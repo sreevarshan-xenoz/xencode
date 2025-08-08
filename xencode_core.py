@@ -96,6 +96,7 @@ def format_output(text):
 def main():
     args = sys.argv[1:]
     online = "false"
+    chat_mode = False
     
     # Parse online flag
     if "--online=true" in args:
@@ -104,6 +105,16 @@ def main():
     elif "--online=false" in args:
         online = "false"
         args = [arg for arg in args if arg != "--online=false"]
+    
+    # Parse chat mode flag
+    if "--chat-mode" in args:
+        chat_mode = True
+        args = [arg for arg in args if arg != "--chat-mode"]
+    
+    # Validate chat mode vs inline mode conflicts
+    if chat_mode and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
+        console.print("[red]❌ Error: Chat mode cannot be used with inline prompts. Use chat mode without arguments or inline mode with prompts.[/red]")
+        return
     
     # Handle --list-models
     if "--list-models" in args:
@@ -135,18 +146,24 @@ def main():
             args.pop(idx)
             args.pop(idx)
     
-    # Handle prompt
-    if not args:
-        console.print("[red]⚠ Please provide a prompt[/red]")
+    # Handle chat mode or inline prompt
+    if chat_mode:
+        # Chat mode will be implemented in subsequent tasks
+        console.print("[yellow]🚧 Chat mode not yet implemented[/yellow]")
         return
-    
-    prompt = " ".join(args)
-    
-    try:
-        response = run_query(model, prompt)
-        format_output(response)
-    except Exception as e:
-        console.print(f"[red]❌ Error: {e}[/red]")
+    else:
+        # Handle inline prompt
+        if not args:
+            console.print("[red]⚠ Please provide a prompt[/red]")
+            return
+        
+        prompt = " ".join(args)
+        
+        try:
+            response = run_query(model, prompt)
+            format_output(response)
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
 
 if __name__ == "__main__":
     main()
