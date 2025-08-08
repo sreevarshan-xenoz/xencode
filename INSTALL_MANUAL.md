@@ -41,7 +41,7 @@ ollama serve
 
 ```bash
 # Wait for Ollama to start, then pull model
-ollama pull qwen:4b
+ollama pull qwen3:4b
 ```
 
 ## 5. Test Installation
