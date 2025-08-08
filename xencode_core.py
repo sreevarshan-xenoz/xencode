@@ -124,6 +124,55 @@ def update_online_status():
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
         return "false"
 
+def chat_mode(model, online):
+    """Interactive chat loop that displays banner and prompts for input"""
+    # Display initial banner
+    display_chat_banner(model, online)
+    
+    # Track current online status for dynamic updates
+    current_online = online
+    
+    while True:
+        try:
+            # Display prompt
+            display_prompt()
+            
+            # Get user input
+            user_input = input().strip()
+            
+            # Handle empty input gracefully without API calls
+            if not user_input:
+                console.print("[dim]Please enter a message or type 'exit' to quit.[/dim]")
+                continue
+            
+            # Show thinking indicator with maximum 200ms latency
+            console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
+            
+            # Check connectivity before API call
+            new_online = update_online_status()
+            if new_online != current_online:
+                current_online = new_online
+                display_chat_banner(model, current_online, is_update=True)
+                display_prompt()
+                console.print(user_input)  # Re-display user input after banner update
+                console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
+            
+            # Process the query using existing functions
+            try:
+                response = run_query(model, user_input)
+                format_output(response)
+            except Exception as e:
+                console.print(f"[red]❌ Error: {e}[/red]")
+            
+            console.print()  # Add spacing between interactions
+            
+        except (KeyboardInterrupt, EOFError):
+            # Handle Ctrl+C and Ctrl+D - will be implemented in next subtask
+            break
+        except Exception as e:
+            console.print(f"[red]❌ Unexpected error: {e}[/red]")
+            continue
+
 def main():
     args = sys.argv[1:]
     online = "false"
@@ -179,8 +228,7 @@ def main():
     
     # Handle chat mode or inline prompt
     if chat_mode:
-        # Chat mode will be implemented in subsequent tasks
-        console.print("[yellow]🚧 Chat mode not yet implemented[/yellow]")
+        chat_mode(model, online)
         return
     else:
         # Handle inline prompt
