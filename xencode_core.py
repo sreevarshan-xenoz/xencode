@@ -124,6 +124,21 @@ def update_online_status():
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
         return "false"
 
+def handle_chat_exit():
+    """Display goodbye message using existing Rich formatting"""
+    console.print()
+    console.print(Panel(
+        "[bold green]👋 Thanks for using Xencode! Goodbye![/bold green]",
+        style="cyan",
+        title="🤖 Xencode AI"
+    ))
+    console.print()
+
+def is_exit_command(user_input):
+    """Check if user input is an exit command (exit, quit, q)"""
+    exit_commands = ['exit', 'quit', 'q']
+    return user_input.lower().strip() in exit_commands
+
 def chat_mode(model, online):
     """Interactive chat loop that displays banner and prompts for input"""
     # Display initial banner
@@ -144,6 +159,11 @@ def chat_mode(model, online):
             if not user_input:
                 console.print("[dim]Please enter a message or type 'exit' to quit.[/dim]")
                 continue
+            
+            # Check for exit commands
+            if is_exit_command(user_input):
+                handle_chat_exit()
+                break
             
             # Show thinking indicator with maximum 200ms latency
             console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
@@ -167,7 +187,8 @@ def chat_mode(model, online):
             console.print()  # Add spacing between interactions
             
         except (KeyboardInterrupt, EOFError):
-            # Handle Ctrl+C and Ctrl+D - will be implemented in next subtask
+            # Handle Ctrl+C and Ctrl+D signal handling
+            handle_chat_exit()
             break
         except Exception as e:
             console.print(f"[red]❌ Unexpected error: {e}[/red]")
