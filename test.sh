@@ -28,7 +28,9 @@ fi
 echo "📦 Checking Python dependencies..."
 python3 -c "import requests, rich" 2>/dev/null
 if [[ $? -ne 0 ]]; then
-    echo "❌ Python dependencies missing. Run: pip install -r requirements.txt"
+    echo "❌ Python dependencies missing. Install with:"
+    echo "   pip3 install -r requirements.txt"
+    echo "   OR python3 -m pip install -r requirements.txt"
     exit 1
 fi
 
