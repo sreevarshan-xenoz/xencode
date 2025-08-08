@@ -93,12 +93,16 @@ def format_output(text):
         
         console.print()
 
-def display_chat_banner(model, online_status):
+def display_chat_banner(model, online_status, is_update=False):
     """Display the chat mode banner with model and online status"""
     online_text = "Yes" if online_status == "true" else "No"
     banner_text = f"""=== Xencode Chat Mode ===
 Model: {model} | Online: {online_text}
 Type 'exit', 'quit', or press Ctrl+C/Ctrl+D to exit."""
+    
+    if is_update:
+        # Clear previous lines and redisplay banner for connectivity updates
+        console.print("\033[2J\033[H", end="")  # Clear screen and move cursor to top
     
     console.print(Panel(banner_text, style="cyan", title="🤖 Xencode AI"))
     console.print()
@@ -106,6 +110,19 @@ Type 'exit', 'quit', or press Ctrl+C/Ctrl+D to exit."""
 def display_prompt():
     """Display the chat prompt"""
     console.print("[bold blue][You] >[/bold blue] ", end="")
+
+def update_online_status():
+    """Check internet connectivity with lightweight ping"""
+    try:
+        # Use a lightweight ping check without blocking user interaction
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", "1", "8.8.8.8"], 
+            capture_output=True, 
+            timeout=2
+        )
+        return "true" if result.returncode == 0 else "false"
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+        return "false"
 
 def main():
     args = sys.argv[1:]
