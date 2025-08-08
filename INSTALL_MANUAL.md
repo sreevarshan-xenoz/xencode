@@ -4,17 +4,22 @@ If the automatic installation script fails, follow these steps:
 
 ## 1. Install Python Dependencies
 
-Try one of these commands:
+### On Arch Linux (Recommended)
 ```bash
-# Option 1: Using pip3
-pip3 install requests rich
+sudo pacman -S python-requests python-rich
+```
+
+### On other systems or with pip
+```bash
+# Option 1: Using pip3 (user install)
+pip3 install --user requests rich
 
 # Option 2: Using python3 -m pip
-python3 -m pip install requests rich
+python3 -m pip install --user requests rich
 
 # Option 3: Install pip first if missing
 sudo pacman -S python-pip
-pip3 install requests rich
+pip3 install --user requests rich
 ```
 
 ## 2. Install Ollama
@@ -29,12 +34,18 @@ sudo pacman -S ollama
 ## 3. Start Ollama Service
 
 ```bash
-# Enable and start service
+# Check if already running
+curl -s http://localhost:11434/api/tags
+
+# If not running, try systemd service
 sudo systemctl enable ollama
 sudo systemctl start ollama
 
 # OR run manually in a separate terminal
 ollama serve
+
+# OR run in background
+nohup ollama serve > /dev/null 2>&1 &
 ```
 
 ## 4. Pull the Model

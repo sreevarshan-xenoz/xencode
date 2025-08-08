@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 
 console = Console()
-DEFAULT_MODEL = "qwen:4b"
+DEFAULT_MODEL = "qwen3:4b"
 
 def list_models():
     try:
@@ -36,7 +36,9 @@ def run_query(model, prompt):
         return r.json()["response"]
     except requests.exceptions.RequestException as e:
         console.print(f"[red]❌ API Error: {e}[/red]")
-        sys.exit(1)def extract_thinking_and_answer(text):
+        sys.exit(1)
+
+def extract_thinking_and_answer(text):
     """Extract thinking section and answer from Qwen response"""
     thinking = ""
     answer = text
@@ -89,7 +91,9 @@ def format_output(text):
         else:
             console.print(Markdown(answer.strip()))
         
-        console.print()def main():
+        console.print()
+
+def main():
     args = sys.argv[1:]
     online = "false"
     
@@ -97,8 +101,7 @@ def format_output(text):
     if "--online=true" in args:
         online = "true"
         args = [arg for arg in args if arg != "--online=true"]
-    
-elif "--online=false" in args:
+    elif "--online=false" in args:
         online = "false"
         args = [arg for arg in args if arg != "--online=false"]
     

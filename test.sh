@@ -36,8 +36,14 @@ fi
 
 # Check if Ollama is running
 echo "🔧 Checking Ollama service..."
-if ! pgrep -x "ollama" > /dev/null; then
-    echo "⚠️  Ollama service not running. Start with: sudo systemctl start ollama"
+if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+    echo "✅ Ollama is running and responding"
+else
+    echo "❌ Ollama is not running or not responding"
+    echo "   Try one of these:"
+    echo "   - sudo systemctl start ollama"
+    echo "   - ollama serve (in another terminal)"
+    exit 1
 fi
 
 # Test basic functionality

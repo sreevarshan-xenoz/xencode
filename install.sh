@@ -16,16 +16,24 @@ fi
 
 # Install Python dependencies
 echo "📦 Installing Python dependencies..."
-if command -v pip3 &> /dev/null; then
-    pip3 install -r requirements.txt
-elif command -v pip &> /dev/null; then
-    pip install -r requirements.txt
-elif command -v python3 -m pip &> /dev/null; then
-    python3 -m pip install -r requirements.txt
+
+# Try system packages first (Arch Linux way)
+if command -v pacman &> /dev/null; then
+    echo "🔧 Installing Python packages via pacman..."
+    sudo pacman -S --needed python-requests python-rich
 else
-    echo "❌ No pip found. Please install pip3 first:"
-    echo "   sudo pacman -S python-pip"
-    exit 1
+    # Fallback to pip methods for other systems
+    if command -v pip3 &> /dev/null; then
+        pip3 install --user -r requirements.txt
+    elif command -v pip &> /dev/null; then
+        pip install --user -r requirements.txt
+    elif command -v python3 -m pip &> /dev/null; then
+        python3 -m pip install --user -r requirements.txt
+    else
+        echo "❌ No pip found. Please install pip3 first:"
+        echo "   sudo pacman -S python-pip"
+        exit 1
+    fi
 fi
 
 # Install Ollama if not present
@@ -39,28 +47,60 @@ if ! command -v ollama &> /dev/null; then
     fi
 fi
 
-# Start Ollama service
-echo "🔄 Starting Ollama service..."
-sudo systemctl enable ollama
-sudo systemctl start ollama
-
-# Wait for Ollama to start
-echo "⏳ Waiting for Ollama service to start..."
-for i in {1..30}; do
-    if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-        echo "✅ Ollama service is running"
-        break
+# Check if Ollama is already running
+echo "🔍 Checking Ollama service status..."
+if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+    echo "✅ Ollama is already running"
+else
+    echo "🔄 Starting Ollama service..."
+    
+    # Try systemd service first
+    if systemctl is-active --quiet ollama; then
+        echo "📋 Ollama service is active but not responding, restarting..."
+        sudo systemctl restart ollama
+    else
+        # Enable and start systemd service
+        sudo systemctl enable ollama
+        sudo systemctl start ollama
     fi
-    if [ $i -eq 30 ]; then
-        echo "❌ Ollama service failed to start. Try manually: ollama serve"
-        exit 1
-    fi
-    sleep 1
-done
+    
+    # Wait for Ollama to start
+    echo "⏳ Waiting for Ollama service to start..."
+    for i in {1..30}; do
+        if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+            echo "✅ Ollama service is now running"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "❌ Ollama service failed to start via systemd"
+            echo "🔧 Trying to start Ollama manually..."
+            
+            # Try to start ollama serve in background
+            if command -v ollama &> /dev/null; then
+                echo "🚀 Starting 'ollama serve' in background..."
+                nohup ollama serve > /dev/null 2>&1 &
+                sleep 5
+                
+                # Check if it's running now
+                if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+                    echo "✅ Ollama is now running via 'ollama serve'"
+                else
+                    echo "❌ Failed to start Ollama. Please run 'ollama serve' manually in another terminal"
+                    exit 1
+                fi
+            else
+                echo "❌ Ollama command not found. Please install Ollama first"
+                exit 1
+            fi
+            break
+        fi
+        sleep 1
+    done
+fi
 
 # Pull default model
-echo "📥 Pulling default model (qwen:4b)..."
-if ollama pull qwen:4b; then
+echo "📥 Pulling default model (qwen3:4b)..."
+if ollama pull qwen3:4b; then
     echo "✅ Model pulled successfully"
 else
     echo "❌ Failed to pull model. Check your internet connection."
