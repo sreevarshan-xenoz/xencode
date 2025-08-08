@@ -36,4 +36,114 @@ def run_query(model, prompt):
         return r.json()["response"]
     except requests.exceptions.RequestException as e:
         console.print(f"[red]❌ API Error: {e}[/red]")
-        sys.exit(1)
+        sys.exit(1)def extract_thinking_and_answer(text):
+    """Extract thinking section and answer from Qwen response"""
+    thinking = ""
+    answer = text
+    
+    # Look for thinking section in Qwen format
+
+    if "<think>" in text and "</think>" in text:
+        try:
+            thinking = text.split("<think>")[1].split("</think>")[0].strip()
+            answer = text.split("</think>")[1].strip()
+        except IndexError:
+            # If parsing fails, treat entire text as answer
+            pass
+    elif "🧠 Thinking:" in text:
+        # Handle alternative thinking format
+        try:
+            thinking = text.split("🧠 Thinking:")[1].split("\n\n")[0].strip()
+            answer = text.split("🧠 Thinking:")[1].split("\n\n", 1)[1].strip()
+        except IndexError:
+            pass
+    
+    return thinking, answer
+
+def format_output(text):
+    """Format output in Claude Code style"""
+    thinking, answer = extract_thinking_and_answer(text)
+    
+    # 🧠 Thinking Section
+    if thinking:
+        console.print("[bold yellow]🧠 Thinking...[/bold yellow]")
+        console.print(f"[dim]{thinking}[/dim]\n")
+    
+    # 📄 Answer Section
+    if answer.strip():
+        console.print("[bold green]📄 Answer[/bold green]")
+        
+        # Handle markdown in answer
+        if answer.startswith("```") and "```" in answer[3:]:
+            # Extract and format code blocks
+            parts = answer.split("```")
+            for i, part in enumerate(parts):
+                if i % 2 == 0:  # Text
+                    if part.strip():
+                        console.print(Markdown(part.strip()))
+                else:  # Code
+                    if part.strip():
+                        lang = part.split('\n')[0] if '\n' in part else ""
+                        code_content = part[part.find('\n')+1:] if '\n' in part else part
+                        console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
+        else:
+            console.print(Markdown(answer.strip()))
+        
+        console.print()def main():
+    args = sys.argv[1:]
+    online = "false"
+    
+    # Parse online flag
+    if "--online=true" in args:
+        online = "true"
+        args = [arg for arg in args if arg != "--online=true"]
+    
+elif "--online=false" in args:
+        online = "false"
+        args = [arg for arg in args if arg != "--online=false"]
+    
+    # Handle --list-models
+    if "--list-models" in args:
+        list_models()
+        return
+    
+    # Handle --update
+    if "--update" in args:
+        args = [arg for arg in args if arg != "--update"]
+        if online == "true":
+            model = DEFAULT_MODEL
+            if "-m" in args:
+                idx = args.index("-m")
+                if idx + 1 < len(args):
+                    model = args[idx + 1]
+                    args.pop(idx)
+                    args.pop(idx)
+            update_model(model)
+        else:
+            console.print("[red]❌ No internet. Cannot update model.[/red]")
+        return
+    
+    # Handle model specification
+    model = DEFAULT_MODEL
+    if "-m" in args:
+        idx = args.index("-m")
+        if idx + 1 < len(args):
+            model = args[idx + 1]
+            args.pop(idx)
+            args.pop(idx)
+    
+    # Handle prompt
+    if not args:
+        console.print("[red]⚠ Please provide a prompt[/red]")
+        return
+    
+    prompt = " ".join(args)
+    
+    try:
+        response = run_query(model, prompt)
+        format_output(response)
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/red]")
+
+if __name__ == "__main__":
+    main()
