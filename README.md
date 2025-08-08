@@ -16,7 +16,7 @@ A powerful offline-first AI assistant for Arch Linux developers, featuring local
 
 ### Quick Install (Recommended)
 ```bash
-git clone <repo-url>
+git clone https://github.com/sreevarshan-xenoz/xencode-.git
 cd xencode
 ./install.sh
 ```
@@ -24,7 +24,7 @@ cd xencode
 ### Manual Install
 1. **Clone and setup**:
 ```bash
-git clone <repo-url>
+git clone https://github.com/sreevarshan-xenoz/xencode-.git
 cd xencode
 chmod +x xencode.sh xencode_core.py install.sh
 ```
