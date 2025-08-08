@@ -93,6 +93,20 @@ def format_output(text):
         
         console.print()
 
+def display_chat_banner(model, online_status):
+    """Display the chat mode banner with model and online status"""
+    online_text = "Yes" if online_status == "true" else "No"
+    banner_text = f"""=== Xencode Chat Mode ===
+Model: {model} | Online: {online_text}
+Type 'exit', 'quit', or press Ctrl+C/Ctrl+D to exit."""
+    
+    console.print(Panel(banner_text, style="cyan", title="🤖 Xencode AI"))
+    console.print()
+
+def display_prompt():
+    """Display the chat prompt"""
+    console.print("[bold blue][You] >[/bold blue] ", end="")
+
 def main():
     args = sys.argv[1:]
     online = "false"
