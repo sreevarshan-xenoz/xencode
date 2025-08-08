@@ -14,25 +14,39 @@ A powerful offline-first AI assistant for Arch Linux developers, featuring local
 
 ## Installation
 
+### Quick Install (Recommended)
+```bash
+git clone <repo-url>
+cd xencode
+./install.sh
+```
+
+### Manual Install
 1. **Clone and setup**:
 ```bash
 git clone <repo-url>
 cd xencode
-chmod +x xencode.sh xencode_core.py
+chmod +x xencode.sh xencode_core.py install.sh
 ```
 
 2. **Install dependencies**:
 ```bash
-pip install requests rich
+pip install -r requirements.txt
 sudo pacman -S ollama
 ```
 
-3. **Pull the default model**:
+3. **Start Ollama service**:
+```bash
+sudo systemctl enable ollama
+sudo systemctl start ollama
+```
+
+4. **Pull the default model**:
 ```bash
 ollama pull qwen:4b
 ```
 
-4. **Setup Hyprland keybinding** (optional):
+5. **Setup Hyprland keybinding** (optional):
 Add to `~/.config/hypr/hyprland.conf`:
 ```
 bind = SUPER, Return, exec, /path/to/xencode/xencode.sh
