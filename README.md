@@ -4,12 +4,13 @@ A powerful offline-first AI assistant for Arch Linux developers, featuring local
 
 ## ✨ Features
 
+- **💬 Dual Mode Operation**: Persistent chat mode for extended sessions + inline mode for quick queries
 - **🔒 Offline First**: Works completely offline with Qwen 3:4B model
 - **🌐 Smart Internet Detection**: Automatically detects connection status
 - **🧠 Claude Code Style**: Clean output with separated thinking sections
 - **🎨 Rich Formatting**: Syntax highlighting, emojis, and beautiful panels
 - **🔄 Model Management**: Easy switching and updating of models
-- **⚡ Hyprland Integration**: Super + Enter hotkey ready
+- **⚡ Hyprland Integration**: Super + Enter hotkey with floating terminal support
 - **🛠️ Smart Installation**: Automated setup with fallback mechanisms
 - **🔍 Service Detection**: Automatically detects and manages Ollama service
 
@@ -39,16 +40,44 @@ If the automated installer fails, see [INSTALL_MANUAL.md](INSTALL_MANUAL.md) for
 
 ### 🎮 Hyprland Integration
 Add to `~/.config/hypr/hyprland.conf`:
-```
+```bash
+# Hotkey for persistent chat mode
 bind = SUPER, Return, exec, /path/to/xencode/xencode.sh
+
+# Window rule for floating terminal
+windowrulev2 = float, title:Xencode AI
+windowrulev2 = center, title:Xencode AI
+windowrulev2 = size 1200 800, title:Xencode AI
 ```
+
+**Note**: The persistent chat mode requires Kitty terminal. If Kitty is not available, xencode will fall back to your default terminal or inline mode.
 
 ## 🚀 Usage
 
-### Basic Examples
+### 💬 Persistent Chat Mode (NEW)
+Launch an interactive chat session in a floating terminal window:
 ```bash
-# Simple query
+# Start persistent chat mode
+./xencode.sh
+
+# This opens a Kitty terminal with title "Xencode AI"
+# Perfect for extended conversations and iterative development
+```
+
+The chat interface provides:
+- Interactive `[You] >` prompts
+- Continuous conversation without re-launching
+- Dynamic connectivity status updates
+- Multiple exit options: `exit`, `quit`, `q`, Ctrl+C, or Ctrl+D
+
+### 📝 Inline Mode
+For quick one-off queries in your current terminal:
+```bash
+# Simple query (existing behavior)
 ./xencode.sh "Hello, how are you?"
+
+# Explicit inline mode (NEW)
+./xencode.sh --inline "write a simple python function to calculate fibonacci"
 
 # Code generation
 ./xencode.sh "write a simple python function to calculate fibonacci"
@@ -102,6 +131,7 @@ def fib(n):
 
 - **Python 3.6+** with `requests` and `rich` libraries
 - **Ollama** for local LLM inference
+- **Kitty terminal** (recommended for persistent chat mode, falls back to default terminal)
 - **Internet connection** (only for model updates)
 - **Arch Linux** (recommended, but works on other Linux distros)
 - **curl** (for service health checks)
