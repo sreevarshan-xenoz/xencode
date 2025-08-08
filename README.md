@@ -39,16 +39,52 @@ If the automated installer fails, see [INSTALL_MANUAL.md](INSTALL_MANUAL.md) for
 ```
 
 ### 🎮 Hyprland Integration
+
+#### Basic Setup
 Add to `~/.config/hypr/hyprland.conf`:
 ```bash
 # Hotkey for persistent chat mode
 bind = SUPER, Return, exec, /path/to/xencode/xencode.sh
 
-# Window rule for floating terminal
+# Essential window rule for floating terminal
+windowrulev2 = float, title:Xencode AI
+```
+
+#### Advanced Window Configuration
+```bash
+# Complete window rule set for optimal experience
 windowrulev2 = float, title:Xencode AI
 windowrulev2 = center, title:Xencode AI
 windowrulev2 = size 1200 800, title:Xencode AI
+windowrulev2 = opacity 0.95, title:Xencode AI
+
+# Alternative positioning examples:
+# windowrulev2 = move 100 100, title:Xencode AI    # Top-left corner
+# windowrulev2 = move 50% 50%, title:Xencode AI    # Center (alternative)
+# windowrulev2 = size 80% 70%, title:Xencode AI    # Percentage-based sizing
 ```
+
+#### Troubleshooting Window Manager Integration
+
+**Window not floating?**
+- Ensure the exact window rule: `windowrulev2 = float, title:Xencode AI`
+- Reload Hyprland config: `hyprctl reload`
+- Check if Kitty is installed: `command -v kitty`
+
+**Terminal not launching?**
+- Xencode requires Kitty terminal for persistent chat mode
+- Install Kitty: `sudo pacman -S kitty` (Arch Linux)
+- Fallback: Xencode will use default terminal or inline mode if Kitty unavailable
+
+**Window positioning issues?**
+- Use `hyprctl clients` to verify window title matches "Xencode AI"
+- Test window rules with: `kitty --title "Xencode AI"`
+- Adjust positioning with `move` and `size` rules as needed
+
+**Alternative Window Managers**
+- **i3/Sway**: Use `for_window [title="Xencode AI"] floating enable`
+- **bspwm**: Use `bspc rule -a \* -o state=floating` before launching
+- **Other WMs**: Look for floating window rules based on window title
 
 **Note**: The persistent chat mode requires Kitty terminal. If Kitty is not available, xencode will fall back to your default terminal or inline mode.
 
