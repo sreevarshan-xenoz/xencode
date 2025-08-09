@@ -20,7 +20,7 @@ try:
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
-console = Console(force_terminal=True, legacy_windows=False)
+console = Console(force_terminal=True, legacy_windows=False, color_system="auto")
 DEFAULT_MODEL = "qwen3:4b"
 
 # Claude-style streaming timing configuration
