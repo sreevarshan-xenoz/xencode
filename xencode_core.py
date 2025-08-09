@@ -19,7 +19,7 @@ try:
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
-console = Console()
+console = Console(force_terminal=True, legacy_windows=False)
 DEFAULT_MODEL = "qwen3:4b"
 
 # Claude-style streaming timing configuration
@@ -155,12 +155,12 @@ def stream_thinking_section(thinking_text):
     lines = thinking_text.split('\n')
     for line in lines:
         if line.strip():  # Only process non-empty lines
-            # Stream each character with timing
+            # Stream each character with timing using direct stdout for immediate display
             for char in line:
-                console.print(char, end='', style="dim italic yellow")
-                sys.stdout.flush()
+                # Use ANSI codes for styling with direct stdout for immediate flushing
+                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
                 time.sleep(THINKING_STREAM_DELAY)
-            console.print()  # New line after each line
+            print()  # New line after each line
             time.sleep(THINKING_LINE_PAUSE)  # Breathing pause between lines
 
 def stream_answer_section(answer_text):
@@ -177,12 +177,11 @@ def stream_answer_section(answer_text):
         for i, part in enumerate(parts):
             if i % 2 == 0:  # Text
                 if part.strip():
-                    # Stream text character by character
+                    # Stream text character by character using direct stdout
                     for char in part.strip():
-                        console.print(char, end='')
-                        sys.stdout.flush()
+                        print(char, end='', flush=True)
                         time.sleep(ANSWER_STREAM_DELAY)
-                    console.print()
+                    print()
             else:  # Code
                 if part.strip():
                     lang = part.split('\n')[0] if '\n' in part else ""
@@ -190,12 +189,11 @@ def stream_answer_section(answer_text):
                     # Display code block immediately for readability
                     console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
     else:
-        # Stream regular text character by character
+        # Stream regular text character by character using direct stdout
         for char in answer_text.strip():
-            console.print(char, end='')
-            sys.stdout.flush()
+            print(char, end='', flush=True)
             time.sleep(ANSWER_STREAM_DELAY)
-        console.print()
+        print()
 
 def stream_claude_response(thinking_text, answer_text):
     """Stream complete response with exact Claude timing and formatting"""
