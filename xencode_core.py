@@ -179,22 +179,36 @@ def format_output(text, streaming=False):
             console.print()
 
 def display_chat_banner(model, online_status, is_update=False):
-    """Display the chat mode banner with model and online status"""
-    online_text = "Yes" if online_status == "true" else "No"
-    banner_text = f"""=== Xencode Chat Mode ===
-Model: {model} | Online: {online_text}
-Type 'exit', 'quit', or press Ctrl+C/Ctrl+D to exit."""
-    
+    """Display Claude-style centered banner with exact formatting"""
     if is_update:
         # Clear previous lines and redisplay banner for connectivity updates
         console.print("\033[2J\033[H", end="")  # Clear screen and move cursor to top
     
-    console.print(Panel(banner_text, style="cyan", title="🤖 Xencode AI"))
+    # Claude-style centered banner with exact format
+    banner_lines = [
+        "╔══════════════════════════════════════════╗",
+        "║ Xencode AI (Claude-Code Style | Qwen) ║",
+        "╚══════════════════════════════════════════╝"
+    ]
+    
+    for line in banner_lines:
+        console.print(line, style="cyan", justify="center")
+    
+    console.print("Offline-First | Hyprland Ready | Arch Optimized", style="dim", justify="center")
+    console.print()
+    
+    # Dynamic status line with appropriate emojis
+    if online_status == "true":
+        status_line = "🌐 Online Mode - using local+internet models"
+    else:
+        status_line = "📡 Offline Mode - local models only"
+    
+    console.print(status_line, style="bold", justify="center")
     console.print()
 
 def display_prompt():
-    """Display the chat prompt"""
-    console.print("[bold blue][You] >[/bold blue] ", end="")
+    """Display the chat prompt in bold white"""
+    console.print("[bold white][You] >[/bold white] ", end="")
 
 def get_multiline_input():
     """Get user input with multiline support using prompt_toolkit if available"""
@@ -208,17 +222,18 @@ def get_multiline_input():
                 """Handle Enter key - submit input"""
                 event.app.exit(result=event.app.current_buffer.text)
             
-            @bindings.add(Keys.ControlJ)  # Shift+Enter (alternative binding)
+            @bindings.add('s-enter')  # Shift+Enter
             def _(event):
                 """Handle Shift+Enter - add new line"""
                 event.current_buffer.insert_text('\n')
             
-            # Use prompt_toolkit for enhanced input
+            # Use prompt_toolkit for enhanced input with bold white prompt
             user_input = prompt(
                 "",  # Empty prompt since we display our own
                 multiline=True,
                 key_bindings=bindings,
-                wrap_lines=True
+                wrap_lines=True,
+                mouse_support=True
             )
             
             # Automatic newline trimming for submitted input
