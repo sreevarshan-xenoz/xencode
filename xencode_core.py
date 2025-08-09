@@ -3,10 +3,12 @@
 import sys
 import subprocess
 import requests
+import time
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.live import Live
 
 # Try to import prompt_toolkit for enhanced input handling
 try:
@@ -19,6 +21,12 @@ except ImportError:
 
 console = Console()
 DEFAULT_MODEL = "qwen3:4b"
+
+# Claude-style streaming timing configuration
+THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
+ANSWER_STREAM_DELAY = 0.030    # 20-40ms per token
+THINKING_TO_ANSWER_PAUSE = 0.5 # 500ms pause between sections
+THINKING_LINE_PAUSE = 0.125    # 100-150ms between thinking lines
 
 def list_models():
     try:
@@ -71,36 +79,104 @@ def extract_thinking_and_answer(text):
     
     return thinking, answer
 
-def format_output(text):
-    """Format output in Claude Code style"""
+def stream_thinking_section(thinking_text):
+    """Stream thinking section with dim yellow italic styling and breathing pauses"""
+    if not thinking_text:
+        return
+    
+    console.print("🧠 Thinking...", style="dim italic yellow")
+    
+    lines = thinking_text.split('\n')
+    for line in lines:
+        if line.strip():  # Only process non-empty lines
+            # Stream each character with timing
+            for char in line:
+                console.print(char, end='', style="dim italic yellow")
+                sys.stdout.flush()
+                time.sleep(THINKING_STREAM_DELAY)
+            console.print()  # New line after each line
+            time.sleep(THINKING_LINE_PAUSE)  # Breathing pause between lines
+
+def stream_answer_section(answer_text):
+    """Stream answer section with bold green styling and markdown support"""
+    if not answer_text.strip():
+        return
+    
+    console.print("\n📄 Answer", style="bold green")
+    
+    # Handle markdown in answer with streaming
+    if answer_text.startswith("```") and "```" in answer_text[3:]:
+        # For code blocks, stream the entire formatted block at once for readability
+        parts = answer_text.split("```")
+        for i, part in enumerate(parts):
+            if i % 2 == 0:  # Text
+                if part.strip():
+                    # Stream text character by character
+                    for char in part.strip():
+                        console.print(char, end='')
+                        sys.stdout.flush()
+                        time.sleep(ANSWER_STREAM_DELAY)
+                    console.print()
+            else:  # Code
+                if part.strip():
+                    lang = part.split('\n')[0] if '\n' in part else ""
+                    code_content = part[part.find('\n')+1:] if '\n' in part else part
+                    # Display code block immediately for readability
+                    console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
+    else:
+        # Stream regular text character by character
+        for char in answer_text.strip():
+            console.print(char, end='')
+            sys.stdout.flush()
+            time.sleep(ANSWER_STREAM_DELAY)
+        console.print()
+
+def stream_claude_response(thinking_text, answer_text):
+    """Stream complete response with exact Claude timing and formatting"""
+    # Stream thinking section with breathing pauses
+    if thinking_text:
+        stream_thinking_section(thinking_text)
+        # 0.5s pause between thinking and answer sections
+        time.sleep(THINKING_TO_ANSWER_PAUSE)
+    
+    # Stream answer section
+    stream_answer_section(answer_text)
+
+def format_output(text, streaming=False):
+    """Format output in Claude Code style with optional streaming"""
     thinking, answer = extract_thinking_and_answer(text)
     
-    # 🧠 Thinking Section
-    if thinking:
-        console.print("[bold yellow]🧠 Thinking...[/bold yellow]")
-        console.print(f"[dim]{thinking}[/dim]\n")
-    
-    # 📄 Answer Section
-    if answer.strip():
-        console.print("[bold green]📄 Answer[/bold green]")
+    if streaming:
+        # Use Claude-style streaming
+        stream_claude_response(thinking, answer)
+    else:
+        # Use existing non-streaming format for backward compatibility
+        # 🧠 Thinking Section
+        if thinking:
+            console.print("[bold yellow]🧠 Thinking...[/bold yellow]")
+            console.print(f"[dim]{thinking}[/dim]\n")
         
-        # Handle markdown in answer
-        if answer.startswith("```") and "```" in answer[3:]:
-            # Extract and format code blocks
-            parts = answer.split("```")
-            for i, part in enumerate(parts):
-                if i % 2 == 0:  # Text
-                    if part.strip():
-                        console.print(Markdown(part.strip()))
-                else:  # Code
-                    if part.strip():
-                        lang = part.split('\n')[0] if '\n' in part else ""
-                        code_content = part[part.find('\n')+1:] if '\n' in part else part
-                        console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
-        else:
-            console.print(Markdown(answer.strip()))
-        
-        console.print()
+        # 📄 Answer Section
+        if answer.strip():
+            console.print("[bold green]📄 Answer[/bold green]")
+            
+            # Handle markdown in answer
+            if answer.startswith("```") and "```" in answer[3:]:
+                # Extract and format code blocks
+                parts = answer.split("```")
+                for i, part in enumerate(parts):
+                    if i % 2 == 0:  # Text
+                        if part.strip():
+                            console.print(Markdown(part.strip()))
+                    else:  # Code
+                        if part.strip():
+                            lang = part.split('\n')[0] if '\n' in part else ""
+                            code_content = part[part.find('\n')+1:] if '\n' in part else part
+                            console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
+            else:
+                console.print(Markdown(answer.strip()))
+            
+            console.print()
 
 def display_chat_banner(model, online_status, is_update=False):
     """Display the chat mode banner with model and online status"""
@@ -221,10 +297,10 @@ def chat_mode(model, online):
                 console.print(user_input)  # Re-display user input after banner update
                 console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
             
-            # Process the query using existing functions
+            # Process the query using existing functions with streaming
             try:
                 response = run_query(model, user_input)
-                format_output(response)
+                format_output(response, streaming=True)
             except Exception as e:
                 console.print(f"[red]❌ Error: {e}[/red]")
             
