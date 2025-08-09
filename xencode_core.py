@@ -134,10 +134,10 @@ def run_streaming_query(model, prompt):
         
         # Initialize streaming state
         full_response = ""
-        thinking_buffer = ""
         in_thinking = False
         thinking_displayed = False
         answer_started = False
+        displayed_chars = 0  # Track how many characters we've displayed
         
         # Show initial thinking indicator
         console.print("🧠 Thinking...", style="dim italic yellow")
@@ -147,71 +147,64 @@ def run_streaming_query(model, prompt):
             if line:
                 try:
                     chunk = json.loads(line.decode('utf-8'))
-                    if 'response' in chunk:
+                    if 'response' in chunk and chunk['response']:
                         token = chunk['response']
                         full_response += token
                         
-                        # State machine for handling thinking/answer sections
+                        # Check if we're entering thinking section
                         if not in_thinking and '<think>' in full_response:
-                            # Start of thinking section detected
                             in_thinking = True
-                            # Find the start of thinking content
+                            # Start displaying from after <think>
                             think_start = full_response.find('<think>') + 7
-                            thinking_buffer = full_response[think_start:]
+                            displayed_chars = think_start
                             
-                        elif in_thinking and '</think>' not in full_response:
-                            # We're in thinking section, stream the new token
-                            if not thinking_displayed:
-                                # Stream this token in thinking style
-                                for char in token:
+                        # Check if we're exiting thinking section
+                        elif in_thinking and '</think>' in full_response:
+                            # Display remaining thinking content up to </think>
+                            think_end = full_response.find('</think>')
+                            if displayed_chars < think_end:
+                                remaining_thinking = full_response[displayed_chars:think_end]
+                                for char in remaining_thinking:
                                     print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
                                     time.sleep(THINKING_STREAM_DELAY)
                             
-                        elif in_thinking and '</think>' in full_response:
-                            # End of thinking section detected
+                            # Transition to answer
                             in_thinking = False
                             thinking_displayed = True
-                            
-                            # Extract any remaining thinking content before </think>
-                            think_end = full_response.find('</think>')
-                            think_start = full_response.find('<think>') + 7
-                            remaining_thinking = full_response[think_start:think_end]
-                            
-                            # Stream any remaining thinking content
-                            current_pos = len(thinking_buffer)
-                            if len(remaining_thinking) > current_pos:
-                                remaining_chars = remaining_thinking[current_pos:]
-                                for char in remaining_chars:
-                                    print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
-                                    time.sleep(THINKING_STREAM_DELAY)
-                            
                             print()  # New line after thinking
                             time.sleep(THINKING_TO_ANSWER_PAUSE)
                             console.print("📄 Answer", style="bold green")
                             answer_started = True
                             
-                            # Start streaming the answer part
-                            answer_start = full_response.find('</think>') + 8
-                            answer_content = full_response[answer_start:].strip()
-                            if answer_content:
-                                for char in answer_content:
-                                    print(char, end='', flush=True)
-                                    time.sleep(ANSWER_STREAM_DELAY)
+                            # Set displayed_chars to start of answer
+                            displayed_chars = full_response.find('</think>') + 8
                             
-                        elif not in_thinking and answer_started:
-                            # We're in answer section, stream the token
-                            for char in token:
+                        # Stream new content based on current state
+                        if in_thinking and not thinking_displayed:
+                            # Stream thinking content
+                            new_content = full_response[displayed_chars:]
+                            for char in new_content:
+                                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
+                                time.sleep(THINKING_STREAM_DELAY)
+                            displayed_chars = len(full_response)
+                            
+                        elif answer_started:
+                            # Stream answer content
+                            new_content = full_response[displayed_chars:]
+                            for char in new_content:
                                 print(char, end='', flush=True)
                                 time.sleep(ANSWER_STREAM_DELAY)
-                                
+                            displayed_chars = len(full_response)
+                            
                         elif not in_thinking and not answer_started and '<think>' not in full_response:
                             # No thinking section, start answer immediately
-                            if not answer_started:
-                                console.print("📄 Answer", style="bold green")
-                                answer_started = True
-                            for char in token:
+                            console.print("📄 Answer", style="bold green")
+                            answer_started = True
+                            new_content = full_response[displayed_chars:]
+                            for char in new_content:
                                 print(char, end='', flush=True)
                                 time.sleep(ANSWER_STREAM_DELAY)
+                            displayed_chars = len(full_response)
                             
                 except json.JSONDecodeError:
                     continue
@@ -529,7 +522,7 @@ def chat_mode(model, online):
 def main():
     args = sys.argv[1:]
     online = "false"
-    chat_mode = False
+    chat_mode_enabled = False
     
     # Parse online flag
     if "--online=true" in args:
@@ -541,11 +534,11 @@ def main():
     
     # Parse chat mode flag
     if "--chat-mode" in args:
-        chat_mode = True
+        chat_mode_enabled = True
         args = [arg for arg in args if arg != "--chat-mode"]
     
     # Validate chat mode vs inline mode conflicts
-    if chat_mode and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
+    if chat_mode_enabled and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
         error_panel = Panel(
             "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh \"your prompt\"",
             title="Usage Error",
@@ -592,7 +585,7 @@ def main():
             args.pop(idx)
     
     # Handle chat mode or inline prompt
-    if chat_mode:
+    if chat_mode_enabled:
         chat_mode(model, online)
         return
     else:
