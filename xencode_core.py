@@ -32,16 +32,65 @@ def list_models():
     try:
         output = subprocess.check_output(["ollama", "list"], text=True)
         console.print(Panel(output, title="📦 Installed Models", style="cyan"))
+    except FileNotFoundError:
+        # Ollama not installed error
+        error_panel = Panel(
+            "❌ Ollama not found\n\nPlease install Ollama:\n• Visit: https://ollama.ai\n• Or use your package manager",
+            title="Missing Dependency",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
     except Exception as e:
-        console.print(f"[red]❌ Error listing models: {e}[/red]")
+        # Generic error panel
+        error_panel = Panel(
+            f"❌ Error listing models: {str(e)}\n\nPlease check your Ollama installation.",
+            title="Model List Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
 
 def update_model(model):
     console.print(f"[yellow]🔄 Pulling latest model: {model}[/yellow]")
     try:
         subprocess.run(["ollama", "pull", model], check=True, capture_output=True)
-        console.print(f"[green]✅ Successfully pulled {model}[/green]")
+        # Success panel
+        success_panel = Panel(
+            f"✅ Successfully pulled {model}\n\nThe model is now ready to use.",
+            title="Model Updated",
+            style="green",
+            border_style="green"
+        )
+        console.print(success_panel)
+    except FileNotFoundError:
+        # Ollama not installed error
+        error_panel = Panel(
+            "❌ Ollama not found\n\nPlease install Ollama:\n• Visit: https://ollama.ai\n• Or use your package manager",
+            title="Missing Dependency",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]❌ Failed to pull {model}: {e.stderr.decode()}[/red]")
+        # Model pull failed - could be missing model
+        stderr_text = e.stderr.decode() if e.stderr else "Unknown error"
+        if "not found" in stderr_text.lower():
+            warning_panel = Panel(
+                f"⚠️ Model '{model}' not found\n\nTry running: ./xencode.sh --list-models\nto see available models, or check the Ollama model library.",
+                title="Model Not Found",
+                style="yellow",
+                border_style="yellow"
+            )
+            console.print(warning_panel)
+        else:
+            error_panel = Panel(
+                f"❌ Failed to pull {model}\n\nError: {stderr_text}\n\nPlease check your internet connection and try again.",
+                title="Update Failed",
+                style="red",
+                border_style="red"
+            )
+            console.print(error_panel)
 
 def run_query(model, prompt):
     url = "http://localhost:11434/api/generate"
@@ -51,8 +100,25 @@ def run_query(model, prompt):
         r = requests.post(url, json=payload)
         r.raise_for_status()
         return r.json()["response"]
+    except requests.exceptions.ConnectionError:
+        # Claude-style connection error panel
+        error_panel = Panel(
+            "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
+            title="Connection Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
+        sys.exit(1)
     except requests.exceptions.RequestException as e:
-        console.print(f"[red]❌ API Error: {e}[/red]")
+        # Generic API error panel
+        error_panel = Panel(
+            f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
+            title="API Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
         sys.exit(1)
 
 def extract_thinking_and_answer(text):
@@ -187,7 +253,7 @@ def display_chat_banner(model, online_status, is_update=False):
     # Claude-style centered banner with exact format
     banner_lines = [
         "╔══════════════════════════════════════════╗",
-        "║ Xencode AI (Claude-Code Style | Qwen) ║",
+        "║ Xencode AI (Claude-Code Style | Qwen)    ║",
         "╚══════════════════════════════════════════╝"
     ]
     
@@ -317,7 +383,14 @@ def chat_mode(model, online):
                 response = run_query(model, user_input)
                 format_output(response, streaming=True)
             except Exception as e:
-                console.print(f"[red]❌ Error: {e}[/red]")
+                # Claude-style error panel for chat mode
+                error_panel = Panel(
+                    f"❌ Error processing your request\n\n{str(e)}\n\nPlease try again or check your setup.",
+                    title="Processing Error",
+                    style="red",
+                    border_style="red"
+                )
+                console.print(error_panel)
             
             console.print()  # Add spacing between interactions
             
@@ -326,7 +399,14 @@ def chat_mode(model, online):
             handle_chat_exit()
             break
         except Exception as e:
-            console.print(f"[red]❌ Unexpected error: {e}[/red]")
+            # Generic error panel for unexpected errors in chat mode
+            error_panel = Panel(
+                f"❌ Unexpected error: {str(e)}\n\nThe chat session will continue. Please try again.",
+                title="Unexpected Error",
+                style="red",
+                border_style="red"
+            )
+            console.print(error_panel)
             continue
 
 def main():
@@ -349,7 +429,13 @@ def main():
     
     # Validate chat mode vs inline mode conflicts
     if chat_mode and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
-        console.print("[red]❌ Error: Chat mode cannot be used with inline prompts. Use chat mode without arguments or inline mode with prompts.[/red]")
+        error_panel = Panel(
+            "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh \"your prompt\"",
+            title="Usage Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
         return
     
     # Handle --list-models
@@ -370,7 +456,13 @@ def main():
                     args.pop(idx)
             update_model(model)
         else:
-            console.print("[red]❌ No internet. Cannot update model.[/red]")
+            warning_panel = Panel(
+                "⚠️ No internet connection\n\nCannot update models while offline.\nPlease check your connection and try again.",
+                title="Offline Mode",
+                style="yellow",
+                border_style="yellow"
+            )
+            console.print(warning_panel)
         return
     
     # Handle model specification
@@ -389,7 +481,13 @@ def main():
     else:
         # Handle inline prompt
         if not args:
-            console.print("[red]⚠ Please provide a prompt[/red]")
+            warning_panel = Panel(
+                "⚠️ No prompt provided\n\nUsage:\n• Inline mode: ./xencode.sh \"your prompt\"\n• Chat mode: ./xencode.sh",
+                title="Missing Prompt",
+                style="yellow",
+                border_style="yellow"
+            )
+            console.print(warning_panel)
             return
         
         prompt = " ".join(args)
@@ -398,7 +496,14 @@ def main():
             response = run_query(model, prompt)
             format_output(response)
         except Exception as e:
-            console.print(f"[red]❌ Error: {e}[/red]")
+            # Generic error panel for inline mode
+            error_panel = Panel(
+                f"❌ Unexpected error: {str(e)}\n\nPlease check your setup and try again.",
+                title="Error",
+                style="red",
+                border_style="red"
+            )
+            console.print(error_panel)
 
 if __name__ == "__main__":
     main()
