@@ -20,7 +20,11 @@ try:
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
-console = Console(force_terminal=True, legacy_windows=False, color_system="auto")
+# Suppress Rich color encoding warnings
+import os
+os.environ.setdefault('FORCE_COLOR', '1')
+
+console = Console(force_terminal=True, legacy_windows=False, color_system="256")
 DEFAULT_MODEL = "qwen3:4b"
 
 # Claude-style streaming timing configuration
