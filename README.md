@@ -96,7 +96,7 @@ If the automated installer fails, see [INSTALL_MANUAL.md](INSTALL_MANUAL.md) for
 Add to `~/.config/hypr/hyprland.conf`:
 ```bash
 # Hotkey for persistent chat mode
-bind = SUPER, Return, exec, /path/to/xencode/xencode.sh
+bind = SUPER, Return, exec, xencode
 
 # Essential window rule for floating terminal
 windowrulev2 = float, title:Xencode AI
@@ -146,10 +146,10 @@ windowrulev2 = opacity 0.95, title:Xencode AI
 Launch an interactive chat session with streaming responses:
 ```bash
 # Start persistent chat mode (default behavior)
-./xencode.sh
+xencode
 
 # Explicit chat mode
-./xencode.sh --chat-mode
+xencode --chat-mode
 ```
 
 **Chat Mode Features:**
@@ -190,32 +190,32 @@ def fibonacci(n):
 For quick one-off queries in your current terminal:
 ```bash
 # Basic inline query
-./xencode.sh "explain quantum computing briefly"
+xencode "explain quantum computing briefly"
 
 # Explicit inline mode
-./xencode.sh --inline "write a python decorator"
+xencode --inline "write a python decorator"
 
 # Code generation
-./xencode.sh "create a REST API endpoint in FastAPI"
+xencode "create a REST API endpoint in FastAPI"
 
 # Technical explanations
-./xencode.sh "explain the difference between Docker and Podman"
+xencode "explain the difference between Docker and Podman"
 ```
 
 ### 🔧 Advanced Usage
 ```bash
 # Model management
-./xencode.sh --list-models                    # List installed models
-./xencode.sh --update                         # Update default model
-./xencode.sh --update -m llama2               # Update specific model
+xencode --list-models                    # List installed models
+xencode --update                         # Update default model
+xencode --update -m llama2               # Update specific model
 
 # Model selection
-./xencode.sh -m mistral "write a bash script"
-./xencode.sh -m codellama "optimize this SQL query"
+xencode -m mistral "write a bash script"
+xencode -m codellama "optimize this SQL query"
 
 # Force specific modes
-./xencode.sh --chat-mode                      # Force chat mode
-./xencode.sh --inline "quick question"        # Force inline mode
+xencode --chat-mode                      # Force chat mode
+xencode --inline "quick question"        # Force inline mode
 ```
 
 ### 🎯 Usage Patterns
@@ -223,7 +223,7 @@ For quick one-off queries in your current terminal:
 **For Development Work:**
 ```bash
 # Start persistent session for coding help
-./xencode.sh
+xencode
 
 # Then in chat:
 [You] > help me debug this Python error: NameError: name 'x' is not defined
@@ -234,14 +234,14 @@ For quick one-off queries in your current terminal:
 **For Quick Queries:**
 ```bash
 # One-off questions
-./xencode.sh "what's the difference between git merge and rebase?"
-./xencode.sh "show me a Docker compose file for PostgreSQL"
+xencode "what's the difference between git merge and rebase?"
+xencode "show me a Docker compose file for PostgreSQL"
 ```
 
 **For Code Review:**
 ```bash
 # Paste code and get feedback
-./xencode.sh --inline "review this function: $(cat my_function.py)"
+xencode --inline "review this function: $(cat my_function.py)"
 ```
 
 ### 🎬 Sample Output (Claude-Style Streaming)
