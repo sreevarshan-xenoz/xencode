@@ -608,7 +608,13 @@ def main():
         
         try:
             response = run_query(model, prompt)
-            format_output(response)
+            # For inline mode, only show the answer (no thinking section)
+            thinking, answer = extract_thinking_and_answer(response)
+            if answer.strip():
+                console.print(Markdown(answer.strip()))
+            else:
+                # Fallback to full response if no thinking tags
+                console.print(Markdown(response.strip()))
         except Exception as e:
             # Generic error panel for inline mode
             error_panel = Panel(
