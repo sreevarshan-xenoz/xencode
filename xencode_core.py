@@ -3,6 +3,7 @@
 import sys
 import subprocess
 import requests
+import json
 import time
 from rich.console import Console
 from rich.syntax import Syntax
@@ -93,6 +94,7 @@ def update_model(model):
             console.print(error_panel)
 
 def run_query(model, prompt):
+    """Non-streaming query for backward compatibility"""
     url = "http://localhost:11434/api/generate"
     payload = {"model": model, "prompt": prompt, "stream": False}
     
@@ -100,6 +102,123 @@ def run_query(model, prompt):
         r = requests.post(url, json=payload)
         r.raise_for_status()
         return r.json()["response"]
+    except requests.exceptions.ConnectionError:
+        # Claude-style connection error panel
+        error_panel = Panel(
+            "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
+            title="Connection Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
+        sys.exit(1)
+    except requests.exceptions.RequestException as e:
+        # Generic API error panel
+        error_panel = Panel(
+            f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
+            title="API Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
+        sys.exit(1)
+
+def run_streaming_query(model, prompt):
+    """Real-time streaming query with Claude-style display"""
+    url = "http://localhost:11434/api/generate"
+    payload = {"model": model, "prompt": prompt, "stream": True}
+    
+    try:
+        response = requests.post(url, json=payload, stream=True)
+        response.raise_for_status()
+        
+        # Initialize streaming state
+        full_response = ""
+        thinking_buffer = ""
+        in_thinking = False
+        thinking_displayed = False
+        answer_started = False
+        
+        # Show initial thinking indicator
+        console.print("🧠 Thinking...", style="dim italic yellow")
+        
+        # Process streaming response
+        for line in response.iter_lines():
+            if line:
+                try:
+                    chunk = json.loads(line.decode('utf-8'))
+                    if 'response' in chunk:
+                        token = chunk['response']
+                        full_response += token
+                        
+                        # State machine for handling thinking/answer sections
+                        if not in_thinking and '<think>' in full_response:
+                            # Start of thinking section detected
+                            in_thinking = True
+                            # Find the start of thinking content
+                            think_start = full_response.find('<think>') + 7
+                            thinking_buffer = full_response[think_start:]
+                            
+                        elif in_thinking and '</think>' not in full_response:
+                            # We're in thinking section, stream the new token
+                            if not thinking_displayed:
+                                # Stream this token in thinking style
+                                for char in token:
+                                    print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
+                                    time.sleep(THINKING_STREAM_DELAY)
+                            
+                        elif in_thinking and '</think>' in full_response:
+                            # End of thinking section detected
+                            in_thinking = False
+                            thinking_displayed = True
+                            
+                            # Extract any remaining thinking content before </think>
+                            think_end = full_response.find('</think>')
+                            think_start = full_response.find('<think>') + 7
+                            remaining_thinking = full_response[think_start:think_end]
+                            
+                            # Stream any remaining thinking content
+                            current_pos = len(thinking_buffer)
+                            if len(remaining_thinking) > current_pos:
+                                remaining_chars = remaining_thinking[current_pos:]
+                                for char in remaining_chars:
+                                    print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
+                                    time.sleep(THINKING_STREAM_DELAY)
+                            
+                            print()  # New line after thinking
+                            time.sleep(THINKING_TO_ANSWER_PAUSE)
+                            console.print("📄 Answer", style="bold green")
+                            answer_started = True
+                            
+                            # Start streaming the answer part
+                            answer_start = full_response.find('</think>') + 8
+                            answer_content = full_response[answer_start:].strip()
+                            if answer_content:
+                                for char in answer_content:
+                                    print(char, end='', flush=True)
+                                    time.sleep(ANSWER_STREAM_DELAY)
+                            
+                        elif not in_thinking and answer_started:
+                            # We're in answer section, stream the token
+                            for char in token:
+                                print(char, end='', flush=True)
+                                time.sleep(ANSWER_STREAM_DELAY)
+                                
+                        elif not in_thinking and not answer_started and '<think>' not in full_response:
+                            # No thinking section, start answer immediately
+                            if not answer_started:
+                                console.print("📄 Answer", style="bold green")
+                                answer_started = True
+                            for char in token:
+                                print(char, end='', flush=True)
+                                time.sleep(ANSWER_STREAM_DELAY)
+                            
+                except json.JSONDecodeError:
+                    continue
+        
+        print()  # Final newline
+        return full_response
+        
     except requests.exceptions.ConnectionError:
         # Claude-style connection error panel
         error_panel = Panel(
@@ -376,10 +495,10 @@ def chat_mode(model, online):
                 console.print(user_input)  # Re-display user input after banner update
                 console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
             
-            # Process the query using existing functions with streaming
+            # Process the query using real-time streaming
             try:
-                response = run_query(model, user_input)
-                format_output(response, streaming=True)
+                response = run_streaming_query(model, user_input)
+                # No need for format_output since streaming is handled in run_streaming_query
             except Exception as e:
                 # Claude-style error panel for chat mode
                 error_panel = Panel(
