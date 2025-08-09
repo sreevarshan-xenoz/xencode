@@ -136,82 +136,45 @@ def run_streaming_query(model, prompt):
         response = requests.post(url, json=payload, stream=True)
         response.raise_for_status()
         
-        # Initialize streaming state
+        # Collect the full response first, then stream it with proper timing
         full_response = ""
-        in_thinking = False
-        thinking_displayed = False
-        answer_started = False
-        displayed_chars = 0  # Track how many characters we've displayed
         
-        # Show initial thinking indicator
-        console.print("🧠 Thinking...", style="dim italic yellow")
+        # Thinking indicator is shown by chat mode, not here
         
-        # Process streaming response
+        # Collect all chunks
         for line in response.iter_lines():
             if line:
                 try:
                     chunk = json.loads(line.decode('utf-8'))
+                    
+                    # Check if streaming is complete
+                    if chunk.get('done', False):
+                        break
+                        
                     if 'response' in chunk and chunk['response']:
                         token = chunk['response']
                         full_response += token
                         
-                        # Check if we're entering thinking section
-                        if not in_thinking and '<think>' in full_response:
-                            in_thinking = True
-                            # Start displaying from after <think>
-                            think_start = full_response.find('<think>') + 7
-                            displayed_chars = think_start
-                            
-                        # Check if we're exiting thinking section
-                        elif in_thinking and '</think>' in full_response:
-                            # Display remaining thinking content up to </think>
-                            think_end = full_response.find('</think>')
-                            if displayed_chars < think_end:
-                                remaining_thinking = full_response[displayed_chars:think_end]
-                                for char in remaining_thinking:
-                                    print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
-                                    time.sleep(THINKING_STREAM_DELAY)
-                            
-                            # Transition to answer
-                            in_thinking = False
-                            thinking_displayed = True
-                            print()  # New line after thinking
-                            time.sleep(THINKING_TO_ANSWER_PAUSE)
-                            console.print("📄 Answer", style="bold green")
-                            answer_started = True
-                            
-                            # Set displayed_chars to start of answer
-                            displayed_chars = full_response.find('</think>') + 8
-                            
-                        # Stream new content based on current state
-                        if in_thinking and not thinking_displayed:
-                            # Stream thinking content
-                            new_content = full_response[displayed_chars:]
-                            for char in new_content:
-                                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
-                                time.sleep(THINKING_STREAM_DELAY)
-                            displayed_chars = len(full_response)
-                            
-                        elif answer_started:
-                            # Stream answer content
-                            new_content = full_response[displayed_chars:]
-                            for char in new_content:
-                                print(char, end='', flush=True)
-                                time.sleep(ANSWER_STREAM_DELAY)
-                            displayed_chars = len(full_response)
-                            
-                        elif not in_thinking and not answer_started and '<think>' not in full_response:
-                            # No thinking section, start answer immediately
-                            console.print("📄 Answer", style="bold green")
-                            answer_started = True
-                            new_content = full_response[displayed_chars:]
-                            for char in new_content:
-                                print(char, end='', flush=True)
-                                time.sleep(ANSWER_STREAM_DELAY)
-                            displayed_chars = len(full_response)
-                            
                 except json.JSONDecodeError:
                     continue
+        
+        # Now stream the complete response with proper Claude-style timing
+        thinking, answer = extract_thinking_and_answer(full_response)
+        
+        if thinking:
+            # Stream thinking section
+            for char in thinking:
+                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
+                time.sleep(THINKING_STREAM_DELAY)
+            print()  # New line after thinking
+            time.sleep(THINKING_TO_ANSWER_PAUSE)
+        
+        # Stream answer section
+        if answer.strip():
+            console.print("📄 Answer", style="bold green")
+            for char in answer.strip():
+                print(char, end='', flush=True)
+                time.sleep(ANSWER_STREAM_DELAY)
         
         print()  # Final newline
         return full_response
