@@ -8,6 +8,15 @@ from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.markdown import Markdown
 
+# Try to import prompt_toolkit for enhanced input handling
+try:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.keys import Keys
+    PROMPT_TOOLKIT_AVAILABLE = True
+except ImportError:
+    PROMPT_TOOLKIT_AVAILABLE = False
+
 console = Console()
 DEFAULT_MODEL = "qwen3:4b"
 
@@ -111,6 +120,41 @@ def display_prompt():
     """Display the chat prompt"""
     console.print("[bold blue][You] >[/bold blue] ", end="")
 
+def get_multiline_input():
+    """Get user input with multiline support using prompt_toolkit if available"""
+    if PROMPT_TOOLKIT_AVAILABLE:
+        try:
+            # Create key bindings for multiline input
+            bindings = KeyBindings()
+            
+            @bindings.add(Keys.ControlM)  # Enter key
+            def _(event):
+                """Handle Enter key - submit input"""
+                event.app.exit(result=event.app.current_buffer.text)
+            
+            @bindings.add(Keys.ControlJ)  # Shift+Enter (alternative binding)
+            def _(event):
+                """Handle Shift+Enter - add new line"""
+                event.current_buffer.insert_text('\n')
+            
+            # Use prompt_toolkit for enhanced input
+            user_input = prompt(
+                "",  # Empty prompt since we display our own
+                multiline=True,
+                key_bindings=bindings,
+                wrap_lines=True
+            )
+            
+            # Automatic newline trimming for submitted input
+            return user_input.strip()
+            
+        except Exception:
+            # Fall back to basic input if prompt_toolkit fails
+            return input().strip()
+    else:
+        # Graceful fallback to basic input() if prompt_toolkit is not available
+        return input().strip()
+
 def update_online_status():
     """Check internet connectivity with lightweight ping"""
     try:
@@ -152,8 +196,8 @@ def chat_mode(model, online):
             # Display prompt
             display_prompt()
             
-            # Get user input
-            user_input = input().strip()
+            # Get user input with multiline support
+            user_input = get_multiline_input()
             
             # Handle empty input gracefully without API calls
             if not user_input:
