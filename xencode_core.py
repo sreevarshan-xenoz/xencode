@@ -6,17 +6,30 @@ import requests
 import json
 import time
 import os
+import threading
+import queue
+import hashlib
+from datetime import datetime
+from pathlib import Path
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.live import Live
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich.prompt import Prompt, Confirm
+from rich.text import Text
+from rich.layout import Layout
+from rich.align import Align
+from rich.rule import Rule
 
 # Try to import prompt_toolkit for enhanced input handling
 try:
     from prompt_toolkit import prompt
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.keys import Keys
+    from prompt_toolkit.completion import WordCompleter
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
@@ -28,25 +41,335 @@ os.environ.setdefault('FORCE_COLOR', '1')
 console = Console(force_terminal=True, legacy_windows=False, color_system="256")
 DEFAULT_MODEL = "qwen3:4b"
 
-# Claude-style streaming timing configuration
+# Enhanced Claude-style streaming timing configuration
 THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
 ANSWER_STREAM_DELAY = 0.030    # 20-40ms per token
 THINKING_TO_ANSWER_PAUSE = 0.5 # 500ms pause between sections
 THINKING_LINE_PAUSE = 0.125    # 100-150ms between thinking lines
 
+# Performance and caching configuration
+CACHE_ENABLED = True
+CACHE_DIR = Path.home() / ".xencode" / "cache"
+MAX_CACHE_SIZE = 100  # Maximum cached responses
+RESPONSE_TIMEOUT = 30  # API response timeout in seconds
+
+# Conversation memory configuration
+MEMORY_ENABLED = True
+MAX_MEMORY_ITEMS = 50
+MEMORY_FILE = Path.home() / ".xencode" / "conversation_memory.json"
+
+class ConversationMemory:
+    """Advanced conversation memory with context management"""
+    
+    def __init__(self, max_items=MAX_MEMORY_ITEMS):
+        self.max_items = max_items
+        self.conversations = {}
+        self.current_session = None
+        self.load_memory()
+    
+    def load_memory(self):
+        """Load conversation memory from disk"""
+        try:
+            if MEMORY_FILE.exists():
+                with open(MEMORY_FILE, 'r') as f:
+                    data = json.load(f)
+                    self.conversations = data.get('conversations', {})
+                    self.current_session = data.get('current_session')
+        except Exception:
+            self.conversations = {}
+            self.current_session = None
+    
+    def save_memory(self):
+        """Save conversation memory to disk"""
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(MEMORY_FILE, 'w') as f:
+                json.dump({
+                    'conversations': self.conversations,
+                    'current_session': self.current_session,
+                    'last_updated': datetime.now().isoformat()
+                }, f, indent=2)
+        except Exception:
+            pass
+    
+    def start_session(self, session_id=None):
+        """Start a new conversation session"""
+        if session_id is None:
+            session_id = f"session_{int(time.time())}"
+        
+        self.current_session = session_id
+        if session_id not in self.conversations:
+            self.conversations[session_id] = {
+                'messages': [],
+                'model': DEFAULT_MODEL,
+                'created': datetime.now().isoformat(),
+                'last_updated': datetime.now().isoformat()
+            }
+        return session_id
+    
+    def add_message(self, role, content, model=None):
+        """Add a message to current session"""
+        if self.current_session is None:
+            self.start_session()
+        
+        message = {
+            'role': role,
+            'content': content,
+            'timestamp': datetime.now().isoformat(),
+            'model': model or DEFAULT_MODEL
+        }
+        
+        self.conversations[self.current_session]['messages'].append(message)
+        self.conversations[self.current_session]['last_updated'] = datetime.now().isoformat()
+        
+        # Trim old messages if exceeding limit
+        if len(self.conversations[self.current_session]['messages']) > self.max_items:
+            self.conversations[self.current_session]['messages'] = \
+                self.conversations[self.current_session]['messages'][-self.max_items:]
+        
+        self.save_memory()
+    
+    def get_context(self, max_messages=10):
+        """Get recent conversation context for model input"""
+        if self.current_session is None or self.current_session not in self.conversations:
+            return []
+        
+        messages = self.conversations[self.current_session]['messages']
+        return messages[-max_messages:] if len(messages) > max_messages else messages
+    
+    def list_sessions(self):
+        """List all conversation sessions"""
+        return list(self.conversations.keys())
+    
+    def switch_session(self, session_id):
+        """Switch to a different conversation session"""
+        if session_id in self.conversations:
+            self.current_session = session_id
+            return True
+        return False
+
+class ResponseCache:
+    """Intelligent response caching for performance optimization"""
+    
+    def __init__(self, cache_dir=CACHE_DIR, max_size=MAX_CACHE_SIZE):
+        self.cache_dir = Path(cache_dir)
+        self.max_size = max_size
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _get_cache_key(self, prompt, model):
+        """Generate cache key from prompt and model"""
+        content = f"{prompt}:{model}".encode('utf-8')
+        return hashlib.md5(content).hexdigest()
+    
+    def get(self, prompt, model):
+        """Get cached response if available"""
+        if not CACHE_ENABLED:
+            return None
+        
+        try:
+            cache_key = self._get_cache_key(prompt, model)
+            cache_file = self.cache_dir / f"{cache_key}.json"
+            
+            if cache_file.exists():
+                with open(cache_file, 'r') as f:
+                    data = json.load(f)
+                    # Check if cache is still valid (24 hours)
+                    if time.time() - data['timestamp'] < 86400:
+                        return data['response']
+        except Exception:
+            pass
+        
+        return None
+    
+    def set(self, prompt, model, response):
+        """Cache a response"""
+        if not CACHE_ENABLED:
+            return
+        
+        try:
+            cache_key = self._get_cache_key(prompt, model)
+            cache_file = self.cache_dir / f"{cache_key}.json"
+            
+            data = {
+                'prompt': prompt,
+                'model': model,
+                'response': response,
+                'timestamp': time.time()
+            }
+            
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            
+            # Clean up old cache files if exceeding limit
+            self._cleanup_cache()
+        except Exception:
+            pass
+    
+    def _cleanup_cache(self):
+        """Remove old cache files to maintain size limit"""
+        try:
+            cache_files = list(self.cache_dir.glob("*.json"))
+            if len(cache_files) > self.max_size:
+                # Sort by modification time and remove oldest
+                cache_files.sort(key=lambda x: x.stat().st_mtime)
+                for old_file in cache_files[:-self.max_size]:
+                    old_file.unlink()
+        except Exception:
+            pass
+
+class ModelManager:
+    """Advanced model management with health monitoring"""
+    
+    def __init__(self):
+        self.available_models = []
+        self.current_model = DEFAULT_MODEL
+        self.model_health = {}
+        self.refresh_models()
+    
+    def refresh_models(self):
+        """Refresh list of available models"""
+        try:
+            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
+            lines = output.strip().split('\n')
+            self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]
+        except Exception:
+            self.available_models = []
+    
+    def check_model_health(self, model):
+        """Check if a model is healthy and responsive"""
+        try:
+            start_time = time.time()
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={"model": model, "prompt": "test", "stream": False},
+                timeout=5
+            )
+            response_time = time.time() - start_time
+            
+            if response.status_code == 200:
+                self.model_health[model] = {
+                    'status': 'healthy',
+                    'response_time': response_time,
+                    'last_check': time.time()
+                }
+                return True
+            else:
+                self.model_health[model] = {
+                    'status': 'error',
+                    'error_code': response.status_code,
+                    'last_check': time.time()
+                }
+                return False
+        except Exception as e:
+            self.model_health[model] = {
+                'status': 'unavailable',
+                'error': str(e),
+                'last_check': time.time()
+            }
+            return False
+    
+    def get_best_model(self):
+        """Get the best available model based on health and performance"""
+        if not self.available_models:
+            return DEFAULT_MODEL
+        
+        # Check health of all models
+        healthy_models = []
+        for model in self.available_models:
+            if self.check_model_health(model):
+                healthy_models.append(model)
+        
+        if not healthy_models:
+            return DEFAULT_MODEL
+        
+        # Return the fastest healthy model
+        fastest_model = min(healthy_models, 
+                           key=lambda m: self.model_health.get(m, {}).get('response_time', float('inf')))
+        return fastest_model
+    
+    def switch_model(self, model):
+        """Switch to a different model"""
+        if model in self.available_models:
+            if self.check_model_health(model):
+                self.current_model = model
+                return True, "Model switched successfully"
+            else:
+                return False, f"Model {model} is not responding"
+        else:
+            return False, f"Model {model} not found"
+
+# Initialize global instances
+memory = ConversationMemory()
+cache = ResponseCache()
+model_manager = ModelManager()
+
 def get_available_models():
+    """Get available models with enhanced error handling and caching"""
     try:
-        output = subprocess.check_output(["ollama", "list"], text=True)
-        lines = output.strip().split('\n')
-        # Exclude the header line and extract model names
-        return [line.split()[0] for line in lines[1:]]
-    except (FileNotFoundError, subprocess.CalledProcessError, IndexError):
+        # Use the model manager for better performance
+        model_manager.refresh_models()
+        return model_manager.available_models
+    except Exception:
         return []
 
 def list_models():
+    """Enhanced model listing with health status and performance metrics"""
     try:
-        output = subprocess.check_output(["ollama", "list"], text=True)
-        console.print(Panel(output, title="📦 Installed Models", style="cyan"))
+        # Refresh models and health status
+        model_manager.refresh_models()
+        
+        if not model_manager.available_models:
+            console.print(Panel(
+                "❌ No models found\n\nPlease install models with:\n• ollama pull qwen3:4b\n• ollama pull llama2\n• ollama pull mistral",
+                title="No Models Available",
+                style="red",
+                border_style="red"
+            ))
+            return
+        
+        # Create enhanced model table
+        table = Table(title="📦 Installed Models", show_header=True, header_style="bold cyan")
+        table.add_column("Model", style="cyan", no_wrap=True)
+        table.add_column("Status", style="green")
+        table.add_column("Response Time", style="yellow")
+        table.add_column("Last Check", style="dim")
+        
+        for model in model_manager.available_models:
+            health = model_manager.model_health.get(model, {})
+            status = health.get('status', 'unknown')
+            
+            # Color code status
+            if status == 'healthy':
+                status_style = "✅ Healthy"
+                response_time = f"{health.get('response_time', 0):.3f}s"
+            elif status == 'error':
+                status_style = "❌ Error"
+                response_time = "N/A"
+            elif status == 'unavailable':
+                status_style = "⚠️ Unavailable"
+                response_time = "N/A"
+            else:
+                status_style = "❓ Unknown"
+                response_time = "N/A"
+            
+            last_check = health.get('last_check', 0)
+            if last_check:
+                last_check_str = datetime.fromtimestamp(last_check).strftime("%H:%M:%S")
+            else:
+                last_check_str = "Never"
+            
+            table.add_row(model, status_style, response_time, last_check_str)
+        
+        console.print(table)
+        
+        # Show current model
+        if model_manager.current_model:
+            console.print(f"\n🎯 Current Model: [bold cyan]{model_manager.current_model}[/bold cyan]")
+        
+        # Show recommendations
+        if len(model_manager.available_models) == 1:
+            console.print("\n💡 Tip: Install more models for variety:\n• ollama pull llama2:7b\n• ollama pull mistral:7b")
+        
     except FileNotFoundError:
         # Ollama not installed error
         error_panel = Panel(
@@ -67,17 +390,55 @@ def list_models():
         console.print(error_panel)
 
 def update_model(model):
+    """Enhanced model update with progress tracking and validation"""
     console.print(f"[yellow]🔄 Pulling latest model: {model}[/yellow]")
+    
     try:
-        subprocess.run(["ollama", "pull", model], check=True, capture_output=True)
-        # Success panel
-        success_panel = Panel(
-            f"✅ Successfully pulled {model}\n\nThe model is now ready to use.",
-            title="Model Updated",
-            style="green",
-            border_style="green"
-        )
-        console.print(success_panel)
+        # Check if model exists first
+        available_models = get_available_models()
+        if model not in available_models:
+            console.print(f"[yellow]📥 Model {model} not found locally, pulling from Ollama library...[/yellow]")
+        
+        # Show progress spinner
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task(f"Pulling {model}...", total=None)
+            
+            # Run the pull command
+            result = subprocess.run(
+                ["ollama", "pull", model], 
+                check=True, 
+                capture_output=True,
+                text=True
+            )
+            
+            progress.update(task, description=f"Validating {model}...")
+            
+            # Validate the model after pull
+            if model_manager.check_model_health(model):
+                progress.update(task, description=f"✅ {model} ready!")
+                time.sleep(0.5)  # Show success briefly
+                
+                # Success panel with enhanced info
+                success_panel = Panel(
+                    f"✅ Successfully pulled and validated {model}\n\n"
+                    f"📊 Model Status: [green]Healthy[/green]\n"
+                    f"⚡ Response Time: [yellow]{model_manager.model_health[model]['response_time']:.3f}s[/yellow]\n"
+                    f"🎯 Ready to use!",
+                    title="Model Updated Successfully",
+                    style="green",
+                    border_style="green"
+                )
+                console.print(success_panel)
+                
+                # Refresh model list
+                model_manager.refresh_models()
+            else:
+                raise Exception(f"Model {model} failed health check after pull")
+                
     except FileNotFoundError:
         # Ollama not installed error
         error_panel = Panel(
@@ -92,7 +453,12 @@ def update_model(model):
         stderr_text = e.stderr.decode() if e.stderr else "Unknown error"
         if "not found" in stderr_text.lower():
             warning_panel = Panel(
-                f"⚠️ Model '{model}' not found\n\nTry running: ./xencode.sh --list-models\nto see available models, or check the Ollama model library.",
+                f"⚠️ Model '{model}' not found in Ollama library\n\n"
+                f"💡 Try these popular models:\n"
+                f"• ollama pull qwen3:4b (fast, efficient)\n"
+                f"• ollama pull llama2:7b (balanced)\n"
+                f"• ollama pull mistral:7b (code-focused)\n"
+                f"• ollama pull codellama:7b (programming)",
                 title="Model Not Found",
                 style="yellow",
                 border_style="yellow"
@@ -100,27 +466,86 @@ def update_model(model):
             console.print(warning_panel)
         else:
             error_panel = Panel(
-                f"❌ Failed to pull {model}\n\nError: {stderr_text}\n\nPlease check your internet connection and try again.",
+                f"❌ Failed to pull {model}\n\nError: {stderr_text}\n\n"
+                f"🔧 Troubleshooting:\n"
+                f"• Check internet connection\n"
+                f"• Verify Ollama service is running\n"
+                f"• Try: systemctl restart ollama",
                 title="Update Failed",
                 style="red",
                 border_style="red"
             )
             console.print(error_panel)
+    except Exception as e:
+        error_panel = Panel(
+            f"❌ Unexpected error updating {model}\n\nError: {str(e)}\n\n"
+            f"🔧 Please check your setup and try again.",
+            title="Update Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
 
 def run_query(model, prompt):
-    """Non-streaming query for backward compatibility"""
+    """Enhanced non-streaming query with caching and conversation memory"""
+    # Check cache first
+    cached_response = cache.get(prompt, model)
+    if cached_response:
+        console.print("[dim]💾 Using cached response[/dim]")
+        return cached_response
+    
+    # Add user message to memory
+    memory.add_message("user", prompt, model)
+    
     url = "http://localhost:11434/api/generate"
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    
+    # Build context-aware prompt
+    context = memory.get_context(max_messages=5)
+    if context:
+        context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context])
+        enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+    else:
+        enhanced_prompt = prompt
+    
+    payload = {"model": model, "prompt": enhanced_prompt, "stream": False}
     
     try:
-        r = requests.post(url, json=payload)
-        r.raise_for_status()
-        return r.json()["response"]
+        # Show progress indicator
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task("🤖 Processing...", total=None)
+            
+            r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
+            r.raise_for_status()
+            
+            response = r.json()["response"]
+            
+            # Cache the response
+            cache.set(prompt, model, response)
+            
+            # Add AI response to memory
+            memory.add_message("assistant", response, model)
+            
+            return response
+            
     except requests.exceptions.ConnectionError:
         # Claude-style connection error panel
         error_panel = Panel(
             "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
             title="Connection Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
+        sys.exit(1)
+    except requests.exceptions.Timeout:
+        error_panel = Panel(
+            f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
+            f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
+            title="Request Timeout",
             style="red",
             border_style="red"
         )
@@ -138,12 +563,24 @@ def run_query(model, prompt):
         sys.exit(1)
 
 def run_streaming_query(model, prompt):
-    """Real-time streaming query with Claude-style display"""
+    """Enhanced real-time streaming query with conversation memory and context awareness"""
+    # Add user message to memory
+    memory.add_message("user", prompt, model)
+    
     url = "http://localhost:11434/api/generate"
-    payload = {"model": model, "prompt": prompt, "stream": True}
+    
+    # Build context-aware prompt
+    context = memory.get_context(max_messages=5)
+    if context:
+        context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context])
+        enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+    else:
+        enhanced_prompt = prompt
+    
+    payload = {"model": model, "prompt": enhanced_prompt, "stream": True}
     
     try:
-        response = requests.post(url, json=payload, stream=True)
+        response = requests.post(url, json=payload, stream=True, timeout=RESPONSE_TIMEOUT)
         response.raise_for_status()
         
         # Collect the full response first, then stream it with proper timing
@@ -151,11 +588,13 @@ def run_streaming_query(model, prompt):
         
         # Thinking indicator is shown by chat mode, not here
         
-        # Collect all chunks
+        # Collect all chunks with progress indication
+        chunk_count = 0
         for line in response.iter_lines():
             if line:
                 try:
                     chunk = json.loads(line.decode('utf-8'))
+                    chunk_count += 1
                     
                     # Check if streaming is complete
                     if chunk.get('done', False):
@@ -173,20 +612,16 @@ def run_streaming_query(model, prompt):
         
         if thinking:
             # Stream thinking section
-            for char in thinking:
-                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
-                time.sleep(THINKING_STREAM_DELAY)
-            print()  # New line after thinking
+            stream_thinking_section(thinking)
             time.sleep(THINKING_TO_ANSWER_PAUSE)
         
         # Stream answer section
         if answer.strip():
-            console.print("📄 Answer", style="bold green")
-            for char in answer.strip():
-                print(char, end='', flush=True)
-                time.sleep(ANSWER_STREAM_DELAY)
+            stream_answer_section(answer)
         
-        print()  # Final newline
+        # Add AI response to memory
+        memory.add_message("assistant", full_response, model)
+        
         return full_response
         
     except requests.exceptions.ConnectionError:
@@ -194,6 +629,16 @@ def run_streaming_query(model, prompt):
         error_panel = Panel(
             "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
             title="Connection Error",
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
+        sys.exit(1)
+    except requests.exceptions.Timeout:
+        error_panel = Panel(
+            f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
+            f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
+            title="Request Timeout",
             style="red",
             border_style="red"
         )
