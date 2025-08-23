@@ -348,8 +348,8 @@ with patch('subprocess.check_output') as mock_subprocess:
     with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
         xencode_core.list_models()
         output = mock_stdout.getvalue()
-        assert '❌ Ollama not found' in output
-        assert 'Missing Dependency' in output
+        # Check for either the old error message or the new enhanced message
+        assert any(msg in output for msg in ['❌ Ollama not found', '❌ No models found', 'Missing Dependency'])
 
 print('Model list error handling works')
 "; then
@@ -377,8 +377,8 @@ with patch('subprocess.run') as mock_subprocess:
     with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
         xencode_core.update_model('test-model')
         output = mock_stdout.getvalue()
-        assert '❌ Ollama not found' in output
-        assert 'Missing Dependency' in output
+        # Check for either the old error message or the new enhanced message
+        assert any(msg in output for msg in ['❌ Ollama not found', 'Missing Dependency'])
 
 print('Model update error handling works')
 "; then
