@@ -5,7 +5,6 @@ import subprocess
 import requests
 import json
 import time
-import os
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.panel import Panel
@@ -33,15 +32,6 @@ THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
 ANSWER_STREAM_DELAY = 0.030    # 20-40ms per token
 THINKING_TO_ANSWER_PAUSE = 0.5 # 500ms pause between sections
 THINKING_LINE_PAUSE = 0.125    # 100-150ms between thinking lines
-
-def get_available_models():
-    try:
-        output = subprocess.check_output(["ollama", "list"], text=True)
-        lines = output.strip().split('\n')
-        # Exclude the header line and extract model names
-        return [line.split()[0] for line in lines[1:]]
-    except (FileNotFoundError, subprocess.CalledProcessError, IndexError):
-        return []
 
 def list_models():
     try:
@@ -340,7 +330,7 @@ def display_chat_banner(model, online_status, is_update=False):
     # Claude-style centered banner with exact format
     banner_lines = [
         "╔══════════════════════════════════════════╗",
-        f"║ Xencode AI (Claude-Code Style | {model})    ║",
+        "║ Xencode AI (Claude-Code Style | Qwen)    ║",
         "╚══════════════════════════════════════════╝"
     ]
     
@@ -427,26 +417,6 @@ def is_exit_command(user_input):
     exit_commands = ['exit', 'quit', 'q']
     return user_input.lower().strip() in exit_commands
 
-def create_file(path, content):
-    try:
-        p = os.path.abspath(path)
-        with open(p, 'w') as f: f.write(content)
-        console.print(Panel(f"✅ {p}", title="Created", style="green"))
-    except: console.print(Panel("❌ Failed", style="red"))
-
-def read_file(path):
-    try: console.print(Panel(open(os.path.abspath(path)).read(), title=path, style="cyan"))
-    except: console.print(Panel("❌ Missing", style="red"))
-
-def write_file(path, content):
-    create_file(path, content)
-
-def delete_file(path):
-    try:
-        os.remove(os.path.abspath(path))
-        console.print(Panel(f"✅ {path}", title="Deleted", style="green"))
-    except: console.print(Panel("❌ Failed", style="red"))
-
 def chat_mode(model, online):
     """Interactive chat loop that displays banner and prompts for input"""
     # Display initial banner
@@ -454,7 +424,6 @@ def chat_mode(model, online):
     
     # Track current online status for dynamic updates
     current_online = online
-    current_model = model
     
     while True:
         try:
@@ -467,16 +436,6 @@ def chat_mode(model, online):
             # Handle empty input gracefully without API calls
             if not user_input:
                 console.print("[dim]Please enter a message or type 'exit' to quit.[/dim]")
-                continue
-
-            if user_input.startswith("/model "):
-                new_model = user_input.split(" ", 1)[1].strip()
-                available_models = get_available_models()
-                if new_model in available_models:
-                    current_model = new_model
-                    console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]", style="green"))
-                else:
-                    console.print(Panel(f"❌ Model [bold]{new_model}[/bold] not found. Use `ollama list` to see available models.", style="red"))
                 continue
             
             # Check for exit commands
@@ -491,14 +450,14 @@ def chat_mode(model, online):
             new_online = update_online_status()
             if new_online != current_online:
                 current_online = new_online
-                display_chat_banner(current_model, current_online, is_update=True)
+                display_chat_banner(model, current_online, is_update=True)
                 display_prompt()
                 console.print(user_input)  # Re-display user input after banner update
                 console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
             
             # Process the query using real-time streaming
             try:
-                response = run_streaming_query(current_model, user_input)
+                response = run_streaming_query(model, user_input)
                 # No need for format_output since streaming is handled in run_streaming_query
             except Exception as e:
                 # Claude-style error panel for chat mode
@@ -581,35 +540,6 @@ def main():
                 border_style="yellow"
             )
             console.print(warning_panel)
-        return
-    
-    # File ops
-    if len(args) > 0 and args[0] == 'file':
-        if len(args) < 2: exit(Panel("❌ No op", style="red"))
-        op = args[1]
-        if op == 'create' and len(args) >= 3:
-            create_file(args[2], ' '.join(args[3:]))
-        elif op == 'read' and len(args) >= 2:
-            read_file(args[2])
-        elif op == 'write' and len(args) >= 3:
-            write_file(args[2], ' '.join(args[3:]))
-        elif op == 'delete' and len(args) >= 2:
-            delete_file(args[2])
-        else:
-            exit(Panel(f"❌ Invalid: {op}", style="red"))
-        return
-    
-    # File operations
-    if args and args[0]=='file':
-        op, args = args[1], args[2:]
-        if op=='create' and len(args)>1:
-            create_file(args[0], ' '.join(args[1:]))
-        elif op=='read' and args:
-            read_file(args[0])
-        elif op=='write' and len(args)>1:
-            write_file(args[0], ' '.join(args[1:]))
-        elif op=='delete' and args:
-            delete_file(args[0])
         return
     
     # Handle model specification
