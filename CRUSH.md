@@ -24,4 +24,12 @@
 
 ## Special Notes
 - test_claude_style.sh validates prompt handling
-- xencode.sh is entrypoint, don't modify directly
+- xencode.sh is entrypoint, do not modify directly
+
+## Codebase Context
+- xencode_core.py: Core logic (file ops, model handling)
+- Main entrypoints:
+  • chat_mode(): Interactive CLI
+  • file operations: create/read/write/delete
+  • streaming Query API (Claude-style)
+- State tracking: online_status, active_model
