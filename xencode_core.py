@@ -867,6 +867,276 @@ def handle_chat_exit():
     ))
     console.print()
 
+def handle_chat_command(command, current_model, current_online):
+    """Handle enhanced chat commands with rich formatting"""
+    cmd_parts = command.split()
+    cmd = cmd_parts[0].lower()
+    
+    if cmd == "/help":
+        show_help_panel()
+        return True
+    elif cmd == "/clear":
+        memory.start_session()  # Start fresh session
+        console.print(Panel("🧹 Conversation cleared. New session started.", style="green"))
+        return True
+    elif cmd == "/memory":
+        show_memory_info()
+        return True
+    elif cmd == "/sessions":
+        show_sessions_list()
+        return True
+    elif cmd == "/switch":
+        if len(cmd_parts) > 1:
+            session_id = cmd_parts[1]
+            if memory.switch_session(session_id):
+                console.print(Panel(f"✅ Switched to session: {session_id}", style="green"))
+            else:
+                console.print(Panel(f"❌ Session not found: {session_id}", style="red"))
+        else:
+            console.print(Panel("❌ Usage: /switch <session_id>", style="red"))
+        return True
+    elif cmd == "/cache":
+        show_cache_info()
+        return True
+    elif cmd == "/status":
+        show_system_status(current_model, current_online)
+        return True
+    elif cmd == "/export":
+        export_conversation()
+        return True
+    elif cmd == "/theme":
+        if len(cmd_parts) > 1:
+            change_theme(cmd_parts[1])
+        else:
+            show_available_themes()
+        return True
+    
+    return False
+
+def show_help_panel():
+    """Display comprehensive help panel with all commands"""
+    help_text = """
+🎯 **Chat Commands:**
+• /help - Show this help
+• /clear - Clear current conversation
+• /memory - Show memory usage
+• /sessions - List all sessions
+• /switch <id> - Switch to session
+• /cache - Show cache info
+• /status - System status
+• /export - Export conversation
+• /theme <name> - Change theme
+
+🔧 **Model Commands:**
+• /model <name> - Switch model
+• /list-models - List available models
+• /update - Update current model
+
+💬 **Regular Input:**
+• Type your message and press Enter
+• Use Shift+Enter for multiline
+• Type 'exit' or 'quit' to end
+"""
+    
+    help_panel = Panel(help_text, title="📚 Xencode Help", style="cyan")
+    console.print(help_panel)
+
+def show_memory_info():
+    """Display memory usage and statistics"""
+    context = memory.get_context()
+    sessions = memory.list_sessions()
+    
+    memory_text = f"""
+🧠 **Memory Information:**
+• Current Session: {memory.current_session}
+• Messages in Context: {len(context)}
+• Total Sessions: {len(sessions)}
+• Memory Limit: {MAX_MEMORY_ITEMS} messages
+
+📊 **Current Context:**
+"""
+    
+    if context:
+        for i, msg in enumerate(context[-5:], 1):  # Show last 5 messages
+            role = msg['role'].capitalize()
+            content_preview = msg['content'][:50] + "..." if len(msg['content']) > 50 else msg['content']
+            memory_text += f"• {i}. {role}: {content_preview}\n"
+    else:
+        memory_text += "• No messages in context\n"
+    
+    memory_panel = Panel(memory_text, title="🧠 Memory Status", style="blue")
+    console.print(memory_panel)
+
+def show_sessions_list():
+    """Display list of all conversation sessions"""
+    sessions = memory.list_sessions()
+    
+    if not sessions:
+        console.print(Panel("❌ No sessions found", style="red"))
+        return
+    
+    table = Table(title="💬 Conversation Sessions", show_header=True, header_style="bold cyan")
+    table.add_column("Session ID", style="cyan")
+    table.add_column("Messages", style="green")
+    table.add_column("Model", style="yellow")
+    table.add_column("Created", style="dim")
+    table.add_column("Last Updated", style="dim")
+    
+    for session_id in sessions:
+        session_data = memory.conversations.get(session_id, {})
+        messages_count = len(session_data.get('messages', []))
+        model = session_data.get('model', 'Unknown')
+        created = session_data.get('created', 'Unknown')
+        last_updated = session_data.get('last_updated', 'Unknown')
+        
+        # Format timestamps
+        try:
+            created_dt = datetime.fromisoformat(created)
+            created_str = created_dt.strftime("%Y-%m-%d %H:%M")
+        except:
+            created_str = created
+        
+        try:
+            updated_dt = datetime.fromisoformat(last_updated)
+            updated_str = updated_dt.strftime("%Y-%m-%d %H:%M")
+        except:
+            updated_str = last_updated
+        
+        # Highlight current session
+        if session_id == memory.current_session:
+            session_id = f"🎯 {session_id}"
+        
+        table.add_row(session_id, str(messages_count), model, created_str, updated_str)
+    
+    console.print(table)
+
+def show_cache_info():
+    """Display cache information and statistics"""
+    try:
+        cache_files = list(CACHE_DIR.glob("*.json"))
+        cache_size = len(cache_files)
+        
+        cache_text = f"""
+💾 **Cache Information:**
+• Cache Directory: {CACHE_DIR}
+• Cached Responses: {cache_size}
+• Max Cache Size: {MAX_CACHE_SIZE}
+• Cache Status: {'Enabled' if CACHE_ENABLED else 'Disabled'}
+"""
+        
+        if cache_size > 0:
+            cache_text += "\n📊 **Recent Cache Entries:**\n"
+            # Show recent cache entries
+            recent_files = sorted(cache_files, key=lambda x: x.stat().st_mtime, reverse=True)[:5]
+            for i, cache_file in enumerate(recent_files, 1):
+                try:
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        prompt_preview = data.get('prompt', '')[:40] + "..." if len(data.get('prompt', '')) > 40 else data.get('prompt', '')
+                        cache_text += f"• {i}. {prompt_preview}\n"
+                except:
+                    cache_text += f"• {i}. [Error reading cache]\n"
+        
+        cache_panel = Panel(cache_text, title="💾 Cache Status", style="magenta")
+        console.print(cache_panel)
+        
+    except Exception as e:
+        console.print(Panel(f"❌ Error reading cache: {str(e)}", style="red"))
+
+def show_system_status(current_model, current_online):
+    """Display comprehensive system status"""
+    # Check Ollama service
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        ollama_status = "✅ Running" if response.status_code == 200 else "❌ Error"
+    except:
+        ollama_status = "❌ Not accessible"
+    
+    # Check model health
+    model_health = model_manager.model_health.get(current_model, {})
+    model_status = model_health.get('status', 'unknown')
+    
+    if model_status == 'healthy':
+        response_time = f"{model_health.get('response_time', 0):.3f}s"
+        model_status_display = f"✅ Healthy ({response_time})"
+    else:
+        model_status_display = f"❌ {model_status.capitalize()}"
+    
+    status_text = f"""
+🖥️ **System Status:**
+• Ollama Service: {ollama_status}
+• Current Model: {current_model}
+• Model Status: {model_status_display}
+• Internet: {'🌐 Online' if current_online == 'true' else '🔌 Offline'}
+• Memory Usage: {len(memory.get_context())} messages
+• Cache Status: {'✅ Enabled' if CACHE_ENABLED else '❌ Disabled'}
+
+📊 **Performance:**
+• Available Models: {len(model_manager.available_models)}
+• Cache Size: {len(list(CACHE_DIR.glob('*.json'))) if CACHE_DIR.exists() else 0}
+• Session Count: {len(memory.conversations)}
+"""
+    
+    status_panel = Panel(status_text, title="📊 System Status", style="green")
+    console.print(status_panel)
+
+def export_conversation():
+    """Export current conversation to file"""
+    try:
+        context = memory.get_context()
+        if not context:
+            console.print(Panel("❌ No conversation to export", style="red"))
+            return
+        
+        # Create export directory
+        export_dir = Path.home() / ".xencode" / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"conversation_{timestamp}.md"
+        export_path = export_dir / filename
+        
+        # Export as markdown
+        with open(export_path, 'w') as f:
+            f.write(f"# Xencode Conversation Export\n\n")
+            f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"**Session:** {memory.current_session}\n\n")
+            
+            for msg in context:
+                role = msg['role'].capitalize()
+                content = msg['content']
+                timestamp = msg['timestamp']
+                
+                f.write(f"## {role}\n\n")
+                f.write(f"*{timestamp}*\n\n")
+                f.write(f"{content}\n\n")
+                f.write("---\n\n")
+        
+        console.print(Panel(f"✅ Conversation exported to:\n{export_path}", style="green"))
+        
+    except Exception as e:
+        console.print(Panel(f"❌ Export failed: {str(e)}", style="red"))
+
+def change_theme(theme_name):
+    """Change the visual theme (placeholder for future implementation)"""
+    console.print(Panel(f"🎨 Theme '{theme_name}' not implemented yet.\n\nAvailable themes:\n• default\n• dark\n• light\n• colorful", style="yellow"))
+
+def show_available_themes():
+    """Show available themes"""
+    themes_text = """
+🎨 **Available Themes:**
+• default - Standard Xencode theme
+• dark - Dark mode (coming soon)
+• light - Light mode (coming soon)
+• colorful - Enhanced colors (coming soon)
+
+💡 Use: /theme <name> to change
+"""
+    
+    themes_panel = Panel(themes_text, title="🎨 Themes", style="magenta")
+    console.print(themes_panel)
+
 def is_exit_command(user_input):
     """Check if user input is an exit command (exit, quit, q)"""
     exit_commands = ['exit', 'quit', 'q']
@@ -893,13 +1163,20 @@ def delete_file(path):
     except: console.print(Panel("❌ Failed", style="red"))
 
 def chat_mode(model, online):
-    """Interactive chat loop that displays banner and prompts for input"""
+    """Enhanced interactive chat loop with advanced features and conversation management"""
+    # Start a new conversation session
+    session_id = memory.start_session()
+    
     # Display initial banner
     display_chat_banner(model, online)
     
     # Track current online status for dynamic updates
     current_online = online
     current_model = model
+    
+    # Show session info
+    console.print(f"[dim]💬 Session: {session_id}[/dim]")
+    console.print(f"[dim]🧠 Memory: {len(memory.get_context())} messages[/dim]")
     
     while True:
         try:
@@ -914,14 +1191,22 @@ def chat_mode(model, online):
                 console.print("[dim]Please enter a message or type 'exit' to quit.[/dim]")
                 continue
 
+            # Enhanced command system
+            if user_input.startswith("/"):
+                if handle_chat_command(user_input, current_model, current_online):
+                    continue
+                else:
+                    # If command not handled, treat as regular input
+                    pass
+
             if user_input.startswith("/model "):
                 new_model = user_input.split(" ", 1)[1].strip()
-                available_models = get_available_models()
-                if new_model in available_models:
+                success, message = model_manager.switch_model(new_model)
+                if success:
                     current_model = new_model
-                    console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]", style="green"))
+                    console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]\n{message}", style="green"))
                 else:
-                    console.print(Panel(f"❌ Model [bold]{new_model}[/bold] not found. Use `ollama list` to see available models.", style="red"))
+                    console.print(Panel(f"❌ Model switch failed: {message}", style="red"))
                 continue
             
             # Check for exit commands
@@ -1026,6 +1311,31 @@ def main():
                 border_style="yellow"
             )
             console.print(warning_panel)
+        return
+    
+    # Handle --status
+    if "--status" in args:
+        show_system_status(DEFAULT_MODEL, online)
+        return
+    
+    # Handle --memory
+    if "--memory" in args:
+        show_memory_info()
+        return
+    
+    # Handle --sessions
+    if "--sessions" in args:
+        show_sessions_list()
+        return
+    
+    # Handle --cache
+    if "--cache" in args:
+        show_cache_info()
+        return
+    
+    # Handle --export
+    if "--export" in args:
+        export_conversation()
         return
     
     # File ops
