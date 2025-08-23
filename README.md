@@ -10,6 +10,12 @@ A powerful offline-first AI assistant with Claude-style interface, featuring loc
 - **⏱️ Authentic Timing**: 40-60ms thinking delays, 20-40ms answer delays for natural feel
 - **🎨 Professional UI**: Centered banners, rich panels, and elegant formatting
 
+### 🧠 **Enhanced AI Capabilities** 🆕
+- **💾 Conversation Memory**: Persistent sessions with context awareness across restarts
+- **🚀 Response Caching**: Intelligent caching for instant repeated responses
+- **🤖 Model Health Monitoring**: Real-time model performance and health tracking
+- **🔄 Advanced Model Management**: Seamless switching with performance optimization
+
 ### 💬 Dual Mode Operation
 - **🖥️ Persistent Chat Mode**: Interactive sessions in floating Kitty terminal
 - **⚡ Inline Mode**: Quick queries in current terminal
@@ -82,6 +88,9 @@ cd xencode
 
 # Claude-style features test
 ./test_claude_style.sh
+
+# Enhanced features test 🆕
+./test_enhanced_features.sh
 
 # Quick functionality check
 ./xencode.sh "Hello, test my installation"
@@ -205,7 +214,7 @@ xencode "explain the difference between Docker and Podman"
 ### 🔧 Advanced Usage
 ```bash
 # Model management
-xencode --list-models                    # List installed models
+xencode --list-models                    # List installed models with health status
 xencode --update                         # Update default model
 xencode --update -m llama2               # Update specific model
 
@@ -216,6 +225,26 @@ xencode -m codellama "optimize this SQL query"
 # Force specific modes
 xencode --chat-mode                      # Force chat mode
 xencode --inline "quick question"        # Force inline mode
+
+# Enhanced features 🆕
+xencode --status                         # System health and performance
+xencode --memory                         # Memory usage and context
+xencode --sessions                       # List conversation sessions
+xencode --cache                          # Cache statistics and management
+xencode --export                         # Export current conversation
+```
+
+### 🆕 **Enhanced Chat Commands** (Chat Mode Only)
+```bash
+/help              # Comprehensive help system
+/clear             # Clear conversation and start fresh
+/memory            # Show memory usage and context
+/sessions          # List all conversation sessions
+/switch <id>       # Switch between sessions
+/cache             # Cache statistics and management
+/status            # System health and performance
+/export            # Export conversation to markdown
+/theme <name>      # Change visual theme (coming soon)
 ```
 
 ### 🎯 Usage Patterns
@@ -334,6 +363,12 @@ if __name__ == '__main__':
 - **Python 3.6+**: Runtime environment
 - **curl**: For API calls and health checks
 - **git**: For repository management
+
+### 🆕 **Enhanced Features Requirements**
+- **Rich Library**: Advanced terminal formatting and UI components
+- **Pathlib**: Modern path handling for file operations
+- **JSON Support**: Built-in Python JSON for data persistence
+- **Directory Permissions**: Write access to `~/.xencode/` for caching and memory
 
 ### 📦 Python Dependencies
 - **requests** (required): HTTP client for Ollama API
