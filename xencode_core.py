@@ -825,20 +825,23 @@ def get_multiline_input():
                 """Handle Shift+Enter - add new line"""
                 event.current_buffer.insert_text('\n')
             
-            # Use prompt_toolkit for enhanced input with bold white prompt
+            # Use prompt_toolkit for enhanced input
             user_input = prompt(
                 "",  # Empty prompt since we display our own
                 multiline=True,
                 key_bindings=bindings,
                 wrap_lines=True,
-                mouse_support=True
+                mouse_support=False  # Disable mouse support to avoid conflicts
             )
             
-            # Automatic newline trimming for submitted input
-            return user_input.strip()
+            # Clean and return input
+            if user_input:
+                return user_input.strip()
+            return ""
             
-        except Exception:
+        except Exception as e:
             # Fall back to basic input if prompt_toolkit fails
+            console.print(f"[dim]Warning: prompt_toolkit failed, using basic input: {e}[/dim]")
             return input().strip()
     else:
         # Graceful fallback to basic input() if prompt_toolkit is not available
@@ -904,6 +907,20 @@ def handle_chat_command(command, current_model, current_online):
     elif cmd == "/export":
         export_conversation()
         return True
+    elif cmd == "/model":
+        if len(cmd_parts) > 1:
+            new_model = cmd_parts[1]
+            success, message = model_manager.switch_model(new_model)
+            if success:
+                # Update the current model in the calling function
+                # We'll need to return the new model
+                return "MODEL_SWITCH", new_model, message
+            else:
+                console.print(Panel(f"❌ Model switch failed: {message}", style="red"))
+                return True
+        else:
+            console.print(Panel("❌ Usage: /model <model_name>", style="red"))
+            return True
     elif cmd == "/theme":
         if len(cmd_parts) > 1:
             change_theme(cmd_parts[1])
@@ -1193,21 +1210,17 @@ def chat_mode(model, online):
 
             # Enhanced command system
             if user_input.startswith("/"):
-                if handle_chat_command(user_input, current_model, current_online):
+                command_result = handle_chat_command(user_input, current_model, current_online)
+                if command_result:
+                    # Handle special return values
+                    if isinstance(command_result, tuple) and command_result[0] == "MODEL_SWITCH":
+                        _, new_model, message = command_result
+                        current_model = new_model
+                        console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]\n{message}", style="green"))
                     continue
                 else:
                     # If command not handled, treat as regular input
                     pass
-
-            if user_input.startswith("/model "):
-                new_model = user_input.split(" ", 1)[1].strip()
-                success, message = model_manager.switch_model(new_model)
-                if success:
-                    current_model = new_model
-                    console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]\n{message}", style="green"))
-                else:
-                    console.print(Panel(f"❌ Model switch failed: {message}", style="red"))
-                continue
             
             # Check for exit commands
             if is_exit_command(user_input):
