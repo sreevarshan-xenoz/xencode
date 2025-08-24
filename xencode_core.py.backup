@@ -438,10 +438,10 @@ def update_model(model):
                     border_style="green"
                 )
                 console.print(success_panel)
-                
+                        
                 # Refresh model list
                 model_manager.refresh_models()
-            else:
+                    else:
                 raise Exception(f"Model {model} failed health check after pull")
                 
     except FileNotFoundError:
