@@ -440,7 +440,7 @@ def update_model(model):
         console.print(success_panel)
                 
                 # Refresh model list
-                model_manager.refresh_models()
+        model_manager.refresh_models()
             else:
                 raise Exception(f"Model {model} failed health check after pull")
                 
