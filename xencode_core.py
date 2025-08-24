@@ -27,18 +27,17 @@ from rich.rule import Rule
 # Try to import prompt_toolkit for enhanced input handling
 try:
     from prompt_toolkit import prompt
-    from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.keys import Keys
-    from prompt_toolkit.completion import WordCompleter
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
-# Suppress Rich color encoding warnings
+# Suppress Rich color encoding warnings and other terminal warnings
 import os
 os.environ.setdefault('FORCE_COLOR', '1')
+os.environ.setdefault('TERM', 'xterm-256color')
+os.environ.setdefault('COLORTERM', 'truecolor')
 
-console = Console(force_terminal=True, legacy_windows=False, color_system="256")
+console = Console(force_terminal=True, legacy_windows=False, color_system="256", stderr=False)
 DEFAULT_MODEL = "qwen3:4b"
 
 # Enhanced Claude-style streaming timing configuration
@@ -230,7 +229,7 @@ class ModelManager:
         """Refresh list of available models"""
         try:
             output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
-            lines = output.strip().split('\n')
+        lines = output.strip().split('\n')
             self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]
         except Exception:
             self.available_models = []
@@ -335,21 +334,27 @@ def list_models():
         table.add_column("Last Check", style="dim")
         
         for model in model_manager.available_models:
-            health = model_manager.model_health.get(model, {})
-            status = health.get('status', 'unknown')
-            
-            # Color code status
-            if status == 'healthy':
-                status_style = "✅ Healthy"
-                response_time = f"{health.get('response_time', 0):.3f}s"
-            elif status == 'error':
-                status_style = "❌ Error"
-                response_time = "N/A"
-            elif status == 'unavailable':
-                status_style = "⚠️ Unavailable"
-                response_time = "N/A"
-            else:
-                status_style = "❓ Unknown"
+            # Actively check model health
+            try:
+                is_healthy = model_manager.check_model_health(model)
+                health = model_manager.model_health.get(model, {})
+                status = health.get('status', 'unknown')
+                
+                # Color code status
+                if status == 'healthy':
+                    status_style = "✅ Healthy"
+                    response_time = f"{health.get('response_time', 0):.3f}s"
+                elif status == 'error':
+                    status_style = "❌ Error"
+                    response_time = "N/A"
+                elif status == 'unavailable':
+                    status_style = "⚠️ Unavailable"
+                    response_time = "N/A"
+                else:
+                    status_style = "❓ Unknown"
+                    response_time = "N/A"
+            except Exception:
+                status_style = "❓ Check Failed"
                 response_time = "N/A"
             
             last_check = health.get('last_check', 0)
@@ -423,16 +428,16 @@ def update_model(model):
                 time.sleep(0.5)  # Show success briefly
                 
                 # Success panel with enhanced info
-                success_panel = Panel(
+        success_panel = Panel(
                     f"✅ Successfully pulled and validated {model}\n\n"
                     f"📊 Model Status: [green]Healthy[/green]\n"
                     f"⚡ Response Time: [yellow]{model_manager.model_health[model]['response_time']:.3f}s[/yellow]\n"
                     f"🎯 Ready to use!",
                     title="Model Updated Successfully",
-                    style="green",
-                    border_style="green"
-                )
-                console.print(success_panel)
+            style="green",
+            border_style="green"
+        )
+        console.print(success_panel)
                 
                 # Refresh model list
                 model_manager.refresh_models()
@@ -481,10 +486,10 @@ def update_model(model):
             f"❌ Unexpected error updating {model}\n\nError: {str(e)}\n\n"
             f"🔧 Please check your setup and try again.",
             title="Update Error",
-            style="red",
-            border_style="red"
-        )
-        console.print(error_panel)
+                style="red",
+                border_style="red"
+            )
+            console.print(error_panel)
 
 def run_query(model, prompt):
     """Enhanced non-streaming query with caching and conversation memory"""
@@ -519,7 +524,7 @@ def run_query(model, prompt):
             task = progress.add_task("🤖 Processing...", total=None)
             
             r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
-            r.raise_for_status()
+        r.raise_for_status()
             
             response = r.json()["response"]
             
@@ -689,12 +694,12 @@ def stream_thinking_section(thinking_text):
     lines = thinking_text.split('\n')
     for line in lines:
         if line.strip():  # Only process non-empty lines
-            # Stream each character with timing using direct stdout for immediate display
+            # Stream each character with timing using Rich console for consistent output
             for char in line:
-                # Use ANSI codes for styling with direct stdout for immediate flushing
-                print(f"\033[2;3;33m{char}\033[0m", end='', flush=True)
+                # Use Rich console for immediate display
+                console.print(char, style="dim italic yellow", end="", highlight=False)
                 time.sleep(THINKING_STREAM_DELAY)
-            print()  # New line after each line
+            console.print()  # New line after each line
             time.sleep(THINKING_LINE_PAUSE)  # Breathing pause between lines
 
 def stream_answer_section(answer_text):
@@ -711,11 +716,11 @@ def stream_answer_section(answer_text):
         for i, part in enumerate(parts):
             if i % 2 == 0:  # Text
                 if part.strip():
-                    # Stream text character by character using direct stdout
+                    # Stream text character by character using Rich console
                     for char in part.strip():
-                        print(char, end='', flush=True)
+                        console.print(char, end="", highlight=False)
                         time.sleep(ANSWER_STREAM_DELAY)
-                    print()
+                    console.print()
             else:  # Code
                 if part.strip():
                     lang = part.split('\n')[0] if '\n' in part else ""
@@ -723,11 +728,11 @@ def stream_answer_section(answer_text):
                     # Display code block immediately for readability
                     console.print(Syntax(code_content, lang or "plaintext", theme="monokai"))
     else:
-        # Stream regular text character by character using direct stdout
+        # Stream regular text character by character using Rich console
         for char in answer_text.strip():
-            print(char, end='', flush=True)
+            console.print(char, end="", highlight=False)
             time.sleep(ANSWER_STREAM_DELAY)
-        print()
+        console.print()
 
 def stream_claude_response(thinking_text, answer_text):
     """Stream complete response with exact Claude timing and formatting"""
@@ -812,31 +817,18 @@ def get_multiline_input():
     """Get user input with multiline support using prompt_toolkit if available"""
     if PROMPT_TOOLKIT_AVAILABLE:
         try:
-            # Create key bindings for multiline input
-            bindings = KeyBindings()
-            
-            @bindings.add(Keys.ControlM)  # Enter key
-            def _(event):
-                """Handle Enter key - submit input"""
-                event.app.exit(result=event.app.current_buffer.text)
-            
-            @bindings.add('s-enter')  # Shift+Enter
-            def _(event):
-                """Handle Shift+Enter - add new line"""
-                event.current_buffer.insert_text('\n')
-            
-            # Use prompt_toolkit for enhanced input
+            # Use prompt_toolkit with default key bindings for reliability
+            # Enter submits, Ctrl+N adds new line
             user_input = prompt(
                 "",  # Empty prompt since we display our own
                 multiline=True,
-                key_bindings=bindings,
                 wrap_lines=True,
                 mouse_support=False  # Disable mouse support to avoid conflicts
             )
             
             # Clean and return input
             if user_input:
-                return user_input.strip()
+            return user_input.strip()
             return ""
             
         except Exception as e:
@@ -1069,15 +1061,17 @@ def show_system_status(current_model, current_online):
     except:
         ollama_status = "❌ Not accessible"
     
-    # Check model health
-    model_health = model_manager.model_health.get(current_model, {})
-    model_status = model_health.get('status', 'unknown')
-    
-    if model_status == 'healthy':
-        response_time = f"{model_health.get('response_time', 0):.3f}s"
-        model_status_display = f"✅ Healthy ({response_time})"
-    else:
-        model_status_display = f"❌ {model_status.capitalize()}"
+    # Check model health actively
+    try:
+        if model_manager.check_model_health(current_model):
+            model_health = model_manager.model_health.get(current_model, {})
+            response_time = f"{model_health.get('response_time', 0):.3f}s"
+            model_status_display = f"✅ Healthy ({response_time})"
+        else:
+            model_health = model_manager.model_health.get(current_model, {})
+            model_status_display = f"❌ {model_health.get('status', 'Unavailable').capitalize()}"
+    except Exception:
+        model_status_display = "❌ Check Failed"
     
     status_text = f"""
 🖥️ **System Status:**
@@ -1208,6 +1202,8 @@ def chat_mode(model, online):
                 console.print("[dim]Please enter a message or type 'exit' to quit.[/dim]")
                 continue
 
+
+
             # Enhanced command system
             if user_input.startswith("/"):
                 command_result = handle_chat_command(user_input, current_model, current_online)
@@ -1215,9 +1211,9 @@ def chat_mode(model, online):
                     # Handle special return values
                     if isinstance(command_result, tuple) and command_result[0] == "MODEL_SWITCH":
                         _, new_model, message = command_result
-                        current_model = new_model
+                    current_model = new_model
                         console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]\n{message}", style="green"))
-                    continue
+                continue
                 else:
                     # If command not handled, treat as regular input
                     pass
@@ -1235,8 +1231,8 @@ def chat_mode(model, online):
             if new_online != current_online:
                 current_online = new_online
                 display_chat_banner(current_model, current_online, is_update=True)
-                display_prompt()
-                console.print(user_input)  # Re-display user input after banner update
+                # Don't re-display prompt or input to avoid confusion
+                console.print("[dim]🌐 Connection status updated[/dim]")
                 console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
             
             # Process the query using real-time streaming
