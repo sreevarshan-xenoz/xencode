@@ -229,7 +229,7 @@ class ModelManager:
         """Refresh list of available models"""
         try:
             output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
-        lines = output.strip().split('\n')
+            lines = output.strip().split('\n')
             self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]
         except Exception:
             self.available_models = []
