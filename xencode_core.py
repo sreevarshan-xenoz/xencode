@@ -31,6 +31,14 @@ try:
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
+# Import Enhanced CLI System with graceful fallback
+try:
+    from enhanced_cli_system import EnhancedXencodeCLI
+    ENHANCED_CLI_AVAILABLE = True
+except ImportError:
+    ENHANCED_CLI_AVAILABLE = False
+    EnhancedXencodeCLI = None
+
 # Suppress Rich color encoding warnings and other terminal warnings
 import os
 os.environ.setdefault('FORCE_COLOR', '1')
@@ -486,10 +494,10 @@ def update_model(model):
             f"❌ Unexpected error updating {model}\n\nError: {str(e)}\n\n"
             f"🔧 Please check your setup and try again.",
             title="Update Error",
-                style="red",
-                border_style="red"
-            )
-            console.print(error_panel)
+            style="red",
+            border_style="red"
+        )
+        console.print(error_panel)
 
 def run_query(model, prompt):
     """Enhanced non-streaming query with caching and conversation memory"""
@@ -524,7 +532,7 @@ def run_query(model, prompt):
             task = progress.add_task("🤖 Processing...", total=None)
             
             r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
-        r.raise_for_status()
+            r.raise_for_status()
             
             response = r.json()["response"]
             
@@ -828,7 +836,7 @@ def get_multiline_input():
             
             # Clean and return input
             if user_input:
-            return user_input.strip()
+                return user_input.strip()
             return ""
             
         except Exception as e:
@@ -867,6 +875,58 @@ def handle_chat_command(command, current_model, current_online):
     cmd_parts = command.split()
     cmd = cmd_parts[0].lower()
     
+    # Try enhanced chat commands first if available
+    if ENHANCED_CLI_AVAILABLE:
+        try:
+            from enhanced_chat_commands import EnhancedChatCommands
+            from enhanced_cli_system import FeatureDetector
+            
+            # Initialize enhanced chat commands if not already done
+            if not hasattr(handle_chat_command, '_enhanced_commands'):
+                detector = FeatureDetector()
+                features = detector.detect_features()
+                
+                # Get enhanced systems if available
+                enhanced_systems = {}
+                if features.multi_model and MultiModelManager:
+                    enhanced_systems['multi_model'] = MultiModelManager()
+                if features.smart_context and SmartContextManager:
+                    enhanced_systems['smart_context'] = SmartContextManager()
+                if features.code_analysis and CodeAnalyzer:
+                    enhanced_systems['code_analyzer'] = CodeAnalyzer()
+                
+                handle_chat_command._enhanced_commands = EnhancedChatCommands(features, enhanced_systems)
+            
+            # Handle enhanced commands
+            enhanced_commands = handle_chat_command._enhanced_commands
+            
+            # Check if this is an enhanced command
+            enhanced_command_names = ["analyze", "model", "models", "context", "smart"]
+            
+            if cmd[1:] in enhanced_command_names:  # Remove leading /
+                args = " ".join(cmd_parts[1:]) if len(cmd_parts) > 1 else ""
+                response, new_model = enhanced_commands.handle_chat_command(cmd[1:], args, current_model)
+                
+                console.print(Panel(response, style="cyan"))
+                
+                if new_model:
+                    return "MODEL_SWITCH", new_model, f"Enhanced model switch to {new_model}"
+                
+                return True
+            
+            # Handle smart mode model suggestion for regular queries
+            if not command.startswith("/") and enhanced_commands.smart_mode_enabled:
+                suggested_model, reasoning = enhanced_commands.suggest_model_for_query(command, current_model)
+                
+                if suggested_model != current_model:
+                    console.print(f"[dim cyan]🤖 {reasoning}[/dim cyan]")
+                    return "MODEL_SWITCH", suggested_model, reasoning
+                
+        except Exception as e:
+            # Enhanced commands failed - fall back to legacy
+            console.print(f"[dim yellow]⚠️ Enhanced commands unavailable: {e}[/dim yellow]")
+    
+    # Legacy chat commands
     if cmd == "/help":
         show_help_panel()
         return True
@@ -946,6 +1006,39 @@ def show_help_panel():
 • Use Shift+Enter for multiline
 • Type 'exit' or 'quit' to end
 """
+    
+    # Add enhanced commands if available
+    if ENHANCED_CLI_AVAILABLE:
+        try:
+            from enhanced_chat_commands import EnhancedChatCommands
+            from enhanced_cli_system import FeatureDetector
+            
+            detector = FeatureDetector()
+            features = detector.detect_features()
+            
+            if features.enhanced_features_available:
+                enhanced_text = "\n\n🚀 **Enhanced Commands:**\n"
+                
+                if features.code_analysis:
+                    enhanced_text += "• /analyze [path] - Analyze code quality\n"
+                
+                if features.multi_model:
+                    enhanced_text += "• /models - List models with capabilities\n"
+                
+                if features.smart_context:
+                    enhanced_text += "• /context - Show project context\n"
+                    enhanced_text += "• /context clear - Clear context cache\n"
+                    enhanced_text += "• /context refresh - Refresh context\n"
+                
+                if features.multi_model and features.smart_context:
+                    enhanced_text += "• /smart on|off - Toggle smart model selection\n"
+                
+                enhanced_text += f"\n🎚️ Feature Level: {features.feature_level.upper()}"
+                
+                help_text += enhanced_text
+        except Exception:
+            # Enhanced commands not available
+            pass
     
     help_panel = Panel(help_text, title="📚 Xencode Help", style="cyan")
     console.print(help_panel)
@@ -1211,9 +1304,9 @@ def chat_mode(model, online):
                     # Handle special return values
                     if isinstance(command_result, tuple) and command_result[0] == "MODEL_SWITCH":
                         _, new_model, message = command_result
-                    current_model = new_model
+                        current_model = new_model
                         console.print(Panel(f"✅ Model switched to [bold]{current_model}[/bold]\n{message}", style="green"))
-                continue
+                    continue
                 else:
                     # If command not handled, treat as regular input
                     pass
@@ -1271,6 +1364,74 @@ def main():
     online = "false"
     chat_mode_enabled = False
     
+    # Initialize Enhanced CLI System if available
+    enhanced_cli = None
+    if ENHANCED_CLI_AVAILABLE and EnhancedXencodeCLI:
+        try:
+            enhanced_cli = EnhancedXencodeCLI()
+        except Exception as e:
+            # Enhanced CLI failed to initialize - continue with legacy mode
+            console.print(f"[dim yellow]⚠️ Enhanced features unavailable: {e}[/dim yellow]")
+    
+    # Try enhanced CLI processing first
+    if enhanced_cli:
+        try:
+            # Create enhanced parser and parse arguments
+            parser = enhanced_cli.create_parser()
+            
+            # Handle special case where no args means chat mode (legacy behavior)
+            if not args:
+                chat_mode_enabled = True
+            else:
+                # Parse enhanced arguments
+                try:
+                    parsed_args = parser.parse_args(args)
+                    
+                    # Process enhanced commands
+                    enhanced_result = enhanced_cli.process_enhanced_args(parsed_args)
+                    
+                    if enhanced_result is not None:
+                        # Enhanced command was processed
+                        console.print(enhanced_result)
+                        return
+                    
+                    # Check if this should be handled as legacy command
+                    if parsed_args.query:
+                        # Legacy inline query mode
+                        prompt = parsed_args.query
+                        model = DEFAULT_MODEL
+                        
+                        try:
+                            response = run_query(model, prompt)
+                            # For inline mode, only show the answer (no thinking section)
+                            thinking, answer = extract_thinking_and_answer(response)
+                            if answer.strip():
+                                console.print(Markdown(answer.strip()))
+                            else:
+                                # Fallback to full response if no thinking tags
+                                console.print(Markdown(response.strip()))
+                        except Exception as e:
+                            # Generic error panel for inline mode
+                            error_panel = Panel(
+                                f"❌ Unexpected error: {str(e)}\n\nPlease check your setup and try again.",
+                                title="Error",
+                                style="red",
+                                border_style="red"
+                            )
+                            console.print(error_panel)
+                        return
+                    
+                except SystemExit:
+                    # argparse called sys.exit (help or error)
+                    return
+                except Exception:
+                    # Enhanced parsing failed - fall back to legacy parsing
+                    pass
+        except Exception:
+            # Enhanced CLI processing failed - fall back to legacy
+            pass
+    
+    # Legacy argument parsing (backward compatibility)
     # Parse online flag
     if "--online=true" in args:
         online = "true"
@@ -1283,6 +1444,10 @@ def main():
     if "--chat-mode" in args:
         chat_mode_enabled = True
         args = [arg for arg in args if arg != "--chat-mode"]
+    
+    # Auto-enable chat mode if no arguments (legacy behavior)
+    if not args:
+        chat_mode_enabled = True
     
     # Validate chat mode vs inline mode conflicts
     if chat_mode_enabled and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):

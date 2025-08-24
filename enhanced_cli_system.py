@@ -491,11 +491,11 @@ Examples:
         except Exception as e:
             return f"❌ Failed to get context: {str(e)}"
     
-    def handle_smart_query(self, query: str) -> Tuple[str, str]:
+    def handle_smart_query(self, query: str) -> str:
         """Handle --smart command with automatic model selection"""
         if not (self.features.multi_model and self.features.smart_context):
             return ("❌ Smart query requires both Multi-Model and Smart Context systems\n"
-                   "Install Phase 1 systems for this feature", "")
+                   "Install Phase 1 systems for this feature")
         
         try:
             # Wait for background initialization if needed
@@ -503,13 +503,13 @@ Examples:
                 self._init_thread.join(timeout=5)
             
             if self.multi_model is None or self.smart_context is None:
-                return "❌ Smart query systems failed to initialize", ""
+                return "❌ Smart query systems failed to initialize"
             
             # Analyze query and select best model
             query_analysis = self.multi_model.analyze_query_type(query)
             suggested_model = query_analysis.suggested_model
             
-            # Test model stability
+            # Test model stability using validated stability manager
             stability_result = self.model_stability.test_model_stability(suggested_model)
             
             if not stability_result.is_stable:
@@ -524,15 +524,61 @@ Examples:
                     # Use emergency model
                     suggested_model = self.model_stability.get_emergency_model()
             
-            reasoning = f"Using {suggested_model} for {query_analysis.query_type} query"
+            # Get project context if available
+            current_dir = os.getcwd()
+            context_info = ""
             
-            return query, suggested_model
+            try:
+                # Validate project path with security manager
+                if self.security_manager.validate_project_path(current_dir):
+                    context_data = self.smart_context.get_project_context_summary(current_dir)
+                    if context_data:
+                        context_info = f"\n\n📁 Project Context:\n{context_data}"
+                else:
+                    context_info = "\n\n⚠️ Project path validation failed - using query without context"
+            except Exception:
+                # Context retrieval failed - continue without context
+                pass
+            
+            # Build enhanced query with context
+            enhanced_query = query
+            if context_info:
+                enhanced_query = f"{query}{context_info}"
+            
+            reasoning = f"🤖 Using {suggested_model} for {query_analysis.query_type} query"
+            
+            # Import xencode_core functions for query execution
+            try:
+                from xencode_core import run_query, extract_thinking_and_answer
+                from rich.markdown import Markdown
+                from rich.console import Console
+                
+                console = Console()
+                
+                # Execute the query with selected model
+                print(f"{reasoning}")
+                print(f"🔍 Query: {query}")
+                
+                response = run_query(suggested_model, enhanced_query)
+                
+                # Format and display response
+                thinking, answer = extract_thinking_and_answer(response)
+                if answer.strip():
+                    console.print(Markdown(answer.strip()))
+                else:
+                    # Fallback to full response if no thinking tags
+                    console.print(Markdown(response.strip()))
+                
+                return "✅ Smart query completed successfully"
+                
+            except ImportError:
+                return f"✅ Smart query analysis complete\n{reasoning}\n\nExecute manually: xencode -m {suggested_model} \"{query}\""
             
         except Exception as e:
-            return f"❌ Smart query failed: {str(e)}", ""
+            return f"❌ Smart query failed: {str(e)}"
     
     def handle_git_commit_command(self) -> str:
-        """Handle --git-commit command"""
+        """Handle --git-commit command with security validation"""
         if not self.features.code_analysis:
             return ("❌ Git commit assistance requires Code Analysis System\n"
                    "Install Phase 1 Code Analysis System for this feature")
@@ -545,13 +591,61 @@ Examples:
             if self.code_analyzer is None:
                 return "❌ Code analyzer failed to initialize"
             
+            # Validate current directory and .git security
+            current_dir = os.getcwd()
+            
+            # Check if we're in a git repository
+            git_dir = os.path.join(current_dir, '.git')
+            if not os.path.exists(git_dir):
+                return "❌ Not in a git repository\nRun this command from within a git repository"
+            
+            # Validate .git directory security to prevent exploits
+            git_violations = self.security_manager.validate_git_directory(git_dir)
+            
+            if git_violations:
+                # Security risks detected in .git directory
+                risk_summary = []
+                for violation in git_violations:
+                    risk_summary.append(f"  • {violation.description}")
+                
+                warning_message = (
+                    "⚠️ Security risks detected in .git directory:\n" +
+                    "\n".join(risk_summary) +
+                    "\n\nCommit message generation blocked for security"
+                )
+                return warning_message
+            
+            # Validate project path
+            if not self.security_manager.validate_project_path(current_dir):
+                return "❌ Project path validation failed - potential security risk"
+            
             # Generate commit message based on git diff
+            print("🔍 Analyzing git changes...")
             commit_message = self.code_analyzer.generate_commit_message()
             
-            # Sanitize commit message for security
+            if commit_message.startswith("Error:") or commit_message.startswith("No changes"):
+                return f"ℹ️ {commit_message}"
+            
+            # Sanitize commit message for security (prevent injection attacks)
             sanitized_message = self.security_manager.sanitize_commit_message(commit_message)
             
-            return f"📝 Suggested commit message:\n{sanitized_message}"
+            # Additional security check - ensure sanitized message is safe
+            if not sanitized_message or sanitized_message != commit_message:
+                security_note = "\n\n🔒 Note: Commit message was sanitized for security"
+            else:
+                security_note = ""
+            
+            result = f"📝 Suggested commit message:\n\n{sanitized_message}{security_note}"
+            
+            # Add usage instructions
+            result += "\n\n💡 To use this message:\n"
+            result += f"   git commit -m \"{sanitized_message.split(chr(10))[0]}\""
+            
+            if '\n\n' in sanitized_message:
+                result += f"\n   # Or with full message:\n"
+                result += f"   git commit -F <(echo \"{sanitized_message}\")"
+            
+            return result
             
         except Exception as e:
             return f"❌ Git commit generation failed: {str(e)}"

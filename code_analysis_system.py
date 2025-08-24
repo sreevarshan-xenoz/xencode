@@ -367,6 +367,225 @@ class CodeAnalyzer:
                     report_lines.append(f"     💡 {issue.suggestion}")
         
         return "\n".join(report_lines)
+    
+    def generate_commit_message(self) -> str:
+        """
+        Generate intelligent commit message based on git diff analysis
+        
+        Returns:
+            Generated commit message based on changes
+        """
+        try:
+            # Get git diff
+            diff_result = subprocess.run(
+                ["git", "diff", "--cached"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if diff_result.returncode != 0:
+                # Try unstaged changes if no staged changes
+                diff_result = subprocess.run(
+                    ["git", "diff"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if diff_result.returncode != 0:
+                    return "No changes detected for commit message generation"
+            
+            diff_content = diff_result.stdout.strip()
+            
+            if not diff_content:
+                return "No changes detected for commit message generation"
+            
+            # Analyze the diff to determine change type and scope
+            change_analysis = self._analyze_git_diff(diff_content)
+            
+            # Generate commit message based on analysis
+            commit_message = self._generate_commit_message_from_analysis(change_analysis)
+            
+            return commit_message
+            
+        except subprocess.TimeoutExpired:
+            return "Error: Git diff command timed out"
+        except subprocess.CalledProcessError as e:
+            return f"Error: Git command failed: {e}"
+        except Exception as e:
+            return f"Error generating commit message: {e}"
+    
+    def _analyze_git_diff(self, diff_content: str) -> Dict[str, Any]:
+        """
+        Analyze git diff to understand the nature of changes
+        
+        Args:
+            diff_content: Raw git diff output
+            
+        Returns:
+            Dictionary with analysis results
+        """
+        analysis = {
+            'files_changed': [],
+            'change_types': set(),
+            'languages': set(),
+            'additions': 0,
+            'deletions': 0,
+            'is_new_file': False,
+            'is_deleted_file': False,
+            'has_tests': False,
+            'has_docs': False,
+            'scope': 'unknown'
+        }
+        
+        lines = diff_content.split('\n')
+        current_file = None
+        
+        for line in lines:
+            # Track file changes
+            if line.startswith('diff --git'):
+                # Extract file path
+                parts = line.split()
+                if len(parts) >= 4:
+                    file_path = parts[3][2:]  # Remove 'b/' prefix
+                    current_file = file_path
+                    analysis['files_changed'].append(file_path)
+                    
+                    # Determine language/file type
+                    if file_path.endswith('.py'):
+                        analysis['languages'].add('Python')
+                    elif file_path.endswith(('.js', '.jsx')):
+                        analysis['languages'].add('JavaScript')
+                    elif file_path.endswith(('.ts', '.tsx')):
+                        analysis['languages'].add('TypeScript')
+                    elif file_path.endswith('.md'):
+                        analysis['has_docs'] = True
+                    elif 'test' in file_path.lower() or file_path.endswith('_test.py'):
+                        analysis['has_tests'] = True
+            
+            # Track new/deleted files
+            elif line.startswith('new file mode'):
+                analysis['is_new_file'] = True
+                analysis['change_types'].add('add')
+            elif line.startswith('deleted file mode'):
+                analysis['is_deleted_file'] = True
+                analysis['change_types'].add('delete')
+            
+            # Count additions/deletions
+            elif line.startswith('+') and not line.startswith('+++'):
+                analysis['additions'] += 1
+            elif line.startswith('-') and not line.startswith('---'):
+                analysis['deletions'] += 1
+            
+            # Detect change types based on content
+            elif line.startswith('+') or line.startswith('-'):
+                content = line[1:].strip()
+                
+                # Function/method changes
+                if re.match(r'^\s*(def|function|class)\s+', content):
+                    analysis['change_types'].add('function')
+                
+                # Import changes
+                elif re.match(r'^\s*(import|from|require)', content):
+                    analysis['change_types'].add('import')
+                
+                # Configuration changes
+                elif current_file and any(config in current_file for config in ['.json', '.yml', '.yaml', '.toml', '.ini']):
+                    analysis['change_types'].add('config')
+                
+                # Documentation changes
+                elif re.match(r'^\s*(#|//|\*|""")', content):
+                    analysis['change_types'].add('docs')
+        
+        # Determine scope
+        if len(analysis['files_changed']) == 1:
+            analysis['scope'] = 'single_file'
+        elif len(analysis['files_changed']) <= 5:
+            analysis['scope'] = 'small'
+        else:
+            analysis['scope'] = 'large'
+        
+        return analysis
+    
+    def _generate_commit_message_from_analysis(self, analysis: Dict[str, Any]) -> str:
+        """
+        Generate commit message based on change analysis
+        
+        Args:
+            analysis: Results from _analyze_git_diff
+            
+        Returns:
+            Generated commit message
+        """
+        change_types = analysis['change_types']
+        files_changed = analysis['files_changed']
+        languages = analysis['languages']
+        
+        # Determine commit type prefix
+        if analysis['is_new_file']:
+            prefix = "feat"
+            action = "Add"
+        elif analysis['is_deleted_file']:
+            prefix = "feat"
+            action = "Remove"
+        elif 'function' in change_types:
+            prefix = "feat" if analysis['additions'] > analysis['deletions'] else "refactor"
+            action = "Update" if prefix == "refactor" else "Add"
+        elif 'config' in change_types:
+            prefix = "config"
+            action = "Update"
+        elif 'docs' in change_types or analysis['has_docs']:
+            prefix = "docs"
+            action = "Update"
+        elif analysis['has_tests']:
+            prefix = "test"
+            action = "Add" if analysis['additions'] > analysis['deletions'] else "Update"
+        elif 'import' in change_types:
+            prefix = "deps"
+            action = "Update"
+        else:
+            prefix = "feat" if analysis['additions'] > analysis['deletions'] else "fix"
+            action = "Update"
+        
+        # Generate description
+        if len(files_changed) == 1:
+            file_name = Path(files_changed[0]).name
+            description = f"{action.lower()} {file_name}"
+        elif analysis['scope'] == 'small':
+            if languages:
+                lang = list(languages)[0]
+                description = f"{action.lower()} {lang} components"
+            else:
+                description = f"{action.lower()} {len(files_changed)} files"
+        else:
+            description = f"{action.lower()} multiple components"
+        
+        # Add language context if relevant
+        if len(languages) == 1 and analysis['scope'] != 'single_file':
+            lang = list(languages)[0]
+            description = f"{action.lower()} {lang} {description.split(' ', 1)[1]}"
+        
+        # Generate final commit message
+        commit_message = f"{prefix}: {description}"
+        
+        # Add body with more details if significant changes
+        if analysis['additions'] + analysis['deletions'] > 20:
+            body_lines = []
+            
+            if analysis['additions'] > 0:
+                body_lines.append(f"- {analysis['additions']} additions")
+            if analysis['deletions'] > 0:
+                body_lines.append(f"- {analysis['deletions']} deletions")
+            
+            if change_types:
+                types_str = ", ".join(sorted(change_types))
+                body_lines.append(f"- Changes: {types_str}")
+            
+            if body_lines:
+                commit_message += "\n\n" + "\n".join(body_lines)
+        
+        return commit_message
 
 # CLI interface for code analysis
 def analyze_code_command(path: str = ".", recursive: bool = True) -> str:
