@@ -1,35 +1,37 @@
-# CRUSH.md
+# Development Guide
 
-## Commands
-- Build: `pip install -r requirements.txt`
-- Lint: `ruff .`
-- Typecheck: `mypy xencode_core.py`
-- Test (all): `./test.sh`
-- Test (single): `pytest xencode_core.py -k test_name`
+## Build Commands
+- **Dependencies**: `pip install -r requirements.txt`
+- **Lint**: `ruff check .`
+- **Format**: `black .`
+- **Type Check**: `mypy xencode_core.py`
+- **Test All**: `./scripts/test.sh`
+- **Test Unit**: `pytest tests/ -k test_name`
 
-## Code Style
-- **Imports**: Standard library > third-party > local (isort order)
-- **Formatting**: Black (88 chars), Ruff linting (E, F, I, W rules)
-- **Types**: MyPy strict mode, all functions require type hints
-- **Naming**: snake_case (vars), PascalCase (classes), _prefix (private)
-- **Error Handling**: No bare except, context managers for resources
-- **Testing**: Tests mirror structure, pytest fixtures, >90% coverage
-- **Docs**: Google-style docstrings for public interfaces
+## Code Standards
+- **Import Order**: Standard library → third-party → local (isort)
+- **Formatting**: Black (88 char limit), Ruff linting
+- **Types**: MyPy strict mode, type hints required
+- **Naming**: snake_case (variables), PascalCase (classes), _prefix (private)
+- **Error Handling**: Specific exceptions, context managers for resources
+- **Testing**: pytest with >90% coverage
+- **Documentation**: Google-style docstrings
 
-## Conventions
-- Pre-commit hooks run linter
-- Tests must pass before commit
-- No print() statements in main code
-- Use logging instead of print()
+## Project Architecture
+- **xencode_core.py**: Core AI interaction logic
+- **xencode.sh**: Shell wrapper and entry point
+- **install.sh**: Multi-platform installation
+- **Enhanced modules**: Optional feature extensions
+
+## Development Workflow
+1. Run tests before changes: `./scripts/test.sh`
+2. Make changes with proper type hints
+3. Run linting: `ruff check . && black .`
+4. Verify tests pass: `pytest tests/`
+5. Test integration: `./scripts/test_claude_style.sh`
 
 ## Special Notes
-- test_claude_style.sh validates prompt handling
-- xencode.sh is entrypoint, do not modify directly
-
-## Codebase Context
-- xencode_core.py: Core logic (file ops, model handling)
-- Main entrypoints:
-  • chat_mode(): Interactive CLI
-  • file operations: create/read/write/delete
-  • streaming Query API (Claude-style)
-- State tracking: online_status, active_model
+- No direct print() in core modules (use Rich console)
+- Maintain backward compatibility
+- Test on multiple distributions
+- Update documentation for user-facing changes

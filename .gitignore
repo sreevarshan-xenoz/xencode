@@ -30,13 +30,19 @@ ENV/
 .idea/
 *.swp
 *.swo
-.kiro
+*~
+
+# Project specific
+.xencode/
+*.backup
+*.log
+.ipynb_checkpoints/
+
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# Kiro specs
-.kiro/
+# Temporary files
+*.tmp
+*.temp
+test.txt
