@@ -3,24 +3,37 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
+minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = [
+    "--cov=xencode",
+    "--cov=xencode_core",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-report=xml",
     "--strict-markers",
     "--strict-config",
     "--verbose",
     "-ra",
 ]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
 
 [tool.coverage.run]
-source = ["xencode"]
+source = ["xencode", "xencode_core"]
 omit = [
     "*/tests/*",
     "*/venv/*",
     "*/__pycache__/*",
+    "*/.*",
     "setup.py",
+    "scripts/*",
 ]
 
 [tool.coverage.report]

@@ -44,6 +44,18 @@ setup(
     ],
     python_requires=">=3.6",
     install_requires=requirements,
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+            "pytest-cov>=4.0.0", 
+            "pytest-mock>=3.10.0",
+            "mypy>=1.0.0",
+            "ruff>=0.1.0",
+            "black>=23.0.0",
+            "pre-commit>=3.0.0",
+            "types-requests>=2.25.0",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "xencode=xencode_core:main",
