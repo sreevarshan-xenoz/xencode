@@ -1,0 +1,66 @@
+costs:
+  cost_per_request: 0.003439844660194175
+  potential_savings: 0.0
+  total_cost: 0.354304
+insights:
+- "\u26A0\uFE0F High response times detected - consider optimizing model selection"
+- "\U0001F6A8 High error rate - investigate system stability"
+performance:
+  cache_hit_rate: 78.0
+  error_rate: 0.13402061855670103
+  response_time: 2.030228710953396
+  tokens_per_second: 15.087106747643881
+timestamp: '2025-09-24T22:16:00.575078'
+usage:
+  model_statistics:
+  - !!python/tuple
+    - 15
+    - 302.53333333333336
+    - 0.13557
+    - claude-3
+    - 10
+    - 1.0
+  - !!python/tuple
+    - 14
+    - 265.2857142857143
+    - 0.003714
+    - gemini-pro
+    - 8
+    - 1.0
+  - !!python/tuple
+    - 27
+    - 222.22222222222223
+    - 0.014700000000000001
+    - gpt-3.5-turbo
+    - 11
+    - 0.9629629629629629
+  - !!python/tuple
+    - 19
+    - 281.2631578947368
+    - 0.20032
+    - gpt-4
+    - 8
+    - 1.0
+  - !!python/tuple
+    - 28
+    - 283.7857142857143
+    - 0.0
+    - local
+    - 10
+    - 0.9285714285714286
+  peak_usage_hour: '16'
+  performance_insights:
+  - "\u26A0\uFE0F High response times detected - consider optimizing model selection"
+  - "\U0001F6A8 High error rate - investigate system stability"
+  usage_trends:
+    daily_usage:
+    - !!python/tuple
+      - '2025-09-24'
+      - 103
+    growth_rate: 0.0
+    trend: stable
+  user_behavior:
+    active_users: 13
+    avg_requests_per_user: 7.923076923076923
+    avg_session_length: 0.09464726081261268
+    power_users: []
