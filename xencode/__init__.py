@@ -9,7 +9,7 @@ __author__ = "Sreevarshan"
 __license__ = "MIT"
 
 from .context_cache_manager import ContextCacheManager
-from .model_stability_manager import ModelManager
+from .model_stability_manager import ModelStabilityManager
 from .smart_context_system import SmartContextManager
 
-__all__ = ["ContextCacheManager", "ModelManager", "SmartContextManager"]
+__all__ = ["ContextCacheManager", "ModelStabilityManager", "SmartContextManager"]

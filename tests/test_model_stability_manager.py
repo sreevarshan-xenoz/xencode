@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import requests
 
 # Import the module to test
-from model_stability_manager import (
+from xencode.model_stability_manager import (
     ModelStabilityManager,
     ModelState,
     StabilityResult,
@@ -433,7 +433,6 @@ class TestIntegrationScenarios(unittest.TestCase):
         ), patch.object(
             self.manager, 'check_ollama_logs', return_value=False
         ):
-
             result = self.manager.test_model_stability("qwen3:4b")
 
             # Should detect OOM and mark as degraded

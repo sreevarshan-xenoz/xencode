@@ -11,13 +11,13 @@ import unittest
 from unittest.mock import patch
 
 # Import components to test
-from enhanced_cli_system import (
+from xencode.enhanced_cli_system import (
     CommandRouter,
     EnhancedXencodeCLI,
     FeatureAvailability,
     FeatureDetector,
 )
-from resource_monitor import (
+from xencode.resource_monitor import (
     FeatureLevel,
     HardwareProfiler,
     ResourceMonitor,
@@ -26,7 +26,7 @@ from resource_monitor import (
     ScanStrategy,
     SystemProfile,
 )
-from security_manager import SecurityManager
+from xencode.security_manager import SecurityManager
 
 
 class TestFeatureDetector(unittest.TestCase):
@@ -415,12 +415,10 @@ class TestColdStartOptimization(unittest.TestCase):
         with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', True), patch(
             'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', True
         ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', True):
-
             # Mock the Phase 1 systems
             with patch('enhanced_cli_system.MultiModelManager') as mock_mm, patch(
                 'enhanced_cli_system.SmartContextManager'
             ) as mock_sc, patch('enhanced_cli_system.CodeAnalyzer') as mock_ca:
-
                 cli = EnhancedXencodeCLI()
 
                 # Wait for background initialization
@@ -472,7 +470,6 @@ class TestIntegrationScenarios(unittest.TestCase):
         with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
             'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
         ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
-
             cli = EnhancedXencodeCLI()
             monitor = ResourceMonitor()
 
@@ -496,7 +493,6 @@ class TestIntegrationScenarios(unittest.TestCase):
             'enhanced_cli_system.MultiModelManager',
             side_effect=Exception("Import failed"),
         ):
-
             # Should still initialize successfully
             cli = EnhancedXencodeCLI()
 

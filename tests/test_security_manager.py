@@ -18,7 +18,7 @@ import shutil
 import tempfile
 import unittest
 
-from security_manager import (
+from xencode.security_manager import (
     RiskLevel,
     SecurityManager,
     SecurityReport,

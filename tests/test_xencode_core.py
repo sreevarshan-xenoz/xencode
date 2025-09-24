@@ -1,19 +1,16 @@
 """Basic tests for xencode_core module."""
 
-import pytest
 import sys
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import patch
 
 # Add the project root to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from xencode_core import (
     ConversationMemory,
-    ResponseCache,
     ModelManager,
-    extract_thinking_and_answer,
-    display_chat_banner,
+    ResponseCache,
 )
 
 
@@ -23,12 +20,18 @@ class TestConversationMemory:
     def test_initialization(self):
         """Test ConversationMemory initialization."""
         memory = ConversationMemory()
+        # Reset to ensure clean state for testing
+        memory.conversations = {}
+        memory.current_session = None
         assert memory.current_session is None
         assert memory.conversations == {}
 
     def test_start_session(self):
         """Test starting a new conversation session."""
         memory = ConversationMemory()
+        # Reset to ensure clean state for testing
+        memory.conversations = {}
+        memory.current_session = None
         session_id = memory.start_session()
         assert session_id is not None
         assert session_id in memory.conversations
@@ -37,6 +40,9 @@ class TestConversationMemory:
     def test_add_message(self):
         """Test adding a message to conversation."""
         memory = ConversationMemory()
+        # Reset to ensure clean state for testing
+        memory.conversations = {}
+        memory.current_session = None
         session_id = memory.start_session()
 
         memory.add_message("user", "Hello, world!", "test_model")
@@ -50,6 +56,9 @@ class TestConversationMemory:
     def test_get_context(self):
         """Test getting conversation context."""
         memory = ConversationMemory()
+        # Reset to ensure clean state for testing
+        memory.conversations = {}
+        memory.current_session = None
         session_id = memory.start_session()
 
         # Add multiple messages

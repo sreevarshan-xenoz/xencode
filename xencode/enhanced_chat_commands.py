@@ -18,7 +18,7 @@ from typing import Optional, Tuple
 
 # Import Phase 1 systems with graceful fallback
 try:
-    from multi_model_system import MultiModelManager
+    from .multi_model_system import MultiModelManager
 
     MULTI_MODEL_AVAILABLE = True
 except ImportError:
@@ -26,7 +26,7 @@ except ImportError:
     MultiModelManager = None
 
 try:
-    from smart_context_system import SmartContextManager
+    from .smart_context_system import SmartContextManager
 
     SMART_CONTEXT_AVAILABLE = True
 except ImportError:
@@ -34,7 +34,7 @@ except ImportError:
     SmartContextManager = None
 
 try:
-    from code_analysis_system import CodeAnalyzer
+    from .code_analysis_system import CodeAnalyzer
 
     CODE_ANALYSIS_AVAILABLE = True
 except ImportError:
@@ -42,9 +42,9 @@ except ImportError:
     CodeAnalyzer = None
 
 # Import security and resource management
-from context_cache_manager import ContextCacheManager
-from model_stability_manager import ModelStabilityManager
-from security_manager import SecurityManager
+from .context_cache_manager import ContextCacheManager
+from .model_stability_manager import ModelStabilityManager
+from .security_manager import SecurityManager
 
 
 class EnhancedChatCommands:
@@ -328,9 +328,7 @@ class EnhancedChatCommands:
                 return f"❌ Failed to refresh context: {str(e)}"
 
         else:
-            return (
-                f"❌ Unknown context command: {subcommand}\nAvailable: clear, refresh"
-            )
+            return f"❌ Unknown context command: {subcommand}\nAvailable: clear, refresh"
 
     def handle_smart_command(self, args: str) -> str:
         """Handle /smart command in chat mode"""
@@ -395,7 +393,6 @@ class EnhancedChatCommands:
                 and self.last_model_suggestion
                 and self.consecutive_query_count > 0
             ):
-
                 self.consecutive_query_count += 1
                 self.last_query_time = current_time
                 return self.last_model_suggestion, "Maintaining conversational flow"
