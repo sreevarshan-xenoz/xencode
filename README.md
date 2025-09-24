@@ -81,13 +81,13 @@ python -m pytest test_phase2_comprehensive.py -v
 ```
 
 ### System Requirements
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| **Python** | 3.9+ | 3.11+ |
-| **RAM** | 4GB | 8GB+ |
-| **Storage** | 5GB | 10GB+ |
-| **Platform** | Linux, macOS, Windows | Linux |
-| **AI Runtime** | Ollama | Ollama + GPU |
+| Component      | Minimum               | Recommended  |
+|----------------|-----------------------|--------------|
+| **Python**     | 3.9+                  | 3.11+        |
+| **RAM**        | 4GB                   | 8GB+         |
+| **Storage**    | 5GB                   | 10GB+        |
+| **Platform**   | Linux, macOS, Windows | Linux        |
+| **AI Runtime** | Ollama                | Ollama + GPU |
 
 ## Usage
 
