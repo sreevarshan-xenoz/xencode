@@ -1558,7 +1558,7 @@ def main():
         # Handle inline prompt
         if not args:
             warning_panel = Panel(
-                "⚠️ No prompt provided\n\nUsage:\n• Inline mode: ./xencode.sh "your prompt"\n• Chat mode: ./xencode.sh",
+                "⚠️ No prompt provided\n\nUsage:\n• Inline mode: ./xencode.sh \"your prompt\"\n• Chat mode: ./xencode.sh",
                 title="Missing Prompt",
                 style="yellow",
                 border_style="yellow"
