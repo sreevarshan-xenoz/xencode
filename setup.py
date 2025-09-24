@@ -6,14 +6,18 @@ from pathlib import Path
 
 # Read README for long description
 readme_path = Path(__file__).parent / "README.md"
-long_description = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
+long_description = (
+    readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
+)
 
 # Read requirements
 requirements_path = Path(__file__).parent / "requirements.txt"
 requirements = []
 if requirements_path.exists():
     requirements = requirements_path.read_text().strip().split('\n')
-    requirements = [req.strip() for req in requirements if req.strip() and not req.startswith('#')]
+    requirements = [
+        req.strip() for req in requirements if req.strip() and not req.startswith('#')
+    ]
 
 setup(
     name="xencode",
@@ -47,7 +51,7 @@ setup(
     extras_require={
         "dev": [
             "pytest>=7.0.0",
-            "pytest-cov>=4.0.0", 
+            "pytest-cov>=4.0.0",
             "pytest-mock>=3.10.0",
             "mypy>=1.0.0",
             "ruff>=0.1.0",

@@ -6,9 +6,7 @@ Runs security tests during development to ensure all security protections work c
 This script should be run before committing any changes to the security manager.
 """
 
-import sys
 import subprocess
-import os
 
 
 def run_command(command, description):
@@ -32,24 +30,27 @@ def main():
     """Run all security tests"""
     print("🔒 Security Manager Test Suite")
     print("=" * 50)
-    
+
     tests = [
         ("python test_security_manager.py", "Unit Tests"),
-        ("python -c 'from security_manager import SecurityManager; sm = SecurityManager(); print(\"Import test passed\")'", "Import Test"),
+        (
+            "python -c 'from security_manager import SecurityManager; sm = SecurityManager(); print(\"Import test passed\")'",
+            "Import Test",
+        ),
         ("python demo_security_manager.py > /dev/null 2>&1", "Demo Test"),
     ]
-    
+
     passed = 0
     total = len(tests)
-    
+
     for command, description in tests:
         if run_command(command, description):
             passed += 1
         print()
-    
+
     print("=" * 50)
     print(f"📊 Test Results: {passed}/{total} tests passed")
-    
+
     if passed == total:
         print("🎉 All security tests passed! Ready for integration.")
         return 0

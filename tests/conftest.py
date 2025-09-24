@@ -1,10 +1,10 @@
 """Test fixtures and utilities for Xencode tests."""
 
-import pytest
-from unittest.mock import Mock, MagicMock
 import tempfile
-import os
 from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def mock_ollama_response():
     }
     mock_response.iter_lines.return_value = [
         b'{"response": "This is ", "done": false}',
-        b'{"response": "a test ", "done": false}', 
+        b'{"response": "a test ", "done": false}',
         b'{"response": "response.", "done": true}',
     ]
     return mock_response
@@ -83,19 +83,19 @@ def mock_requests_session():
 
 class MockOllamaServer:
     """Mock Ollama server for testing."""
-    
+
     def __init__(self, working=True):
         self.working = working
         self.models = ["qwen3:4b", "llama2:7b", "mistral:7b"]
-    
+
     def is_running(self):
         return self.working
-    
+
     def list_models(self):
         if not self.working:
             raise Exception("Ollama server not running")
         return {"models": [{"name": model} for model in self.models]}
-    
+
     def generate_response(self, prompt, model="qwen3:4b"):
         if not self.working:
             raise Exception("Ollama server not running")
