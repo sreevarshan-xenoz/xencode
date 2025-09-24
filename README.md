@@ -41,40 +41,29 @@
 
 ```mermaid
 graph TB
-    A[🎯 User Interface\n(REST API / CLI / Web)] --> B[🤖 Intelligent Model Selector\n(Dynamic routing based on query complexity)]
-    B --> C[⚡ Advanced Cache System\n(LRU + Semantic Caching)]
-    C --> D[🛡️ Error Handler\n(Retry logic + Fallback strategies)]
-    D --> E[⚙️ Config Manager\n(Environment-aware settings)]
-    E --> F[📊 System Coordinator\n(Orchestrates components & monitors health)]
-    F --> G[🧠 AI Models\n(Multi-model ensemble:\n- LLMs\n- Embedding models\n- Specialized agents)]
+    A["🎯 User Interface<br/>REST API / CLI / Web"] --> B["🤖 Intelligent Model Selector<br/>Dynamic routing & optimization"]
+    B --> C["⚡ Advanced Cache System<br/>LRU + Semantic Caching"]
+    C --> D["🛡️ Error Handler<br/>Retry logic & Fallback strategies"]
+    D --> E["⚙️ Config Manager<br/>Environment-aware settings"]
+    E --> F["📊 System Coordinator<br/>Orchestrates & monitors health"]
+    F --> G["🧠 AI Models<br/>Multi-model ensemble"]
 
     %% Bidirectional feedback loops for system awareness
-    F -.->|Health metrics| A
-    C -.->|Cache stats| F
-    D -.->|Error logs| F
-    G -.->|Model performance| B
+    F -.->|"Health metrics"| A
+    C -.->|"Cache stats"| F
+    D -.->|"Error logs"| F
+    G -.->|"Model performance"| B
 
-    %% Styling with professional color palette and visual enhancements
-    classDef ui fill:#e3f2fd,stroke:#1976d2,stroke-width:2px;
-    classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
-    classDef infra fill:#e8f5e8,stroke:#388e3c,stroke-width:2px;
-    classDef models fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    %% Styling with professional color palette
+    classDef ui fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef infra fill:#e8f5e8,stroke:#388e3c,stroke-width:2px,color:#000
+    classDef models fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
     
     class A ui
     class B,C,D core
     class E,F infra
     class G models
-    
-    %% Add icons to connections for better visual scanning
-    linkStyle 0 stroke:#1976d2,stroke-width:2px,stroke-dasharray:0
-    linkStyle 1 stroke:#7b1fa2,stroke-width:2px
-    linkStyle 2 stroke:#d32f2f,stroke-width:2px
-    linkStyle 3 stroke:#388e3c,stroke-width:2px
-    linkStyle 4 stroke:#0288d1,stroke-width:2px
-    linkStyle 5 stroke:#f57c00,stroke-width:2px
-    
-    %% Feedback loop styling
-    linkStyle 6,7,8,9 stroke:#546e7a,stroke-width:1.5px,stroke-dasharray:5 5
 ```
 
 </div>
