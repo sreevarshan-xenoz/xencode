@@ -41,20 +41,40 @@
 
 ```mermaid
 graph TB
-    A[🎯 User Interface] --> B[🤖 Intelligent Model Selector]
-    B --> C[⚡ Advanced Cache System]
-    C --> D[🛡️ Error Handler]
-    D --> E[⚙️ Config Manager]
-    E --> F[📊 System Coordinator]
-    F --> G[🧠 AI Models]
+    A[🎯 User Interface\n(REST API / CLI / Web)] --> B[🤖 Intelligent Model Selector\n(Dynamic routing based on query complexity)]
+    B --> C[⚡ Advanced Cache System\n(LRU + Semantic Caching)]
+    C --> D[🛡️ Error Handler\n(Retry logic + Fallback strategies)]
+    D --> E[⚙️ Config Manager\n(Environment-aware settings)]
+    E --> F[📊 System Coordinator\n(Orchestrates components & monitors health)]
+    F --> G[🧠 AI Models\n(Multi-model ensemble:\n- LLMs\n- Embedding models\n- Specialized agents)]
+
+    %% Bidirectional feedback loops for system awareness
+    F -.->|Health metrics| A
+    C -.->|Cache stats| F
+    D -.->|Error logs| F
+    G -.->|Model performance| B
+
+    %% Styling with professional color palette and visual enhancements
+    classDef ui fill:#e3f2fd,stroke:#1976d2,stroke-width:2px;
+    classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef infra fill:#e8f5e8,stroke:#388e3c,stroke-width:2px;
+    classDef models fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
     
-    style A fill:#e1f5fe
-    style B fill:#f3e5f5
-    style C fill:#fff3e0
-    style D fill:#ffebee
-    style E fill:#e8f5e8
-    style F fill:#fce4ec
-    style G fill:#e3f2fd
+    class A ui
+    class B,C,D core
+    class E,F infra
+    class G models
+    
+    %% Add icons to connections for better visual scanning
+    linkStyle 0 stroke:#1976d2,stroke-width:2px,stroke-dasharray:0
+    linkStyle 1 stroke:#7b1fa2,stroke-width:2px
+    linkStyle 2 stroke:#d32f2f,stroke-width:2px
+    linkStyle 3 stroke:#388e3c,stroke-width:2px
+    linkStyle 4 stroke:#0288d1,stroke-width:2px
+    linkStyle 5 stroke:#f57c00,stroke-width:2px
+    
+    %% Feedback loop styling
+    linkStyle 6,7,8,9 stroke:#546e7a,stroke-width:1.5px,stroke-dasharray:5 5
 ```
 
 </div>
