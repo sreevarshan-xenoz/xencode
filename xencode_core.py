@@ -11,6 +11,7 @@ import queue
 import hashlib
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, List, Optional, Any, Tuple
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.panel import Panel
@@ -68,13 +69,13 @@ MEMORY_FILE = Path.home() / ".xencode" / "conversation_memory.json"
 class ConversationMemory:
     """Advanced conversation memory with context management"""
     
-    def __init__(self, max_items=MAX_MEMORY_ITEMS):
-        self.max_items = max_items
-        self.conversations = {}
-        self.current_session = None
+    def __init__(self, max_items: int = MAX_MEMORY_ITEMS) -> None:
+        self.max_items: int = max_items
+        self.conversations: Dict[str, Any] = {}
+        self.current_session: Optional[str] = None
         self.load_memory()
     
-    def load_memory(self):
+    def load_memory(self) -> None:
         """Load conversation memory from disk"""
         try:
             if MEMORY_FILE.exists():
@@ -86,7 +87,7 @@ class ConversationMemory:
             self.conversations = {}
             self.current_session = None
     
-    def save_memory(self):
+    def save_memory(self) -> None:
         """Save conversation memory to disk"""
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -99,7 +100,7 @@ class ConversationMemory:
         except Exception:
             pass
     
-    def start_session(self, session_id=None):
+    def start_session(self, session_id: Optional[str] = None) -> str:
         """Start a new conversation session"""
         if session_id is None:
             session_id = f"session_{int(time.time())}"
@@ -114,7 +115,7 @@ class ConversationMemory:
             }
         return session_id
     
-    def add_message(self, role, content, model=None):
+    def add_message(self, role: str, content: str, model: Optional[str] = None) -> None:
         """Add a message to current session"""
         if self.current_session is None:
             self.start_session()
@@ -131,12 +132,11 @@ class ConversationMemory:
         
         # Trim old messages if exceeding limit
         if len(self.conversations[self.current_session]['messages']) > self.max_items:
-            self.conversations[self.current_session]['messages'] = \
-                self.conversations[self.current_session]['messages'][-self.max_items:]
+            self.conversations[self.current_session]['messages'] = self.conversations[self.current_session]['messages'][-self.max_items:]
         
         self.save_memory()
     
-    def get_context(self, max_messages=10):
+    def get_context(self, max_messages: int = 10) -> List[Dict[str, Any]]:
         """Get recent conversation context for model input"""
         if self.current_session is None or self.current_session not in self.conversations:
             return []
@@ -144,11 +144,11 @@ class ConversationMemory:
         messages = self.conversations[self.current_session]['messages']
         return messages[-max_messages:] if len(messages) > max_messages else messages
     
-    def list_sessions(self):
+    def list_sessions(self) -> List[str]:
         """List all conversation sessions"""
         return list(self.conversations.keys())
     
-    def switch_session(self, session_id):
+    def switch_session(self, session_id: str) -> bool:
         """Switch to a different conversation session"""
         if session_id in self.conversations:
             self.current_session = session_id
@@ -158,17 +158,17 @@ class ConversationMemory:
 class ResponseCache:
     """Intelligent response caching for performance optimization"""
     
-    def __init__(self, cache_dir=CACHE_DIR, max_size=MAX_CACHE_SIZE):
-        self.cache_dir = Path(cache_dir)
-        self.max_size = max_size
+    def __init__(self, cache_dir: Path = CACHE_DIR, max_size: int = MAX_CACHE_SIZE) -> None:
+        self.cache_dir: Path = Path(cache_dir)
+        self.max_size: int = max_size
         self.cache_dir.mkdir(parents=True, exist_ok=True)
     
-    def _get_cache_key(self, prompt, model):
+    def _get_cache_key(self, prompt: str, model: str) -> str:
         """Generate cache key from prompt and model"""
         content = f"{prompt}:{model}".encode('utf-8')
         return hashlib.md5(content).hexdigest()
     
-    def get(self, prompt, model):
+    def get(self, prompt: str, model: str) -> Optional[str]:
         """Get cached response if available"""
         if not CACHE_ENABLED:
             return None
@@ -182,13 +182,13 @@ class ResponseCache:
                     data = json.load(f)
                     # Check if cache is still valid (24 hours)
                     if time.time() - data['timestamp'] < 86400:
-                        return data['response']
+                        return data['response']  # type: ignore
         except Exception:
             pass
         
         return None
     
-    def set(self, prompt, model, response):
+    def set(self, prompt: str, model: str, response: str) -> None:
         """Cache a response"""
         if not CACHE_ENABLED:
             return
@@ -212,7 +212,7 @@ class ResponseCache:
         except Exception:
             pass
     
-    def _cleanup_cache(self):
+    def _cleanup_cache(self) -> None:
         """Remove old cache files to maintain size limit"""
         try:
             cache_files = list(self.cache_dir.glob("*.json"))
@@ -224,93 +224,14 @@ class ResponseCache:
         except Exception:
             pass
 
-class ModelManager:
-    """Advanced model management with health monitoring"""
-    
-    def __init__(self):
-        self.available_models = []
-        self.current_model = DEFAULT_MODEL
-        self.model_health = {}
-        self.refresh_models()
-    
-    def refresh_models(self):
-        """Refresh list of available models"""
-        try:
-            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
-            lines = output.strip().split('\n')
-            self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]
-        except Exception:
-            self.available_models = []
-    
-    def check_model_health(self, model):
-        """Check if a model is healthy and responsive"""
-        try:
-            start_time = time.time()
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={"model": model, "prompt": "test", "stream": False},
-                timeout=5
-            )
-            response_time = time.time() - start_time
-            
-            if response.status_code == 200:
-                self.model_health[model] = {
-                    'status': 'healthy',
-                    'response_time': response_time,
-                    'last_check': time.time()
-                }
-                return True
-            else:
-                self.model_health[model] = {
-                    'status': 'error',
-                    'error_code': response.status_code,
-                    'last_check': time.time()
-                }
-                return False
-        except Exception as e:
-            self.model_health[model] = {
-                'status': 'unavailable',
-                'error': str(e),
-                'last_check': time.time()
-            }
-            return False
-    
-    def get_best_model(self):
-        """Get the best available model based on health and performance"""
-        if not self.available_models:
-            return DEFAULT_MODEL
-        
-        # Check health of all models
-        healthy_models = []
-        for model in self.available_models:
-            if self.check_model_health(model):
-                healthy_models.append(model)
-        
-        if not healthy_models:
-            return DEFAULT_MODEL
-        
-        # Return the fastest healthy model
-        fastest_model = min(healthy_models, 
-                           key=lambda m: self.model_health.get(m, {}).get('response_time', float('inf')))
-        return fastest_model
-    
-    def switch_model(self, model):
-        """Switch to a different model"""
-        if model in self.available_models:
-            if self.check_model_health(model):
-                self.current_model = model
-                return True, "Model switched successfully"
-            else:
-                return False, f"Model {model} is not responding"
-        else:
-            return False, f"Model {model} not found"
+class ModelManager:\n    """Advanced model management with health monitoring"""\n    \n    def __init__(self) -> None:\n        self.available_models: List[str] = []\n        self.current_model: str = DEFAULT_MODEL\n        self.model_health: Dict[str, Any] = {}\n        self.refresh_models()\n    \n    def refresh_models(self) -> None:\n        """Refresh list of available models"""\n        try:\n            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)\n            lines = output.strip().split('\\n')\n            self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]\n        except Exception:\n            self.available_models = []\n    \n    def check_model_health(self, model: str) -> bool:\n        """Check if a model is healthy and responsive"""\n        try:\n            start_time = time.time()\n            response = requests.post(\n                "http://localhost:11434/api/generate",\n                json={"model": model, "prompt": "test", "stream": False},\n                timeout=5\n            )\n            response_time = time.time() - start_time\n            \n            if response.status_code == 200:\n                self.model_health[model] = {\n                    'status': 'healthy',\n                    'response_time': response_time,\n                    'last_check': time.time()\n                }\n                return True\n            else:\n                self.model_health[model] = {\n                    'status': 'error',\n                    'error_code': response.status_code,\n                    'last_check': time.time()\n                }\n                return False\n        except Exception as e:\n            self.model_health[model] = {\n                'status': 'unavailable',\n                'error': str(e),\n                'last_check': time.time()\n            }\n            return False\n    \n    def get_best_model(self) -> str:\n        """Get the best available model based on health and performance"""\n        if not self.available_models:\n            return DEFAULT_MODEL\n        \n        # Check health of all models\n        healthy_models = []\n        for model in self.available_models:\n            if self.check_model_health(model):\n                healthy_models.append(model)\n        \n        if not healthy_models:\n            return DEFAULT_MODEL\n        \n        # Return the fastest healthy model\n        fastest_model = min(healthy_models, \n                           key=lambda m: self.model_health.get(m, {}).get('response_time', float('inf')))\n        return fastest_model\n    \n    def switch_model(self, model: str) -> Tuple[bool, str]:\n        """Switch to a different model"""\n        if model in self.available_models:\n            if self.check_model_health(model):\n                self.current_model = model\n                return True, "Model switched successfully"\n            else:\n                return False, f"Model {model} is not responding"\n        else:\n            return False, f"Model {model} not found"\n
 
 # Initialize global instances
 memory = ConversationMemory()
 cache = ResponseCache()
 model_manager = ModelManager()
 
-def get_available_models():
+def get_available_models() -> List[str]:
     """Get available models with enhanced error handling and caching"""
     try:
         # Use the model manager for better performance
@@ -319,7 +240,7 @@ def get_available_models():
     except Exception:
         return []
 
-def list_models():
+def list_models() -> None:
     """Enhanced model listing with health status and performance metrics"""
     try:
         # Refresh models and health status
@@ -402,7 +323,7 @@ def list_models():
         )
         console.print(error_panel)
 
-def update_model(model):
+def update_model(model: str) -> None:
     """Enhanced model update with progress tracking and validation"""
     console.print(f"[yellow]🔄 Pulling latest model: {model}[/yellow]")
     
@@ -499,7 +420,7 @@ def update_model(model):
         )
         console.print(error_panel)
 
-def run_query(model, prompt):
+def run_query(model: str, prompt: str) -> str:
     """Enhanced non-streaming query with caching and conversation memory"""
     # Check cache first
     cached_response = cache.get(prompt, model)
@@ -668,7 +589,7 @@ def run_streaming_query(model, prompt):
         console.print(error_panel)
         sys.exit(1)
 
-def extract_thinking_and_answer(text):
+def extract_thinking_and_answer(text: str) -> Tuple[str, str]:
     """Extract thinking section and answer from Qwen response"""
     thinking = ""
     answer = text
@@ -1452,7 +1373,7 @@ def main():
     # Validate chat mode vs inline mode conflicts
     if chat_mode_enabled and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
         error_panel = Panel(
-            "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh \"your prompt\"",
+            "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh "your prompt"",
             title="Usage Error",
             style="red",
             border_style="red"
@@ -1558,7 +1479,7 @@ def main():
         # Handle inline prompt
         if not args:
             warning_panel = Panel(
-                "⚠️ No prompt provided\n\nUsage:\n• Inline mode: ./xencode.sh \"your prompt\"\n• Chat mode: ./xencode.sh",
+                "⚠️ No prompt provided\n\nUsage:\n• Inline mode: ./xencode.sh "your prompt"\n• Chat mode: ./xencode.sh",
                 title="Missing Prompt",
                 style="yellow",
                 border_style="yellow"

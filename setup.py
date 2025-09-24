@@ -49,6 +49,23 @@ setup(
             "xencode=xencode_core:main",
         ],
     },
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+            "pytest-cov>=4.0.0",
+            "mypy>=1.0.0",
+            "ruff>=0.1.0",
+            "black>=23.0.0",
+            "pre-commit>=3.0.0",
+            "bandit>=1.7.0",
+        ],
+        "test": [
+            "pytest>=7.0.0",
+            "pytest-cov>=4.0.0",
+            "mypy>=1.0.0",
+        ],
+        "docs": [],
+    },
     include_package_data=True,
     package_data={
         "": ["*.md", "*.txt", "*.sh"],
