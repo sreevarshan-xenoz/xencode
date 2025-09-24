@@ -303,7 +303,7 @@ class ModelManager:
             else:
                 return False, f"Model {model} is not responding"
         else:
-            return False, f"Model {model} not found"\n
+            return False, f"Model {model} not found"
 
 # Initialize global instances
 memory = ConversationMemory()
@@ -1452,7 +1452,7 @@ def main():
     # Validate chat mode vs inline mode conflicts
     if chat_mode_enabled and args and not any(flag in args for flag in ["--list-models", "--update", "-m"]):
         error_panel = Panel(
-            "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh "your prompt"",
+            "❌ Invalid usage\n\nChat mode cannot be used with inline prompts.\n\nUse:\n• Chat mode: ./xencode.sh\n• Inline mode: ./xencode.sh \"your prompt\"",
             title="Usage Error",
             style="red",
             border_style="red"
