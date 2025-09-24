@@ -224,7 +224,86 @@ class ResponseCache:
         except Exception:
             pass
 
-class ModelManager:\n    """Advanced model management with health monitoring"""\n    \n    def __init__(self) -> None:\n        self.available_models: List[str] = []\n        self.current_model: str = DEFAULT_MODEL\n        self.model_health: Dict[str, Any] = {}\n        self.refresh_models()\n    \n    def refresh_models(self) -> None:\n        """Refresh list of available models"""\n        try:\n            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)\n            lines = output.strip().split('\\n')\n            self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]\n        except Exception:\n            self.available_models = []\n    \n    def check_model_health(self, model: str) -> bool:\n        """Check if a model is healthy and responsive"""\n        try:\n            start_time = time.time()\n            response = requests.post(\n                "http://localhost:11434/api/generate",\n                json={"model": model, "prompt": "test", "stream": False},\n                timeout=5\n            )\n            response_time = time.time() - start_time\n            \n            if response.status_code == 200:\n                self.model_health[model] = {\n                    'status': 'healthy',\n                    'response_time': response_time,\n                    'last_check': time.time()\n                }\n                return True\n            else:\n                self.model_health[model] = {\n                    'status': 'error',\n                    'error_code': response.status_code,\n                    'last_check': time.time()\n                }\n                return False\n        except Exception as e:\n            self.model_health[model] = {\n                'status': 'unavailable',\n                'error': str(e),\n                'last_check': time.time()\n            }\n            return False\n    \n    def get_best_model(self) -> str:\n        """Get the best available model based on health and performance"""\n        if not self.available_models:\n            return DEFAULT_MODEL\n        \n        # Check health of all models\n        healthy_models = []\n        for model in self.available_models:\n            if self.check_model_health(model):\n                healthy_models.append(model)\n        \n        if not healthy_models:\n            return DEFAULT_MODEL\n        \n        # Return the fastest healthy model\n        fastest_model = min(healthy_models, \n                           key=lambda m: self.model_health.get(m, {}).get('response_time', float('inf')))\n        return fastest_model\n    \n    def switch_model(self, model: str) -> Tuple[bool, str]:\n        """Switch to a different model"""\n        if model in self.available_models:\n            if self.check_model_health(model):\n                self.current_model = model\n                return True, "Model switched successfully"\n            else:\n                return False, f"Model {model} is not responding"\n        else:\n            return False, f"Model {model} not found"\n
+class ModelManager:
+    """Advanced model management with health monitoring"""
+    
+    def __init__(self) -> None:
+        self.available_models: List[str] = []
+        self.current_model: str = DEFAULT_MODEL
+        self.model_health: Dict[str, Any] = {}
+        self.refresh_models()
+    
+    def refresh_models(self) -> None:
+        """Refresh list of available models"""
+        try:
+            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
+            lines = output.strip().split('\n')
+            self.available_models = [line.split()[0] for line in lines[1:] if line.strip()]
+        except Exception:
+            self.available_models = []
+    
+    def check_model_health(self, model: str) -> bool:
+        """Check if a model is healthy and responsive"""
+        try:
+            start_time = time.time()
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={"model": model, "prompt": "test", "stream": False},
+                timeout=5
+            )
+            response_time = time.time() - start_time
+            
+            if response.status_code == 200:
+                self.model_health[model] = {
+                    'status': 'healthy',
+                    'response_time': response_time,
+                    'last_check': time.time()
+                }
+                return True
+            else:
+                self.model_health[model] = {
+                    'status': 'error',
+                    'error_code': response.status_code,
+                    'last_check': time.time()
+                }
+                return False
+        except Exception as e:
+            self.model_health[model] = {
+                'status': 'unavailable',
+                'error': str(e),
+                'last_check': time.time()
+            }
+            return False
+    
+    def get_best_model(self) -> str:
+        """Get the best available model based on health and performance"""
+        if not self.available_models:
+            return DEFAULT_MODEL
+        
+        # Check health of all models
+        healthy_models = []
+        for model in self.available_models:
+            if self.check_model_health(model):
+                healthy_models.append(model)
+        
+        if not healthy_models:
+            return DEFAULT_MODEL
+        
+        # Return the fastest healthy model
+        fastest_model = min(healthy_models, 
+                           key=lambda m: self.model_health.get(m, {}).get('response_time', float('inf')))
+        return fastest_model
+    
+    def switch_model(self, model: str) -> Tuple[bool, str]:
+        """Switch to a different model"""
+        if model in self.available_models:
+            if self.check_model_health(model):
+                self.current_model = model
+                return True, "Model switched successfully"
+            else:
+                return False, f"Model {model} is not responding"
+        else:
+            return False, f"Model {model} not found"\n
 
 # Initialize global instances
 memory = ConversationMemory()

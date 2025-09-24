@@ -12,15 +12,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from context_cache_manager import (
-    ContextCacheManager, 
-    ContextData, 
-    CacheLock, 
+from xencode.context_cache_manager import (
+    ContextCacheManager,
+    ConversationCache,
+    ContextData,
+    CacheLock,
     CacheVersion,
-    get_cache_manager
+    get_cache_manager,
 )
-
-
 class TestContextCacheManager(unittest.TestCase):
     """Comprehensive test suite for ContextCacheManager"""
     
