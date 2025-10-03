@@ -325,7 +325,7 @@ class EnhancedCommandPalette:
         )
     
     def _load_ai_suggestions_async(self):
-        """Load AI suggestions in background"""
+        """Load AI suggestions in background with advanced AI integration"""
         if self._ai_suggestions_loading:
             return
         
@@ -333,26 +333,56 @@ class EnhancedCommandPalette:
         
         def load_suggestions():
             try:
-                if self.ai_suggester:
-                    ai_commands = self.ai_suggester(self.command_history[-5:])
-                    
-                    # Convert to CommandSuggestion objects
-                    ai_suggestions = []
-                    for cmd in ai_commands:
-                        ai_suggestions.append(CommandSuggestion(
-                            command=cmd,
-                            description="AI suggested",
-                            source="ai",
-                            frequency=0
-                        ))
-                    
-                    self._ai_suggestions_cache = ai_suggestions
-                    
-                    # Update UI if we have the application
-                    if hasattr(self, 'application') and self.application.is_running:
-                        self._filter_suggestions()
-                        self._update_ui()
+                ai_commands = []
+                
+                # Try advanced AI integration first
+                if WARP_AI_AVAILABLE:
+                    try:
+                        import asyncio
+                        from pathlib import Path
                         
+                        ai_integration = get_warp_ai_integration()
+                        
+                        # Run async AI suggestions
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        ai_commands = loop.run_until_complete(
+                            ai_integration.get_smart_suggestions(
+                                self.command_history[-10:],  # More context
+                                Path.cwd()
+                            )
+                        )
+                        
+                        loop.close()
+                        
+                    except Exception as e:
+                        self.console.print(f"[yellow]Advanced AI failed, using fallback: {e}[/yellow]")
+                        # Fallback to simple AI suggester
+                        if self.ai_suggester:
+                            ai_commands = self.ai_suggester(self.command_history[-5:])
+                else:
+                    # Use simple AI suggester
+                    if self.ai_suggester:
+                        ai_commands = self.ai_suggester(self.command_history[-5:])
+                
+                # Convert to CommandSuggestion objects
+                ai_suggestions = []
+                for cmd in ai_commands:
+                    ai_suggestions.append(CommandSuggestion(
+                        command=cmd,
+                        description="AI suggested" if not WARP_AI_AVAILABLE else "Smart AI suggestion",
+                        source="ai",
+                        frequency=0
+                    ))
+                
+                self._ai_suggestions_cache = ai_suggestions
+                
+                # Update UI if we have the application
+                if hasattr(self, 'application') and self.application.is_running:
+                    self._filter_suggestions()
+                    self._update_ui()
+                    
             except Exception as e:
                 self.console.print(f"[red]AI suggestions failed: {e}[/red]")
             finally:
@@ -543,6 +573,11 @@ class WarpTerminalWithPalette:
 # Example usage
 if __name__ == "__main__":
     from xencode.warp_terminal import WarpTerminal, example_ai_suggester
+try:
+    from xencode.warp_ai_integration import get_warp_ai_integration
+    WARP_AI_AVAILABLE = True
+except ImportError:
+    WARP_AI_AVAILABLE = False
     
     # Create terminal
     terminal = WarpTerminal(ai_suggester=example_ai_suggester)

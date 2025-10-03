@@ -618,7 +618,7 @@ class WarpTerminal:
         return block
     
     def get_ai_suggestions_async(self) -> List[str]:
-        """Get AI suggestions asynchronously with caching"""
+        """Get AI suggestions asynchronously with advanced caching and context awareness"""
         current_time = time.time()
         
         # Check if we have cached suggestions that are still valid
@@ -630,16 +630,49 @@ class WarpTerminal:
         def get_suggestions():
             try:
                 # Get context from recent commands
-                recent_commands = [block.command for block in list(self.command_blocks)[-5:]]
+                recent_commands = [block.command for block in list(self.command_blocks)[-10:]]
                 
-                # Use AI model to suggest next commands
-                if self.ai_suggester:
-                    suggestions = self.ai_suggester(recent_commands)
+                # Try advanced AI integration first
+                try:
+                    from .warp_ai_integration import get_warp_ai_integration
+                    from pathlib import Path
+                    import asyncio
+                    
+                    ai_integration = get_warp_ai_integration()
+                    
+                    # Run async AI suggestions in a new event loop
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    suggestions = loop.run_until_complete(
+                        ai_integration.get_smart_suggestions(recent_commands, Path.cwd())
+                    )
+                    
+                    loop.close()
+                    
                     self._ai_suggestions_cache = suggestions
                     self._ai_suggestions_cache_time = time.time()
+                    
+                except ImportError:
+                    # Fallback to simple AI suggester
+                    if self.ai_suggester:
+                        suggestions = self.ai_suggester(recent_commands)
+                        self._ai_suggestions_cache = suggestions
+                        self._ai_suggestions_cache_time = time.time()
+                    
             except Exception as e:
-                self.console.print(f"[red]AI suggestions failed: {e}[/red]")
-                self._ai_suggestions_cache = []
+                logger.warning(f"AI suggestions failed: {e}")
+                # Fallback to simple suggestions
+                if self.ai_suggester:
+                    try:
+                        recent_commands = [block.command for block in list(self.command_blocks)[-5:]]
+                        suggestions = self.ai_suggester(recent_commands)
+                        self._ai_suggestions_cache = suggestions
+                        self._ai_suggestions_cache_time = time.time()
+                    except Exception:
+                        self._ai_suggestions_cache = []
+                else:
+                    self._ai_suggestions_cache = []
         
         # Start in background thread
         thread = threading.Thread(target=get_suggestions)

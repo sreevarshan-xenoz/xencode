@@ -55,6 +55,10 @@ from .warp_ui_components import (
 from .warp_testing_harness import (
     CommandTestingHarness, TestResult, run_comprehensive_test
 )
+from .warp_ai_integration import (
+    WarpAIIntegration, ProjectAnalyzer, AdvancedAISuggester,
+    ProjectContext, CommandSuggestionContext, get_warp_ai_integration
+)
 
 __all__ = [
     # Core systems
@@ -83,5 +87,7 @@ __all__ = [
     "EnhancedCommandPalette", "WarpTerminalWithPalette",
     "CommandSuggestion", "FuzzyMatcher",
     "OutputRenderer", "WarpLayoutManager",
-    "CommandTestingHarness", "TestResult", "run_comprehensive_test"
+    "CommandTestingHarness", "TestResult", "run_comprehensive_test",
+    "WarpAIIntegration", "ProjectAnalyzer", "AdvancedAISuggester",
+    "ProjectContext", "CommandSuggestionContext", "get_warp_ai_integration"
 ]
