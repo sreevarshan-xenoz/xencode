@@ -252,7 +252,8 @@ Convert the feature design into a series of prompts for a code-generation LLM th
   - Add latency optimization for <50ms sync times
   - _Requirements: REQ-5.2_
 
-- [ ] 5.4 Create workspace isolation and security
+- [-] 5.4 Create workspace isolation and security
+
   - Implement workspace-level permission controls
   - Add data isolation between workspaces
   - Create workspace switching with context preservation
