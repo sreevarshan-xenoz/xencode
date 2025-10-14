@@ -302,23 +302,42 @@ class HardwareProfiler:
     def _detect_storage_type(self) -> str:
         """Detect storage type (SSD vs HDD)"""
         try:
-            # Check for SSD indicators in /proc/mounts or similar
-            # This is a simplified detection - real implementation would be more robust
-
-            # Check if running on SSD (Linux-specific)
-            if os.path.exists('/sys/block'):
-                for device in os.listdir('/sys/block'):
-                    if device.startswith(('sd', 'nvme')):
-                        rotational_file = f'/sys/block/{device}/queue/rotational'
-                        if os.path.exists(rotational_file):
-                            with open(rotational_file, 'r') as f:
-                                if f.read().strip() == '0':
-                                    if device.startswith('nvme'):
-                                        return "nvme"
+            # Check for SSD indicators (cross-platform)
+            import platform
+            
+            if platform.system() == "Linux":
+                # Linux-specific SSD detection
+                if os.path.exists('/sys/block'):
+                    for device in os.listdir('/sys/block'):
+                        if device.startswith(('sd', 'nvme')):
+                            rotational_file = f'/sys/block/{device}/queue/rotational'
+                            if os.path.exists(rotational_file):
+                                with open(rotational_file, 'r') as f:
+                                    if f.read().strip() == '0':
+                                        if device.startswith('nvme'):
+                                            return "nvme"
+                                        else:
+                                            return "ssd"
                                     else:
-                                        return "ssd"
-                                else:
-                                    return "hdd"
+                                        return "hdd"
+            elif platform.system() == "Windows":
+                # Windows SSD detection using WMI or assume SSD for modern systems
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['powershell', '-Command', 
+                         'Get-PhysicalDisk | Select-Object MediaType'],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if 'SSD' in result.stdout:
+                        return "ssd"
+                    elif 'HDD' in result.stdout:
+                        return "hdd"
+                except Exception:
+                    pass
+            elif platform.system() == "Darwin":
+                # macOS - most modern Macs use SSD
+                return "ssd"
 
             return "unknown"
 

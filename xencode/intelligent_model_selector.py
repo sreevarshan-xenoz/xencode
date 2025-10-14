@@ -153,17 +153,40 @@ class HardwareDetector:
             disk_usage = psutil.disk_usage('.')
             available_gb = disk_usage.free / (1024**3)
             
-            # Try to detect SSD vs HDD (Linux)
+            # Try to detect SSD vs HDD (cross-platform)
             storage_type = "unknown"
             if platform.system() == "Linux":
                 try:
-                    with open("/sys/block/sda/queue/rotational", "r") as f:
-                        rotational = f.read().strip()
-                        storage_type = "hdd" if rotational == "1" else "ssd"
+                    # Check multiple possible devices
+                    for device in ['sda', 'nvme0n1', 'vda']:
+                        rotational_path = f"/sys/block/{device}/queue/rotational"
+                        if os.path.exists(rotational_path):
+                            with open(rotational_path, "r") as f:
+                                rotational = f.read().strip()
+                                storage_type = "hdd" if rotational == "1" else "ssd"
+                                break
+                    else:
+                        storage_type = "ssd"  # Default assumption for modern systems
                 except:
                     storage_type = "ssd"  # Default assumption for modern systems
+            elif platform.system() == "Windows":
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['powershell', '-Command', 
+                         'Get-PhysicalDisk | Select-Object -First 1 MediaType'],
+                        capture_output=True, text=True, timeout=2
+                    )
+                    if 'SSD' in result.stdout:
+                        storage_type = "ssd"
+                    elif 'HDD' in result.stdout:
+                        storage_type = "hdd"
+                    else:
+                        storage_type = "ssd"  # Default for modern systems
+                except:
+                    storage_type = "ssd"  # Default for modern systems
             else:
-                storage_type = "ssd"  # Default for macOS/Windows
+                storage_type = "ssd"  # Default for macOS and other systems
             
             return {
                 "type": storage_type,
