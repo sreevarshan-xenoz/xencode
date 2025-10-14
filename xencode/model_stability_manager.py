@@ -368,15 +368,32 @@ class ModelStabilityManager:
         return False
 
     def check_ollama_logs(self, model_name: str) -> bool:
-        """Check ollama logs for OOM or crash indicators"""
+        """Check ollama logs for OOM or crash indicators (cross-platform)"""
         try:
-            # Common ollama log locations
+            import platform
+            
+            # Common ollama log locations (cross-platform)
             log_paths = [
-                "/var/log/ollama.log",
-                "/tmp/ollama.log",
                 Path.home() / ".ollama" / "logs" / "server.log",
-                "/usr/local/var/log/ollama.log",
             ]
+            
+            # Add platform-specific paths
+            if platform.system() == "Linux":
+                log_paths.extend([
+                    Path("/var/log/ollama.log"),
+                    Path("/tmp/ollama.log"),
+                    Path("/usr/local/var/log/ollama.log"),
+                ])
+            elif platform.system() == "Windows":
+                log_paths.extend([
+                    Path(os.environ.get('TEMP', 'C:\\Temp')) / "ollama.log",
+                    Path(os.environ.get('LOCALAPPDATA', 'C:\\Users\\Default\\AppData\\Local')) / "Ollama" / "logs" / "server.log",
+                ])
+            elif platform.system() == "Darwin":
+                log_paths.extend([
+                    Path("/usr/local/var/log/ollama.log"),
+                    Path("/tmp/ollama.log"),
+                ])
 
             current_time = datetime.now()
 
