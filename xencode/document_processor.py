@@ -23,27 +23,33 @@ from xencode.models.document import (
     is_supported_document_type,
     estimate_processing_time
 )
+from xencode.processors.base import ProcessorInterface
 
+# Import processors
+try:
+    from xencode.processors.pdf_processor import PDFProcessor
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
 
-class ProcessorInterface(ABC):
-    """Abstract interface for document processors"""
-    
-    @abstractmethod
-    async def can_process(self, file_path: Path, document_type: DocumentType) -> bool:
-        """Check if this processor can handle the document type"""
-        pass
-    
-    @abstractmethod
-    async def process(self, 
-                     file_path: Path, 
-                     options: ProcessingOptions) -> ProcessedDocument:
-        """Process the document and return structured content"""
-        pass
-    
-    @abstractmethod
-    def get_supported_types(self) -> List[DocumentType]:
-        """Get list of supported document types"""
-        pass
+try:
+    from xencode.processors.docx_processor import DOCXProcessor
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
+try:
+    from xencode.processors.web_extractor import WebContentExtractor
+    WEB_AVAILABLE = True
+except ImportError:
+    WEB_AVAILABLE = False
+
+try:
+    from xencode.processors.text_processor import TextProcessor
+    TEXT_AVAILABLE = True
+except ImportError:
+    TEXT_AVAILABLE = False
+
 
 
 class FallbackHandler:
@@ -125,6 +131,39 @@ class DocumentProcessor:
             'failed': 0,
             'fallback_used': 0
         }
+        
+        # Auto-register available processors
+        self._register_available_processors()
+    
+    def _register_available_processors(self) -> None:
+        """Register all available processors"""
+        try:
+            if PDF_AVAILABLE:
+                pdf_processor = PDFProcessor()
+                self.register_processor(pdf_processor)
+        except Exception as e:
+            print(f"Warning: Could not register PDF processor: {e}")
+        
+        try:
+            if DOCX_AVAILABLE:
+                docx_processor = DOCXProcessor()
+                self.register_processor(docx_processor)
+        except Exception as e:
+            print(f"Warning: Could not register DOCX processor: {e}")
+        
+        try:
+            if WEB_AVAILABLE:
+                web_processor = WebContentExtractor()
+                self.register_processor(web_processor)
+        except Exception as e:
+            print(f"Warning: Could not register Web processor: {e}")
+        
+        try:
+            if TEXT_AVAILABLE:
+                text_processor = TextProcessor()
+                self.register_processor(text_processor)
+        except Exception as e:
+            print(f"Warning: Could not register Text processor: {e}")
     
     def register_processor(self, 
                           processor: ProcessorInterface,

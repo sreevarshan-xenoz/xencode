@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-import fcntl
 import hashlib
 import json
 import os
 import shutil
 import signal
+import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import psutil
+
+# Cross-platform file locking
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
 
 
 class CacheVersion(Enum):
@@ -118,6 +124,7 @@ class ContextCacheManager:
 
         # Lock management
         self._active_locks: Dict[str, CacheLock] = {}
+        self._lock_fds: Dict[str, int] = {}  # Store file descriptors for active locks
         self._lock_timeout_seconds = 30
         self._cleanup_interval_hours = 24
 
@@ -165,34 +172,71 @@ class ContextCacheManager:
             return False
 
     def _acquire_file_lock(self, lock_file: Path, timeout: int = 5) -> Optional[int]:
-        """Acquire exclusive file lock with timeout"""
+        """Acquire exclusive file lock with timeout (cross-platform)"""
+        fd = None
         try:
             # Create lock file if it doesn't exist
-            lock_file.touch()
-
-            # Open file for locking
-            fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT)
-
-            # Try to acquire exclusive lock with timeout
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    return fd
-                except (IOError, OSError):
-                    time.sleep(0.1)
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            if sys.platform == 'win32':
+                # Windows file locking using msvcrt
+                # Open file in binary write mode
+                fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT | os.O_BINARY)
+                
+                # Write at least one byte for msvcrt.locking to work
+                # Check file size using fstat on the file descriptor
+                file_stat = os.fstat(fd)
+                if file_stat.st_size == 0:
+                    os.write(fd, b'\x00')
+                os.lseek(fd, 0, os.SEEK_SET)
+                
+                # Try to acquire exclusive lock with timeout
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    try:
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                        return fd
+                    except (IOError, OSError):
+                        time.sleep(0.1)
+            else:
+                # Unix file locking using fcntl
+                fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT)
+                
+                # Try to acquire exclusive lock with timeout
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        return fd
+                    except (IOError, OSError):
+                        time.sleep(0.1)
 
             # Timeout reached
-            os.close(fd)
+            if fd is not None:
+                os.close(fd)
             return None
 
-        except Exception:
+        except Exception as e:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except:
+                    pass
             return None
 
     def _release_file_lock(self, fd: int):
-        """Release file lock"""
+        """Release file lock (cross-platform)"""
         try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if sys.platform == 'win32':
+                # Windows file unlocking
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                except:
+                    pass
+            else:
+                # Unix file unlocking
+                fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
         except Exception:
             pass
@@ -212,52 +256,65 @@ class ContextCacheManager:
             if fd is None:
                 return False
 
-            try:
-                # Step 2: Check existing lock content
-                if lock_file.exists() and lock_file.stat().st_size > 0:
-                    try:
-                        with open(lock_file, 'r') as f:
-                            existing_lock_data = json.load(f)
+            # Step 2: Check existing lock content
+            if lock_file.exists() and lock_file.stat().st_size > 1:  # More than just the lock byte
+                try:
+                    with open(lock_file, 'r') as f:
+                        existing_lock_data = json.load(f)
 
-                        existing_lock = CacheLock.from_dict(existing_lock_data)
+                    existing_lock = CacheLock.from_dict(existing_lock_data)
 
-                        # Check if existing lock is from a running process
-                        if self._is_pid_running(existing_lock.pid):
-                            # Check lock age to prevent indefinite locks
-                            lock_age = datetime.now() - existing_lock.timestamp
-                            if lock_age.total_seconds() < self._lock_timeout_seconds:
-                                return False  # Valid lock exists
+                    # Check if existing lock is from a running process
+                    if self._is_pid_running(existing_lock.pid):
+                        # Check lock age to prevent indefinite locks
+                        lock_age = datetime.now() - existing_lock.timestamp
+                        if lock_age.total_seconds() < self._lock_timeout_seconds:
+                            self._release_file_lock(fd)
+                            return False  # Valid lock exists
 
-                        # Stale lock - can be overridden
-                    except (json.JSONDecodeError, KeyError, ValueError):
-                        # Corrupted lock file - can be overridden
-                        pass
+                    # Stale lock - can be overridden
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    # Corrupted lock file - can be overridden
+                    pass
 
-                # Step 3: Write new lock
-                new_lock = CacheLock(
-                    project_hash=project_hash,
-                    pid=current_pid,
-                    timestamp=datetime.now(),
-                    lock_file_path=str(lock_file),
-                )
+            # Step 3: Write new lock
+            new_lock = CacheLock(
+                project_hash=project_hash,
+                pid=current_pid,
+                timestamp=datetime.now(),
+                lock_file_path=str(lock_file),
+            )
 
-                with open(lock_file, 'w') as f:
-                    json.dump(new_lock.to_dict(), f, indent=2)
+            # Write lock data through the file descriptor
+            lock_data = json.dumps(new_lock.to_dict(), indent=2).encode('utf-8')
+            # Truncate file first
+            os.ftruncate(fd, 0)
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, lock_data)
+            # Flush to disk
+            os.fsync(fd)
 
-                # Step 4: Store lock in memory
-                self._active_locks[project_hash] = new_lock
+            # Step 4: Store lock in memory with file descriptor
+            self._active_locks[project_hash] = new_lock
+            # Store the file descriptor to keep the lock held
+            self._lock_fds[project_hash] = fd
 
-                return True
+            return True
 
-            finally:
+        except Exception as e:
+            if 'fd' in locals() and fd is not None:
                 self._release_file_lock(fd)
-
-        except Exception:
             return False
 
     def release_cache_lock(self, project_hash: str) -> None:
         """Release cache lock for project"""
         try:
+            # Release file descriptor if it exists
+            if project_hash in self._lock_fds:
+                fd = self._lock_fds[project_hash]
+                self._release_file_lock(fd)
+                del self._lock_fds[project_hash]
+
             lock_file = self._get_lock_file_path(project_hash)
 
             # Remove from active locks
