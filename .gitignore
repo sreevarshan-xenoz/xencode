@@ -33,8 +33,6 @@ ENV/
 *~
 
 # Project specific
-.xencode/
-.kiro/
 *.backup
 *.log
 .ipynb_checkpoints/
