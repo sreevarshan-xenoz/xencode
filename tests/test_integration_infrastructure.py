@@ -309,9 +309,9 @@ class TestEnhancedCLI(unittest.TestCase):
 
     def setUp(self):
         # Mock Phase 1 systems to avoid import errors
-        with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
-            'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
-        ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
+        with patch('xencode.enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
+            'xencode.enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
+        ), patch('xencode.enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
             self.cli = EnhancedXencodeCLI()
 
     def test_cli_initialization(self):
@@ -395,9 +395,9 @@ class TestColdStartOptimization(unittest.TestCase):
         """Test that initialization completes within reasonable time"""
         start_time = time.time()
 
-        with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
-            'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
-        ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
+        with patch('xencode.enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
+            'xencode.enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
+        ), patch('xencode.enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
             cli = EnhancedXencodeCLI()
 
         initialization_time = time.time() - start_time
@@ -412,13 +412,13 @@ class TestColdStartOptimization(unittest.TestCase):
 
     def test_background_initialization(self):
         """Test background initialization of enhanced features"""
-        with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', True), patch(
-            'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', True
-        ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', True):
+        with patch('xencode.enhanced_cli_system.MULTI_MODEL_AVAILABLE', True), patch(
+            'xencode.enhanced_cli_system.SMART_CONTEXT_AVAILABLE', True
+        ), patch('xencode.enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', True):
             # Mock the Phase 1 systems
-            with patch('enhanced_cli_system.MultiModelManager') as mock_mm, patch(
-                'enhanced_cli_system.SmartContextManager'
-            ) as mock_sc, patch('enhanced_cli_system.CodeAnalyzer') as mock_ca:
+            with patch('xencode.enhanced_cli_system.MultiModelManager') as mock_mm, patch(
+                'xencode.enhanced_cli_system.SmartContextManager'
+            ) as mock_sc, patch('xencode.enhanced_cli_system.CodeAnalyzer') as mock_ca:
                 cli = EnhancedXencodeCLI()
 
                 # Wait for background initialization
@@ -467,9 +467,9 @@ class TestIntegrationScenarios(unittest.TestCase):
     def test_full_system_integration(self):
         """Test full system working together"""
         # Initialize all components
-        with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
-            'enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
-        ), patch('enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
+        with patch('xencode.enhanced_cli_system.MULTI_MODEL_AVAILABLE', False), patch(
+            'xencode.enhanced_cli_system.SMART_CONTEXT_AVAILABLE', False
+        ), patch('xencode.enhanced_cli_system.CODE_ANALYSIS_AVAILABLE', False):
             cli = EnhancedXencodeCLI()
             monitor = ResourceMonitor()
 
@@ -489,8 +489,8 @@ class TestIntegrationScenarios(unittest.TestCase):
 
     def test_graceful_degradation_scenario(self):
         """Test graceful degradation when features fail"""
-        with patch('enhanced_cli_system.MULTI_MODEL_AVAILABLE', True), patch(
-            'enhanced_cli_system.MultiModelManager',
+        with patch('xencode.enhanced_cli_system.MULTI_MODEL_AVAILABLE', True), patch(
+            'xencode.enhanced_cli_system.MultiModelManager',
             side_effect=Exception("Import failed"),
         ):
             # Should still initialize successfully
