@@ -46,6 +46,18 @@ except ImportError:
     WebSocketConnection = None
     SYNC_COORDINATOR_AVAILABLE = False
 
+try:
+    from .workspace_security import (
+        WorkspaceSecurityManager, WorkspacePermission, IsolationLevel, WorkspaceContext
+    )
+    WORKSPACE_SECURITY_AVAILABLE = True
+except ImportError:
+    WorkspaceSecurityManager = None
+    WorkspacePermission = None
+    IsolationLevel = None
+    WorkspaceContext = None
+    WORKSPACE_SECURITY_AVAILABLE = False
+
 
 def get_workspace_status() -> dict:
     """Get status of workspace components"""
@@ -54,7 +66,8 @@ def get_workspace_status() -> dict:
         "crdt_engine_available": CRDT_ENGINE_AVAILABLE,
         "storage_backend_available": STORAGE_BACKEND_AVAILABLE,
         "collaboration_manager_available": COLLABORATION_MANAGER_AVAILABLE,
-        "sync_coordinator_available": SYNC_COORDINATOR_AVAILABLE
+        "sync_coordinator_available": SYNC_COORDINATOR_AVAILABLE,
+        "workspace_security_available": WORKSPACE_SECURITY_AVAILABLE
     }
 
 
@@ -66,10 +79,15 @@ __all__ = [
     'SyncCoordinator',
     'SyncMessage',
     'WebSocketConnection',
+    'WorkspaceSecurityManager',
+    'WorkspacePermission',
+    'IsolationLevel',
+    'WorkspaceContext',
     'get_workspace_status',
     'WORKSPACE_MANAGER_AVAILABLE',
     'CRDT_ENGINE_AVAILABLE',
     'STORAGE_BACKEND_AVAILABLE',
     'COLLABORATION_MANAGER_AVAILABLE',
-    'SYNC_COORDINATOR_AVAILABLE'
+    'SYNC_COORDINATOR_AVAILABLE',
+    'WORKSPACE_SECURITY_AVAILABLE'
 ]

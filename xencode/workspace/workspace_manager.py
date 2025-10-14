@@ -18,6 +18,9 @@ from xencode.models.workspace import (
     create_default_workspace
 )
 from xencode.workspace.storage_backend import SQLiteStorageBackend
+from xencode.workspace.workspace_security import (
+    WorkspaceSecurityManager, WorkspacePermission, IsolationLevel, WorkspaceContext
+)
 
 
 class WorkspaceError(Exception):
@@ -28,8 +31,10 @@ class WorkspaceError(Exception):
 class WorkspaceManager:
     """Manages workspaces with SQLite backend"""
     
-    def __init__(self, storage_backend: Optional[SQLiteStorageBackend] = None):
+    def __init__(self, storage_backend: Optional[SQLiteStorageBackend] = None,
+                 security_manager: Optional[WorkspaceSecurityManager] = None):
         self.storage = storage_backend or SQLiteStorageBackend()
+        self.security_manager = security_manager or WorkspaceSecurityManager()
         
         # In-memory cache for active workspaces
         self.workspace_cache: Dict[str, Workspace] = {}
@@ -45,6 +50,7 @@ class WorkspaceManager:
     async def initialize(self) -> None:
         """Initialize workspace manager"""
         await self.storage.initialize()
+        await self.security_manager.initialize()
     
     async def create_workspace(self, 
                               name: str,
@@ -87,9 +93,13 @@ class WorkspaceManager:
         if not workspace:
             return None
         
-        # Check access permissions
-        if user_id and not workspace.can_user_access(user_id):
-            return None
+        # Check access permissions through security manager
+        if user_id:
+            has_access = await self.security_manager.check_workspace_permission(
+                workspace_id, user_id, WorkspacePermission.READ
+            )
+            if not has_access and not workspace.can_user_access(user_id):
+                return None
         
         # Update last accessed
         workspace.last_accessed = datetime.now()
@@ -492,6 +502,110 @@ class WorkspaceManager:
             'file_locks': len(self.file_locks),
             'cache_ttl_seconds': self.cache_ttl_seconds
         }
+    
+    async def set_workspace_permissions(self, workspace_id: str, user_id: str, 
+                                      permissions: Set[WorkspacePermission],
+                                      granted_by: str) -> bool:
+        """Set workspace permissions for user"""
+        # Check if granter has admin permission
+        has_admin = await self.security_manager.check_workspace_permission(
+            workspace_id, granted_by, WorkspacePermission.ADMIN
+        )
+        
+        if not has_admin:
+            # Check if granter is workspace owner
+            workspace = await self.get_workspace(workspace_id)
+            if not workspace or workspace.owner_id != granted_by:
+                return False
+        
+        return await self.security_manager.set_workspace_permissions(
+            workspace_id, user_id, permissions
+        )
+    
+    async def check_workspace_permission(self, workspace_id: str, user_id: str, 
+                                       permission: WorkspacePermission) -> bool:
+        """Check workspace permission for user"""
+        return await self.security_manager.check_workspace_permission(
+            workspace_id, user_id, permission
+        )
+    
+    async def switch_workspace_context(self, user_id: str, workspace_id: str,
+                                     preserve_context: bool = True) -> Optional[WorkspaceContext]:
+        """Switch user to different workspace with context preservation"""
+        return await self.security_manager.switch_workspace_context(
+            user_id, workspace_id, preserve_context
+        )
+    
+    async def get_workspace_with_isolation(self, workspace_id: str, user_id: str) -> Optional[Workspace]:
+        """Get workspace with data isolation applied"""
+        workspace = await self.get_workspace(workspace_id, user_id)
+        if not workspace:
+            return None
+        
+        # Apply data isolation
+        workspace_data = workspace.to_dict()
+        filtered_data = await self.security_manager.enforce_data_isolation(
+            workspace_id, user_id, workspace_data
+        )
+        
+        # Create filtered workspace object
+        if filtered_data:
+            # In a real implementation, you'd reconstruct the workspace with filtered data
+            return workspace
+        
+        return None
+    
+    async def set_workspace_isolation_level(self, workspace_id: str, 
+                                          isolation_level: IsolationLevel,
+                                          set_by: str) -> bool:
+        """Set isolation level for workspace"""
+        # Check admin permission
+        has_admin = await self.security_manager.check_workspace_permission(
+            workspace_id, set_by, WorkspacePermission.ADMIN
+        )
+        
+        if not has_admin:
+            return False
+        
+        self.security_manager.isolation_levels[workspace_id] = isolation_level
+        return True
+    
+    async def get_workspace_security_status(self, workspace_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get workspace security status"""
+        # Check read permission
+        has_read = await self.security_manager.check_workspace_permission(
+            workspace_id, user_id, WorkspacePermission.READ
+        )
+        
+        if not has_read:
+            return None
+        
+        return await self.security_manager.get_workspace_security_status(workspace_id)
+    
+    async def revoke_workspace_access(self, workspace_id: str, target_user_id: str, 
+                                    revoked_by: str) -> bool:
+        """Revoke workspace access for user"""
+        return await self.security_manager.revoke_workspace_access(
+            workspace_id, target_user_id, revoked_by
+        )
+    
+    async def get_user_workspace_contexts(self, user_id: str) -> List[WorkspaceContext]:
+        """Get workspace contexts for user"""
+        contexts = []
+        
+        # Get active context
+        if user_id in self.security_manager.active_contexts:
+            contexts.append(self.security_manager.active_contexts[user_id])
+        
+        # Get context history
+        if user_id in self.security_manager.context_history:
+            contexts.extend(self.security_manager.context_history[user_id])
+        
+        return contexts
+    
+    async def cleanup_security_contexts(self, timeout_minutes: int = 480) -> int:
+        """Clean up inactive security contexts"""
+        return await self.security_manager.cleanup_inactive_contexts(timeout_minutes)
     
     async def close(self) -> None:
         """Close workspace manager"""

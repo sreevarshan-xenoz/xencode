@@ -423,10 +423,7 @@ class SyncCoordinator:
 
 
 # Global sync coordinator instance
-sync_coordinator = SyncCoordinator()"""
-Real-
-time synchronization coordinator for collaborative workspaces
-"""
+sync_coordinator = SyncCoordinator()
 
 import asyncio
 import json
