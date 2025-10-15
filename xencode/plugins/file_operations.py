@@ -423,7 +423,8 @@ class FileOperationsPlugin:
             # Read file and search for query
             if AIOFILES_AVAILABLE:
                 async with aiofiles.open(safe_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    async for line_num, line in enumerate(f, 1):
+                    content = await f.read()
+                    for line_num, line in enumerate(content.splitlines(), 1):
                         if query in line:
                             matches.append((line_num, line.strip()))
             else:

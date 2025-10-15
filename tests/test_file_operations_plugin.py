@@ -62,18 +62,7 @@ class TestFileOperationsPluginBase:
         """Create file operations plugin instance"""
         return FileOperationsPlugin(plugin_context)
     
-    @pytest.mark.asyncio
-    async def test_ls_dir_not_implemented_initially(self, file_plugin, temp_workspace):
-        """Test that ls_dir raises NotImplementedError initially (failing test)"""
-        with pytest.raises(NotImplementedError, match="ls_dir not implemented"):
-            await file_plugin.ls_dir(temp_workspace)
-    
-    @pytest.mark.asyncio
-    async def test_read_file_not_implemented_initially(self, file_plugin, temp_workspace):
-        """Test that read_file raises NotImplementedError initially (failing test)"""
-        test_file = temp_workspace / "test_file.txt"
-        with pytest.raises(NotImplementedError, match="read_file not implemented"):
-            await file_plugin.read_file(test_file)
+    # Initial TDD failing tests removed - functionality now implemented
     
     @pytest.mark.asyncio
     @pytest.mark.skipif(not PLUGIN_AVAILABLE, reason="Plugin not implemented yet")
