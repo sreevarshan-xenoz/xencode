@@ -460,6 +460,142 @@ class DiskCache:
             self.stats.total_entries = cursor.fetchone()[0]
         
         return self.stats
+    
+    async def get_entry(self, key: str) -> Optional[CacheEntry]:
+        """Get cache entry with metadata"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT created_at, last_accessed, access_count, size_bytes, 
+                       compressed, tags, metadata 
+                FROM cache_entries WHERE key = ?
+            """, (key,))
+            row = cursor.fetchone()
+            
+            if row:
+                created_at, last_accessed, access_count, size_bytes, compressed, tags_str, metadata_str = row
+                
+                # Get the actual value
+                value = await self.get(key)
+                if value is not None:
+                    return CacheEntry(
+                        key=key,
+                        value=value,
+                        created_at=created_at,
+                        last_accessed=last_accessed,
+                        access_count=access_count,
+                        size_bytes=size_bytes,
+                        compressed=compressed,
+                        tags=set(json.loads(tags_str)),
+                        metadata=json.loads(metadata_str)
+                    )
+        
+        return None
+    
+    async def get_all_entries(self) -> List[CacheEntry]:
+        """Get all cache entries"""
+        entries = []
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT key, created_at, last_accessed, access_count, size_bytes, 
+                       compressed, tags, metadata 
+                FROM cache_entries
+            """)
+            
+            for row in cursor:
+                key, created_at, last_accessed, access_count, size_bytes, compressed, tags_str, metadata_str = row
+                
+                # Note: We don't load the actual value for performance reasons
+                # The caller can use get() if they need the value
+                entry = CacheEntry(
+                    key=key,
+                    value=None,  # Not loaded for performance
+                    created_at=created_at,
+                    last_accessed=last_accessed,
+                    access_count=access_count,
+                    size_bytes=size_bytes,
+                    compressed=compressed,
+                    tags=set(json.loads(tags_str)),
+                    metadata=json.loads(metadata_str)
+                )
+                entries.append(entry)
+        
+        return entries
+    
+    async def get_entries_by_tag(self, tag: str) -> List[CacheEntry]:
+        """Get cache entries by tag"""
+        entries = []
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT key, created_at, last_accessed, access_count, size_bytes, 
+                       compressed, tags, metadata 
+                FROM cache_entries
+            """)
+            
+            for row in cursor:
+                key, created_at, last_accessed, access_count, size_bytes, compressed, tags_str, metadata_str = row
+                tags_set = set(json.loads(tags_str))
+                
+                if tag in tags_set:
+                    entry = CacheEntry(
+                        key=key,
+                        value=None,  # Not loaded for performance
+                        created_at=created_at,
+                        last_accessed=last_accessed,
+                        access_count=access_count,
+                        size_bytes=size_bytes,
+                        compressed=compressed,
+                        tags=tags_set,
+                        metadata=json.loads(metadata_str)
+                    )
+                    entries.append(entry)
+        
+        return entries
+    
+    async def delete_pattern(self, pattern: str) -> int:
+        """Delete cache entries matching pattern"""
+        deleted = 0
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT key, data_file FROM cache_entries 
+                WHERE key LIKE ?
+            """, (f"%{pattern}%",))
+            
+            keys_to_delete = []
+            for row in cursor:
+                key, data_file = row
+                keys_to_delete.append((key, data_file))
+            
+            for key, data_file in keys_to_delete:
+                # Remove data file
+                data_path = self.data_dir / data_file
+                if data_path.exists():
+                    data_path.unlink()
+                
+                # Remove database entry
+                conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
+                deleted += 1
+        
+        return deleted
+    
+    async def delete(self, key: str) -> bool:
+        """Delete a specific cache entry"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT data_file FROM cache_entries WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            
+            if row:
+                data_file = row[0]
+                data_path = self.data_dir / data_file
+                if data_path.exists():
+                    data_path.unlink()
+                
+                conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
+                return True
+        
+        return False
 
 
 class HybridCacheManager:
@@ -649,6 +785,183 @@ class HybridCacheManager:
                 if data_path.exists():
                     data_path.unlink()
                 conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
+    
+    # Enhanced methods for multimodal cache support
+    async def put_enhanced(self, key: str, value: Any, entry: 'CacheEntry') -> bool:
+        """Store value with enhanced cache entry metadata"""
+        # Try memory cache first
+        if await self.memory_cache.put(key, value, entry.tags, entry.metadata):
+            return True
+        
+        # Fall back to disk cache
+        return await self.disk_cache.put(key, value, entry.tags, entry.metadata)
+    
+    async def get_entry(self, key: str) -> Optional['CacheEntry']:
+        """Get cache entry with metadata"""
+        # Check memory cache first
+        if key in self.memory_cache.cache:
+            return self.memory_cache.cache[key]
+        
+        # Check disk cache
+        return await self.disk_cache.get_entry(key)
+    
+    async def get_all_entries(self) -> List['CacheEntry']:
+        """Get all cache entries"""
+        entries = []
+        
+        # Memory cache entries
+        entries.extend(self.memory_cache.cache.values())
+        
+        # Disk cache entries
+        disk_entries = await self.disk_cache.get_all_entries()
+        entries.extend(disk_entries)
+        
+        return entries
+    
+    async def get_entries_by_tag(self, tag: str) -> List['CacheEntry']:
+        """Get cache entries by tag"""
+        entries = []
+        
+        # Memory cache entries
+        for entry in self.memory_cache.cache.values():
+            if tag in entry.tags:
+                entries.append(entry)
+        
+        # Disk cache entries
+        disk_entries = await self.disk_cache.get_entries_by_tag(tag)
+        entries.extend(disk_entries)
+        
+        return entries
+    
+    async def delete_pattern(self, pattern: str) -> int:
+        """Delete cache entries matching pattern"""
+        deleted = 0
+        
+        # Memory cache
+        keys_to_delete = [key for key in self.memory_cache.cache.keys() if pattern in key]
+        for key in keys_to_delete:
+            self.memory_cache._remove_key(key)
+            deleted += 1
+        
+        # Disk cache
+        disk_deleted = await self.disk_cache.delete_pattern(pattern)
+        deleted += disk_deleted
+        
+        return deleted
+    
+    async def cleanup_expired(self):
+        """Clean up expired cache entries"""
+        await self._cleanup_old_entries()
+    
+    async def optimize_memory(self):
+        """Optimize memory usage"""
+        await self._reduce_memory_cache()
+    
+    # Additional methods for multimodal cache compatibility
+    async def get(self, key: str) -> Optional[Any]:
+        """Get value from cache (compatibility method)"""
+        # Check memory cache first
+        if key in self.memory_cache.cache:
+            entry = self.memory_cache.cache[key]
+            entry.last_accessed = time.time()
+            entry.access_count += 1
+            return entry.value
+        
+        # Check disk cache
+        return await self.disk_cache.get(key)
+    
+    async def delete(self, key: str) -> bool:
+        """Delete cache entry"""
+        deleted = False
+        
+        # Remove from memory cache
+        if key in self.memory_cache.cache:
+            self.memory_cache._remove_key(key)
+            deleted = True
+        
+        # Remove from disk cache
+        with sqlite3.connect(self.disk_cache.db_path) as conn:
+            cursor = conn.execute("SELECT data_file FROM cache_entries WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            if row:
+                data_file = row[0]
+                data_path = self.disk_cache.data_dir / data_file
+                if data_path.exists():
+                    data_path.unlink()
+                conn.execute("DELETE FROM cache_entries WHERE key = ?", (key,))
+                deleted = True
+        
+        return deleted
+    
+    async def put_enhanced(self, key: str, value: Any, entry: CacheEntry) -> bool:
+        """Store value with enhanced cache entry metadata"""
+        # Try memory cache first
+        if self.memory_cache.put(key, value, entry.tags, entry.metadata):
+            return True
+        
+        # Fall back to disk cache
+        return await self.disk_cache.put(key, value, entry.tags, entry.metadata)
+    
+    async def get_entry(self, key: str) -> Optional[CacheEntry]:
+        """Get cache entry with metadata"""
+        # Check memory cache first
+        if key in self.memory_cache.cache:
+            return self.memory_cache.cache[key]
+        
+        # Check disk cache
+        return await self.disk_cache.get_entry(key)
+    
+    async def get_all_entries(self) -> List[CacheEntry]:
+        """Get all cache entries"""
+        memory_entries = list(self.memory_cache.cache.values())
+        disk_entries = await self.disk_cache.get_all_entries()
+        return memory_entries + disk_entries
+    
+    async def get_entries_by_tag(self, tag: str) -> List[CacheEntry]:
+        """Get cache entries by tag"""
+        memory_entries = [entry for entry in self.memory_cache.cache.values() if tag in entry.tags]
+        disk_entries = await self.disk_cache.get_entries_by_tag(tag)
+        return memory_entries + disk_entries
+    
+    async def delete_pattern(self, pattern: str) -> int:
+        """Delete cache entries matching pattern"""
+        deleted = 0
+        
+        # Memory cache
+        keys_to_delete = [key for key in self.memory_cache.cache.keys() if pattern in key]
+        for key in keys_to_delete:
+            self.memory_cache._remove_key(key)
+            deleted += 1
+        
+        # Disk cache
+        disk_deleted = await self.disk_cache.delete_pattern(pattern)
+        deleted += disk_deleted
+        
+        return deleted
+    
+    async def cleanup_expired(self):
+        """Clean up expired cache entries"""
+        await self._cleanup_old_entries()
+    
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        memory_stats = self.memory_cache.get_stats()
+        disk_stats = self.disk_cache.get_stats()
+        
+        return {
+            'memory_usage_mb': memory_stats.memory_usage_mb,
+            'disk_usage_mb': disk_stats.disk_usage_mb,
+            'hit_rate': ((self.memory_hits + self.disk_hits) / max(1, self.total_requests)) * 100,
+            'total_entries': memory_stats.total_entries + disk_stats.total_entries,
+            'memory_hits': self.memory_hits,
+            'disk_hits': self.disk_hits,
+            'total_requests': self.total_requests
+        }
+
+
+class AdvancedCacheSystem(HybridCacheManager):
+    """Alias for HybridCacheManager to maintain compatibility"""
+    pass
 
 
 # Global cache instance
