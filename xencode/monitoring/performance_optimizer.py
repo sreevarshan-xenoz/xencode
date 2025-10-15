@@ -320,4 +320,4 @@ class AlertManager:
                     logger.error(f"Alert callback failed: {e}")
     
     async def _resolve_alert_if_exists(self, metric_type: MetricType):
-        """Resolve alert if it ex
+        """Resolve alert if it exists and conditions are met"""
