@@ -420,6 +420,60 @@ class DocumentProcessor:
         """Get list of all supported document types"""
         return list(self.processors.keys())
     
+    async def process_document_with_ethics(self, 
+                                         file_path: Union[str, Path],
+                                         document_type: Optional[DocumentType] = None,
+                                         options: Optional[ProcessingOptions] = None) -> Dict[str, Any]:
+        """Process document with ethics compliance checking"""
+        try:
+            from .ethics_document_integration import document_ethics_processor
+            
+            # First process the document normally
+            result = await self.process_document(file_path, document_type, options)
+            
+            if not result.success or not result.document:
+                return {
+                    'processing_result': result,
+                    'ethics_report': None,
+                    'error': result.error_message
+                }
+            
+            # Extract text content for ethics analysis
+            document_content = result.document.extracted_text or ""
+            document_metadata = {
+                'id': str(file_path),
+                'name': result.document.original_filename,
+                'type': result.document.document_type.value,
+                'file_size': Path(file_path).stat().st_size if Path(file_path).exists() else 0,
+                'processing_time_ms': result.document.processing_time_ms
+            }
+            
+            # Run ethics compliance check
+            ethics_report = await document_ethics_processor.process_document_with_ethics(
+                document_content, document_metadata
+            )
+            
+            return {
+                'processing_result': result,
+                'ethics_report': ethics_report,
+                'compliance_score': ethics_report.compliance_score,
+                'issues_found': len(ethics_report.issues_found),
+                'recommendations': ethics_report.recommendations
+            }
+            
+        except ImportError:
+            return {
+                'processing_result': result if 'result' in locals() else None,
+                'ethics_report': None,
+                'error': 'Ethics framework not available'
+            }
+        except Exception as e:
+            return {
+                'processing_result': result if 'result' in locals() else None,
+                'ethics_report': None,
+                'error': f'Ethics processing failed: {str(e)}'
+            }
+    
     async def validate_document(self, file_path: Union[str, Path]) -> Dict[str, Any]:
         """Validate document without full processing"""
         
