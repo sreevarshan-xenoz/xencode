@@ -25,8 +25,12 @@ from xencode.advanced_error_handler import get_error_handler, ErrorHandler, Erro
 # Phase 6 AI/ML imports
 try:
     from xencode.ai_ensembles import create_ensemble_reasoner, EnsembleReasoner
+    from xencode.ollama_optimizer import create_ollama_optimizer, OllamaOptimizer
+    from xencode.rlhf_tuner import create_rlhf_tuner, RLHFTuner
 except ImportError:
     create_ensemble_reasoner = EnsembleReasoner = None
+    create_ollama_optimizer = OllamaOptimizer = None
+    create_rlhf_tuner = RLHFTuner = None
 
 console = Console()
 
@@ -40,6 +44,8 @@ class Phase2Coordinator:
         self.error_handler: Optional[ErrorHandler] = None
         self.config: Optional[XencodeConfig] = None
         self.ensemble_reasoner: Optional[EnsembleReasoner] = None
+        self.ollama_optimizer: Optional[OllamaOptimizer] = None
+        self.rlhf_tuner: Optional[RLHFTuner] = None
         self.initialized = False
         
     async def initialize(self, config_path: Optional[Path] = None) -> bool:
@@ -64,6 +70,22 @@ class Phase2Coordinator:
                 if create_ensemble_reasoner:
                     self.ensemble_reasoner = await create_ensemble_reasoner(self.cache_manager)
                     console.print("[green]✅ AI Ensemble system initialized[/green]")
+                
+                # Initialize Ollama optimizer
+                if create_ollama_optimizer:
+                    self.ollama_optimizer = await create_ollama_optimizer()
+                    if self.ollama_optimizer:
+                        console.print("[green]✅ Ollama Optimizer initialized[/green]")
+                
+                # Initialize RLHF tuner (lightweight config)
+                if create_rlhf_tuner:
+                    try:
+                        from xencode.rlhf_tuner import RLHFConfig
+                        rlhf_config = RLHFConfig(max_epochs=1, synthetic_data_size=10)
+                        self.rlhf_tuner = await create_rlhf_tuner(rlhf_config)
+                        console.print("[green]✅ RLHF Tuner initialized[/green]")
+                    except Exception as e:
+                        console.print(f"[yellow]⚠️ RLHF Tuner initialization skipped: {e}[/yellow]")
                 
                 self.initialized = True
                 console.print("[green]✅ Phase 2 systems initialized successfully[/green]")

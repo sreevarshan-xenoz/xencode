@@ -51,6 +51,24 @@ except ImportError:
     EnsembleReasoner = QueryRequest = QueryResponse = ModelResponse = None
     EnsembleMethod = ModelTier = TokenVoter = create_ensemble_reasoner = None
 
+try:
+    from .ollama_optimizer import (
+        OllamaOptimizer, ModelInfo, BenchmarkResult, QuantizationLevel,
+        ModelStatus, create_ollama_optimizer
+    )
+except ImportError:
+    OllamaOptimizer = ModelInfo = BenchmarkResult = QuantizationLevel = None
+    ModelStatus = create_ollama_optimizer = None
+
+try:
+    from .rlhf_tuner import (
+        RLHFTuner, RLHFConfig, CodePair, TrainingMetrics,
+        SyntheticDataGenerator, create_rlhf_tuner
+    )
+except ImportError:
+    RLHFTuner = RLHFConfig = CodePair = TrainingMetrics = None
+    SyntheticDataGenerator = create_rlhf_tuner = None
+
 # Enhancement systems (Phase 3+) - with optional imports
 try:
     from .user_feedback_system import (
@@ -144,6 +162,10 @@ __all__ = [
     # AI/ML Phase 6 systems
     "EnsembleReasoner", "QueryRequest", "QueryResponse", "ModelResponse",
     "EnsembleMethod", "ModelTier", "TokenVoter", "create_ensemble_reasoner",
+    "OllamaOptimizer", "ModelInfo", "BenchmarkResult", "QuantizationLevel",
+    "ModelStatus", "create_ollama_optimizer",
+    "RLHFTuner", "RLHFConfig", "CodePair", "TrainingMetrics",
+    "SyntheticDataGenerator", "create_rlhf_tuner",
     
     # Enhancement systems
     "UserFeedbackManager", "FeedbackType", "UserJourneyEvent",
