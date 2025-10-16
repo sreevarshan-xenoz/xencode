@@ -2,10 +2,12 @@
 """
 Analytics API Router
 
-FastAPI router for analytics, reporting, and data insights endpoints.
+FastAPI router for analytics, reporting, and data insights endpoints including
+metrics collection, dashboard data, and comprehensive reporting capabilities.
 """
 
 import asyncio
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union
 from enum import Enum
@@ -28,6 +30,8 @@ try:
     )
     from ...advanced_analytics_engine import AdvancedAnalyticsEngine
     from ...analytics_integration import IntegratedAnalyticsOrchestrator
+    from ...analytics.metrics_collector import MetricsCollector
+    from ...analytics.event_tracker import EventTracker
     ANALYTICS_AVAILABLE = True
 except ImportError:
     ANALYTICS_AVAILABLE = False
@@ -48,123 +52,425 @@ class ReportFormatEnum(str, Enum):
 
 class ReportTypeEnum(str, Enum):
     """Report type options"""
-    SUMMARY = "summary"
-    DETAILED = "detailed"
-    USAGE_PATTERNS = "usage_patterns"
-    COST_ANALYSIS = "cost_analysis"
+    USAGE = "usage"
     PERFORMANCE = "performance"
-    TRENDS = "trends"
+    SECURITY = "security"
+    USER_ACTIVITY = "user_activity"
+    SYSTEM_HEALTH = "system_health"
+    PLUGIN_ANALYTICS = "plugin_analytics"
+    WORKSPACE_ANALYTICS = "workspace_analytics"
     CUSTOM = "custom"
+
+
+class MetricTypeEnum(str, Enum):
+    """Metric type options"""
+    COUNTER = "counter"
+    GAUGE = "gauge"
+    HISTOGRAM = "histogram"
+    SUMMARY = "summary"
+
+
+class TimeRangeEnum(str, Enum):
+    """Time range options"""
+    LAST_HOUR = "1h"
+    LAST_DAY = "1d"
+    LAST_WEEK = "1w"
+    LAST_MONTH = "1m"
+    LAST_QUARTER = "3m"
+    LAST_YEAR = "1y"
+    CUSTOM = "custom"
+
+
+class MetricRequest(BaseModel):
+    """Request to record a metric"""
+    name: str
+    value: float
+    metric_type: MetricTypeEnum = MetricTypeEnum.GAUGE
+    labels: Dict[str, str] = Field(default_factory=dict)
+    timestamp: Optional[datetime] = None
+
+
+class EventRequest(BaseModel):
+    """Request to record an event"""
+    event_type: str
+    event_data: Dict[str, Any] = Field(default_factory=dict)
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    timestamp: Optional[datetime] = None
 
 
 class ReportRequest(BaseModel):
     """Request to generate a report"""
     report_type: ReportTypeEnum
-    format: ReportFormatEnum
-    title: str
-    description: Optional[str] = None
-    time_period_hours: int = Field(24, ge=1, le=8760)  # 1 hour to 1 year
-    include_charts: bool = True
-    include_recommendations: bool = True
-    custom_filters: Dict[str, Any] = Field(default_factory=dict)
+    format: ReportFormatEnum = ReportFormatEnum.JSON
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_DAY
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    include_raw_data: bool = False
+    email_delivery: Optional[str] = None
+
+
+class DashboardRequest(BaseModel):
+    """Request for dashboard data"""
+    dashboard_type: str = "overview"
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_DAY
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    refresh_interval: int = 30  # seconds
+
+
+class MetricResponse(BaseModel):
+    """Metric data response"""
+    name: str
+    value: float
+    metric_type: str
+    labels: Dict[str, str]
+    timestamp: datetime
+
+
+class EventResponse(BaseModel):
+    """Event data response"""
+    id: str
+    event_type: str
+    event_data: Dict[str, Any]
+    user_id: Optional[str]
+    session_id: Optional[str]
+    timestamp: datetime
 
 
 class ReportResponse(BaseModel):
-    """Response for generated report"""
+    """Report generation response"""
     report_id: str
-    status: str
-    title: str
+    report_type: str
     format: str
-    generated_at: datetime
+    status: str = "generating"
     download_url: Optional[str] = None
-    file_size_bytes: Optional[int] = None
+    created_at: datetime
+    estimated_completion: Optional[datetime] = None
 
 
-class AnalyticsQuery(BaseModel):
-    """Analytics query request"""
-    query_type: str = Field(..., description="Type of analytics query")
-    time_range_hours: int = Field(24, ge=1, le=8760)
-    filters: Dict[str, Any] = Field(default_factory=dict)
-    aggregation: Optional[str] = Field(None, description="Aggregation method")
-    group_by: Optional[List[str]] = Field(None, description="Fields to group by")
-
-
-class AnalyticsResponse(BaseModel):
-    """Analytics query response"""
-    query_id: str
-    timestamp: datetime
+class DashboardResponse(BaseModel):
+    """Dashboard data response"""
+    dashboard_type: str
     data: Dict[str, Any]
-    metadata: Dict[str, Any]
+    last_updated: datetime
+    refresh_interval: int
+    next_refresh: datetime
 
 
-class UsageMetrics(BaseModel):
-    """Usage metrics response"""
+class AnalyticsOverview(BaseModel):
+    """Analytics overview response"""
+    total_events: int
+    total_metrics: int
+    active_users: int
+    system_health_score: float
+    top_events: List[Dict[str, Any]]
+    performance_summary: Dict[str, Any]
+    alerts: List[Dict[str, Any]]
+    last_updated: datetime
+
+
+class HealthCheckResponse(BaseModel):
+    """Health check response"""
+    status: str
     timestamp: datetime
-    total_requests: int
-    unique_users: int
-    popular_features: List[Dict[str, Any]]
-    performance_metrics: Dict[str, float]
-    error_rates: Dict[str, float]
+    components: Dict[str, str]
+    uptime_seconds: float
+    version: str
+    environment: str
 
 
 # Dependency to get analytics system
 async def get_analytics_system():
     """Dependency to get analytics system"""
     if not ANALYTICS_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Analytics components not available")
+        raise HTTPException(status_code=503, detail="Analytics system not available")
     
     try:
-        # Initialize analytics system if needed
+        # For now, return a mock system - in production this would be a singleton
         return AnalyticsReportingSystem()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize analytics system: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics system: {e}")
 
 
-@router.get("/status")
-async def get_analytics_status():
-    """Get analytics system status"""
-    return {
-        "status": "available" if ANALYTICS_AVAILABLE else "unavailable",
-        "components": {
-            "reporting_system": ANALYTICS_AVAILABLE,
-            "analytics_engine": ANALYTICS_AVAILABLE,
-            "orchestrator": ANALYTICS_AVAILABLE
-        },
-        "timestamp": datetime.now().isoformat()
-    }
+# Dependency to get metrics collector
+async def get_metrics_collector():
+    """Dependency to get metrics collector"""
+    if not ANALYTICS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Metrics collector not available")
+    
+    try:
+        return MetricsCollector()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics collector: {e}")
+
+
+# Dependency to get event tracker
+async def get_event_tracker():
+    """Dependency to get event tracker"""
+    if not ANALYTICS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Event tracker not available")
+    
+    try:
+        return EventTracker()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get event tracker: {e}")
+
+
+@router.get("/overview", response_model=AnalyticsOverview)
+async def get_analytics_overview(
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_DAY,
+    analytics_system = Depends(get_analytics_system)
+):
+    """Get analytics overview with key metrics and insights"""
+    try:
+        if ANALYTICS_AVAILABLE:
+            overview_data = await analytics_system.get_overview(time_range.value)
+            
+            return AnalyticsOverview(
+                total_events=overview_data.get('total_events', 0),
+                total_metrics=overview_data.get('total_metrics', 0),
+                active_users=overview_data.get('active_users', 0),
+                system_health_score=overview_data.get('health_score', 0.95),
+                top_events=overview_data.get('top_events', []),
+                performance_summary=overview_data.get('performance_summary', {}),
+                alerts=overview_data.get('alerts', []),
+                last_updated=datetime.now()
+            )
+        else:
+            # Mock implementation
+            return AnalyticsOverview(
+                total_events=12450,
+                total_metrics=8920,
+                active_users=156,
+                system_health_score=0.97,
+                top_events=[
+                    {"event": "plugin_execution", "count": 3420},
+                    {"event": "workspace_sync", "count": 2890},
+                    {"event": "file_operation", "count": 2156}
+                ],
+                performance_summary={
+                    "avg_response_time_ms": 45.2,
+                    "cache_hit_rate": 0.94,
+                    "error_rate": 0.02
+                },
+                alerts=[],
+                last_updated=datetime.now()
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics overview: {e}")
+
+
+@router.post("/metrics", response_model=MetricResponse)
+async def record_metric(
+    request: MetricRequest,
+    metrics_collector = Depends(get_metrics_collector)
+):
+    """Record a metric value"""
+    try:
+        timestamp = request.timestamp or datetime.now()
+        
+        if ANALYTICS_AVAILABLE:
+            await metrics_collector.record_metric(
+                name=request.name,
+                value=request.value,
+                metric_type=request.metric_type.value,
+                labels=request.labels,
+                timestamp=timestamp
+            )
+        
+        return MetricResponse(
+            name=request.name,
+            value=request.value,
+            metric_type=request.metric_type.value,
+            labels=request.labels,
+            timestamp=timestamp
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to record metric: {e}")
+
+
+@router.get("/metrics")
+async def get_metrics(
+    name: Optional[str] = None,
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_HOUR,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    labels: Optional[str] = None,
+    metrics_collector = Depends(get_metrics_collector)
+):
+    """Get metrics data"""
+    try:
+        # Parse labels if provided
+        label_filters = {}
+        if labels:
+            for label_pair in labels.split(','):
+                if '=' in label_pair:
+                    key, value = label_pair.split('=', 1)
+                    label_filters[key.strip()] = value.strip()
+        
+        if ANALYTICS_AVAILABLE:
+            metrics = await metrics_collector.get_metrics(
+                name=name,
+                time_range=time_range.value,
+                start_date=start_date,
+                end_date=end_date,
+                labels=label_filters
+            )
+        else:
+            # Mock implementation
+            metrics = [
+                {
+                    "name": "response_time_ms",
+                    "value": 45.2,
+                    "metric_type": "gauge",
+                    "labels": {"endpoint": "/api/v1/plugins"},
+                    "timestamp": datetime.now().isoformat()
+                },
+                {
+                    "name": "request_count",
+                    "value": 1250,
+                    "metric_type": "counter",
+                    "labels": {"method": "GET"},
+                    "timestamp": datetime.now().isoformat()
+                }
+            ]
+        
+        return {
+            "metrics": metrics,
+            "total_count": len(metrics),
+            "time_range": time_range.value,
+            "filters": {"name": name, "labels": label_filters}
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {e}")
+
+
+@router.post("/events", response_model=EventResponse)
+async def record_event(
+    request: EventRequest,
+    event_tracker = Depends(get_event_tracker)
+):
+    """Record an analytics event"""
+    try:
+        event_id = str(uuid.uuid4())
+        timestamp = request.timestamp or datetime.now()
+        
+        if ANALYTICS_AVAILABLE:
+            await event_tracker.record_event(
+                event_id=event_id,
+                event_type=request.event_type,
+                event_data=request.event_data,
+                user_id=request.user_id,
+                session_id=request.session_id,
+                timestamp=timestamp
+            )
+        
+        return EventResponse(
+            id=event_id,
+            event_type=request.event_type,
+            event_data=request.event_data,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            timestamp=timestamp
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to record event: {e}")
+
+
+@router.get("/events")
+async def get_events(
+    event_type: Optional[str] = None,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_HOUR,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0, ge=0),
+    event_tracker = Depends(get_event_tracker)
+):
+    """Get analytics events"""
+    try:
+        if ANALYTICS_AVAILABLE:
+            events = await event_tracker.get_events(
+                event_type=event_type,
+                user_id=user_id,
+                session_id=session_id,
+                time_range=time_range.value,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+                offset=offset
+            )
+        else:
+            # Mock implementation
+            events = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "event_type": "plugin_execution",
+                    "event_data": {"plugin_id": "file-operations", "method": "ls_dir"},
+                    "user_id": "user123",
+                    "session_id": "session456",
+                    "timestamp": datetime.now().isoformat()
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "event_type": "workspace_sync",
+                    "event_data": {"workspace_id": "ws789", "changes": 3},
+                    "user_id": "user123",
+                    "session_id": "session456",
+                    "timestamp": datetime.now().isoformat()
+                }
+            ]
+        
+        return {
+            "events": events,
+            "total_count": len(events),
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "event_type": event_type,
+                "user_id": user_id,
+                "session_id": session_id,
+                "time_range": time_range.value
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get events: {e}")
 
 
 @router.post("/reports", response_model=ReportResponse)
 async def generate_report(
-    report_request: ReportRequest,
+    request: ReportRequest,
     background_tasks: BackgroundTasks,
     analytics_system = Depends(get_analytics_system)
 ):
     """Generate an analytics report"""
     try:
-        # Convert Pydantic models to internal types
-        config = ReportConfig(
-            report_type=ReportType(report_request.report_type.value),
-            format=ReportFormat(report_request.format.value),
-            title=report_request.title,
-            description=report_request.description,
-            time_period_hours=report_request.time_period_hours,
-            include_charts=report_request.include_charts,
-            include_recommendations=report_request.include_recommendations,
-            custom_filters=report_request.custom_filters
+        report_id = str(uuid.uuid4())
+        
+        # Start report generation in background
+        background_tasks.add_task(
+            generate_report_background,
+            analytics_system,
+            report_id,
+            request
         )
         
-        # Generate report
-        report = await analytics_system.generate_report(config)
-        
         return ReportResponse(
-            report_id=report.report_id,
-            status="completed",
-            title=report.config.title,
-            format=report.format.value,
-            generated_at=report.generated_at,
-            download_url=f"/api/v1/analytics/reports/{report.report_id}/download",
-            file_size_bytes=len(report.content) if isinstance(report.content, (str, bytes)) else None
+            report_id=report_id,
+            report_type=request.report_type.value,
+            format=request.format.value,
+            status="generating",
+            created_at=datetime.now(),
+            estimated_completion=datetime.now() + timedelta(minutes=5)
         )
         
     except Exception as e:
@@ -172,25 +478,28 @@ async def generate_report(
 
 
 @router.get("/reports/{report_id}")
-async def get_report_info(
+async def get_report_status(
     report_id: str,
     analytics_system = Depends(get_analytics_system)
 ):
-    """Get information about a specific report"""
+    """Get report generation status"""
     try:
-        # This would typically fetch from a database
-        # For now, return mock data
-        return {
-            "report_id": report_id,
-            "status": "completed",
-            "title": "Analytics Report",
-            "format": "json",
-            "generated_at": datetime.now().isoformat(),
-            "download_url": f"/api/v1/analytics/reports/{report_id}/download"
-        }
+        if ANALYTICS_AVAILABLE:
+            status = await analytics_system.get_report_status(report_id)
+        else:
+            # Mock implementation
+            status = {
+                "report_id": report_id,
+                "status": "completed",
+                "download_url": f"/api/v1/analytics/reports/{report_id}/download",
+                "created_at": datetime.now().isoformat(),
+                "completed_at": datetime.now().isoformat()
+            }
+        
+        return status
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get report info: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get report status: {e}")
 
 
 @router.get("/reports/{report_id}/download")
@@ -200,295 +509,188 @@ async def download_report(
 ):
     """Download a generated report"""
     try:
-        # This would typically fetch the report from storage
-        # For now, generate a sample report
-        sample_data = {
-            "report_id": report_id,
-            "generated_at": datetime.now().isoformat(),
-            "summary": {
-                "total_users": 150,
-                "total_requests": 5000,
-                "average_response_time": 85.5,
-                "error_rate": 0.02
-            },
-            "usage_patterns": [
-                {"feature": "document_processing", "usage_count": 1200, "percentage": 24.0},
-                {"feature": "code_analysis", "usage_count": 1800, "percentage": 36.0},
-                {"feature": "workspace_management", "usage_count": 800, "percentage": 16.0}
-            ]
-        }
-        
-        # Create file-like object
-        json_str = json.dumps(sample_data, indent=2)
-        file_obj = io.StringIO(json_str)
-        
-        return StreamingResponse(
-            io.BytesIO(json_str.encode()),
-            media_type="application/json",
-            headers={"Content-Disposition": f"attachment; filename=report_{report_id}.json"}
-        )
+        if ANALYTICS_AVAILABLE:
+            report_data = await analytics_system.get_report_data(report_id)
+            
+            # Create streaming response
+            def generate_report_stream():
+                yield report_data
+            
+            return StreamingResponse(
+                generate_report_stream(),
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f"attachment; filename=report_{report_id}.json"}
+            )
+        else:
+            # Mock implementation
+            mock_report = {
+                "report_id": report_id,
+                "generated_at": datetime.now().isoformat(),
+                "data": {
+                    "summary": "Mock analytics report",
+                    "metrics": {"total_events": 1000, "active_users": 50}
+                }
+            }
+            
+            def generate_mock_stream():
+                yield json.dumps(mock_report, indent=2)
+            
+            return StreamingResponse(
+                generate_mock_stream(),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=report_{report_id}.json"}
+            )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download report: {e}")
 
 
-@router.post("/query", response_model=AnalyticsResponse)
-async def execute_analytics_query(
-    query: AnalyticsQuery,
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard_data(
+    request: DashboardRequest = Depends(),
     analytics_system = Depends(get_analytics_system)
 ):
-    """Execute a custom analytics query"""
+    """Get dashboard data for visualization"""
     try:
-        # Generate query ID
-        import uuid
-        query_id = str(uuid.uuid4())
-        
-        # Mock analytics data based on query type
-        if query.query_type == "usage_summary":
-            data = {
-                "total_requests": 5000,
-                "unique_users": 150,
-                "time_period_hours": query.time_range_hours,
-                "top_features": [
-                    {"name": "code_analysis", "count": 1800},
-                    {"name": "document_processing", "count": 1200},
-                    {"name": "workspace_management", "count": 800}
-                ]
-            }
-        elif query.query_type == "performance_metrics":
-            data = {
-                "average_response_time_ms": 85.5,
-                "p95_response_time_ms": 150.2,
-                "p99_response_time_ms": 280.1,
-                "error_rate": 0.02,
-                "cache_hit_rate": 0.94
-            }
-        elif query.query_type == "user_behavior":
-            data = {
-                "session_duration_avg_minutes": 45.2,
-                "pages_per_session": 12.5,
-                "bounce_rate": 0.15,
-                "conversion_rate": 0.68
-            }
+        if ANALYTICS_AVAILABLE:
+            dashboard_data = await analytics_system.get_dashboard_data(
+                dashboard_type=request.dashboard_type,
+                time_range=request.time_range.value,
+                start_date=request.start_date,
+                end_date=request.end_date
+            )
         else:
-            data = {"message": f"Query type '{query.query_type}' not implemented"}
-        
-        return AnalyticsResponse(
-            query_id=query_id,
-            timestamp=datetime.now(),
-            data=data,
-            metadata={
-                "query_type": query.query_type,
-                "time_range_hours": query.time_range_hours,
-                "filters_applied": len(query.filters),
-                "execution_time_ms": 45
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to execute analytics query: {e}")
-
-
-@router.get("/metrics/usage", response_model=UsageMetrics)
-async def get_usage_metrics(
-    hours: int = Query(24, ge=1, le=8760, description="Time period in hours"),
-    analytics_system = Depends(get_analytics_system)
-):
-    """Get usage metrics for the specified time period"""
-    try:
-        # Mock usage metrics
-        return UsageMetrics(
-            timestamp=datetime.now(),
-            total_requests=5000,
-            unique_users=150,
-            popular_features=[
-                {"name": "code_analysis", "usage_count": 1800, "percentage": 36.0},
-                {"name": "document_processing", "usage_count": 1200, "percentage": 24.0},
-                {"name": "workspace_management", "usage_count": 800, "percentage": 16.0},
-                {"name": "analytics", "usage_count": 600, "percentage": 12.0},
-                {"name": "monitoring", "usage_count": 400, "percentage": 8.0}
-            ],
-            performance_metrics={
-                "avg_response_time_ms": 85.5,
-                "p95_response_time_ms": 150.2,
-                "cache_hit_rate": 0.94,
-                "throughput_rps": 125.5
-            },
-            error_rates={
-                "total_error_rate": 0.02,
-                "4xx_error_rate": 0.015,
-                "5xx_error_rate": 0.005
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get usage metrics: {e}")
-
-
-@router.get("/metrics/performance")
-async def get_performance_metrics(
-    hours: int = Query(24, ge=1, le=168, description="Time period in hours (max 1 week)"),
-    granularity: str = Query("hour", description="Data granularity: minute, hour, day")
-):
-    """Get performance metrics over time"""
-    try:
-        # Generate mock time series data
-        from datetime import datetime, timedelta
-        
-        end_time = datetime.now()
-        start_time = end_time - timedelta(hours=hours)
-        
-        # Determine time step based on granularity
-        if granularity == "minute":
-            step = timedelta(minutes=1)
-        elif granularity == "hour":
-            step = timedelta(hours=1)
-        elif granularity == "day":
-            step = timedelta(days=1)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid granularity")
-        
-        # Generate data points
-        data_points = []
-        current_time = start_time
-        
-        while current_time <= end_time:
-            # Mock performance data with some variation
-            import random
-            
-            data_points.append({
-                "timestamp": current_time.isoformat(),
-                "response_time_ms": 85 + random.uniform(-20, 30),
-                "throughput_rps": 120 + random.uniform(-30, 40),
-                "error_rate": max(0, 0.02 + random.uniform(-0.015, 0.01)),
-                "cpu_usage": 45 + random.uniform(-15, 25),
-                "memory_usage": 60 + random.uniform(-20, 20)
-            })
-            
-            current_time += step
-        
-        return {
-            "time_period_hours": hours,
-            "granularity": granularity,
-            "data_points": data_points,
-            "summary": {
-                "avg_response_time_ms": sum(p["response_time_ms"] for p in data_points) / len(data_points),
-                "avg_throughput_rps": sum(p["throughput_rps"] for p in data_points) / len(data_points),
-                "avg_error_rate": sum(p["error_rate"] for p in data_points) / len(data_points)
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")
-
-
-@router.get("/insights")
-async def get_analytics_insights(
-    category: str = Query("all", description="Insight category: usage, performance, errors, trends, all"),
-    analytics_system = Depends(get_analytics_system)
-):
-    """Get AI-generated insights from analytics data"""
-    try:
-        insights = []
-        
-        if category in ["usage", "all"]:
-            insights.extend([
-                {
-                    "category": "usage",
-                    "type": "trend",
-                    "title": "Code Analysis Feature Growing",
-                    "description": "Code analysis usage has increased 25% over the past week",
-                    "confidence": 0.85,
-                    "recommendation": "Consider optimizing code analysis performance for better user experience"
+            # Mock implementation
+            dashboard_data = {
+                "overview": {
+                    "total_requests": 15420,
+                    "active_users": 156,
+                    "error_rate": 0.02,
+                    "avg_response_time": 45.2
                 },
-                {
-                    "category": "usage",
-                    "type": "pattern",
-                    "title": "Peak Usage Hours",
-                    "description": "Highest usage occurs between 9 AM - 11 AM and 2 PM - 4 PM",
-                    "confidence": 0.92,
-                    "recommendation": "Schedule maintenance outside peak hours"
+                "charts": {
+                    "requests_over_time": [
+                        {"timestamp": "2023-01-01T10:00:00Z", "value": 120},
+                        {"timestamp": "2023-01-01T11:00:00Z", "value": 145},
+                        {"timestamp": "2023-01-01T12:00:00Z", "value": 132}
+                    ],
+                    "top_endpoints": [
+                        {"endpoint": "/api/v1/plugins", "requests": 3420},
+                        {"endpoint": "/api/v1/workspaces", "requests": 2890},
+                        {"endpoint": "/api/v1/analytics", "requests": 1560}
+                    ]
                 }
-            ])
-        
-        if category in ["performance", "all"]:
-            insights.extend([
-                {
-                    "category": "performance",
-                    "type": "optimization",
-                    "title": "Cache Hit Rate Excellent",
-                    "description": "Cache hit rate of 94% is above target of 90%",
-                    "confidence": 0.98,
-                    "recommendation": "Current caching strategy is working well"
-                },
-                {
-                    "category": "performance",
-                    "type": "alert",
-                    "title": "Response Time Variance",
-                    "description": "Response times show high variance during peak hours",
-                    "confidence": 0.78,
-                    "recommendation": "Investigate auto-scaling configuration"
-                }
-            ])
-        
-        if category in ["errors", "all"]:
-            insights.extend([
-                {
-                    "category": "errors",
-                    "type": "trend",
-                    "title": "Error Rate Stable",
-                    "description": "Error rate has remained stable at 2% over the past month",
-                    "confidence": 0.89,
-                    "recommendation": "Continue monitoring for any sudden changes"
-                }
-            ])
-        
-        return {
-            "category": category,
-            "insights": insights,
-            "generated_at": datetime.now().isoformat(),
-            "total_insights": len(insights)
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get analytics insights: {e}")
-
-
-@router.get("/dashboard/data")
-async def get_dashboard_data():
-    """Get data for analytics dashboard"""
-    try:
-        return {
-            "summary": {
-                "total_users": 150,
-                "total_requests": 5000,
-                "avg_response_time": 85.5,
-                "error_rate": 0.02,
-                "uptime": 99.8
-            },
-            "recent_activity": [
-                {"timestamp": (datetime.now() - timedelta(minutes=5)).isoformat(), "event": "Document processed", "user": "user_123"},
-                {"timestamp": (datetime.now() - timedelta(minutes=8)).isoformat(), "event": "Code analyzed", "user": "user_456"},
-                {"timestamp": (datetime.now() - timedelta(minutes=12)).isoformat(), "event": "Workspace created", "user": "user_789"}
-            ],
-            "top_features": [
-                {"name": "Code Analysis", "usage": 36.0},
-                {"name": "Document Processing", "usage": 24.0},
-                {"name": "Workspace Management", "usage": 16.0}
-            ],
-            "system_health": {
-                "cpu_usage": 45.2,
-                "memory_usage": 62.1,
-                "disk_usage": 28.5,
-                "cache_hit_rate": 94.2
             }
-        }
+        
+        return DashboardResponse(
+            dashboard_type=request.dashboard_type,
+            data=dashboard_data,
+            last_updated=datetime.now(),
+            refresh_interval=request.refresh_interval,
+            next_refresh=datetime.now() + timedelta(seconds=request.refresh_interval)
+        )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get dashboard data: {e}")
 
 
-# Add router tags and metadata
+@router.get("/health", response_model=HealthCheckResponse)
+async def health_check():
+    """Analytics system health check"""
+    try:
+        components = {
+            "analytics_engine": "healthy" if ANALYTICS_AVAILABLE else "unavailable",
+            "metrics_collector": "healthy" if ANALYTICS_AVAILABLE else "unavailable",
+            "event_tracker": "healthy" if ANALYTICS_AVAILABLE else "unavailable",
+            "report_generator": "healthy" if ANALYTICS_AVAILABLE else "unavailable"
+        }
+        
+        overall_status = "healthy" if all(status == "healthy" for status in components.values()) else "degraded"
+        
+        return HealthCheckResponse(
+            status=overall_status,
+            timestamp=datetime.now(),
+            components=components,
+            uptime_seconds=86400.0,  # Mock 24 hours
+            version="3.0.0",
+            environment="development"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
+
+
+@router.get("/insights")
+async def get_insights(
+    insight_type: str = "performance",
+    time_range: TimeRangeEnum = TimeRangeEnum.LAST_DAY,
+    analytics_system = Depends(get_analytics_system)
+):
+    """Get AI-powered insights and recommendations"""
+    try:
+        if ANALYTICS_AVAILABLE:
+            insights = await analytics_system.get_insights(insight_type, time_range.value)
+        else:
+            # Mock implementation
+            insights = {
+                "insight_type": insight_type,
+                "recommendations": [
+                    {
+                        "title": "Optimize Plugin Performance",
+                        "description": "File operations plugin shows 15% slower response times",
+                        "priority": "medium",
+                        "impact": "performance"
+                    },
+                    {
+                        "title": "Scale Workspace Storage",
+                        "description": "Workspace storage usage increased by 25% this week",
+                        "priority": "low",
+                        "impact": "capacity"
+                    }
+                ],
+                "trends": {
+                    "user_growth": 0.12,
+                    "performance_trend": -0.05,
+                    "error_trend": 0.02
+                },
+                "generated_at": datetime.now().isoformat()
+            }
+        
+        return insights
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get insights: {e}")
+
+
+# Background tasks
+async def generate_report_background(
+    analytics_system,
+    report_id: str,
+    request: ReportRequest
+):
+    """Background task for report generation"""
+    try:
+        if ANALYTICS_AVAILABLE:
+            await analytics_system.generate_report(
+                report_id=report_id,
+                report_type=request.report_type.value,
+                format=request.format.value,
+                time_range=request.time_range.value,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                filters=request.filters,
+                include_raw_data=request.include_raw_data
+            )
+            
+            # Send email if requested
+            if request.email_delivery:
+                await analytics_system.send_report_email(report_id, request.email_delivery)
+        
+        # TODO: Update report status in database/cache
+        
+    except Exception as e:
+        # TODO: Log report generation error
+        print(f"Report generation failed: {e}")
+
+
 router.tags = ["Analytics"]
