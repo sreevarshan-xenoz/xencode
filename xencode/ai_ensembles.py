@@ -20,6 +20,12 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
+# Import metrics (optional)
+try:
+    from .ai_metrics import record_ensemble_success, record_ensemble_error
+except ImportError:
+    record_ensemble_success = record_ensemble_error = lambda *args, **kwargs: None
+
 console = Console()
 
 
@@ -267,6 +273,15 @@ class EnsembleReasoner:
         
         # Update stats
         self._update_stats(response)
+        
+        # Record metrics
+        record_ensemble_success(
+            method=query.method.value if hasattr(query.method, 'value') else str(query.method),
+            model_count=len(available_models),
+            inference_time_ms=response.total_time_ms,
+            consensus_score=response.consensus_score,
+            cache_hit=response.cache_hit
+        )
         
         return response
     
