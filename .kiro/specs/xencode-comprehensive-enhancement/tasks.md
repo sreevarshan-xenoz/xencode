@@ -562,7 +562,7 @@ Convert the feature design into a series of prompts for a code-generation LLM th
   - Add log aggregation and analysis
   - _Requirements: REQ-6, REQ-9_
 
-- [x] 13.4 Create deployment automation
+- [ ] 13.4 Create deployment automation
   - Implement CI/CD pipeline enhancements
   - Add automated testing and deployment
   - Create rollback and disaster recovery procedures
