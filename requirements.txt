@@ -41,6 +41,11 @@ peft>=0.7.0
 transformers>=4.35.0
 pydantic>=2.0.0
 ollama>=0.1.7
+datasets>=2.0.0
+numpy>=1.21.0
+
+# CLI dependencies
+click>=8.0.0
 
 # Development dependencies
 pytest>=7.0.0
