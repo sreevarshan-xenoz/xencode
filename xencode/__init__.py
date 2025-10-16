@@ -41,6 +41,16 @@ try:
 except ImportError:
     Phase2Coordinator = None
 
+# AI/ML Phase 6 systems - with optional imports
+try:
+    from .ai_ensembles import (
+        EnsembleReasoner, QueryRequest, QueryResponse, ModelResponse,
+        EnsembleMethod, ModelTier, TokenVoter, create_ensemble_reasoner
+    )
+except ImportError:
+    EnsembleReasoner = QueryRequest = QueryResponse = ModelResponse = None
+    EnsembleMethod = ModelTier = TokenVoter = create_ensemble_reasoner = None
+
 # Enhancement systems (Phase 3+) - with optional imports
 try:
     from .user_feedback_system import (
@@ -130,6 +140,10 @@ __all__ = [
     "ConfigurationManager", "XencodeConfig",
     "ErrorHandler", "ErrorCategory",
     "Phase2Coordinator",
+    
+    # AI/ML Phase 6 systems
+    "EnsembleReasoner", "QueryRequest", "QueryResponse", "ModelResponse",
+    "EnsembleMethod", "ModelTier", "TokenVoter", "create_ensemble_reasoner",
     
     # Enhancement systems
     "UserFeedbackManager", "FeedbackType", "UserJourneyEvent",

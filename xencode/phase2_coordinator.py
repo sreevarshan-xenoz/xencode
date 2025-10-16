@@ -22,6 +22,12 @@ from xencode.advanced_cache_system import get_cache_manager, HybridCacheManager
 from xencode.smart_config_manager import get_config_manager, ConfigurationManager, XencodeConfig
 from xencode.advanced_error_handler import get_error_handler, ErrorHandler, ErrorSeverity, ErrorCategory
 
+# Phase 6 AI/ML imports
+try:
+    from xencode.ai_ensembles import create_ensemble_reasoner, EnsembleReasoner
+except ImportError:
+    create_ensemble_reasoner = EnsembleReasoner = None
+
 console = Console()
 
 
@@ -33,6 +39,7 @@ class Phase2Coordinator:
         self.cache_manager: Optional[HybridCacheManager] = None
         self.error_handler: Optional[ErrorHandler] = None
         self.config: Optional[XencodeConfig] = None
+        self.ensemble_reasoner: Optional[EnsembleReasoner] = None
         self.initialized = False
         
     async def initialize(self, config_path: Optional[Path] = None) -> bool:
@@ -52,6 +59,11 @@ class Phase2Coordinator:
                     memory_mb=self.config.cache.memory_cache_mb,
                     disk_mb=self.config.cache.disk_cache_mb
                 )
+                
+                # Initialize AI ensemble system (Phase 6)
+                if create_ensemble_reasoner:
+                    self.ensemble_reasoner = await create_ensemble_reasoner(self.cache_manager)
+                    console.print("[green]✅ AI Ensemble system initialized[/green]")
                 
                 self.initialized = True
                 console.print("[green]✅ Phase 2 systems initialized successfully[/green]")

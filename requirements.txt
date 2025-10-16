@@ -35,6 +35,13 @@ prometheus-client>=0.19.0
 fastapi>=0.104.1
 uvicorn>=0.24.0
 
+# AI/ML Phase 6 dependencies
+torch>=2.0.0
+peft>=0.7.0
+transformers>=4.35.0
+pydantic>=2.0.0
+ollama>=0.1.7
+
 # Development dependencies
 pytest>=7.0.0
 pytest-cov>=4.0.0
