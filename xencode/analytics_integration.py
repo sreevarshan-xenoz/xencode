@@ -397,7 +397,8 @@ class IntegratedAnalyticsOrchestrator:
         insights = []
         
         # Check analytics infrastructure status
-        if analytics_data.get("analytics_infrastructure", {}).get("running", False):
+        analytics_infra = analytics_data.get("analytics_infrastructure")
+        if isinstance(analytics_infra, dict) and analytics_infra.get("running", False):
             insights.append({
                 "type": "analytics_healthy",
                 "severity": "info",
