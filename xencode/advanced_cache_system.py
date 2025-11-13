@@ -893,52 +893,6 @@ class HybridCacheManager:
         
         return deleted
     
-    async def put_enhanced(self, key: str, value: Any, entry: CacheEntry) -> bool:
-        """Store value with enhanced cache entry metadata"""
-        # Try memory cache first
-        if self.memory_cache.put(key, value, entry.tags, entry.metadata):
-            return True
-        
-        # Fall back to disk cache
-        return await self.disk_cache.put(key, value, entry.tags, entry.metadata)
-    
-    async def get_entry(self, key: str) -> Optional[CacheEntry]:
-        """Get cache entry with metadata"""
-        # Check memory cache first
-        if key in self.memory_cache.cache:
-            return self.memory_cache.cache[key]
-        
-        # Check disk cache
-        return await self.disk_cache.get_entry(key)
-    
-    async def get_all_entries(self) -> List[CacheEntry]:
-        """Get all cache entries"""
-        memory_entries = list(self.memory_cache.cache.values())
-        disk_entries = await self.disk_cache.get_all_entries()
-        return memory_entries + disk_entries
-    
-    async def get_entries_by_tag(self, tag: str) -> List[CacheEntry]:
-        """Get cache entries by tag"""
-        memory_entries = [entry for entry in self.memory_cache.cache.values() if tag in entry.tags]
-        disk_entries = await self.disk_cache.get_entries_by_tag(tag)
-        return memory_entries + disk_entries
-    
-    async def delete_pattern(self, pattern: str) -> int:
-        """Delete cache entries matching pattern"""
-        deleted = 0
-        
-        # Memory cache
-        keys_to_delete = [key for key in self.memory_cache.cache.keys() if pattern in key]
-        for key in keys_to_delete:
-            self.memory_cache._remove_key(key)
-            deleted += 1
-        
-        # Disk cache
-        disk_deleted = await self.disk_cache.delete_pattern(pattern)
-        deleted += disk_deleted
-        
-        return deleted
-    
     async def cleanup_expired(self):
         """Clean up expired cache entries"""
         await self._cleanup_old_entries()
