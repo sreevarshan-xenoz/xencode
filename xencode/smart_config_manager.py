@@ -309,7 +309,7 @@ class ConfigurationManager:
                     return ConfigFormat.YAML
                 else:
                     return ConfigFormat.TOML
-            except:
+            except (OSError, IOError, UnicodeDecodeError):
                 return ConfigFormat.YAML  # Default
     
     def load_config(self, config_path: Optional[Path] = None) -> XencodeConfig:
