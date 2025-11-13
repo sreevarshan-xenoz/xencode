@@ -167,7 +167,7 @@ class HardwareDetector:
                                 break
                     else:
                         storage_type = "ssd"  # Default assumption for modern systems
-                except:
+                except (OSError, IOError, ValueError):
                     storage_type = "ssd"  # Default assumption for modern systems
             elif platform.system() == "Windows":
                 try:
@@ -183,7 +183,7 @@ class HardwareDetector:
                         storage_type = "hdd"
                     else:
                         storage_type = "ssd"  # Default for modern systems
-                except:
+                except (subprocess.SubprocessError, OSError, FileNotFoundError):
                     storage_type = "ssd"  # Default for modern systems
             else:
                 storage_type = "ssd"  # Default for macOS and other systems
@@ -192,7 +192,7 @@ class HardwareDetector:
                 "type": storage_type,
                 "available_gb": available_gb
             }
-        except:
+        except (OSError, AttributeError):
             return {
                 "type": "unknown",
                 "available_gb": 100.0  # Safe default
@@ -668,7 +668,7 @@ What would you like to do?
                 timeout=5
             )
             return result.returncode == 0
-        except:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             return False
     
     def _save_model_config(self, model: ModelRecommendation):
