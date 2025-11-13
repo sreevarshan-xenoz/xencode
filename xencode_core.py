@@ -1666,34 +1666,22 @@ def main():
         export_conversation()
         return
 
-    # File ops
-    if len(args) > 0 and args[0] == 'file':
+    # File operations
+    if args and args[0] == 'file':
         if len(args) < 2:
-            exit(Panel("❌ No op", style="red"))
+            console.print(Panel("❌ No operation specified", style="red"))
+            return
         op = args[1]
         if op == 'create' and len(args) >= 3:
             create_file(args[2], ' '.join(args[3:]))
-        elif op == 'read' and len(args) >= 2:
+        elif op == 'read' and len(args) >= 3:
             read_file(args[2])
         elif op == 'write' and len(args) >= 3:
             write_file(args[2], ' '.join(args[3:]))
-        elif op == 'delete' and len(args) >= 2:
+        elif op == 'delete' and len(args) >= 3:
             delete_file(args[2])
         else:
-            exit(Panel(f"❌ Invalid: {op}", style="red"))
-        return
-
-    # File operations
-    if args and args[0] == 'file':
-        op, args = args[1], args[2:]
-        if op == 'create' and len(args) > 1:
-            create_file(args[0], ' '.join(args[1:]))
-        elif op == 'read' and args:
-            read_file(args[0])
-        elif op == 'write' and len(args) > 1:
-            write_file(args[0], ' '.join(args[1:]))
-        elif op == 'delete' and args:
-            delete_file(args[0])
+            console.print(Panel(f"❌ Invalid operation: {op}", style="red"))
         return
 
     # Handle model specification
