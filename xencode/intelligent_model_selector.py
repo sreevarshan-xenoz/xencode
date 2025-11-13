@@ -568,7 +568,9 @@ What would you like to do?
         
         self.console.print(choice_text)
         
-        while True:
+        MAX_RETRIES = 5
+        retries = 0
+        while retries < MAX_RETRIES:
             choice = Prompt.ask("Your choice", choices=choices, default="1")
             
             if choice == "1":
@@ -580,7 +582,11 @@ What would you like to do?
             elif choice == "manual":
                 return self._show_manual_selection()
             else:
-                self.console.print("[red]Invalid choice. Please try again.[/red]")
+                retries += 1
+                self.console.print(f"[red]Invalid choice. Please try again. ({MAX_RETRIES - retries} attempts remaining)[/red]")
+        
+        self.console.print("[yellow]Maximum retries reached. Using default recommendation.[/yellow]")
+        return primary
     
     def _show_manual_selection(self) -> Optional[ModelRecommendation]:
         """Show all available models for manual selection"""
