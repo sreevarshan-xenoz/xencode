@@ -24,6 +24,11 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
 console = Console()
 
+DEFAULT_MEMORY_CACHE_MB = 256
+DEFAULT_DISK_CACHE_MB = 1024
+COMPRESSION_THRESHOLD_BYTES = 1024
+CACHE_EXPIRY_SECONDS = 86400
+
 
 @dataclass
 class CacheEntry:
@@ -123,7 +128,7 @@ class CompressionManager:
         original_size = len(serialized)
         
         # Only compress if data is large enough
-        if original_size < 1024:  # 1KB threshold
+        if original_size < COMPRESSION_THRESHOLD_BYTES:
             return serialized, False
         
         # Compress with LZMA
@@ -149,7 +154,7 @@ class CompressionManager:
 class MemoryCache:
     """In-memory LRU cache with size limits"""
     
-    def __init__(self, max_size_mb: int = 256):
+    def __init__(self, max_size_mb: int = DEFAULT_MEMORY_CACHE_MB):
         self.max_size_bytes = max_size_mb * 1024 * 1024
         self.cache: Dict[str, CacheEntry] = {}
         self.access_order: List[str] = []
@@ -268,7 +273,7 @@ class MemoryCache:
 class DiskCache:
     """Persistent disk-based cache with SQLite backend"""
     
-    def __init__(self, cache_dir: Path, max_size_mb: int = 1024):
+    def __init__(self, cache_dir: Path, max_size_mb: int = DEFAULT_DISK_CACHE_MB):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / "cache.db"
@@ -602,8 +607,8 @@ class HybridCacheManager:
     """High-performance hybrid cache with memory + disk tiers"""
     
     def __init__(self, 
-                 memory_cache_mb: int = 256,
-                 disk_cache_mb: int = 1024,
+                 memory_cache_mb: int = DEFAULT_MEMORY_CACHE_MB,
+                 disk_cache_mb: int = DEFAULT_DISK_CACHE_MB,
                  cache_dir: Optional[Path] = None):
         
         self.cache_dir = cache_dir or Path.home() / ".xencode" / "cache"
@@ -931,7 +936,7 @@ class AdvancedCacheSystem(HybridCacheManager):
 _cache_manager: Optional[HybridCacheManager] = None
 
 
-async def get_cache_manager(memory_mb: int = 256, disk_mb: int = 1024) -> HybridCacheManager:
+async def get_cache_manager(memory_mb: int = DEFAULT_MEMORY_CACHE_MB, disk_mb: int = DEFAULT_DISK_CACHE_MB) -> HybridCacheManager:
     """Get or create global cache manager"""
     global _cache_manager
     if _cache_manager is None:
