@@ -533,6 +533,7 @@ class WarpTerminal:
         
         # Execute command in a separate thread to avoid blocking
         def execute_command():
+            process = None
             try:
                 # Start the process
                 process = subprocess.Popen(
@@ -609,6 +610,13 @@ class WarpTerminal:
                     "error": str(e)
                 }
                 block.tags = ["error"]
+            finally:
+                if process:
+                    try:
+                        process.terminate()
+                        process.wait(timeout=1)
+                    except Exception:
+                        pass
         
         # Start execution in background
         thread = threading.Thread(target=execute_command)
