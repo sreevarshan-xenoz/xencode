@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 import psutil
 from rich.console import Console
 from rich.panel import Panel
@@ -431,7 +431,7 @@ class ErrorHandler:
         
         return ErrorCategory.UNKNOWN
     
-    def _generate_user_guidance(self, exception: Exception, category: ErrorCategory) -> tuple[str, List[str]]:
+    def _generate_user_guidance(self, exception: Exception, category: ErrorCategory) -> Tuple[str, List[str]]:
         """Generate user-friendly message and suggested actions"""
         
         guidance_map = {
