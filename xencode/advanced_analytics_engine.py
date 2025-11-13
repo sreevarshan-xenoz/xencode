@@ -828,7 +828,7 @@ class MLTrendAnalyzer:
                     trend_strength = abs(correlation)
                 else:
                     trend_strength = 0.0
-            except:
+            except (ZeroDivisionError, ValueError, OverflowError):
                 trend_strength = 0.0
         else:
             trend_strength = 0.0
@@ -977,7 +977,7 @@ class MLTrendAnalyzer:
                 return 0.0
             
             return numerator / denominator
-        except:
+        except (ZeroDivisionError, ValueError, OverflowError):
             return 0.0
 
 
