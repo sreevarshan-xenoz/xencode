@@ -627,6 +627,12 @@ What would you like to do?
             self.console.print("[red]❌ Ollama is not installed. Please install Ollama first.[/red]")
             return False
         
+        # Validate model tag to prevent command injection
+        import re
+        if not re.match(r'^[a-zA-Z0-9._:/-]+$', model.ollama_tag):
+            self.console.print(f"[red]❌ Invalid model tag: {model.ollama_tag}[/red]")
+            return False
+        
         # Download with progress
         try:
             with Progress(
