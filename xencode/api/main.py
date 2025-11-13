@@ -25,7 +25,7 @@ import uvicorn
 try:
     from ..monitoring.resource_manager import get_resource_manager
     from ..monitoring.performance_optimizer import PerformanceOptimizer
-        from ..cache.multimodal_cache import get_multimodal_cache_async
+    from ..cache.multimodal_cache import get_multimodal_cache_async
     from ..audit.audit_logger import get_global_audit_logger, AuditEventType, AuditSeverity
     XENCODE_COMPONENTS_AVAILABLE = True
 except ImportError:
