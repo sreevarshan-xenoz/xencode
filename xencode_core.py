@@ -35,6 +35,22 @@ except ImportError:
     ENHANCED_CLI_AVAILABLE = False
     EnhancedXencodeCLI = None
 
+# Import enhanced systems for chat commands
+try:
+    from xencode.multi_model_system import MultiModelManager
+except ImportError:
+    MultiModelManager = None
+
+try:
+    from xencode.smart_context_system import SmartContextManager
+except ImportError:
+    SmartContextManager = None
+
+try:
+    from xencode.code_analysis_system import CodeAnalyzer
+except ImportError:
+    CodeAnalyzer = None
+
 # Suppress Rich color encoding warnings and other terminal warnings
 os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
