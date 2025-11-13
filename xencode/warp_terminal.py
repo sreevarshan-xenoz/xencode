@@ -697,10 +697,12 @@ class WarpTerminal:
         
         # Add specific tags based on content
         if output_type == "git_status":
-            if output_data.get("data", {}).get("modified"):
-                tags.append("has_changes")
-            if output_data.get("data", {}).get("untracked"):
-                tags.append("has_untracked")
+            data = output_data.get("data")
+            if isinstance(data, dict):
+                if data.get("modified"):
+                    tags.append("has_changes")
+                if data.get("untracked"):
+                    tags.append("has_untracked")
         
         return tags
     
