@@ -24,6 +24,9 @@ from rich.panel import Panel
 
 console = Console()
 
+MODEL_DOWNLOAD_TIMEOUT_SECONDS = 1800
+MAX_USER_RETRIES = 5
+
 
 @dataclass
 class SystemSpecs:
@@ -653,7 +656,7 @@ What would you like to do?
                     ["ollama", "pull", model.ollama_tag],
                     capture_output=True,
                     text=True,
-                    timeout=1800  # 30 minutes timeout
+                    timeout=MODEL_DOWNLOAD_TIMEOUT_SECONDS
                 )
                 
                 if result.returncode == 0:
