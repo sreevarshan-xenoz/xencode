@@ -611,6 +611,10 @@ class HybridCacheManager:
         self.disk_cache = DiskCache(self.cache_dir, disk_cache_mb)
         self.key_generator = CacheKeyGenerator()
         
+        # Thread safety locks
+        self._memory_lock = asyncio.Lock()
+        self._disk_lock = asyncio.Lock()
+        
         # Performance tracking
         self.total_requests = 0
         self.cache_hits = 0
@@ -626,20 +630,23 @@ class HybridCacheManager:
         self.total_requests += 1
         
         # Try memory cache first (fastest)
-        result = self.memory_cache.get(key)
-        if result is not None:
-            self.cache_hits += 1
-            self.memory_hits += 1
-            return result
+        async with self._memory_lock:
+            result = self.memory_cache.get(key)
+            if result is not None:
+                self.cache_hits += 1
+                self.memory_hits += 1
+                return result
         
         # Try disk cache (slower but persistent)
-        result = await self.disk_cache.get(key)
-        if result is not None:
-            # Promote to memory cache for future fast access
-            self.memory_cache.put(key, result)
-            self.cache_hits += 1
-            self.disk_hits += 1
-            return result
+        async with self._disk_lock:
+            result = await self.disk_cache.get(key)
+            if result is not None:
+                # Promote to memory cache for future fast access
+                async with self._memory_lock:
+                    self.memory_cache.put(key, result)
+                self.cache_hits += 1
+                self.disk_hits += 1
+                return result
         
         return None
     
@@ -655,8 +662,10 @@ class HybridCacheManager:
             auto_tags.update(tags)
         
         # Store in both caches
-        memory_success = self.memory_cache.put(key, response, auto_tags)
-        disk_success = await self.disk_cache.put(key, response, auto_tags)
+        async with self._memory_lock:
+            memory_success = self.memory_cache.put(key, response, auto_tags)
+        async with self._disk_lock:
+            disk_success = await self.disk_cache.put(key, response, auto_tags)
         
         return memory_success or disk_success
     
