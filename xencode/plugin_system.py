@@ -566,7 +566,8 @@ class PluginManager:
             with open(self.config_file, 'r') as f:
                 config_data = yaml.safe_load(f)
             
-            plugin_config = config_data.get("plugins", {}).get(plugin_name, {})
+            plugins = config_data.get("plugins") if isinstance(config_data, dict) else None
+            plugin_config = plugins.get(plugin_name, {}) if isinstance(plugins, dict) else {}
             return PluginConfig(**plugin_config)
         except Exception as e:
             logger.warning(f"Failed to load config for {plugin_name}: {e}")
