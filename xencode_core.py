@@ -1199,14 +1199,14 @@ def show_sessions_list():
         try:
             created_dt = datetime.fromisoformat(created)
             created_str = created_dt.strftime("%Y-%m-%d %H:%M")
-        except:
-            created_str = created
+        except (ValueError, TypeError, AttributeError):
+            created_str = created if isinstance(created, str) else "Unknown"
 
         try:
             updated_dt = datetime.fromisoformat(last_updated)
             updated_str = updated_dt.strftime("%Y-%m-%d %H:%M")
-        except:
-            updated_str = last_updated
+        except (ValueError, TypeError, AttributeError):
+            updated_str = last_updated if isinstance(last_updated, str) else "Unknown"
 
         # Highlight current session
         if session_id == memory.current_session:
@@ -1247,8 +1247,8 @@ def show_cache_info():
                             else data.get('prompt', '')
                         )
                         cache_text += f"• {i}. {prompt_preview}\n"
-                except:
-                    cache_text += f"• {i}. [Error reading cache]\n"
+                except (OSError, json.JSONDecodeError, KeyError) as e:
+                    cache_text += f"• {i}. [Error reading cache: {type(e).__name__}]\n"
 
         cache_panel = Panel(cache_text, title="💾 Cache Status", style="magenta")
         console.print(cache_panel)
@@ -1263,7 +1263,7 @@ def show_system_status(current_model, current_online):
     try:
         response = requests.get("http://localhost:11434/api/tags", timeout=5)
         ollama_status = "✅ Running" if response.status_code == 200 else "❌ Error"
-    except:
+    except (requests.RequestException, OSError):
         ollama_status = "❌ Not accessible"
 
     # Check model health actively
@@ -1378,17 +1378,16 @@ def create_file(path, content):
         with open(p, 'w') as f:
             f.write(content)
         console.print(Panel(f"✅ {p}", title="Created", style="green"))
-    except:
-        console.print(Panel("❌ Failed", style="red"))
+    except (OSError, IOError, PermissionError) as e:
+        console.print(Panel(f"❌ Failed: {type(e).__name__}", style="red"))
 
 
 def read_file(path):
     try:
-        console.print(
-            Panel(open(os.path.abspath(path)).read(), title=path, style="cyan")
-        )
-    except:
-        console.print(Panel("❌ Missing", style="red"))
+        with open(os.path.abspath(path), 'r') as f:
+            console.print(Panel(f.read(), title=path, style="cyan"))
+    except (OSError, IOError, FileNotFoundError) as e:
+        console.print(Panel(f"❌ Error: {type(e).__name__}", style="red"))
 
 
 def write_file(path, content):
@@ -1399,8 +1398,8 @@ def delete_file(path):
     try:
         os.remove(os.path.abspath(path))
         console.print(Panel(f"✅ {path}", title="Deleted", style="green"))
-    except:
-        console.print(Panel("❌ Failed", style="red"))
+    except (OSError, FileNotFoundError, PermissionError) as e:
+        console.print(Panel(f"❌ Failed: {type(e).__name__}", style="red"))
 
 
 def chat_mode(model, online):
