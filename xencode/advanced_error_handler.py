@@ -176,7 +176,7 @@ class ErrorLogger:
                 "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}",
                 "platform": psutil.platform.system()
             }
-        except:
+        except (AttributeError, OSError):
             return {"system_info": "unavailable"}
 
 
@@ -251,7 +251,7 @@ class RecoveryManager:
             async with aiohttp.ClientSession() as session:
                 async with session.get('https://httpbin.org/status/200', timeout=5) as response:
                     return response.status == 200
-        except:
+        except (ImportError, OSError, Exception):
             return False
     
     async def _use_fallback_endpoint(self, error: XencodeError) -> bool:
