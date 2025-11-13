@@ -132,14 +132,18 @@ class ErrorLogger:
         self.log_dir = log_dir or Path.home() / ".xencode" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Setup logger
+        # Setup logger with configurable level
+        import os
+        log_level = os.getenv('XENCODE_LOG_LEVEL', 'INFO').upper()
+        level = getattr(logging, log_level, logging.INFO)
+        
         self.logger = logging.getLogger("xencode_errors")
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(level)
         
         # File handler
         log_file = self.log_dir / f"xencode_errors_{datetime.now().strftime('%Y%m%d')}.log"
         file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(level)
         
         # Formatter
         formatter = logging.Formatter(
