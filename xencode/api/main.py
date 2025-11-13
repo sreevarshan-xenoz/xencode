@@ -25,7 +25,7 @@ import uvicorn
 try:
     from ..monitoring.resource_manager import get_resource_manager
     from ..monitoring.performance_optimizer import PerformanceOptimizer
-    from ..cache.multimodal_cache import get_multimodal_cache
+        from ..cache.multimodal_cache import get_multimodal_cache_async
     from ..audit.audit_logger import get_global_audit_logger, AuditEventType, AuditSeverity
     XENCODE_COMPONENTS_AVAILABLE = True
 except ImportError:
@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
         # Initialize core components
         if XENCODE_COMPONENTS_AVAILABLE:
             app_state["resource_manager"] = await get_resource_manager()
-            app_state["cache_system"] = await get_multimodal_cache()
+            app_state["cache_system"] = await get_multimodal_cache_async()
             app_state["audit_logger"] = get_global_audit_logger()
             
             # Log startup event

@@ -16,6 +16,7 @@ from .multimodal_cache import (
     CacheType,
     MultiModalCacheEntry,
     get_multimodal_cache,
+    get_multimodal_cache_async,
     initialize_multimodal_cache
 )
 
@@ -28,5 +29,6 @@ __all__ = [
     'CacheType',
     'MultiModalCacheEntry',
     'get_multimodal_cache',
+    'get_multimodal_cache_async',
     'initialize_multimodal_cache'
 ]

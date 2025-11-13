@@ -724,8 +724,8 @@ class ResourceManager:
     async def _async_cache_cleanup(self):
         """Async cache cleanup"""
         try:
-            from ..cache.multimodal_cache import get_multimodal_cache
-            cache_system = await get_multimodal_cache()
+            from ..cache.multimodal_cache import get_multimodal_cache_async
+            cache_system = await get_multimodal_cache_async()
             await cache_system.optimize_cache()
         except Exception as e:
             logger.warning(f"Cache cleanup not available: {e}")

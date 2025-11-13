@@ -62,7 +62,14 @@ class PluginContext:
     workspace_id: str = "default"
     user_id: str = "anonymous"
     workspace_root: Optional[Path] = None
-    permissions: List[str] = field(default_factory=list)
+    permissions: List[str] = field(default_factory=lambda: [
+        "file:read",
+        "file:view",
+        "file:search",
+        "file:write",
+        "file:lint",
+        "file:delete",
+    ])
     session_id: Optional[str] = None
     
     def __post_init__(self):
@@ -89,9 +96,18 @@ class FileOperationsPlugin:
         # Initialize cache manager if available
         if CACHE_AVAILABLE:
             try:
-                asyncio.create_task(self._init_cache())
+                loop = asyncio.get_running_loop()
             except Exception as e:
-                logger.warning(f"Failed to initialize cache: {e}")
+                loop = None
+                logger.debug(f"No running event loop for cache init: {e}")
+            
+            if loop and not loop.is_closed():
+                loop.create_task(self._init_cache())
+            else:
+                try:
+                    asyncio.run(self._init_cache())
+                except RuntimeError:
+                    logger.debug("Cache initialization deferred; no event loop available.")
         
         # Initialize audit logger if available
         if AUDIT_AVAILABLE:
@@ -294,7 +310,7 @@ class FileOperationsPlugin:
         
         try:
             # Use pathlib glob for pattern matching
-            matches = list(safe_path.glob(pattern))
+            matches = list(safe_path.rglob(pattern))
             
             # Filter to only return files within workspace
             workspace_root = self.context.workspace_root.resolve()
@@ -342,7 +358,7 @@ class FileOperationsPlugin:
         safe_path = self._sandbox_path(path)
         
         try:
-            matches_found = 0
+            matches: List[Tuple[Path, str]] = []
             
             if recursive:
                 # Use os.walk for recursive search
@@ -361,8 +377,7 @@ class FileOperationsPlugin:
                             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                                 for line_num, line in enumerate(f, 1):
                                     if query in line:
-                                        matches_found += 1
-                                        yield (file_path, line.strip())
+                                        matches.append((file_path, line.strip()))
                                         
                         except (UnicodeDecodeError, PermissionError, OSError):
                             # Skip files that can't be read as text
@@ -378,8 +393,7 @@ class FileOperationsPlugin:
                             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                                 for line_num, line in enumerate(f, 1):
                                     if query in line:
-                                        matches_found += 1
-                                        yield (file_path, line.strip())
+                                        matches.append((file_path, line.strip()))
                                         
                         except (UnicodeDecodeError, PermissionError, OSError):
                             continue
@@ -389,8 +403,10 @@ class FileOperationsPlugin:
                 safe_path, 
                 query=query,
                 recursive=recursive,
-                matches_found=matches_found
+                matches_found=len(matches)
             )
+            
+            return matches
             
         except Exception as e:
             self._log_audit_event("search_content", safe_path, success=False, error_message=str(e))

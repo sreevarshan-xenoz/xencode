@@ -6,24 +6,30 @@ Provides tamper-proof audit logging, security event correlation,
 and compliance reporting for enterprise users.
 """
 
-from .audit_logger import AuditLogger, AuditEvent, AuditEventType
+from .audit_logger import (
+    AuditLogger,
+    AuditEvent,
+    AuditEventType,
+    AuditSeverity,
+    AuditChain,
+    AuditEncryption,
+    AuditStorage,
+)
 from .security_correlator import SecurityEventCorrelator, SecurityIncident
 from .compliance_reporter import ComplianceReporter, ComplianceReport
-from .audit_storage import AuditStorage, AuditQuery
-from .tamper_detection import TamperDetector, IntegrityCheck
 
 __all__ = [
     'AuditLogger',
     'AuditEvent', 
     'AuditEventType',
+    'AuditSeverity',
+    'AuditChain',
+    'AuditEncryption',
     'SecurityEventCorrelator',
     'SecurityIncident',
     'ComplianceReporter',
     'ComplianceReport',
     'AuditStorage',
-    'AuditQuery',
-    'TamperDetector',
-    'IntegrityCheck'
 ]
 
 # Global audit logger instance

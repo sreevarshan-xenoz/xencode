@@ -265,7 +265,12 @@ class AuditEncryption:
     
     def verify_signature(self, event: AuditEvent) -> bool:
         """Verify an event signature"""
-        if not event.signature:
+        if not event.signature or not event.checksum:
+            return False
+        
+        # Ensure the event data itself has not been tampered with
+        if not event.verify_integrity():
+            logger.error("Audit event integrity verification failed before signature check")
             return False
         
         try:

@@ -901,8 +901,8 @@ async def get_performance_metrics(
         # Get cache statistics if available
         cache_hit_rate = 0.0
         try:
-            from ...cache.multimodal_cache import get_multimodal_cache
-            cache_system = await get_multimodal_cache()
+            from ...cache.multimodal_cache import get_multimodal_cache_async
+            cache_system = await get_multimodal_cache_async()
             cache_stats = await cache_system.get_cache_statistics()
             cache_hit_rate = cache_stats.get("base_cache", {}).get("hit_rate", 0.0)
         except:

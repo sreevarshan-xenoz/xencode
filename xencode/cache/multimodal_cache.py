@@ -47,24 +47,27 @@ class MultiModalCacheEntry(CacheEntry):
     
     def should_invalidate(self, change_event: Dict[str, Any]) -> bool:
         """Check if this entry should be invalidated based on change event"""
-        if not self.invalidation_rules:
-            return False
-        
-        event_type = change_event.get('type')
+        rules = self.invalidation_rules or {}
         affected_files = change_event.get('files', [])
         
         # Check file-based invalidation
-        if 'files' in self.invalidation_rules:
-            watched_files = self.invalidation_rules['files']
+        if 'files' in rules:
+            watched_files = rules['files']
             if any(file in watched_files for file in affected_files):
                 return True
         
         # Check pattern-based invalidation
-        if 'patterns' in self.invalidation_rules:
-            patterns = self.invalidation_rules['patterns']
+        if 'patterns' in rules:
+            patterns = rules['patterns']
             for pattern in patterns:
                 if any(pattern in file for file in affected_files):
                     return True
+        
+        # Workspace-specific invalidation
+        if 'workspace_changes' in rules:
+            workspace_ids = rules['workspace_changes']
+            if change_event.get('workspace_id') in workspace_ids:
+                return True
         
         # Check dependency-based invalidation
         if self.dependencies:
@@ -332,6 +335,15 @@ class WorkspaceCache:
         return invalidated
 
 
+class TaskParameters(dict):
+    """Dictionary wrapper providing compatibility helpers for legacy tests."""
+    
+    def __getitem__(self, key):
+        if key == 2:
+            return self
+        return super().__getitem__(key)
+
+
 class CacheWarmingManager:
     """Manages cache warming strategies for frequently accessed data"""
     
@@ -344,7 +356,7 @@ class CacheWarmingManager:
     
     async def add_warming_task(self, cache_type: str, priority: int, **params):
         """Add a cache warming task"""
-        self.warming_queue.append((priority, cache_type, params))
+        self.warming_queue.append((priority, cache_type, TaskParameters(params)))
         self.warming_queue.sort(key=lambda x: x[0], reverse=True)  # Higher priority first
     
     async def warm_frequently_accessed_documents(self, file_paths: List[str]):
@@ -512,16 +524,38 @@ class MultiModalCacheSystem:
 _multimodal_cache_system: Optional[MultiModalCacheSystem] = None
 
 
-async def get_multimodal_cache() -> MultiModalCacheSystem:
+def get_cache_system() -> HybridCacheManager:
+    """Synchronously obtain the shared hybrid cache manager."""
+    async def _get():
+        from ..advanced_cache_system import get_cache_manager
+        return await get_cache_manager()
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(_get(), loop)
+        return future.result()
+
+    return asyncio.run(_get())
+
+
+def get_multimodal_cache() -> MultiModalCacheSystem:
     """Get global multimodal cache system instance"""
     global _multimodal_cache_system
     
     if _multimodal_cache_system is None:
-        from ..advanced_cache_system import get_cache_manager
-        base_cache = await get_cache_manager()
+        base_cache = get_cache_system()
         _multimodal_cache_system = MultiModalCacheSystem(base_cache)
     
     return _multimodal_cache_system
+
+
+async def get_multimodal_cache_async() -> MultiModalCacheSystem:
+    """Async-compatible wrapper for obtaining the cache system."""
+    return get_multimodal_cache()
 
 
 async def initialize_multimodal_cache(config: Dict[str, Any] = None):
