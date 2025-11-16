@@ -51,3 +51,42 @@ Thumbs.db
 *.tmp
 *.temp
 test.txt
+
+# Documentation and summary files (often generated or temporary)
+*_SUMMARY.md
+*_REPORT.md
+*_GUIDE.md
+*_FIXES.md
+QUICK_*.md
+DEMO_*.md
+PHASE*.md
+
+# Crush repository (external dependency)
+crush/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+.xencode/
+
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+secrets/
+
+# Python cache and compiled
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+*.ipynb_checkpoints
+
+# Editor backup files
+*~
+*.bak
+*.orig
