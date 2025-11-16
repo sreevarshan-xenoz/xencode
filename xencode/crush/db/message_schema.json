@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://xencode.local/message-part.schema.json",
+  "title": "Message Content Parts Schema",
+  "description": "Schema for validating message content parts in crush",
+  "type": "object",
+  "properties": {
+    "parts": {
+      "type": "array",
+      "description": "Array of content parts that make up a message",
+      "items": {
+        "type": "object",
+        "oneOf": [
+          {
+            "title": "Text Part",
+            "description": "Plain text content",
+            "properties": {
+              "type": {
+                "const": "text"
+              },
+              "text": {
+                "type": "string",
+                "description": "The text content"
+              }
+            },
+            "required": ["type", "text"],
+            "additionalProperties": false
+          },
+          {
+            "title": "Tool Call Part",
+            "description": "A request to execute a tool",
+            "properties": {
+              "type": {
+                "const": "tool_call"
+              },
+              "id": {
+                "type": "string",
+                "description": "Unique identifier for this tool call"
+              },
+              "tool": {
+                "type": "string",
+                "description": "Name of the tool to execute"
+              },
+              "input": {
+                "type": "object",
+                "description": "Parameters for the tool"
+              }
+            },
+            "required": ["type", "tool", "input"],
+            "additionalProperties": false
+          },
+          {
+            "title": "Tool Result Part",
+            "description": "Result from a tool execution",
+            "properties": {
+              "type": {
+                "const": "tool_result"
+              },
+              "tool_call_id": {
+                "type": "string",
+                "description": "ID of the tool call this is a result for"
+              },
+              "tool": {
+                "type": "string",
+                "description": "Name of the tool that was executed"
+              },
+              "result": {
+                "type": "string",
+                "description": "The result content"
+              },
+              "is_error": {
+                "type": "boolean",
+                "description": "Whether this result represents an error",
+                "default": false
+              },
+              "metadata": {
+                "type": "object",
+                "description": "Additional metadata about the result"
+              }
+            },
+            "required": ["type", "tool", "result"],
+            "additionalProperties": false
+          },
+          {
+            "title": "Binary Part",
+            "description": "Binary content like images or files",
+            "properties": {
+              "type": {
+                "const": "binary"
+              },
+              "filename": {
+                "type": "string",
+                "description": "Name of the file"
+              },
+              "mime_type": {
+                "type": "string",
+                "description": "MIME type of the content"
+              },
+              "encoding": {
+                "type": "string",
+                "description": "Encoding used (e.g., base64)",
+                "enum": ["base64", "utf-8"]
+              },
+              "data": {
+                "type": "string",
+                "description": "The encoded binary data"
+              }
+            },
+            "required": ["type", "filename", "encoding"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": ["parts"]
+}
