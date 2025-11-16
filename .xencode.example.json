@@ -1,0 +1,83 @@
+{
+  "models": {
+    "large": {
+      "provider": "openai",
+      "model": "gpt-4"
+    },
+    "small": {
+      "provider": "openai",
+      "model": "gpt-3.5-turbo"
+    }
+  },
+  "providers": {
+    "openai": {
+      "api_key": "${OPENAI_API_KEY}",
+      "base_url": "https://api.openai.com/v1",
+      "price_per_1m_input": 30.0,
+      "price_per_1m_output": 60.0,
+      "timeout": 60,
+      "max_retries": 3
+    },
+    "anthropic": {
+      "api_key": "${ANTHROPIC_API_KEY}",
+      "base_url": "https://api.anthropic.com",
+      "price_per_1m_input": 15.0,
+      "price_per_1m_output": 75.0,
+      "timeout": 60,
+      "max_retries": 3
+    }
+  },
+  "lsp": {
+    "python": {
+      "command": "pylsp",
+      "args": [],
+      "file_patterns": ["*.py"],
+      "root_markers": ["pyproject.toml", "setup.py", "requirements.txt"]
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "file_patterns": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+      "root_markers": ["package.json", "tsconfig.json"]
+    }
+  },
+  "mcp": {
+    "filesystem": {
+      "command": "uvx",
+      "args": ["mcp-server-filesystem"],
+      "disabled": false,
+      "auto_approve": ["read_file", "list_directory"]
+    }
+  },
+  "options": {
+    "auto_summarize": true,
+    "max_context_tokens": 100000,
+    "log_level": "INFO",
+    "command_timeout": 60,
+    "background_job_timeout": 300,
+    "permission_timeout": 300
+  },
+  "permissions": {
+    "skip_requests": false,
+    "allowed_tools": ["view", "grep", "ls"],
+    "allowed_directories": [],
+    "blocked_commands": [
+      "sudo",
+      "rm -rf",
+      "dd",
+      "mkfs",
+      "fdisk",
+      "format",
+      "del /f",
+      "rmdir /s",
+      "> /dev/sda"
+    ]
+  },
+  "agents": {
+    "default": {
+      "name": "default",
+      "system_prompt": "You are a helpful AI coding assistant. You can execute commands, read and modify files, and help with coding tasks.",
+      "tools": ["bash", "view", "edit", "write", "grep", "ls"]
+    }
+  }
+}
