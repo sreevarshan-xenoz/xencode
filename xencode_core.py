@@ -51,6 +51,13 @@ try:
 except ImportError:
     CodeAnalyzer = None
 
+# Import project context detection
+try:
+    from xencode.project_context import get_project_context
+    PROJECT_CONTEXT_AVAILABLE = True
+except ImportError:
+    PROJECT_CONTEXT_AVAILABLE = False
+
 # Suppress Rich color encoding warnings and other terminal warnings
 os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
@@ -59,7 +66,9 @@ os.environ.setdefault('COLORTERM', 'truecolor')
 console = Console(
     force_terminal=True, legacy_windows=False, color_system="256", stderr=False
 )
-DEFAULT_MODEL = "qwen3:4b"
+
+# Smart default model selection - will be updated based on available models
+DEFAULT_MODEL = None  # Will be set dynamically
 
 # Enhanced Claude-style streaming timing configuration
 THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
@@ -276,9 +285,10 @@ class ModelManager:
         """Check if a model is healthy and responsive"""
         try:
             start_time = time.time()
+            # Use a minimal prompt to check model availability
             response = requests.post(
                 "http://localhost:11434/api/generate",
-                json={"model": model, "prompt": "test", "stream": False},
+                json={"model": model, "prompt": "hi", "stream": False},
                 timeout=5,
             )
             response_time = time.time() - start_time
@@ -354,6 +364,35 @@ def get_available_models() -> List[str]:
         return model_manager.available_models
     except Exception:
         return []
+
+
+def get_smart_default_model() -> str:
+    """Intelligently select the best available model"""
+    available = get_available_models()
+    
+    if not available:
+        return "qwen2.5:3b"  # Fallback if no models installed
+    
+    # Preferred models in order of preference
+    preferred_models = [
+        "qwen2.5:7b",
+        "qwen2.5:3b", 
+        "qwen3:4b",
+        "llama3.2:3b",
+        "llama3.1:8b",
+        "mistral:7b",
+        "phi3:mini",
+        "gemma2:2b",
+    ]
+    
+    # Check for preferred models
+    for preferred in preferred_models:
+        for available_model in available:
+            if preferred in available_model.lower():
+                return available_model
+    
+    # If no preferred model found, return the first available
+    return available[0]
 
 
 def list_models() -> None:
@@ -546,7 +585,7 @@ def update_model(model: str) -> None:
 
 
 def run_query(model: str, prompt: str) -> str:
-    """Enhanced non-streaming query with caching and conversation memory"""
+    """Enhanced non-streaming query with caching, conversation memory, and project context"""
     # Check cache first
     cached_response = cache.get(prompt, model)
     if cached_response:
@@ -558,12 +597,26 @@ def run_query(model: str, prompt: str) -> str:
 
     url = "http://localhost:11434/api/generate"
 
-    # Build context-aware prompt
+    # Build context-aware prompt with project context
     context = memory.get_context(max_messages=5)
-    if context:
-        context_prompt = "\n\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in context]
-        )
+    context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
+    
+    # Add project context if available and relevant
+    project_info = ""
+    if PROJECT_CONTEXT_AVAILABLE:
+        try:
+            project_ctx = get_project_context()
+            if project_ctx.should_include_context(prompt):
+                project_info = project_ctx.get_context_prompt()
+        except Exception:
+            pass  # Silently fail if project context detection fails
+    
+    # Build final prompt
+    if project_info and context_prompt:
+        enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
+    elif project_info:
+        enhanced_prompt = f"{project_info}user: {prompt}"
+    elif context_prompt:
         enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
     else:
         enhanced_prompt = prompt
@@ -625,18 +678,32 @@ def run_query(model: str, prompt: str) -> str:
 
 
 def run_streaming_query(model, prompt):
-    """Enhanced real-time streaming query with conversation memory and context awareness"""
+    """Enhanced REAL-TIME streaming query with conversation memory and context awareness"""
     # Add user message to memory
     memory.add_message("user", prompt, model)
 
     url = "http://localhost:11434/api/generate"
 
-    # Build context-aware prompt
+    # Build context-aware prompt with project context
     context = memory.get_context(max_messages=5)
-    if context:
-        context_prompt = "\n\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in context]
-        )
+    context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
+    
+    # Add project context if available and relevant
+    project_info = ""
+    if PROJECT_CONTEXT_AVAILABLE:
+        try:
+            project_ctx = get_project_context()
+            if project_ctx.should_include_context(prompt):
+                project_info = project_ctx.get_context_prompt()
+        except Exception:
+            pass  # Silently fail if project context detection fails
+    
+    # Build final prompt
+    if project_info and context_prompt:
+        enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
+    elif project_info:
+        enhanced_prompt = f"{project_info}user: {prompt}"
+    elif context_prompt:
         enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
     else:
         enhanced_prompt = prompt
@@ -649,18 +716,17 @@ def run_streaming_query(model, prompt):
         )
         response.raise_for_status()
 
-        # Collect the full response first, then stream it with proper timing
+        # Stream tokens IMMEDIATELY as they arrive (no buffering)
         full_response = ""
+        in_thinking = False
+        thinking_shown = False
+        answer_shown = False
 
-        # Thinking indicator is shown by chat mode, not here
-
-        # Collect all chunks with progress indication
-        chunk_count = 0
+        # Stream tokens in real-time
         for line in response.iter_lines():
             if line:
                 try:
                     chunk = json.loads(line.decode('utf-8'))
-                    chunk_count += 1
 
                     # Check if streaming is complete
                     if chunk.get('done', False):
@@ -670,20 +736,35 @@ def run_streaming_query(model, prompt):
                         token = chunk['response']
                         full_response += token
 
+                        # Detect thinking section markers
+                        if '<think>' in token:
+                            in_thinking = True
+                            if not thinking_shown:
+                                console.print("\n[bold cyan]Xencode[/bold cyan] [dim]›[/dim] [dim italic]thinking...[/dim italic]")
+                                thinking_shown = True
+                            continue
+                        elif '</think>' in token:
+                            in_thinking = False
+                            if not answer_shown:
+                                console.print("\n\n[bold cyan]Xencode[/bold cyan] [dim]›[/dim]")
+                                answer_shown = True
+                            continue
+
+                        # Stream token immediately (no buffering!)
+                        if in_thinking:
+                            console.print(token, style="dim italic yellow", end="", highlight=False)
+                        else:
+                            if not answer_shown and not in_thinking:
+                                console.print("\n[bold cyan]Xencode[/bold cyan] [dim]›[/dim]")
+                                answer_shown = True
+                            console.print(token, end="", highlight=False)
+
+                        sys.stdout.flush()  # Force immediate output
+
                 except json.JSONDecodeError:
                     continue
 
-        # Now stream the complete response with proper Claude-style timing
-        thinking, answer = extract_thinking_and_answer(full_response)
-
-        if thinking:
-            # Stream thinking section
-            stream_thinking_section(thinking)
-            time.sleep(THINKING_TO_ANSWER_PAUSE)
-
-        # Stream answer section
-        if answer.strip():
-            stream_answer_section(answer)
+        console.print()  # New line at end
 
         # Add AI response to memory
         memory.add_message("assistant", full_response, model)
@@ -857,39 +938,40 @@ def format_output(text, streaming=False):
 
 
 def display_chat_banner(model, online_status, is_update=False):
-    """Display Claude-style centered banner with exact formatting"""
+    """Display immersive full-screen banner (like Gemini/Crush/Claude CLI)"""
     if is_update:
-        # Clear previous lines and redisplay banner for connectivity updates
-        console.print("\033[2J\033[H", end="")  # Clear screen and move cursor to top
+        # Clear screen and redisplay banner for connectivity updates
+        console.clear()
 
-    # Claude-style centered banner with exact format
-    banner_lines = [
-        "╔══════════════════════════════════════════╗",
-        f"║ Xencode AI (Claude-Code Style | {model})    ║",
-        "╚══════════════════════════════════════════╝",
-    ]
-
-    for line in banner_lines:
-        console.print(line, style="cyan", justify="center")
-
-    console.print(
-        "Offline-First | Hyprland Ready | Arch Optimized", style="dim", justify="center"
-    )
+    # Immersive banner with modern design
     console.print()
-
+    console.print("╔═══════════════════════════════════════════════════════════════╗", style="bold cyan", justify="center")
+    console.print("║                                                               ║", style="bold cyan", justify="center")
+    console.print(f"║                    🤖 XENCODE AI ASSISTANT                    ║", style="bold cyan", justify="center")
+    console.print("║                                                               ║", style="bold cyan", justify="center")
+    console.print("╚═══════════════════════════════════════════════════════════════╝", style="bold cyan", justify="center")
+    console.print()
+    
+    # Model and status info
+    console.print(f"Model: {model}", style="bold white", justify="center")
+    
     # Dynamic status line with appropriate emojis
     if online_status == "true":
-        status_line = "🌐 Online Mode - using local+internet models"
+        status_line = "🌐 Online Mode"
+        status_style = "bold green"
     else:
-        status_line = "📡 Offline Mode - local models only"
-
-    console.print(status_line, style="bold", justify="center")
+        status_line = "📡 Offline Mode"
+        status_style = "bold yellow"
+    
+    console.print(status_line, style=status_style, justify="center")
+    console.print()
+    console.print("─" * 80, style="dim", justify="center")
     console.print()
 
 
 def display_prompt():
-    """Display the chat prompt in bold white"""
-    console.print("[bold white][You] >[/bold white] ", end="")
+    """Display the chat prompt with immersive styling (like Gemini/Crush/Claude CLI)"""
+    console.print("\n[bold cyan]You[/bold cyan] [dim]›[/dim] ", end="")
 
 
 def get_multiline_input():
@@ -938,15 +1020,15 @@ def update_online_status():
 
 
 def handle_chat_exit():
-    """Display goodbye message using existing Rich formatting"""
+    """Display goodbye message with immersive styling"""
     console.print()
-    console.print(
-        Panel(
-            "[bold green]👋 Thanks for using Xencode! Goodbye![/bold green]",
-            style="cyan",
-            title="🤖 Xencode AI",
-        )
-    )
+    console.print()
+    console.print("─" * 80, style="dim", justify="center")
+    console.print()
+    console.print("👋 Thanks for using Xencode!", style="bold cyan", justify="center")
+    console.print("Your AI assistant that respects your privacy", style="dim", justify="center")
+    console.print()
+    console.print("─" * 80, style="dim", justify="center")
     console.print()
 
 
@@ -1075,6 +1157,12 @@ def handle_chat_command(command, current_model, current_online):
         else:
             show_available_themes()
         return True
+    elif cmd == "/project":
+        show_project_context()
+        return True
+    elif cmd == "/models":
+        show_available_models_interactive()
+        return True
 
     return False
 
@@ -1091,12 +1179,13 @@ def show_help_panel():
 • /cache - Show cache info
 • /status - System status
 • /export - Export conversation
+• /project - Show project context
 • /theme <name> - Change theme
 
 🔧 **Model Commands:**
-• /model <name> - Switch model
-• /list-models - List available models
-• /update - Update current model
+• /models - Show available models with health status
+• /model <name> - Switch to a different model
+• /update <name> - Download/update a model
 
 💬 **Regular Input:**
 • Type your message and press Enter
@@ -1366,6 +1455,95 @@ def show_available_themes():
     console.print(themes_panel)
 
 
+def show_project_context():
+    """Show current project context"""
+    if not PROJECT_CONTEXT_AVAILABLE:
+        console.print(Panel(
+            "❌ Project context detection not available\n\n"
+            "This feature requires the project_context module.",
+            title="Feature Not Available",
+            style="red"
+        ))
+        return
+    
+    try:
+        project_ctx = get_project_context()
+        context = project_ctx.detect_project()
+        
+        context_text = f"""
+📁 **Project Information:**
+• Type: {context['type']}
+• Directory: {project_ctx.cwd}
+
+🌿 **Git Status:**
+• Branch: {context['git']['branch']}
+• Has Changes: {'Yes' if context['git']['has_changes'] else 'No'}
+
+📝 **Modified Files:**
+{chr(10).join(f"• {f}" for f in context['files'][:10]) if context['files'] else '• No modified files'}
+
+📦 **Dependencies:**
+{chr(10).join(f"• {d}" for d in context['dependencies'][:10]) if context['dependencies'] else '• No dependencies detected'}
+
+💡 **Tip:** Project context is automatically included in code-related queries.
+"""
+        
+        context_panel = Panel(context_text, title="📊 Project Context", style="blue")
+        console.print(context_panel)
+        
+    except Exception as e:
+        console.print(Panel(
+            f"❌ Failed to detect project context\n\nError: {str(e)}",
+            title="Context Detection Error",
+            style="red"
+        ))
+
+
+def show_available_models_interactive():
+    """Show available models with health status and allow switching"""
+    models = get_available_models()
+    
+    if not models:
+        console.print(Panel(
+            "❌ No models found\n\n"
+            "Install a model with: ollama pull qwen2.5:3b",
+            title="No Models Available",
+            style="red"
+        ))
+        return
+    
+    # Create table with model info
+    table = Table(title="🤖 Available Models", show_header=True, header_style="bold cyan")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("Model", style="white")
+    table.add_column("Status", style="green")
+    table.add_column("Response Time", style="yellow")
+    table.add_column("Current", style="magenta")
+    
+    current_model = model_manager.current_model
+    
+    for i, model in enumerate(models, 1):
+        # Check health
+        is_healthy = model_manager.check_model_health(model)
+        health = model_manager.model_health.get(model, {})
+        
+        if health.get('status') == 'healthy':
+            status = "✅ Healthy"
+            response_time = f"{health.get('response_time', 0):.2f}s"
+        else:
+            status = "❌ Error"
+            response_time = "N/A"
+        
+        is_current = "⭐" if model == current_model else ""
+        
+        table.add_row(str(i), model, status, response_time, is_current)
+    
+    console.print(table)
+    console.print()
+    console.print("[dim]💡 Tip: Use /model <name> to switch models[/dim]")
+    console.print(f"[dim]Current model: [bold]{current_model}[/bold][/dim]")
+
+
 def is_exit_command(user_input):
     """Check if user input is an exit command (exit, quit, q)"""
     exit_commands = ['exit', 'quit', 'q']
@@ -1403,7 +1581,10 @@ def delete_file(path):
 
 
 def chat_mode(model, online):
-    """Enhanced interactive chat loop with advanced features and conversation management"""
+    """Enhanced interactive chat loop with immersive full-screen experience (like Gemini/Crush/Claude CLI)"""
+    # Clear screen for immersive experience
+    console.clear()
+    
     # Start a new conversation session
     session_id = memory.start_session()
 
@@ -1417,6 +1598,7 @@ def chat_mode(model, online):
     # Show session info
     console.print(f"[dim]💬 Session: {session_id}[/dim]")
     console.print(f"[dim]🧠 Memory: {len(memory.get_context())} messages[/dim]")
+    console.print()  # Extra spacing for clean look
 
     while True:
         try:
@@ -1462,8 +1644,8 @@ def chat_mode(model, online):
                 handle_chat_exit()
                 break
 
-            # Show thinking indicator with maximum 200ms latency
-            console.print("[bold yellow]🧠 [Thinking...][/bold yellow]")
+            # Show thinking indicator with immersive styling
+            console.print("\n[bold cyan]Xencode[/bold cyan] [dim]›[/dim] [dim italic]processing...[/dim italic]")
 
             # Check connectivity before API call
             new_online = update_online_status()
@@ -1506,10 +1688,128 @@ def chat_mode(model, online):
             continue
 
 
+def check_ollama_health():
+    """Check if Ollama is running and accessible"""
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            return True, "Ollama is running"
+        else:
+            return False, f"Ollama returned status {response.status_code}"
+    except requests.ConnectionError:
+        return False, "Ollama is not running. Start it with: ollama serve"
+    except requests.Timeout:
+        return False, "Ollama is not responding (timeout)"
+    except Exception as e:
+        return False, f"Unexpected error: {e}"
+
+
+def is_first_run():
+    """Check if this is the first run"""
+    config_file = Path.home() / ".xencode" / "config.json"
+    return not config_file.exists()
+
+
+def run_first_time_setup():
+    """Run interactive setup for first-time users"""
+    console.print(Panel(
+        "👋 Welcome to Xencode!\n\n"
+        "Let's get you set up in 30 seconds...",
+        title="First Run Setup",
+        style="blue"
+    ))
+    
+    # Check Ollama installation
+    try:
+        subprocess.run(["ollama", "--version"], capture_output=True, check=True, timeout=5)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        console.print(Panel(
+            "❌ Ollama is not installed\n\n"
+            "Install Ollama:\n"
+            "• Visit: https://ollama.ai\n"
+            "• Or: curl https://ollama.ai/install.sh | sh",
+            title="Ollama Not Found",
+            style="red"
+        ))
+        sys.exit(1)
+    
+    # Check if Ollama is running
+    is_healthy, message = check_ollama_health()
+    if not is_healthy:
+        console.print(Panel(
+            f"❌ {message}\n\n"
+            "Start Ollama:\n"
+            "• Run: ollama serve\n"
+            "• Or: systemctl start ollama",
+            title="Ollama Not Running",
+            style="red"
+        ))
+        sys.exit(1)
+    
+    # Check for models
+    models = get_available_models()
+    if not models:
+        console.print(Panel(
+            "⚠️ No models installed\n\n"
+            "Would you like to install a recommended model?",
+            title="No Models Found",
+            style="yellow"
+        ))
+        
+        # Recommend best model based on system
+        recommended_model = "qwen2.5:3b"  # Small, fast, efficient
+        
+        if PROMPT_TOOLKIT_AVAILABLE:
+            from prompt_toolkit import prompt as pt_prompt
+            choice = pt_prompt(f"Install recommended model ({recommended_model})? [y/N]: ").lower()
+            install_model = choice in ['y', 'yes']
+        else:
+            choice = input(f"Install recommended model ({recommended_model})? [y/N]: ").lower()
+            install_model = choice in ['y', 'yes']
+        
+        if install_model:
+            update_model(recommended_model)
+            models = get_available_models()  # Refresh after install
+        else:
+            console.print("[yellow]You can install models later with: ollama pull <model>[/yellow]")
+            sys.exit(0)
+    
+    # Save config with smart model selection
+    config_dir = Path.home() / ".xencode"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.json"
+    
+    # Use smart model selection
+    best_model = get_smart_default_model()
+    
+    config = {
+        "default_model": best_model,
+        "setup_completed": True,
+        "setup_date": datetime.now().isoformat()
+    }
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    console.print(f"[green]✅ Setup complete! Using model: {best_model}[/green]\n")
+
+
 def main():
+    # Check for first run
+    if is_first_run():
+        run_first_time_setup()
+    
+    # Smart model selection - use best available model
+    global DEFAULT_MODEL
+    DEFAULT_MODEL = get_smart_default_model()
+    
     args = sys.argv[1:]
-    online = "false"
-    chat_mode_enabled = False
+    # Read online status from environment variable (set by xencode.sh)
+    online = "true" if os.environ.get('XENCODE_ONLINE', 'false').lower() == 'true' else "false"
+    
+    # Check if we should force chat mode in current terminal (like Gemini/Crush/Claude CLI)
+    force_chat = os.environ.get('XENCODE_FORCE_CHAT', 'false').lower() == 'true'
+    chat_mode_enabled = force_chat or (len(args) == 0)
 
     # Initialize Enhanced CLI System if available
     enhanced_cli = None
@@ -1694,6 +1994,19 @@ def main():
 
     # Handle chat mode or inline prompt
     if chat_mode_enabled:
+        # Health check before starting chat mode
+        is_healthy, health_message = check_ollama_health()
+        if not is_healthy:
+            console.print(Panel(
+                f"❌ {health_message}\n\n"
+                "Please start Ollama:\n"
+                "• Run: ollama serve\n"
+                "• Or: systemctl start ollama",
+                title="Ollama Not Available",
+                style="red"
+            ))
+            return
+        
         chat_mode(model, online)
         return
     else:
