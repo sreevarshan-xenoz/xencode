@@ -38,6 +38,11 @@ ENV/
 *.log
 .ipynb_checkpoints/
 
+# Test coverage
+.coverage
+coverage.xml
+htmlcov/
+
 # OS
 .DS_Store
 Thumbs.db
