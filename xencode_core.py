@@ -58,6 +58,17 @@ try:
 except ImportError:
     PROJECT_CONTEXT_AVAILABLE = False
 
+# Import System Checker
+try:
+    from xencode.system_checker import SystemChecker
+    SYSTEM_CHECKER_AVAILABLE = True
+    system_checker = SystemChecker()
+    # Print system status on startup (optional, or can be behind a flag)
+    # system_checker.print_status() 
+except ImportError:
+    SYSTEM_CHECKER_AVAILABLE = False
+    system_checker = None
+
 # Suppress Rich color encoding warnings and other terminal warnings
 os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
