@@ -169,30 +169,6 @@ source .venv/bin/activate  # Linux/macOS
 # 📚 Dependency installation
 pip install -e .[dev,test]
 
-# ✅ Verification
-python -m pytest test_phase2_comprehensive.py -v
-```
-
-</details>
-
-### 💻 **System Requirements**
-
-<div align="center">
-
-| Component | 🚨 Minimum | 🎯 Recommended | 🚀 Optimal |
-|-----------|------------|---------------|-----------|
-| **Python** | 3.9+ | 3.11+ | 3.12+ |
-| **RAM** | 4GB | 8GB | 16GB+ |
-| **Storage** | 5GB | 10GB | 20GB+ |
-| **Platform** | Any OS | Linux | Ubuntu 22.04+ |
-| **AI Runtime** | Ollama | Ollama + GPU | Ollama + NVIDIA |
-
-</div>
-
-## 💫 **Usage**
-
-<div align="center">
-
 ### 🎮 **Get Started in Seconds**
 
 </div>
