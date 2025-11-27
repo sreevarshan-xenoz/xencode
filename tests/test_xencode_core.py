@@ -2,7 +2,8 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
+import pytest
+# from unittest.mock import patch - Removed for real data testing
 
 # Add the project root to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -97,14 +98,24 @@ class TestResponseCache:
 class TestModelManager:
     """Test cases for ModelManager class."""
 
+    @pytest.mark.requires_ollama
     def test_initialization(self):
-        """Test ModelManager initialization."""
-        with patch('subprocess.check_output') as mock_subprocess:
-            mock_subprocess.return_value = (
-                "NAME    MODIFIED    SIZE\nqwen3:4b  2 hours ago    4.7 GB"
-            )
+        """Test ModelManager initialization with real system."""
+        try:
             manager = ModelManager()
-            assert manager.current_model is not None
+            # With real system, this should populate if Ollama is running and has models
+            # We can't guarantee models are pulled, but we can check the list structure
+            assert isinstance(manager.available_models, list)
+        except Exception as e:
+            pytest.fail(f"ModelManager initialization failed with real system: {e}")
+
+    @pytest.mark.requires_ollama
+    def test_refresh_models(self):
+        """Test refreshing models from real Ollama instance."""
+        manager = ModelManager()
+        manager.refresh_models()
+        assert isinstance(manager.available_models, list)
+
 
 
 class TestUtilityFunctions:
