@@ -14,7 +14,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock, patch
+# from unittest.mock import Mock, patch - Removed for real data testing
 
 # Import the components to test
 try:

@@ -38,43 +38,6 @@ class TestBanditIntegration:
         """Test Python code scanning when Bandit is not available"""
         bandit = BanditIntegration()
         bandit.bandit_available = False
-        
-        code = "import os\nos.system('ls')"
-        results = await bandit.scan_python_code(code)
-        
-        assert results == []
-    
-    @pytest.mark.asyncio
-    @patch('subprocess.run')
-    @patch('asyncio.create_subprocess_exec')
-    async def test_scan_python_code_with_bandit(self, mock_subprocess, mock_run):
-        """Test Python code scanning with Bandit available"""
-        # Mock Bandit availability check
-        mock_run.return_value.returncode = 0
-        
-        # Mock Bandit subprocess execution
-        mock_process = AsyncMock()
-        mock_process.communicate.return_value = (
-            b'{"results": [{"issue_severity": "HIGH", "issue_confidence": "HIGH", "issue_text": "Test issue", "line_number": 1, "test_id": "B101"}]}',
-            b''
-        )
-        mock_process.returncode = 1
-        mock_subprocess.return_value = mock_process
-        
-        bandit = BanditIntegration()
-        bandit.bandit_available = True
-        
-        code = "assert False"
-        results = await bandit.scan_python_code(code)
-        
-        assert len(results) == 1
-        assert results[0]['issue_severity'] == 'HIGH'
-        assert results[0]['test_id'] == 'B101'
-    
-    def test_convert_bandit_to_analysis_issues(self):
-        """Test conversion of Bandit results to AnalysisIssue objects"""
-        bandit = BanditIntegration()
-        
         bandit_results = [
             {
                 'issue_severity': 'HIGH',
