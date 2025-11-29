@@ -13,6 +13,8 @@ from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 from textual import events
 
+from xencode.tui.widgets.git_status import GitStatusManager, GitStatus
+
 
 class FileExplorer(Tree):
     """File explorer tree widget"""
@@ -29,6 +31,9 @@ class FileExplorer(Tree):
             root_path: Root directory to explore (defaults to current directory)
         """
         self.root_path = root_path or Path.cwd()
+        
+        # Initialize Git status manager
+        self.git_manager = GitStatusManager(self.root_path)
         
         # Create root node
         root_label = Text("📁 " + self.root_path.name, style="bold cyan")
@@ -80,11 +85,24 @@ class FileExplorer(Tree):
                 if item.is_dir():
                     icon = "📁"
                     style = "bold blue"
+                    label = Text(f"{icon} {item.name}", style=style)
                 else:
                     icon = self._get_file_icon(item.suffix)
-                    style = "white"
-                
-                label = Text(f"{icon} {item.name}", style=style)
+                    
+                    # Get Git status
+                    git_status = self.git_manager.get_status(item)
+                    git_icon = self.git_manager.get_status_icon(git_status)
+                    git_color = self.git_manager.get_status_color(git_status)
+                    
+                    # Build label with Git status
+                    label = Text()
+                    label.append(f"{icon} ", style="white")
+                    
+                    # Add Git status badge if not clean
+                    if git_status != GitStatus.CLEAN:
+                        label.append(f"[{git_icon}] ", style=git_color)
+                    
+                    label.append(item.name, style="white")
                 
                 # Add child node
                 child = node.add(label, data=item)
@@ -146,6 +164,12 @@ class FileExplorer(Tree):
                 child.remove()
         
         self._populate_node(node)
+    
+    async def refresh_git_status(self) -> None:
+        """Refresh Git status for all visible files"""
+        await self.git_manager.refresh_status()
+        # Refresh the tree to update labels
+        self.refresh()
     
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         """Called when a node is selected

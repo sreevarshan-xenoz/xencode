@@ -12,6 +12,7 @@ from textual.widgets import Static, Checkbox, RadioButton, RadioSet, Label
 from textual.containers import Container, Vertical, Horizontal, VerticalScroll
 from textual.binding import Binding
 from textual.message import Message
+from xencode.tui.utils.model_checker import ModelChecker
 
 
 class ModelSelected(Message):
@@ -104,11 +105,49 @@ class ModelSelector(VerticalScroll):
         yield Label("Choose 1 model for single, or 2-4 for ensemble", classes="dim")
         
         # Model checkboxes
+        available_system_models = ModelChecker.get_available_models()
+        
+        # Track which system models are covered by our hardcoded list
+        covered_system_models = set()
+        
         for model_id, model_name in self.AVAILABLE_MODELS:
-            checkbox = Checkbox(model_name, value=(model_id == "qwen2.5:7b"))
-            checkbox.data = model_id
+            # Check if model is installed (exact or prefix match)
+            # We match if any system model starts with our ID, OR if our ID starts with the system model (less likely)
+            # Actually, let's find the best match
+            matched_sys_model = None
+            for sys_model in available_system_models:
+                if sys_model.startswith(model_id) or model_id.startswith(sys_model.split(':')[0]):
+                    matched_sys_model = sys_model
+                    covered_system_models.add(sys_model)
+                    break
+            
+            is_installed = matched_sys_model is not None
+            
+            display_name = model_name
+            if not is_installed:
+                display_name += " (Not Installed)"
+            else:
+                # Use the actual installed name if it differs slightly
+                if matched_sys_model != model_id:
+                    display_name += f" [{matched_sys_model}]"
+                
+            checkbox = Checkbox(display_name, value=(is_installed and "qwen" in model_id))
+            # Use the actual installed ID if found, otherwise the hardcoded one
+            checkbox.data = matched_sys_model if matched_sys_model else model_id
+            
             self.model_checkboxes[model_id] = checkbox
             yield checkbox
+            
+        # Add any other installed models that weren't in our list
+        for sys_model in available_system_models:
+            if sys_model not in covered_system_models:
+                checkbox = Checkbox(f"{sys_model} (Installed)", value=False)
+                checkbox.data = sys_model
+                self.model_checkboxes[sys_model] = checkbox
+                yield checkbox
+            
+        # Add option to refresh/check models
+        yield Label("Tip: Run 'ollama pull <model>' in terminal to install", classes="dim")
         
         # Ensemble section
         yield Label("")  # Spacer
@@ -130,8 +169,25 @@ class ModelSelector(VerticalScroll):
         """Called when mounted"""
         self.ensemble_radios = self.query_one("#ensemble-method", RadioSet)
         
-        # Initialize with default
-        self.selected_models.add("qwen2.5:7b")
+        # Initialize with default if available
+        available = ModelChecker.get_available_models()
+        
+        # If we have any available models, select the first one if nothing else is selected
+        if available and not self.selected_models:
+            # Prefer qwen or llama
+            preferred = [m for m in available if "qwen" in m or "llama" in m]
+            if preferred:
+                default_model = preferred[0]
+            else:
+                default_model = available[0]
+                
+            self.selected_models.add(default_model)
+            
+            # Update checkboxes
+            for cb in self.query(Checkbox):
+                if cb.data == default_model:
+                    cb.value = True
+                    break
     
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         """Handle checkbox changes"""
@@ -169,6 +225,17 @@ class ModelSelector(VerticalScroll):
         """Apply the current selection"""
         if not self.selected_models:
             self.app.notify("⚠️ Please select at least one model", severity="warning")
+            return
+            
+        # Verify selected models are actually installed
+        available = ModelChecker.get_available_models()
+        missing = []
+        for model in self.selected_models:
+            if not any(m.startswith(model) for m in available):
+                missing.append(model)
+        
+        if missing:
+            self.app.notify(f"⚠️ Models not found: {', '.join(missing)}. Please install via 'ollama pull'", severity="error")
             return
         
         if len(self.selected_models) > 4:

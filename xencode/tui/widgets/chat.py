@@ -12,7 +12,7 @@ from rich.console import RenderableType
 from rich.markdown import Markdown
 from rich.text import Text
 from textual import events
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, Label
 from textual.containers import Container, VerticalScroll
 from textual.message import Message
 
@@ -93,17 +93,24 @@ class ChatHistory(VerticalScroll):
         super().__init__(*args, **kwargs)
         self.border_title = "💬 Chat History"
     
-    def add_message(self, role: str, content: str) -> ChatMessage:
+    def add_message(self, role: str, content: str, sender: str = None) -> ChatMessage:
         """Add a message to the history
         
         Args:
             role: Message role (user/assistant/system)
             content: Message content
+            sender: Optional sender name for user messages
             
         Returns:
             The created message widget
         """
-        message = ChatMessage(role, content)
+        if role == "user":
+            display_name = sender if sender else "You"
+            message = UserMessage(content, display_name)
+            message.add_class("user")
+        else:
+            message = ChatMessage(role, content)
+            
         self.mount(message)
         
         # Scroll to bottom
@@ -197,14 +204,26 @@ class ChatPanel(Container):
         # Post message to app for processing
         self.post_message(ChatSubmitted(user_message))
     
-    def add_user_message(self, content: str) -> None:
+    def add_message(self, role: str, content: str, sender: str = None) -> None:
+        """Add a message to the chat
+        
+        Args:
+            role: 'user' or 'assistant'
+            content: Message content
+            sender: Optional name of sender (for collaboration)
+        """
+        if self.history:
+            self.history.add_message(role, content, sender)
+    
+    def add_user_message(self, content: str, sender: str = None) -> None:
         """Add a user message
         
         Args:
             content: Message content
+            sender: Optional sender name
         """
         if self.history:
-            self.history.add_message("user", content)
+            self.history.add_message("user", content, sender)
     
     def add_assistant_message(self, content: str) -> ChatMessage:
         """Add an assistant message
@@ -236,6 +255,19 @@ class ChatPanel(Container):
         """
         if self.history:
             self.history.update_last_message(content)
+
+
+class UserMessage(Static):
+    """User message bubble"""
+    
+    def __init__(self, content: str, sender: str = "You"):
+        super().__init__()
+        self.content = content
+        self.sender = sender
+        
+    def compose(self):
+        yield Label(f"👤 {self.sender}", classes="message-author")
+        yield Markdown(self.content)
 
 
 class ChatSubmitted(Message):
