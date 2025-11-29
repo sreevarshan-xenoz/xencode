@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""
-Main Xencode TUI Application
-
-VS Code-like terminal interface for Xencode.
-"""
-
 import asyncio
+import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -13,14 +10,15 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Header, Footer
 from textual.binding import Binding
+import websockets
 
 from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
 from xencode.tui.widgets.editor import CodeEditor
 from xencode.tui.widgets.chat import ChatPanel, ChatSubmitted
 from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
+from xencode.tui.widgets.collaboration import CollaborationPanel
 
 # Import core functionality
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from xencode_core import run_streaming_query, ModelManager, ConversationMemory
@@ -64,6 +62,14 @@ class XencodeApp(App):
         display: none;
     }
     
+    #collab-panel-container {
+        height: 50%;
+    }
+    
+    #collab-panel-container.hidden {
+        display: none;
+    }
+    
     #chat-panel-container {
         height: 1fr;
     }
@@ -85,6 +91,8 @@ class XencodeApp(App):
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+e", "toggle_explorer", "Toggle Explorer"),
         Binding("ctrl+m", "toggle_models", "Models"),
+        Binding("ctrl+k", "toggle_collab", "Collab"),
+        Binding("ctrl+g", "refresh_git", "Git Refresh"),
         Binding("ctrl+l", "clear_chat", "Clear Chat"),
         Binding("f1", "help", "Help"),
     ]
@@ -108,6 +116,13 @@ class XencodeApp(App):
         self.code_editor: Optional[CodeEditor] = None
         self.chat_panel: Optional[ChatPanel] = None
         self.model_selector: Optional[ModelSelector] = None
+        self.collab_panel: Optional[CollaborationPanel] = None
+        
+        # Collaboration state
+        self.server_process: Optional[subprocess.Popen] = None
+        self.ws_connection: Optional[websockets.WebSocketClientProtocol] = None
+        self.session_id: Optional[str] = None
+        self.username: Optional[str] = None
         
         # Ensemble state
         self.use_ensemble = False
@@ -138,6 +153,11 @@ class XencodeApp(App):
                         self.model_selector = ModelSelector()
                         yield self.model_selector
                     
+                    # Collaboration panel (initially hidden)
+                    with Vertical(id="collab-panel-container", classes="hidden"):
+                        self.collab_panel = CollaborationPanel()
+                        yield self.collab_panel
+
                     # Chat panel
                     with Vertical(id="chat-panel-container"):
                         self.chat_panel = ChatPanel()
@@ -166,6 +186,22 @@ class XencodeApp(App):
         if self.code_editor:
             self.code_editor.load_file(event.path)
         
+        # Broadcast file open if connected
+        if self.ws_connection and self.session_id:
+            try:
+                # Calculate relative path
+                try:
+                    rel_path = event.path.relative_to(self.root_path)
+                    asyncio.create_task(self.ws_connection.send(json.dumps({
+                        "type": "file_open",
+                        "content": str(rel_path)
+                    })))
+                except ValueError:
+                    # Path not relative to root (e.g. external file)
+                    pass
+            except Exception as e:
+                self.notify(f"Failed to broadcast file open: {e}", severity="error")
+        
         # Optionally notify chat
         if self.chat_panel:
             self.chat_panel.add_system_message(
@@ -186,6 +222,120 @@ class XencodeApp(App):
         if not self.use_ensemble and self.ensemble_models:
             self.current_model = self.ensemble_models[0]
     
+    async def on_collaboration_panel_host_session(self, event: CollaborationPanel.HostSession) -> None:
+        """Handle host session request"""
+        try:
+            # Start server
+            self.server_process = subprocess.Popen(
+                [sys.executable, "-m", "uvicorn", "xencode.server.app:app", "--host", "0.0.0.0", "--port", "8000"],
+                cwd=str(Path.cwd())
+            )
+            self.notify("Starting collaboration server...", severity="information")
+            await asyncio.sleep(2)  # Wait for server to start
+            
+            # Create session via API (using requests for simplicity, could use aiohttp)
+            import requests
+            response = requests.post("http://localhost:8000/sessions/create", params={"username": "Host"})
+            if response.status_code == 200:
+                data = response.json()
+                self.session_id = str(data["session_id"])
+                invite_code = data["invite_code"]
+                self.username = "Host"
+                
+                # Connect WebSocket
+                await self._connect_websocket("localhost:8000", self.session_id, "Host")
+                
+                # Update UI
+                if self.collab_panel:
+                    self.collab_panel.set_connected("host", invite_code)
+                    self.collab_panel.add_user("Host (You)")
+            else:
+                self.notify(f"Failed to create session: {response.text}", severity="error")
+                
+        except Exception as e:
+            self.notify(f"Error hosting session: {e}", severity="error")
+
+    async def on_collaboration_panel_join_session(self, event: CollaborationPanel.JoinSession) -> None:
+        """Handle join session request"""
+        try:
+            import requests
+            # Get session ID from invite code
+            response = requests.get(f"http://localhost:8000/sessions/{event.invite_code}")
+            if response.status_code == 200:
+                data = response.json()
+                self.session_id = str(data["session_id"])
+                self.username = event.username
+                
+                # Connect WebSocket
+                await self._connect_websocket("localhost:8000", self.session_id, event.username)
+                
+                # Update UI
+                if self.collab_panel:
+                    self.collab_panel.set_connected("guest", event.invite_code)
+                    self.collab_panel.add_user(f"{event.username} (You)")
+            else:
+                self.notify("Invalid invite code or session not found", severity="error")
+                
+        except Exception as e:
+            self.notify(f"Error joining session: {e}", severity="error")
+
+    async def _connect_websocket(self, host: str, session_id: str, username: str):
+        """Connect to collaboration WebSocket"""
+        uri = f"ws://{host}/ws/{session_id}/{username}"
+        try:
+            self.ws_connection = await websockets.connect(uri)
+            self.notify(f"Connected to session as {username}", severity="information")
+            
+            # Start listening loop
+            asyncio.create_task(self._listen_websocket())
+            
+        except Exception as e:
+            self.notify(f"WebSocket connection failed: {e}", severity="error")
+
+    async def _listen_websocket(self):
+        """Listen for WebSocket messages"""
+        if not self.ws_connection:
+            return
+            
+        try:
+            async for message in self.ws_connection:
+                data = json.loads(message)
+                await self._handle_collab_message(data)
+        except websockets.exceptions.ConnectionClosed:
+            self.notify("Disconnected from session", severity="warning")
+            self.ws_connection = None
+            
+    async def _handle_collab_message(self, data: dict):
+        """Handle incoming collaboration message"""
+        msg_type = data.get("type")
+        content = data.get("content")
+        sender = data.get("sender", "System")
+        
+        if msg_type == "chat":
+            if self.chat_panel:
+                self.chat_panel.add_message("user", content, sender) # Re-using user role for now
+        elif msg_type == "system":
+            if self.collab_panel:
+                # Update user list based on system messages (simplified)
+                if "joined" in content:
+                    user = content.split(" ")[0]
+                    self.collab_panel.add_user(user)
+            self.notify(content, severity="information")
+            
+        elif msg_type == "file_open":
+            # Handle remote file open (Follow Mode)
+            try:
+                rel_path = content
+                full_path = self.root_path / rel_path
+                if full_path.exists() and full_path.is_file():
+                    if self.code_editor:
+                        self.code_editor.load_file(full_path)
+                    self.notify(f"{sender} opened {rel_path}", severity="information")
+                else:
+                    self.notify(f"{sender} opened {rel_path} (not found)", severity="warning")
+            except Exception as e:
+                self.notify(f"Error syncing file: {e}", severity="error")
+
     async def on_chat_submitted(self, event: ChatSubmitted) -> None:
         """Handle chat submission
         
@@ -196,6 +346,16 @@ class XencodeApp(App):
         
         if not self.chat_panel:
             return
+            
+        # Broadcast if connected
+        if self.ws_connection and self.session_id:
+            try:
+                await self.ws_connection.send(json.dumps({
+                    "type": "chat",
+                    "content": user_query
+                }))
+            except Exception as e:
+                self.notify(f"Failed to broadcast message: {e}", severity="error")
         
         # Add thinking indicator
         thinking_msg = self.chat_panel.add_assistant_message("Thinking...")
@@ -329,12 +489,34 @@ class XencodeApp(App):
         """Toggle model selector visibility"""
         model_panel = self.query_one("#model-selector-panel")
         chat_container = self.query_one("#chat-panel-container")
+        collab_panel = self.query_one("#collab-panel-container")
+        
+        # Hide collab if open
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
         
         if model_panel.has_class("hidden"):
             model_panel.remove_class("hidden")
             chat_container.add_class("shrink")
         else:
             model_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_collab(self) -> None:
+        """Toggle collaboration panel visibility"""
+        collab_panel = self.query_one("#collab-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        
+        # Hide models if open
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+            
+        if collab_panel.has_class("hidden"):
+            collab_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            collab_panel.add_class("hidden")
             chat_container.remove_class("shrink")
     
     def action_clear_chat(self) -> None:
@@ -361,8 +543,29 @@ class XencodeApp(App):
             ## Ensemble Mode
             Select 2-4 models in Model Selector to enable ensemble.
             Choose method: Vote, Weighted, Consensus, or Hybrid.
+            
+            ## Git Integration
+            - **Ctrl+G**: Refresh Git status
+            - Status indicators: M (Modified), A (Added), D (Deleted), ? (Untracked)
             """
             self.chat_panel.add_system_message(help_text)
+
+    def action_refresh_git(self) -> None:
+        """Refresh Git status in file explorer"""
+        if self.file_explorer:
+            asyncio.create_task(self.file_explorer.refresh_git_status())
+            self.notify("Git status refreshed", severity="information")
+
+    def on_unmount(self) -> None:
+        """Called when app is unmounted"""
+        # Stop server if running
+        if self.server_process:
+            self.server_process.terminate()
+            self.server_process.wait()
+            
+        # Close WebSocket
+        if self.ws_connection:
+            asyncio.create_task(self.ws_connection.close())
 
 
 def run_tui(root_path: Optional[Path] = None):
