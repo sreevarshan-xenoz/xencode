@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""
+Model Selector Widget for Xencode TUI
+
+Allows selecting models and configuring ensembles.
+"""
+
+from typing import List, Optional, Set
+
+from rich.text import Text
+from textual.widgets import Static, Checkbox, RadioButton, RadioSet, Label
+from textual.containers import Container, Vertical, Horizontal, VerticalScroll
+from textual.binding import Binding
+from textual.message import Message
+
+
+class ModelSelected(Message):
+    """Message sent when model selection changes"""
+    
+    def __init__(self, models: List[str], is_ensemble: bool, method: str = "vote") -> None:
+        """Initialize message
+        
+        Args:
+            models: List of selected model names
+            is_ensemble: Whether ensemble mode is active
+            method: Ensemble method (vote/weighted/consensus/hybrid)
+        """
+        super().__init__()
+        self.models = models
+        is_ensemble = is_ensemble
+        self.method = method
+
+
+class ModelSelector(VerticalScroll):
+    """Model selector with ensemble configuration"""
+    
+    DEFAULT_CSS = """
+    ModelSelector {
+        height: 100%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1;
+    }
+    
+    ModelSelector Label {
+        margin: 1 0;
+        color: $text;
+    }
+    
+    ModelSelector .section-title {
+        text-style: bold;
+        color: $accent;
+    }
+    
+    ModelSelector Checkbox {
+        margin: 0 0 0 2;
+    }
+    
+    ModelSelector RadioButton {
+        margin: 0 0 0 2;
+    }
+    """
+    
+    BINDINGS = [
+        Binding("enter", "apply_selection", "Apply", show=True),
+    ]
+    
+    # Available models list
+    AVAILABLE_MODELS = [
+        ("qwen2.5:7b", "Qwen 2.5 7B (Fast, Balanced)"),
+        ("qwen2.5:14b", "Qwen 2.5 14B (Powerful)"),
+        ("llama3.1:8b", "Llama 3.1 8B (High Quality)"),
+        ("llama3.2:3b", "Llama 3.2 3B (Very Fast)"),
+        ("mistral:7b", "Mistral 7B (Fast)"),
+        ("phi3:mini", "Phi-3 Mini (Ultra Fast)"),
+        ("gemma2:2b", "Gemma 2 2B (Tiny, Fast)"),
+        ("codellama:7b", "CodeLlama 7B (Code Specialist)"),
+    ]
+    
+    # Ensemble methods
+    ENSEMBLE_METHODS = [
+        ("vote", "Majority Vote - Simple token voting"),
+        ("weighted", "Weighted - By model quality"),
+        ("consensus", "Consensus - Require 70% agreement"),
+        ("hybrid", "Hybrid - Adaptive method selection"),
+    ]
+    
+    def __init__(self, *args, **kwargs):
+        """Initialize model selector"""
+        super().__init__(*args, **kwargs)
+        self.border_title = "⚙️ Model Selection"
+        self.selected_models: Set[str] = set()
+        self.ensemble_enabled = False
+        self.ensemble_method = "vote"
+        
+        # Widgets
+        self.model_checkboxes: dict = {}
+        self.ensemble_radios: Optional[RadioSet] = None
+    
+    def compose(self):
+        """Compose the selector"""
+        # Title
+        yield Label("Select Models:", classes="section-title")
+        yield Label("Choose 1 model for single, or 2-4 for ensemble", classes="dim")
+        
+        # Model checkboxes
+        for model_id, model_name in self.AVAILABLE_MODELS:
+            checkbox = Checkbox(model_name, value=(model_id == "qwen2.5:7b"))
+            checkbox.data = model_id
+            self.model_checkboxes[model_id] = checkbox
+            yield checkbox
+        
+        # Ensemble section
+        yield Label("")  # Spacer
+        yield Label("Ensemble Method:", classes="section-title")
+        yield Label("Used when 2+ models selected", classes="dim")
+        
+        # Ensemble method radio buttons
+        with RadioSet(id="ensemble-method"):
+            for method_id, method_desc in self.ENSEMBLE_METHODS:
+                radio = RadioButton(method_desc, value=(method_id == "vote"))
+                radio.data = method_id
+                yield radio
+        
+        # Instructions
+        yield Label("")  # Spacer
+        yield Label("[Enter] to apply changes", classes="dim")
+    
+    def on_mount(self) -> None:
+        """Called when mounted"""
+        self.ensemble_radios = self.query_one("#ensemble-method", RadioSet)
+        
+        # Initialize with default
+        self.selected_models.add("qwen2.5:7b")
+    
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        """Handle checkbox changes"""
+        model_id = event.checkbox.data
+        
+        if event.value:
+            self.selected_models.add(model_id)
+        else:
+            self.selected_models.discard(model_id)
+        
+        # Update ensemble status
+        self.ensemble_enabled = len(self.selected_models) >= 2
+        self._update_border_title()
+    
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        """Handle radio button changes"""
+        if event.pressed and event.pressed.data:
+            self.ensemble_method = event.pressed.data
+            self._update_border_title()
+    
+    def _update_border_title(self) -> None:
+        """Update border title with current status"""
+        count = len(self.selected_models)
+        
+        if count == 0:
+            title = "⚙️ Model Selection (None)"
+        elif count == 1:
+            title = f"⚙️ Single Model ({count} selected)"
+        else:
+            title = f"⚙️ Ensemble Mode ({count} models, {self.ensemble_method})"
+        
+        self.border_title = title
+    
+    def action_apply_selection(self) -> None:
+        """Apply the current selection"""
+        if not self.selected_models:
+            self.app.notify("⚠️ Please select at least one model", severity="warning")
+            return
+        
+        if len(self.selected_models) > 4:
+            self.app.notify("⚠️ Maximum 4 models for ensemble", severity="warning")
+            return
+        
+        # Post message to app
+        self.post_message(ModelSelected(
+            models=list(self.selected_models),
+            is_ensemble=self.ensemble_enabled,
+            method=self.ensemble_method
+        ))
+        
+        # Notify user
+        if self.ensemble_enabled:
+            self.app.notify(
+                f"✅ Ensemble activated: {len(self.selected_models)} models ({self.ensemble_method})",
+                severity="information"
+            )
+        else:
+            model = list(self.selected_models)[0]
+            self.app.notify(f"✅ Single model: {model}", severity="information")
+    
+    def get_current_selection(self) -> dict:
+        """Get current selection state"""
+        return {
+            "models": list(self.selected_models),
+            "is_ensemble": self.ensemble_enabled,
+            "method": self.ensemble_method
+        }
