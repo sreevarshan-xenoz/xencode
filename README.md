@@ -32,9 +32,10 @@
 🎯 **Smart by Default** - Automatically detects your hardware and recommends the perfect AI model  
 ⚡ **Blazingly Fast** - 99.9% performance improvement with advanced hybrid caching  
 🛡️ **Rock Solid** - 95%+ automatic recovery from failures with intelligent error handling  
-� **Secu rity First** - Comprehensive vulnerability scanning with Bandit integration  
+🔒 **Security First** - Comprehensive vulnerability scanning with Bandit integration  
 🔧 **Zero Config** - Works out of the box, configures itself for optimal performance  
-🌐 **Offline First** - Complete local operation, your data never leaves your machine
+🌐 **Offline First** - Complete local operation, your data never leaves your machine  
+💻 **Interactive TUI** - VS Code-like terminal interface with real-time collaboration
 
 ## 🏗️ **Architecture Overview**
 
@@ -125,35 +126,6 @@ graph TB
 ```
 📈 Resource Tracking → 🔍 Analysis → 🚨 Alerts → 🔧 Auto-Optimization
 </div>
-
-```bash
-# 🎯 Production Ready in 30 seconds
-curl -sSL https://raw.githubusercontent.com/sreevarshan-xenoz/xencode/main/install.sh | bash
-```
-
-</details>
-
-## 📸 **Visual Tour**
-
-<div align="center">
-
-| **Main Interface** | **File Explorer & Editor** |
-|:---:|:---:|
-| ![Main Interface](images/1.jpg) | ![Explorer](images/2.jpg) |
-
-| **AI Chat** | **Model Selection** |
-|:---:|:---:|
-| ![Chat](images/3.jpg) | ![Models](images/4.jpg) |
-
-| **Git Integration** | **Collaboration** |
-|:---:|:---:|
-| ![Git](images/5.jpg) | ![Collab](images/6.jpg) |
-
-</div>
-
-<details>
-
-<summary><b>🔧 Manual Installation</b> - <i>For developers and advanced users</i></summary>
 
 ### 🏭 **Production Deployment**
 ```bash
