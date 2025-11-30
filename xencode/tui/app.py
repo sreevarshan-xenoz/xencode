@@ -17,6 +17,8 @@ from xencode.tui.widgets.editor import CodeEditor
 from xencode.tui.widgets.chat import ChatPanel, ChatSubmitted
 from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
 from xencode.tui.widgets.collaboration import CollaborationPanel
+from xencode.tui.widgets.commit_dialog import CommitDialog
+from xencode.tui.widgets.terminal import TerminalPanel
 
 # Import core functionality
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -93,6 +95,8 @@ class XencodeApp(App):
         Binding("ctrl+m", "toggle_models", "Models"),
         Binding("ctrl+k", "toggle_collab", "Collab"),
         Binding("ctrl+g", "refresh_git", "Git Refresh"),
+        Binding("ctrl+shift+c", "commit_dialog", "Commit"),
+        Binding("ctrl+t", "toggle_terminal", "Terminal"),
         Binding("ctrl+l", "clear_chat", "Clear Chat"),
         Binding("f1", "help", "Help"),
     ]
@@ -140,13 +144,14 @@ class XencodeApp(App):
                     self.file_explorer = FileExplorer(self.root_path)
                     yield self.file_explorer
                 
-                # Center panel: Code Editor
+                # Center panel: Code Editor + Terminal
                 with Vertical(id="center-panel"):
                     self.code_editor = CodeEditor()
                     self.code_editor.border_title = "Code Viewer"
                     yield self.code_editor
+                    yield TerminalPanel()
                 
-                # Right panel: Model Selector (hidden by default) + Chat
+                # Right panel: Model Selector + Collab + Chat
                 with Vertical(id="right-panel"):
                     # Model selector (initially hidden)
                     with Vertical(id="model-selector-panel", classes="hidden"):
@@ -433,8 +438,8 @@ class XencodeApp(App):
         Yields:
             Response chunks
         """
-        # This is a simplified version - integrate with xencode_core streaming
-        import requests
+        import aiohttp
+        import json
         
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -444,18 +449,26 @@ class XencodeApp(App):
         }
         
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=60)
-            
-            for line in response.iter_lines():
-                if line:
-                    import json
-                    data = json.loads(line)
-                    if "response" in data:
-                        yield data["response"]
-        
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status != 200:
+                        yield f"\n\nError: API returned status {response.status}"
+                        return
+                        
+                    async for line in response.content:
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                if "response" in data:
+                                    yield data["response"]
+                                if "error" in data:
+                                    yield f"\n\nError: {data['error']}"
+                            except json.JSONDecodeError:
+                                pass
+                                
         except Exception as e:
             yield f"\n\nError: {str(e)}"
-    
+
     def _get_language(self, suffix: str) -> str:
         """Get language identifier for file
         
@@ -476,7 +489,7 @@ class XencodeApp(App):
             ".css": "css",
         }
         return language_map.get(suffix.lower(), "text")
-    
+
     def action_toggle_explorer(self) -> None:
         """Toggle file explorer visibility"""
         left_panel = self.query_one("#left-panel")
@@ -555,6 +568,49 @@ class XencodeApp(App):
         if self.file_explorer:
             asyncio.create_task(self.file_explorer.refresh_git_status())
             self.notify("Git status refreshed", severity="information")
+
+    async def action_commit_dialog(self) -> None:
+        """Show commit dialog"""
+        if not self.file_explorer or not self.file_explorer.git_manager:
+            self.notify("Git integration not available", severity="error")
+            return
+            
+        diff = await self.file_explorer.git_manager.get_diff(staged=True)
+        if not diff:
+            self.notify("No staged changes to commit", severity="warning")
+            return
+            
+        def commit_callback(message: Optional[str]) -> None:
+            if message:
+                asyncio.create_task(self._do_commit(message))
+                
+        await self.push_screen(CommitDialog(diff, self._generate_commit_message), commit_callback)
+        
+    async def _do_commit(self, message: str) -> None:
+        success = await self.file_explorer.git_manager.commit(message)
+        if success:
+            self.notify("Changes committed successfully", severity="information")
+        else:
+            self.notify("Failed to commit changes", severity="error")
+            
+    async def _generate_commit_message(self, diff: str) -> str:
+        """Generate commit message from diff"""
+        prompt = f"Generate a conventional commit message for the following git diff. Return ONLY the message.\n\n{diff[:2000]}"
+        # Use existing streaming method but collect result
+        response = ""
+        async for chunk in self._stream_ai_response(prompt):
+            if "Error:" not in chunk:
+                response += chunk
+        return response.strip()
+
+    def action_toggle_terminal(self) -> None:
+        """Toggle terminal visibility"""
+        terminal = self.query_one(TerminalPanel)
+        if terminal.has_class("visible"):
+            terminal.remove_class("visible")
+        else:
+            terminal.add_class("visible")
+            terminal.query_one("Input").focus()
 
     def on_unmount(self) -> None:
         """Called when app is unmounted"""

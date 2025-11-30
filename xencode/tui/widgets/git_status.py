@@ -267,3 +267,67 @@ class GitStatusManager:
             self._repo.index.reset([rel_path])
         except (ValueError, GitCommandError):
             pass
+
+    async def get_diff(self, staged: bool = True) -> str:
+        """Get git diff
+        
+        Args:
+            staged: If True, get staged diff (index vs HEAD). 
+                   If False, get working tree diff (working vs index).
+            
+        Returns:
+            Diff string
+        """
+        if not self._is_git_repo or not self._repo:
+            return ""
+            
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._get_diff_sync, staged)
+        except Exception:
+            return ""
+            
+    def _get_diff_sync(self, staged: bool) -> str:
+        """Get diff (synchronous)"""
+        if not self._repo:
+            return ""
+            
+        try:
+            if staged:
+                # Diff index against HEAD
+                return self._repo.git.diff("--staged")
+            else:
+                # Diff working tree against index
+                return self._repo.git.diff()
+        except GitCommandError:
+            return ""
+
+    async def commit(self, message: str) -> bool:
+        """Commit staged changes
+        
+        Args:
+            message: Commit message
+            
+        Returns:
+            True if successful
+        """
+        if not self._is_git_repo or not self._repo:
+            return False
+            
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._commit_sync, message)
+            await self.refresh_status()
+            return True
+        except Exception:
+            return False
+            
+    def _commit_sync(self, message: str) -> None:
+        """Commit (synchronous)"""
+        if not self._repo:
+            return
+            
+        try:
+            self._repo.index.commit(message)
+        except GitCommandError:
+            pass
