@@ -132,6 +132,24 @@ graph TB
 
 </details>
 
+## 📸 **Visual Tour**
+
+<div align="center">
+
+| **Main Interface** | **File Explorer & Editor** |
+|:---:|:---:|
+| ![Main Interface](images/1.jpg) | ![Explorer](images/2.jpg) |
+
+| **AI Chat** | **Model Selection** |
+|:---:|:---:|
+| ![Chat](images/3.jpg) | ![Models](images/4.jpg) |
+
+| **Git Integration** | **Collaboration** |
+|:---:|:---:|
+| ![Git](images/5.jpg) | ![Collab](images/6.jpg) |
+
+</div>
+
 ## 🚀 **Installation**
 
 <div align="center">
