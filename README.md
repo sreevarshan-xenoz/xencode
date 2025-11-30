@@ -131,7 +131,28 @@ graph TB
 curl -sSL https://raw.githubusercontent.com/sreevarshan-xenoz/xencode/main/install.sh | bash
 ```
 
+</details>
+
+## 📸 **Visual Tour**
+
+<div align="center">
+
+| **Main Interface** | **File Explorer & Editor** |
+|:---:|:---:|
+| ![Main Interface](images/1.jpg) | ![Explorer](images/2.jpg) |
+
+| **AI Chat** | **Model Selection** |
+|:---:|:---:|
+| ![Chat](images/3.jpg) | ![Models](images/4.jpg) |
+
+| **Git Integration** | **Collaboration** |
+|:---:|:---:|
+| ![Git](images/5.jpg) | ![Collab](images/6.jpg) |
+
+</div>
+
 <details>
+
 <summary><b>🔧 Manual Installation</b> - <i>For developers and advanced users</i></summary>
 
 ### 🏭 **Production Deployment**
