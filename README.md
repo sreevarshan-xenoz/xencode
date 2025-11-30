@@ -37,6 +37,47 @@
 🌐 **Offline First** - Complete local operation, your data never leaves your machine  
 💻 **Interactive TUI** - VS Code-like terminal interface with real-time collaboration
 
+## 📸 **Screenshots**
+
+<div align="center">
+
+### 🎨 **See Xencode in Action**
+
+<table>
+<tr>
+<td width="50%">
+<img src="images/1.jpg" alt="Main Interface with Explorer" />
+<p align="center"><b>🗂️ Main Interface with Explorer</b></p>
+</td>
+<td width="50%">
+<img src="images/2.jpg" alt="Clean Interface" />
+<p align="center"><b>✨ Clean Interface View</b></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="images/3.jpg" alt="Model Selection" />
+<p align="center"><b>🤖 Intelligent Model Selection</b></p>
+</td>
+<td width="50%">
+<img src="images/4.jpg" alt="Collaboration Features" />
+<p align="center"><b>👥 Real-time Collaboration</b></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="images/5.jpg" alt="Terminal Integration" />
+<p align="center"><b>💻 Integrated Terminal</b></p>
+</td>
+<td width="50%">
+<img src="images/6.jpg" alt="Full Interface" />
+<p align="center"><b>🚀 Complete Workspace View</b></p>
+</td>
+</tr>
+</table>
+
+</div>
+
 ## 🏗️ **Architecture Overview**
 
 <div align="center">
