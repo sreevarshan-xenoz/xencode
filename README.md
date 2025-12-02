@@ -1,103 +1,104 @@
 <div align="center">
 
-# 🚀 Xencode
+# Xencode
 
-### *Next-Generation AI Assistant Platform*
+**AI-Powered Development Assistant Platform**
 
-**Enterprise-grade intelligence meets lightning-fast performance**
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg?style=for-the-badge)](https://github.com/sreevarshan-xenoz/xencode)
-[![Tests](https://img.shields.io/badge/tests-24%2F24%20passing-brightgreen.svg?style=for-the-badge)](#quality-assurance)
-[![Performance](https://img.shields.io/badge/performance-99.9%25%20boost-blue.svg?style=for-the-badge)](#performance--reliability-layer)
-[![System Score](https://img.shields.io/badge/system%20score-94%2F100-orange.svg?style=for-the-badge)](#technical-components)
-
-```ascii
-   ╭─────────────────────────────────────────────────────────────╮
-   │  🤖 Intelligent Model Selection  ⚡ Advanced Caching        │
-   │  🛡️ Enterprise Error Handling    ⚙️ Smart Configuration     │
-   │  📊 System Health Monitoring     🔧 Production Ready        │
-   ╰─────────────────────────────────────────────────────────────╯
-```
-
-[🚀 Quick Start](#installation) • [📚 Documentation](#architecture) • [🧪 Demo](demo_phase2_features.py) • [🗺️ Roadmap](PLAN.md)
+[Quick Start](#installation) • [Documentation](#architecture) • [Contributing](#contributing)
 
 </div>
 
 ---
 
-## ✨ **What Makes Xencode Special**
+## Overview
 
-> **Xencode isn't just another AI assistant—it's a complete intelligence platform engineered for the modern enterprise.**
+Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, and workspace collaboration features with a focus on privacy and offline operation.
 
-🎯 **Smart by Default** - Automatically detects your hardware and recommends the perfect AI model  
-⚡ **Blazingly Fast** - 99.9% performance improvement with advanced hybrid caching  
-🛡️ **Rock Solid** - 95%+ automatic recovery from failures with intelligent error handling  
-🔒 **Security First** - Comprehensive vulnerability scanning with Bandit integration  
-🔧 **Zero Config** - Works out of the box, configures itself for optimal performance  
-🌐 **Offline First** - Complete local operation, your data never leaves your machine  
-💻 **Interactive TUI** - VS Code-like terminal interface with real-time collaboration
+## Key Features
 
-## 📸 **Screenshots**
+### Core AI Capabilities
+- **🤖 LangChain Agentic System** - Production-ready agent with 9 specialized tools
+  - File operations (read, write, execute commands)
+  - Git workflow automation (status, diff, commit, log)
+  - Web search (DuckDuckGo integration)
+  - Code analysis (repository scanning, Python AST analysis)
+- **🧠 Multi-Agent Collaboration** - 4 specialized agents with intelligent task delegation
+  - CodeAgent (codellama:7b) for programming tasks
+  - ResearchAgent (mistral:7b) for web search and analysis
+  - ExecutionAgent (qwen3:4b) for file/command operations
+  - GeneralAgent (qwen3:4b) for general queries
+- **💾 Conversation Memory** - SQLite-backed persistent conversation history
+- **🎯 Smart Model Selection** - Automatic model switching based on task type
+
+### Platform Features
+- **Intelligent Model Selection** - Automatic hardware detection and model recommendations
+- **Advanced Caching** - Multi-tier caching system with LRU eviction and compression
+- **Error Recovery** - Automated error handling with retry mechanisms and fallback strategies
+- **Configuration Management** - Support for multiple configuration formats with hot-reload
+- **Security Analysis** - Integrated security scanning with Bandit and vulnerability detection
+- **Document Processing** - Support for PDF, DOCX, and web content extraction
+- **Workspace Collaboration** - Real-time collaboration with CRDT-based synchronization
+- **Analytics & Monitoring** - System health monitoring and performance metrics
+- **Plugin System** - Extensible architecture with marketplace integration
+
+## Screenshots
 
 <div align="center">
-
-### 🎨 **See Xencode in Action**
 
 <table>
 <tr>
 <td width="50%">
 <img src="images/1.jpg" alt="Main Interface with Explorer" />
-<p align="center"><b>🗂️ Main Interface with Explorer</b></p>
+<p align="center"><b>Main Interface with Explorer</b></p>
 </td>
 <td width="50%">
 <img src="images/2.jpg" alt="Clean Interface" />
-<p align="center"><b>✨ Clean Interface View</b></p>
+<p align="center"><b>Clean Interface View</b></p>
 </td>
 </tr>
 <tr>
 <td width="50%">
 <img src="images/3.jpg" alt="Model Selection" />
-<p align="center"><b>🤖 Intelligent Model Selection</b></p>
+<p align="center"><b>Intelligent Model Selection</b></p>
 </td>
 <td width="50%">
 <img src="images/4.jpg" alt="Collaboration Features" />
-<p align="center"><b>👥 Real-time Collaboration</b></p>
+<p align="center"><b>Real-time Collaboration</b></p>
 </td>
 </tr>
 <tr>
 <td width="50%">
 <img src="images/5.jpg" alt="Terminal Integration" />
-<p align="center"><b>💻 Integrated Terminal</b></p>
+<p align="center"><b>Integrated Terminal</b></p>
 </td>
 <td width="50%">
 <img src="images/6.jpg" alt="Full Interface" />
-<p align="center"><b>🚀 Complete Workspace View</b></p>
+<p align="center"><b>Complete Workspace View</b></p>
 </td>
 </tr>
 </table>
 
 </div>
 
-## 🏗️ **Architecture Overview**
-
-<div align="center">
+## Architecture
 
 ```mermaid
 graph TB
-    A["🎯 User Interface<br/>REST API / CLI / Web"] --> B["🤖 Intelligent Model Selector<br/>Dynamic routing & optimization"]
-    B --> C["⚡ Advanced Cache System<br/>LRU + Semantic Caching"]
-    C --> D["🛡️ Error Handler<br/>Retry logic & Fallback strategies"]
-    D --> E["⚙️ Config Manager<br/>Environment-aware settings"]
-    E --> F["📊 System Coordinator<br/>Orchestrates & monitors health"]
-    F --> G["🧠 AI Models<br/>Multi-model ensemble"]
+    A[User Interface<br/>REST API / CLI / Web] --> B[Intelligent Model Selector<br/>Dynamic routing & optimization]
+    B --> C[Advanced Cache System<br/>LRU + Semantic Caching]
+    C --> D[Error Handler<br/>Retry logic & Fallback strategies]
+    D --> E[Config Manager<br/>Environment-aware settings]
+    E --> F[System Coordinator<br/>Orchestrates & monitors health]
+    F --> G[AI Models<br/>Multi-model ensemble]
 
-    %% Bidirectional feedback loops for system awareness
-    F -.->|"Health metrics"| A
-    C -.->|"Cache stats"| F
-    D -.->|"Error logs"| F
-    G -.->|"Model performance"| B
+    F -.->|Health metrics| A
+    C -.->|Cache stats| F
+    D -.->|Error logs| F
+    G -.->|Model performance| B
 
-    %% Styling with professional color palette
     classDef ui fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
     classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
     classDef infra fill:#e8f5e8,stroke:#388e3c,stroke-width:2px,color:#000
@@ -109,453 +110,301 @@ graph TB
     class G models
 ```
 
-</div>
+## Installation
 
-## 🚀 **Core Capabilities**
+### Prerequisites
 
-<details>
-<summary><b>🎨 Foundation Layer</b> - <i>Click to expand</i></summary>
+- Python 3.8 or higher
+- Ollama installed and running
+- 4GB+ RAM recommended
+- 2GB+ free disk space
 
-- **🎭 Advanced Interface**: Real-time streaming with structured response formatting
-- **🔒 Offline Operation**: Complete local deployment with optional cloud connectivity  
-- **🧠 Session Management**: Persistent conversation context with intelligent memory management
-- **🔄 Model Agnostic**: Full compatibility with Ollama model ecosystem
-- **✨ Rich Terminal UI**: Professional interface with dynamic status indicators
-- **🌍 Cross-Platform**: Comprehensive Linux, macOS, and Windows support
+### Quick Install
 
-</details>
-
-<details>
-<summary><b>⚡ Performance & Reliability Layer</b> - <i>Click to expand</i></summary>
-### 🤖 **Intelligent Model Selection Engine**
-```
-🔍 Hardware Detection → 📊 Performance Scoring → 🎯 Model Recommendation → ⚡ Optimization
-```
-- Automated hardware profiling and optimization
-- AI model recommendations based on system specifications  
-- Interactive deployment wizard with guided setup
-- Real-time performance monitoring and tuning
-
-### ⚡ **Advanced Caching Architecture** 
-```
-💾 Memory Cache → 🗄️ SQLite Storage → 🗜️ LZMA Compression → 📈 Analytics
-```
-- Hybrid memory and persistent storage with LRU eviction policies
-- LZMA compression for optimal storage efficiency
-- Sub-millisecond response times for cached operations
-- Intelligent cache analytics and optimization algorithms
-
-### 🛡️ **Enterprise Error Management**
-```
-🚨 Error Detection → 🔍 Classification → 🔄 Recovery Strategy → ✅ Success
-```
-- Comprehensive error classification and handling framework
-- Automated recovery mechanisms with exponential backoff strategies
-- Context-aware diagnostic messaging with actionable solutions
-- 95%+ success rate for transient failure recovery
-
-### ⚙️ **Configuration Management System**
-```
-📄 Multi-Format → 🔧 Validation → 🌍 Environment → 🔥 Hot-Reload
-```
-- Multi-format configuration support (YAML, TOML, JSON, INI)
-- Environment-based configuration overrides
-- Runtime schema validation with type safety
-- Dynamic configuration reloading without service interruption
-
-### 📊 **System Health & Monitoring**
-```
-📈 Resource Tracking → 🔍 Analysis → 🚨 Alerts → 🔧 Auto-Optimization
-</div>
-
-### 🏭 **Production Deployment**
 ```bash
 git clone https://github.com/sreevarshan-xenoz/xencode.git
 cd xencode
 chmod +x install.sh && ./install.sh
 ```
 
-### 👨‍💻 **Development Environment**
+### Development Setup
+
 ```bash
-# 📦 Repository setup
+# Clone repository
 git clone https://github.com/sreevarshan-xenoz/xencode.git
 cd xencode
 
-# 🐍 Environment configuration  
+# Create virtual environment
 python -m venv .venv
 source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows PowerShell
+# .venv\Scripts\activate   # Windows
 
-# 📚 Dependency installation
+# Install dependencies
 pip install -e .[dev,test]
+```
 
-### 🎮 **Get Started in Seconds**
+## Usage
 
-</div>
+### Basic Commands
 
-<table>
-<tr>
-<td width="50%">
-
-### 🎯 **Basic Operations**
 ```bash
-# 💬 Interactive session
+# Start interactive session
 ./xencode.sh
 
-# ⚡ Direct queries  
-./xencode.sh "optimize this Python code"
+# Direct query
+./xencode.sh "analyze this code"
 
-# 🔧 Model management
+# List available models
 ./xencode.sh --list-models
+
+# Update models
 ./xencode.sh --update
 ```
 
-</td>
-<td width="50%">
+### Agentic Mode
 
-### 🚀 **Advanced Features**
 ```bash
-# 🤖 Smart model selection
+# Start interactive agent session
+python -m xencode.agentic_cli start
+
+# Use specific model
+python -m xencode.agentic_cli start --model codellama:7b
+
+# Multi-agent collaboration
+python -c "from xencode.agentic import AgentCoordinator; coord = AgentCoordinator(); print(coord.delegate_task('your task'))"
+```
+
+### Advanced Features
+
+```bash
+# Model selection wizard
 python -m xencode.intelligent_model_selector
 
-# ⚡ Cache operations
-python demo_phase2_features.py --demo-cache
-
-# ⚙️ Interactive config
+# Configuration setup
 python -m xencode.smart_config_manager --setup
 
-# 📊 System health check
+# System health check
 python -m xencode.phase2_coordinator --status
 
-# 🔒 Security scanning
-python demo_enhanced_security_scanning.py
+# Run security scan
+python -m xencode.analyzers.security_analyzer
 ```
 
-</td>
-</tr>
-</table>
+## Configuration
 
-<details>
-<summary><b>⚙️ Advanced Configuration</b> - <i>Customize everything</i></summary>
+Configuration files support YAML, TOML, JSON, and INI formats. Default location: `~/.xencode/config.yaml`
 
 ```yaml
-# ~/.xencode/config.yaml
 model:
-  primary: "llama3.1:8b"           # 🎯 Main model
-  fallback: ["mistral:7b", "phi3:mini"]  # 🔄 Backup options
+  primary: "llama3.1:8b"
+  fallback: ["mistral:7b", "phi3:mini"]
   
 cache:
-  memory_limit_mb: 512             # 💾 Memory cache size
-  disk_limit_mb: 2048             # 🗄️ Disk cache size  
-  compression: true               # 🗜️ Enable compression
+  memory_limit_mb: 512
+  disk_limit_mb: 2048
+  compression: true
 
 performance:
-  async_workers: 4                # ⚡ Concurrent workers
-  timeout_seconds: 30             # ⏰ Request timeout
-  retry_attempts: 3               # 🔄 Retry failed requests
+  async_workers: 4
+  timeout_seconds: 30
+  retry_attempts: 3
+
+security:
+  enable_scanning: true
+  scan_on_save: false
 ```
 
-<div align="center">
+## Project Structure
 
-**🎨 Want to see all features in action?**  
-Run: `python demo_phase2_features.py --full-demo`
-
-</div>
-
-</details>
-
-## Architecture
-
-### Project Structure
 ```
 xencode/
-├── xencode.sh                          # Primary executable interface
+├── xencode.sh                          # Main executable
 ├── xencode_core.py                     # Core application logic
-├── install.sh                          # Automated installation system
-├── requirements.txt                    # Dependency specifications
+├── install.sh                          # Installation script
+├── requirements.txt                    # Dependencies
 │
-├── xencode/                            # Core Platform Components
-│   ├── intelligent_model_selector.py  # Hardware optimization & model selection
-│   ├── advanced_cache_system.py       # High-performance caching infrastructure  
-│   ├── smart_config_manager.py        # Configuration management system
-│   ├── advanced_error_handler.py      # Error handling & recovery framework
-│   └── phase2_coordinator.py          # System integration & health monitoring
+├── xencode/                            # Core modules
+│   ├── agentic/                       # LangChain agentic system ⭐
+│   │   ├── manager.py                 # Agent manager
+│   │   ├── tools.py                   # Base tools
+│   │   ├── advanced_tools.py          # Git, web, code tools
+│   │   ├── coordinator.py             # Multi-agent system
+│   │   ├── memory.py                  # Conversation memory
+│   │   └── database.py                # SQLite storage
+│   ├── intelligent_model_selector.py  # Model selection engine
+│   ├── advanced_cache_system.py       # Caching infrastructure
+│   ├── smart_config_manager.py        # Configuration management
+│   ├── advanced_error_handler.py      # Error handling
+│   ├── phase2_coordinator.py          # System coordination
+│   ├── tui/widgets/agent_panel.py     # Agent TUI interface
+│   ├── analyzers/                     # Code analysis modules
+│   ├── processors/                    # Document processors
+│   ├── workspace/                     # Collaboration features
+│   ├── auth/                          # Authentication & authorization
+│   ├── analytics/                     # Analytics engine
+│   └── plugins/                       # Plugin system
 │
-├── tests/
-│   ├── test_phase2_comprehensive.py   # Comprehensive test suite (24 tests)
-│   └── test_*.py                      # Component-specific test modules
+├── tests/                             # Test suite
+│   ├── test_phase2_comprehensive.py
+│   └── integration/
 │
-├── demos/
-│   ├── demo_phase2_features.py        # Feature demonstration system
-│   └── demo_*.py                      # Individual component demonstrations
-│
-└── documentation/
-    ├── PLAN.md                        # Development roadmap & specifications
-    └── INSTALL_MANUAL.md              # Detailed deployment guide
+└── docs/                              # Documentation
+    ├── PLAN.md
+    └── CLI_GUIDE.md
 ```
 
-## Quality Assurance
+## Core Components
 
-### Test Framework
+### LangChain Agentic System ⭐ NEW
+- **9 Specialized Tools** across 4 categories
+  - File operations (read, write, execute)
+  - Git automation (status, diff, commit, log)
+  - Web search (DuckDuckGo)
+  - Code analysis (AST parsing, repository scanning)
+- **Multi-Agent Collaboration** with 4 specialized agents
+  - Automatic task classification and routing
+  - Intelligent agent delegation
+  - Collaborative task breakdown
+- **Conversation Memory** with SQLite persistence
+  - Full conversation history tracking
+  - Context window management (up to 8192 tokens)
+  - Tool usage analytics
+- **Smart Model Selection** integrated with existing model manager
+  - Dynamic model switching based on task type
+  - Performance tracking per model
+- **TUI Integration** with interactive agent panel
+  - Real-time agent status display
+  - Tool usage logging
+  - Interactive task submission
+
+### Intelligent Model Selection
+- Hardware profiling (CPU, RAM, GPU detection)
+- Model recommendation based on system capabilities
+- Performance benchmarking and scoring
+- Interactive deployment wizard
+
+### Advanced Caching
+- Multi-tier caching (memory + SQLite)
+- LZMA compression for storage efficiency
+- LRU eviction policies
+- Cache analytics and optimization
+
+### Error Management
+- Comprehensive error classification
+- Automated recovery with exponential backoff
+- Context-aware diagnostic messages
+- Fallback strategies for model failures
+
+### Configuration Management
+- Multi-format support (YAML, TOML, JSON, INI)
+- Environment variable overrides
+- Schema validation with Pydantic
+- Hot-reload without service restart
+
+### Security Analysis
+- Bandit integration for Python security scanning
+- CVE database matching
+- OWASP Top 10 vulnerability detection
+- Multi-language support
+
+### Document Processing
+- PDF text extraction
+- DOCX document parsing
+- Web content extraction
+- Text processing and analysis
+
+### Workspace Collaboration
+- Real-time synchronization with CRDTs
+- Multi-user workspace support
+- Permission management
+- Audit logging
+
+## Testing
+
 ```bash
-# Comprehensive test execution
+# Run all tests
+python -m pytest -v
+
+# Run specific test suite
 python -m pytest test_phase2_comprehensive.py -v
 
-# Full test suite validation
-python -m pytest -v --tb=short
+# Run with coverage
+python -m pytest --cov=xencode --cov-report=html
 
-# Performance benchmarking
+# Performance benchmarks
 python -m xencode.intelligent_model_selector --benchmark
-
-# Cache system validation
-python -m xencode.advanced_cache_system --test-performance
 ```
 
-### 📊 **Quality Dashboard**
+## Development Roadmap
 
-<div align="center">
+### Phase 3: Advanced Features (In Progress)
+- Enhanced plugin architecture with marketplace
+- Advanced analytics dashboard
+- Multi-modal support (vision, voice)
+- Extended collaboration features
 
-| 🎯 Metric | 📈 Result | 🎖️ Status | 📊 Progress |
-|-----------|-----------|-----------|-------------|
-| **🧪 Test Coverage** | 42/42 tests | ✅ 100% Pass | ![100%](https://progress-bar.dev/100?color=00ff00) |
-| **⚡ Performance** | 99.9% improvement | ✅ Exceeds target | ![99%](https://progress-bar.dev/99?color=00ff00) |
-| **🎯 System Score** | 94/100 | ✅ Optimal | ![94%](https://progress-bar.dev/94?color=orange) |
-| **🛡️ Reliability** | 95%+ recovery rate | ✅ Enterprise grade | ![95%](https://progress-bar.dev/95?color=00ff00) |
-| **🏗️ Code Quality** | Type-safe, linted | ✅ Production ready | ![100%](https://progress-bar.dev/100?color=00ff00) |
+### Phase 4: Distribution & Deployment
+- Docker containerization
+- Kubernetes deployment configs
+- Package distribution (PyPI, Homebrew)
+- CI/CD pipeline improvements
 
-</div>
+### Phase 5: Multi-Modal Integration
+- Image analysis and OCR
+- Voice integration
+- Video processing capabilities
 
-## 🔧 **Technical Deep Dive**
-
-<div align="center">
-
-### 🏗️ **5 Core Components • 2,800+ Lines • Production Ready**
-
-</div>
-
-<table>
-<tr>
-<td width="50%">
-
-### 🤖 **Intelligent Model Selection**
-**`intelligent_model_selector.py`**
-```
-🔍 Hardware Scan → 📊 Performance Score → 🎯 Model Match → ⚡ Optimize
-```
-- 🖥️ Automated hardware profiling (CPU, RAM, GPU, storage)
-- 🧠 AI model selection based on system capabilities  
-- 📈 Benchmark-driven system evaluation with scoring
-- 🎮 Interactive deployment wizard with guided setup
-- 🔄 Continuous model management with background optimization
-
-### ⚡ **Advanced Caching Infrastructure**
-**`advanced_cache_system.py`**
-```
-💾 Memory → 🗄️ SQLite → 🗜️ LZMA → 📊 Analytics
-```
-- 🏗️ Multi-tier caching with hybrid storage layers
-- 🗜️ LZMA compression for optimal storage efficiency
-- ⚡ Sub-millisecond response times (99.9% improvement)
-- 📊 Intelligent cache analytics with automated optimization
-- 🚀 Fully asynchronous I/O for maximum throughput
-
-### ⚙️ **Smart Configuration Management**
-**`smart_config_manager.py`**
-```
-📄 Multi-Format → 🔧 Validate → 🌍 Override → 🔥 Hot-Reload
-```
-- 📚 Multi-format support (YAML, TOML, JSON, INI)
-- 🛡️ Runtime schema validation using Pydantic type safety
-- 🌍 Environment-based configuration overrides
-- 🎮 Interactive configuration wizard for guided setup
-- 🔥 Hot-reload capabilities for zero-downtime updates
-
-</td>
-<td width="50%">
-
-### 🛡️ **Advanced Error Management**
-**`advanced_error_handler.py`**
-```
-🚨 Detect → 🔍 Classify → 🔄 Recover → ✅ Success
-```
-- 🎯 Intelligent error classification across failure domains
-- 🔄 Automated recovery strategies with exponential backoff
-- 💬 Context-aware diagnostic messaging with solutions
-- 🏆 Enterprise-grade resilience (95%+ recovery success)
-
-### 🔒 **Enhanced Security Scanning**
-**`security_analyzer.py`**
-```
-🔍 Bandit Scan → 🛡️ CVE Check → 📊 OWASP Analysis → 📋 Report
-```
-- 🐍 Bandit integration for Python security scanning (50+ rules)
-- 🗄️ CVE database matching for known vulnerabilities
-- 🌐 OWASP Top 10 vulnerability detection
-- 📊 Comprehensive security reporting with risk assessment
-- 🔧 Multi-language support (Python, JavaScript, Java)
-
-### 📊 **System Integration Platform**
-**`phase2_coordinator.py`**
-```
-🎛️ Orchestrate → 📈 Monitor → 🔧 Optimize → 📋 Report
-```
-- 🎭 Component lifecycle management and coordination
-- 📊 Real-time system health monitoring with metrics
-- 🔧 Automated optimization algorithms for resources
-- 📋 Comprehensive status reporting and diagnostics
-
-### 🎯 **Performance Highlights**
-```
-⚡ 99.9% faster cached responses
-🧠 94/100 system optimization score  
-🛡️ 95%+ automatic error recovery
-🎯 <1ms memory cache access times
-🔄 Zero-downtime configuration reloads
-```
-
-</td>
-</tr>
-</table>
-
-## 🗺️ **Development Roadmap**
-
-<div align="center">
-
-### 🚀 **What's Coming Next**
-
-</div>
-
-<details>
-<summary><b>🎯 Phase 3: Advanced Features</b> - <i>🔥 Coming Soon</i></summary>
-
-### 🔌 **Plugin Architecture**
-- Extensible system with marketplace integration
-- Hot-pluggable modules with dynamic loading
-- Developer SDK with comprehensive APIs
-
-### � ***Enhanced Security Framework**
-- Comprehensive vulnerability scanning with Bandit integration
-- CVE database matching and OWASP Top 10 detection
-- Multi-language security analysis (Python, JavaScript, Java)
-- Automated security reporting and risk assessment
-
-### 📊 **Advanced Analytics** 
-- Comprehensive insights and performance telemetry
-- Real-time dashboards with interactive charts
-- Usage patterns analysis and optimization suggestions
-
-### 🌐 **Multi-Modal Support**
-- Vision processing for image analysis and OCR
-- Document analysis (PDF, DOCX, presentations)
-- Voice integration with speech-to-text
-
-### 👥 **Collaboration Platform**
-- Multi-user workspaces with real-time sharing
-- Team management and permission controls
-- Conversation history and knowledge sharing
-
-### 🏢 **Enterprise Integration**
-- SSO integration (SAML, OAuth2, LDAP)
-- Role-based access control (RBAC)
-- Audit logging and compliance frameworks
-
-</details>
-
-### 📅 **Release Timeline**
-
-<div align="center">
-
-| 🚀 Phase | 🎯 Focus Area | ⏱️ Duration | 📊 Status | 🔥 Excitement |
-|----------|---------------|-------------|-----------|----------------|
-| **Phase 3** | Advanced Features | 4-5 weeks | 🔄 In Progress | ![90%](https://progress-bar.dev/90?color=orange&width=100) |
-| **Phase 4** | Distribution & Deployment | 2-3 weeks | 📋 Planned | ![70%](https://progress-bar.dev/70?color=blue&width=100) |
-| **Phase 5** | Multi-Modal Integration | 4-5 weeks | 📋 Planned | ![85%](https://progress-bar.dev/85?color=purple&width=100) |
-| **Phase 6** | Intelligence & Automation | 5-6 weeks | 📋 Planned | ![95%](https://progress-bar.dev/95?color=red&width=100) |
-| **Phase 7** | Platform Ecosystem | 6-8 weeks | 💭 Concept | ![60%](https://progress-bar.dev/60?color=green&width=100) |
-
-</div>
+### Phase 6: Intelligence & Automation
+- Advanced code refactoring
+- Automated testing generation
+- Intelligent code completion
 
 ## Contributing
 
-### Development Environment Setup
-```bash
-# Repository initialization
-git clone https://github.com/YOUR-USERNAME/xencode.git
-cd xencode
+Contributions are welcome! Please follow these guidelines:
 
-# Environment configuration
-python -m venv .venv && source .venv/bin/activate
-pip install -e .[dev,test]
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Commit your changes (`git commit -am 'Add new feature'`)
+4. Push to the branch (`git push origin feature/your-feature`)
+5. Open a Pull Request
 
-# Quality assurance validation
-python -m pytest test_phase2_comprehensive.py -v --tb=short
-python -m ruff check . --fix
-python -m mypy xencode/
-```
+### Development Guidelines
 
-### Contribution Process
-1. Fork the repository and create a feature branch
-2. Implement changes following established code standards
-3. Ensure comprehensive test coverage for new functionality
-4. Run full test suite and quality checks
-5. Submit pull request with detailed description
-
-### Code Standards
-| Requirement | Description |
-|-------------|-------------|
-| **Type Safety** | Full type annotation with mypy validation |
-| **Test Coverage** | 100% coverage for new features and modifications |
-| **Documentation** | Comprehensive docstrings and updated documentation |
-| **Performance** | Benchmarking for performance-critical components |
-| **Security** | Security review for external integrations |
+- Follow PEP 8 style guidelines
+- Add type hints to all functions
+- Write tests for new features
+- Update documentation as needed
+- Run linters before committing:
+  ```bash
+  python -m ruff check . --fix
+  python -m mypy xencode/
+  ```
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for complete terms and conditions.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-The Xencode project builds upon excellent open-source technologies and frameworks:
+Built with these excellent open-source projects:
 
-- **Ollama**: Local LLM runtime and model management
-- **Rich**: Advanced terminal user interface framework  
-- **Pydantic**: Data validation and configuration management
-- **pytest**: Comprehensive testing and quality assurance
-- **Community**: Contributors, testers, and early adopters
+- [Ollama](https://ollama.ai/) - Local LLM runtime
+- [Rich](https://github.com/Textualize/rich) - Terminal UI framework
+- [Pydantic](https://pydantic-docs.helpmanual.io/) - Data validation
+- [pytest](https://pytest.org/) - Testing framework
+- [Bandit](https://bandit.readthedocs.io/) - Security analysis
+
+## Support
+
+- Documentation: [docs/](docs/)
+- Issues: [GitHub Issues](https://github.com/sreevarshan-xenoz/xencode/issues)
+- Discussions: [GitHub Discussions](https://github.com/sreevarshan-xenoz/xencode/discussions)
 
 ---
 
-## Project Status
-
-### 🏆 **Phase 2 Achievement Dashboard**
-
 <div align="center">
 
-**🎯 Status:** ✅ **Production Ready** - All objectives crushed!
-
-</div>
-
-| 🎯 Metric | 🚀 Achievement | 📊 Target | 🎖️ Result |
-|-----------|----------------|-----------|-----------|
-| **🔧 Components** | 5 major systems | 5 planned | ![100%](https://progress-bar.dev/100?color=00ff00&width=120) |
-| **👨‍💻 Code Quality** | ~2,800 lines | Professional grade | ![100%](https://progress-bar.dev/100?color=00ff00&width=120) |
-| **🧪 Test Coverage** | 24/24 passing | 100% success | ![100%](https://progress-bar.dev/100?color=00ff00&width=120) |
-| **⚡ Performance** | 99.9% improvement | 50% target | ![199%](https://progress-bar.dev/100?color=gold&width=120) |
-| **🎯 System Score** | 94/100 | 80+ target | ![117%](https://progress-bar.dev/100?color=orange&width=120) |
-| **🛡️ Reliability** | 95%+ recovery | 90%+ target | ![105%](https://progress-bar.dev/100?color=00ff00&width=120) |
-
-<div align="center">
-
-### 🎊 **We didn't just meet the targets—we absolutely demolished them!**
-
-```ascii
-╭─────────────────────────────────────────────────────────────╮
-│  🚀 From Prototype to Enterprise Platform in Record Time    │
-│  ⚡ 99.9% Performance Boost • 🛡️ 95%+ Reliability           │
-│  🎯 All Systems Operational • 🏆 Production Ready           │
-╰─────────────────────────────────────────────────────────────╯
-```
-
-**📚 [Technical Deep Dive](PLAN.md) • 🎮 [Interactive Demo](demo_phase2_features.py) • 🚀 [Get Started](#installation)**
+**Built with ❤️ for developers who value privacy and performance**
 
 </div>

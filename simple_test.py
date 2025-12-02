@@ -1,1 +1,0 @@
-#!/usr/bin/env python3\nprint(\"Starting test...\")\n\ntry:\n    from xencode.analytics.analytics_engine import AnalyticsEngine\n    print(\"Analytics engine imported\")\nexcept Exception as e:\n    print(f\"Error importing analytics engine: {e}\")\n\nprint(\"Test complete\")\n
