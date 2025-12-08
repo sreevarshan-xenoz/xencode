@@ -422,6 +422,32 @@ class CodeAnalyzer:
 
         return "\n".join(report_lines)
 
+    def get_raw_git_diff(self, staged: bool = True) -> str:
+        """
+        Get the raw git diff output.
+
+        Args:
+            staged: if True, check staged changes (git diff --cached),
+                    otherwise check unstaged changes (git diff)
+
+        Returns:
+            Raw diff string or empty string if no changes
+        """
+        try:
+            cmd = ["git", "diff", "--cached"] if staged else ["git", "diff"]
+            diff_result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=10
+            )
+
+            if diff_result.returncode != 0:
+                # If staged failed or empty, maybe fallback?
+                # For now just return empty if failed
+                return ""
+
+            return diff_result.stdout.strip()
+        except Exception:
+            return ""
+
     def generate_commit_message(self) -> str:
         """
         Generate intelligent commit message based on git diff analysis
@@ -430,27 +456,18 @@ class CodeAnalyzer:
             Generated commit message based on changes
         """
         try:
-            # Get git diff
-            diff_result = subprocess.run(
-                ["git", "diff", "--cached"], capture_output=True, text=True, timeout=10
-            )
-
-            if diff_result.returncode != 0:
-                # Try unstaged changes if no staged changes
-                diff_result = subprocess.run(
-                    ["git", "diff"], capture_output=True, text=True, timeout=10
-                )
-
-                if diff_result.returncode != 0:
-                    return "No changes detected for commit message generation"
-
-            diff_content = diff_result.stdout.strip()
+            # Try staged changes first
+            diff_content = self.get_raw_git_diff(staged=True)
 
             if not diff_content:
-                return "No changes detected for commit message generation"
+                # Try unstaged changes
+                diff_content = self.get_raw_git_diff(staged=False)
+                
+                if not diff_content:
+                    return "No changes detected for commit message generation"
 
             # Analyze the diff to determine change type and scope
-            change_analysis = self._analyze_git_diff(diff_content)
+            change_analysis = self.analyze_git_diff(diff_content)
 
             # Generate commit message based on analysis
             commit_message = self._generate_commit_message_from_analysis(
@@ -459,14 +476,10 @@ class CodeAnalyzer:
 
             return commit_message
 
-        except subprocess.TimeoutExpired:
-            return "Error: Git diff command timed out"
-        except subprocess.CalledProcessError as e:
-            return f"Error: Git command failed: {e}"
         except Exception as e:
             return f"Error generating commit message: {e}"
 
-    def _analyze_git_diff(self, diff_content: str) -> Dict[str, Any]:
+    def analyze_git_diff(self, diff_content: str) -> Dict[str, Any]:
         """
         Analyze git diff to understand the nature of changes
 

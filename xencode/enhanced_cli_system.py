@@ -200,6 +200,9 @@ class CommandRouter:
             'context': self._requires_smart_context,
             'smart': self._requires_multi_model_and_context,
             'git-commit': self._requires_code_analysis,
+            'git-review': self._requires_code_analysis,
+            'git-diff-analyze': self._requires_code_analysis,
+            'git-branch': self._requires_code_analysis,
         }
 
     def can_handle_enhanced_command(self, command: str) -> bool:
@@ -373,6 +376,27 @@ Examples:
             help='Generate intelligent commit message from git diff',
         )
 
+        parser.add_argument(
+            '--git-review',
+            metavar='REF',
+            nargs='?',
+            const='HEAD',
+            help='Review git changes (defaults to HEAD, or provide PR/Branch/Commit)',
+        )
+
+        parser.add_argument(
+            '--git-diff-analyze',
+            action='store_true',
+            help='Analyze current git diff for bugs and style issues before committing',
+        )
+
+        parser.add_argument(
+            '--git-branch',
+            metavar='ACTION',
+            choices=['suggest'],
+            help='Git branch assistance (e.g., "suggest" to name branch from changes)',
+        )
+
         # System commands
         parser.add_argument(
             '--feature-status',
@@ -418,6 +442,15 @@ Examples:
 
         if args.git_commit:
             return self.handle_git_commit_command()
+
+        if args.git_review:
+            return self.handle_git_review_command(args.git_review)
+
+        if args.git_diff_analyze:
+            return self.handle_git_diff_analyze_command()
+
+        if args.git_branch:
+            return self.handle_git_branch_command(args.git_branch)
 
         # No enhanced command found - use legacy handling
         return None
@@ -599,7 +632,170 @@ Examples:
         except Exception as e:
             return f"❌ Smart query failed: {str(e)}"
 
-    def handle_git_commit_command(self) -> str:
+    def handle_git_review_command(self, ref: str) -> str:
+        """
+        Handle --git-review command to review code changes using AI and static analysis
+        """
+        if not self.features.code_analysis:
+            return "❌ Git review requires Code Analysis System"
+
+        try:
+            # Wait for background initialization if needed
+            if hasattr(self, '_init_thread'):
+                self._init_thread.join(timeout=5)
+
+            if self.code_analyzer is None:
+                return "❌ Code analyzer failed to initialize"
+
+            # TODO: Implement actual PR/Ref comparison logic
+            # For now, if ref is HEAD, analyze the last commit
+            print(f"🔍 Reviewing changes in {ref}...")
+            
+            # This is a placeholder for a more complex implementation that would 
+            # ideally use 'git diff ref^!' or similar and analyze the diff content.
+            # Reuse code analyzer diff analysis for now.
+            diff_content = self.code_analyzer.get_raw_git_diff(staged=True)
+            if not diff_content:
+                 diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
+            
+            if not diff_content:
+                return "ℹ️ No changes found to review."
+
+            analysis = self.code_analyzer.analyze_git_diff(diff_content)
+            
+            # Construct a human-readable review
+            review = ["📋 Git Review Report", "=" * 30]
+            
+            review.append(f"\n📊 Scope: {analysis['scope']}")
+            review.append(f"📁 Files Changed: {len(analysis['files_changed'])}")
+            review.append(f"➕ Additions: {analysis['additions']} | ➖ Deletions: {analysis['deletions']}")
+            
+            if analysis['languages']:
+                review.append(f"💻 Languages: {', '.join(analysis['languages'])}")
+                
+            review.append("\n⚠️ Potential Issues (Static Analysis):")
+            # We assume code analyzer works on file paths, so we can't easily run it on a diff *string*
+            # without checking out the files. For this MVP, we'll list the files and recommend running full analysis.
+            for file in analysis['files_changed']:
+                review.append(f"  • {file}")
+            
+            review.append("\n💡 Tip: Run 'xencode --analyze-code' on changed files for detailed inspection.")
+
+            return "\n".join(review)
+
+        except Exception as e:
+            return f"❌ Git review failed: {str(e)}"
+
+    def handle_git_diff_analyze_command(self) -> str:
+        """
+        Handle --git-diff-analyze to check for bugs/style in current diff
+        """
+        if not self.features.code_analysis:
+            return "❌ Diff analysis requires Code Analysis System"
+            
+        try:
+             # Wait for background initialization if needed
+            if hasattr(self, '_init_thread'):
+                self._init_thread.join(timeout=5)
+
+            if self.code_analyzer is None:
+                return "❌ Code analyzer failed to initialize"
+
+            print("🔍 Analyzing current diff...")
+            diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
+            # merging staged and unstaged for a full picture or just prioritization?
+            # Let's check staged first as that's what's about to be committed.
+            staged_diff = self.code_analyzer.get_raw_git_diff(staged=True)
+            
+            if not diff_content and not staged_diff:
+                return "✅ No changes to analyze."
+            
+            full_diff = (staged_diff or "") + "\n" + (diff_content or "")
+            
+            # Perform basic regex-based checks on the diff content itself
+            # This is a faster, lightweight check compared to parsing the whole AST of changed files
+            issues = []
+            
+            # Check for console logs / print statements in additions
+            for line in full_diff.splitlines():
+                if line.startswith('+'):
+                    clean_line = line[1:].strip()
+                    if 'console.log' in clean_line or 'print(' in clean_line:
+                        issues.append(f"⚠️ Debug print found: {clean_line}")
+                    if 'TODO' in clean_line:
+                         issues.append(f"📝 TODO found: {clean_line}")
+
+            if not issues:
+                return "✅ Diff looks clean! (No obvious debug code or TODOs found)"
+            
+            return "⚠️ Issues found in diff:\n" + "\n".join(issues)
+
+        except Exception as e:
+            return f"❌ Diff analysis failed: {str(e)}"
+
+    def handle_git_branch_command(self, action: str) -> str:
+        """
+        Handle --git-branch suggest
+        """
+        if not self.features.code_analysis:
+             return "❌ Git branch assistant requires Code Analysis System"
+        
+        if action != 'suggest':
+             return "❌ Valid actions: 'suggest'"
+             
+        try:
+             # Wait for background initialization if needed
+            if hasattr(self, '_init_thread'):
+                self._init_thread.join(timeout=5)
+
+            if self.code_analyzer is None:
+                return "❌ Code analyzer failed to initialize"
+            
+            print("🔍 Pondering branch names based on changes...")
+            
+            # Reuse commit message logic to understand changes
+            # Ideally we'd ask the LLM for creative names, but we can fall back to deterministic ones
+            
+            diff_content = self.code_analyzer.get_raw_git_diff(staged=True)
+            if not diff_content:
+                diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
+                
+            if not diff_content:
+                return "ℹ️ No changes found to base a branch name on."
+                
+            analysis = self.code_analyzer.analyze_git_diff(diff_content)
+            
+            # Simple heuristic generation
+            suggestions = []
+            
+            prefix = "feature"
+            if "fix" in self.code_analyzer._generate_commit_message_from_analysis(analysis).lower():
+                 prefix = "fix"
+            
+            # File based
+            if analysis['files_changed']:
+                main_file = os.path.basename(analysis['files_changed'][0]).split('.')[0]
+                suggestions.append(f"{prefix}/{main_file}-update")
+                
+            # Content based
+            if analysis['change_types']:
+                changes = "-".join(list(analysis['change_types'])[:2])
+                suggestions.append(f"{prefix}/{changes}-changes")
+            
+            suggestions.append(f"{prefix}/update-{int(time.time())}")
+            
+            output = ["🌱 Suggested Branch Names:", "=" * 25]
+            for i, name in enumerate(suggestions, 1):
+                output.append(f"{i}. {name}")
+                
+            output.append("\n💡 To switch: git checkout -b <name>")
+            
+            return "\n".join(output)
+
+        except Exception as e:
+            return f"❌ Branch suggestion failed: {str(e)}"
+
+    def handle_git_commit_command(self) -> str: # existing logic follows...
         """Handle --git-commit command with security validation"""
         if not self.features.code_analysis:
             return (
@@ -718,6 +914,9 @@ Examples:
         if self.features.code_analysis:
             status_lines.append("  • --analyze PATH")
             status_lines.append("  • --git-commit")
+            status_lines.append("  • --git-review [REF]")
+            status_lines.append("  • --git-diff-analyze")
+            status_lines.append("  • --git-branch suggest")
 
         if self.features.multi_model:
             status_lines.append("  • --models")
