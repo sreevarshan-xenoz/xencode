@@ -69,6 +69,14 @@ except ImportError:
     SYSTEM_CHECKER_AVAILABLE = False
     system_checker = None
 
+# Import Intelligent Model Selector for First Run Setup
+try:
+    from xencode.intelligent_model_selector import FirstRunSetup
+    FIRST_RUN_SETUP_AVAILABLE = True
+except ImportError:
+    FIRST_RUN_SETUP_AVAILABLE = False
+
+
 # Suppress Rich color encoding warnings and other terminal warnings
 os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
@@ -377,20 +385,56 @@ def get_available_models() -> List[str]:
         return []
 
 
-def get_smart_default_model() -> str:
+
+try:
+    from xencode.tui.utils.model_checker import ModelChecker
+    MODEL_CHECKER_AVAILABLE = True
+except ImportError:
+    MODEL_CHECKER_AVAILABLE = False
+    ModelChecker = None
+
+def get_smart_default_model() -> Optional[str]:
     """Intelligently select the best available model"""
-    available = get_available_models()
+    available = []
+    
+    if MODEL_CHECKER_AVAILABLE:
+        available = ModelChecker.get_available_models()
+    else:
+        # Minimal fallback if checker not available
+        try:
+            from xencode.tui.utils.model_checker import ModelChecker as MC
+            available = MC.get_available_models()
+        except ImportError:
+            pass
+            
+    if not available:
+        # Try one last direct check if list is empty or checker failed
+        try:
+            import subprocess
+            output = subprocess.check_output(["ollama", "list"], text=True)
+            if "NAME" in output:
+                lines = output.strip().split('\n')
+                available = [line.split()[0] for line in lines[1:] if line.strip()]
+        except Exception:
+            pass
     
     if not available:
-        return "qwen2.5:3b"  # Fallback if no models installed
+        # No models found at all
+        return None
     
+    # Filter out embedding models
+    chat_models = [m for m in available if "embed" not in m]
+    if not chat_models:
+        # Only embedding models? Use first avail as fallback, though unlikely to work for chat
+        return available[0]
+        
     # Preferred models in order of preference
     preferred_models = [
         "qwen2.5:7b",
         "qwen2.5:3b", 
         "qwen3:4b",
-        "llama3.2:3b",
         "llama3.1:8b",
+        "llama3.2:3b",
         "mistral:7b",
         "phi3:mini",
         "gemma2:2b",
@@ -398,12 +442,13 @@ def get_smart_default_model() -> str:
     
     # Check for preferred models
     for preferred in preferred_models:
-        for available_model in available:
+        for available_model in chat_models:
             if preferred in available_model.lower():
                 return available_model
     
-    # If no preferred model found, return the first available
-    return available[0]
+    # If no preferred model found, return the first available chat model
+    return chat_models[0]
+
 
 
 def list_models() -> None:
@@ -1723,6 +1768,20 @@ def is_first_run():
 
 def run_first_time_setup():
     """Run interactive setup for first-time users"""
+    # Try advanced setup wizard first
+    if FIRST_RUN_SETUP_AVAILABLE:
+        try:
+            setup = FirstRunSetup()
+            model = setup.run_setup()
+            # If setup completed (model selected) or user skipped (model=None but wizard ran),
+            # check if config exists to determine if we're done.
+            # actually wizard saves config if successful.
+            config_file = Path.home() / ".xencode" / "model_config.json"
+            if config_file.exists() or model:
+               return
+        except Exception as e:
+            console.print(f"[dim yellow]Advanced setup not available: {e}[/dim yellow]")
+
     console.print(Panel(
         "👋 Welcome to Xencode!\n\n"
         "Let's get you set up in 30 seconds...",

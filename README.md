@@ -101,24 +101,6 @@ graph TB
 
     F -.->|Health metrics| A
     C -.->|Cache stats| F
-    D -.->|Error logs| F
-    G -.->|Model performance| B
-
-    classDef ui fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
-    classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
-    classDef infra fill:#e8f5e8,stroke:#388e3c,stroke-width:2px,color:#000
-    classDef models fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
-    
-    class A ui
-    class B,C,D core
-    class E,F infra
-    class G models
-```
-
-## Installation
-
-### Prerequisites
-
 - Python 3.8 or higher
 - Ollama installed and running
 - 4GB+ RAM recommended
