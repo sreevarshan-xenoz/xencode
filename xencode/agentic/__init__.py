@@ -13,6 +13,7 @@ from .advanced_tools import (
     ToolRegistry
 )
 from .coordinator import AgentCoordinator, AgentType
+from .ensemble_integration import EnsembleChain, ModelCouncil, create_ensemble_chain, create_model_council
 
 __all__ = [
     "LangChainManager",
@@ -27,5 +28,9 @@ __all__ = [
     "CodeAnalysisTool",
     "ToolRegistry",
     "AgentCoordinator",
-    "AgentType"
+    "AgentType",
+    "EnsembleChain",
+    "ModelCouncil",
+    "create_ensemble_chain",
+    "create_model_council"
 ]
