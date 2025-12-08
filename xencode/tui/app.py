@@ -20,6 +20,8 @@ from xencode.tui.widgets.collaboration import CollaborationPanel
 from xencode.tui.widgets.commit_dialog import CommitDialog
 from xencode.tui.widgets.terminal import TerminalPanel
 
+from xencode.tui.utils.model_checker import ModelChecker
+
 # Import core functionality
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -113,7 +115,22 @@ class XencodeApp(App):
         # Core components
         self.model_manager = ModelManager()
         self.memory = ConversationMemory()
-        self.current_model = "qwen2.5:7b"  # Default model
+        
+        # Detect available models
+        available_models = ModelChecker.get_available_models()
+        
+        # Smart default selection
+        if available_models:
+            # Filter out embedding models for chat
+            chat_models = [m for m in available_models if "embed" not in m]
+            if chat_models:
+                # Prefer qwen or llama if available
+                preferred = [m for m in chat_models if "qwen" in m.lower() or "llama" in m.lower()]
+                self.current_model = preferred[0] if preferred else chat_models[0]
+            else:
+                self.current_model = available_models[0]
+        else:
+            self.current_model = "qwen2.5:7b"  # Default fallback
         
         # Widgets (will be set in compose)
         self.file_explorer: Optional[FileExplorer] = None

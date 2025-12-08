@@ -57,8 +57,21 @@ class ModelChecker:
                         parts = line.split()
                         if parts:
                             models.append(parts[0])
+                if models:
+                    return models
             except subprocess.CalledProcessError as e:
                 logger.warning(f"Failed to list models via CLI: {e}")
+
+        # Fallback to REST API (localhost)
+        try:
+            import urllib.request
+            import json
+            with urllib.request.urlopen("http://localhost:11434/api/tags") as url:
+                data = json.loads(url.read().decode())
+                if 'models' in data:
+                    return [m['name'] for m in data['models']]
+        except Exception as e:
+            logger.warning(f"Failed to list models via REST API: {e}")
                 
         return models
     
