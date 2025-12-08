@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from rich.console import RenderableType
-from rich.markdown import Markdown
+
 from rich.text import Text
 from rich.table import Table
 from textual import events

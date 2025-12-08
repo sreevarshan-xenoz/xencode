@@ -8,11 +8,11 @@ AI chat interface with message history and streaming responses.
 from datetime import datetime
 from typing import Optional
 
-from rich.console import RenderableType
-from rich.markdown import Markdown
+from rich.console import RenderableType, Group
+from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import events
-from textual.widgets import Input, Static, Label
+from textual.widgets import Input, Static, Label, Markdown as MarkdownWidget
 from textual.containers import Container, VerticalScroll
 from textual.message import Message
 
@@ -70,11 +70,11 @@ class ChatMessage(Static):
         
         # Render content as markdown if it's from assistant
         if self.role == "assistant":
-            content = Markdown(self.content_text)
+            content = RichMarkdown(self.content_text)
         else:
             content = Text(self.content_text)
         
-        return Text.assemble(header, "\n", content)
+        return Group(header, content)
 
 
 class ChatHistory(VerticalScroll):
@@ -163,6 +163,7 @@ class ChatPanel(Container):
     ChatPanel {
         height: 100%;
         background: $surface;
+        border: none;
     }
     """
     
@@ -262,12 +263,12 @@ class UserMessage(Static):
     
     def __init__(self, content: str, sender: str = "You"):
         super().__init__()
-        self.content = content
+        self.content_text = content  # Rename to content_text to be consistent if needed, but 'content' is fine
         self.sender = sender
         
     def compose(self):
         yield Label(f"👤 {self.sender}", classes="message-author")
-        yield Markdown(self.content)
+        yield MarkdownWidget(self.content_text)
 
 
 class ChatSubmitted(Message):

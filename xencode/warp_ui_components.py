@@ -21,7 +21,7 @@ from rich.columns import Columns
 from rich.align import Align
 from rich.progress import Progress, BarColumn, TextColumn
 from rich.syntax import Syntax
-from rich.markdown import Markdown
+
 from rich import box
 
 
