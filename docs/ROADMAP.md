@@ -29,7 +29,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 #### 2. ️ TUI Centricity (Git Interface)
 - [x] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
-- [ ] **Commit Wizard** - Interactive TUI flow for generated messages
+- [x] **Commit Wizard** - Interactive TUI flow for generated messages
 - [ ] **Review Dashboard** - TUI for browsing PR review comments
 
 ---

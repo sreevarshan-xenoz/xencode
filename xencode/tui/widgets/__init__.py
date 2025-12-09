@@ -13,4 +13,5 @@ __all__ = [
     "DiffViewer",
     "DiffPanel",
     "CommitDialog",
+    "CommitWizard",
 ]
