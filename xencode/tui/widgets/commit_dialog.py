@@ -10,6 +10,8 @@ from textual.screen import ModalScreen
 from textual.binding import Binding
 from textual.message import Message
 
+from xencode.tui.widgets.diff_viewer import DiffViewer
+
 class CommitDialog(ModalScreen):
     """Modal dialog for committing changes with AI assistance"""
     
@@ -75,7 +77,7 @@ class CommitDialog(ModalScreen):
             yield Label("Commit Changes", id="title")
             
             yield Label("Staged Changes:", classes="dim")
-            yield TextArea(self.diff, id="diff-preview", read_only=True, language="diff")
+            yield DiffViewer(self.diff, id="diff-preview")
             
             yield Label("Commit Message (Ctrl+Enter to commit):", classes="dim")
             yield TextArea("", id="message-input")
