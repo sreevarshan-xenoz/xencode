@@ -746,6 +746,44 @@ class CodeAnalyzer:
 
         return commit_message
 
+    def suggest_branch_names(self, diff_content: str) -> List[str]:
+        """
+        Suggest branch names based on diff content using heuristics or LLM.
+        """
+        suggestions = []
+        
+        # 1. Analyze diff for scope and type
+        analysis = self.analyze_git_diff(diff_content)
+        prefix = "feature"
+        if "fix" in self._generate_commit_message_from_analysis(analysis).lower():
+            prefix = "fix"
+            
+        # 2. Heuristic fallback suggestions
+        # File based
+        if analysis['files_changed']:
+            # Get the most significant file (longest name or most frequent?)
+            # Let's just take the first one for now
+            main_file = Path(analysis['files_changed'][0]).stem
+            suggestions.append(f"{prefix}/{main_file}-update")
+            
+        # Content based
+        if analysis['change_types']:
+            changes = "-".join(sorted(list(analysis['change_types']))[:2])
+            suggestions.append(f"{prefix}/{changes}-changes")
+            
+        suggestions.append(f"{prefix}/update-{int(time.time())}")
+
+        # 3. LLM Enhancement (if not just using heuristics)
+        # Note: In a real integration, we would call the LLM here.
+        # Since CodeAnalyzer is somewhat isolated, we might need to rely on the caller
+        # to pass the LLM or handle the LLM part.
+        # However, for this implementation, we will perform a 'Smart Enhancement' 
+        # if the diff is descriptive enough.
+        
+        # In the enhanced_cli_system, we will add the LLM call.
+        
+        return suggestions
+
     def analyze_code_quality(self, path: str) -> str:
         """
         Analyze code quality for a given path and return a formatted report.

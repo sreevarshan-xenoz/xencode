@@ -25,10 +25,10 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 - [/] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
 - [x] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
 - [x] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
-- [ ] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
+- [x] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
 
 #### 2. ️ TUI Centricity (Git Interface)
-- [ ] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
+- [x] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
 - [ ] **Commit Wizard** - Interactive TUI flow for generated messages
 - [ ] **Review Dashboard** - TUI for browsing PR review comments
 

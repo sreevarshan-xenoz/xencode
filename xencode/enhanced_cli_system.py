@@ -795,7 +795,7 @@ Examples:
              return "❌ Valid actions: 'suggest'"
              
         try:
-             # Wait for background initialization if needed
+            # Wait for background initialization if needed
             if hasattr(self, '_init_thread'):
                 self._init_thread.join(timeout=5)
 
@@ -804,9 +804,6 @@ Examples:
             
             print("🔍 Pondering branch names based on changes...")
             
-            # Reuse commit message logic to understand changes
-            # Ideally we'd ask the LLM for creative names, but we can fall back to deterministic ones
-            
             diff_content = self.code_analyzer.get_raw_git_diff(staged=True)
             if not diff_content:
                 diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
@@ -814,30 +811,40 @@ Examples:
             if not diff_content:
                 return "ℹ️ No changes found to base a branch name on."
                 
-            analysis = self.code_analyzer.analyze_git_diff(diff_content)
+            # Use the new helper method  
+            suggestions = self.code_analyzer.suggest_branch_names(diff_content)
             
-            # Simple heuristic generation
-            suggestions = []
-            
-            prefix = "feature"
-            if "fix" in self.code_analyzer._generate_commit_message_from_analysis(analysis).lower():
-                 prefix = "fix"
-            
-            # File based
-            if analysis['files_changed']:
-                main_file = os.path.basename(analysis['files_changed'][0]).split('.')[0]
-                suggestions.append(f"{prefix}/{main_file}-update")
-                
-            # Content based
-            if analysis['change_types']:
-                changes = "-".join(list(analysis['change_types'])[:2])
-                suggestions.append(f"{prefix}/{changes}-changes")
-            
-            suggestions.append(f"{prefix}/update-{int(time.time())}")
+            # Try LLM enhancement if available
+            if self.features.multi_model:
+                try:
+                    from xencode_core import run_query, extract_thinking_and_answer
+                    
+                    prompt = f"""Based on this git diff, suggest 3 concise, descriptive branch names following git conventions (e.g., feature/short-name, fix/issue-description).
+                    
+Diff:
+{diff_content[:3000]}
+
+Respond with ONLY the 3 branch names, one per line."""
+                    
+                    response = run_query(prompt, model="codellama:7b")
+                    _, answer = extract_thinking_and_answer(response)
+                    
+                    if answer:
+                        llm_suggestions = [line.strip() for line in answer.strip().split('\n') if line.strip() and '/' in line]
+                        if llm_suggestions:
+                            suggestions = llm_suggestions[:3] + suggestions  # Prepend LLM suggestions
+                            
+                except Exception:
+                    pass  # Silently fall back to heuristics
             
             output = ["🌱 Suggested Branch Names:", "=" * 25]
-            for i, name in enumerate(suggestions, 1):
-                output.append(f"{i}. {name}")
+            seen = set()
+            for name in suggestions:
+                if name not in seen:
+                    seen.add(name)
+                    output.append(f"  • {name}")
+                    if len(seen) >= 5:
+                        break
                 
             output.append("\n💡 To switch: git checkout -b <name>")
             
