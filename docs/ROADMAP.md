@@ -18,59 +18,37 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ---
 
-### Phase 2: 🔥 The Leverage (EXECUTE NOW)
-*The 20% of features that provide 80% of the value. Focused on daily stickiness.*
+### Phase 2:  The Perfect Git Loop (Current Focus)
+*Goal: The world's best AI-powered Git assistant. "Developers never commit manually again."*
 
-#### 1. ✅ Git Smart Assistant (Non-negotiable)
-*Goal: Developers never commit manually again.*
+#### 1. ✅ Smart Commit & Review (The Core Loop)
 - [/] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
 - [x] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
 - [x] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
 - [ ] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
 
-#### 2. ⚡ Real-time File Watcher
-*Goal: "Copilot but offline + smarter". Auto-analysis on save.*
-- [ ] **Watch Loop** - Detect file changes (`watchdog` integration)
-- [ ] **Auto-Analyze** - Stream analysis results to TUI on save
-- [ ] **Proactive Warnings** - "You just introduced a bug" alerts
-- [ ] **Refactoator** - Suggest refactors in real-time
-
-#### 3. 🛠 Unified CLI Experience
-*Goal: A single, cohesive Developer OS feel.*
-- [x] **Enhanced CLI System** - Consolidated entry point (`xencode`)
-- [ ] **Unified Command Tree** - Clean `xencode [command] [subcommand]` structure
-- [ ] **Interactive Help** - Context-sensitive help menu
-
-#### 4. �️ Interactive TUI Polishing
-*Goal: Premium, "Warp-like" experience.*
-- [x] **Base TUI** - Split panels, input handling
-- [ ] **Streaming Output** - Real-time thinking/response stream in TUI
-- [ ] **Diff Viewer** - Rich diff display in terminal
-- [ ] **Status Dashboard** - Real-time system status (models, memory, watcher)
+#### 2. ️ TUI Centricity (Git Interface)
+- [ ] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
+- [ ] **Commit Wizard** - Interactive TUI flow for generated messages
+- [ ] **Review Dashboard** - TUI for browsing PR review comments
 
 ---
 
-### Phase 3: � Enhanced UX (Next Up)
-*High-value interactions only.*
-- [ ] **Voice Input/Output** - Lightweight STT/TTS for "Companion Mode"
-- [ ] **Basic Plugin System** - Hooks & event system only
+### Phase 3: ⚡ The Offline Copilot (Next Up)
+*Goal: Real-time assistance within the loop.*
+- [ ] **Real-time File Watcher** - Auto-analysis on save
+- [ ] **Proactive Warnings** - "You just introduced a bug"
+- [ ] **Refactor Suggestions** - Live improvement tips
 
 ---
 
-### Phase 6: 🧠 Future Moat (Post-Adoption)
-*Agentic workflows to automate complex tasks.*
-- [/] **Agent Orchestration** - Multiple specialised agents
-- [ ] **Auto Toolchain** - Agent selects best tools for task
-- [ ] **Multi-Agent Debugging** - "Council of Agents" solving bugs
-
----
-
-### 📦 Backlog / Deprioritized (Low ROI)
-*Moved out of immediate focus to preserve momentum.*
-- Web Interface & VS Code Extension (Startup killers)
-- Distributed Processing & Cloud Integration
-- Advanced Analytics & Custom Model Training
-- Documentation Generator & Test Generation
+### 📦 Icebox / Long-Term Vision
+*Great ideas saved for later to maintain laser focus.*
+- **Voice Input/Output** (Companion Mode)
+- **Plugin System** (Hooks only for now)
+- **Agent Orchestration** (Multi-agent debugging)
+- **VS Code Extension** (Separate product)
+- **Web Interface** (Separate product)
 
 ## 🛠️ Technical Architecture Evolution
 
