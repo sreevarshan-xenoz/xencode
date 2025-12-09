@@ -101,6 +101,10 @@ graph TB
 
     F -.->|Health metrics| A
     C -.->|Cache stats| F
+```
+
+### System Requirements
+
 - Python 3.8 or higher
 - Ollama installed and running
 - 4GB+ RAM recommended
