@@ -112,10 +112,18 @@ graph TB
 
 ### Quick Install
 
+**Linux / macOS**
 ```bash
 git clone https://github.com/sreevarshan-xenoz/xencode.git
 cd xencode
 chmod +x install.sh && ./install.sh
+```
+
+**Windows**
+```powershell
+git clone https://github.com/sreevarshan-xenoz/xencode.git
+cd xencode
+.\install.ps1
 ```
 
 ### Development Setup

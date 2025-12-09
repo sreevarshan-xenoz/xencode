@@ -58,3 +58,6 @@ bandit>=1.7.0
 # Note: pre-commit and safety are optional for development
 # pre-commit>=3.0.0
 # safety>=2.3.0
+
+# Windows Build Dependencies
+pyinstaller>=6.3.0
