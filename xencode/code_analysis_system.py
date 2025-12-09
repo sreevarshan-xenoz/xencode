@@ -94,7 +94,7 @@ class CodeAnalyzer:
             # Parse AST for syntax errors
             try:
                 tree = ast.parse(content)
-                issues.extend(self.analyze_python_ast(tree, file_path, lines))
+                issues.extend(self.analyze_python_ast(tree, file_path, lines, content))
             except SyntaxError as e:
                 issues.append(
                     CodeIssue(
@@ -129,7 +129,7 @@ class CodeAnalyzer:
         return issues
 
     def analyze_python_ast(
-        self, tree: ast.AST, file_path: Path, lines: List[str]
+        self, tree: ast.AST, file_path: Path, lines: List[str], content: str
     ) -> List[CodeIssue]:
         """Analyze Python AST for issues"""
         issues = []
@@ -448,6 +448,25 @@ class CodeAnalyzer:
         except Exception:
             return ""
 
+    def get_diff_from_ref(self, ref: str) -> str:
+        """
+        Get diff against a specific reference
+        
+        Args:
+            ref: Git reference (branch, commit, tag)
+            
+        Returns:
+            Raw diff string or empty string if no changes
+        """
+        try:
+            cmd = ["git", "diff", ref]
+            diff_result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=10
+            )
+            return diff_result.stdout.strip()
+        except Exception:
+            return ""
+
     def generate_commit_message(self) -> str:
         """
         Generate intelligent commit message based on git diff analysis
@@ -574,6 +593,76 @@ class CodeAnalyzer:
 
         return analysis
 
+    def parse_diff_changes(self, diff_content: str) -> Dict[str, set]:
+        """
+        Parse diff to find changed lines per file
+        
+        Returns:
+            Dictionary mapping file paths to sets of changed line numbers (1-based)
+        """
+        changes = {}
+        current_file = None
+        current_line = 0
+        
+        for line in diff_content.split('\n'):
+            if line.startswith('diff --git'):
+                parts = line.split()
+                if len(parts) >= 4:
+                    # diff --git a/path b/path -> use b/path (new)
+                    b_path = parts[3]
+                    if b_path.startswith('b/'):
+                        current_file = b_path[2:]
+                        changes[current_file] = set()
+                    else:
+                        current_file = None
+            
+            elif line.startswith('@@'):
+                # @@ -1,5 +10,5 @@
+                # Parse +start,len
+                match = re.search(r'\+(\d+)(?:,(\d+))?', line)
+                if match:
+                    current_line = int(match.group(1))
+            
+            elif line.startswith('+') and not line.startswith('+++'):
+                if current_file:
+                    changes[current_file].add(current_line)
+                current_line += 1
+            
+            elif line.startswith(' ') and current_file:
+                current_line += 1
+                
+        return changes
+
+    def analyze_diff_context(self, diff_content: str) -> List[CodeIssue]:
+        """
+        Analyze changes in a git diff, filtering issues to changed lines
+        
+        Args:
+            diff_content: Raw git diff output
+            
+        Returns:
+            List of CodeIssues found in the changed lines
+        """
+        changed_lines = self.parse_diff_changes(diff_content)
+        all_issues = []
+        
+        for file_path, lines in changed_lines.items():
+             path_obj = Path(file_path)
+             if not path_obj.exists():
+                 continue
+                 
+             # Run full analysis on file
+             file_issues = self.analyze_file(path_obj)
+             
+             # Filter based on changed lines
+             relevant_issues = [
+                 issue for issue in file_issues 
+                 if issue.line_number in lines
+             ]
+             all_issues.extend(relevant_issues)
+             
+        return all_issues
+
     def _generate_commit_message_from_analysis(self, analysis: Dict[str, Any]) -> str:
         """
         Generate commit message based on change analysis
@@ -656,6 +745,20 @@ class CodeAnalyzer:
                 commit_message += "\n\n" + "\n".join(body_lines)
 
         return commit_message
+
+    def analyze_code_quality(self, path: str) -> str:
+        """
+        Analyze code quality for a given path and return a formatted report.
+        (Wrapper for CLI compatibility)
+        """
+        path_obj = Path(path)
+        if path_obj.is_file():
+            issues = self.analyze_file(path_obj)
+            results = {str(path_obj): issues} if issues else {}
+        else:
+            results = self.analyze_directory(path_obj, recursive=True)
+            
+        return self.generate_report(results)
 
 
 # CLI interface for code analysis

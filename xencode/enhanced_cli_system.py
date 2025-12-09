@@ -647,20 +647,18 @@ Examples:
             if self.code_analyzer is None:
                 return "❌ Code analyzer failed to initialize"
 
-            # TODO: Implement actual PR/Ref comparison logic
-            # For now, if ref is HEAD, analyze the last commit
-            print(f"🔍 Reviewing changes in {ref}...")
+            print(f"🔍 Reviewing changes against {ref}...")
             
-            # This is a placeholder for a more complex implementation that would 
-            # ideally use 'git diff ref^!' or similar and analyze the diff content.
-            # Reuse code analyzer diff analysis for now.
-            diff_content = self.code_analyzer.get_raw_git_diff(staged=True)
-            if not diff_content:
-                 diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
+            # Get diff content
+            diff_content = self.code_analyzer.get_diff_from_ref(ref)
             
             if not diff_content:
                 return "ℹ️ No changes found to review."
 
+            # Static Analysis on changes
+            diff_issues = self.code_analyzer.analyze_diff_context(diff_content)
+            
+            # Get general stats
             analysis = self.code_analyzer.analyze_git_diff(diff_content)
             
             # Construct a human-readable review
@@ -673,13 +671,55 @@ Examples:
             if analysis['languages']:
                 review.append(f"💻 Languages: {', '.join(analysis['languages'])}")
                 
-            review.append("\n⚠️ Potential Issues (Static Analysis):")
-            # We assume code analyzer works on file paths, so we can't easily run it on a diff *string*
-            # without checking out the files. For this MVP, we'll list the files and recommend running full analysis.
-            for file in analysis['files_changed']:
-                review.append(f"  • {file}")
+            review.append("\n⚠️ Static Analysis Issues (in changed lines):")
+            if diff_issues:
+                for issue in diff_issues:
+                     severity_emoji = {
+                        "critical": "🔴",
+                        "high": "🟠",
+                        "medium": "🟡",
+                        "low": "🟢",
+                    }
+                     emoji = severity_emoji.get(issue.severity.value, "⚪")
+                     review.append(f"  {emoji} {Path(issue.file_path).name}:{issue.line_number} - {issue.message}")
+            else:
+                review.append("  ✅ No static analysis issues found in changes.")
             
-            review.append("\n💡 Tip: Run 'xencode --analyze-code' on changed files for detailed inspection.")
+            # AI Review if available
+            if self.features.multi_model and self.multi_model:
+                try:
+                    from xencode_core import run_query, extract_thinking_and_answer
+                    
+                    print("🤖 requesting AI Code Review...")
+                    
+                    # Construct prompt
+                    # Truncate diff to avoid context limits (conservative 6000 chars)
+                    truncated_diff = diff_content[:6000]
+                    if len(diff_content) > 6000:
+                        truncated_diff += "\n... (diff truncated)"
+                        
+                    prompt = (
+                        "You are an expert code reviewer. Review the following git diff for bugs, "
+                        "security vulnerabilities, and code style issues. "
+                        "Focus ONLY on the changes. Be concise and constructive.\n\n"
+                        f"```diff\n{truncated_diff}\n```"
+                    )
+                    
+                    # Use a coding capable model
+                    model = "codellama:7b" 
+                    # Ideally we check available models, but this is a safe default for now 
+                    # given the roadmap mentions it.
+                    
+                    response = run_query(model, prompt)
+                    _, answer = extract_thinking_and_answer(response)
+                    
+                    if answer.strip():
+                        review.append(f"\n🧠 AI Review:\n{answer.strip()}")
+                        
+                except Exception as e:
+                    review.append(f"\n⚠️ AI Review unavailable: {str(e)}")
+            else:
+                review.append("\nℹ️ For AI review, enable Multi-Model System (Phase 1)")
 
             return "\n".join(review)
 
@@ -703,8 +743,6 @@ Examples:
 
             print("🔍 Analyzing current diff...")
             diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
-            # merging staged and unstaged for a full picture or just prioritization?
-            # Let's check staged first as that's what's about to be committed.
             staged_diff = self.code_analyzer.get_raw_git_diff(staged=True)
             
             if not diff_content and not staged_diff:
@@ -712,23 +750,36 @@ Examples:
             
             full_diff = (staged_diff or "") + "\n" + (diff_content or "")
             
-            # Perform basic regex-based checks on the diff content itself
-            # This is a faster, lightweight check compared to parsing the whole AST of changed files
-            issues = []
+            # Use robust analysis on changed lines
+            issues = self.code_analyzer.analyze_diff_context(full_diff)
             
-            # Check for console logs / print statements in additions
+            # Also do regex checks for things AST might miss (like TODOs in comments not docstrings)
+            regex_issues = []
             for line in full_diff.splitlines():
                 if line.startswith('+'):
                     clean_line = line[1:].strip()
-                    if 'console.log' in clean_line or 'print(' in clean_line:
-                        issues.append(f"⚠️ Debug print found: {clean_line}")
                     if 'TODO' in clean_line:
-                         issues.append(f"📝 TODO found: {clean_line}")
+                         regex_issues.append(f"📝 TODO found: {clean_line}")
 
-            if not issues:
-                return "✅ Diff looks clean! (No obvious debug code or TODOs found)"
+            if not issues and not regex_issues:
+                return "✅ Diff looks clean! (No static analysis issues found)"
             
-            return "⚠️ Issues found in diff:\n" + "\n".join(issues)
+            report = ["⚠️ Issues found in diff:", "=" * 25]
+            
+            for issue in issues:
+                severity_emoji = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🟢",
+                }
+                emoji = severity_emoji.get(issue.severity.value, "⚪")
+                report.append(f"{emoji} {Path(issue.file_path).name}:{issue.line_number} - {issue.message}")
+                
+            for regex_issue in regex_issues:
+                report.append(regex_issue)
+                
+            return "\n".join(report)
 
         except Exception as e:
             return f"❌ Diff analysis failed: {str(e)}"

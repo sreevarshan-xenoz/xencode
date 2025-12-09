@@ -24,8 +24,8 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 #### 1. ✅ Git Smart Assistant (Non-negotiable)
 *Goal: Developers never commit manually again.*
 - [/] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
-- [ ] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
-- [ ] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
+- [x] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
+- [x] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
 - [ ] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
 
 #### 2. ⚡ Real-time File Watcher
