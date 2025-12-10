@@ -2,7 +2,7 @@ import platform
 import subprocess
 import sys
 import shutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 class SystemChecker:
     """
@@ -62,7 +62,7 @@ class SystemChecker:
         info["ollama_installed"] = shutil.which("ollama") is not None
         
         if info["ollama_installed"]:
-             try:
+            try:
                 # Check if ollama is actually running by trying to list models or hit the API
                 # Using a quick timeout
                 import requests
@@ -72,13 +72,35 @@ class SystemChecker:
                         info["ollama_running"] = True
                 except requests.RequestException:
                     info["ollama_running"] = False
-             except ImportError:
-                 # If requests is not installed, we can't easily check API, 
-                 # but we can try subprocess if we wanted to be very thorough.
-                 # For now, assume if installed it might be running, or let the app handle connection errors.
-                 pass
+            except ImportError:
+                # If requests is not installed, we can't easily check API, 
+                # but we can try subprocess if we wanted to be very thorough.
+                # For now, assume if installed it might be running, or let the app handle connection errors.
+                pass
 
         return info
+    
+    def ensure_ollama_available(self, auto_start: bool = True) -> Tuple[bool, str]:
+        """
+        Ensure Ollama is available, optionally starting it if not running.
+        
+        Args:
+            auto_start: If True, attempt to start Ollama if not running
+            
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            from .ollama_fallback import OllamaFallbackManager
+            fallback = OllamaFallbackManager(auto_start=auto_start, auto_install=False)
+            return fallback.ensure_ollama_available()
+        except ImportError:
+            # Fallback if ollama_fallback module not available
+            if not self.system_info.get("ollama_installed"):
+                return False, "Ollama is not installed"
+            if not self.system_info.get("ollama_running"):
+                return False, "Ollama is not running"
+            return True, "Ollama is running"
 
     def get_info(self) -> Dict[str, Any]:
         """Returns the gathered system information."""

@@ -60,6 +60,12 @@ except ImportError:
     OllamaOptimizer = ModelInfo = BenchmarkResult = QuantizationLevel = None
     ModelStatus = create_ollama_optimizer = None
 
+# Ollama Fallback Manager for auto-start and installation
+try:
+    from .ollama_fallback import OllamaFallbackManager, ensure_ollama
+except ImportError:
+    OllamaFallbackManager = ensure_ollama = None
+
 try:
     from .rlhf_tuner import (
         RLHFTuner, RLHFConfig, CodePair, TrainingMetrics,
@@ -164,6 +170,7 @@ __all__ = [
     "EnsembleMethod", "ModelTier", "TokenVoter", "create_ensemble_reasoner",
     "OllamaOptimizer", "ModelInfo", "BenchmarkResult", "QuantizationLevel",
     "ModelStatus", "create_ollama_optimizer",
+    "OllamaFallbackManager", "ensure_ollama",
     "RLHFTuner", "RLHFConfig", "CodePair", "TrainingMetrics",
     "SyntheticDataGenerator", "create_rlhf_tuner",
     

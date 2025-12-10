@@ -76,6 +76,14 @@ try:
 except ImportError:
     FIRST_RUN_SETUP_AVAILABLE = False
 
+# Import Ollama Fallback Manager for auto-start and installation
+try:
+    from xencode.ollama_fallback import OllamaFallbackManager
+    OLLAMA_FALLBACK_AVAILABLE = True
+except ImportError:
+    OLLAMA_FALLBACK_AVAILABLE = False
+    OllamaFallbackManager = None
+
 
 # Suppress Rich color encoding warnings and other terminal warnings
 os.environ.setdefault('FORCE_COLOR', '1')
@@ -1745,7 +1753,35 @@ def chat_mode(model, online):
 
 
 def check_ollama_health():
-    """Check if Ollama is running and accessible"""
+    """Check if Ollama is running and accessible, with fallback auto-start"""
+    # First, quick check if already running
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            return True, "Ollama is running"
+    except (requests.ConnectionError, requests.Timeout):
+        pass
+    except Exception:
+        pass
+    
+    # Ollama not running - try fallback manager
+    if OLLAMA_FALLBACK_AVAILABLE and OllamaFallbackManager:
+        try:
+            fallback = OllamaFallbackManager(auto_start=True, auto_install=False)
+            
+            if fallback.try_start_ollama():
+                return True, "Ollama started successfully"
+            
+            # If not installed, return failure (installation needs explicit user action)
+            if not fallback.is_ollama_installed():
+                return False, (
+                    "Ollama is not installed.\n"
+                    "Run 'xencode' with first-time setup or install manually from: https://ollama.ai"
+                )
+        except Exception as e:
+            console.print(f"[dim yellow]Fallback manager error: {e}[/dim yellow]")
+    
+    # Fallback to original error messages
     try:
         response = requests.get("http://localhost:11434/api/tags", timeout=5)
         if response.status_code == 200:
@@ -1789,32 +1825,48 @@ def run_first_time_setup():
         style="blue"
     ))
     
-    # Check Ollama installation
-    try:
-        subprocess.run(["ollama", "--version"], capture_output=True, check=True, timeout=5)
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        console.print(Panel(
-            "❌ Ollama is not installed\n\n"
-            "Install Ollama:\n"
-            "• Visit: https://ollama.ai\n"
-            "• Or: curl https://ollama.ai/install.sh | sh",
-            title="Ollama Not Found",
-            style="red"
-        ))
-        sys.exit(1)
-    
-    # Check if Ollama is running
-    is_healthy, message = check_ollama_health()
-    if not is_healthy:
-        console.print(Panel(
-            f"❌ {message}\n\n"
-            "Start Ollama:\n"
-            "• Run: ollama serve\n"
-            "• Or: systemctl start ollama",
-            title="Ollama Not Running",
-            style="red"
-        ))
-        sys.exit(1)
+    # Use Ollama Fallback Manager for intelligent setup
+    if OLLAMA_FALLBACK_AVAILABLE and OllamaFallbackManager:
+        fallback = OllamaFallbackManager(auto_start=True, auto_install=False)
+        success, message = fallback.ensure_ollama_available()
+        
+        if not success:
+            console.print(Panel(
+                f"❌ {message}",
+                title="Ollama Setup Failed",
+                style="red"
+            ))
+            sys.exit(1)
+        else:
+            console.print(f"[green]✅ {message}[/green]")
+    else:
+        # Legacy fallback: manual checks
+        # Check Ollama installation
+        try:
+            subprocess.run(["ollama", "--version"], capture_output=True, check=True, timeout=5)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            console.print(Panel(
+                "❌ Ollama is not installed\n\n"
+                "Install Ollama:\n"
+                "• Visit: https://ollama.ai\n"
+                "• Or: curl https://ollama.ai/install.sh | sh",
+                title="Ollama Not Found",
+                style="red"
+            ))
+            sys.exit(1)
+        
+        # Check if Ollama is running
+        is_healthy, message = check_ollama_health()
+        if not is_healthy:
+            console.print(Panel(
+                f"❌ {message}\n\n"
+                "Start Ollama:\n"
+                "• Run: ollama serve\n"
+                "• Or: systemctl start ollama",
+                title="Ollama Not Running",
+                style="red"
+            ))
+            sys.exit(1)
     
     # Check for models
     models = get_available_models()
