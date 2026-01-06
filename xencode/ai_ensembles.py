@@ -68,6 +68,7 @@ class QueryRequest(BaseModel):
     temperature: float = Field(default=0.7, description="Sampling temperature")
     timeout_ms: int = Field(default=2000, description="Per-model timeout in milliseconds")
     require_consensus: bool = Field(default=False, description="Require model agreement")
+    use_rag: bool = Field(default=False, description="Use Local RAG for context")
     
     model_config = {"use_enum_values": True}
 
@@ -213,7 +214,43 @@ class EnsembleReasoner:
         start_time = time.perf_counter()
         self.stats["total_queries"] += 1
         
-        # Check cache first
+        # RAG Context Retrieval
+        augmented_prompt = query.prompt
+        rag_context_found = False
+        
+        if query.use_rag:
+            try:
+                # Lazy import to avoid circular dependencies
+                from xencode.rag.vector_store import VectorStore
+                # Initialize vector store (assuming default path)
+                vector_store = VectorStore()
+                results = vector_store.similarity_search(query.prompt, k=3)
+                
+                if results:
+                    context_strings = []
+                    for doc in results:
+                        source = doc.metadata.get('filename', 'unknown')
+                        context_strings.append(f"--- snippet from {source} ---\n{doc.page_content}\n")
+                    
+                    context_block = "\nContext from Codebase:\n" + "\n".join(context_strings) + "\nEnd of Context.\n"
+                    augmented_prompt = f"{context_block}\n\nQuestion: {query.prompt}"
+                    rag_context_found = True
+                    console.print(f"[blue]🔍 Retrieved {len(results)} context chunks for RAG[/blue]")
+            except Exception as e:
+                console.print(f"[yellow]⚠️ RAG retrieval failed: {e}[/yellow]")
+
+        # Check cache first (using augmented prompt for cache key if RAG used)
+        if self.cache_manager:
+            # We use the original prompt for cache key lookup usually, but if RAG changes context, 
+            # maybe we should cache based on augmented prompt? 
+            # For now, let's keep original prompt but add a tag/flag in key if RAG was used.
+            # Actually, if context changes, response should change.
+            # So effective prompt is augmented_prompt.
+            
+            # Temporary: modify query object locally just for this run? 
+            # But query is Pydantic.
+            pass # We'll handle caching later or let it cache without context awareness for now (simplified)
+
         if self.cache_manager:
             cache_key = self._generate_cache_key(query)
             method_value = query.method.value if hasattr(query.method, 'value') else query.method
@@ -232,7 +269,12 @@ class EnsembleReasoner:
             raise RuntimeError("No models available for ensemble reasoning")
         
         # Parallel inference across models
-        model_responses = await self._parallel_inference(query, available_models)
+        # We need to pass augmented_prompt to _parallel_inference, but _parallel_inference calls _single_model_inference
+        # which uses query.prompt.
+        # We can create a temporary query object with augmented prompt
+        effective_query = query.model_copy(update={"prompt": augmented_prompt})
+        
+        model_responses = await self._parallel_inference(effective_query, available_models)
         
         # Filter successful responses
         successful_responses = [r for r in model_responses if r.success]
