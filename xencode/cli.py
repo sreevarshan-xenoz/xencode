@@ -626,6 +626,20 @@ def devops(model):
 
 
 @cli.command()
+@click.option('--model', default='qwen2.5:14b', help='Model to use (smarter is better for shadow)')
+@click.option('--path', default='.', help='Path to watch')
+def shadow(model, path):
+    """Start Shadow Mode (Background Autocomplete)"""
+    try:
+        from xencode.shadow.engine import start_shadow_mode
+        start_shadow_mode(path, model)
+    except ImportError as e:
+         console.print(f"[red]❌ Missing dependencies: {e}[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ Shadow Mode failed: {e}[/red]")
+
+
+@cli.command()
 def version():
     """Show version information"""
     console.print(Panel(
