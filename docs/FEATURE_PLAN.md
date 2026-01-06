@@ -1,74 +1,133 @@
 # Xencode Feature Plan
 
-Based on the robust foundation (FastAPI, Ollama integration, TUI, Agentic framework), this document outlines a curated list of high-impact features that developers typically love. These range from quality-of-life improvements to advanced AI capabilities that leverage the existing architecture.
+Based on the robust foundation (FastAPI, Ollama integration, TUI, Agentic framework), this document outlines a curated, prioritized list of high-impact features. These are organized by development priority, moving from core "must-haves" to advanced ecosystem expansions.
 
-## 1. Deep Context: Local RAG (Retrieval-Augmented Generation)
-Currently, developers often have to copy-paste code or upload files to get context. Implementing a local Vector Store allows the AI to "know" the entire codebase instantly.
+---
 
-- The Feature: Automatically index the user's project files into a local vector database (like ChromaDB or Qdrant). When the user asks "How does the auth middleware work?", the system retrieves the relevant code chunks and sends them to the LLM as context.
-- Why Devs Love It: It feels like the AI has actually read the code. It eliminates the "copy-paste fatigue."
-- Implementation:
-  - Add a `vector_store` module.
-  - Create a CLI command: `xencode index .` (watches for changes).
-  - Update `agentic/coordinator.py` to perform a similarity search before sending the prompt to Ollama.
+## Phase 1: The Foundation (Core Intelligence & Access)
+*Goal: Establish Xencode as the omniscient assistant that lives where the developer works.*
 
-## 2. Git Workflow Automation
-Developers live in Git. Removing friction from Git tasks is a massive productivity booster.
+### 1. Deep Context: Local RAG (Retrieval-Augmented Generation)
+*The Brain.*
+- **The Feature**: Automatically index the user's project files into a local vector database. When the user asks "How does the auth middleware work?", the system retrieves the relevant code chunks for context.
+- **Why Devs Love It**: It feels like the AI has actually read the code. Eliminates "copy-paste fatigue."
+- **Implementation**:
+  - Add a `vector_store` module (ChromaDB/Qdrant).
+  - CLI command: `xencode index .` (with file watchers).
+  - Update `agentic/coordinator.py` to prompt with retrieved context.
 
-- Automated Commit Messages: Run `xencode commit`. It stages files, runs `git diff`, sends the diff to the LLM, and generates a conventional commit message (e.g., `feat: add user login`).
-- PR Reviewer Bot: Since you already have a FastAPI backend, create a GitHub App or a GitLab webhook integration. When a Pull Request is opened, Xencode analyzes the diff and leaves comments suggesting improvements or flagging potential bugs.
-- Implementation:
-  - Use `GitPython` library for local commands.
-  - Use `PyGithub` for the API integration.
-  - Add these as "Tools" in `agentic/advanced_tools.py`.
+### 2. Natural Language Shell (Shell Genie)
+*The Hands.*
+- **The Feature**: Translate natural language instructions (e.g., "Find all large log files and gzip them") into safe, executable shell commands.
+- **Why Devs Love It**: Solves the "how do I do `tar` again?" problem without leaving the terminal context.
+- **Implementation**:
+  - LLM translation layer with a "Do vs. Explain" safety prompt.
+  - Interactive confirmation loop in TUI ("Run this? [y/N]").
 
-## 3. Test & Documentation Generation
-Everyone hates writing unit tests and docstrings, but everyone loves having them.
+### 3. Git Workflow Automation
+*The Daily Driver.*
+- **The Feature**: 
+  - `xencode commit`: Stages files, analyzes diffs, and generates conventional commit messages.
+  - `xencode review`: Analyzes local changes or PRs and suggests improvements/flags bugs.
+- **Why Devs Love It**: Removes friction from the most repetitive part of the job.
+- **Implementation**:
+  - `GitPython` for local op operations.
+  - `PyGithub` for PR review integration.
 
-- Unit Test Generator: `xencode test generate <path_to_file>`. The AI reads the function logic and generates pytest test cases, including edge cases.
-- Docstring Standardizer: `xencode docstring <path>`. Enforces Google or NumPy style docstrings across the project.
-- Implementation:
-  - Leverage your `analyzers` module to parse AST (Abstract Syntax Trees) to understand function signatures without needing the LLM to parse raw text.
-  - Add specific prompts in your TUI to prompt for "Generate Tests for current view."
+---
 
-## 4. The "IDE Bridge" (VS Code Extension)
-You have a great TUI, but developers live in VS Code or JetBrains. A lightweight extension that talks to your local FastAPI server would be a game-changer.
+## Phase 2: Accelerator Tools (High-Frequency Utility)
+*Goal: Automate the tedious parts of coding directly.*
 
-- The Feature: A VS Code extension that sends the selected text to your running `xencode` server (localhost:8000) and displays the response inline, or opens a side panel for chat.
-- Why Devs Love It: They never have to leave their editor.
-- Implementation:
-  - Your API is already FastAPI; just add an endpoint `/api/v1/chat` that accepts `{ context: str, query: str }`.
-  - Build a simple JS extension that calls this endpoint.
+### 4. Test & Documentation Generator
+- **The Feature**: 
+  - `xencode test generate <path>`: Reads logic and generates defined pytest cases/mocks.
+  - `xencode docstring <path>`: Enforces style guides (Google/NumPy) on existing code.
+- **Why Devs Love It**: Everyone hates writing boilerplate tests and docs, but everyone loves having them.
+- **Implementation**:
+  - Use `ast` analysis to locate function boundaries specifically.
 
-## 5. Code Smell & Refactoring Agent
-Move beyond simple "search" to active "improvement."
+### 5. DevOps & Infrastructure Generator
+- **The Feature**: Auto-generate `Dockerfile`, `docker-compose.yml`, GitHub Actions workflows, and K8s manifests based on project analysis (`requirements.txt`, `package.json`, etc.).
+- **Why Devs Love It**: Lowers the barrier to entry for deployment; removes "dependency hell."
+- **Implementation**:
+  - Template-based generation with LLM filling in version/env specifics.
 
-- Refactoring Suggestions: specific command `xencode refactor <file>`. Ask the AI to "Optimize for performance" or "Convert to Async/Await."
-- Security Scanner (Enhanced): You have a `security_analyzer`. Enhance it to auto-fix vulnerabilities. Instead of just reporting "SQL Injection risk," generate the patched code using parameterized queries.
-- Implementation:
-  - Create a "Fix Mode" in the CLI/TUI that applies a patch directly to the file (with user confirmation).
+### 6. Code Smell & Refactoring Agent
+- **The Feature**: Active improvement suggestions. `xencode refactor <file> --goal="performance"` or `xencode fix <security-report>`.
+- **Why Devs Love It**: It's like having a senior engineer pair program with you to clean up technical debt.
+- **Implementation**:
+  - Combine `security_analyzer` output with a patch-generation agent.
 
-## 6. Session Persistence & "Golden Prompts"
-Developers often repeat the same complex instructions (e.g., "Act as a senior Python architect and review this code for PEP8 compliance...").
+---
 
-- Prompt Library: Allow users to save named prompts.
-- Chat History Export: Export TUI sessions as Markdown or Jupyter Notebooks for documentation purposes.
-- Implementation:
-  - Store these in your SQLAlchemy DB (`UserSavedPrompts` table).
-  - Add UI controls in `tui/app.py` to recall these prompts.
+## Phase 3: Deep Integration (Workflow Embedding)
+*Goal: Remove context switching entirely.*
 
-## 7. Performance Profiling (Cost & Speed)
-Since you use local LLMs, developers care about resource usage.
+### 7. The "IDE Bridge" (VS Code Extension)
+- **The Feature**: A lightweight VS Code/JetBrains extension that talks to the local `xencode` server. Highlight code -> "Ask Xencode".
+- **Why Devs Love It**: They never have to leave their primary editor environment.
+- **Implementation**:
+  - Add `/api/v1/chat` endpoint to FastAPI.
+  - Simple TypeScript extension for the client side.
 
-- Token Velocity Dashboard: Extend your `analytics` module to show "Tokens/Second" and "Time to First Token" (TTFT) in the TUI sidebar.
-- Why Devs Love It: Helps them tune their Ollama models (quantization, context window) for the best speed.
+### 8. "Shadow Mode" Autocomplete
+- **The Feature**: A privacy-first, local alternative to GitHub Copilot. Runs a small, fast model (like Codestral or DeepSeek-Coder) in the background to provide single-line or block completions.
+- **Why Devs Love It**: Low latency, offline capable, and zero data leakage.
+- **Implementation**:
+  - Requires efficient local inference (e.g., `llama.cpp` server integration).
+  - Editor plugin integration via LSP.
 
-## 8. Extensible Plugin System
-You have a plugin structure, but make it Python-package installable.
+### 9. Smart Database Assistant
+- **The Feature**: NL-to-SQL generation. "Show me the top 5 users by spend in the last month."
+- **Why Devs Love It**: Makes ad-hoc data analysis trivial; prevents dangerous queries (e.g., missing `WHERE`).
+- **Implementation**:
+  - Introspect DB schema (via SQLAlchemy) to provide table context to the LLM.
 
-- The Feature: Allow users to `pip install xencode-plugin-jira` or `xencode-plugin-aws`.
-- Why Devs Love It: It allows the community to build connectors for the tools they use (Jira, Linear, AWS, Terraform).
-- Implementation:
-  - Define a strict abstract base class in `plugins/base.py`.
-  - Use entry points in `pyproject.toml` so your app automatically discovers installed plugins.
+---
 
+## Phase 4: Advanced Visualization & Experimentation
+*Goal: Provide higher-level understanding and transparency.*
+
+### 10. Interactive Architecture Visualizer
+- **The Feature**: Generate dynamic dependency graphs and flow charts (Mermaid/React Flow) from the codebase.
+- **Why Devs Love It**: Incredible for onboarding and understanding legacy codebases.
+- **Implementation**:
+  - Static analysis -> Graph data structure -> Frontend renderer.
+
+### 11. Multi-Model "Arena" Mode
+- **The Feature**: Run a prompt against multiple local models simultaneously (e.g., Llama 3 vs. Mistral) to see which gives better code.
+- **Why Devs Love It**: Allows rapid testing of new open-source models for specific tasks.
+- **Implementation**:
+  - Parallel API calls to Ollama; split-pane view in TUI.
+
+### 12. System Health & Performance Profiling
+- **The Feature**: Token velocity dashboard (Tokens/sec, TTFT) and cost estimation.
+- **Why Devs Love It**: Essential for tuning local deployment interactions and hardware usage.
+
+---
+
+## Phase 5: Ecosystem & Future Tech
+*Goal: Expand the platform's capabilities limitlessly.*
+
+### 13. API Kitchen & Mock Server
+- **The Feature**: Define an API spec (or just describe it), and Xencode spins up a live mock server with realistic data.
+- **Why Devs Love It**: FE devs can work before BE is ready. Great for testing edge cases.
+- **Implementation**:
+  - Dynamic FastAPI route generation based on Pydantic models.
+
+### 14. Voice Command Interface
+- **The Feature**: "Xencode, run the test suite and tell me if it passes." Hands-free interaction.
+- **Why Devs Love It**: Reduces RSI; great for "thinking out loud" workflows.
+- **Implementation**:
+  - Whisper (local) for STT -> Command Router -> TTS response.
+
+### 15. Session Persistence & "Golden Prompts"
+- **The Feature**: Save and organize successful prompt patterns; export chat history as Markdown/Notebooks.
+- **Why Devs Love It**: Builds a reusable library of engineering knowledge.
+
+### 16. Extensible Plugin System
+- **The Feature**: `pip install xencode-plugin-jira`.
+- **Why Devs Love It**: Connects Xencode to their unique proprietary tools/platforms.
+- **Implementation**:
+  - `pluggy` or standard Python entry-points.
