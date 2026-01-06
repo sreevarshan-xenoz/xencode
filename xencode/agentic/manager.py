@@ -13,10 +13,22 @@ class LangChainManager:
 
     def __init__(self, model_name: str = "qwen3:4b", base_url: str = "http://localhost:11434", 
                  use_memory: bool = True, db_path: str = "agentic_memory.db", 
-                 smart_model_selection: bool = False):
+                 smart_model_selection: bool = False, use_rag: bool = False):
         self.model_name = model_name
         self.base_url = base_url
         self.smart_model_selection = smart_model_selection
+        self.use_rag = use_rag
+        
+        # Initialize RAG if enabled
+        self.vector_store = None
+        if use_rag:
+            try:
+                from ..rag.vector_store import VectorStore
+                self.vector_store = VectorStore(embedding_model=model_name)
+            except ImportError:
+                print("Warning: RAG dependencies not found.")
+            except Exception as e:
+                print(f"Warning: RAG initialization failed: {e}")
         
         # Initialize model selector if enabled
         if smart_model_selection:
@@ -63,6 +75,8 @@ Final Answer: the final answer to the original input question
 
 Begin!
 
+{context_block}
+
 Question: {input}
 Thought:{agent_scratchpad}"""
 
@@ -81,12 +95,39 @@ Thought:{agent_scratchpad}"""
     def run_agent(self, user_input: str) -> str:
         """Run the agent with the given input."""
         try:
+            # RAG Context Retrieval
+            context_block = ""
+            if self.use_rag and self.vector_store:
+                try:
+                    docs = self.vector_store.similarity_search(user_input, k=3)
+                    if docs:
+                        context_strings = []
+                        for doc in docs:
+                            source = doc.metadata.get('filename', 'unknown')
+                            context_strings.append(f"--- snippet from {source} ---\n{doc.page_content}\n")
+                        context_block = "Context from Vector Store:\n" + "\n".join(context_strings) + "\nEnd of Context.\n"
+                except Exception as e:
+                    print(f"RAG retrieval failed: {e}")
+
             # Store user message
             if self.use_memory:
                 self.memory.add_message(role="user", content=user_input)
             
             # Run agent
-            result = self.agent_executor.invoke({"input": user_input})
+            # We pass context_block as a partial variable if needed, or inject into input.
+            # But the prompt template expects {context_block}
+            # Or if it doesn't, we can prepend it to input.
+            # Since I modified the template, I must pass `context_block` to invoke.
+            
+            # The agent executor invoke takes input.
+            # To pass extra variables to prompt, we might need to modify how the agent is structured.
+            # But create_react_agent binds prompt.
+            # Actually, `AgentExecutor.invoke` accepts input dict that fills prompt variables.
+            
+            result = self.agent_executor.invoke({
+                "input": user_input,
+                "context_block": context_block
+            })
             output = result.get("output", "No output returned")
             
             # Store assistant response

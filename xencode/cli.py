@@ -83,7 +83,8 @@ def system(config_path, force):
 @click.option('--max-tokens', type=int, default=512, help='Maximum tokens to generate')
 @click.option('--temperature', type=float, default=0.7, help='Sampling temperature')
 @click.option('--timeout', type=int, default=2000, help='Timeout in milliseconds')
-def query(prompt, models, method, max_tokens, temperature, timeout):
+@click.option('--rag', is_flag=True, help='Use local RAG context')
+def query(prompt, models, method, max_tokens, temperature, timeout, rag):
     """
     Query the AI ensemble with a prompt
     
@@ -106,7 +107,8 @@ def query(prompt, models, method, max_tokens, temperature, timeout):
                 method=EnsembleMethod(method),
                 max_tokens=max_tokens,
                 temperature=temperature,
-                timeout_ms=timeout
+                timeout_ms=timeout,
+                use_rag=rag
             )
             
             # Execute query with progress
@@ -484,11 +486,150 @@ def optimize():
     asyncio.run(_optimize())
 
 
+@cli.group()
+def rag():
+    """Local RAG (Retrieval Augmented Generation) commands"""
+    pass
+
+
+@rag.command()
+@click.argument('path', default='.', type=click.Path(exists=True))
+@click.option('--reset', is_flag=True, help='Clear existing index before indexing')
+def index(path, reset):
+    """Index codebase for RAG"""
+    console.print(f"[blue]🔍 Indexing codebase at {path}...[/blue]")
+    
+    try:
+        from xencode.rag.vector_store import VectorStore
+        from xencode.rag.indexer import Indexer
+        
+        vector_store = VectorStore()
+        
+        if reset:
+            console.print("[yellow]🗑️ Clearing existing index...[/yellow]")
+            vector_store.clear()
+            # Re-initialize to recreate empty collection
+            vector_store = VectorStore()
+            
+        indexer = Indexer(vector_store)
+        indexer.index_directory(path)
+        
+        console.print("[green]✅ Indexing completed successfully![/green]")
+        
+    except ImportError as e:
+        console.print(f"[red]❌ Missing dependencies: {e}[/red]")
+        console.print("Please install requirements: pip install chromadb langchain-ollama")
+    except Exception as e:
+        console.print(f"[red]❌ Indexing failed: {e}[/red]")
+
+
+@rag.command()
+@click.argument('query')
+@click.option('--k', default=3, help='Number of results to retrieve')
+def search(query, k):
+    """Search the vector store"""
+    try:
+        from xencode.rag.vector_store import VectorStore
+        
+        vector_store = VectorStore()
+        results = vector_store.similarity_search(query, k=k)
+        
+        if not results:
+            console.print("[yellow]No results found.[/yellow]")
+            return
+            
+        console.print(f"[green]Found {len(results)} relevant snippets:[/green]\n")
+        
+        for i, doc in enumerate(results, 1):
+            source = doc.metadata.get('source', 'unknown')
+            console.print(Panel(
+                doc.page_content,
+                title=f"{i}. {source}",
+                border_style="blue"
+            ))
+            
+    except ImportError:
+         console.print("[red]❌ Missing dependencies. Please install chromadb.[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ Search failed: {e}[/red]")
+
+
+@cli.command()
+@click.argument('instruction')
+@click.option('--model', default='llama3.1:8b', help='Model to use')
+@click.option('--yes', '-y', is_flag=True, help='Execute without confirmation')
+def shell(instruction, model, yes):
+    """Natural Language Shell (Shell Genie)"""
+    try:
+        from xencode.shell_genie.genie import ShellGenie
+        
+        genie = ShellGenie(model_name=model)
+        
+        with console.status("[bold blue]🧞 Generating command...[/bold blue]"):
+            command, explanation = genie.generate_command(instruction)
+        
+        if command and command != "SAFE_GUARD_TRIGGERED":
+            console.print(Panel(
+                f"[bold]Explanation:[/bold] {explanation}\n\n[bold green]{command}[/bold green]",
+                title="🧞 Shell Genie",
+                border_style="magenta"
+            ))
+            genie.execute(command, auto_confirm=yes)
+        else:
+            console.print("[red]❌ Could not generate a safe command.[/red]")
+            if explanation:
+                console.print(f"Reason: {explanation}")
+                
+    except ImportError as e:
+         console.print(f"[red]❌ Missing dependencies: {e}[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ Shell Genie failed: {e}[/red]")
+
+
+@cli.command()
+@click.option('--model', default='llama3.1:8b', help='Model to use')
+def devops(model):
+    """Generate DevOps infrastructure (Dockerfile, etc.)"""
+    try:
+        from xencode.devops.generator import DevOpsGenerator
+        
+        generator = DevOpsGenerator(model_name=model)
+        console.print("[blue]🔍 Analyzing project...[/blue]")
+        context = generator.analyze_project()
+        
+        if not context:
+            console.print("[yellow]⚠️ No dependency files (requirements.txt, package.json) found.[/yellow]")
+            if not Confirm.ask("Continue without context?"):
+                return
+
+        # Generate Dockerfile
+        with console.status("[bold blue]🐳 Generating Dockerfile...[/bold blue]"):
+            dockerfile = generator.generate_dockerfile(context)
+        
+        console.print(Panel(dockerfile, title="Generated Dockerfile", border_style="blue"))
+        if Confirm.ask("Save Dockerfile?", default=True):
+            generator.safe_write("Dockerfile", dockerfile)
+            
+        # Generate docker-compose
+        if Confirm.ask("Generate docker-compose.yml?", default=True):
+             with console.status("[bold blue]🐙 Generating docker-compose.yml...[/bold blue]"):
+                compose = generator.generate_docker_compose(context)
+             
+             console.print(Panel(compose, title="Generated docker-compose.yml", border_style="magenta"))
+             if Confirm.ask("Save docker-compose.yml?", default=True):
+                 generator.safe_write("docker-compose.yml", compose)
+
+    except ImportError as e:
+         console.print(f"[red]❌ Missing dependencies: {e}[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ DevOps generation failed: {e}[/red]")
+
+
 @cli.command()
 def version():
     """Show version information"""
     console.print(Panel(
-        "[bold green]🤖 Xencode AI/ML Leviathan v2.1.0[/bold green]\n\n"
+        "[bold green]🤖 Xencode AI/ML Leviathan v2.3.0[/bold green]\n\n"
         "The ultimate offline AI assistant that outperforms GitHub Copilot\n"
         "with <50ms inference, 10% SMAPE improvements, and 100% privacy.\n\n"
         "[yellow]🐉 The leviathan has awakened![/yellow]",
