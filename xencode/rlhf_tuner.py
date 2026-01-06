@@ -17,14 +17,21 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-import torch
-from transformers import (
-    AutoTokenizer, AutoModelForCausalLM, TrainingArguments, 
-    Trainer, DataCollatorForLanguageModeling
-)
-from peft import LoraConfig, get_peft_model, TaskType, PeftModel
-from datasets import Dataset
-import numpy as np
+
+# Lazy imports for heavy ML dependencies
+torch = None
+AutoTokenizer = None
+AutoModelForCausalLM = None
+TrainingArguments = None
+Trainer = None
+DataCollatorForLanguageModeling = None
+LoraConfig = None
+get_peft_model = None
+TaskType = None
+PeftModel = None
+Dataset = None
+np = None
+
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.table import Table
@@ -218,9 +225,30 @@ class RLHFTuner:
             ]
         )
     
+    def _ensure_deps(self):
+        """Load ML dependencies lazily"""
+        global torch, AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+        global DataCollatorForLanguageModeling, LoraConfig, get_peft_model, TaskType, PeftModel
+        global Dataset, np
+        
+        try:
+            import torch
+            from transformers import (
+                AutoTokenizer, AutoModelForCausalLM, TrainingArguments, 
+                Trainer, DataCollatorForLanguageModeling
+            )
+            from peft import LoraConfig, get_peft_model, TaskType, PeftModel
+            from datasets import Dataset
+            import numpy as np
+        except ImportError as e:
+            console.print(f"[red]❌ Missing ML dependencies: {e}[/red]")
+            console.print("Please install: pip install torch transformers peft datasets numpy")
+            raise
+
     async def initialize_model(self) -> bool:
         """Initialize base model and tokenizer"""
         try:
+            self._ensure_deps()
             console.print(f"[blue]🤖 Loading base model: {self.config.base_model}[/blue]")
             
             with console.status("[bold blue]Loading tokenizer and model..."):
