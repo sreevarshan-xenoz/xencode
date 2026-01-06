@@ -18,13 +18,14 @@ class AgentType(Enum):
 class Agent:
     """Individual agent with specialized capabilities."""
     
-    def __init__(self, agent_type: AgentType, model_name: str, base_url: str = "http://localhost:11434"):
+    def __init__(self, agent_type: AgentType, model_name: str, base_url: str = "http://localhost:11434", use_rag: bool = False):
         self.agent_type = agent_type
         self.manager = LangChainManager(
             model_name=model_name,
             base_url=base_url,
             use_memory=True,
-            db_path=f"agent_{agent_type.value}_memory.db"
+            db_path=f"agent_{agent_type.value}_memory.db",
+            use_rag=use_rag
         )
     
     def execute(self, task: str) -> Dict[str, Any]:
@@ -51,11 +52,12 @@ class AgentCoordinator:
     
     def _init_agents(self):
         """Initialize specialized agents."""
-        # Code agent - uses codellama
+        # Code agent - uses codellama (with RAG!)
         self.agents[AgentType.CODE] = Agent(
             agent_type=AgentType.CODE,
             model_name="codellama:7b",
-            base_url=self.base_url
+            base_url=self.base_url,
+            use_rag=True
         )
         
         # Research agent - uses mistral
