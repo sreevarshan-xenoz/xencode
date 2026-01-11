@@ -5,6 +5,8 @@ Multi-Model Ensemble System for Xencode Phase 6
 Orchestrates multiple AI models for superior reasoning through voting mechanisms,
 parallel inference, and intelligent fusion strategies. Achieves <50ms inference
 with 10% SMAPE improvements over single-model approaches.
+
+REVISION: Improved token voting, semantic consensus, and confidence metrics
 """
 
 import asyncio
@@ -25,6 +27,19 @@ try:
     from .ai_metrics import record_ensemble_success, record_ensemble_error
 except ImportError:
     record_ensemble_success = record_ensemble_error = lambda *args, **kwargs: None
+
+# Import improved ensemble components
+try:
+    from .ensemble_lightweight import (
+        LightweightTokenVoter,
+        ImprovedConsensus,
+        EnhancedQualityMetrics
+    )
+    IMPROVEMENTS_AVAILABLE = True
+    print("[green][OK] Ensemble improvements loaded[/green]")
+except ImportError:
+    IMPROVEMENTS_AVAILABLE = False
+    print("[yellow][WARN] Using original ensemble components[/yellow]")
 
 console = Console()
 
