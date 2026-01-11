@@ -44,6 +44,14 @@ langchain-community>=0.3.0
 langchain-ollama>=0.2.0
 duckduckgo-search>=4.0.0
 
+# Ensemble improvements - Semantic voting and tokenization
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+torch>=2.0.0
+
+# Note: sentence-transformers and transformers require additional installation
+# Install with: pip install sentence-transformers transformers torch
+
 # Development dependencies
 pytest>=7.0.0
 pytest-cov>=4.0.0
