@@ -401,6 +401,8 @@ def update_model(model: str) -> None:
         console.print(error_panel)
 
 
+import asyncio
+
 def run_query(model: str, prompt: str) -> str:
     """Enhanced non-streaming query with caching, conversation memory, and project context"""
     # Check cache first
@@ -412,86 +414,173 @@ def run_query(model: str, prompt: str) -> str:
     # Add user message to memory
     memory.add_message("user", prompt, model)
 
-    url = "http://localhost:11434/api/generate"
+    # Determine if this is a cloud model
+    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
+        # Use the new model provider system for cloud models
+        from xencode.model_providers import get_model_provider_manager
 
-    # Build context-aware prompt with project context
-    context = memory.get_context(max_messages=5)
-    context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
-    
-    # Add project context if available and relevant
-    project_info = ""
-    if PROJECT_CONTEXT_AVAILABLE:
-        try:
-            project_ctx = get_project_context()
-            if project_ctx.should_include_context(prompt):
-                project_info = project_ctx.get_context_prompt()
-        except Exception:
-            pass  # Silently fail if project context detection fails
-    
-    # Build final prompt
-    if project_info and context_prompt:
-        enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
-    elif project_info:
-        enhanced_prompt = f"{project_info}user: {prompt}"
-    elif context_prompt:
-        enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+        provider_manager = get_model_provider_manager()
+
+        # Initialize providers if not already done
+        if not provider_manager.providers:
+            # Configure providers based on model type
+            if model.startswith("openai:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.openai_api_key:
+                    provider_manager.configure_provider("openai", config.api_keys.openai_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("openai:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "openai", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
+            elif model.startswith("google_gemini:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.google_gemini_api_key:
+                    provider_manager.configure_provider("google_gemini", config.api_keys.google_gemini_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("google_gemini:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "google_gemini", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
+            elif model.startswith("openrouter:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.openrouter_api_key:
+                    provider_manager.configure_provider("openrouter", config.api_keys.openrouter_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("openrouter:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "openrouter", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
     else:
-        enhanced_prompt = prompt
+        # Use Ollama for local models
+        url = "http://localhost:11434/api/generate"
 
-    payload = {"model": model, "prompt": enhanced_prompt, "stream": False}
+        # Build context-aware prompt with project context
+        context = memory.get_context(max_messages=5)
+        context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
 
-    try:
-        # Show progress indicator
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("🤖 Processing...", total=None)
+        # Add project context if available and relevant
+        project_info = ""
+        if PROJECT_CONTEXT_AVAILABLE:
+            try:
+                project_ctx = get_project_context()
+                if project_ctx.should_include_context(prompt):
+                    project_info = project_ctx.get_context_prompt()
+            except Exception:
+                pass  # Silently fail if project context detection fails
 
-            r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
-            r.raise_for_status()
+        # Build final prompt
+        if project_info and context_prompt:
+            enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
+        elif project_info:
+            enhanced_prompt = f"{project_info}user: {prompt}"
+        elif context_prompt:
+            enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+        else:
+            enhanced_prompt = prompt
 
-            response = r.json()["response"]
+        payload = {"model": model, "prompt": enhanced_prompt, "stream": False}
 
-            # Cache the response
-            cache.set(prompt, model, response)
+        try:
+            # Show progress indicator
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("🤖 Processing...", total=None)
 
-            # Add AI response to memory
-            memory.add_message("assistant", response, model)
+                r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
+                r.raise_for_status()
 
-            return response
+                response = r.json()["response"]
 
-    except requests.exceptions.ConnectionError:
-        # Claude-style connection error panel
-        error_panel = Panel(
-            "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
-            title="Connection Error",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
-    except requests.exceptions.Timeout:
-        error_panel = Panel(
-            f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
-            f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
-            title="Request Timeout",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
-    except requests.exceptions.RequestException as e:
-        # Generic API error panel
-        error_panel = Panel(
-            f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
-            title="API Error",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
+                # Cache the response
+                cache.set(prompt, model, response)
+
+                # Add AI response to memory
+                memory.add_message("assistant", response, model)
+
+                return response
+
+        except requests.exceptions.ConnectionError:
+            # Claude-style connection error panel
+            error_panel = Panel(
+                "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
+                title="Connection Error",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
+        except requests.exceptions.Timeout:
+            error_panel = Panel(
+                f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
+                f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
+                title="Request Timeout",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
+        except requests.exceptions.RequestException as e:
+            # Generic API error panel
+            error_panel = Panel(
+                f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
+                title="API Error",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
 
 
 def run_streaming_query(model, prompt):
