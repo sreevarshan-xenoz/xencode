@@ -19,6 +19,7 @@ from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
 from xencode.tui.widgets.collaboration import CollaborationPanel
 from xencode.tui.widgets.commit_dialog import CommitDialog
 from xencode.tui.widgets.terminal import TerminalPanel
+from xencode.tui.widgets.agent_panel import AgentTaskSubmitted
 
 from xencode.tui.utils.model_checker import ModelChecker
 
@@ -446,12 +447,130 @@ class XencodeApp(App):
                 f"Error: {str(e)}"
             )
     
+    async def on_agent_task_submitted(self, event: "AgentTaskSubmitted") -> None:
+        """Handle agent task submission
+
+        Args:
+            event: Agent task submission event
+        """
+        user_query = event.task
+
+        if not self.chat_panel:
+            return
+
+        # Add thinking indicator
+        thinking_msg = self.chat_panel.add_assistant_message("Processing with agents...")
+
+        try:
+            # Build context from current file if open
+            context_parts = []
+
+            if self.code_editor and self.code_editor.current_file:
+                file_path = self.code_editor.current_file
+                try:
+                    file_content = file_path.read_text(encoding="utf-8")
+                    context_parts.append(
+                        f"Current file: {file_path.name}\n"
+                        f"```{self._get_language(file_path.suffix)}\n"
+                        f"{file_content[:2000]}...\n"  # Limit context
+                        f"```"
+                    )
+                except:
+                    pass
+
+            # Build enhanced prompt
+            if context_parts:
+                enhanced_prompt = (
+                    f"Context:\n{''.join(context_parts)}\n\n"
+                    f"User question: {user_query}"
+                )
+            else:
+                enhanced_prompt = user_query
+
+            # Handle different collaboration types
+            if event.collaboration_type == "sequential" and event.agent_sequence:
+                # Sequential collaboration
+                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+
+                coordinator = AgentCoordinator()
+                result = coordinator.sequential_collaboration(enhanced_prompt, event.agent_sequence)
+
+                # Format the result
+                response_parts = [
+                    f"SEQUENTIAL COLLABORATION RESULT:",
+                    f"Original Task: {result['original_task']}",
+                    f"Agent Sequence: {' -> '.join(result['agent_sequence'])}",
+                    f"Total Steps: {result['total_steps']}",
+                    "",
+                    "INTERMEDIATE RESULTS:",
+                ]
+
+                for step_result in result['intermediate_results']:
+                    response_parts.append(
+                        f"Step {step_result['step']} ({step_result['agent']}): "
+                        f"{step_result['output']}"
+                    )
+
+                response_parts.append("")
+                response_parts.append(f"FINAL RESULT: {result['final_result']}")
+
+                full_response = "\n".join(response_parts)
+                self.chat_panel.update_streaming_message(full_response)
+
+            elif event.collaboration_type == "adaptive":
+                # Adaptive collaboration
+                from xencode.agentic.coordinator import AgentCoordinator
+
+                coordinator = AgentCoordinator()
+                result = coordinator.adaptive_collaboration(enhanced_prompt)
+
+                # Format the result based on the approach taken
+                if result.get('approach') == 'standard_delegation':
+                    full_response = f"Standard delegation result: {result['result']}"
+                else:
+                    # For sequential or parallel results
+                    full_response = f"Adaptive collaboration result: {result.get('final_result', result.get('synthesized_result', 'No result'))}"
+
+                self.chat_panel.update_streaming_message(full_response)
+
+            elif event.use_multi_agent:
+                # Multi-agent collaboration
+                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+
+                coordinator = AgentCoordinator()
+                result = coordinator.multi_agent_task([{
+                    "task": enhanced_prompt,
+                    "agent_type": None  # Will be classified automatically
+                }])
+
+                # Format multi-agent results
+                response_parts = ["MULTI-AGENT RESULTS:"]
+                for res in result:
+                    response_parts.append(
+                        f"Agent: {res['selected_agent']}, "
+                        f"Result: {res['result'][:200]}..."
+                    )
+
+                full_response = "\n".join(response_parts)
+                self.chat_panel.update_streaming_message(full_response)
+
+            else:
+                # Single agent (default behavior)
+                async for chunk in self._stream_ai_response(enhanced_prompt):
+                    full_response += chunk
+                    self.chat_panel.update_streaming_message(full_response)
+
+        except Exception as e:
+            self.chat_panel.update_streaming_message(
+                f"Error in agent collaboration: {str(e)}"
+            )
+
     async def _stream_ai_response(self, prompt: str):
         """Stream AI response chunks
-        
+
         Args:
             prompt: The prompt to send
-            
+
         Yields:
             Response chunks
         """

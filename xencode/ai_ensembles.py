@@ -50,6 +50,7 @@ class EnsembleMethod(Enum):
     WEIGHTED = "weighted"  # Weighted by model confidence
     CONSENSUS = "consensus"  # Require agreement threshold
     HYBRID = "hybrid"  # Adaptive method selection
+    SEMANTIC = "semantic"  # Semantic-aware fusion using embeddings
 
 
 class ModelTier(Enum):
@@ -114,52 +115,89 @@ class QueryResponse(BaseModel):
 
 class TokenVoter:
     """Implements token-level voting for ensemble fusion"""
-    
+
     @staticmethod
     def vote_tokens(responses: List[str], weights: Optional[List[float]] = None) -> str:
         """Vote on tokens across responses"""
         if not responses:
             return ""
-        
+
         if len(responses) == 1:
             return responses[0]
-        
+
         # Tokenize responses (simple whitespace split for now)
         tokenized = [resp.split() for resp in responses]
         weights = weights or [1.0] * len(responses)
-        
+
         # Find maximum length
         max_len = max(len(tokens) for tokens in tokenized) if tokenized else 0
-        
+
         # Vote on each position
         fused_tokens = []
         for pos in range(max_len):
             position_votes = defaultdict(float)
-            
+
             for i, tokens in enumerate(tokenized):
                 if pos < len(tokens):
                     token = tokens[pos]
                     position_votes[token] += weights[i]
-            
+
             if position_votes:
                 # Select token with highest vote
                 best_token = max(position_votes.items(), key=lambda x: x[1])[0]
                 fused_tokens.append(best_token)
-        
+
         return " ".join(fused_tokens)
-    
+
+    @staticmethod
+    def semantic_vote_tokens(responses: List[str], weights: Optional[List[float]] = None) -> str:
+        """Semantic-aware token voting using sentence embeddings"""
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+
+            # Load pre-trained sentence transformer model
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+
+            if not responses:
+                return ""
+
+            if len(responses) == 1:
+                return responses[0]
+
+            # Get embeddings for each response
+            embeddings = model.encode(responses)
+            weights = weights or [1.0] * len(responses)
+
+            # Calculate weighted centroid
+            weighted_embeddings = embeddings * np.array(weights)[:, np.newaxis]
+            centroid = np.sum(weighted_embeddings, axis=0) / np.sum(weights)
+
+            # Find the response closest to the centroid
+            similarities = np.dot(embeddings, centroid) / (
+                np.linalg.norm(embeddings, axis=1) * np.linalg.norm(centroid)
+            )
+
+            # Return the response with highest similarity to centroid
+            best_idx = np.argmax(similarities)
+            return responses[best_idx]
+
+        except ImportError:
+            # Fallback to regular voting if sentence_transformers not available
+            return TokenVoter.vote_tokens(responses, weights)
+
     @staticmethod
     def calculate_consensus(responses: List[str]) -> float:
         """Calculate consensus score (0-1) across responses"""
         if len(responses) <= 1:
             return 1.0
-        
+
         # Simple similarity based on common tokens
         all_tokens = [set(resp.split()) for resp in responses]
-        
+
         if not all_tokens:
             return 0.0
-        
+
         # Calculate pairwise similarities
         similarities = []
         for i in range(len(all_tokens)):
@@ -168,8 +206,37 @@ class TokenVoter:
                 union = len(all_tokens[i] | all_tokens[j])
                 similarity = intersection / union if union > 0 else 0.0
                 similarities.append(similarity)
-        
+
         return sum(similarities) / len(similarities) if similarities else 0.0
+
+    @staticmethod
+    def calculate_semantic_consensus(responses: List[str]) -> float:
+        """Calculate semantic consensus using sentence embeddings"""
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+
+            if len(responses) <= 1:
+                return 1.0
+
+            # Load model and encode responses
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            embeddings = model.encode(responses)
+
+            # Calculate pairwise cosine similarities
+            similarities = []
+            for i in range(len(embeddings)):
+                for j in range(i + 1, len(embeddings)):
+                    sim = np.dot(embeddings[i], embeddings[j]) / (
+                        np.linalg.norm(embeddings[i]) * np.linalg.norm(embeddings[j])
+                    )
+                    similarities.append(sim)
+
+            return sum(similarities) / len(similarities) if similarities else 0.0
+
+        except ImportError:
+            # Fallback to regular consensus calculation
+            return TokenVoter.calculate_consensus(responses)
 
 
 class EnsembleReasoner:
@@ -471,21 +538,21 @@ class EnsembleReasoner:
                 error=str(e)
             )
     
-    async def _fuse_responses(self, responses: List[ModelResponse], 
+    async def _fuse_responses(self, responses: List[ModelResponse],
                             method: EnsembleMethod,
                             model_configs: List[ModelConfig]) -> str:
         """Fuse multiple model responses using specified method"""
         if not responses:
             return ""
-        
+
         if len(responses) == 1:
             return responses[0].response
-        
+
         response_texts = [r.response for r in responses]
-        
+
         if method == EnsembleMethod.VOTE:
             return self.voter.vote_tokens(response_texts)
-        
+
         elif method == EnsembleMethod.WEIGHTED:
             # Weight by model configuration and confidence
             weights = []
@@ -495,13 +562,17 @@ class EnsembleReasoner:
                     if config.ollama_tag == response.model:
                         model_weight = config.weight
                         break
-                
+
                 # Combine model weight with response confidence
                 combined_weight = model_weight * (response.confidence + 0.1)  # Avoid zero weights
                 weights.append(combined_weight)
-            
+
             return self.voter.vote_tokens(response_texts, weights)
-        
+
+        elif method == EnsembleMethod.SEMANTIC:
+            # Use semantic-aware fusion
+            return self.voter.semantic_vote_tokens(response_texts)
+
         elif method == EnsembleMethod.CONSENSUS:
             # Only return response if consensus is high enough
             consensus = self.voter.calculate_consensus(response_texts)
@@ -511,11 +582,11 @@ class EnsembleReasoner:
                 # Fall back to highest confidence response
                 best_response = max(responses, key=lambda r: r.confidence)
                 return best_response.response
-        
+
         elif method == EnsembleMethod.HYBRID:
             # Adaptive method selection based on response characteristics
             consensus = self.voter.calculate_consensus(response_texts)
-            
+
             if consensus >= 0.8:  # High consensus - use simple voting
                 return self.voter.vote_tokens(response_texts)
             elif consensus >= 0.5:  # Medium consensus - use weighted
@@ -524,7 +595,7 @@ class EnsembleReasoner:
             else:  # Low consensus - use best single response
                 best_response = max(responses, key=lambda r: r.confidence)
                 return best_response.response
-        
+
         # Default fallback
         return response_texts[0]
     

@@ -1,9 +1,10 @@
 from typing import List, Optional
 
 from langchain_ollama import ChatOllama
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
 from langchain.tools import BaseTool
+from langchain_core.tools import BaseTool as BaseToolNew
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate
 
 from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
 
@@ -55,41 +56,35 @@ class LangChainManager:
         return registry.get_all_tools()
 
     def _setup_agent(self) -> AgentExecutor:
-        """Set up the ReAct agent."""
-        # Define a simple ReAct prompt
-        # Note: This is a basic prompt, might need tuning for specific models
-        template = """Answer the following questions as best you can. You have access to the following tools:
-
-{tools}
-
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-Begin!
+        """Set up the tool-calling agent."""
+        # Define a simple prompt for the agent
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a helpful AI assistant. Use the provided tools to answer questions.
 
 {context_block}
 
-Question: {input}
-Thought:{agent_scratchpad}"""
+You have access to the following tools:
+{tools}
 
-        prompt = PromptTemplate.from_template(template)
+When you need to use a tool, respond with a JSON object like this:
+```json
+{{"name": "tool_name", "arguments": {{"arg1": "value1", "arg2": "value2"}}}}
+```
 
-        agent = create_react_agent(self.llm, self.tools, prompt)
-        
+After receiving the tool result, respond with your final answer."""),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}")
+        ])
+
+        agent = create_tool_calling_agent(self.llm, self.tools, prompt)
+
         return AgentExecutor(
             agent=agent,
             tools=self.tools,
             verbose=True,
             handle_parsing_errors=True,
-            max_iterations=10
+            max_iterations=10,
+            max_execution_time=30.0
         )
 
     def run_agent(self, user_input: str) -> str:
@@ -112,28 +107,23 @@ Thought:{agent_scratchpad}"""
             # Store user message
             if self.use_memory:
                 self.memory.add_message(role="user", content=user_input)
-            
-            # Run agent
-            # We pass context_block as a partial variable if needed, or inject into input.
-            # But the prompt template expects {context_block}
-            # Or if it doesn't, we can prepend it to input.
-            # Since I modified the template, I must pass `context_block` to invoke.
-            
-            # The agent executor invoke takes input.
-            # To pass extra variables to prompt, we might need to modify how the agent is structured.
-            # But create_react_agent binds prompt.
-            # Actually, `AgentExecutor.invoke` accepts input dict that fills prompt variables.
-            
+
+            # Run agent with context
             result = self.agent_executor.invoke({
                 "input": user_input,
                 "context_block": context_block
             })
-            output = result.get("output", "No output returned")
-            
+
+            # The new agent returns the result directly
+            if isinstance(result, dict):
+                output = result.get("output", str(result))
+            else:
+                output = str(result)
+
             # Store assistant response
             if self.use_memory:
                 self.memory.add_message(role="assistant", content=output)
-            
+
             return output
         except Exception as e:
             error_msg = f"Agent execution failed: {str(e)}"

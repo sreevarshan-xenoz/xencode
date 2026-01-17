@@ -12,6 +12,18 @@ from .advanced_tools import (
     CodeAnalysisTool,
     ToolRegistry
 )
+from .enhanced_tools import (
+    GitBranchTool,
+    GitPushTool,
+    GitPullTool,
+    FindFileTool,
+    FileStatTool,
+    DependencyAnalysisTool,
+    SystemInfoTool,
+    ProcessInfoTool,
+    WebSearchDetailedTool,
+    EnhancedToolRegistry
+)
 from .coordinator import AgentCoordinator, AgentType
 from .ensemble_integration import EnsembleChain, ModelCouncil, create_ensemble_chain, create_model_council
 
@@ -27,6 +39,16 @@ __all__ = [
     "WebSearchTool",
     "CodeAnalysisTool",
     "ToolRegistry",
+    "GitBranchTool",
+    "GitPushTool",
+    "GitPullTool",
+    "FindFileTool",
+    "FileStatTool",
+    "DependencyAnalysisTool",
+    "SystemInfoTool",
+    "ProcessInfoTool",
+    "WebSearchDetailedTool",
+    "EnhancedToolRegistry",
     "AgentCoordinator",
     "AgentType",
     "EnsembleChain",
