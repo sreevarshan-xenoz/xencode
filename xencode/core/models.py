@@ -25,6 +25,12 @@ class ModelManager:
         self.available_models: List[str] = []
         self.current_model: str = DEFAULT_MODEL
         self.model_health: Dict[str, Any] = {}
+        # Import configuration to get API keys
+        try:
+            from xencode.smart_config_manager import get_config
+            self.config = get_config()
+        except ImportError:
+            self.config = None
         self.refresh_models()
 
     def refresh_models(self) -> None:
@@ -38,14 +44,50 @@ class ModelManager:
         except Exception:
             self.available_models = []
 
+        # Add cloud models if API keys are configured
+        if self.config:
+            if self.config.api_keys.openai_api_key:
+                # Add OpenAI models
+                openai_models = [
+                    "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4",
+                    "gpt-3.5-turbo", "gpt-4-32k", "gpt-3.5-turbo-16k"
+                ]
+                for model in openai_models:
+                    if model not in self.available_models:
+                        self.available_models.append(f"openai:{model}")
+
+            if self.config.api_keys.google_gemini_api_key:
+                # Add Google Gemini models
+                gemini_models = [
+                    "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"
+                ]
+                for model in gemini_models:
+                    if model not in self.available_models:
+                        self.available_models.append(f"google_gemini:{model}")
+
+            if self.config.api_keys.openrouter_api_key:
+                # Add OpenRouter models
+                openrouter_models = [
+                    "openai/gpt-4o", "openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet",
+                    "google/gemini-pro", "meta-llama/llama-3.1-8b-instruct"
+                ]
+                for model in openrouter_models:
+                    if model not in self.available_models:
+                        self.available_models.append(f"openrouter:{model}")
+
     def check_model_health(self, model: str) -> bool:
         """Check if a model is healthy and responsive"""
+        # Check if this is a cloud model
+        if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
+            return self.check_cloud_model_health(model)
+
+        # Otherwise, it's an Ollama model
         try:
             start_time = time.time()
             # Use a minimal prompt to check model availability
             response = requests.post(
                 "http://localhost:11434/api/generate",
-                json={"model": model, "prompt": "hi", "stream": False},
+                json={"model": model.replace('ollama:', ''), "prompt": "hi", "stream": False},
                 timeout=5,
             )
             response_time = time.time() - start_time
@@ -64,6 +106,102 @@ class ModelManager:
                     'last_check': time.time(),
                 }
                 return False
+        except Exception as e:
+            self.model_health[model] = {
+                'status': 'unavailable',
+                'error': str(e),
+                'last_check': time.time(),
+            }
+            return False
+
+    def check_cloud_model_health(self, model: str) -> bool:
+        """Check health of cloud models"""
+        try:
+            start_time = time.time()
+
+            if model.startswith("openai:"):
+                import openai
+                client = openai.OpenAI(api_key=self.config.api_keys.openai_api_key if self.config else "")
+
+                # Test the model with a simple request
+                model_name = model.replace("openai:", "")
+                try:
+                    # Just check if the model is accessible
+                    response = client.models.retrieve(model_name)
+                    response_time = time.time() - start_time
+
+                    self.model_health[model] = {
+                        'status': 'healthy',
+                        'response_time': response_time,
+                        'last_check': time.time(),
+                    }
+                    return True
+                except Exception:
+                    self.model_health[model] = {
+                        'status': 'unavailable',
+                        'error': 'Model not accessible with provided API key',
+                        'last_check': time.time(),
+                    }
+                    return False
+
+            elif model.startswith("google_gemini:"):
+                import google.generativeai as genai
+                genai.configure(api_key=self.config.api_keys.google_gemini_api_key if self.config else "")
+
+                model_name = model.replace("google_gemini:", "")
+                try:
+                    # Test if we can access the model
+                    test_model = genai.GenerativeModel(model_name)
+                    response_time = time.time() - start_time
+
+                    self.model_health[model] = {
+                        'status': 'healthy',
+                        'response_time': response_time,
+                        'last_check': time.time(),
+                    }
+                    return True
+                except Exception:
+                    self.model_health[model] = {
+                        'status': 'unavailable',
+                        'error': 'Model not accessible with provided API key',
+                        'last_check': time.time(),
+                    }
+                    return False
+
+            elif model.startswith("openrouter:"):
+                import openai
+                client = openai.OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=self.config.api_keys.openrouter_api_key if self.config else ""
+                )
+
+                model_name = model.replace("openrouter:", "")
+                try:
+                    # Test if we can access the model
+                    response = client.models.retrieve(model_name)
+                    response_time = time.time() - start_time
+
+                    self.model_health[model] = {
+                        'status': 'healthy',
+                        'response_time': response_time,
+                        'last_check': time.time(),
+                    }
+                    return True
+                except Exception:
+                    self.model_health[model] = {
+                        'status': 'unavailable',
+                        'error': 'Model not accessible with provided API key',
+                        'last_check': time.time(),
+                    }
+                    return False
+
+        except ImportError as e:
+            self.model_health[model] = {
+                'status': 'unavailable',
+                'error': f'Missing required library: {str(e)}',
+                'last_check': time.time(),
+            }
+            return False
         except Exception as e:
             self.model_health[model] = {
                 'status': 'unavailable',

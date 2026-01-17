@@ -161,6 +161,22 @@ class UIConfig:
 
 
 @dataclass
+class APIKeysConfig:
+    """API keys configuration for external providers"""
+    openai_api_key: str = ""
+    google_gemini_api_key: str = ""
+    openrouter_api_key: str = ""
+    anthropic_api_key: str = ""
+    huggingface_api_key: str = ""
+
+    def validate(self) -> List[str]:
+        """Validate API key configuration"""
+        errors = []
+        # Add validation if needed
+        return errors
+
+
+@dataclass
 class XencodeConfig:
     """Complete Xencode configuration"""
     version: str = "2.0.0"
@@ -169,26 +185,28 @@ class XencodeConfig:
     security: SecurityConfig = field(default_factory=SecurityConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
     custom: Dict[str, Any] = field(default_factory=dict)
     
     def validate(self) -> Dict[str, List[str]]:
         """Validate all configuration sections"""
         validation_results = {}
-        
+
         sections = {
             "model": self.model,
             "cache": self.cache,
             "security": self.security,
             "performance": self.performance,
-            "ui": self.ui
+            "ui": self.ui,
+            "api_keys": self.api_keys
         }
-        
+
         for section_name, section_config in sections.items():
             if hasattr(section_config, 'validate'):
                 errors = section_config.validate()
                 if errors:
                     validation_results[section_name] = errors
-        
+
         return validation_results
     
     def to_dict(self) -> Dict[str, Any]:
@@ -199,7 +217,7 @@ class XencodeConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'XencodeConfig':
         """Create configuration from dictionary"""
         config = cls()
-        
+
         if 'model' in data:
             config.model = ModelConfig(**data['model'])
         if 'cache' in data:
@@ -210,11 +228,13 @@ class XencodeConfig:
             config.performance = PerformanceConfig(**data['performance'])
         if 'ui' in data:
             config.ui = UIConfig(**data['ui'])
+        if 'api_keys' in data:
+            config.api_keys = APIKeysConfig(**data['api_keys'])
         if 'custom' in data:
             config.custom = data['custom']
         if 'version' in data:
             config.version = data['version']
-        
+
         return config
 
 
@@ -252,6 +272,11 @@ class ConfigurationManager:
             'XENCODE_SECURITY_ENABLED': ('security', 'enabled', lambda x: x.lower() == 'true'),
             'XENCODE_VERBOSE': ('ui', 'verbose_mode', lambda x: x.lower() == 'true'),
             'XENCODE_THEME': ('ui', 'theme'),
+            'OPENAI_API_KEY': ('api_keys', 'openai_api_key'),
+            'GOOGLE_GEMINI_API_KEY': ('api_keys', 'google_gemini_api_key'),
+            'OPENROUTER_API_KEY': ('api_keys', 'openrouter_api_key'),
+            'ANTHROPIC_API_KEY': ('api_keys', 'anthropic_api_key'),
+            'HUGGINGFACE_API_KEY': ('api_keys', 'huggingface_api_key'),
         }
         
         for env_var, config_path in env_mapping.items():
@@ -577,69 +602,83 @@ class ConfigurationManager:
         if not self.config:
             console.print("[red]No configuration loaded[/red]")
             return
-        
+
         table = Table(title="🔧 Xencode Configuration")
         table.add_column("Section", style="cyan")
         table.add_column("Setting", style="white")
         table.add_column("Value", style="green")
-        
+
         config_dict = self.config.to_dict()
-        
+
         for section_name, section_data in config_dict.items():
             if isinstance(section_data, dict):
                 for key, value in section_data.items():
                     if section_name == "model" and key == "system_prompt":
                         # Truncate long system prompts
                         display_value = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                    elif section_name == "api_keys":
+                        # Mask API keys for security
+                        if "api_key" in key.lower():
+                            display_value = "*" * len(str(value)) if value else "<not set>"
+                        else:
+                            display_value = str(value)
                     else:
                         display_value = str(value)
-                    
+
                     table.add_row(section_name, key, display_value)
             else:
                 table.add_row(section_name, "", str(section_data))
-        
+
         console.print(table)
     
     def interactive_setup(self) -> XencodeConfig:
         """Interactive configuration setup wizard"""
         console.print("[bold blue]🔧 Xencode Configuration Setup[/bold blue]\n")
-        
+
         config = XencodeConfig()
-        
+
+        # API Keys configuration
+        console.print("[bold]API Keys Configuration:[/bold]")
+        config.api_keys.openai_api_key = Prompt.ask("OpenAI API Key (optional)", password=True, default="")
+        config.api_keys.google_gemini_api_key = Prompt.ask("Google Gemini API Key (optional)", password=True, default="")
+        config.api_keys.openrouter_api_key = Prompt.ask("OpenRouter API Key (optional)", password=True, default="")
+        config.api_keys.anthropic_api_key = Prompt.ask("Anthropic API Key (optional)", password=True, default="")
+        config.api_keys.huggingface_api_key = Prompt.ask("HuggingFace API Key (optional)", password=True, default="")
+
         # Model configuration
-        console.print("[bold]Model Configuration:[/bold]")
+        console.print("\n[bold]Model Configuration:[/bold]")
         config.model.name = Prompt.ask("Model name", default=config.model.name)
         config.model.temperature = FloatPrompt.ask("Temperature (0.0-2.0)", default=config.model.temperature)
         config.model.max_tokens = IntPrompt.ask("Max tokens", default=config.model.max_tokens)
-        
+
         # Cache configuration
         console.print("\n[bold]Cache Configuration:[/bold]")
         config.cache.enabled = Confirm.ask("Enable caching", default=config.cache.enabled)
         if config.cache.enabled:
             config.cache.memory_cache_mb = IntPrompt.ask("Memory cache (MB)", default=config.cache.memory_cache_mb)
             config.cache.disk_cache_mb = IntPrompt.ask("Disk cache (MB)", default=config.cache.disk_cache_mb)
-        
+
         # Security configuration
         console.print("\n[bold]Security Configuration:[/bold]")
         config.security.enabled = Confirm.ask("Enable security features", default=config.security.enabled)
         if config.security.enabled:
             config.security.scan_code = Confirm.ask("Scan code for vulnerabilities", default=config.security.scan_code)
             config.security.sandbox_execution = Confirm.ask("Sandbox code execution", default=config.security.sandbox_execution)
-        
+
         # UI configuration
         console.print("\n[bold]UI Configuration:[/bold]")
         theme_choices = ["dark", "light", "auto"]
         config.ui.theme = Prompt.ask("Theme", choices=theme_choices, default=config.ui.theme)
         config.ui.verbose_mode = Confirm.ask("Verbose mode", default=config.ui.verbose_mode)
-        
+
         self.config = config
-        
+
         # Save configuration
         if Confirm.ask("\nSave configuration"):
             format_choices = ["yaml", "toml", "json"]
             format_choice = Prompt.ask("Configuration format", choices=format_choices, default="yaml")
             self.save_config(format=ConfigFormat(format_choice))
-        
+
         return config
 
 
