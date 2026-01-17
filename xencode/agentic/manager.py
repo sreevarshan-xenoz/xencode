@@ -3,10 +3,18 @@ from typing import List, Optional
 from langchain_ollama import ChatOllama
 from langchain.tools import BaseTool
 from langchain_core.tools import BaseTool as BaseToolNew
-from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 
 from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
+
+# Import AgentExecutor with fallback
+try:
+    from langchain.agents import AgentExecutor
+except ImportError:
+    # If AgentExecutor is not available, define a minimal placeholder
+    class AgentExecutor:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError("AgentExecutor not available in this LangChain version")
 
 
 class LangChainManager:
@@ -57,7 +65,10 @@ class LangChainManager:
 
     def _setup_agent(self) -> AgentExecutor:
         """Set up the tool-calling agent."""
-        # Define a simple prompt for the agent
+        # Create a basic agent that works with the current LangChain version
+        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+        # Create a simple prompt that works with most LangChain versions
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a helpful AI assistant. Use the provided tools to answer questions.
 
@@ -73,19 +84,60 @@ When you need to use a tool, respond with a JSON object like this:
 
 After receiving the tool result, respond with your final answer."""),
             ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}")
+            MessagesPlaceholder(variable_name="agent_scratchpad")
         ])
 
-        agent = create_tool_calling_agent(self.llm, self.tools, prompt)
+        # Try to create an agent using the most compatible approach
+        try:
+            # Try the create_tool_calling_agent approach
+            from langchain.agents import create_tool_calling_agent
+            agent = create_tool_calling_agent(
+                llm=self.llm,
+                tools=self.tools,
+                prompt=prompt
+            )
 
-        return AgentExecutor(
-            agent=agent,
-            tools=self.tools,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=10,
-            max_execution_time=30.0
-        )
+            return AgentExecutor(
+                agent=agent,
+                tools=self.tools,
+                verbose=True,
+                handle_parsing_errors=True,
+                max_iterations=10,
+                max_execution_time=30.0
+            )
+        except ImportError:
+            # If create_tool_calling_agent is not available, try create_json_chat_agent
+            try:
+                from langchain.agents import create_json_chat_agent
+                agent = create_json_chat_agent(
+                    llm=self.llm,
+                    tools=self.tools,
+                    prompt=prompt
+                )
+
+                return AgentExecutor(
+                    agent=agent,
+                    tools=self.tools,
+                    verbose=True,
+                    handle_parsing_errors=True,
+                    max_iterations=10,
+                    max_execution_time=30.0
+                )
+            except ImportError:
+                # If neither is available, create a basic executor that just uses the LLM directly
+                # This is a fallback that provides basic functionality
+                class BasicAgentExecutor:
+                    def __init__(self, llm, tools):
+                        self.llm = llm
+                        self.tools = tools
+
+                    def invoke(self, inputs):
+                        # Basic implementation that just sends the input to the LLM
+                        input_text = inputs.get("input", "")
+                        response = self.llm.invoke(input_text)
+                        return {"output": str(response)}
+
+                return BasicAgentExecutor(self.llm, self.tools)
 
     def run_agent(self, user_input: str) -> str:
         """Run the agent with the given input."""

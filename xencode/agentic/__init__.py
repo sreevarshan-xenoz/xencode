@@ -26,6 +26,18 @@ from .enhanced_tools import (
 )
 from .coordinator import AgentCoordinator, AgentType
 from .ensemble_integration import EnsembleChain, ModelCouncil, create_ensemble_chain, create_model_council
+from .specialized import (
+    SpecializedAgentType,
+    SpecializedAgent,
+    DataScienceAgent,
+    WebDevelopmentAgent,
+    SecurityAnalysisAgent,
+    DevOpsAgent,
+    TestingAgent,
+    DocumentationAgent,
+    SpecializedAgentFactory
+)
+from .specialized.coordinator import SpecializedAgentCoordinator
 
 __all__ = [
     "LangChainManager",
@@ -54,5 +66,15 @@ __all__ = [
     "EnsembleChain",
     "ModelCouncil",
     "create_ensemble_chain",
-    "create_model_council"
+    "create_model_council",
+    "SpecializedAgentType",
+    "SpecializedAgent",
+    "DataScienceAgent",
+    "WebDevelopmentAgent",
+    "SecurityAnalysisAgent",
+    "DevOpsAgent",
+    "TestingAgent",
+    "DocumentationAgent",
+    "SpecializedAgentFactory",
+    "SpecializedAgentCoordinator"
 ]
