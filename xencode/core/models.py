@@ -16,14 +16,15 @@ from rich.table import Table
 console = Console()
 
 # Smart default model selection - will be updated based on available models
-DEFAULT_MODEL = None  # Will be set dynamically
+DEFAULT_MODEL: Optional[str] = None  # Will be set dynamically
 
 class ModelManager:
     """Advanced model management with health monitoring"""
 
     def __init__(self) -> None:
+        """Initialize the ModelManager with default values."""
         self.available_models: List[str] = []
-        self.current_model: str = DEFAULT_MODEL
+        self.current_model: Optional[str] = DEFAULT_MODEL
         self.model_health: Dict[str, Any] = {}
         # Import configuration to get API keys
         try:
@@ -76,7 +77,14 @@ class ModelManager:
                         self.available_models.append(f"openrouter:{model}")
 
     def check_model_health(self, model: str) -> bool:
-        """Check if a model is healthy and responsive"""
+        """Check if a model is healthy and responsive
+
+        Args:
+            model: Name of the model to check
+
+        Returns:
+            True if the model is healthy, False otherwise
+        """
         # Check if this is a cloud model
         if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
             return self.check_cloud_model_health(model)
@@ -115,7 +123,14 @@ class ModelManager:
             return False
 
     def check_cloud_model_health(self, model: str) -> bool:
-        """Check health of cloud models"""
+        """Check health of cloud models
+
+        Args:
+            model: Name of the cloud model to check
+
+        Returns:
+            True if the model is healthy, False otherwise
+        """
         try:
             start_time = time.time()
 
@@ -210,8 +225,12 @@ class ModelManager:
             }
             return False
 
-    def get_best_model(self) -> str:
-        """Get the best available model based on health and performance"""
+    def get_best_model(self) -> Optional[str]:
+        """Get the best available model based on health and performance
+
+        Returns:
+            The best available model or DEFAULT_MODEL if none are available
+        """
         if not self.available_models:
             return DEFAULT_MODEL
 
@@ -234,7 +253,14 @@ class ModelManager:
         return fastest_model
 
     def switch_model(self, model: str) -> Tuple[bool, str]:
-        """Switch to a different model"""
+        """Switch to a different model
+
+        Args:
+            model: Name of the model to switch to
+
+        Returns:
+            A tuple of (success, message) indicating whether the switch was successful
+        """
         if model in self.available_models:
             if self.check_model_health(model):
                 self.current_model = model
@@ -246,7 +272,11 @@ class ModelManager:
 
 
 def get_available_models() -> List[str]:
-    """Get available models with enhanced error handling and caching"""
+    """Get available models with enhanced error handling and caching
+
+    Returns:
+        List of available model names
+    """
     try:
         # Use the model manager for better performance
         model_manager = ModelManager()
@@ -257,7 +287,11 @@ def get_available_models() -> List[str]:
 
 
 def get_smart_default_model() -> Optional[str]:
-    """Intelligently select the best available model"""
+    """Intelligently select the best available model
+
+    Returns:
+        The best available model or None if no models are found
+    """
     # Import here to avoid circular dependencies
     try:
         from xencode.tui.utils.model_checker import ModelChecker
@@ -324,7 +358,7 @@ def get_smart_default_model() -> Optional[str]:
 def list_models() -> None:
     """Enhanced model listing with health status and performance metrics"""
     model_manager = ModelManager()
-    
+
     try:
         # Refresh models and health status
         model_manager.refresh_models()
@@ -416,7 +450,11 @@ def list_models() -> None:
 
 
 def update_model(model: str) -> None:
-    """Enhanced model update with progress tracking and validation"""
+    """Enhanced model update with progress tracking and validation
+
+    Args:
+        model: Name of the model to update
+    """
     console.print(f"[yellow]🔄 Pulling latest model: {model}[/yellow]")
 
     try:
