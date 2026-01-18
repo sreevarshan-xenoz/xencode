@@ -11,7 +11,12 @@ from rich.panel import Panel
 console = Console()
 
 def create_file(path: Union[str, Path], content: str) -> None:
-    """Create a file with the given content."""
+    """Create a file with the given content.
+
+    Args:
+        path: Path to the file to create
+        content: Content to write to the file
+    """
     try:
         abs_path = Path(path).resolve()
         with open(abs_path, 'w', encoding='utf-8') as f:
@@ -22,7 +27,14 @@ def create_file(path: Union[str, Path], content: str) -> None:
 
 
 def read_file(path: Union[str, Path]) -> str:
-    """Read the content of a file."""
+    """Read the content of a file.
+
+    Args:
+        path: Path to the file to read
+
+    Returns:
+        Content of the file, or empty string if an error occurs
+    """
     try:
         abs_path = Path(path).resolve()
         with open(abs_path, 'r', encoding='utf-8') as f:
@@ -35,12 +47,24 @@ def read_file(path: Union[str, Path]) -> str:
 
 
 def write_file(path: Union[str, Path], content: str) -> None:
-    """Write content to a file."""
+    """Write content to a file.
+
+    Args:
+        path: Path to the file to write
+        content: Content to write to the file
+    """
     create_file(path, content)
 
 
 def delete_file(path: Union[str, Path]) -> bool:
-    """Delete a file."""
+    """Delete a file.
+
+    Args:
+        path: Path to the file to delete
+
+    Returns:
+        True if the file was deleted successfully, False otherwise
+    """
     try:
         abs_path = Path(path).resolve()
         os.remove(abs_path)

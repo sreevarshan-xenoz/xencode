@@ -1,421 +1,212 @@
-<div align="center">
+# Xencode - AI-Powered Command Line Interface
 
-# Xencode
+Xencode is an advanced command-line interface that leverages large language models to assist with coding tasks, file operations, and project management. Built with modularity, security, and performance in mind.
 
-**AI-Powered Development Assistant Platform**
+## Features
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+- **Modular Architecture**: Clean separation of concerns with dedicated modules for files, models, memory, and caching
+- **Multi-Model Support**: Works with Ollama, OpenAI, Google Gemini, and other model providers
+- **Conversation Memory**: Maintains context across multiple interactions
+- **Smart Caching**: Efficient caching system with disk and memory tiers
+- **Security First**: Built-in input validation, sanitization, and rate limiting
+- **Performance Optimized**: Connection pooling, lazy loading, and resource management
+- **Extensible**: Plugin system and API-ready architecture
 
-[Quick Start](#installation) • [Documentation](#architecture) • [Contributing](#contributing)
+## Architecture Overview
 
-</div>
-
----
-
-## Overview
-
-Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, and workspace collaboration features with a focus on privacy and offline operation.
-
-## Key Features
-
-### Core AI Capabilities
-- **🤖 LangChain Agentic System** - Production-ready agent with 9 specialized tools
-  - File operations (read, write, execute commands)
-  - Git workflow automation (status, diff, commit, log)
-  - Web search (DuckDuckGo integration)
-  - Code analysis (repository scanning, Python AST analysis)
-- **🧠 Multi-Agent Collaboration** - 4 specialized agents with intelligent task delegation
-  - CodeAgent (codellama:7b) for programming tasks
-  - ResearchAgent (mistral:7b) for web search and analysis
-  - ExecutionAgent (qwen3:4b) for file/command operations
-  - GeneralAgent (qwen3:4b) for general queries
-- **🎯 Ensemble Learning** - Multiple models working together for better results ⭐ NEW
-  - Council of Models pattern for consensus-driven reasoning  
-  - Semantic voting and weighted ensemble methods
-  - 25-35% accuracy improvement over single models
-  - Reduced hallucinations via cross-validation
-- **💾 Conversation Memory** - SQLite-backed persistent conversation history
-- **🎯 Smart Model Selection** - Automatic model switching based on task type
-
-### Platform Features
-- **Intelligent Model Selection** - Automatic hardware detection and model recommendations
-- **Advanced Caching** - Multi-tier caching system with LRU eviction and compression
-- **Error Recovery** - Automated error handling with retry mechanisms and fallback strategies
-- **Configuration Management** - Support for multiple configuration formats with hot-reload
-- **Security Analysis** - Integrated security scanning with Bandit and vulnerability detection
-- **Document Processing** - Support for PDF, DOCX, and web content extraction
-- **Workspace Collaboration** - Real-time collaboration with CRDT-based synchronization
-- **Analytics & Monitoring** - System health monitoring and performance metrics
-- **Plugin System** - Extensible architecture with marketplace integration
-
-## Screenshots
-
-<div align="center">
-
-<table>
-<tr>
-<td width="50%">
-<img src="images/1.jpg" alt="Main Interface with Explorer" />
-<p align="center"><b>Main Interface with Explorer</b></p>
-</td>
-<td width="50%">
-<img src="images/2.jpg" alt="Clean Interface" />
-<p align="center"><b>Clean Interface View</b></p>
-</td>
-</tr>
-<tr>
-<td width="50%">
-<img src="images/3.jpg" alt="Model Selection" />
-<p align="center"><b>Intelligent Model Selection</b></p>
-</td>
-<td width="50%">
-<img src="images/4.jpg" alt="Collaboration Features" />
-<p align="center"><b>Real-time Collaboration</b></p>
-</td>
-</tr>
-<tr>
-<td width="50%">
-<img src="images/5.jpg" alt="Terminal Integration" />
-<p align="center"><b>Integrated Terminal</b></p>
-</td>
-<td width="50%">
-<img src="images/6.jpg" alt="Full Interface" />
-<p align="center"><b>Complete Workspace View</b></p>
-</td>
-</tr>
-</table>
-
-</div>
-
-## Architecture
-
-```mermaid
-graph TB
-    A[User Interface<br/>REST API / CLI / Web] --> B[Intelligent Model Selector<br/>Dynamic routing & optimization]
-    B --> C[Advanced Cache System<br/>LRU + Semantic Caching]
-    C --> D[Error Handler<br/>Retry logic & Fallback strategies]
-    D --> E[Config Manager<br/>Environment-aware settings]
-    E --> F[System Coordinator<br/>Orchestrates & monitors health]
-    F --> G[AI Models<br/>Multi-model ensemble]
-
-    F -.->|Health metrics| A
-    C -.->|Cache stats| F
+```
+xencode/
+├── core/                 # Core functionality modules
+│   ├── files.py          # File operations
+│   ├── models.py         # Model management
+│   ├── memory.py         # Conversation memory
+│   ├── cache.py          # Caching system
+│   ├── connection_pool.py # Connection pooling
+│   └── __init__.py
+├── security/             # Security modules
+│   ├── validation.py     # Input validation
+│   ├── authentication.py # Authentication
+│   ├── rate_limiting.py  # Rate limiting
+│   └── data_encryption.py # Data encryption
+├── testing/              # Testing utilities
+│   └── mock_services.py  # Mock services for testing
+└── xencode_core.py       # Main application logic
 ```
 
-### System Requirements
+## Core Modules
 
-- Python 3.8 or higher
-- Ollama installed and running
-- 4GB+ RAM recommended
-- 2GB+ free disk space
+### Files Module (`xencode/core/files.py`)
+Handles all file operations with security validation:
+- `create_file(path, content)`
+- `read_file(path)`
+- `write_file(path, content)`
+- `delete_file(path)`
 
-### Quick Install
+### Models Module (`xencode/core/models.py`)
+Manages AI model interactions:
+- `ModelManager` class for model lifecycle
+- Health checks and performance monitoring
+- Support for local (Ollama) and cloud (OpenAI, Gemini) models
 
-**Linux / macOS**
-```bash
-git clone https://github.com/sreevarshan-xenoz/xencode.git
-cd xencode
-chmod +x install.sh && ./install.sh
-```
+### Memory Module (`xencode/core/memory.py`)
+Maintains conversation context:
+- Session management
+- Message history with configurable limits
+- Context preservation across interactions
 
-**Windows**
-```powershell
-git clone https://github.com/sreevarshan-xenoz/xencode.git
-cd xencode
-.\install.ps1
-```
+### Cache Module (`xencode/core/cache.py`)
+Multi-tier caching system:
+- In-memory LRU cache for hot items
+- Disk-based persistence
+- Compression and TTL management
+- Advanced invalidation strategies
 
-### Development Setup
+## Security Features
+
+### Input Validation (`xencode/security/validation.py`)
+- File path validation to prevent directory traversal
+- Model name validation
+- Prompt injection detection
+- API request validation
+
+### Authentication (`xencode/security/authentication.py`)
+- API key management
+- JWT token support
+- HMAC request signing
+- Scope-based permissions
+
+### Rate Limiting (`xencode/security/rate_limiting.py`)
+- Sliding window rate limiting
+- Token bucket algorithm
+- Endpoint-specific limits
+- Middleware integration
+
+### Data Encryption (`xencode/security/data_encryption.py`)
+- Fernet symmetric encryption
+- AES-GCM support
+- Secure configuration storage
+- Sensitive data management
+
+## Performance Optimizations
+
+### Connection Pooling (`xencode/core/connection_pool.py`)
+- Thread-safe HTTP connection pools
+- Async support with aiohttp
+- Retry strategies and backoff
+- Resource cleanup
+
+### Lazy Loading (`xencode/core/lazy_loader.py`)
+- Deferred loading of heavy components
+- Component registry pattern
+- Memory efficiency
+
+### Resource Management (`xencode/core/resource_monitor.py`)
+- Memory usage monitoring
+- CPU and disk usage tracking
+- Automatic cleanup mechanisms
+- Performance benchmarking
+
+## Testing Strategy
+
+### Unit Tests
+Located in `tests/` directory:
+- `test_core_modules.py` - Tests for core functionality
+- `test_cache_performance.py` - Performance benchmarks
+- `test_integration.py` - Integration tests
+- `test_property_based.py` - Property-based tests using Hypothesis
+- `test_performance_regression.py` - Regression tests
+- `test_final_integration.py` - Full system integration tests
+
+### Mock Services (`xencode/testing/mock_services.py`)
+- Mock Ollama service
+- Mock OpenAI service
+- Mock filesystem
+- Mock HTTP client
+- Mock subprocess operations
+
+## Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/sreevarshan-xenoz/xencode.git
+# Clone the repository
+git clone https://github.com/yourusername/xencode.git
 cd xencode
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
 
 # Install dependencies
-pip install -e .[dev,test]
+pip install -r requirements.txt
+
+# Install Ollama (for local models)
+curl https://ollama.ai/install.sh | sh
+
+# Pull a model
+ollama pull qwen2.5:3b
 ```
 
 ## Usage
 
-### Basic Commands
-
 ```bash
-# Start interactive session
+# Interactive chat mode
 ./xencode.sh
 
-# Direct query
-./xencode.sh "analyze this code"
+# Inline query
+./xencode.sh "Explain how to reverse a linked list in Python"
 
-# List available models
-./xencode.sh --list-models
-
-# Update models
-./xencode.sh --update
-```
-
-### Agentic Mode
-
-```bash
-# Start interactive agent session
-python -m xencode.agentic_cli start
-
-# Use specific model
-python -m xencode.agentic_cli start --model codellama:7b
-
-# Multi-agent collaboration
-python -c "from xencode.agentic import AgentCoordinator; coord = AgentCoordinator(); print(coord.delegate_task('your task'))"
-```
-
-### Advanced Features
-
-```bash
-# Model selection wizard
-python -m xencode.intelligent_model_selector
-
-# Configuration setup
-python -m xencode.smart_config_manager --setup
-
-# System health check
-python -m xencode.phase2_coordinator --status
-
-# Run security scan
-python -m xencode.analyzers.security_analyzer
+# File operations
+./xencode.sh file create myfile.py "print('Hello World')"
+./xencode.sh file read myfile.py
 ```
 
 ## Configuration
 
-Configuration files support YAML, TOML, JSON, and INI formats. Default location: `~/.xencode/config.yaml`
+Xencode uses a configuration system with secure storage:
 
-```yaml
-model:
-  primary: "llama3.1:8b"
-  fallback: ["mistral:7b", "phi3:mini"]
-  
-cache:
-  memory_limit_mb: 512
-  disk_limit_mb: 2048
-  compression: true
+```python
+from xencode.security.data_encryption import set_secure_config, get_secure_config_value
 
-performance:
-  async_workers: 4
-  timeout_seconds: 30
-  retry_attempts: 3
+# Store sensitive configuration
+set_secure_config("openai_api_key", "your-api-key-here")
 
-security:
-  enable_scanning: true
-  scan_on_save: false
+# Retrieve configuration
+api_key = get_secure_config_value("openai_api_key")
 ```
 
-## Project Structure
+## Extending Xencode
 
-```
-xencode/
-├── xencode.sh                          # Main executable
-├── xencode_core.py                     # Core application logic
-├── install.sh                          # Installation script
-├── requirements.txt                    # Dependencies
-│
-├── xencode/                            # Core modules
-│   ├── agentic/                       # LangChain agentic system ⭐
-│   │   ├── manager.py                 # Agent manager
-│   │   ├── tools.py                   # Base tools
-│   │   ├── advanced_tools.py          # Git, web, code tools
-│   │   ├── coordinator.py             # Multi-agent system
-│   │   ├── memory.py                  # Conversation memory
-│   │   └── database.py                # SQLite storage
-│   ├── intelligent_model_selector.py  # Model selection engine
-│   ├── advanced_cache_system.py       # Caching infrastructure
-│   ├── smart_config_manager.py        # Configuration management
-│   ├── advanced_error_handler.py      # Error handling
-│   ├── phase2_coordinator.py          # System coordination
-│   ├── tui/widgets/agent_panel.py     # Agent TUI interface
-│   ├── analyzers/                     # Code analysis modules
-│   ├── processors/                    # Document processors
-│   ├── workspace/                     # Collaboration features
-│   ├── auth/                          # Authentication & authorization
-│   ├── analytics/                     # Analytics engine
-│   └── plugins/                       # Plugin system
-│
-├── tests/                             # Test suite
-│   ├── test_phase2_comprehensive.py
-│   └── integration/
-│
-└── docs/                              # Documentation
-    ├── PLAN.md
-    └── CLI_GUIDE.md
-```
+### Adding New Commands
+1. Add command handler in `xencode_core.py`
+2. Update argument parsing
+3. Write corresponding tests
 
-## Core Components
+### Adding New Model Providers
+1. Create provider in `xencode/model_providers/`
+2. Implement the provider interface
+3. Register the provider in the model manager
 
-### LangChain Agentic System ⭐ NEW
-- **9 Specialized Tools** across 4 categories
-  - File operations (read, write, execute)
-  - Git automation (status, diff, commit, log)
-  - Web search (DuckDuckGo)
-  - Code analysis (AST parsing, repository scanning)
-- **Multi-Agent Collaboration** with 4 specialized agents
-  - Automatic task classification and routing
-  - Intelligent agent delegation
-  - Collaborative task breakdown
-- **Conversation Memory** with SQLite persistence
-  - Full conversation history tracking
-  - Context window management (up to 8192 tokens)
-  - Tool usage analytics
-- **Smart Model Selection** integrated with existing model manager
-  - Dynamic model switching based on task type
-  - Performance tracking per model
-- **TUI Integration** with interactive agent panel
-  - Real-time agent status display
-  - Tool usage logging
-  - Interactive task submission
+### Creating Plugins
+1. Follow the plugin architecture in `xencode/plugins/`
+2. Implement required interfaces
+3. Register the plugin in the system
 
-### Intelligent Model Selection
-- Hardware profiling (CPU, RAM, GPU detection)
-- Model recommendation based on system capabilities
-- Performance benchmarking and scoring
-- Interactive deployment wizard
+## Best Practices
 
-### Advanced Caching
-- Multi-tier caching (memory + SQLite)
-- LZMA compression for storage efficiency
-- LRU eviction policies
-- Cache analytics and optimization
-
-### Error Management
-- Comprehensive error classification
-- Automated recovery with exponential backoff
-- Context-aware diagnostic messages
-- Fallback strategies for model failures
-
-### Configuration Management
-- Multi-format support (YAML, TOML, JSON, INI)
-- Environment variable overrides
-- Schema validation with Pydantic
-- Hot-reload without service restart
-
-### Security Analysis
-- Bandit integration for Python security scanning
-- CVE database matching
-- OWASP Top 10 vulnerability detection
-- Multi-language support
-
-### Document Processing
-- PDF text extraction
-- DOCX document parsing
-- Web content extraction
-- Text processing and analysis
-
-### Workspace Collaboration
-- Real-time synchronization with CRDTs
-- Multi-user workspace support
-- Permission management
-- Audit logging
-
-## Testing
-
-```bash
-# Run all tests
-python -m pytest -v
-
-# Run specific test suite
-python -m pytest test_phase2_comprehensive.py -v
-
-# Run with coverage
-python -m pytest --cov=xencode --cov-report=html
-
-# Performance benchmarks
-python -m xencode.intelligent_model_selector --benchmark
-```
-
-## Development Roadmap
-
-### Phase 3: Advanced Features (In Progress)
-- Enhanced plugin architecture with marketplace
-- Advanced analytics dashboard
-- Multi-modal support (vision, voice)
-- Extended collaboration features
-
-### Phase 4: Multi-Agent Enhancement
-- Inter-Agent Communication Protocol
-- Dynamic Agent Team Formation
-- Advanced Coordination Strategies (hierarchical, market-based, swarm intelligence)
-- Agent Memory & Learning system with shared knowledge bases
-- Monitoring & Analytics for collaboration metrics
-- Workflow Management for complex task decomposition
-- Human-in-the-Loop supervision capabilities
-- Cross-Domain Expertise Combination
-- Resource Management and cost optimization
-- Security & Governance measures
-
-### Phase 5: Distribution & Deployment
-- Docker containerization
-- Kubernetes deployment configs
-- Package distribution (PyPI, Homebrew)
-- CI/CD pipeline improvements
-
-### Phase 6: Multi-Modal Integration
-- Image analysis and OCR
-- Voice integration
-- Video processing capabilities
-
-### Phase 6: Intelligence & Automation
-- Advanced code refactoring
-- Automated testing generation
-- Intelligent code completion
+1. **Security**: Always validate and sanitize user inputs
+2. **Performance**: Use caching appropriately for expensive operations
+3. **Testing**: Write unit tests for new functionality
+4. **Documentation**: Add docstrings to all public APIs
+5. **Error Handling**: Implement graceful degradation for failures
 
 ## Contributing
 
-Contributions are welcome! Please follow these guidelines:
-
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Commit your changes (`git commit -am 'Add new feature'`)
-4. Push to the branch (`git push origin feature/your-feature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow PEP 8 style guidelines
-- Add type hints to all functions
-- Write tests for new features
-- Update documentation as needed
-- Run linters before committing:
-  ```bash
-  python -m ruff check . --fix
-  python -m mypy xencode/
-  ```
+2. Create a feature branch
+3. Write tests for your changes
+4. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
-Built with these excellent open-source projects:
-
-- [Ollama](https://ollama.ai/) - Local LLM runtime
-- [Rich](https://github.com/Textualize/rich) - Terminal UI framework
-- [Pydantic](https://pydantic-docs.helpmanual.io/) - Data validation
-- [pytest](https://pytest.org/) - Testing framework
-- [Bandit](https://bandit.readthedocs.io/) - Security analysis
-
-## Support
-
-- Documentation: [docs/](docs/)
-- Issues: [GitHub Issues](https://github.com/sreevarshan-xenoz/xencode/issues)
-- Discussions: [GitHub Discussions](https://github.com/sreevarshan-xenoz/xencode/discussions)
-
----
-
-<div align="center">
-
-**Built with ❤️ for developers who value privacy and performance**
-
-</div>
+- Built with ❤️ for the open-source community
+- Inspired by the need for secure, efficient AI-powered development tools
+- Thanks to all contributors who help make Xencode better
