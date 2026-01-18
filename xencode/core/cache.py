@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Union
 
 # Performance and caching configuration
-CACHE_ENABLED = True
-CACHE_DIR = Path.home() / ".xencode" / "cache"
-MAX_CACHE_SIZE = 100  # Maximum cached responses
-CACHE_TTL_SECONDS = 86400  # 24 hours TTL
-COMPRESSION_ENABLED = True
+CACHE_ENABLED: bool = True
+CACHE_DIR: Path = Path.home() / ".xencode" / "cache"
+MAX_CACHE_SIZE: int = 100  # Maximum cached responses
+CACHE_TTL_SECONDS: int = 86400  # 24 hours TTL
+COMPRESSION_ENABLED: bool = True
 
 
 class CacheStats(NamedTuple):
@@ -27,9 +27,9 @@ class CacheStats(NamedTuple):
 
 
 class CacheLevel(Enum):
-    MEMORY = "memory"
-    DISK = "disk"
-    DISTRIBUTED = "distributed"  # Future extension
+    MEMORY: str = "memory"
+    DISK: str = "disk"
+    DISTRIBUTED: str = "distributed"  # Future extension
 
 
 class LRUCacheItem:
@@ -46,13 +46,25 @@ class LRUCacheItem:
 class InMemoryCache:
     """Simple in-memory LRU cache for frequently accessed items"""
     def __init__(self, capacity: int = 50):
+        """Initialize the in-memory cache.
+
+        Args:
+            capacity: Maximum number of items to store in the cache
+        """
         self.capacity = capacity
         self.cache: Dict[str, LRUCacheItem] = {}
         self.access_order: List[str] = []  # Keys ordered by access time
         self.stats = CacheStats(hits=0, misses=0, evictions=0, size=0)
 
     def get(self, key: str) -> Optional[LRUCacheItem]:
-        """Get an item from the cache and update access order"""
+        """Get an item from the cache and update access order
+
+        Args:
+            key: Key to look up in the cache
+
+        Returns:
+            The cache item if found, None otherwise
+        """
         if key in self.cache:
             item = self.cache[key]
             # Update access count and time
@@ -71,7 +83,13 @@ class InMemoryCache:
         return None
 
     def put(self, key: str, value: str, model: str) -> None:
-        """Put an item in the cache, evicting if necessary"""
+        """Put an item in the cache, evicting if necessary
+
+        Args:
+            key: Key to store the item under
+            value: Value to store in the cache
+            model: Model associated with this cached item
+        """
         current_time = time.time()
 
         if key in self.cache:
@@ -99,7 +117,11 @@ class InMemoryCache:
         self.stats = self.stats._replace(size=len(self.cache))
 
     def get_stats(self) -> CacheStats:
-        """Get current cache statistics"""
+        """Get current cache statistics
+
+        Returns:
+            Current cache statistics
+        """
         return self.stats
 
     def clear(self) -> None:
@@ -119,6 +141,14 @@ class ResponseCache:
         ttl_seconds: int = CACHE_TTL_SECONDS,
         compression_enabled: bool = COMPRESSION_ENABLED
     ) -> None:
+        """Initialize the response cache.
+
+        Args:
+            cache_dir: Directory to store cache files
+            max_size: Maximum number of items in the cache
+            ttl_seconds: Time-to-live for cache entries in seconds
+            compression_enabled: Whether to compress cache entries
+        """
         self.cache_dir: Path = Path(cache_dir)
         self.max_size: int = max_size
         self.ttl_seconds: int = ttl_seconds
@@ -136,24 +166,54 @@ class ResponseCache:
         self.eviction_count = 0
 
     def _get_cache_key(self, prompt: str, model: str) -> str:
-        """Generate cache key from prompt and model"""
+        """Generate cache key from prompt and model
+
+        Args:
+            prompt: The prompt to generate a key for
+            model: The model to generate a key for
+
+        Returns:
+            MD5 hash of the prompt:model combination
+        """
         content = f"{prompt}:{model}".encode('utf-8')
         return hashlib.md5(content).hexdigest()
 
     def _compress_data(self, data: str) -> bytes:
-        """Compress data using LZMA if enabled"""
+        """Compress data using LZMA if enabled
+
+        Args:
+            data: String data to compress
+
+        Returns:
+            Compressed byte data
+        """
         if self.compression_enabled:
             return lzma.compress(data.encode('utf-8'))
         return data.encode('utf-8')
 
     def _decompress_data(self, compressed_data: bytes) -> str:
-        """Decompress data using LZMA if enabled"""
+        """Decompress data using LZMA if enabled
+
+        Args:
+            compressed_data: Compressed byte data to decompress
+
+        Returns:
+            Decompressed string data
+        """
         if self.compression_enabled:
             return lzma.decompress(compressed_data).decode('utf-8')
         return compressed_data.decode('utf-8')
 
     def get(self, prompt: str, model: str) -> Optional[str]:
-        """Get cached response if available, checking memory first then disk"""
+        """Get cached response if available, checking memory first then disk
+
+        Args:
+            prompt: The prompt to look up
+            model: The model associated with the prompt
+
+        Returns:
+            Cached response if found and not expired, None otherwise
+        """
         if not CACHE_ENABLED:
             return None
 
@@ -204,7 +264,13 @@ class ResponseCache:
         return None
 
     def set(self, prompt: str, model: str, response: str) -> None:
-        """Cache a response in both memory and disk"""
+        """Cache a response in both memory and disk
+
+        Args:
+            prompt: The prompt that generated the response
+            model: The model that generated the response
+            response: The response to cache
+        """
         if not CACHE_ENABLED:
             return
 
@@ -250,8 +316,177 @@ class ResponseCache:
         except Exception:
             pass
 
+    def invalidate_by_pattern(self, pattern: str) -> int:
+        """Invalidate cache entries that match a pattern.
+
+        Args:
+            pattern: Pattern to match against cache keys
+
+        Returns:
+            Number of invalidated entries
+        """
+        invalidated_count = 0
+
+        # Invalidate from memory cache
+        keys_to_remove = [key for key in self.memory_cache.cache.keys() if pattern in key]
+        for key in keys_to_remove:
+            if key in self.memory_cache.cache:
+                del self.memory_cache.cache[key]
+            if key in self.memory_cache.access_order:
+                self.memory_cache.access_order.remove(key)
+            invalidated_count += 1
+
+        # Update memory cache stats
+        self.memory_cache.stats = self.memory_cache.stats._replace(
+            size=len(self.memory_cache.cache)
+        )
+
+        # Invalidate from disk cache
+        try:
+            cache_files = list(self.cache_dir.glob(f"*{pattern}*.json.xz"))
+            for cache_file in cache_files:
+                cache_file.unlink()
+                invalidated_count += 1
+        except Exception:
+            pass
+
+        return invalidated_count
+
+    def invalidate_by_model(self, model: str) -> int:
+        """Invalidate all cache entries for a specific model.
+
+        Args:
+            model: Model name to invalidate entries for
+
+        Returns:
+            Number of invalidated entries
+        """
+        # Generate a pattern based on the model name
+        # Since cache keys are MD5 hashes of "prompt:model", we need to find files differently
+        # We'll use a temporary approach by scanning all files and checking their content
+        invalidated_count = 0
+
+        try:
+            cache_files = list(self.cache_dir.glob("*.json.xz"))
+            for cache_file in cache_files:
+                try:
+                    # Read and decompress the file to check the model
+                    with open(cache_file, 'rb') as f:
+                        compressed_data = f.read()
+
+                    data_str = self._decompress_data(compressed_data)
+                    data = json.loads(data_str)
+
+                    if data.get('model') == model:
+                        cache_file.unlink()
+                        invalidated_count += 1
+                except Exception:
+                    # If we can't read the file, skip it
+                    continue
+        except Exception:
+            pass
+
+        # Also invalidate from memory cache
+        keys_to_remove = []
+        for key, item in self.memory_cache.cache.items():
+            if item.model == model:
+                keys_to_remove.append(key)
+
+        for key in keys_to_remove:
+            del self.memory_cache.cache[key]
+            if key in self.memory_cache.access_order:
+                self.memory_cache.access_order.remove(key)
+            invalidated_count += 1
+
+        # Update memory cache stats
+        self.memory_cache.stats = self.memory_cache.stats._replace(
+            size=len(self.memory_cache.cache)
+        )
+
+        return invalidated_count
+
+    def invalidate_expired(self) -> int:
+        """Invalidate all expired cache entries.
+
+        Returns:
+            Number of invalidated entries
+        """
+        invalidated_count = 0
+
+        # Invalidate from memory cache
+        current_time = time.time()
+        expired_keys = [
+            key for key, item in self.memory_cache.cache.items()
+            if current_time - item.timestamp >= self.ttl_seconds
+        ]
+
+        for key in expired_keys:
+            del self.memory_cache.cache[key]
+            if key in self.memory_cache.access_order:
+                self.memory_cache.access_order.remove(key)
+            invalidated_count += 1
+
+        # Update memory cache stats
+        self.memory_cache.stats = self.memory_cache.stats._replace(
+            size=len(self.memory_cache.cache)
+        )
+
+        # Invalidate from disk cache
+        try:
+            cache_files = list(self.cache_dir.glob("*.json.xz"))
+            for cache_file in cache_files:
+                try:
+                    # Read and decompress the file to check timestamp
+                    with open(cache_file, 'rb') as f:
+                        compressed_data = f.read()
+
+                    data_str = self._decompress_data(compressed_data)
+                    data = json.loads(data_str)
+
+                    if current_time - data['timestamp'] >= self.ttl_seconds:
+                        cache_file.unlink()
+                        invalidated_count += 1
+                except Exception:
+                    # If we can't read the file, skip it
+                    continue
+        except Exception:
+            pass
+
+        return invalidated_count
+
+    def get_cache_size(self) -> int:
+        """Get the current number of cache entries.
+
+        Returns:
+            Total number of cache entries (memory + disk)
+        """
+        memory_size = len(self.memory_cache.cache)
+
+        try:
+            disk_files = list(self.cache_dir.glob("*.json.xz"))
+            disk_size = len(disk_files)
+        except Exception:
+            disk_size = 0
+
+        return memory_size + disk_size
+
+    def clear_by_model(self, model: str) -> int:
+        """Clear all cache entries for a specific model.
+
+        Args:
+            model: Model name to clear entries for
+
+        Returns:
+            Number of cleared entries
+        """
+        return self.invalidate_by_model(model)
+
     def get_stats(self) -> Dict[str, Any]:
-        """Get comprehensive cache statistics"""
+        """Get comprehensive cache statistics
+
+        Returns:
+            Dictionary containing cache statistics
+        """
         disk_files = list(self.cache_dir.glob("*.json.xz"))
         disk_usage = sum(f.stat().st_size for f in disk_files)
 
