@@ -640,6 +640,59 @@ def shadow(model, path):
 
 
 @cli.command()
+@click.argument('intent', nargs=-1, required=True)
+@click.option('--mode', '-m', type=click.Choice(['assist', 'execute', 'autonomous']), default='assist',
+              help='Execution mode for ByteBot')
+@click.option('--raw', is_flag=True, help='Print raw JSON result')
+def bytebot(intent, mode, raw):
+    """Run ByteBot terminal cognition for a given intent"""
+    try:
+        from xencode.bytebot import ByteBotEngine
+
+        intent_text = " ".join(intent).strip()
+        if not intent_text:
+            console.print("[red]❌ Intent is required.[/red]")
+            return
+
+        engine = ByteBotEngine()
+        result = engine.process_intent(intent_text, mode=mode)
+
+        if raw:
+            console.print_json(data=result)
+            return
+
+        status = result.get("status", "unknown")
+        summary = result.get("summary") or result.get("message") or ""
+        console.print(Panel(
+            f"[bold]Mode:[/bold] {mode}\n"
+            f"[bold]Status:[/bold] {status}\n"
+            f"[bold]Summary:[/bold] {summary}",
+            title="🧠 ByteBot Result",
+            border_style="blue"
+        ))
+
+        # Show step details if present
+        steps = result.get("suggested_steps") or result.get("execution_results")
+        if steps:
+            table = Table(title="ByteBot Steps")
+            table.add_column("#", style="cyan", width=4)
+            table.add_column("Status", style="green")
+            table.add_column("Command", style="yellow")
+            table.add_column("Risk", style="magenta")
+            for idx, step in enumerate(steps, 1):
+                table.add_row(
+                    str(idx),
+                    str(step.get("status", "")),
+                    str(step.get("command", ""))[:80],
+                    f"{step.get('risk_score', 0):.2f}" if step.get("risk_score") is not None else ""
+                )
+            console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]❌ ByteBot failed: {e}[/red]")
+
+
+@cli.command()
 def version():
     """Show version information"""
     console.print(Panel(
