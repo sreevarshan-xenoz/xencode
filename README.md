@@ -1,205 +1,101 @@
-# Xencode - AI-Powered Command Line Interface
+# Xencode - AI-Powered Development Platform
 
-Xencode is an advanced command-line interface that leverages large language models to assist with coding tasks, file operations, and project management. Built with modularity, security, and performance in mind.
+Xencode is a cutting-edge AI assistant platform that transforms how developers interact with their command-line environment. It combines intelligent model selection, advanced caching, robust error handling, and innovative workflow capabilities to create a superior development experience.
 
-## Features
+## Core Features
 
-- **Modular Architecture**: Clean separation of concerns with dedicated modules for files, models, memory, and caching
-- **Multi-Model Support**: Works with Ollama, OpenAI, Google Gemini, and other model providers
-- **Conversation Memory**: Maintains context across multiple interactions
-- **Smart Caching**: Efficient caching system with disk and memory tiers
-- **Security First**: Built-in input validation, sanitization, and rate limiting
-- **Performance Optimized**: Connection pooling, lazy loading, and resource management
-- **Extensible**: Plugin system and API-ready architecture
+### 1. Intelligent Model Selection
+- Automatically detects system hardware (CPU, GPU, RAM, storage)
+- Recommends optimal AI models based on available resources
+- Interactive setup wizard for first-time users
+- Performance optimization for different system configurations
 
-## Architecture Overview
+### 2. Advanced Caching System
+- Hybrid memory/disk caching with LRU eviction
+- LZMA compression for efficient storage
+- Cache analytics and monitoring
+- Multi-level caching strategy
 
-```
-xencode/
-├── core/                 # Core functionality modules
-│   ├── files.py          # File operations
-│   ├── models.py         # Model management
-│   ├── memory.py         # Conversation memory
-│   ├── cache.py          # Caching system
-│   ├── connection_pool.py # Connection pooling
-│   └── __init__.py
-├── security/             # Security modules
-│   ├── validation.py     # Input validation
-│   ├── authentication.py # Authentication
-│   ├── rate_limiting.py  # Rate limiting
-│   └── data_encryption.py # Data encryption
-├── testing/              # Testing utilities
-│   └── mock_services.py  # Mock services for testing
-└── xencode_core.py       # Main application logic
-```
+### 3. Robust Error Handling
+- Intelligent error classification and recovery
+- Automatic retry mechanisms with exponential backoff
+- Context-aware error messages
+- Comprehensive error monitoring
 
-## Core Modules
+### 4. Smart Configuration Management
+- Multi-format support (YAML, TOML, JSON, INI)
+- Schema validation with Pydantic
+- Interactive configuration wizard
+- Hot-reload configuration changes
 
-### Files Module (`xencode/core/files.py`)
-Handles all file operations with security validation:
-- `create_file(path, content)`
-- `read_file(path)`
-- `write_file(path, content)`
-- `delete_file(path)`
+### 5. Plugin Architecture
+- Dynamic plugin loading and lifecycle management
+- Service registration and discovery
+- Event-driven plugin communication
+- Secure plugin context with permissions
 
-### Models Module (`xencode/core/models.py`)
-Manages AI model interactions:
-- `ModelManager` class for model lifecycle
-- Health checks and performance monitoring
-- Support for local (Ollama) and cloud (OpenAI, Gemini) models
+### 6. Advanced Analytics Dashboard
+- Real-time performance metrics monitoring
+- SQLite-based metrics persistence
+- Usage pattern analysis
+- Cost tracking and optimization recommendations
 
-### Memory Module (`xencode/core/memory.py`)
-Maintains conversation context:
-- Session management
-- Message history with configurable limits
-- Context preservation across interactions
+### 7. Hybrid Model Architecture
+- Dynamic switching between local and cloud models
+- Model chaining for complex workflows
+- Privacy-aware routing based on sensitivity levels
+- Fallback mechanisms for high availability
 
-### Cache Module (`xencode/core/cache.py`)
-Multi-tier caching system:
-- In-memory LRU cache for hot items
-- Disk-based persistence
-- Compression and TTL management
-- Advanced invalidation strategies
+### 8. Advanced Memory Management
+- Tiered storage system (RAM Hot/Warm, SSD Cold, HDD Archive)
+- Predictive caching based on usage patterns
+- Intelligent cache eviction policies
+- Cross-tier balancing algorithms
 
-## Security Features
+### 9. Visual Workflow Builder
+- Drag-and-drop interface for creating AI workflows
+- Multiple node types (input, process, decision, model call)
+- Template library for common workflow patterns
+- Interactive execution and visualization
 
-### Input Validation (`xencode/security/validation.py`)
-- File path validation to prevent directory traversal
-- Model name validation
-- Prompt injection detection
-- API request validation
-
-### Authentication (`xencode/security/authentication.py`)
-- API key management
-- JWT token support
-- HMAC request signing
-- Scope-based permissions
-
-### Rate Limiting (`xencode/security/rate_limiting.py`)
-- Sliding window rate limiting
-- Token bucket algorithm
-- Endpoint-specific limits
-- Middleware integration
-
-### Data Encryption (`xencode/security/data_encryption.py`)
-- Fernet symmetric encryption
-- AES-GCM support
-- Secure configuration storage
-- Sensitive data management
-
-## Performance Optimizations
-
-### Connection Pooling (`xencode/core/connection_pool.py`)
-- Thread-safe HTTP connection pools
-- Async support with aiohttp
-- Retry strategies and backoff
-- Resource cleanup
-
-### Lazy Loading (`xencode/core/lazy_loader.py`)
-- Deferred loading of heavy components
-- Component registry pattern
-- Memory efficiency
-
-### Resource Management (`xencode/core/resource_monitor.py`)
-- Memory usage monitoring
-- CPU and disk usage tracking
-- Automatic cleanup mechanisms
-- Performance benchmarking
-
-## Testing Strategy
-
-### Unit Tests
-Located in `tests/` directory:
-- `test_core_modules.py` - Tests for core functionality
-- `test_cache_performance.py` - Performance benchmarks
-- `test_integration.py` - Integration tests
-- `test_property_based.py` - Property-based tests using Hypothesis
-- `test_performance_regression.py` - Regression tests
-- `test_final_integration.py` - Full system integration tests
-
-### Mock Services (`xencode/testing/mock_services.py`)
-- Mock Ollama service
-- Mock OpenAI service
-- Mock filesystem
-- Mock HTTP client
-- Mock subprocess operations
+### 10. Enhanced Xencode Terminal
+- Structured command blocks with rich output rendering
+- AI-powered command suggestions
+- Session persistence with crash recovery
+- Advanced UI components and command palette
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/xencode.git
-cd xencode
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Ollama (for local models)
-curl https://ollama.ai/install.sh | sh
-
-# Pull a model
-ollama pull qwen2.5:3b
+pip install xencode
 ```
 
 ## Usage
 
 ```bash
-# Interactive chat mode
-./xencode.sh
+# Run the Xencode CLI
+xencode
 
-# Inline query
-./xencode.sh "Explain how to reverse a linked list in Python"
-
-# File operations
-./xencode.sh file create myfile.py "print('Hello World')"
-./xencode.sh file read myfile.py
+# Or use as a module
+python -m xencode
 ```
 
-## Configuration
+## Architecture
 
-Xencode uses a configuration system with secure storage:
+Xencode follows a modular architecture with clear separation of concerns:
 
-```python
-from xencode.security.data_encryption import set_secure_config, get_secure_config_value
-
-# Store sensitive configuration
-set_secure_config("openai_api_key", "your-api-key-here")
-
-# Retrieve configuration
-api_key = get_secure_config_value("openai_api_key")
-```
-
-## Extending Xencode
-
-### Adding New Commands
-1. Add command handler in `xencode_core.py`
-2. Update argument parsing
-3. Write corresponding tests
-
-### Adding New Model Providers
-1. Create provider in `xencode/model_providers/`
-2. Implement the provider interface
-3. Register the provider in the model manager
-
-### Creating Plugins
-1. Follow the plugin architecture in `xencode/plugins/`
-2. Implement required interfaces
-3. Register the plugin in the system
-
-## Best Practices
-
-1. **Security**: Always validate and sanitize user inputs
-2. **Performance**: Use caching appropriately for expensive operations
-3. **Testing**: Write unit tests for new functionality
-4. **Documentation**: Add docstrings to all public APIs
-5. **Error Handling**: Implement graceful degradation for failures
+- **Core**: Fundamental components and utilities
+- **Models**: AI model management and selection
+- **Cache**: Advanced caching mechanisms
+- **Analytics**: Performance monitoring and analytics
+- **Plugins**: Extension system
+- **Security**: Security and validation utilities
+- **TUI**: Terminal user interface components
+- **Workflows**: Workflow management and execution
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Write tests for your changes
-4. Submit a pull request
+We welcome contributions to Xencode! Please see our contributing guidelines for more information.
 
 ## License
 
@@ -207,6 +103,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- Built with ❤️ for the open-source community
-- Inspired by the need for secure, efficient AI-powered development tools
-- Thanks to all contributors who help make Xencode better
+Xencode builds upon the excellent work of the open-source community and integrates with various AI model providers to deliver the best possible experience for developers.
