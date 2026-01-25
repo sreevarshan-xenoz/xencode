@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm
 
 # Import Xencode systems
 from xencode.phase2_coordinator import Phase2Coordinator
