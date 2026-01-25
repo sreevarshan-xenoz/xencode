@@ -23,7 +23,7 @@ try:
     from ...workspace.crdt_engine import CRDTEngine, Change, Conflict
     from ...workspace.sync_coordinator import SyncCoordinator
     from ...models.workspace import (
-        Workspace as WorkspaceModel, 
+        Workspace as WorkspaceModel,
         WorkspaceConfig as WorkspaceConfigModel,
         WorkspaceType,
         WorkspaceStatus,
@@ -31,6 +31,18 @@ try:
     )
     WORKSPACE_COMPONENTS_AVAILABLE = True
 except ImportError:
+    # Define stub types for when workspace components are not available
+    from typing import Any
+    Change = Any
+    Conflict = Any
+    CRDTEngine = Any
+    SyncCoordinator = Any
+    WorkspaceManager = Any
+    WorkspaceModel = Any
+    WorkspaceConfigModel = Any
+    WorkspaceType = Any
+    WorkspaceStatus = Any
+    CollaborationMode = Any
     WORKSPACE_COMPONENTS_AVAILABLE = False
 
 router = APIRouter()
