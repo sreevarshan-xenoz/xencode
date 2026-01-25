@@ -7,6 +7,7 @@ Provides intelligent code analysis, review, and suggestions
 import ast
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
