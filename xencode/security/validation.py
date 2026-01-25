@@ -4,7 +4,7 @@ Provides security validation and sanitization for user inputs
 """
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 from urllib.parse import urlparse
 
 
@@ -270,6 +270,20 @@ def sanitize_prompt(prompt: str) -> str:
     sanitized = re.sub(r'<[^>]+>', '', sanitized)
     
     return sanitized.strip()
+
+
+def sanitize_user_input(input_str: str) -> str:
+    """
+    Sanitize user input to prevent injection attacks.
+    Wrapper around sanitize_prompt for general user input.
+
+    Args:
+        input_str: User input to sanitize
+
+    Returns:
+        Sanitized input
+    """
+    return sanitize_prompt(input_str)
 
 
 def validate_url(url: str) -> bool:

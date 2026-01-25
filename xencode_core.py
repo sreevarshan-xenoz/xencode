@@ -110,7 +110,7 @@ console = Console(
 )
 
 # Smart default model selection - will be updated based on available models
-DEFAULT_MODEL = None  # Will be set dynamically
+DEFAULT_MODEL = get_smart_default_model()  # Will be set dynamically
 
 # Enhanced Claude-style streaming timing configuration
 THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
