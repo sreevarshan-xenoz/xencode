@@ -188,26 +188,34 @@ class TokenVoter:
 
     @staticmethod
     def calculate_consensus(responses: List[str]) -> float:
-        """Calculate consensus score (0-1) across responses"""
+        """Calculate consensus score (0-1) across responses - OPTIMIZED"""
         if len(responses) <= 1:
             return 1.0
 
         # Simple similarity based on common tokens
-        all_tokens = [set(resp.split()) for resp in responses]
+        all_tokens = [set(resp.split()) for resp in responses if resp.strip()]
 
-        if not all_tokens:
+        if not all_tokens or len(all_tokens) <= 1:
             return 0.0
 
-        # Calculate pairwise similarities
-        similarities = []
+        # Calculate pairwise similarities more efficiently
+        total_similarity = 0.0
+        comparison_count = 0
+
+        # Use a more efficient approach to calculate pairwise similarities
         for i in range(len(all_tokens)):
             for j in range(i + 1, len(all_tokens)):
-                intersection = len(all_tokens[i] & all_tokens[j])
-                union = len(all_tokens[i] | all_tokens[j])
-                similarity = intersection / union if union > 0 else 0.0
-                similarities.append(similarity)
+                set_i, set_j = all_tokens[i], all_tokens[j]
 
-        return sum(similarities) / len(similarities) if similarities else 0.0
+                # Calculate intersection and union efficiently
+                intersection = len(set_i & set_j)
+                union = len(set_i | set_j)
+
+                if union > 0:
+                    total_similarity += intersection / union
+                    comparison_count += 1
+
+        return total_similarity / comparison_count if comparison_count > 0 else 0.0
 
     @staticmethod
     def calculate_semantic_consensus(responses: List[str]) -> float:
@@ -410,55 +418,69 @@ class EnsembleReasoner:
         return response
     
     async def _get_available_models(self, requested_models: List[str]) -> List[ModelConfig]:
-        """Get available and enabled models from request"""
+        """Get available and enabled models from request - OPTIMIZED"""
         available = []
-        
-        for model_name in requested_models:
+
+        # First, check requested models in parallel
+        async def check_model_availability(model_name: str) -> Optional[ModelConfig]:
             if model_name in self.model_configs:
                 config = self.model_configs[model_name]
                 if config.enabled:
-                    # Quick availability check
                     try:
                         await asyncio.wait_for(
                             self.client.generate(model=config.ollama_tag, prompt="test", stream=False),
-                            timeout=1.0
+                            timeout=0.8  # Reduced timeout for faster checks
                         )
-                        available.append(config)
+                        return config
                     except (asyncio.TimeoutError, Exception):
                         console.print(f"[yellow]⚠️ Model {model_name} not available, skipping[/yellow]")
-        
-        # Sort by fallback priority if no models available
-        if not available:
-            # Try fallback models
+            return None
+
+        # Run availability checks in parallel for requested models
+        availability_checks = [
+            check_model_availability(model_name) for model_name in requested_models
+        ]
+        results = await asyncio.gather(*availability_checks, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, ModelConfig):
+                available.append(result)
+
+        # If not enough models available, try fallback models in parallel too
+        if len(available) < 2:  # Need at least 2 for meaningful ensemble
             fallback_models = sorted(
-                [c for c in self.model_configs.values() if c.enabled],
+                [c for c in self.model_configs.values() if c.enabled and c.ollama_tag not in [a.ollama_tag for a in available]],
                 key=lambda x: x.fallback_priority
             )
-            for config in fallback_models[:2]:  # Try top 2 fallbacks
-                try:
-                    await asyncio.wait_for(
-                        self.client.generate(model=config.ollama_tag, prompt="test", stream=False),
-                        timeout=1.0
-                    )
-                    available.append(config)
-                    if len(available) >= 2:  # Minimum ensemble size
+
+            fallback_checks = [
+                check_model_availability(config.ollama_tag) for config in fallback_models[:3]  # Try top 3 fallbacks
+            ]
+            fallback_results = await asyncio.gather(*fallback_checks, return_exceptions=True)
+
+            for result in fallback_results:
+                if isinstance(result, ModelConfig):
+                    available.append(result)
+                    if len(available) >= 3:  # Maximum ensemble size for fallback
                         break
-                except:
-                    continue
-        
+
         return available
     
-    async def _parallel_inference(self, query: QueryRequest, 
+    async def _parallel_inference(self, query: QueryRequest,
                                 models: List[ModelConfig]) -> List[ModelResponse]:
-        """Run parallel inference across models"""
-        tasks = []
-        
-        for model_config in models:
-            task = asyncio.create_task(
-                self._single_model_inference(query, model_config)
+        """Run parallel inference across models - OPTIMIZED"""
+        if not models:
+            return []
+
+        # Create tasks for all models
+        tasks = [
+            asyncio.create_task(
+                self._single_model_inference(query, model_config),
+                name=f"inference_{model_config.ollama_tag}"
             )
-            tasks.append(task)
-        
+            for model_config in models
+        ]
+
         # Wait for all with timeout
         try:
             responses = await asyncio.wait_for(
@@ -481,18 +503,21 @@ class EnsembleReasoner:
                     responses.append(ModelResponse(
                         model="unknown", response="", success=False, error="Timeout"
                     ))
-        
-        # Filter out exceptions
+
+        # Process responses efficiently in a single pass
         valid_responses = []
         for i, response in enumerate(responses):
             if isinstance(response, Exception):
+                model_tag = models[i].ollama_tag if i < len(models) else "unknown"
                 valid_responses.append(ModelResponse(
-                    model=models[i].ollama_tag if i < len(models) else "unknown",
-                    response="", success=False, error=str(response)
+                    model=model_tag,
+                    response="",
+                    success=False,
+                    error=str(response)
                 ))
             else:
                 valid_responses.append(response)
-        
+
         return valid_responses
     
     async def _single_model_inference(self, query: QueryRequest, 
@@ -541,27 +566,28 @@ class EnsembleReasoner:
     async def _fuse_responses(self, responses: List[ModelResponse],
                             method: EnsembleMethod,
                             model_configs: List[ModelConfig]) -> str:
-        """Fuse multiple model responses using specified method"""
+        """Fuse multiple model responses using specified method - OPTIMIZED"""
         if not responses:
             return ""
 
         if len(responses) == 1:
             return responses[0].response
 
+        # Pre-calculate response texts once
         response_texts = [r.response for r in responses]
 
         if method == EnsembleMethod.VOTE:
             return self.voter.vote_tokens(response_texts)
 
         elif method == EnsembleMethod.WEIGHTED:
-            # Weight by model configuration and confidence
+            # Create a lookup dictionary for model configs to avoid nested loops
+            model_config_map = {config.ollama_tag: config for config in model_configs}
+
+            # Calculate weights more efficiently
             weights = []
             for response in responses:
-                model_weight = 1.0
-                for config in model_configs:
-                    if config.ollama_tag == response.model:
-                        model_weight = config.weight
-                        break
+                config = model_config_map.get(response.model)
+                model_weight = config.weight if config else 1.0
 
                 # Combine model weight with response confidence
                 combined_weight = model_weight * (response.confidence + 0.1)  # Avoid zero weights
@@ -599,21 +625,27 @@ class EnsembleReasoner:
         # Default fallback
         return response_texts[0]
     
-    def _calculate_confidence(self, responses: List[ModelResponse], 
+    def _calculate_confidence(self, responses: List[ModelResponse],
                             consensus_score: float) -> float:
-        """Calculate overall confidence score"""
+        """Calculate overall confidence score - OPTIMIZED"""
         if not responses:
             return 0.0
-        
-        # Average individual confidences
-        avg_confidence = sum(r.confidence for r in responses) / len(responses)
-        
+
+        # Calculate all metrics in a single pass for efficiency
+        total_confidence = 0.0
+        success_count = 0
+
+        for response in responses:
+            total_confidence += response.confidence
+            if response.success:
+                success_count += 1
+
+        avg_confidence = total_confidence / len(responses)
+        success_rate = success_count / len(responses)
+
         # Boost confidence with consensus
         consensus_boost = consensus_score * 0.3
-        
-        # Penalize if some models failed
-        success_rate = sum(1 for r in responses if r.success) / len(responses)
-        
+
         final_confidence = (avg_confidence + consensus_boost) * success_rate
         return min(1.0, final_confidence)
     
