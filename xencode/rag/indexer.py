@@ -1,15 +1,17 @@
 import os
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .vector_store import VectorStore
+from .graph_store import GraphStore
+from .graph_extractor import CodeGraphExtractor
 
 class Indexer:
     """
-    Handles indexing of a codebase into the VectorStore.
+    Handles indexing of a codebase into the VectorStore and GraphStore.
     """
     
     DEFAULT_EXCLUDES = {
@@ -22,8 +24,10 @@ class Indexer:
         '.md', '.txt', '.json', '.yaml', '.yml', '.sql', '.sh'
     }
     
-    def __init__(self, vector_store: VectorStore):
+    def __init__(self, vector_store: VectorStore, graph_store: Optional[GraphStore] = None):
         self.vector_store = vector_store
+        self.graph_store = graph_store or GraphStore()
+        self.graph_extractor = CodeGraphExtractor()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
@@ -65,6 +69,9 @@ class Indexer:
                 
                 for file_path in files_to_index:
                     try:
+                        # Extract graph relationships
+                        self.graph_extractor.extract_from_file(str(file_path))
+                        
                         docs = self._process_file(file_path)
                         documents.extend(docs)
                         progress.advance(task)
@@ -74,16 +81,32 @@ class Indexer:
         else:
              for file_path in files_to_index:
                 try:
+                    # Extract graph relationships
+                    self.graph_extractor.extract_from_file(str(file_path))
+                    
                     docs = self._process_file(file_path)
                     documents.extend(docs)
                 except Exception:
                     pass
 
-        # Batch add to vector store
+        # Batch add to stores
         if documents:
             if verbose:
                 print(f"Storing {len(documents)} chunks to vector store...")
             self.vector_store.add_documents(documents)
+            
+            # Store graph data
+            nodes, rels = self.graph_extractor.get_data()
+            if verbose:
+                print(f"Storing {len(nodes)} nodes and {len(rels)} relationships to graph store...")
+            
+            for node_id, node_type, metadata in nodes:
+                self.graph_store.add_node(node_id, node_type, metadata)
+            for src, target, rel_type, metadata in rels:
+                self.graph_store.add_relationship(src, target, rel_type, metadata)
+                
+            self.graph_store.persist()
+            
             if verbose:
                 print("Indexing complete.")
         else:

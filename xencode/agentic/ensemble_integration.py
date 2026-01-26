@@ -6,8 +6,8 @@ Provides semantic voting, council pattern, and enhanced orchestration.
 """
 
 from typing import Dict, List, Optional, Any
-from langchain.chains.base import Chain
-from langchain.callbacks.manager import CallbackManagerForChainRun
+from langchain_core.runnables import Runnable
+from langchain_core.callbacks import CallbackManagerForChainRun
 from langchain_core.language_models import BaseLLM
 from pydantic import Field
 import asyncio
@@ -15,27 +15,32 @@ import asyncio
 from ..ai_ensembles import EnsembleReasoner, QueryRequest, EnsembleMethod, QueryResponse
 
 
-class EnsembleChain(Chain):
+class EnsembleChain(Runnable):
     """LangChain wrapper for EnsembleReasoner"""
-    
+
     ensemble_reasoner: EnsembleReasoner = Field(default_factory=EnsembleReasoner)
     models: List[str] = Field(default=["llama3.1:8b", "mistral:7b"])
     method: EnsembleMethod = Field(default=EnsembleMethod.VOTE)
     max_tokens: int = Field(default=512)
     temperature: float = Field(default=0.7)
     timeout_ms: int = Field(default=2000)
-    
-    @property
-    def input_keys(self) -> List[str]:
-        return ["prompt"]
-    
-    @property
-    def output_keys(self) -> List[str]:
-        return ["response", "consensus_score", "confidence", "model_responses"]
-    
-    def _call(
+
+    def input_schema(self):
+        return {"prompt": str}
+
+    def output_schema(self):
+        return {
+            "response": str,
+            "consensus_score": float,
+            "confidence": float,
+            "model_responses": List[Dict[str, Any]]
+        }
+
+    def invoke(
         self,
         inputs: Dict[str, Any],
+        config=None,
+        *,
         run_manager: Optional[CallbackManagerForChainRun] = None,
     ) -> Dict[str, Any]:
         """Execute ensemble reasoning"""
@@ -113,8 +118,12 @@ class EnsembleChain(Chain):
         }
     
     @property
-    def _chain_type(self) -> str:
-        return "ensemble"
+    def lc_serializable(self) -> bool:
+        return True
+
+    @property
+    def lc_namespace(self) -> List[str]:
+        return ["xencode", "ensemble"]
 
 
 class ModelCouncil:

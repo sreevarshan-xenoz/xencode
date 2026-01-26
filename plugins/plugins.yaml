@@ -1,0 +1,5 @@
+global:
+  auto_reload: false
+  max_errors: 5
+  plugin_timeout: 30
+plugins: {}

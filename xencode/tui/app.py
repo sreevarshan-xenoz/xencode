@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
 from xencode.tui.widgets.collaboration import CollaborationPanel
 from xencode.tui.widgets.commit_dialog import CommitDialog
 from xencode.tui.widgets.terminal import TerminalPanel
+from xencode.tui.widgets.agent_panel import AgentTaskSubmitted
+from xencode.tui.widgets.bytebot_panel import ByteBotPanel, ByteBotTaskSubmitted
 
 from xencode.tui.utils.model_checker import ModelChecker
 
@@ -73,6 +76,14 @@ class XencodeApp(App):
     #collab-panel-container.hidden {
         display: none;
     }
+
+    #bytebot-panel-container {
+        height: 50%;
+    }
+
+    #bytebot-panel-container.hidden {
+        display: none;
+    }
     
     #chat-panel-container {
         height: 1fr;
@@ -96,6 +107,7 @@ class XencodeApp(App):
         Binding("ctrl+e", "toggle_explorer", "Toggle Explorer"),
         Binding("ctrl+m", "toggle_models", "Models"),
         Binding("ctrl+k", "toggle_collab", "Collab"),
+        Binding("ctrl+b", "toggle_bytebot", "ByteBot"),
         Binding("ctrl+g", "refresh_git", "Git Refresh"),
         Binding("ctrl+shift+c", "commit_dialog", "Commit"),
         Binding("ctrl+t", "toggle_terminal", "Terminal"),
@@ -138,6 +150,7 @@ class XencodeApp(App):
         self.chat_panel: Optional[ChatPanel] = None
         self.model_selector: Optional[ModelSelector] = None
         self.collab_panel: Optional[CollaborationPanel] = None
+        self.bytebot_panel: Optional[ByteBotPanel] = None
         
         # Collaboration state
         self.server_process: Optional[subprocess.Popen] = None
@@ -180,6 +193,11 @@ class XencodeApp(App):
                         self.collab_panel = CollaborationPanel()
                         yield self.collab_panel
 
+                    # ByteBot panel (initially hidden)
+                    with Vertical(id="bytebot-panel-container", classes="hidden"):
+                        self.bytebot_panel = ByteBotPanel()
+                        yield self.bytebot_panel
+
                     # Chat panel
                     with Vertical(id="chat-panel-container"):
                         self.chat_panel = ChatPanel()
@@ -196,6 +214,7 @@ class XencodeApp(App):
                 f"Working directory: {self.root_path}\n"
                 f"Mode: Single Model ({self.current_model})\n\n"
                 f"💡 Press Ctrl+M to configure models/ensemble\n"
+                f"🧠 ByteBot: Press Ctrl+B to open widget\n"
                 f"Select a file from the explorer or start chatting!"
             )
     
@@ -368,6 +387,26 @@ class XencodeApp(App):
         
         if not self.chat_panel:
             return
+
+        # ByteBot slash command handling (do not broadcast)
+        bytebot_payload = self._parse_bytebot_command(user_query)
+        if bytebot_payload:
+            intent_text = bytebot_payload["intent"]
+            mode = bytebot_payload["mode"]
+
+            if not intent_text:
+                self.chat_panel.add_system_message(
+                    "ByteBot usage: /bytebot --mode assist|execute|autonomous <intent>"
+                )
+                return
+
+            thinking_msg = self.chat_panel.add_assistant_message("ByteBot is working...")
+            try:
+                result_text = await self._run_bytebot_intent(intent_text, mode)
+                self.chat_panel.update_streaming_message(result_text)
+            except Exception as e:
+                self.chat_panel.update_streaming_message(f"ByteBot error: {e}")
+            return
             
         # Broadcast if connected
         if self.ws_connection and self.session_id:
@@ -445,13 +484,210 @@ class XencodeApp(App):
             self.chat_panel.update_streaming_message(
                 f"Error: {str(e)}"
             )
+
+    async def on_bytebot_task_submitted(self, event: ByteBotTaskSubmitted) -> None:
+        """Handle ByteBot task submission from widget"""
+        if not self.bytebot_panel:
+            return
+
+        try:
+            result_text = await self._run_bytebot_intent(event.intent, event.mode)
+            self.bytebot_panel.log_result(result_text)
+        except Exception as e:
+            self.bytebot_panel.log_result(f"ByteBot error: {e}")
+        finally:
+            self.bytebot_panel.set_idle()
+
+    def _parse_bytebot_command(self, user_query: str) -> Optional[dict]:
+        """Parse /bytebot or /bb command from chat input"""
+        try:
+            tokens = shlex.split(user_query)
+        except ValueError:
+            return None
+
+        if not tokens:
+            return None
+
+        command = tokens[0].lower()
+        if command not in ("/bytebot", "/bb"):
+            return None
+
+        mode = "assist"
+        intent_parts = []
+        i = 1
+        while i < len(tokens):
+            token = tokens[i]
+            if token in ("--mode", "-m") and i + 1 < len(tokens):
+                mode = tokens[i + 1].lower()
+                i += 2
+                continue
+            if token.startswith("mode="):
+                mode = token.split("=", 1)[1].lower()
+                i += 1
+                continue
+            intent_parts.append(token)
+            i += 1
+
+        return {
+            "mode": mode if mode in ("assist", "execute", "autonomous") else "assist",
+            "intent": " ".join(intent_parts).strip()
+        }
+
+    async def _run_bytebot_intent(self, intent: str, mode: str) -> str:
+        """Run ByteBot in a worker thread and format the result"""
+        from xencode.bytebot import ByteBotEngine
+
+        engine = ByteBotEngine()
+        result = await asyncio.to_thread(engine.process_intent, intent, mode)
+
+        status = result.get("status", "unknown")
+        summary = result.get("summary") or result.get("message") or ""
+        output_lines = [
+            f"**ByteBot**",
+            f"- Mode: {mode}",
+            f"- Status: {status}",
+        ]
+        if summary:
+            output_lines.append(f"- Summary: {summary}")
+
+        steps = result.get("suggested_steps") or result.get("execution_results") or []
+        if steps:
+            output_lines.append("\n**Steps**")
+            for idx, step in enumerate(steps, 1):
+                command = step.get("command", "")
+                step_status = step.get("status", "")
+                risk = step.get("risk_score")
+                risk_text = f"{risk:.2f}" if isinstance(risk, (int, float)) else ""
+                output_lines.append(
+                    f"{idx}. [{step_status}] {command} (risk: {risk_text})"
+                )
+
+        return "\n".join(output_lines)
     
+    async def on_agent_task_submitted(self, event: "AgentTaskSubmitted") -> None:
+        """Handle agent task submission
+
+        Args:
+            event: Agent task submission event
+        """
+        user_query = event.task
+
+        if not self.chat_panel:
+            return
+
+        # Add thinking indicator
+        thinking_msg = self.chat_panel.add_assistant_message("Processing with agents...")
+
+        try:
+            # Build context from current file if open
+            context_parts = []
+
+            if self.code_editor and self.code_editor.current_file:
+                file_path = self.code_editor.current_file
+                try:
+                    file_content = file_path.read_text(encoding="utf-8")
+                    context_parts.append(
+                        f"Current file: {file_path.name}\n"
+                        f"```{self._get_language(file_path.suffix)}\n"
+                        f"{file_content[:2000]}...\n"  # Limit context
+                        f"```"
+                    )
+                except:
+                    pass
+
+            # Build enhanced prompt
+            if context_parts:
+                enhanced_prompt = (
+                    f"Context:\n{''.join(context_parts)}\n\n"
+                    f"User question: {user_query}"
+                )
+            else:
+                enhanced_prompt = user_query
+
+            # Handle different collaboration types
+            if event.collaboration_type == "sequential" and event.agent_sequence:
+                # Sequential collaboration
+                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+
+                coordinator = AgentCoordinator()
+                result = coordinator.sequential_collaboration(enhanced_prompt, event.agent_sequence)
+
+                # Format the result
+                response_parts = [
+                    f"SEQUENTIAL COLLABORATION RESULT:",
+                    f"Original Task: {result['original_task']}",
+                    f"Agent Sequence: {' -> '.join(result['agent_sequence'])}",
+                    f"Total Steps: {result['total_steps']}",
+                    "",
+                    "INTERMEDIATE RESULTS:",
+                ]
+
+                for step_result in result['intermediate_results']:
+                    response_parts.append(
+                        f"Step {step_result['step']} ({step_result['agent']}): "
+                        f"{step_result['output']}"
+                    )
+
+                response_parts.append("")
+                response_parts.append(f"FINAL RESULT: {result['final_result']}")
+
+                full_response = "\n".join(response_parts)
+                self.chat_panel.update_streaming_message(full_response)
+
+            elif event.collaboration_type == "adaptive":
+                # Adaptive collaboration
+                from xencode.agentic.coordinator import AgentCoordinator
+
+                coordinator = AgentCoordinator()
+                result = coordinator.adaptive_collaboration(enhanced_prompt)
+
+                # Format the result based on the approach taken
+                if result.get('approach') == 'standard_delegation':
+                    full_response = f"Standard delegation result: {result['result']}"
+                else:
+                    # For sequential or parallel results
+                    full_response = f"Adaptive collaboration result: {result.get('final_result', result.get('synthesized_result', 'No result'))}"
+
+                self.chat_panel.update_streaming_message(full_response)
+
+            elif event.use_multi_agent:
+                # Multi-agent collaboration
+                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+
+                coordinator = AgentCoordinator()
+                result = coordinator.multi_agent_task([{
+                    "task": enhanced_prompt,
+                    "agent_type": None  # Will be classified automatically
+                }])
+
+                # Format multi-agent results
+                response_parts = ["MULTI-AGENT RESULTS:"]
+                for res in result:
+                    response_parts.append(
+                        f"Agent: {res['selected_agent']}, "
+                        f"Result: {res['result'][:200]}..."
+                    )
+
+                full_response = "\n".join(response_parts)
+                self.chat_panel.update_streaming_message(full_response)
+
+            else:
+                # Single agent (default behavior)
+                async for chunk in self._stream_ai_response(enhanced_prompt):
+                    full_response += chunk
+                    self.chat_panel.update_streaming_message(full_response)
+
+        except Exception as e:
+            self.chat_panel.update_streaming_message(
+                f"Error in agent collaboration: {str(e)}"
+            )
+
     async def _stream_ai_response(self, prompt: str):
         """Stream AI response chunks
-        
+
         Args:
             prompt: The prompt to send
-            
+
         Yields:
             Response chunks
         """
@@ -537,16 +773,39 @@ class XencodeApp(App):
         collab_panel = self.query_one("#collab-panel-container")
         chat_container = self.query_one("#chat-panel-container")
         model_panel = self.query_one("#model-selector-panel")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
         
         # Hide models if open
         if not model_panel.has_class("hidden"):
             model_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
             
         if collab_panel.has_class("hidden"):
             collab_panel.remove_class("hidden")
             chat_container.add_class("shrink")
         else:
             collab_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_bytebot(self) -> None:
+        """Toggle ByteBot panel visibility"""
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+
+        # Hide other panels if open
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+
+        if bytebot_panel.has_class("hidden"):
+            bytebot_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            bytebot_panel.add_class("hidden")
             chat_container.remove_class("shrink")
     
     def action_clear_chat(self) -> None:
@@ -563,6 +822,7 @@ class XencodeApp(App):
             
             - **Ctrl+E**: Toggle file explorer
             - **Ctrl+M**: Toggle model selector
+            - **Ctrl+B**: Toggle ByteBot panel
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
             - **Ctrl+C**: Quit application
@@ -577,6 +837,9 @@ class XencodeApp(App):
             ## Git Integration
             - **Ctrl+G**: Refresh Git status
             - Status indicators: M (Modified), A (Added), D (Deleted), ? (Untracked)
+
+            ## ByteBot
+            - **Ctrl+B**: Open ByteBot panel and run intents
             """
             self.chat_panel.add_system_message(help_text)
 

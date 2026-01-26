@@ -85,8 +85,17 @@ class CollaborationPanel(Container):
             if code and username:
                 self.post_message(self.JoinSession(code, username))
         elif event.button.id == "btn-disconnect":
-            # TODO: Implement disconnect logic
-            pass
+            # Implement disconnect logic
+            self.is_connected = False
+            self.current_role = None
+            self.invite_code = None
+            self.status_label.update("Status: Disconnected")
+            self.status_label.classes = "status-offline"
+            self.query_one("#controls").display = True
+            self.query_one("#btn-start").disabled = False
+            self.query_one("#btn-join").disabled = False
+            self.input_username.disabled = False
+            self.input_code.disabled = False
             
     def set_connected(self, role: str, code: str):
         """Update UI for connected state"""
