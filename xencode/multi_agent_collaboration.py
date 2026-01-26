@@ -393,6 +393,307 @@ class Agent:
         }
 
 
+class MarketBasedAllocation:
+    """Market-based resource allocation system for agents"""
+
+    def __init__(self, orchestrator):
+        self.orchestrator = orchestrator
+        self.resource_market: Dict[str, Dict] = {}  # Resource pools
+        self.agent_bids: Dict[str, Dict] = {}  # Bids for resources
+        self.auction_history: List[Dict] = []
+
+    async def auction_resource(self, resource_type: str, required_by: str, priority: int = 5) -> str:
+        """Auction a resource to agents based on bids"""
+        eligible_agents = []
+
+        for agent_id, agent in self.orchestrator.agents.items():
+            if agent_id != required_by and self._can_provide_resource(agent, resource_type):
+                bid_value = self._calculate_bid_value(agent, resource_type, priority)
+                eligible_agents.append((agent_id, bid_value))
+
+        if not eligible_agents:
+            return required_by  # Original agent keeps resource if no bidders
+
+        # Sort by bid value (highest first)
+        eligible_agents.sort(key=lambda x: x[1], reverse=True)
+        winner = eligible_agents[0][0]
+
+        # Record auction
+        self.auction_history.append({
+            "resource_type": resource_type,
+            "requested_by": required_by,
+            "winner": winner,
+            "winning_bid": eligible_agents[0][1],
+            "timestamp": time.time()
+        })
+
+        return winner
+
+    def _can_provide_resource(self, agent: Agent, resource_type: str) -> bool:
+        """Check if agent can provide the requested resource"""
+        return resource_type in agent.capabilities.available_resources
+
+    def _calculate_bid_value(self, agent: Agent, resource_type: str, priority: int) -> float:
+        """Calculate bid value based on agent capabilities and current load"""
+        base_value = agent.capabilities.processing_power
+
+        # Factor in current workload
+        active_tasks = len([t for t in agent.assigned_tasks
+                           if t.status in [TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]])
+        workload_factor = max(0.1, 1.0 - (active_tasks / agent.capabilities.max_concurrent_tasks))
+
+        # Factor in priority
+        priority_factor = priority / 10.0
+
+        return base_value * workload_factor * priority_factor
+
+
+class NegotiationProtocol:
+    """Negotiation protocols between agents"""
+
+    def __init__(self):
+        self.negotiation_sessions: Dict[str, Dict] = {}
+        self.proposals_history: List[Dict] = []
+
+    async def initiate_negotiation(self, initiator: str, responder: str,
+                                 proposal: Dict[str, Any]) -> str:
+        """Initiate a negotiation session between agents"""
+        session_id = f"nego_{uuid.uuid4()}"
+
+        session = {
+            "id": session_id,
+            "initiator": initiator,
+            "responder": responder,
+            "proposal": proposal,
+            "counter_proposals": [],
+            "status": "active",
+            "created_at": time.time()
+        }
+
+        self.negotiation_sessions[session_id] = session
+        return session_id
+
+    async def submit_counter_proposal(self, session_id: str, proposer: str,
+                                    counter_proposal: Dict[str, Any]) -> bool:
+        """Submit a counter proposal in a negotiation"""
+        if session_id not in self.negotiation_sessions:
+            return False
+
+        session = self.negotiation_sessions[session_id]
+        if proposer not in [session["initiator"], session["responder"]]:
+            return False
+
+        session["counter_proposals"].append({
+            "proposer": proposer,
+            "proposal": counter_proposal,
+            "timestamp": time.time()
+        })
+
+        return True
+
+    async def reach_agreement(self, session_id: str, agreed_terms: Dict[str, Any]) -> bool:
+        """Mark a negotiation as concluded with agreed terms"""
+        if session_id not in self.negotiation_sessions:
+            return False
+
+        session = self.negotiation_sessions[session_id]
+        session["status"] = "agreed"
+        session["agreed_terms"] = agreed_terms
+        session["concluded_at"] = time.time()
+
+        # Add to history
+        self.proposals_history.append(session.copy())
+
+        return True
+
+    async def reject_proposal(self, session_id: str, reason: str = "") -> bool:
+        """Reject a proposal and conclude negotiation"""
+        if session_id not in self.negotiation_sessions:
+            return False
+
+        session = self.negotiation_sessions[session_id]
+        session["status"] = "rejected"
+        session["rejection_reason"] = reason
+        session["concluded_at"] = time.time()
+
+        # Add to history
+        self.proposals_history.append(session.copy())
+
+        return True
+
+
+class SwarmIntelligence:
+    """Swarm intelligence behaviors for agent coordination"""
+
+    def __init__(self):
+        self.swarm_behaviors: Dict[str, Callable] = {
+            "foraging": self._foraging_behavior,
+            "consensus": self._consensus_behavior,
+            "task_allocation": self._task_allocation_behavior
+        }
+
+    async def execute_swarm_behavior(self, behavior_type: str, agents: List[str],
+                                  context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a swarm intelligence behavior"""
+        if behavior_type not in self.swarm_behaviors:
+            return {"error": f"Unknown behavior: {behavior_type}"}
+
+        return await self.swarm_behaviors[behavior_type](agents, context)
+
+    async def _foraging_behavior(self, agents: List[str], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Simulate foraging behavior for resource discovery"""
+        # Agents explore and share information about resources
+        discoveries = []
+        for agent_id in agents:
+            # Simulate agent exploration
+            discovery = {
+                "agent": agent_id,
+                "resources_found": len(agents) * 2,  # Simulated discovery
+                "quality_score": context.get("quality_threshold", 0.5)
+            }
+            discoveries.append(discovery)
+
+        return {
+            "behavior": "foraging",
+            "discoveries": discoveries,
+            "best_discovery": max(discoveries, key=lambda x: x["quality_score"]) if discoveries else None
+        }
+
+    async def _consensus_behavior(self, agents: List[str], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Reach consensus through swarm behavior"""
+        # Agents influence each other to reach agreement
+        opinions = [hash(agent_id) % 100 for agent_id in agents]  # Simulated opinions
+        avg_opinion = sum(opinions) / len(opinions) if opinions else 0
+
+        return {
+            "behavior": "consensus",
+            "initial_opinions": opinions,
+            "consensus_value": avg_opinion,
+            "agreement_level": 0.8  # Simulated agreement level
+        }
+
+    async def _task_allocation_behavior(self, agents: List[str], context: Dict[str, Any]) -> Dict[str, Any]:
+        """Distribute tasks using swarm intelligence"""
+        tasks = context.get("tasks", [])
+        allocation = {}
+
+        for i, task in enumerate(tasks):
+            # Assign task to agent based on fitness (simulated)
+            agent_idx = i % len(agents)
+            allocation[task["id"]] = agents[agent_idx]
+
+        return {
+            "behavior": "task_allocation",
+            "allocation": allocation,
+            "efficiency": 0.9  # Simulated efficiency
+        }
+
+
+class HumanInLoopSupervisor:
+    """Human-in-the-loop supervision capabilities"""
+
+    def __init__(self):
+        self.approval_queue: List[Dict] = []
+        self.human_decisions: List[Dict] = []
+        self.supervision_enabled = True
+
+    async def request_approval(self, decision_point: str, options: List[Dict],
+                             context: Dict[str, Any], urgency: int = 5) -> str:
+        """Request human approval for critical decisions"""
+        if not self.supervision_enabled:
+            # Return first option as default if supervision disabled
+            return options[0]["id"] if options else ""
+
+        approval_request = {
+            "id": f"approval_{uuid.uuid4()}",
+            "decision_point": decision_point,
+            "options": options,
+            "context": context,
+            "urgency": urgency,
+            "submitted_at": time.time(),
+            "status": "pending"
+        }
+
+        self.approval_queue.append(approval_request)
+        return approval_request["id"]
+
+    async def record_human_decision(self, request_id: str, decision: str,
+                                 feedback: str = "") -> bool:
+        """Record a human decision"""
+        for req in self.approval_queue:
+            if req["id"] == request_id:
+                req["status"] = "approved" if decision.startswith("approve") else "rejected"
+                req["human_decision"] = decision
+                req["feedback"] = feedback
+                req["decided_at"] = time.time()
+
+                # Move to decisions history
+                self.human_decisions.append(req.copy())
+                self.approval_queue.remove(req)
+
+                return True
+
+        return False
+
+    def get_pending_approvals(self) -> List[Dict]:
+        """Get all pending approval requests"""
+        return [req for req in self.approval_queue if req["status"] == "pending"]
+
+
+class CrossDomainExpertise:
+    """Cross-domain expertise combination system"""
+
+    def __init__(self):
+        self.domain_knowledge: Dict[str, Dict] = {}
+        self.expertise_bridge_agents: List[str] = []
+
+    async def register_domain_expertise(self, agent_id: str, domain: str,
+                                     expertise_level: float, topics: List[str]):
+        """Register an agent's expertise in a specific domain"""
+        if domain not in self.domain_knowledge:
+            self.domain_knowledge[domain] = {}
+
+        self.domain_knowledge[domain][agent_id] = {
+            "expertise_level": expertise_level,
+            "topics": topics,
+            "last_updated": time.time()
+        }
+
+    async def find_cross_domain_solution(self, required_domains: List[str],
+                                      problem_description: str) -> Dict[str, Any]:
+        """Find solution requiring expertise from multiple domains"""
+        solution_path = []
+
+        for domain in required_domains:
+            if domain in self.domain_knowledge:
+                # Find best expert in this domain
+                domain_experts = self.domain_knowledge[domain]
+                best_expert = max(domain_experts.items(),
+                                key=lambda x: x[1]["expertise_level"])
+
+                solution_path.append({
+                    "domain": domain,
+                    "expert_agent": best_expert[0],
+                    "expertise_level": best_expert[1]["expertise_level"],
+                    "relevant_topics": best_expert[1]["topics"]
+                })
+
+        return {
+            "problem": problem_description,
+            "solution_path": solution_path,
+            "domains_covered": required_domains,
+            "feasibility_score": min(len(solution_path), len(required_domains)) / len(required_domains) if required_domains else 0
+        }
+
+    async def create_bridge_agent(self, agent_id: str, connecting_domains: List[str]):
+        """Create an agent that bridges multiple domains"""
+        self.expertise_bridge_agents.append({
+            "id": agent_id,
+            "connecting_domains": connecting_domains,
+            "created_at": time.time()
+        })
+
+
 class CollaborationOrchestrator:
     """Central orchestrator for multi-agent collaboration"""
 
@@ -403,6 +704,14 @@ class CollaborationOrchestrator:
         self.memory = AgentMemory()
         self.active_teams: List[List[str]] = []
         self.coordination_strategies = {}
+
+        # Advanced coordination components
+        self.market_allocator = MarketBasedAllocation(self)
+        self.negotiation_protocol = NegotiationProtocol()
+        self.swarm_intelligence = SwarmIntelligence()
+        self.human_supervisor = HumanInLoopSupervisor()
+        self.cross_domain_expertise = CrossDomainExpertise()
+
         self.running = False
 
     def register_agent(self, agent: Agent):
@@ -410,6 +719,36 @@ class CollaborationOrchestrator:
         self.agents[agent.id] = agent
         agent.connect(self.communication_protocol, self.memory)
         logger.info(f"Registered agent: {agent.id} ({agent.role.value})")
+
+    async def allocate_resource_market_based(self, resource_type: str, requesting_agent: str,
+                                          priority: int = 5) -> str:
+        """Allocate resources using market-based mechanism"""
+        return await self.market_allocator.auction_resource(resource_type, requesting_agent, priority)
+
+    async def initiate_agent_negotiation(self, initiator: str, responder: str,
+                                       proposal: Dict[str, Any]) -> str:
+        """Initiate negotiation between agents"""
+        return await self.negotiation_protocol.initiate_negotiation(initiator, responder, proposal)
+
+    async def execute_swarm_behavior(self, behavior_type: str, participating_agents: List[str],
+                                   context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute swarm intelligence behavior"""
+        return await self.swarm_intelligence.execute_swarm_behavior(behavior_type, participating_agents, context)
+
+    async def request_human_approval(self, decision_point: str, options: List[Dict],
+                                   context: Dict[str, Any], urgency: int = 5) -> str:
+        """Request human approval for critical decisions"""
+        return await self.human_supervisor.request_approval(decision_point, options, context, urgency)
+
+    async def register_agent_expertise(self, agent_id: str, domain: str,
+                                    expertise_level: float, topics: List[str]):
+        """Register an agent's domain expertise"""
+        await self.cross_domain_expertise.register_domain_expertise(agent_id, domain, expertise_level, topics)
+
+    async def find_cross_domain_solution(self, required_domains: List[str],
+                                       problem_description: str) -> Dict[str, Any]:
+        """Find solution requiring cross-domain expertise"""
+        return await self.cross_domain_expertise.find_cross_domain_solution(required_domains, problem_description)
 
     def create_team(self, agent_ids: List[str], team_purpose: str) -> str:
         """Create a dynamic team of agents"""
@@ -638,19 +977,24 @@ async def create_sample_agents(orchestrator: CollaborationOrchestrator):
 
 async def demo_collaboration():
     """Demonstrate the multi-agent collaboration system"""
-    console.print("[bold green]🚀 Initializing Multi-Agent Collaboration System[/bold green]")
-    
+    console.print("[bold green]Initializing Multi-Agent Collaboration System[/bold green]")
+
     orchestrator = CollaborationOrchestrator()
-    
+
     # Create sample agents
     await create_sample_agents(orchestrator)
-    
+
     # Create a team
     team_id = orchestrator.create_team(
         ["coder_001", "generalist_001", "validator_001"],
         "Software Development Team"
     )
-    
+
+    # Register agent expertise for cross-domain functionality
+    await orchestrator.register_agent_expertise("coder_001", "software_development", 0.9, ["python", "javascript", "algorithms"])
+    await orchestrator.register_agent_expertise("generalist_001", "research_analysis", 0.8, ["research", "writing", "analysis"])
+    await orchestrator.register_agent_expertise("validator_001", "quality_assurance", 0.85, ["testing", "validation", "verification"])
+
     # Create and assign tasks
     complex_task = Task(
         id="",
@@ -659,24 +1003,67 @@ async def demo_collaboration():
         priority=8,
         metadata={"required_skills": ["python", "testing", "documentation"]}
     )
-    
+
     task_id = await orchestrator.assign_task(complex_task)
-    console.print(f"[blue]✅ Assigned task {task_id}[/blue]")
-    
+    console.print(f"[blue]Assigned task {task_id}[/blue]")
+
+    # Demonstrate market-based resource allocation
+    console.print("\n[yellow]Demonstrating Market-Based Resource Allocation...[/yellow]")
+    allocated_agent = await orchestrator.allocate_resource_market_based("computing_power", "coder_001", priority=9)
+    console.print(f"[blue]Allocated resource to agent: {allocated_agent}[/blue]")
+
+    # Demonstrate negotiation between agents
+    console.print("\nDemonstrating Agent Negotiation...")
+    negotiation_id = await orchestrator.initiate_agent_negotiation(
+        "coder_001", "validator_001",
+        {"resource": "testing_environment", "duration": "2_hours", "compensation": "priority_queue"}
+    )
+    console.print(f"[blue]Started negotiation: {negotiation_id}[/blue]")
+
+    # Demonstrate swarm intelligence behavior
+    console.print("\nDemonstrating Swarm Intelligence Behavior...")
+    swarm_result = await orchestrator.execute_swarm_behavior(
+        "consensus",
+        ["coder_001", "generalist_001", "validator_001"],
+        {"topic": "feature_priority", "options": ["high", "medium", "low"]}
+    )
+    console.print(f"[blue]Swarm consensus reached: {swarm_result['consensus_value']:.2f}[/blue]")
+
+    # Demonstrate cross-domain expertise solution
+    console.print("\nDemonstrating Cross-Domain Expertise...")
+    cross_domain_solution = await orchestrator.find_cross_domain_solution(
+        ["software_development", "research_analysis", "quality_assurance"],
+        "Build a comprehensive feature with research-backed implementation and thorough validation"
+    )
+    console.print(f"[blue]Cross-domain solution feasibility: {cross_domain_solution['feasibility_score']:.2f}[/blue]")
+
+    # Request human approval for critical decision
+    console.print("\nDemonstrating Human-in-the-Loop Supervision...")
+    approval_request_id = await orchestrator.request_human_approval(
+        "deploy_to_production",
+        [
+            {"id": "option1", "description": "Deploy with full testing", "risk": "low"},
+            {"id": "option2", "description": "Deploy with minimal testing", "risk": "high"}
+        ],
+        {"feature": "new_feature", "deadline": "urgent", "impact": "high"},
+        urgency=8
+    )
+    console.print(f"[blue]Approval requested: {approval_request_id}[/blue]")
+
     # Start coordination (in background)
     coord_task = asyncio.create_task(orchestrator.coordinate_agents())
-    
+
     # Let it run for a bit to simulate activity
-    await asyncio.sleep(2)
-    
+    await asyncio.sleep(3)
+
     # Display dashboard
     orchestrator.display_collaboration_dashboard()
-    
+
     # Stop coordination
     orchestrator.stop_coordination()
     await coord_task  # Wait for coordination task to complete
-    
-    console.print("[green]✅ Multi-Agent Collaboration Demo Completed[/green]")
+
+    console.print("[green]Multi-Agent Collaboration Demo Completed[/green]")
 
 
 if __name__ == "__main__":
