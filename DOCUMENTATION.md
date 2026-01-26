@@ -159,6 +159,16 @@ template_id = builder.create_template(
 builder.apply_template(template_id)
 ```
 
+### Natural Language Generation
+You can also generate workflows automatically from natural language descriptions:
+
+```python
+# Generate from description
+success = await builder.generate_from_description(
+    "Create a workflow that takes user input, analyzes it with an AI model, and displays the result."
+)
+```
+
 ## Multi-Agent Collaboration
 
 Xencode features an advanced multi-agent collaboration system with several coordination strategies.

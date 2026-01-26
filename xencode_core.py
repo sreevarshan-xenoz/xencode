@@ -105,9 +105,42 @@ os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
 os.environ.setdefault('COLORTERM', 'truecolor')
 
-console = Console(
-    force_terminal=True, legacy_windows=False, color_system="256", stderr=False
-)
+# On Windows, force UTF-8 encoding to handle Unicode characters properly
+if sys.platform.startswith('win'):
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+    os.environ.setdefault('PYTHONUTF8', '1')
+
+# Initialize Rich console with proper encoding handling for Windows
+try:
+    import sys
+
+    # On Windows, handle encoding issues with Rich console
+    if sys.platform.startswith('win'):
+        # Force UTF-8 encoding for Rich console on Windows and disable problematic features
+        console = Console(
+            force_terminal=True,
+            force_interactive=True,
+            color_system="windows",
+            legacy_windows=False,  # Important: Disable legacy Windows console
+            encoding="utf-8",
+            stderr=False,
+            record=True  # Enable recording to handle encoding issues
+        )
+    else:
+        console = Console(
+            force_terminal=True,
+            legacy_windows=False,
+            color_system="256",
+            stderr=False
+        )
+except Exception:
+    # Fallback to basic console if there are issues
+    console = Console(
+        force_terminal=True,
+        legacy_windows=False,
+        color_system="256",
+        stderr=False
+    )
 
 # Smart default model selection - will be updated based on available models
 DEFAULT_MODEL = get_smart_default_model()  # Will be set dynamically
@@ -247,13 +280,13 @@ def list_models() -> None:
 
                 # Color code status
                 if status == 'healthy':
-                    status_style = "✅ Healthy"
+                    status_style = "OK Healthy"
                     response_time = f"{health.get('response_time', 0):.3f}s"
                 elif status == 'error':
-                    status_style = "❌ Error"
+                    status_style = "ERROR Error"
                     response_time = "N/A"
                 elif status == 'unavailable':
-                    status_style = "⚠️ Unavailable"
+                    status_style = "WARNING Unavailable"
                     response_time = "N/A"
                 else:
                     status_style = "❓ Unknown"
@@ -333,12 +366,12 @@ def update_model(model: str) -> None:
 
             # Validate the model after pull
             if model_manager.check_model_health(model):
-                progress.update(task, description=f"✅ {model} ready!")
+                progress.update(task, description=f"OK {model} ready!")
                 time.sleep(0.5)  # Show success briefly
 
                 # Success panel with enhanced info
                 success_panel = Panel(
-                    f"✅ Successfully pulled and validated {model}\n\n"
+                    f"OK Successfully pulled and validated {model}\n\n"
                     f"📊 Model Status: [green]Healthy[/green]\n"
                     f"⚡ Response Time: [yellow]{model_manager.model_health[model]['response_time']:.3f}s[/yellow]\n"
                     f"🎯 Ready to use!",
@@ -1027,7 +1060,7 @@ def handle_chat_command(command, current_model, current_online):
             session_id = cmd_parts[1]
             if memory.switch_session(session_id):
                 console.print(
-                    Panel(f"✅ Switched to session: {session_id}", style="green")
+                    Panel(f"OK Switched to session: {session_id}", style="green")
                 )
             else:
                 console.print(Panel(f"❌ Session not found: {session_id}", style="red"))
@@ -1257,9 +1290,9 @@ def show_system_status(current_model, current_online):
     # Check Ollama service
     try:
         response = requests.get("http://localhost:11434/api/tags", timeout=5)
-        ollama_status = "✅ Running" if response.status_code == 200 else "❌ Error"
+        ollama_status = "OK Running" if response.status_code == 200 else "ERROR Error"
     except (requests.RequestException, OSError):
-        ollama_status = "❌ Not accessible"
+        ollama_status = "ERROR Not accessible"
 
     # Check model health actively
     try:
@@ -1270,19 +1303,19 @@ def show_system_status(current_model, current_online):
         else:
             model_health = model_manager.model_health.get(current_model, {})
             model_status_display = (
-                f"❌ {model_health.get('status', 'Unavailable').capitalize()}"
+                f"ERROR {model_health.get('status', 'Unavailable').capitalize()}"
             )
     except Exception:
-        model_status_display = "❌ Check Failed"
+        model_status_display = "ERROR Check Failed"
 
     status_text = f"""
 🖥️ **System Status:**
 • Ollama Service: {ollama_status}
 • Current Model: {current_model}
 • Model Status: {model_status_display}
-• Internet: {'🌐 Online' if current_online == 'true' else '🔌 Offline'}
+• Internet: {'ONLINE' if current_online == 'true' else 'OFFLINE'}
 • Memory Usage: {len(memory.get_context())} messages
-• Cache Status: {'✅ Enabled' if CACHE_ENABLED else '❌ Disabled'}
+• Cache Status: {'OK Enabled' if CACHE_ENABLED else 'ERROR Disabled'}
 
 📊 **Performance:**
 • Available Models: {len(model_manager.available_models)}
