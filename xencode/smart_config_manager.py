@@ -34,10 +34,42 @@ except ImportError:
             TOML_AVAILABLE = True
         except ImportError:
             TOML_AVAILABLE = False
-            console = Console()
-            console.print("[yellow]⚠️  TOML support not available. Install 'tomli' for Python < 3.11 or 'toml' package[/yellow]")
+            try:
+                import sys
+                if sys.platform.startswith('win'):
+                    toml_console = Console(
+                        force_terminal=True,
+                        force_interactive=True,
+                        color_system="windows",
+                        legacy_windows=False,
+                        encoding="utf-8"
+                    )
+                else:
+                    toml_console = Console()
+            except Exception:
+                toml_console = Console()
+            toml_console.print("[yellow]WARNING TOML support not available. Install 'tomli' for Python < 3.11 or 'toml' package[/yellow]")
 
-console = Console()
+# Initialize Rich console with proper encoding handling for Windows
+try:
+    import sys
+
+    # On Windows, handle encoding issues with Rich console
+    if sys.platform.startswith('win'):
+        # Force UTF-8 encoding for Rich console on Windows and disable problematic features
+        console = Console(
+            force_terminal=True,
+            force_interactive=True,
+            color_system="windows",
+            legacy_windows=False,  # Important: Disable legacy Windows console
+            encoding="utf-8",
+            record=True  # Enable recording to handle encoding issues
+        )
+    else:
+        console = Console()
+except Exception:
+    # Fallback to basic console if there are issues
+    console = Console()
 
 
 class ConfigFormat(Enum):
@@ -360,10 +392,10 @@ class ConfigurationManager:
                     raise ValueError(f"Unsupported format: {self.config_format}")
                 
                 self.config = XencodeConfig.from_dict(config_data)
-                console.print(f"[green]✅ Configuration loaded from {config_file}[/green]")
+                console.print(f"[green]OK Configuration loaded from {config_file}[/green]")
                 
             except Exception as e:
-                console.print(f"[red]❌ Error loading config: {e}[/red]")
+                console.print(f"[red]ERROR Error loading config: {e}[/red]")
                 console.print("[yellow]Using default configuration[/yellow]")
                 self.config = XencodeConfig()
         else:
@@ -461,7 +493,7 @@ class ConfigurationManager:
         elif self.config.cache.memory_cache_mb > 2048:
             self.config.cache.memory_cache_mb = 2048
         
-        console.print("[green]✅ Configuration auto-fixed[/green]")
+        console.print("[green]OK Configuration auto-fixed[/green]")
     
     def save_config(self, config_path: Optional[Path] = None, 
                    format: Optional[ConfigFormat] = None) -> bool:
@@ -495,11 +527,11 @@ class ConfigurationManager:
             
             self.config_path = save_path
             self.config_format = save_format
-            console.print(f"[green]✅ Configuration saved to {save_path}[/green]")
+            console.print(f"[green]OK Configuration saved to {save_path}[/green]")
             return True
             
         except Exception as e:
-            console.print(f"[red]❌ Error saving config: {e}[/red]")
+            console.print(f"[red]ERROR Error saving config: {e}[/red]")
             return False
     
     def _save_yaml(self, path: Path, data: Dict[str, Any]):
