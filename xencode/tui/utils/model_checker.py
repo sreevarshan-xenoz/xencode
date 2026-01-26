@@ -36,8 +36,17 @@ class ModelChecker:
             try:
                 # ollama.list() returns a dict with 'models' key
                 response = ollama.list()
-                if 'models' in response:
-                    return [m['name'] for m in response['models']]
+                if isinstance(response, dict) and 'models' in response:
+                    # Each model is a dict, extract the name field
+                    models_list = []
+                    for m in response['models']:
+                        if isinstance(m, dict):
+                            # Try different possible name fields
+                            name = m.get('name') or m.get('model') or m.get('id')
+                            if name:
+                                models_list.append(name)
+                    if models_list:
+                        return models_list
             except Exception as e:
                 logger.warning(f"Failed to list models via library: {e}")
         

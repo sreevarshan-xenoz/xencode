@@ -10,6 +10,7 @@ import pytest
 import asyncio
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 # Removed import of test_mocks as they have been deleted
 # Real services will be used where applicable; tests will be skipped if services are unavailable
 

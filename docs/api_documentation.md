@@ -2,386 +2,272 @@
 
 ## Overview
 
-The Xencode API provides comprehensive endpoints for AI-powered development tools, workspace management, analytics, monitoring, and plugin systems. This documentation covers all available endpoints, authentication, and usage examples.
+Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. This document describes the public APIs and modules available in the Xencode platform.
 
-## Base URL
+## Core Modules
 
+### Files Module (`xencode.core.files`)
+
+Functions for file operations within the Xencode platform.
+
+#### `create_file(path: Union[str, Path], content: str) -> None`
+Creates a file with the given content.
+
+- **Parameters**:
+  - `path`: Path to the file to create
+  - `content`: Content to write to the file
+- **Returns**: None
+- **Side Effects**: Creates a file and prints a success/failure message to the console
+
+#### `read_file(path: Union[str, Path]) -> str`
+Reads the content of a file.
+
+- **Parameters**:
+  - `path`: Path to the file to read
+- **Returns**: String content of the file, or empty string if an error occurs
+- **Side Effects**: Prints file content to the console in a panel
+
+#### `write_file(path: Union[str, Path], content: str) -> None`
+Writes content to a file (equivalent to `create_file`).
+
+- **Parameters**:
+  - `path`: Path to the file to write
+  - `content`: Content to write to the file
+- **Returns**: None
+
+#### `delete_file(path: Union[str, Path]) -> bool`
+Deletes a file.
+
+- **Parameters**:
+  - `path`: Path to the file to delete
+- **Returns**: True if deletion was successful, False otherwise
+- **Side Effects**: Prints success/failure message to the console
+
+### Models Module (`xencode.core.models`)
+
+Classes and functions for managing AI models.
+
+#### `ModelManager` Class
+Manages available models and their health status.
+
+##### Methods:
+- `refresh_models()` - Refreshes the list of available models from Ollama
+- `check_model_health(model: str) -> bool` - Checks if a model is responsive
+- `get_best_model() -> str` - Gets the fastest healthy model
+- `switch_model(model: str) -> Tuple[bool, str]` - Attempts to switch to a different model
+
+#### `get_available_models() -> List[str]`
+Gets a list of available models from Ollama.
+
+- **Returns**: List of model names
+
+#### `get_smart_default_model() -> Optional[str]`
+Intelligently selects the best available model based on preferences and availability.
+
+- **Returns**: Name of the selected model, or None if no models are available
+
+#### `list_models() -> None`
+Displays a table of installed models with their status and performance metrics.
+
+- **Side Effects**: Prints a table of models to the console
+
+#### `update_model(model: str) -> None`
+Downloads or updates a model from the Ollama library.
+
+- **Parameters**:
+  - `model`: Name of the model to update
+- **Side Effects**: Downloads the model and prints progress/status to the console
+
+### Memory Module (`xencode.core.memory`)
+
+Classes for managing conversation memory.
+
+#### `ConversationMemory` Class
+Manages conversation history with context preservation.
+
+##### Constructor:
+- `ConversationMemory(max_items: int = 50)` - Initializes with a maximum number of items to retain
+
+##### Methods:
+- `load_memory()` - Loads conversation history from disk
+- `save_memory()` - Saves conversation history to disk
+- `start_session(session_id: Optional[str] = None) -> str` - Starts a new conversation session
+- `add_message(role: str, content: str, model: Optional[str] = None)` - Adds a message to the current session
+- `get_context(max_messages: int = 10) -> List[Dict[str, Any]]` - Gets recent conversation context
+- `list_sessions() -> List[str]` - Lists all conversation sessions
+- `switch_session(session_id: str) -> bool` - Switches to a different session
+
+### Cache Module (`xencode.core.cache`)
+
+Classes for response caching with multiple levels.
+
+#### `ResponseCache` Class
+Sophisticated multi-level response caching system with compression and statistics.
+
+##### Constructor:
+- `ResponseCache(cache_dir: Path = CACHE_DIR, max_size: int = 100, ttl_seconds: int = 86400, compression_enabled: bool = True)`
+
+##### Methods:
+- `get(prompt: str, model: str) -> Optional[str]` - Gets a cached response
+- `set(prompt: str, model: str, response: str)` - Caches a response
+- `get_stats() -> Dict[str, Any]` - Gets comprehensive cache statistics
+- `clear_cache()` - Clears both memory and disk caches
+
+### Connection Pool Module (`xencode.core.connection_pool`)
+
+Classes for managing HTTP connections efficiently.
+
+#### `APIClient` Class
+API client with connection pooling for Ollama and other services.
+
+##### Constructor:
+- `APIClient(base_url: str = "http://localhost:11434", max_connections: int = 10, max_retries: int = 3)`
+
+##### Methods:
+- `sync_request(endpoint: str, method: str = "POST", json_data: Optional[Dict] = None, timeout: int = 30) -> requests.Response` - Makes a synchronous request
+- `async_request(endpoint: str, method: str = "POST", json_data: Optional[Dict] = None, timeout: int = 30) -> aiohttp.ClientResponse` - Makes an asynchronous request
+- `generate(model: str, prompt: str, stream: bool = False) -> Union[Dict, str]` - Generates a response from a model
+- `list_models() -> Dict` - Lists available models
+- `close()` - Closes all connections
+
+#### Helper Functions:
+- `get_api_client(base_url: str = "http://localhost:11434") -> APIClient` - Gets or creates a singleton API client
+- `close_api_client()` - Closes the global API client
+
+## Security Modules
+
+### Validation Module (`xencode.security.validation`)
+
+Functions for input validation and sanitization.
+
+#### `InputValidator` Class
+Validates and sanitizes various types of input.
+
+##### Methods:
+- `sanitize_input(input_text: str) -> str` - Removes dangerous patterns from input
+- `validate_file_path(file_path: str) -> bool` - Validates file paths to prevent directory traversal
+- `validate_url(url: str) -> bool` - Validates URLs to prevent SSRF attacks
+- `validate_model_name(model_name: str) -> bool` - Validates model names to prevent injection
+
+#### Standalone Functions:
+- `sanitize_user_input(user_input: str) -> str` - Convenience function to sanitize user input
+- `validate_file_operation(file_path: str, operation: str = "read") -> bool` - Validates file operations
+
+### API Validation Module (`xencode.security.api_validation`)
+
+Functions for validating API responses.
+
+#### `APIResponseValidator` Class
+Validates API responses to ensure they meet expected formats.
+
+##### Methods:
+- `validate_ollama_response(response_data: Union[Dict[str, Any], str]) -> bool` - Validates Ollama API responses
+- `validate_model_list_response(response_data: Union[Dict[str, Any], str]) -> bool` - Validates model list responses
+- `sanitize_response_content(content: str) -> str` - Sanitizes response content
+
+#### Standalone Functions:
+- `validate_api_response(response_data: Union[Dict[str, Any], str], api_type: str = "ollama") -> bool` - Validates API responses by type
+- `sanitize_api_response(content: str) -> str` - Sanitizes API response content
+
+## Benchmarking Module (`benchmarks.performance_benchmarks`)
+
+Tools for measuring performance of Xencode components.
+
+#### `PerformanceBenchmarkSuite` Class
+Suite of performance benchmarks for Xencode components.
+
+##### Methods:
+- `benchmark_function(func: Callable, name: str, iterations: int = 10, *args, **kwargs) -> BenchmarkResult` - Benchmarks a synchronous function
+- `benchmark_async_function(func, name: str, iterations: int = 10, *args, **kwargs) -> BenchmarkResult` - Benchmarks an asynchronous function
+- `benchmark_cache_performance(cache: ResponseCache, iterations: int = 100) -> BenchmarkResult` - Benchmarks cache performance
+- `benchmark_api_response_time(api_endpoint: str, headers: Dict[str, str], payload: Dict[str, Any], iterations: int = 10) -> BenchmarkResult` - Benchmarks API response time
+- `benchmark_concurrent_api_calls(api_endpoint: str, headers: Dict[str, str], payload: Dict[str, Any], concurrent_requests: int = 10) -> BenchmarkResult` - Benchmarks concurrent API calls
+- `print_results()` - Prints benchmark results in a formatted table
+
+#### `run_performance_benchmarks()` Function
+Runs a comprehensive set of performance benchmarks.
+
+## Usage Examples
+
+### Basic Usage
+```python
+from xencode.core import get_api_client, ConversationMemory
+
+# Initialize components
+client = get_api_client()
+memory = ConversationMemory()
+
+# Add a message to memory
+memory.add_message("user", "Hello, how are you?", "llama3.1:8b")
+
+# Get recent context
+context = memory.get_context(max_messages=5)
+print(f"Context has {len(context)} messages")
 ```
-https://api.xencode.dev/api/v1
+
+### File Operations
+```python
+from xencode.core.files import create_file, read_file
+
+# Create a file
+create_file("example.txt", "Hello, world!")
+
+# Read the file
+content = read_file("example.txt")
+print(content)  # Outputs: Hello, world!
 ```
 
-## Authentication
+### Model Management
+```python
+from xencode.core.models import ModelManager, list_models
 
-All API endpoints require authentication using JWT tokens:
+# List available models
+list_models()
 
-```http
-Authorization: Bearer <your_jwt_token>
+# Create a model manager
+manager = ModelManager()
+print(f"Best model: {manager.get_best_model()}")
 ```
 
-## API Endpoints
+### Caching
+```python
+from xencode.core.cache import ResponseCache
 
-### Analytics API
+# Create a cache
+cache = ResponseCache()
 
-#### GET /analytics/overview
-Get system analytics overview with key metrics and insights.
+# Store a response
+cache.set("What is the capital of France?", "llama3.1:8b", "The capital of France is Paris.")
 
-**Response:**
-```json
-{
-  "total_events": 15420,
-  "active_users": 156,
-  "system_health_score": 0.96,
-  "performance_metrics": {
-    "avg_response_time_ms": 45.3,
-    "requests_per_second": 125.8,
-    "error_rate": 0.012
-  }
-}
-```
+# Retrieve the response
+response = cache.get("What is the capital of France?", "llama3.1:8b")
+print(response)  # Outputs: The capital of France is Paris.
 
-#### POST /analytics/metrics
-Record performance metrics for monitoring and analysis.
-
-**Request:**
-```json
-{
-  "name": "api_response_time",
-  "value": 150.5,
-  "metric_type": "gauge",
-  "labels": {
-    "endpoint": "/api/v1/workspaces",
-    "method": "GET"
-  }
-}
-```
-
-#### GET /analytics/events
-Retrieve analytics events with filtering and pagination.
-
-**Query Parameters:**
-- `event_type` (string): Filter by event type
-- `user_id` (string): Filter by user ID
-- `start_date` (string): Start date (ISO format)
-- `end_date` (string): End date (ISO format)
-- `limit` (integer): Number of results (default: 100)
-
-### Monitoring API
-
-#### GET /monitoring/health
-Get comprehensive system health status.
-
-**Response:**
-```json
-{
-  "overall_status": "healthy",
-  "health_score": 0.96,
-  "components": {
-    "database": "healthy",
-    "cache": "healthy",
-    "external_apis": "degraded"
-  },
-  "uptime_hours": 24.5
-}
-```
-
-#### GET /monitoring/resources
-Get system resource utilization metrics.
-
-**Response:**
-```json
-[
-  {
-    "resource_type": "cpu",
-    "utilization_percent": 23.7,
-    "available_cores": 8,
-    "load_average": [1.2, 1.5, 1.8]
-  },
-  {
-    "resource_type": "memory",
-    "utilization_percent": 68.2,
-    "used_gb": 12.5,
-    "total_gb": 32.0
-  }
-]
-```
-
-### Plugin API
-
-#### GET /plugins
-List all available plugins with their status and metadata.
-
-**Response:**
-```json
-[
-  {
-    "id": "file-operations",
-    "name": "File Operations Plugin",
-    "version": "1.2.0",
-    "status": "enabled",
-    "description": "Advanced file system operations",
-    "capabilities": ["read", "write", "search", "analyze"]
-  }
-]
-```
-
-#### POST /plugins/{plugin_id}/execute
-Execute a plugin method with specified parameters.
-
-**Request:**
-```json
-{
-  "method": "analyze_file",
-  "args": ["/path/to/file.py"],
-  "kwargs": {
-    "include_metrics": true,
-    "depth": "detailed"
-  }
-}
-```
-
-### Workspace API
-
-#### POST /workspaces
-Create a new collaborative workspace.
-
-**Request:**
-```json
-{
-  "name": "ML Project Workspace",
-  "description": "Machine learning project collaboration",
-  "settings": {
-    "auto_save_enabled": true,
-    "real_time_sync": true
-  },
-  "collaborators": ["user1@example.com", "user2@example.com"]
-}
-```
-
-#### GET /workspaces/{workspace_id}
-Get detailed workspace information including files and collaboration status.
-
-#### WebSocket /workspaces/{workspace_id}/ws
-Real-time collaboration WebSocket endpoint for live synchronization.
-
-### Code Analysis API
-
-#### POST /code/analyze
-Analyze code for quality, security, and performance issues.
-
-**Request:**
-```json
-{
-  "code": "def hello_world():\n    print('Hello, World!')",
-  "language": "python",
-  "analysis_types": ["syntax", "style", "security", "performance"]
-}
-```
-
-### Document Processing API
-
-#### POST /documents/process
-Process documents and extract structured content.
-
-**Request:**
-```json
-{
-  "document_url": "https://example.com/document.pdf",
-  "processing_options": {
-    "extract_text": true,
-    "extract_images": false,
-    "ocr_enabled": true
-  }
-}
+# Get cache statistics
+stats = cache.get_stats()
+print(f"Cache hit rate: {stats['overall']['hit_rate_percent']}%")
 ```
 
 ## Error Handling
 
-All API endpoints return consistent error responses:
+Xencode follows a consistent error handling approach:
 
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid input parameters",
-    "details": {
-      "field": "email",
-      "issue": "Invalid email format"
-    }
-  }
-}
-```
+1. Functions that return values typically return `None` or appropriate defaults on error
+2. Functions with side effects print error messages to the console using Rich panels
+3. Validation functions return boolean values indicating success/failure
+4. Exceptions are caught internally and converted to appropriate return values or console messages
 
-### HTTP Status Codes
+## Security Considerations
 
-- `200` - Success
-- `201` - Created
-- `400` - Bad Request
-- `401` - Unauthorized
-- `403` - Forbidden
-- `404` - Not Found
-- `422` - Validation Error
-- `429` - Rate Limited
-- `500` - Internal Server Error
+1. All user inputs are sanitized using the `InputValidator` class
+2. File operations validate paths to prevent directory traversal
+3. URLs are validated to prevent Server-Side Request Forgery (SSRF)
+4. Model names are validated to prevent injection attacks
+5. API responses are validated to ensure expected formats
 
-## Rate Limiting
+## Performance Tips
 
-API requests are rate limited to ensure fair usage:
-
-- **Standard endpoints**: 1000 requests per hour
-- **Analytics endpoints**: 5000 requests per hour
-- **WebSocket connections**: 10 concurrent connections per user
-
-Rate limit headers are included in responses:
-```http
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 999
-X-RateLimit-Reset: 1640995200
-```
-
-## SDK Examples
-
-### Python SDK
-
-```python
-from xencode_sdk import XencodeClient
-
-client = XencodeClient(api_key="your_api_key")
-
-# Create workspace
-workspace = client.workspaces.create({
-    "name": "My Project",
-    "description": "Project workspace"
-})
-
-# Analyze code
-analysis = client.code.analyze(
-    code="print('hello')",
-    language="python"
-)
-
-# Get analytics
-metrics = client.analytics.get_overview()
-```
-
-### JavaScript SDK
-
-```javascript
-import { XencodeClient } from '@xencode/sdk';
-
-const client = new XencodeClient({ apiKey: 'your_api_key' });
-
-// Create workspace
-const workspace = await client.workspaces.create({
-  name: 'My Project',
-  description: 'Project workspace'
-});
-
-// Real-time collaboration
-const ws = client.workspaces.connect(workspace.id);
-ws.on('change', (change) => {
-  console.log('Workspace updated:', change);
-});
-```
-
-## Webhooks
-
-Configure webhooks to receive real-time notifications:
-
-### Webhook Events
-
-- `workspace.created`
-- `workspace.updated`
-- `plugin.executed`
-- `analysis.completed`
-- `alert.triggered`
-
-### Webhook Payload
-
-```json
-{
-  "event": "workspace.created",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "data": {
-    "workspace_id": "ws_123",
-    "name": "New Workspace",
-    "created_by": "user_456"
-  }
-}
-```
-
-## Performance Optimization
-
-### Caching
-
-- API responses are cached for 5 minutes
-- Use `Cache-Control: no-cache` header to bypass cache
-- ETags are supported for conditional requests
-
-### Pagination
-
-Large result sets are paginated:
-
-```json
-{
-  "data": [...],
-  "pagination": {
-    "page": 1,
-    "per_page": 100,
-    "total": 1500,
-    "total_pages": 15
-  }
-}
-```
-
-### Filtering and Sorting
-
-Most list endpoints support filtering and sorting:
-
-```http
-GET /api/v1/analytics/events?event_type=user_action&sort=timestamp&order=desc
-```
-
-## Security
-
-### API Security Features
-
-- JWT-based authentication
-- Rate limiting and DDoS protection
-- Input validation and sanitization
-- SQL injection prevention
-- XSS protection
-- CORS configuration
-
-### Best Practices
-
-1. **Store API keys securely** - Never commit API keys to version control
-2. **Use HTTPS only** - All API calls must use HTTPS
-3. **Validate responses** - Always validate API responses in your application
-4. **Handle errors gracefully** - Implement proper error handling and retry logic
-5. **Monitor usage** - Track API usage and set up alerts for unusual activity
-
-## Support and Resources
-
-- **API Status**: https://status.xencode.dev
-- **Developer Portal**: https://developers.xencode.dev
-- **Community Forum**: https://community.xencode.dev
-- **Support Email**: api-support@xencode.dev
-
-## Changelog
-
-### v3.0.0 (2024-01-15)
-- Added comprehensive analytics API
-- Implemented real-time collaboration WebSockets
-- Enhanced security and monitoring features
-- Added plugin marketplace integration
-
-### v2.1.0 (2023-12-01)
-- Added code analysis endpoints
-- Improved workspace management
-- Enhanced error handling and validation
-
-### v2.0.0 (2023-10-15)
-- Major API restructure
-- Added authentication and authorization
-- Implemented rate limiting
-- Added webhook support
+1. Use the connection pooling system for multiple API calls
+2. Leverage the multi-level caching system for repeated requests
+3. Monitor cache statistics to optimize cache settings
+4. Use the benchmarking tools to identify performance bottlenecks

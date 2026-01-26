@@ -46,7 +46,6 @@ class SemanticConsensus:
                 print(f"[green]✅ Semantic similarity engine ready: {model_name}[/green]")
             except Exception as e:
                 print(f"[yellow]⚠️ Failed to load semantic model: {e}[/yellow]")
-                SEMANTIC_AVAILABLE = False
                 self.model = None
 
     def calculate_consensus(self, responses: List[str]) -> float:

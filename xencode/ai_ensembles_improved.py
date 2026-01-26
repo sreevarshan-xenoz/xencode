@@ -128,7 +128,6 @@ class SemanticConsensus:
                 console.print("[green]✅ Semantic similarity engine ready (GPU accelerated)[/green]")
             except Exception as e:
                 console.print(f"[yellow]⚠️ Failed to load semantic model: {e}. Using fallback.[/yellow]")
-                SEMANTIC_AVAILABLE = False
                 self.model = None
         else:
             self.model = None
@@ -984,9 +983,9 @@ async def create_ensemble_reasoner(cache_manager=None) -> EnsembleReasoner:
     return EnsembleReasoner(cache_manager=cache_manager)
 
 
-    async def quick_ensemble_query(prompt: str, models: Optional[List[str]] = None,
+async def quick_ensemble_query(prompt: str, models: Optional[List[str]] = None,
                              method: EnsembleMethod = EnsembleMethod.VOTE) -> str:
-        """Quick ensemble query for simple use cases"""
+    """Quick ensemble query for simple use cases"""
     reasoner = await create_ensemble_reasoner()
 
     query = QueryRequest(

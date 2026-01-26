@@ -68,7 +68,7 @@ except ImportError:
 
     # Patch 3: Update confidence calculation
     print("  [3/6] Updating confidence calculation...")
-    confidence_pattern = r'confidence = min\(1\.0, len\(response_text\.split\(\)\) / 50\.0\))'
+    confidence_pattern = r'confidence = min\(1\.0, len\(response_text\.split\(\)\) / 50\.0\)'
     if re.search(confidence_pattern, content):
         new_conf = """# Use improved quality metrics if available
         if self.quality_metrics and IMPROVEMENTS_AVAILABLE:
@@ -88,13 +88,13 @@ except ImportError:
                 response.tokens_generated,
                 avg_similarity_with_others=avg_similarity
             )
-            improved_confidence
+            confidence = min(1.0, improved_confidence)
         else:
-            min(1.0, len(response_text.split()) / 50.0)"""
-            content = re.sub(confidence_pattern, new_conf, content)
-            print("      [DONE] Confidence calculation improved")
-        else:
-            print("      [SKIP] Confidence pattern not found (already patched?)")
+            confidence = min(1.0, len(response_text.split()) / 50.0)"""
+        content = re.sub(confidence_pattern, new_conf, content)
+        print("      [DONE] Confidence calculation improved")
+    else:
+        print("      [SKIP] Confidence pattern not found (already patched?)")
 
     # Patch 4: Update consensus calculation
     print("  [4/6] Updating consensus calculation...")
@@ -105,10 +105,10 @@ except ImportError:
             if IMPROVEMENTS_AVAILABLE else
             self.voter.calculate_consensus([r.response for r in successful_responses])
         )'''
-            content = content.replace(old_consensus, new_consensus)
-            print("      [DONE] Consensus calculation improved")
-        else:
-            print("      [SKIP] Consensus pattern not found (already patched?)")
+        content = content.replace(old_consensus, new_consensus)
+        print("      [DONE] Consensus calculation improved")
+    else:
+        print("      [SKIP] Consensus pattern not found (already patched?)")
 
     # Patch 5: Fix typing issues with Optional[List[str]]
     print("  [5/6] Fixing typing issues...")
@@ -123,16 +123,16 @@ except ImportError:
     # Patch 6: Update fusion logic
     print("  [6/6] Updating fusion logic for improved components...")
     vote_call = 'return self.voter.vote_tokens(response_texts)'
-    if vote_call in content and 'IMPROVEMENTS_AVAILABLE' in content:
+    if vote_call in content:
         new_vote = '''# Use improved token voting
         if IMPROVEMENTS_AVAILABLE:
             return self.voter.vote_tokens(response_texts, weights)
         else:
             return self.voter.vote_tokens(response_texts)'''
-            content = content.replace(vote_call, new_vote)
-            print("      [DONE] Fusion logic improved")
-        else:
-            print("      [SKIP] Fusion not found (already patched?)")
+        content = content.replace(vote_call, new_vote)
+        print("      [DONE] Fusion logic improved")
+    else:
+        print("      [SKIP] Fusion not found (already patched?)")
 
     # Save updated file
     if content != original_content:

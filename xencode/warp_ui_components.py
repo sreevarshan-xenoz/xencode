@@ -408,7 +408,13 @@ class WarpLayoutManager:
         # Metadata
         exit_code = block.metadata.get('exit_code', '?')
         duration = block.metadata.get('duration_ms', '?')
-        timestamp = block.timestamp.strftime("%H:%M:%S") if hasattr(block, 'timestamp') else "unknown"
+        timestamp = "unknown"
+        if hasattr(block, 'timestamp'):
+            if isinstance(block.timestamp, datetime):
+                timestamp = block.timestamp.strftime("%H:%M:%S")
+            elif isinstance(block.timestamp, (int, float)):
+                # Convert timestamp to datetime if it's a numeric value
+                timestamp = datetime.fromtimestamp(block.timestamp).strftime("%H:%M:%S")
         
         # Color-code exit code
         if exit_code == 0:

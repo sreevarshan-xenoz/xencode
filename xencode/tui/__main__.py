@@ -15,8 +15,8 @@ def main():
     # Get root path from args or use current directory
     root_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
     
-    print(f"🚀 Starting Xencode TUI...")
-    print(f"📂 Root: {root_path}")
+    print(f"Starting Xencode TUI...")
+    print(f"Root: {root_path}")
     print()
     
     run_tui(root_path=root_path)

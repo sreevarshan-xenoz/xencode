@@ -1,0 +1,269 @@
+{
+  "directed": true,
+  "multigraph": true,
+  "graph": {},
+  "nodes": [
+    {
+      "type": "file",
+      "name": "caller.py",
+      "id": "D:\\xencode\\temp_test_rag\\caller.py"
+    },
+    {
+      "type": "file",
+      "name": "sample.py",
+      "id": "D:\\xencode\\temp_test_rag\\sample.py"
+    },
+    {
+      "type": "class",
+      "name": "Calculator",
+      "line": 4,
+      "id": "D:\\xencode\\temp_test_rag\\sample.py::Calculator"
+    },
+    {
+      "type": "function",
+      "name": "add",
+      "line": 5,
+      "id": "D:\\xencode\\temp_test_rag\\sample.py::Calculator.add"
+    },
+    {
+      "type": "function",
+      "name": "main",
+      "line": 8,
+      "id": "D:\\xencode\\temp_test_rag\\sample.py::main"
+    },
+    {
+      "type": "unknown",
+      "id": "sample"
+    },
+    {
+      "type": "unknown",
+      "id": "os"
+    },
+    {
+      "type": "unknown",
+      "id": "Calculator"
+    },
+    {
+      "type": "unknown",
+      "id": "print"
+    },
+    {
+      "type": "unknown",
+      "id": "add"
+    }
+  ],
+  "links": [
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\caller.py",
+      "target": "sample",
+      "key": 0
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\caller.py",
+      "target": "sample",
+      "key": 1
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\caller.py",
+      "target": "sample",
+      "key": 2
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\caller.py",
+      "target": "sample",
+      "key": 3
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "os",
+      "key": 0
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "os",
+      "key": 1
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "os",
+      "key": 2
+    },
+    {
+      "type": "imports",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "os",
+      "key": 3
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "key": 0
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "key": 1
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "key": 2
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "key": 3
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "key": 0
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "key": 1
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "key": 2
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "key": 3
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator.add",
+      "key": 0
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator.add",
+      "key": 1
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator.add",
+      "key": 2
+    },
+    {
+      "type": "contains",
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::Calculator",
+      "target": "D:\\xencode\\temp_test_rag\\sample.py::Calculator.add",
+      "key": 3
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "Calculator",
+      "key": 0
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "Calculator",
+      "key": 1
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "Calculator",
+      "key": 2
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "Calculator",
+      "key": 3
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "print",
+      "key": 0
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "print",
+      "key": 1
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "print",
+      "key": 2
+    },
+    {
+      "type": "calls",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "print",
+      "key": 3
+    },
+    {
+      "type": "calls_method",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "add",
+      "key": 0
+    },
+    {
+      "type": "calls_method",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "add",
+      "key": 1
+    },
+    {
+      "type": "calls_method",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "add",
+      "key": 2
+    },
+    {
+      "type": "calls_method",
+      "is_external": true,
+      "source": "D:\\xencode\\temp_test_rag\\sample.py::main",
+      "target": "add",
+      "key": 3
+    }
+  ]
+}

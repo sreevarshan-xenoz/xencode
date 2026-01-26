@@ -5,6 +5,7 @@ Handles model health monitoring, OOM detection, and fallback chains
 """
 
 import json
+import os
 import re
 import subprocess
 import threading

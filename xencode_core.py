@@ -18,6 +18,21 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
 from rich.table import Table
 
+# Import from new modular structure
+from xencode.core import (
+    create_file,
+    read_file,
+    write_file,
+    delete_file,
+    ModelManager,
+    get_smart_default_model,
+    get_available_models,
+    list_models,
+    update_model,
+    ConversationMemory,
+    ResponseCache
+)
+
 # Try to import prompt_toolkit for enhanced input handling
 try:
     from prompt_toolkit import prompt
@@ -64,7 +79,7 @@ try:
     SYSTEM_CHECKER_AVAILABLE = True
     system_checker = SystemChecker()
     # Print system status on startup (optional, or can be behind a flag)
-    # system_checker.print_status() 
+    # system_checker.print_status()
 except ImportError:
     SYSTEM_CHECKER_AVAILABLE = False
     system_checker = None
@@ -90,12 +105,45 @@ os.environ.setdefault('FORCE_COLOR', '1')
 os.environ.setdefault('TERM', 'xterm-256color')
 os.environ.setdefault('COLORTERM', 'truecolor')
 
-console = Console(
-    force_terminal=True, legacy_windows=False, color_system="256", stderr=False
-)
+# On Windows, force UTF-8 encoding to handle Unicode characters properly
+if sys.platform.startswith('win'):
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+    os.environ.setdefault('PYTHONUTF8', '1')
+
+# Initialize Rich console with proper encoding handling for Windows
+try:
+    import sys
+
+    # On Windows, handle encoding issues with Rich console
+    if sys.platform.startswith('win'):
+        # Force UTF-8 encoding for Rich console on Windows and disable problematic features
+        console = Console(
+            force_terminal=True,
+            force_interactive=True,
+            color_system="windows",
+            legacy_windows=False,  # Important: Disable legacy Windows console
+            encoding="utf-8",
+            stderr=False,
+            record=True  # Enable recording to handle encoding issues
+        )
+    else:
+        console = Console(
+            force_terminal=True,
+            legacy_windows=False,
+            color_system="256",
+            stderr=False
+        )
+except Exception:
+    # Fallback to basic console if there are issues
+    console = Console(
+        force_terminal=True,
+        legacy_windows=False,
+        color_system="256",
+        stderr=False
+    )
 
 # Smart default model selection - will be updated based on available models
-DEFAULT_MODEL = None  # Will be set dynamically
+DEFAULT_MODEL = get_smart_default_model()  # Will be set dynamically
 
 # Enhanced Claude-style streaming timing configuration
 THINKING_STREAM_DELAY = 0.045  # 40-60ms per token
@@ -115,269 +163,7 @@ MAX_MEMORY_ITEMS = 50
 MEMORY_FILE = Path.home() / ".xencode" / "conversation_memory.json"
 
 
-class ConversationMemory:
-    """Advanced conversation memory with context management"""
-
-    def __init__(self, max_items: int = MAX_MEMORY_ITEMS) -> None:
-        self.max_items: int = max_items
-        self.conversations: Dict[str, Any] = {}
-        self.current_session: Optional[str] = None
-        self.load_memory()
-
-    def load_memory(self) -> None:
-        """Load conversation memory from disk"""
-        try:
-            if MEMORY_FILE.exists():
-                with open(MEMORY_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.conversations = data.get('conversations', {})
-                    self.current_session = data.get('current_session')
-        except Exception:
-            self.conversations = {}
-            self.current_session = None
-
-    def save_memory(self) -> None:
-        """Save conversation memory to disk"""
-        try:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            with open(MEMORY_FILE, 'w') as f:
-                json.dump(
-                    {
-                        'conversations': self.conversations,
-                        'current_session': self.current_session,
-                        'last_updated': datetime.now().isoformat(),
-                    },
-                    f,
-                    indent=2,
-                )
-        except Exception:
-            pass
-
-    def start_session(self, session_id: Optional[str] = None) -> str:
-        """Start a new conversation session"""
-        if session_id is None:
-            session_id = f"session_{int(time.time())}"
-
-        self.current_session = session_id
-        if session_id not in self.conversations:
-            self.conversations[session_id] = {
-                'messages': [],
-                'model': DEFAULT_MODEL,
-                'created': datetime.now().isoformat(),
-                'last_updated': datetime.now().isoformat(),
-            }
-        return session_id
-
-    def add_message(self, role: str, content: str, model: Optional[str] = None) -> None:
-        """Add a message to current session"""
-        if self.current_session is None:
-            self.start_session()
-
-        message = {
-            'role': role,
-            'content': content,
-            'timestamp': datetime.now().isoformat(),
-            'model': model or DEFAULT_MODEL,
-        }
-
-        self.conversations[self.current_session]['messages'].append(message)
-        self.conversations[self.current_session][
-            'last_updated'
-        ] = datetime.now().isoformat()
-
-        # Trim old messages if exceeding limit
-        if len(self.conversations[self.current_session]['messages']) > self.max_items:
-            self.conversations[self.current_session]['messages'] = self.conversations[
-                self.current_session
-            ]['messages'][-self.max_items :]
-
-        self.save_memory()
-
-    def get_context(self, max_messages: int = 10) -> List[Dict[str, Any]]:
-        """Get recent conversation context for model input"""
-        if (
-            self.current_session is None
-            or self.current_session not in self.conversations
-        ):
-            return []
-
-        messages = self.conversations[self.current_session]['messages']
-        return messages[-max_messages:] if len(messages) > max_messages else messages
-
-    def list_sessions(self) -> List[str]:
-        """List all conversation sessions"""
-        return list(self.conversations.keys())
-
-    def switch_session(self, session_id: str) -> bool:
-        """Switch to a different conversation session"""
-        if session_id in self.conversations:
-            self.current_session = session_id
-            return True
-        return False
-
-
-class ResponseCache:
-    """Intelligent response caching for performance optimization"""
-
-    def __init__(
-        self, cache_dir: Path = CACHE_DIR, max_size: int = MAX_CACHE_SIZE
-    ) -> None:
-        self.cache_dir: Path = Path(cache_dir)
-        self.max_size: int = max_size
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-    def _get_cache_key(self, prompt: str, model: str) -> str:
-        """Generate cache key from prompt and model"""
-        content = f"{prompt}:{model}".encode('utf-8')
-        return hashlib.md5(content).hexdigest()
-
-    def get(self, prompt: str, model: str) -> Optional[str]:
-        """Get cached response if available"""
-        if not CACHE_ENABLED:
-            return None
-
-        try:
-            cache_key = self._get_cache_key(prompt, model)
-            cache_file = self.cache_dir / f"{cache_key}.json"
-
-            if cache_file.exists():
-                with open(cache_file, 'r') as f:
-                    data = json.load(f)
-                    # Check if cache is still valid (24 hours)
-                    if time.time() - data['timestamp'] < 86400:
-                        return data['response']  # type: ignore
-        except Exception:
-            pass
-
-        return None
-
-    def set(self, prompt: str, model: str, response: str) -> None:
-        """Cache a response"""
-        if not CACHE_ENABLED:
-            return
-
-        try:
-            cache_key = self._get_cache_key(prompt, model)
-            cache_file = self.cache_dir / f"{cache_key}.json"
-
-            data = {
-                'prompt': prompt,
-                'model': model,
-                'response': response,
-                'timestamp': time.time(),
-            }
-
-            with open(cache_file, 'w') as f:
-                json.dump(data, f, indent=2)
-
-            # Clean up old cache files if exceeding limit
-            self._cleanup_cache()
-        except Exception:
-            pass
-
-    def _cleanup_cache(self) -> None:
-        """Remove old cache files to maintain size limit"""
-        try:
-            cache_files = list(self.cache_dir.glob("*.json"))
-            if len(cache_files) > self.max_size:
-                # Sort by modification time and remove oldest
-                cache_files.sort(key=lambda x: x.stat().st_mtime)
-                for old_file in cache_files[: -self.max_size]:
-                    old_file.unlink()
-        except Exception:
-            pass
-
-
-class ModelManager:
-    """Advanced model management with health monitoring"""
-
-    def __init__(self) -> None:
-        self.available_models: List[str] = []
-        self.current_model: str = DEFAULT_MODEL
-        self.model_health: Dict[str, Any] = {}
-        self.refresh_models()
-
-    def refresh_models(self) -> None:
-        """Refresh list of available models"""
-        try:
-            output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
-            lines = output.strip().split('\n')
-            self.available_models = [
-                line.split()[0] for line in lines[1:] if line.strip()
-            ]
-        except Exception:
-            self.available_models = []
-
-    def check_model_health(self, model: str) -> bool:
-        """Check if a model is healthy and responsive"""
-        try:
-            start_time = time.time()
-            # Use a minimal prompt to check model availability
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={"model": model, "prompt": "hi", "stream": False},
-                timeout=5,
-            )
-            response_time = time.time() - start_time
-
-            if response.status_code == 200:
-                self.model_health[model] = {
-                    'status': 'healthy',
-                    'response_time': response_time,
-                    'last_check': time.time(),
-                }
-                return True
-            else:
-                self.model_health[model] = {
-                    'status': 'error',
-                    'error_code': response.status_code,
-                    'last_check': time.time(),
-                }
-                return False
-        except Exception as e:
-            self.model_health[model] = {
-                'status': 'unavailable',
-                'error': str(e),
-                'last_check': time.time(),
-            }
-            return False
-
-    def get_best_model(self) -> str:
-        """Get the best available model based on health and performance"""
-        if not self.available_models:
-            return DEFAULT_MODEL
-
-        # Check health of all models
-        healthy_models = []
-        for model in self.available_models:
-            if self.check_model_health(model):
-                healthy_models.append(model)
-
-        if not healthy_models:
-            return DEFAULT_MODEL
-
-        # Return the fastest healthy model
-        fastest_model = min(
-            healthy_models,
-            key=lambda m: self.model_health.get(m, {}).get(
-                'response_time', float('inf')
-            ),
-        )
-        return fastest_model
-
-    def switch_model(self, model: str) -> Tuple[bool, str]:
-        """Switch to a different model"""
-        if model in self.available_models:
-            if self.check_model_health(model):
-                self.current_model = model
-                return True, "Model switched successfully"
-            else:
-                return False, f"Model {model} is not responding"
-        else:
-            return False, f"Model {model} not found"
-
-
-# Initialize global instances
+# Initialize global instances using the new modular components
 memory = ConversationMemory()
 cache = ResponseCache()
 model_manager = ModelManager()
@@ -494,13 +280,13 @@ def list_models() -> None:
 
                 # Color code status
                 if status == 'healthy':
-                    status_style = "✅ Healthy"
+                    status_style = "OK Healthy"
                     response_time = f"{health.get('response_time', 0):.3f}s"
                 elif status == 'error':
-                    status_style = "❌ Error"
+                    status_style = "ERROR Error"
                     response_time = "N/A"
                 elif status == 'unavailable':
-                    status_style = "⚠️ Unavailable"
+                    status_style = "WARNING Unavailable"
                     response_time = "N/A"
                 else:
                     status_style = "❓ Unknown"
@@ -580,12 +366,12 @@ def update_model(model: str) -> None:
 
             # Validate the model after pull
             if model_manager.check_model_health(model):
-                progress.update(task, description=f"✅ {model} ready!")
+                progress.update(task, description=f"OK {model} ready!")
                 time.sleep(0.5)  # Show success briefly
 
                 # Success panel with enhanced info
                 success_panel = Panel(
-                    f"✅ Successfully pulled and validated {model}\n\n"
+                    f"OK Successfully pulled and validated {model}\n\n"
                     f"📊 Model Status: [green]Healthy[/green]\n"
                     f"⚡ Response Time: [yellow]{model_manager.model_health[model]['response_time']:.3f}s[/yellow]\n"
                     f"🎯 Ready to use!",
@@ -648,6 +434,8 @@ def update_model(model: str) -> None:
         console.print(error_panel)
 
 
+import asyncio
+
 def run_query(model: str, prompt: str) -> str:
     """Enhanced non-streaming query with caching, conversation memory, and project context"""
     # Check cache first
@@ -659,86 +447,173 @@ def run_query(model: str, prompt: str) -> str:
     # Add user message to memory
     memory.add_message("user", prompt, model)
 
-    url = "http://localhost:11434/api/generate"
+    # Determine if this is a cloud model
+    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
+        # Use the new model provider system for cloud models
+        from xencode.model_providers import get_model_provider_manager
 
-    # Build context-aware prompt with project context
-    context = memory.get_context(max_messages=5)
-    context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
-    
-    # Add project context if available and relevant
-    project_info = ""
-    if PROJECT_CONTEXT_AVAILABLE:
-        try:
-            project_ctx = get_project_context()
-            if project_ctx.should_include_context(prompt):
-                project_info = project_ctx.get_context_prompt()
-        except Exception:
-            pass  # Silently fail if project context detection fails
-    
-    # Build final prompt
-    if project_info and context_prompt:
-        enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
-    elif project_info:
-        enhanced_prompt = f"{project_info}user: {prompt}"
-    elif context_prompt:
-        enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+        provider_manager = get_model_provider_manager()
+
+        # Initialize providers if not already done
+        if not provider_manager.providers:
+            # Configure providers based on model type
+            if model.startswith("openai:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.openai_api_key:
+                    provider_manager.configure_provider("openai", config.api_keys.openai_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("openai:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "openai", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
+            elif model.startswith("google_gemini:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.google_gemini_api_key:
+                    provider_manager.configure_provider("google_gemini", config.api_keys.google_gemini_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("google_gemini:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "google_gemini", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
+            elif model.startswith("openrouter:"):
+                from xencode.smart_config_manager import get_config
+                config = get_config()
+                if config.api_keys.openrouter_api_key:
+                    provider_manager.configure_provider("openrouter", config.api_keys.openrouter_api_key)
+                    asyncio.run(provider_manager.initialize_providers())
+
+                    # Extract model name without prefix
+                    model_name = model.replace("openrouter:", "")
+
+                    # Run the async function in an event loop
+                    async def run_async_call():
+                        return await provider_manager.generate_with_provider(
+                            prompt, "openrouter", model_name, max_tokens=2048, temperature=0.7
+                        )
+
+                    response = asyncio.run(run_async_call())
+
+                    # Cache the response
+                    cache.set(prompt, model, response)
+
+                    # Add AI response to memory
+                    memory.add_message("assistant", response, model)
+
+                    return response
     else:
-        enhanced_prompt = prompt
+        # Use Ollama for local models
+        url = "http://localhost:11434/api/generate"
 
-    payload = {"model": model, "prompt": enhanced_prompt, "stream": False}
+        # Build context-aware prompt with project context
+        context = memory.get_context(max_messages=5)
+        context_prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in context]) if context else ""
 
-    try:
-        # Show progress indicator
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("🤖 Processing...", total=None)
+        # Add project context if available and relevant
+        project_info = ""
+        if PROJECT_CONTEXT_AVAILABLE:
+            try:
+                project_ctx = get_project_context()
+                if project_ctx.should_include_context(prompt):
+                    project_info = project_ctx.get_context_prompt()
+            except Exception:
+                pass  # Silently fail if project context detection fails
 
-            r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
-            r.raise_for_status()
+        # Build final prompt
+        if project_info and context_prompt:
+            enhanced_prompt = f"{project_info}{context_prompt}\n\nuser: {prompt}"
+        elif project_info:
+            enhanced_prompt = f"{project_info}user: {prompt}"
+        elif context_prompt:
+            enhanced_prompt = f"{context_prompt}\n\nuser: {prompt}"
+        else:
+            enhanced_prompt = prompt
 
-            response = r.json()["response"]
+        payload = {"model": model, "prompt": enhanced_prompt, "stream": False}
 
-            # Cache the response
-            cache.set(prompt, model, response)
+        try:
+            # Show progress indicator
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("🤖 Processing...", total=None)
 
-            # Add AI response to memory
-            memory.add_message("assistant", response, model)
+                r = requests.post(url, json=payload, timeout=RESPONSE_TIMEOUT)
+                r.raise_for_status()
 
-            return response
+                response = r.json()["response"]
 
-    except requests.exceptions.ConnectionError:
-        # Claude-style connection error panel
-        error_panel = Panel(
-            "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
-            title="Connection Error",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
-    except requests.exceptions.Timeout:
-        error_panel = Panel(
-            f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
-            f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
-            title="Request Timeout",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
-    except requests.exceptions.RequestException as e:
-        # Generic API error panel
-        error_panel = Panel(
-            f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
-            title="API Error",
-            style="red",
-            border_style="red",
-        )
-        console.print(error_panel)
-        sys.exit(1)
+                # Cache the response
+                cache.set(prompt, model, response)
+
+                # Add AI response to memory
+                memory.add_message("assistant", response, model)
+
+                return response
+
+        except requests.exceptions.ConnectionError:
+            # Claude-style connection error panel
+            error_panel = Panel(
+                "❌ Cannot connect to Ollama service\n\nPlease check:\n• Is Ollama running? Try: systemctl start ollama\n• Is the service accessible at localhost:11434?",
+                title="Connection Error",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
+        except requests.exceptions.Timeout:
+            error_panel = Panel(
+                f"⏰ Request timed out after {RESPONSE_TIMEOUT}s\n\n"
+                f"🔧 Try:\n• Using a smaller model\n• Checking system resources\n• Restarting Ollama service",
+                title="Request Timeout",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
+        except requests.exceptions.RequestException as e:
+            # Generic API error panel
+            error_panel = Panel(
+                f"❌ API Error: {str(e)}\n\nPlease check your Ollama installation and try again.",
+                title="API Error",
+                style="red",
+                border_style="red",
+            )
+            console.print(error_panel)
+            sys.exit(1)
 
 
 def run_streaming_query(model, prompt):
@@ -1185,7 +1060,7 @@ def handle_chat_command(command, current_model, current_online):
             session_id = cmd_parts[1]
             if memory.switch_session(session_id):
                 console.print(
-                    Panel(f"✅ Switched to session: {session_id}", style="green")
+                    Panel(f"OK Switched to session: {session_id}", style="green")
                 )
             else:
                 console.print(Panel(f"❌ Session not found: {session_id}", style="red"))
@@ -1415,9 +1290,9 @@ def show_system_status(current_model, current_online):
     # Check Ollama service
     try:
         response = requests.get("http://localhost:11434/api/tags", timeout=5)
-        ollama_status = "✅ Running" if response.status_code == 200 else "❌ Error"
+        ollama_status = "OK Running" if response.status_code == 200 else "ERROR Error"
     except (requests.RequestException, OSError):
-        ollama_status = "❌ Not accessible"
+        ollama_status = "ERROR Not accessible"
 
     # Check model health actively
     try:
@@ -1428,19 +1303,19 @@ def show_system_status(current_model, current_online):
         else:
             model_health = model_manager.model_health.get(current_model, {})
             model_status_display = (
-                f"❌ {model_health.get('status', 'Unavailable').capitalize()}"
+                f"ERROR {model_health.get('status', 'Unavailable').capitalize()}"
             )
     except Exception:
-        model_status_display = "❌ Check Failed"
+        model_status_display = "ERROR Check Failed"
 
     status_text = f"""
 🖥️ **System Status:**
 • Ollama Service: {ollama_status}
 • Current Model: {current_model}
 • Model Status: {model_status_display}
-• Internet: {'🌐 Online' if current_online == 'true' else '🔌 Offline'}
+• Internet: {'ONLINE' if current_online == 'true' else 'OFFLINE'}
 • Memory Usage: {len(memory.get_context())} messages
-• Cache Status: {'✅ Enabled' if CACHE_ENABLED else '❌ Disabled'}
+• Cache Status: {'OK Enabled' if CACHE_ENABLED else 'ERROR Disabled'}
 
 📊 **Performance:**
 • Available Models: {len(model_manager.available_models)}
