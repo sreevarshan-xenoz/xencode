@@ -68,6 +68,8 @@ class TestMemoryModule(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.memory = ConversationMemory(max_items=5)
+        # Start a fresh session for each test
+        self.memory.start_session(f"test_session_{id(self)}")
     
     def test_add_message(self):
         """Test adding a message to memory"""

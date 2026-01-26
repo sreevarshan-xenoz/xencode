@@ -82,7 +82,7 @@ class ByteBotPanel(Container):
         super().__init__(*args, **kwargs)
         self.status_label: Optional[Label] = None
         self.input_field: Optional[Input] = None
-        self.log: Optional[ByteBotLog] = None
+        self.bytebot_log: Optional[ByteBotLog] = None
         self.current_mode = "assist"
 
     def compose(self):
@@ -100,8 +100,8 @@ class ByteBotPanel(Container):
             yield Button("Run", id="run", variant="primary")
             yield Button("Clear", id="clear", variant="default")
 
-        self.log = ByteBotLog()
-        yield self.log
+        self.bytebot_log = ByteBotLog()
+        yield self.bytebot_log
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
@@ -114,8 +114,8 @@ class ByteBotPanel(Container):
         elif button_id == "run":
             self.submit_intent()
         elif button_id == "clear":
-            if self.log:
-                self.log.clear()
+            if self.bytebot_log:
+                self.bytebot_log.clear()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.submit_intent()
@@ -142,8 +142,8 @@ class ByteBotPanel(Container):
         self.post_message(ByteBotTaskSubmitted(intent, self.current_mode))
 
     def log_result(self, content: str) -> None:
-        if self.log:
-            self.log.add_entry(content)
+        if self.bytebot_log:
+            self.bytebot_log.add_entry(content)
 
     def set_idle(self) -> None:
         self._update_status("idle")

@@ -267,7 +267,23 @@ class WorkflowEngine:
         # Find the start node
         start_nodes = [node for node in nodes if node.node_type == NodeType.START]
         if not start_nodes:
-            raise ValueError("No start node found in workflow")
+            # Fallback: check for INPUT nodes as start nodes
+            start_nodes = [node for node in nodes if node.node_type == NodeType.INPUT]
+            
+        if not start_nodes:
+            # Fallback: check for any node with no inputs (roots)
+            node_inputs = set()
+            for conn in connections:
+                node_inputs.add(conn.target_node_id)
+            
+            start_nodes = [node for node in nodes if node.id not in node_inputs]
+
+        if not start_nodes:
+            # If still no start node, just pick the first one
+            if nodes:
+                start_nodes = [nodes[0]]
+            else:
+                raise ValueError("No nodes in workflow")
         
         start_node = start_nodes[0]
         
@@ -338,6 +354,76 @@ class WorkflowEngine:
         return context["workflow_data"]
 
 
+class WorkflowGenerator:
+    """Generates workflows from natural language descriptions"""
+    
+    def __init__(self, hybrid_manager: HybridModelManager):
+        self.hybrid_manager = hybrid_manager
+    
+    async def generate_workflow(self, description: str) -> Optional[Dict[str, Any]]:
+        """Generate a workflow structure from a description"""
+        prompt = f"""
+        You are an expert AI workflow architect. Your goal is to convert a natural language description of a workflow into a JSON structure compatible with the Xencode Workflow Builder.
+
+        Available Node Types:
+        - start: Entry point
+        - input: Get user input (config: input_type, prompt)
+        - process: transform data (config: operation like "uppercase", "lowercase", "length")
+        - decision: branching logic (config: condition)
+        - output: display result
+        - model_call: AI model invocation (config: model_config, prompt_template)
+        - data_transform: general transformation
+        - conditional_branch: branch based on condition
+        - loop: repeat execution
+        - end: workflow termination
+
+        Available Connection Types:
+        - sequence: normal flow
+        - conditional: branch flow
+        - loop_back: return to previous node
+        - parallel: concurrent flow
+
+        Output Format (JSON):
+        {{
+          "nodes": [
+            {{
+              "id": "unique_id",
+              "node_type": "node_type_value",
+              "title": "Readable Title",
+              "description": "What this node does",
+              "config": {{ ... }},
+              "position": {{ "x": 100, "y": 100 }}
+            }}
+          ],
+          "connections": [
+            {{
+              "source_node_id": "source_id",
+              "target_node_id": "target_id",
+              "connection_type": "sequence"
+            }}
+          ]
+        }}
+
+        User Description: {description}
+
+        Generate the JSON workflow structure. Ensure node IDs are unique strings. Position nodes logically (e.g., left to right). Return ONLY the JSON.
+        """
+        
+        try:
+            response = await self.hybrid_manager.generate(prompt)
+            
+            # Clean up response if it contains markdown code blocks
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0].strip()
+                
+            return json.loads(response)
+        except Exception as e:
+            logger.error(f"Error generating workflow: {e}")
+            return None
+
+
 class WorkflowBuilder:
     """Visual workflow builder with drag-and-drop interface"""
     
@@ -347,9 +433,86 @@ class WorkflowBuilder:
         self.templates: List[WorkflowTemplate] = []
         self.engine = WorkflowEngine()
         self.console = Console()
+        self.hybrid_manager = None
         
         # Load default templates
         self._load_default_templates()
+        
+    def set_hybrid_manager(self, hybrid_manager: HybridModelManager):
+        """Set the hybrid model manager"""
+        self.hybrid_manager = hybrid_manager
+        self.engine.set_hybrid_manager(hybrid_manager)
+        
+    async def generate_from_description(self, description: str) -> bool:
+        """Generate a workflow from natural language description"""
+        if not self.hybrid_manager:
+            return False
+            
+        generator = WorkflowGenerator(self.hybrid_manager)
+        workflow_data = await generator.generate_workflow(description)
+        
+        if not workflow_data:
+            return False
+            
+        # Clear current workflow
+        self.nodes = []
+        self.connections = []
+        
+        try:
+            # Load nodes
+            for node_data in workflow_data.get("nodes", []):
+                # Handle potential enum conversion issues
+                node_type_str = node_data["node_type"]
+                try:
+                    node_type = NodeType(node_type_str)
+                except ValueError:
+                    # Fallback or mapping if needed
+                    logger.warning(f"Unknown node type: {node_type_str}, defaulting to PROCESS")
+                    node_type = NodeType.PROCESS
+
+                node = WorkflowNode(
+                    id=node_data["id"],
+                    node_type=node_type,
+                    title=node_data["title"],
+                    description=node_data.get("description", ""),
+                    config=node_data.get("config", {}),
+                    position=NodePosition(**node_data["position"]),
+                    inputs=[], # Will be populated by connections
+                    outputs=[], # Will be populated by connections
+                    metadata=node_data.get("metadata", {})
+                )
+                self.nodes.append(node)
+            
+            # Load connections
+            for conn_data in workflow_data.get("connections", []):
+                conn_type_str = conn_data["connection_type"]
+                try:
+                    conn_type = ConnectionType(conn_type_str)
+                except ValueError:
+                    conn_type = ConnectionType.SEQUENCE
+
+                connection = WorkflowConnection(
+                    id=str(uuid.uuid4()), # Generate new ID just in case
+                    source_node_id=conn_data["source_node_id"],
+                    target_node_id=conn_data["target_node_id"],
+                    connection_type=conn_type,
+                    label=conn_data.get("label", ""),
+                    metadata=conn_data.get("metadata", {})
+                )
+                
+                # Update node inputs/outputs
+                source_node = self.get_node_by_id(connection.source_node_id)
+                target_node = self.get_node_by_id(connection.target_node_id)
+                
+                if source_node and target_node:
+                    source_node.outputs.append(target_node.id)
+                    target_node.inputs.append(source_node.id)
+                    self.connections.append(connection)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error applying generated workflow: {e}")
+            return False
     
     def _load_default_templates(self):
         """Load default workflow templates"""
@@ -673,6 +836,14 @@ class VisualWorkflowInterface:
         """Run the interactive workflow builder"""
         self.console.print(Panel("[bold blue]Xencode Visual Workflow Builder[/bold blue]"))
         
+        # Try to initialize hybrid manager if not already set
+        if not self.builder.hybrid_manager:
+            try:
+                from ..ai.hybrid_model_architecture import get_hybrid_model_manager
+                self.builder.set_hybrid_manager(get_hybrid_model_manager())
+            except ImportError:
+                pass
+        
         while True:
             self.console.print("\n[bold]Workflow Builder Menu:[/bold]")
             self.console.print("1. View current workflow")
@@ -683,9 +854,10 @@ class VisualWorkflowInterface:
             self.console.print("6. Execute workflow")
             self.console.print("7. Save workflow")
             self.console.print("8. Load workflow")
-            self.console.print("9. Exit")
+            self.console.print("9. Generate workflow from description")
+            self.console.print("10. Exit")
             
-            choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"])
+            choice = Prompt.ask("Select an option", choices=[str(i) for i in range(1, 11)])
             
             if choice == "1":
                 self._view_workflow()
@@ -704,8 +876,29 @@ class VisualWorkflowInterface:
             elif choice == "8":
                 await self._load_workflow_interactive()
             elif choice == "9":
+                await self._generate_workflow_interactive()
+            elif choice == "10":
                 self.console.print("[green]Goodbye![/green]")
                 break
+                
+    async def _generate_workflow_interactive(self):
+        """Interactively generate a workflow from description"""
+        self.console.print("\n[bold]Generate Workflow:[/bold]")
+        
+        if not self.builder.hybrid_manager:
+            self.console.print("[red]Hybrid Model Manager not available. Cannot generate workflow.[/red]")
+            return
+            
+        description = Prompt.ask("Describe the workflow you want to create")
+        
+        with self.console.status("[bold green]Generating workflow...[/bold green]"):
+            success = await self.builder.generate_from_description(description)
+            
+        if success:
+            self.console.print("[green]Workflow generated successfully![/green]")
+            self._view_workflow()
+        else:
+            self.console.print("[red]Failed to generate workflow[/red]")
     
     def _view_workflow(self):
         """View the current workflow"""
@@ -891,71 +1084,100 @@ def get_visual_workflow_builder() -> VisualWorkflowInterface:
 if __name__ == "__main__":
     import asyncio
     
-    async def test_visual_workflow_builder():
-        """Test the visual workflow builder"""
-        print("Testing Visual Workflow Builder...")
-        
-        # Create workflow builder
-        vwb = get_visual_workflow_builder()
-        
-        print("\n1. Testing basic workflow creation:")
-        # Add nodes to the workflow
-        input_node = vwb.builder.add_node(
-            NodeType.INPUT,
-            "User Input",
-            "Get input from user",
-            {"input_type": "text", "prompt": "Enter your query:"},
-            x=100, y=100
-        )
-        
-        model_node = vwb.builder.add_node(
-            NodeType.MODEL_CALL,
-            "AI Model",
-            "Process with AI model",
-            {
-                "model_config": {"task_type": "general", "sensitivity": 2},
-                "prompt_template": "Analyze this query and provide a response: {input}"
-            },
-            x=300, y=100
-        )
-        
-        output_node = vwb.builder.add_node(
-            NodeType.OUTPUT,
-            "Display Output",
-            "Show the result",
-            {},
-            x=500, y=100
-        )
-        
-        # Connect the nodes
-        vwb.builder.connect_nodes(input_node.id, model_node.id)
-        vwb.builder.connect_nodes(model_node.id, output_node.id)
-        
-        print(f"Created workflow with {len(vwb.builder.nodes)} nodes and {len(vwb.builder.connections)} connections")
-        
-        print("\n2. Testing workflow visualization:")
-        tree = vwb.builder.visualize_workflow()
-        print("Workflow visualization created successfully")
-        
-        print("\n3. Testing template functionality:")
-        templates = vwb.builder.get_templates_by_category("development")
-        print(f"Found {len(templates)} development templates")
-        
-        # Test instantiating a template
-        if vwb.builder.templates:
-            first_template = vwb.builder.templates[0]
-            success = vwb.builder.instantiate_template(first_template.id)
-            print(f"Template instantiation: {'Success' if success else 'Failed'}")
-        
-        print("\n4. Testing workflow execution (will fail without hybrid manager):")
-        try:
-            # This will fail without a hybrid manager, which is expected
-            result = await vwb.builder.execute_current_workflow({"input": "test query"})
-            print(f"Execution result: {result}")
-        except Exception as e:
-            print(f"Expected execution error (no hybrid manager): {type(e).__name__}")
-        
-        print("\n✅ Visual Workflow Builder tests completed!")
+    # Check if we should run in interactive mode
+    import sys
     
-    # Run the test
-    asyncio.run(test_visual_workflow_builder())
+    # Mock Hybrid Manager for testing
+    class MockHybridManager:
+        async def generate(self, prompt, context=None):
+            return f"Mock response for: {prompt[:30]}..."
+
+    if "--interactive" in sys.argv:
+        async def run_interactive():
+            vwb = get_visual_workflow_builder()
+            # Set mock manager if real one fails
+            try:
+                from ..ai.hybrid_model_architecture import get_hybrid_model_manager
+                vwb.builder.set_hybrid_manager(get_hybrid_model_manager())
+            except (ImportError, ValueError):
+                print("Using mock manager for interactive mode")
+                vwb.builder.set_hybrid_manager(MockHybridManager())
+                
+            await vwb.run_interactive_mode()
+        
+        try:
+            asyncio.run(run_interactive())
+        except KeyboardInterrupt:
+            print("\nExiting...")
+    else:
+        async def test_visual_workflow_builder():
+            """Test the visual workflow builder"""
+            print("Testing Visual Workflow Builder...")
+            
+            # Create workflow builder
+            vwb = get_visual_workflow_builder()
+            
+            # Set mock manager
+            vwb.builder.set_hybrid_manager(MockHybridManager())
+            
+            print("\n1. Testing basic workflow creation:")
+            # Add nodes to the workflow
+            input_node = vwb.builder.add_node(
+                NodeType.INPUT,
+                "User Input",
+                "Get input from user",
+                {"input_type": "text", "prompt": "Enter your query:"},
+                x=100, y=100
+            )
+            
+            model_node = vwb.builder.add_node(
+                NodeType.MODEL_CALL,
+                "AI Model",
+                "Process with AI model",
+                {
+                    "model_config": {"task_type": "general", "sensitivity": 2},
+                    "prompt_template": "Analyze this query and provide a response: {input}"
+                },
+                x=300, y=100
+            )
+            
+            output_node = vwb.builder.add_node(
+                NodeType.OUTPUT,
+                "Display Output",
+                "Show the result",
+                {},
+                x=500, y=100
+            )
+            
+            # Connect the nodes
+            vwb.builder.connect_nodes(input_node.id, model_node.id)
+            vwb.builder.connect_nodes(model_node.id, output_node.id)
+            
+            print(f"Created workflow with {len(vwb.builder.nodes)} nodes and {len(vwb.builder.connections)} connections")
+            
+            print("\n2. Testing workflow visualization:")
+            tree = vwb.builder.visualize_workflow()
+            print("Workflow visualization created successfully")
+            
+            print("\n3. Testing template functionality:")
+            templates = vwb.builder.get_templates_by_category("development")
+            print(f"Found {len(templates)} development templates")
+            
+            # Test instantiating a template
+            if vwb.builder.templates:
+                first_template = vwb.builder.templates[0]
+                success = vwb.builder.instantiate_template(first_template.id)
+                print(f"Template instantiation: {'Success' if success else 'Failed'}")
+            
+            print("\n4. Testing workflow execution:")
+            try:
+                # This should now succeed with the mock manager
+                result = await vwb.builder.execute_current_workflow({"input": "test query"})
+                print(f"Execution result: {result}")
+            except Exception as e:
+                print(f"Execution error: {type(e).__name__}: {e}")
+            
+            print("\n✅ Visual Workflow Builder tests completed!")
+        
+        # Run the test
+        asyncio.run(test_visual_workflow_builder())
