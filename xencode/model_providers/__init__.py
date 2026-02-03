@@ -708,6 +708,127 @@ class GoogleGeminiProvider(ModelProvider):
         return "google_gemini"
 
 
+class QwenProvider(ModelProvider):
+    """Qwen AI model provider implementation with OAuth2 device flow authentication."""
+
+    def __init__(self, api_key: str = "", base_url: str = "https://chat.qwen.ai/v1"):
+        # For Qwen, we'll use the authentication manager instead of a static API key
+        super().__init__(api_key, base_url)
+        from xencode.auth.qwen_auth import qwen_auth_manager
+        self.auth_manager = qwen_auth_manager
+
+    async def list_models(self) -> List[ModelInfo]:
+        """List available models from Qwen (hardcoded for now)."""
+        # Qwen doesn't have a public models endpoint, so we'll return known models
+        known_models = [
+            ModelInfo(
+                name="qwen-max-coder-7b-instruct",
+                provider="qwen",
+                max_tokens=4096,
+                context_window=32768,
+                capabilities=["text", "chat", "instruct", "code"],
+                pricing={"input": 0.001, "output": 0.002}  # Placeholder pricing
+            ),
+            ModelInfo(
+                name="qwen-max",
+                provider="qwen",
+                max_tokens=4096,
+                context_window=32768,
+                capabilities=["text", "chat", "instruct"],
+                pricing={"input": 0.001, "output": 0.002}  # Placeholder pricing
+            ),
+            ModelInfo(
+                name="qwen-plus",
+                provider="qwen",
+                max_tokens=4096,
+                context_window=128000,
+                capabilities=["text", "chat", "instruct"],
+                pricing={"input": 0.002, "output": 0.004}  # Placeholder pricing
+            )
+        ]
+        return known_models
+
+    async def generate(self,
+                     prompt: str,
+                     model: str,
+                     max_tokens: int = 1024,
+                     temperature: float = 0.7,
+                     stream: bool = False) -> AsyncIterator[str]:
+        """Generate text from Qwen model."""
+        # For Qwen, we'll use the chat endpoint as it's more versatile
+        messages = [{"role": "user", "content": prompt}]
+        async for chunk in self.chat(messages, model, max_tokens, temperature, stream):
+            yield chunk
+
+    async def chat(self,
+                  messages: List[Dict[str, str]],
+                  model: str,
+                  max_tokens: int = 1024,
+                  temperature: float = 0.7,
+                  stream: bool = False) -> AsyncIterator[str]:
+        """Chat with Qwen model using authenticated API."""
+        # Authenticate and get credentials
+        try:
+            creds = await self.auth_manager.get_or_authenticate()
+
+            if not self.session:
+                self.session = aiohttp.ClientSession()
+
+            headers = {
+                'Authorization': f'Bearer {creds.access_token}',
+                'Content-Type': 'application/json'
+            }
+
+            payload = {
+                'model': model,
+                'messages': messages,
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+                'stream': stream  # Note: Qwen may not support streaming in all cases
+            }
+
+            # For now, implement non-streaming as streaming may not be supported
+            # or requires special handling
+            async with self.session.post(f"{self.base_url}/chat/completions",
+                                      headers=headers, json=payload) as response:
+                if response.status == 401:  # Unauthorized - token expired
+                    # Try to refresh and retry once
+                    if creds.refresh_token:
+                        await self.auth_manager.refresh_access_token(creds.refresh_token)
+                        # Get new credentials and retry
+                        new_creds = await self.auth_manager.get_or_authenticate()
+                        headers['Authorization'] = f'Bearer {new_creds.access_token}'
+
+                        async with self.session.post(f"{self.base_url}/chat/completions",
+                                                   headers=headers, json=payload) as retry_response:
+                            if retry_response.status != 200:
+                                yield f"Error: API request failed after refresh - {retry_response.status}"
+                                return
+
+                            data = await retry_response.json()
+                            content = data["choices"][0]["message"]["content"]
+                            yield content
+                    else:
+                        yield "Error: Access token expired and no refresh token available"
+                        return
+
+                elif response.status != 200:
+                    error_data = await response.json()
+                    yield f"Error: {error_data.get('error', {}).get('message', f'API request failed - {response.status}')}"
+                    return
+
+                data = await response.json()
+                content = data["choices"][0]["message"]["content"]
+                yield content
+
+        except Exception as e:
+            yield f"Error: {str(e)}"
+
+    def get_provider_name(self) -> str:
+        """Get the name of this provider."""
+        return "qwen"
+
+
 class OpenRouterProvider(ModelProvider):
     """OpenRouter model provider implementation."""
 
@@ -877,6 +998,8 @@ class ModelProviderManager:
                 provider = GoogleGeminiProvider(api_key, base_url or "https://generativelanguage.googleapis.com/v1beta")
             elif name == "openrouter":
                 provider = OpenRouterProvider(api_key, base_url or "https://openrouter.ai/api/v1")
+            elif name == "qwen":
+                provider = QwenProvider(api_key, base_url or "https://chat.qwen.ai/v1")
             else:
                 print(f"Unknown provider: {name}")
                 continue
@@ -948,6 +1071,7 @@ __all__ = [
     'HuggingFaceProvider',
     'GoogleGeminiProvider',
     'OpenRouterProvider',
+    'QwenProvider',
     'ModelProviderManager',
     'get_model_provider_manager'
 ]
