@@ -29,6 +29,7 @@ from xencode.tui.utils.model_checker import ModelChecker
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from xencode_core import run_streaming_query, ModelManager, ConversationMemory
+from xencode.auth.qwen_auth import qwen_auth_manager, QwenAuthError
 
 
 class XencodeApp(App):
@@ -112,6 +113,7 @@ class XencodeApp(App):
         Binding("ctrl+shift+c", "commit_dialog", "Commit"),
         Binding("ctrl+t", "toggle_terminal", "Terminal"),
         Binding("ctrl+l", "clear_chat", "Clear Chat"),
+        Binding("ctrl+shift+l", "logout_qwen", "Logout Qwen"),
         Binding("f1", "help", "Help"),
     ]
     
@@ -136,8 +138,13 @@ class XencodeApp(App):
             # Filter out embedding models for chat
             chat_models = [m for m in available_models if "embed" not in m]
             if chat_models:
-                # Prefer qwen or llama if available
-                preferred = [m for m in chat_models if "qwen" in m.lower() or "llama" in m.lower()]
+                # Prefer qwen cloud models, then local qwen, then llama
+                cloud_qwen_models = [m for m in chat_models if any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
+                local_qwen_models = [m for m in chat_models if "qwen" in m.lower() and not any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
+                llama_models = [m for m in chat_models if "llama" in m.lower()]
+
+                # Prioritize cloud Qwen models first, then local Qwen, then Llama
+                preferred = cloud_qwen_models or local_qwen_models or llama_models
                 self.current_model = preferred[0] if preferred else chat_models[0]
             else:
                 self.current_model = available_models[0]
@@ -470,7 +477,7 @@ class XencodeApp(App):
                 response = await reasoner.reason(query)
                 full_response = response.fused_response
                 self.chat_panel.update_streaming_message(full_response)
-                
+
                 # Show ensemble stats
                 stats_msg = f"\n\n_Ensemble: {len(response.model_responses)} models, {response.total_time_ms:.0f}ms, consensus: {response.consensus_score:.2f}_"
                 self.chat_panel.update_streaming_message(full_response + stats_msg)
@@ -693,34 +700,56 @@ class XencodeApp(App):
         """
         import aiohttp
         import json
-        
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": self.current_model,
-            "prompt": prompt,
-            "stream": True
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    if response.status != 200:
-                        yield f"\n\nError: API returned status {response.status}"
-                        return
-                        
-                    async for line in response.content:
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                if "response" in data:
-                                    yield data["response"]
-                                if "error" in data:
-                                    yield f"\n\nError: {data['error']}"
-                            except json.JSONDecodeError:
-                                pass
-                                
-        except Exception as e:
-            yield f"\n\nError: {str(e)}"
+
+        # Check if we're using a Qwen model that requires authentication
+        if "qwen" in self.current_model.lower() and any(qwen_model in self.current_model.lower() for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]):
+            # Use Qwen AI API with authentication via provider
+            try:
+                from xencode.model_providers import QwenProvider
+
+                # Create Qwen provider instance
+                provider = QwenProvider()
+
+                # Format messages for chat API
+                messages = [{"role": "user", "content": prompt}]
+
+                # Call Qwen completion API via provider
+                full_response = ""
+                async for chunk in provider.chat(messages, self.current_model, max_tokens=2048, temperature=0.7):
+                    full_response += chunk
+                    yield chunk
+
+            except Exception as e:
+                yield f"\n\nError calling Qwen API: {str(e)}"
+        else:
+            # Use local Ollama API (existing behavior)
+            url = "http://localhost:11434/api/generate"
+            payload = {
+                "model": self.current_model,
+                "prompt": prompt,
+                "stream": True
+            }
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload) as response:
+                        if response.status != 200:
+                            yield f"\n\nError: API returned status {response.status}"
+                            return
+
+                        async for line in response.content:
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    if "response" in data:
+                                        yield data["response"]
+                                    if "error" in data:
+                                        yield f"\n\nError: {data['error']}"
+                                except json.JSONDecodeError:
+                                    pass
+
+            except Exception as e:
+                yield f"\n\nError: {str(e)}"
 
     def _get_language(self, suffix: str) -> str:
         """Get language identifier for file
@@ -819,21 +848,22 @@ class XencodeApp(App):
         if self.chat_panel:
             help_text = """
             # Xencode TUI Keybindings
-            
+
             - **Ctrl+E**: Toggle file explorer
             - **Ctrl+M**: Toggle model selector
             - **Ctrl+B**: Toggle ByteBot panel
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
             - **Ctrl+C**: Quit application
+            - **Ctrl+Shift+L**: Logout of Qwen AI
             - **F1**: Show this help
             - **Tab**: Switch focus between panels
             - **Ctrl+Enter**: Send chat message
-            
+
             ## Ensemble Mode
             Select 2-4 models in Model Selector to enable ensemble.
             Choose method: Vote, Weighted, Consensus, or Hybrid.
-            
+
             ## Git Integration
             - **Ctrl+G**: Refresh Git status
             - Status indicators: M (Modified), A (Added), D (Deleted), ? (Untracked)
@@ -891,6 +921,17 @@ class XencodeApp(App):
         else:
             terminal.add_class("visible")
             terminal.query_one("Input").focus()
+
+    def action_logout_qwen(self) -> None:
+        """Log out of Qwen authentication and clear cached credentials"""
+        try:
+            success = qwen_auth_manager.clear_credentials()
+            if success:
+                self.notify("Successfully logged out of Qwen AI", severity="information")
+            else:
+                self.notify("Failed to clear Qwen credentials", severity="warning")
+        except Exception as e:
+            self.notify(f"Error clearing Qwen credentials: {e}", severity="error")
 
     def on_unmount(self) -> None:
         """Called when app is unmounted"""
