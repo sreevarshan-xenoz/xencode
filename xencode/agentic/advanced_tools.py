@@ -13,7 +13,16 @@ from duckduckgo_search import DDGS
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from multimodal.code_analyzer import CodeAnalyzer
+try:
+    from multimodal.code_analyzer import CodeAnalyzer
+except ImportError:
+    # If multimodal module is not available, create a dummy class
+    class CodeAnalyzer:
+        def analyze_python_file(self, path):
+            return {"error": "CodeAnalyzer not available"}
+
+        def analyze_directory(self, path):
+            return {"error": "CodeAnalyzer not available"}
 
 
 # ============================================================================
