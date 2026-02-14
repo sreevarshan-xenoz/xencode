@@ -667,6 +667,104 @@ class CommandPredictor:
                 results.append(cmd_data)
         
         return results
+    
+    async def get_command_statistics(self, command: str = None) -> Dict[str, Any]:
+        """Get statistics for a specific command or all commands"""
+        if command:
+            stats = {
+                'command': command,
+                'frequency': self.command_frequency.get(command, 0),
+                'success_rate': self._calculate_success_rate(command),
+                'last_used': self._get_last_used(command),
+                'common_sequences': self._get_common_sequences(command),
+                'temporal_usage': self._get_temporal_usage(command)
+            }
+        else:
+            stats = {
+                'total_commands': len(self.history),
+                'unique_commands': len(self.command_frequency),
+                'most_frequent': self.command_frequency.most_common(10),
+                'success_rate': self._calculate_overall_success_rate(),
+                'patterns_detected': sum(len(v) for v in self.command_patterns.values())
+            }
+        
+        return stats
+    
+    def _calculate_success_rate(self, command: str) -> float:
+        """Calculate success rate for a command"""
+        stats = self.success_rates.get(command, {'success': 0, 'failure': 0})
+        total = stats['success'] + stats['failure']
+        if total == 0:
+            return 0.0
+        return stats['success'] / total
+    
+    def _calculate_overall_success_rate(self) -> float:
+        """Calculate overall success rate"""
+        total_success = sum(stats['success'] for stats in self.success_rates.values())
+        total_failure = sum(stats['failure'] for stats in self.success_rates.values())
+        total = total_success + total_failure
+        if total == 0:
+            return 0.0
+        return total_success / total
+    
+    def _get_last_used(self, command: str) -> Optional[str]:
+        """Get last usage timestamp for a command"""
+        for cmd_data in reversed(self.history):
+            if cmd_data.get('command') == command:
+                return cmd_data.get('timestamp')
+        return None
+    
+    def _get_common_sequences(self, command: str) -> List[Tuple[str, int]]:
+        """Get common command sequences following this command"""
+        if command in self.command_sequences:
+            return self.command_sequences[command].most_common(5)
+        return []
+    
+    def _get_temporal_usage(self, command: str) -> Dict[str, int]:
+        """Get temporal usage pattern for a command"""
+        usage = {}
+        for time_key, commands in self.temporal_patterns.items():
+            if command in commands:
+                usage[time_key] = commands[command]
+        return usage
+    
+    async def analyze_patterns(self) -> Dict[str, Any]:
+        """Analyze all detected patterns in command history"""
+        analysis = {
+            'command_patterns': {},
+            'sequence_patterns': [],
+            'temporal_patterns': {},
+            'context_patterns': {}
+        }
+        
+        # Analyze command patterns
+        for base, patterns in self.command_patterns.items():
+            analysis['command_patterns'][base] = {
+                'count': len(patterns),
+                'examples': patterns[:5]
+            }
+        
+        # Analyze sequence patterns
+        for cmd, sequences in self.command_sequences.items():
+            if sequences:
+                top_sequence = sequences.most_common(1)[0]
+                analysis['sequence_patterns'].append({
+                    'from': cmd,
+                    'to': top_sequence[0],
+                    'frequency': top_sequence[1]
+                })
+        
+        # Analyze temporal patterns
+        for time_key, commands in self.temporal_patterns.items():
+            if commands:
+                analysis['temporal_patterns'][time_key] = commands.most_common(5)
+        
+        # Analyze context patterns
+        for context_key, commands in self.context_patterns.items():
+            if commands:
+                analysis['context_patterns'][context_key] = commands.most_common(5)
+        
+        return analysis
 
 
 class ContextAnalyzer:
