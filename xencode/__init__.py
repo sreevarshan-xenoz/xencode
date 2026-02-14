@@ -154,6 +154,16 @@ except ImportError:
     WarpAIIntegration = ProjectAnalyzer = AdvancedAISuggester = None
     ProjectContext = CommandSuggestionContext = get_warp_ai_integration = None
 
+# Feature system
+try:
+    from .features import (
+        FeatureBase, FeatureConfig, FeatureStatus, FeatureError,
+        FeatureManager, FeatureSystemConfig, FeatureConfigManager
+    )
+except ImportError:
+    FeatureBase = FeatureConfig = FeatureStatus = FeatureError = None
+    FeatureManager = FeatureSystemConfig = FeatureConfigManager = None
+
 __all__ = [
     # Core systems
     "ContextCacheManager", "ModelStabilityManager", "SmartContextManager",
@@ -192,5 +202,9 @@ __all__ = [
     "OutputRenderer", "WarpLayoutManager",
     "CommandTestingHarness", "TestResult", "run_comprehensive_test",
     "WarpAIIntegration", "ProjectAnalyzer", "AdvancedAISuggester",
-    "ProjectContext", "CommandSuggestionContext", "get_warp_ai_integration"
+    "ProjectContext", "CommandSuggestionContext", "get_warp_ai_integration",
+    
+    # Feature system
+    "FeatureBase", "FeatureConfig", "FeatureStatus", "FeatureError",
+    "FeatureManager", "FeatureSystemConfig", "FeatureConfigManager"
 ]
