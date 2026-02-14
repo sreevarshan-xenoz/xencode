@@ -24,6 +24,10 @@ from xencode.ai_ensembles import QueryRequest, EnsembleMethod, create_ensemble_r
 from xencode.ollama_optimizer import create_ollama_optimizer, QuantizationLevel
 from xencode.rlhf_tuner import RLHFConfig, create_rlhf_tuner
 
+# Import feature system
+from xencode.features import FeatureManager, FeatureConfig, FeatureSystemConfig, FeatureConfigManager
+from xencode.features.core.cli import FeatureCommandGroup
+
 console = Console()
 
 
@@ -138,6 +142,75 @@ def query(prompt, models, method, max_tokens, temperature, timeout, rag):
             sys.exit(1)
     
     asyncio.run(_run_query())
+
+
+@cli.group()
+def features():
+    """Feature management"""
+    pass
+
+
+@features.command()
+def list():
+    """List all available features"""
+    console.print("[blue]📋 Listing available features...[/blue]")
+    
+    feature_manager = FeatureManager()
+    features = feature_manager.get_available_features()
+    
+    table = Table(title="Available Features")
+    table.add_column("Name", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Version", style="yellow")
+    
+    for feature_name in sorted(features):
+        feature = feature_manager.get_feature(feature_name)
+        if feature:
+            status = feature.get_status().value
+            version = feature.version
+        else:
+            status = "not_loaded"
+            version = "unknown"
+        
+        table.add_row(feature_name, status, version)
+    
+    console.print(table)
+
+
+@features.command()
+@click.argument('feature_name')
+def enable(feature_name):
+    """Enable a feature"""
+    console.print(f"[blue]⚡ Enabling feature: {feature_name}[/blue]")
+    
+    async def _enable():
+        feature_manager = FeatureManager()
+        success = await feature_manager.initialize_feature(feature_name)
+        
+        if success:
+            console.print(f"[green]✅ Feature '{feature_name}' enabled successfully![/green]")
+        else:
+            console.print(f"[red]❌ Failed to enable feature '{feature_name}'[/red]")
+    
+    asyncio.run(_enable())
+
+
+@features.command()
+@click.argument('feature_name')
+def disable(feature_name):
+    """Disable a feature"""
+    console.print(f"[blue]🛑 Disabling feature: {feature_name}[/blue]")
+    
+    async def _disable():
+        feature_manager = FeatureManager()
+        success = await feature_manager.shutdown_feature(feature_name)
+        
+        if success:
+            console.print(f"[green]✅ Feature '{feature_name}' disabled successfully![/green]")
+        else:
+            console.print(f"[red]❌ Failed to disable feature '{feature_name}'[/red]")
+    
+    asyncio.run(_disable())
 
 
 @cli.group()
@@ -691,6 +764,241 @@ def bytebot(intent, mode, raw):
 
     except Exception as e:
         console.print(f"[red]❌ ByteBot failed: {e}[/red]")
+
+
+@cli.group()
+def review():
+    """AI Code Review commands"""
+    pass
+
+@review.command()
+@click.argument('url', required=True)
+@click.option('--platform', type=click.Choice(['github', 'gitlab', 'bitbucket']), 
+              help='Platform (auto-detected if not specified)')
+@click.option('--format', type=click.Choice(['text', 'markdown', 'json', 'html']), 
+              default='text', help='Output format')
+@click.option('--severity', type=click.Choice(['critical', 'high', 'medium', 'low']), 
+              help='Filter by minimum severity level')
+@click.option('--output', '-o', type=click.Path(), help='Save report to file')
+@click.pass_context
+def pr(ctx, url, platform, format, severity, output):
+    """
+    Review a pull request
+    
+    Examples:
+      xencode review pr https://github.com/owner/repo/pull/123
+      xencode review pr https://gitlab.com/owner/repo/-/merge_requests/45 --format markdown
+      xencode review pr <url> --severity high --output report.md
+    """
+    console.print(f"[cyan]🔍 Analyzing pull request: {url}[/cyan]")
+    
+    async def _review_pr():
+        try:
+            from xencode.features.code_review import CodeReviewFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="code_review", enabled=True)
+            feature = CodeReviewFeature(config)
+            await feature._initialize()
+            
+            # Analyze PR
+            with console.status("[bold blue]🤖 AI reviewing pull request..."):
+                review = await feature.analyze_pr(url, platform or 'github')
+            
+            # Filter by severity if specified
+            if severity:
+                severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+                min_level = severity_order[severity]
+                
+                # Filter issues
+                if 'issues' in review:
+                    review['issues'] = [
+                        issue for issue in review['issues']
+                        if severity_order.get(issue.get('severity', 'low'), 3) <= min_level
+                    ]
+            
+            # Generate formatted report
+            report = feature.generate_formatted_report(review, format)
+            
+            # Output report
+            if output:
+                Path(output).write_text(report)
+                console.print(f"[green]✅ Report saved to {output}[/green]")
+            else:
+                console.print("\n" + report)
+            
+            # Show summary
+            total_issues = len(review.get('issues', []))
+            console.print(f"\n[yellow]📊 Found {total_issues} issues[/yellow]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ PR review failed: {e}[/red]")
+            import traceback
+            if ctx.obj.get('verbose'):
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_review_pr())
+
+
+@review.command()
+@click.argument('path', required=True, type=click.Path(exists=True))
+@click.option('--language', '-l', help='Programming language (auto-detected if not specified)')
+@click.option('--format', type=click.Choice(['text', 'markdown', 'json', 'html']), 
+              default='text', help='Output format')
+@click.option('--severity', type=click.Choice(['critical', 'high', 'medium', 'low']), 
+              help='Filter by minimum severity level')
+@click.option('--output', '-o', type=click.Path(), help='Save report to file')
+@click.pass_context
+def file(ctx, path, language, format, severity, output):
+    """
+    Review a specific file
+    
+    Examples:
+      xencode review file src/main.py
+      xencode review file app.js --language javascript
+      xencode review file code.rs --severity high --format markdown
+    """
+    console.print(f"[cyan]🔍 Analyzing file: {path}[/cyan]")
+    
+    async def _review_file():
+        try:
+            from xencode.features.code_review import CodeReviewFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="code_review", enabled=True)
+            feature = CodeReviewFeature(config)
+            await feature._initialize()
+            
+            # Analyze file
+            with console.status("[bold blue]🤖 AI reviewing file..."):
+                review = await feature.analyze_file(path, language)
+            
+            # Filter by severity if specified
+            if severity:
+                severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+                min_level = severity_order[severity]
+                
+                # Filter issues
+                if 'issues' in review:
+                    review['issues'] = [
+                        issue for issue in review['issues']
+                        if severity_order.get(issue.get('severity', 'low'), 3) <= min_level
+                    ]
+            
+            # Generate formatted report
+            report = feature.generate_formatted_report(review, format)
+            
+            # Output report
+            if output:
+                Path(output).write_text(report)
+                console.print(f"[green]✅ Report saved to {output}[/green]")
+            else:
+                console.print("\n" + report)
+            
+            # Show summary
+            total_issues = len(review.get('issues', []))
+            console.print(f"\n[yellow]📊 Found {total_issues} issues[/yellow]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ File review failed: {e}[/red]")
+            import traceback
+            if ctx.obj.get('verbose'):
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_review_file())
+
+
+@review.command()
+@click.argument('path', required=True, type=click.Path(exists=True))
+@click.option('--language', '-l', help='Filter by programming language')
+@click.option('--format', type=click.Choice(['text', 'markdown', 'json', 'html']), 
+              default='text', help='Output format')
+@click.option('--severity', type=click.Choice(['critical', 'high', 'medium', 'low']), 
+              help='Filter by minimum severity level')
+@click.option('--output', '-o', type=click.Path(), help='Save report to file')
+@click.option('--patterns', multiple=True, help='File patterns to include (e.g., *.py, *.js)')
+@click.pass_context
+def directory(ctx, path, language, format, severity, output, patterns):
+    """
+    Review an entire directory
+    
+    Examples:
+      xencode review directory src/
+      xencode review directory . --language python
+      xencode review directory app/ --patterns "*.js" --patterns "*.ts"
+      xencode review directory . --severity high --format markdown -o report.md
+    """
+    console.print(f"[cyan]🔍 Analyzing directory: {path}[/cyan]")
+    
+    async def _review_directory():
+        try:
+            from xencode.features.code_review import CodeReviewFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="code_review", enabled=True)
+            feature = CodeReviewFeature(config)
+            await feature._initialize()
+            
+            # Prepare patterns
+            pattern_list = list(patterns) if patterns else None
+            
+            # Analyze directory
+            with console.status("[bold blue]🤖 AI reviewing directory..."):
+                review = await feature.analyze_directory(path, pattern_list)
+            
+            # Filter by language if specified
+            if language and 'files' in review:
+                review['files'] = [
+                    f for f in review['files']
+                    if f.get('language', '').lower() == language.lower()
+                ]
+            
+            # Filter by severity if specified
+            if severity:
+                severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+                min_level = severity_order[severity]
+                
+                # Filter issues
+                if 'issues' in review:
+                    review['issues'] = [
+                        issue for issue in review['issues']
+                        if severity_order.get(issue.get('severity', 'low'), 3) <= min_level
+                    ]
+            
+            # Generate formatted report
+            report = feature.generate_formatted_report(review, format)
+            
+            # Output report
+            if output:
+                Path(output).write_text(report)
+                console.print(f"[green]✅ Report saved to {output}[/green]")
+            else:
+                console.print("\n" + report)
+            
+            # Show summary
+            total_files = len(review.get('files', []))
+            total_issues = len(review.get('issues', []))
+            console.print(f"\n[yellow]📊 Analyzed {total_files} files, found {total_issues} issues[/yellow]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Directory review failed: {e}[/red]")
+            import traceback
+            if ctx.obj.get('verbose'):
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_review_directory())
 
 
 @cli.command()
