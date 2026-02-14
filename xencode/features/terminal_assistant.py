@@ -496,22 +496,161 @@ class CommandPredictor:
         
         return suggestions
     
-    async def record(self, command: str, success: bool = True) -> None:
+    def _get_sequence_suggestions(self) -> List[Dict[str, Any]]:
+        """Get suggestions based on command sequences"""
+        suggestions = []
+        
+        if len(self.history) >= 1:
+            last_cmd = self.history[-1].get('command')
+            if last_cmd in self.command_sequences:
+                for next_cmd, count in self.command_sequences[last_cmd].most_common(3):
+                    suggestions.append({
+                        'command': next_cmd,
+                        'score': count * 3.0,
+                        'source': 'sequence',
+                        'reason': f'Often follows "{last_cmd}"'
+                    })
+        
+        return suggestions
+    
+    def _get_temporal_suggestions(self) -> List[Dict[str, Any]]:
+        """Get suggestions based on temporal patterns"""
+        suggestions = []
+        current_hour = datetime.now().hour
+        hour_key = f"hour_{current_hour}"
+        
+        if hour_key in self.temporal_patterns:
+            for cmd, count in Counter(self.temporal_patterns[hour_key]).most_common(3):
+                suggestions.append({
+                    'command': cmd,
+                    'score': count * 2.0,
+                    'source': 'temporal',
+                    'reason': f'Commonly used at this time'
+                })
+        
+        return suggestions
+    
+    def _get_pattern_suggestions(self, partial: str = None) -> List[Dict[str, Any]]:
+        """Get suggestions based on detected patterns"""
+        suggestions = []
+        
+        if not partial:
+            return suggestions
+        
+        # Extract pattern (e.g., "git" from "git commit")
+        base_cmd = partial.split()[0] if partial else ''
+        
+        if base_cmd in self.command_patterns:
+            for pattern in self.command_patterns[base_cmd][:3]:
+                if pattern.startswith(partial):
+                    suggestions.append({
+                        'command': pattern,
+                        'score': 8.0,
+                        'source': 'pattern',
+                        'reason': f'Common {base_cmd} pattern'
+                    })
+        
+        return suggestions
+    
+    def _detect_command_pattern(self, command: str) -> Optional[str]:
+        """Detect and categorize command patterns"""
+        parts = command.split()
+        if len(parts) < 2:
+            return None
+        
+        base = parts[0]
+        
+        # Git patterns
+        if base == 'git':
+            if len(parts) >= 2:
+                return f"git_{parts[1]}"
+        
+        # Docker patterns
+        elif base == 'docker':
+            if len(parts) >= 2:
+                return f"docker_{parts[1]}"
+        
+        # Python patterns
+        elif base == 'python':
+            if '-m' in parts:
+                idx = parts.index('-m')
+                if idx + 1 < len(parts):
+                    return f"python_module_{parts[idx + 1]}"
+        
+        # NPM patterns
+        elif base == 'npm':
+            if len(parts) >= 2:
+                return f"npm_{parts[1]}"
+        
+        return None
+    
+    def _analyze_temporal_pattern(self, command: str, timestamp: str) -> None:
+        """Analyze and record temporal patterns"""
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            hour_key = f"hour_{dt.hour}"
+            self.temporal_patterns[hour_key][command] += 1
+            
+            # Day of week pattern
+            day_key = f"day_{dt.weekday()}"
+            self.temporal_patterns[day_key][command] += 1
+        except Exception:
+            pass
+    
+    def _analyze_context_pattern(self, command: str, context: Dict[str, Any]) -> None:
+        """Analyze and record context-based patterns"""
+        if not context:
+            return
+        
+        project_type = context.get('project_type')
+        if project_type:
+            self.context_patterns[project_type][command] += 1
+        
+        # Directory-based patterns
+        directory = context.get('directory')
+        if directory:
+            dir_name = Path(directory).name
+            self.context_patterns[f"dir_{dir_name}"][command] += 1
+    
+    async def record(self, command: str, success: bool = True, context: Dict[str, Any] = None) -> None:
         """Record a command execution"""
+        timestamp = datetime.now().isoformat()
+        
         self.history.append({
             'command': command,
-            'timestamp': datetime.now().isoformat(),
-            'success': success
+            'timestamp': timestamp,
+            'success': success,
+            'context': context
         })
         
         # Update frequency
         if success:
             self.command_frequency[command] += 1
         
+        # Update success rates
+        if success:
+            self.success_rates[command]['success'] += 1
+        else:
+            self.success_rates[command]['failure'] += 1
+        
         # Update sequences
         if len(self.history) >= 2:
             prev_cmd = self.history[-2].get('command')
             self.command_sequences[prev_cmd][command] += 1
+        
+        # Detect and record patterns
+        pattern = self._detect_command_pattern(command)
+        if pattern:
+            base = command.split()[0]
+            if command not in self.command_patterns[base]:
+                self.command_patterns[base].append(command)
+        
+        # Analyze temporal patterns
+        self._analyze_temporal_pattern(command, timestamp)
+        
+        # Analyze context patterns
+        if context:
+            self._analyze_context_pattern(command, context)
         
         # Trim history
         if len(self.history) > self.history_size:
