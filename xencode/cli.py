@@ -1001,6 +1001,525 @@ def directory(ctx, path, language, format, severity, output, patterns):
     asyncio.run(_review_directory())
 
 
+@cli.group()
+def terminal():
+    """Terminal Assistant commands"""
+    pass
+
+
+@terminal.command()
+@click.argument('context', required=False)
+@click.option('--partial', '-p', help='Partial command input')
+@click.option('--limit', '-n', type=int, default=5, help='Number of suggestions')
+@click.pass_context
+def suggest(ctx, context, partial, limit):
+    """
+    Suggest commands based on context
+    
+    Examples:
+      xencode terminal suggest
+      xencode terminal suggest --partial "git"
+      xencode terminal suggest "python project" --limit 10
+    """
+    console.print("[cyan]🤖 Analyzing context and generating suggestions...[/cyan]")
+    
+    async def _suggest():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(
+                name="terminal_assistant",
+                enabled=True,
+                config={'suggestion_limit': limit}
+            )
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Get suggestions
+            suggestions = await feature.suggest_commands(context=context, partial=partial)
+            
+            if not suggestions:
+                console.print("[yellow]No suggestions found[/yellow]")
+                await feature._shutdown()
+                return
+            
+            # Display suggestions
+            table = Table(title="💡 Command Suggestions")
+            table.add_column("#", style="cyan", width=4)
+            table.add_column("Command", style="green")
+            table.add_column("Score", style="yellow", width=8)
+            table.add_column("Source", style="blue", width=12)
+            table.add_column("Explanation", style="white")
+            
+            for idx, suggestion in enumerate(suggestions, 1):
+                table.add_row(
+                    str(idx),
+                    suggestion['command'],
+                    f"{suggestion.get('score', 0):.1f}",
+                    suggestion.get('source', 'unknown'),
+                    suggestion.get('explanation', '')[:50]
+                )
+            
+            console.print(table)
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Suggestion failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_suggest())
+
+
+@terminal.command()
+@click.argument('command', required=True)
+@click.pass_context
+def explain(ctx, command):
+    """
+    Explain what a command does
+    
+    Examples:
+      xencode terminal explain "git commit -m 'message'"
+      xencode terminal explain "docker run -it ubuntu"
+      xencode terminal explain "npm install --save-dev"
+    """
+    console.print(f"[cyan]📖 Explaining command: {command}[/cyan]")
+    
+    async def _explain():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Get explanation
+            explanation = await feature.explain_command(command)
+            
+            # Display explanation
+            console.print(Panel(
+                f"[bold]Command:[/bold] {explanation['command']}\n\n"
+                f"[bold]Description:[/bold]\n{explanation['description']}\n\n"
+                f"[bold]Arguments:[/bold]\n" +
+                "\n".join(f"  • {arg['value']}: {arg['description']}" 
+                         for arg in explanation.get('arguments', [])) +
+                (f"\n\n[bold]Examples:[/bold]\n" +
+                 "\n".join(f"  • {ex}" for ex in explanation.get('examples', []))
+                 if explanation.get('examples') else "") +
+                (f"\n\n[bold red]Warnings:[/bold red]\n" +
+                 "\n".join(f"  {warn}" for warn in explanation.get('warnings', []))
+                 if explanation.get('warnings') else ""),
+                title="Command Explanation",
+                border_style="blue"
+            ))
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Explanation failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_explain())
+
+
+@terminal.command()
+@click.argument('error', required=True)
+@click.option('--command', '-c', help='Command that caused the error')
+@click.option('--limit', '-n', type=int, default=5, help='Number of fix suggestions')
+@click.pass_context
+def fix(ctx, error, command, limit):
+    """
+    Suggest fixes for command errors
+    
+    Examples:
+      xencode terminal fix "command not found: npm"
+      xencode terminal fix "Permission denied" --command "rm file.txt"
+      xencode terminal fix "No such file or directory" -c "cd /nonexistent"
+    """
+    console.print(f"[cyan]🔧 Analyzing error and suggesting fixes...[/cyan]")
+    
+    async def _fix():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Get fix suggestions
+            fixes = await feature.fix_error(command or '', error)
+            
+            if not fixes:
+                console.print("[yellow]No fix suggestions found[/yellow]")
+                await feature._shutdown()
+                return
+            
+            # Display fixes
+            console.print(f"\n[bold green]Found {len(fixes[:limit])} fix suggestions:[/bold green]\n")
+            
+            for idx, fix_data in enumerate(fixes[:limit], 1):
+                console.print(Panel(
+                    f"[bold]Fix Command:[/bold]\n{fix_data['fix']}\n\n"
+                    f"[bold]Explanation:[/bold]\n{fix_data['explanation']}\n\n"
+                    f"[bold]Confidence:[/bold] {fix_data['confidence']:.1%}\n"
+                    f"[bold]Category:[/bold] {fix_data['category']}" +
+                    (f"\n[yellow]⚠️  Requires sudo[/yellow]" if fix_data.get('requires_sudo') else "") +
+                    (f"\n[yellow]📦 Requires installation: {fix_data.get('install_command')}[/yellow]" 
+                     if fix_data.get('requires_install') else "") +
+                    (f"\n\n[bold]Documentation:[/bold] {fix_data['documentation_url']}" 
+                     if fix_data.get('documentation_url') else "") +
+                    (f"\n\n[bold]Alternatives:[/bold]\n" +
+                     "\n".join(f"  • {alt}" for alt in fix_data.get('alternative_commands', []))
+                     if fix_data.get('alternative_commands') else ""),
+                    title=f"Fix #{idx}",
+                    border_style="green"
+                ))
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Fix suggestion failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_fix())
+
+
+@terminal.command()
+@click.argument('pattern', required=True)
+@click.option('--limit', '-n', type=int, default=20, help='Number of results')
+@click.pass_context
+def history(ctx, pattern, limit):
+    """
+    Search command history
+    
+    Examples:
+      xencode terminal history "git"
+      xencode terminal history "npm.*install"
+      xencode terminal history "docker" --limit 50
+    """
+    console.print(f"[cyan]🔍 Searching command history for: {pattern}[/cyan]")
+    
+    async def _search_history():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Search history
+            results = await feature.search_history(pattern)
+            
+            if not results:
+                console.print("[yellow]No matching commands found in history[/yellow]")
+                await feature._shutdown()
+                return
+            
+            # Display results
+            table = Table(title=f"📜 Command History ({len(results[:limit])} results)")
+            table.add_column("#", style="cyan", width=4)
+            table.add_column("Command", style="green")
+            table.add_column("Timestamp", style="yellow")
+            table.add_column("Status", style="white", width=10)
+            
+            for idx, cmd_data in enumerate(results[:limit], 1):
+                status = "✅ Success" if cmd_data.get('success', True) else "❌ Failed"
+                timestamp = cmd_data.get('timestamp', '')
+                if timestamp:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(timestamp)
+                        timestamp = dt.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        pass
+                
+                table.add_row(
+                    str(idx),
+                    cmd_data.get('command', ''),
+                    timestamp,
+                    status
+                )
+            
+            console.print(table)
+            
+            if len(results) > limit:
+                console.print(f"\n[yellow]Showing {limit} of {len(results)} results. Use --limit to see more.[/yellow]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ History search failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_search_history())
+
+
+@terminal.command()
+@click.pass_context
+def learn(ctx):
+    """
+    Start learning mode - interactive tutorial
+    
+    Learning mode helps you discover and master terminal commands
+    through interactive guidance and personalized suggestions.
+    """
+    console.print("[cyan]🎓 Starting Terminal Assistant learning mode...[/cyan]")
+    
+    async def _learn():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            console.print(Panel(
+                "[bold green]Welcome to Terminal Assistant Learning Mode![/bold green]\n\n"
+                "This mode helps you:\n"
+                "  • Discover new commands relevant to your work\n"
+                "  • Learn command patterns and best practices\n"
+                "  • Get personalized suggestions based on your skill level\n"
+                "  • Track your progress and mastery\n\n"
+                "[yellow]The Terminal Assistant is now actively learning from your commands.[/yellow]\n"
+                "[yellow]Use 'xencode terminal statistics' to see your progress.[/yellow]",
+                title="🎓 Learning Mode",
+                border_style="green"
+            ))
+            
+            # Show current learning status
+            if feature.learning_engine and feature.learning_engine.user_skill_level:
+                console.print("\n[bold]Your Current Skill Levels:[/bold]")
+                table = Table()
+                table.add_column("Command Category", style="cyan")
+                table.add_column("Skill Level", style="green")
+                table.add_column("Progress", style="yellow")
+                
+                for cmd, level in sorted(
+                    feature.learning_engine.user_skill_level.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:10]:
+                    progress_bar = "█" * int(level * 10) + "░" * (10 - int(level * 10))
+                    table.add_row(cmd, f"{level:.1%}", progress_bar)
+                
+                console.print(table)
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Learning mode failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_learn())
+
+
+@terminal.command()
+@click.option('--command', '-c', help='Get statistics for specific command')
+@click.pass_context
+def statistics(ctx, command):
+    """
+    Get command usage statistics
+    
+    Examples:
+      xencode terminal statistics
+      xencode terminal statistics --command "git commit"
+    """
+    console.print("[cyan]📊 Gathering command statistics...[/cyan]")
+    
+    async def _statistics():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Get statistics
+            stats = await feature.get_statistics(command)
+            
+            if command:
+                # Show specific command statistics
+                console.print(Panel(
+                    f"[bold]Command:[/bold] {stats['command']}\n\n"
+                    f"[bold]Frequency:[/bold] {stats['frequency']} times\n"
+                    f"[bold]Success Rate:[/bold] {stats['success_rate']:.1%}\n"
+                    f"[bold]Last Used:[/bold] {stats.get('last_used', 'Never')}\n\n"
+                    f"[bold]Common Sequences:[/bold]\n" +
+                    "\n".join(f"  • {seq[0]} ({seq[1]} times)" 
+                             for seq in stats.get('common_sequences', [])[:5]) +
+                    (f"\n\n[bold]Temporal Usage:[/bold]\n" +
+                     "\n".join(f"  • {time}: {count} times" 
+                              for time, count in sorted(stats.get('temporal_usage', {}).items())[:5])
+                     if stats.get('temporal_usage') else ""),
+                    title=f"Statistics for '{command}'",
+                    border_style="blue"
+                ))
+            else:
+                # Show overall statistics
+                console.print(Panel(
+                    f"[bold]Total Commands:[/bold] {stats['total_commands']}\n"
+                    f"[bold]Unique Commands:[/bold] {stats['unique_commands']}\n"
+                    f"[bold]Overall Success Rate:[/bold] {stats['success_rate']:.1%}\n"
+                    f"[bold]Patterns Detected:[/bold] {stats['patterns_detected']}",
+                    title="📊 Overall Statistics",
+                    border_style="green"
+                ))
+                
+                # Show most frequent commands
+                if stats.get('most_frequent'):
+                    console.print("\n[bold]Most Frequent Commands:[/bold]")
+                    table = Table()
+                    table.add_column("Rank", style="cyan", width=6)
+                    table.add_column("Command", style="green")
+                    table.add_column("Count", style="yellow", width=10)
+                    
+                    for idx, (cmd, count) in enumerate(stats['most_frequent'], 1):
+                        table.add_row(str(idx), cmd, str(count))
+                    
+                    console.print(table)
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Statistics failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_statistics())
+
+
+@terminal.command()
+@click.pass_context
+def patterns(ctx):
+    """
+    Analyze command patterns
+    
+    Shows detected patterns in your command usage including:
+    - Command patterns (common command structures)
+    - Sequence patterns (commands that follow each other)
+    - Temporal patterns (time-based usage)
+    - Context patterns (project-specific commands)
+    """
+    console.print("[cyan]🔍 Analyzing command patterns...[/cyan]")
+    
+    async def _patterns():
+        try:
+            from xencode.features.terminal_assistant import TerminalAssistantFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="terminal_assistant", enabled=True)
+            feature = TerminalAssistantFeature(config)
+            await feature._initialize()
+            
+            # Analyze patterns
+            analysis = await feature.analyze_patterns()
+            
+            # Display command patterns
+            if analysis.get('command_patterns'):
+                console.print("\n[bold green]Command Patterns:[/bold green]")
+                table = Table()
+                table.add_column("Base Command", style="cyan")
+                table.add_column("Pattern Count", style="yellow")
+                table.add_column("Examples", style="white")
+                
+                for base, data in sorted(
+                    analysis['command_patterns'].items(),
+                    key=lambda x: x[1]['count'],
+                    reverse=True
+                )[:10]:
+                    examples = ", ".join(data['examples'][:3])
+                    table.add_row(base, str(data['count']), examples[:60])
+                
+                console.print(table)
+            
+            # Display sequence patterns
+            if analysis.get('sequence_patterns'):
+                console.print("\n[bold green]Sequence Patterns:[/bold green]")
+                console.print("[dim]Commands that commonly follow each other[/dim]\n")
+                table = Table()
+                table.add_column("From Command", style="cyan")
+                table.add_column("To Command", style="green")
+                table.add_column("Frequency", style="yellow")
+                
+                for pattern in sorted(
+                    analysis['sequence_patterns'],
+                    key=lambda x: x['frequency'],
+                    reverse=True
+                )[:10]:
+                    table.add_row(
+                        pattern['from'][:40],
+                        pattern['to'][:40],
+                        str(pattern['frequency'])
+                    )
+                
+                console.print(table)
+            
+            # Display temporal patterns
+            if analysis.get('temporal_patterns'):
+                console.print("\n[bold green]Temporal Patterns:[/bold green]")
+                console.print("[dim]Commands used at specific times[/dim]\n")
+                
+                for time_key, commands in sorted(analysis['temporal_patterns'].items())[:5]:
+                    if commands:
+                        console.print(f"[bold]{time_key}:[/bold]")
+                        for cmd, count in commands[:3]:
+                            console.print(f"  • {cmd} ({count} times)")
+                        console.print()
+            
+            # Display context patterns
+            if analysis.get('context_patterns'):
+                console.print("\n[bold green]Context Patterns:[/bold green]")
+                console.print("[dim]Commands used in specific contexts[/dim]\n")
+                
+                for context, commands in sorted(analysis['context_patterns'].items())[:5]:
+                    if commands:
+                        console.print(f"[bold]{context}:[/bold]")
+                        for cmd, count in commands[:3]:
+                            console.print(f"  • {cmd} ({count} times)")
+                        console.print()
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Pattern analysis failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_patterns())
+
+
 @cli.command()
 def version():
     """Show version information"""
