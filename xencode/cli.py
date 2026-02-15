@@ -31,7 +31,7 @@ from xencode.features.core.cli import FeatureCommandGroup
 console = Console()
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(version="2.1.0", prog_name="xencode")
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.pass_context
@@ -47,6 +47,10 @@ def cli(ctx, verbose):
     
     if verbose:
         console.print("[blue]🐉 Xencode CLI initialized in verbose mode[/blue]")
+
+    if ctx.invoked_subcommand is None:
+        from xencode.tui.app import run_tui
+        run_tui(root_path=Path.cwd())
 
 
 @cli.group()
@@ -591,6 +595,18 @@ def optimize():
             console.print(f"[red]❌ Optimization failed: {e}[/red]")
     
     asyncio.run(_optimize())
+
+
+@cli.command()
+@click.argument('path', required=False, default='.')
+def tui(path):
+    """Launch the Xencode TUI"""
+    try:
+        from xencode.tui.app import run_tui
+
+        run_tui(root_path=Path(path))
+    except Exception as e:
+        console.print(f"[red]❌ TUI launch failed: {e}[/red]")
 
 
 @cli.group()

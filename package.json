@@ -1,0 +1,26 @@
+{
+  "name": "xencode",
+  "version": "2.1.0",
+  "description": "Node wrapper for the Xencode Python CLI",
+  "license": "MIT",
+  "bin": {
+    "xencode": "bin/xencode.js"
+  },
+  "files": [
+    "bin/",
+    "xencode/",
+    "xencode_cli.py",
+    "requirements.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "xencode",
+    "cli",
+    "ai",
+    "developer-tools"
+  ]
+}
