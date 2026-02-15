@@ -6,7 +6,7 @@ postgresql:
   fullnameOverride: "bytebot-postgresql"
   auth:
     username: postgres
-    password: postgres
+    password: "${POSTGRES_PASSWORD}"
     database: bytebotdb
   service:
     port: 5432
@@ -50,7 +50,7 @@ bytebot-agent:
     port: 5432
     database: bytebotdb
     username: postgres
-    password: postgres
+    password: "${EXTERNAL_DB_PASSWORD}"
   # Legacy API key configuration (for backward compatibility)
   env:
     ANTHROPIC_API_KEY: ""

@@ -117,6 +117,17 @@ xencode query "Explain async programming" \
 - **consensus**: High-agreement requirement (quality-focused)
 - **hybrid**: Adaptive method selection (intelligent)
 
+### Agentic Session
+
+#### `xencode agentic`
+Start an interactive agentic session.
+
+```bash
+xencode agentic
+xencode agentic --model qwen3:4b
+xencode agentic --base-url http://localhost:11434
+```
+
 ### Ollama Model Management
 
 #### `xencode ollama list`

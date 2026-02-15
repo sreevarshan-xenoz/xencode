@@ -9,8 +9,9 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer
+from textual.widgets import Header, Footer, Label, Button
 from textual.binding import Binding
+from textual.screen import ModalScreen
 import websockets
 
 from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
@@ -20,8 +21,13 @@ from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
 from xencode.tui.widgets.collaboration import CollaborationPanel
 from xencode.tui.widgets.commit_dialog import CommitDialog
 from xencode.tui.widgets.terminal import TerminalPanel
-from xencode.tui.widgets.agent_panel import AgentTaskSubmitted
+from xencode.tui.widgets.agent_panel import AgentPanel, AgentTaskSubmitted
 from xencode.tui.widgets.bytebot_panel import ByteBotPanel, ByteBotTaskSubmitted
+from xencode.tui.widgets.settings_panel import SettingsPanel
+from xencode.tui.widgets.options_panel import OptionsPanel
+from xencode.tui.widgets.code_review_panel import CodeReviewPanel
+from xencode.tui.widgets.performance_dashboard import PerformanceDashboard
+from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
 
 from xencode.tui.utils.model_checker import ModelChecker
 
@@ -29,6 +35,70 @@ from xencode.tui.utils.model_checker import ModelChecker
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from xencode_core import run_streaming_query, ModelManager, ConversationMemory
+from xencode.auth.qwen_auth import qwen_auth_manager, QwenAuthError
+
+
+class OnboardingModal(ModalScreen):
+    """First-run onboarding modal with account actions and key options."""
+
+    DEFAULT_CSS = """
+    OnboardingModal {
+        align: center middle;
+    }
+
+    #onboarding-dialog {
+        width: 80%;
+        max-width: 100;
+        height: auto;
+        border: solid $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #onboarding-title {
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+    }
+
+    #onboarding-actions {
+        margin-top: 1;
+        align: right middle;
+        height: auto;
+    }
+
+    OnboardingModal Button {
+        margin-left: 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(id="onboarding-dialog"):
+            yield Label("👋 Welcome to Xencode TUI", id="onboarding-title")
+            yield Label(
+                "Use the TUI as your main interface.\n"
+                "\n"
+                "Key options available in TUI:\n"
+                "• Chat + code context\n"
+                "• Model/ensemble controls\n"
+                "• Collaboration + ByteBot\n"
+                "• Terminal + Git actions\n"
+                "• Settings panel (Ctrl+,)\n"
+                "\n"
+                "For Qwen cloud models, login/signup once to continue."
+            )
+            with Horizontal(id="onboarding-actions"):
+                yield Button("Login", id="btn-login", variant="success")
+                yield Button("Sign Up", id="btn-signup")
+                yield Button("Continue", id="btn-continue", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-login":
+            self.dismiss("login")
+        elif event.button.id == "btn-signup":
+            self.dismiss("signup")
+        else:
+            self.dismiss("continue")
 
 
 class XencodeApp(App):
@@ -84,6 +154,104 @@ class XencodeApp(App):
     #bytebot-panel-container.hidden {
         display: none;
     }
+
+    #agent-panel-container {
+        height: 50%;
+    }
+
+    #agent-panel-container.hidden {
+        display: none;
+    }
+
+    #settings-panel-container {
+        height: 50%;
+    }
+
+    #settings-panel-container.hidden {
+        display: none;
+    }
+
+    #options-panel-container {
+        height: 50%;
+    }
+
+    #options-panel-container.hidden {
+        display: none;
+    }
+
+    #review-panel-container {
+        height: 50%;
+    }
+
+    #review-panel-container.hidden {
+        display: none;
+    }
+
+    #performance-panel-container {
+        height: 50%;
+    }
+
+    #performance-panel-container.hidden {
+        display: none;
+    }
+
+    #terminal-assistant-panel-container {
+        height: 50%;
+    }
+
+    #terminal-assistant-panel-container.hidden {
+        display: none;
+    }
+
+    Screen.theme-midnight {
+        background: #0f111a;
+        color: #e6e6e6;
+    }
+
+    Screen.theme-ocean {
+        background: #0b1b2b;
+        color: #eaf4ff;
+    }
+
+    Screen.theme-forest {
+        background: #0f1d14;
+        color: #e9f5ea;
+    }
+
+    Screen.theme-sunset {
+        background: #26160f;
+        color: #fff1e6;
+    }
+
+    Screen.theme-violet {
+        background: #191426;
+        color: #f1e9ff;
+    }
+
+    Screen.theme-slate {
+        background: #1b1f24;
+        color: #e7edf3;
+    }
+
+    Screen.theme-terminal {
+        background: #001100;
+        color: #80ff80;
+    }
+
+    Screen.theme-desert {
+        background: #2a2016;
+        color: #fff4df;
+    }
+
+    Screen.theme-arctic {
+        background: #eaf4ff;
+        color: #102a43;
+    }
+
+    Screen.theme-rose {
+        background: #26151c;
+        color: #ffe8f0;
+    }
     
     #chat-panel-container {
         height: 1fr;
@@ -108,10 +276,17 @@ class XencodeApp(App):
         Binding("ctrl+m", "toggle_models", "Models"),
         Binding("ctrl+k", "toggle_collab", "Collab"),
         Binding("ctrl+b", "toggle_bytebot", "ByteBot"),
+        Binding("ctrl+a", "toggle_agent", "Agent"),
+        Binding("ctrl+r", "toggle_review", "Review"),
+        Binding("ctrl+p", "toggle_performance", "Performance"),
+        Binding("ctrl+y", "toggle_terminal_assistant", "Term Assist"),
         Binding("ctrl+g", "refresh_git", "Git Refresh"),
         Binding("ctrl+shift+c", "commit_dialog", "Commit"),
         Binding("ctrl+t", "toggle_terminal", "Terminal"),
+        Binding("ctrl+comma", "toggle_settings", "Settings"),
+        Binding("ctrl+o", "toggle_options", "Options"),
         Binding("ctrl+l", "clear_chat", "Clear Chat"),
+        Binding("ctrl+shift+l", "logout_qwen", "Logout Qwen"),
         Binding("f1", "help", "Help"),
     ]
     
@@ -136,8 +311,13 @@ class XencodeApp(App):
             # Filter out embedding models for chat
             chat_models = [m for m in available_models if "embed" not in m]
             if chat_models:
-                # Prefer qwen or llama if available
-                preferred = [m for m in chat_models if "qwen" in m.lower() or "llama" in m.lower()]
+                # Prefer qwen cloud models, then local qwen, then llama
+                cloud_qwen_models = [m for m in chat_models if any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
+                local_qwen_models = [m for m in chat_models if "qwen" in m.lower() and not any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
+                llama_models = [m for m in chat_models if "llama" in m.lower()]
+
+                # Prioritize cloud Qwen models first, then local Qwen, then Llama
+                preferred = cloud_qwen_models or local_qwen_models or llama_models
                 self.current_model = preferred[0] if preferred else chat_models[0]
             else:
                 self.current_model = available_models[0]
@@ -151,6 +331,12 @@ class XencodeApp(App):
         self.model_selector: Optional[ModelSelector] = None
         self.collab_panel: Optional[CollaborationPanel] = None
         self.bytebot_panel: Optional[ByteBotPanel] = None
+        self.agent_panel: Optional[AgentPanel] = None
+        self.settings_panel: Optional[SettingsPanel] = None
+        self.options_panel: Optional[OptionsPanel] = None
+        self.review_panel: Optional[CodeReviewPanel] = None
+        self.performance_panel: Optional[PerformanceDashboard] = None
+        self.terminal_assistant_panel: Optional[TerminalAssistantPanel] = None
         
         # Collaboration state
         self.server_process: Optional[subprocess.Popen] = None
@@ -162,6 +348,10 @@ class XencodeApp(App):
         self.use_ensemble = False
         self.ensemble_models = ["qwen2.5:7b"]
         self.ensemble_method = "vote"
+
+        # Persisted TUI settings/state
+        self.settings_path = Path.home() / ".xencode_tui_settings.json"
+        self.ui_settings = self._load_ui_settings()
     
     def compose(self) -> ComposeResult:
         """Compose the app layout"""
@@ -198,6 +388,36 @@ class XencodeApp(App):
                         self.bytebot_panel = ByteBotPanel()
                         yield self.bytebot_panel
 
+                    # Agent panel (initially hidden)
+                    with Vertical(id="agent-panel-container", classes="hidden"):
+                        self.agent_panel = AgentPanel()
+                        yield self.agent_panel
+
+                    # Settings panel (initially hidden)
+                    with Vertical(id="settings-panel-container", classes="hidden"):
+                        self.settings_panel = SettingsPanel()
+                        yield self.settings_panel
+
+                    # Options panel (initially hidden)
+                    with Vertical(id="options-panel-container", classes="hidden"):
+                        self.options_panel = OptionsPanel()
+                        yield self.options_panel
+
+                    # Code review panel (initially hidden)
+                    with Vertical(id="review-panel-container", classes="hidden"):
+                        self.review_panel = CodeReviewPanel()
+                        yield self.review_panel
+
+                    # Performance dashboard panel (initially hidden)
+                    with Vertical(id="performance-panel-container", classes="hidden"):
+                        self.performance_panel = PerformanceDashboard()
+                        yield self.performance_panel
+
+                    # Terminal assistant panel (initially hidden)
+                    with Vertical(id="terminal-assistant-panel-container", classes="hidden"):
+                        self.terminal_assistant_panel = TerminalAssistantPanel()
+                        yield self.terminal_assistant_panel
+
                     # Chat panel
                     with Vertical(id="chat-panel-container"):
                         self.chat_panel = ChatPanel()
@@ -207,6 +427,11 @@ class XencodeApp(App):
     
     def on_mount(self) -> None:
         """Called when app is mounted"""
+        self._apply_ui_settings()
+
+        if self.settings_panel:
+            self.settings_panel.set_settings(self.ui_settings)
+
         # Welcome message
         if self.chat_panel:
             self.chat_panel.add_system_message(
@@ -214,9 +439,13 @@ class XencodeApp(App):
                 f"Working directory: {self.root_path}\n"
                 f"Mode: Single Model ({self.current_model})\n\n"
                 f"💡 Press Ctrl+M to configure models/ensemble\n"
+                f"⚙️ Settings: Press Ctrl+,\n"
                 f"🧠 ByteBot: Press Ctrl+B to open widget\n"
                 f"Select a file from the explorer or start chatting!"
             )
+
+        if self._should_show_onboarding():
+            self.push_screen(OnboardingModal(), self._handle_onboarding_result)
     
     def on_file_selected(self, event: FileSelected) -> None:
         """Handle file selection from explorer
@@ -470,7 +699,7 @@ class XencodeApp(App):
                 response = await reasoner.reason(query)
                 full_response = response.fused_response
                 self.chat_panel.update_streaming_message(full_response)
-                
+
                 # Show ensemble stats
                 stats_msg = f"\n\n_Ensemble: {len(response.model_responses)} models, {response.total_time_ms:.0f}ms, consensus: {response.consensus_score:.2f}_"
                 self.chat_panel.update_streaming_message(full_response + stats_msg)
@@ -693,34 +922,56 @@ class XencodeApp(App):
         """
         import aiohttp
         import json
-        
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": self.current_model,
-            "prompt": prompt,
-            "stream": True
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as response:
-                    if response.status != 200:
-                        yield f"\n\nError: API returned status {response.status}"
-                        return
-                        
-                    async for line in response.content:
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                if "response" in data:
-                                    yield data["response"]
-                                if "error" in data:
-                                    yield f"\n\nError: {data['error']}"
-                            except json.JSONDecodeError:
-                                pass
-                                
-        except Exception as e:
-            yield f"\n\nError: {str(e)}"
+
+        # Check if we're using a Qwen model that requires authentication
+        if "qwen" in self.current_model.lower() and any(qwen_model in self.current_model.lower() for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]):
+            # Use Qwen AI API with authentication via provider
+            try:
+                from xencode.model_providers import QwenProvider
+
+                # Create Qwen provider instance
+                provider = QwenProvider()
+
+                # Format messages for chat API
+                messages = [{"role": "user", "content": prompt}]
+
+                # Call Qwen completion API via provider
+                full_response = ""
+                async for chunk in provider.chat(messages, self.current_model, max_tokens=2048, temperature=0.7):
+                    full_response += chunk
+                    yield chunk
+
+            except Exception as e:
+                yield f"\n\nError calling Qwen API: {str(e)}"
+        else:
+            # Use local Ollama API (existing behavior)
+            url = "http://localhost:11434/api/generate"
+            payload = {
+                "model": self.current_model,
+                "prompt": prompt,
+                "stream": True
+            }
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload) as response:
+                        if response.status != 200:
+                            yield f"\n\nError: API returned status {response.status}"
+                            return
+
+                        async for line in response.content:
+                            if line:
+                                try:
+                                    data = json.loads(line)
+                                    if "response" in data:
+                                        yield data["response"]
+                                    if "error" in data:
+                                        yield f"\n\nError: {data['error']}"
+                                except json.JSONDecodeError:
+                                    pass
+
+            except Exception as e:
+                yield f"\n\nError: {str(e)}"
 
     def _get_language(self, suffix: str) -> str:
         """Get language identifier for file
@@ -756,10 +1007,31 @@ class XencodeApp(App):
         model_panel = self.query_one("#model-selector-panel")
         chat_container = self.query_one("#chat-panel-container")
         collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
         
         # Hide collab if open
         if not collab_panel.has_class("hidden"):
             collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
         
         if model_panel.has_class("hidden"):
             model_panel.remove_class("hidden")
@@ -774,12 +1046,30 @@ class XencodeApp(App):
         chat_container = self.query_one("#chat-panel-container")
         model_panel = self.query_one("#model-selector-panel")
         bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
         
         # Hide models if open
         if not model_panel.has_class("hidden"):
             model_panel.add_class("hidden")
         if not bytebot_panel.has_class("hidden"):
             bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
             
         if collab_panel.has_class("hidden"):
             collab_panel.remove_class("hidden")
@@ -794,18 +1084,258 @@ class XencodeApp(App):
         chat_container = self.query_one("#chat-panel-container")
         model_panel = self.query_one("#model-selector-panel")
         collab_panel = self.query_one("#collab-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
 
         # Hide other panels if open
         if not model_panel.has_class("hidden"):
             model_panel.add_class("hidden")
         if not collab_panel.has_class("hidden"):
             collab_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
 
         if bytebot_panel.has_class("hidden"):
             bytebot_panel.remove_class("hidden")
             chat_container.add_class("shrink")
         else:
             bytebot_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_settings(self) -> None:
+        """Toggle settings panel visibility"""
+        settings_panel = self.query_one("#settings-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
+
+        if settings_panel.has_class("hidden"):
+            settings_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            settings_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_options(self) -> None:
+        """Toggle options panel visibility."""
+        options_panel = self.query_one("#options-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
+
+        if options_panel.has_class("hidden"):
+            options_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            options_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_agent(self) -> None:
+        """Toggle agent panel visibility."""
+        agent_panel = self.query_one("#agent-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
+
+        if agent_panel.has_class("hidden"):
+            agent_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            agent_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_review(self) -> None:
+        """Toggle code review panel visibility."""
+        review_panel = self.query_one("#review-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
+
+        if review_panel.has_class("hidden"):
+            review_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            review_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_performance(self) -> None:
+        """Toggle performance dashboard visibility."""
+        performance_panel = self.query_one("#performance-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.add_class("hidden")
+
+        if performance_panel.has_class("hidden"):
+            performance_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            performance_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+
+    def action_toggle_terminal_assistant(self) -> None:
+        """Toggle terminal assistant panel visibility."""
+        terminal_assistant_panel = self.query_one("#terminal-assistant-panel-container")
+        chat_container = self.query_one("#chat-panel-container")
+        model_panel = self.query_one("#model-selector-panel")
+        collab_panel = self.query_one("#collab-panel-container")
+        bytebot_panel = self.query_one("#bytebot-panel-container")
+        settings_panel = self.query_one("#settings-panel-container")
+        options_panel = self.query_one("#options-panel-container")
+        agent_panel = self.query_one("#agent-panel-container")
+        review_panel = self.query_one("#review-panel-container")
+        performance_panel = self.query_one("#performance-panel-container")
+
+        if not model_panel.has_class("hidden"):
+            model_panel.add_class("hidden")
+        if not collab_panel.has_class("hidden"):
+            collab_panel.add_class("hidden")
+        if not bytebot_panel.has_class("hidden"):
+            bytebot_panel.add_class("hidden")
+        if not settings_panel.has_class("hidden"):
+            settings_panel.add_class("hidden")
+        if not options_panel.has_class("hidden"):
+            options_panel.add_class("hidden")
+        if not agent_panel.has_class("hidden"):
+            agent_panel.add_class("hidden")
+        if not review_panel.has_class("hidden"):
+            review_panel.add_class("hidden")
+        if not performance_panel.has_class("hidden"):
+            performance_panel.add_class("hidden")
+
+        if terminal_assistant_panel.has_class("hidden"):
+            terminal_assistant_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            terminal_assistant_panel.add_class("hidden")
             chat_container.remove_class("shrink")
     
     def action_clear_chat(self) -> None:
@@ -819,21 +1349,28 @@ class XencodeApp(App):
         if self.chat_panel:
             help_text = """
             # Xencode TUI Keybindings
-            
+
             - **Ctrl+E**: Toggle file explorer
             - **Ctrl+M**: Toggle model selector
             - **Ctrl+B**: Toggle ByteBot panel
+            - **Ctrl+A**: Toggle Agent panel
+            - **Ctrl+R**: Toggle Code Review panel
+            - **Ctrl+P**: Toggle Performance panel
+            - **Ctrl+Y**: Toggle Terminal Assistant panel
+            - **Ctrl+,**: Toggle settings panel
+            - **Ctrl+O**: Toggle options panel
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
             - **Ctrl+C**: Quit application
+            - **Ctrl+Shift+L**: Logout of Qwen AI
             - **F1**: Show this help
             - **Tab**: Switch focus between panels
             - **Ctrl+Enter**: Send chat message
-            
+
             ## Ensemble Mode
             Select 2-4 models in Model Selector to enable ensemble.
             Choose method: Vote, Weighted, Consensus, or Hybrid.
-            
+
             ## Git Integration
             - **Ctrl+G**: Refresh Git status
             - Status indicators: M (Modified), A (Added), D (Deleted), ? (Untracked)
@@ -891,6 +1428,160 @@ class XencodeApp(App):
         else:
             terminal.add_class("visible")
             terminal.query_one("Input").focus()
+
+    def action_logout_qwen(self) -> None:
+        """Log out of Qwen authentication and clear cached credentials"""
+        try:
+            success = qwen_auth_manager.clear_credentials()
+            if success:
+                self.notify("Successfully logged out of Qwen AI", severity="information")
+            else:
+                self.notify("Failed to clear Qwen credentials", severity="warning")
+        except Exception as e:
+            self.notify(f"Error clearing Qwen credentials: {e}", severity="error")
+
+    async def on_settings_panel_login_requested(self, event: SettingsPanel.LoginRequested) -> None:
+        """Handle login action from settings panel."""
+        await self._authenticate_qwen("login")
+
+    async def on_settings_panel_signup_requested(self, event: SettingsPanel.SignupRequested) -> None:
+        """Handle signup action from settings panel."""
+        await self._authenticate_qwen("signup")
+
+    def on_settings_panel_save_requested(self, event: SettingsPanel.SaveRequested) -> None:
+        """Persist settings from settings panel."""
+        self.ui_settings.update(event.settings)
+        self._save_ui_settings()
+        self._apply_ui_settings()
+        self.notify("Settings saved", severity="information")
+
+    def on_settings_panel_theme_changed(self, event: SettingsPanel.ThemeChanged) -> None:
+        """Apply selected theme immediately for live preview."""
+        self._apply_theme(event.theme)
+
+    async def on_options_panel_command_requested(self, event: OptionsPanel.CommandRequested) -> None:
+        """Run option command through embedded terminal."""
+        command = event.command.strip()
+        if not command:
+            return
+
+        if command == "tui":
+            self.notify("You are already in TUI", severity="information")
+            return
+
+        if command == "query":
+            if self.chat_panel:
+                self.chat_panel.add_system_message("Use the chat panel directly for `query` in TUI.")
+            return
+
+        self.action_toggle_terminal()
+        terminal = self.query_one(TerminalPanel)
+        terminal.output.write(f"[bold green]➜ xencode {command}[/bold green]")
+        await terminal._run_command(f"xencode {command}")
+
+    def _handle_onboarding_result(self, result: Optional[str]) -> None:
+        """Handle onboarding modal result."""
+        self.ui_settings["onboarding_completed"] = True
+        self._save_ui_settings()
+
+        if result == "login":
+            asyncio.create_task(self._authenticate_qwen("login"))
+        elif result == "signup":
+            asyncio.create_task(self._authenticate_qwen("signup"))
+
+    async def _authenticate_qwen(self, intent: str) -> None:
+        """Authenticate Qwen via device flow for login/signup paths."""
+        action_name = "Sign up" if intent == "signup" else "Login"
+        self.notify(f"{action_name} to Qwen started. Follow terminal/browser instructions.", severity="information")
+
+        try:
+            await qwen_auth_manager.get_or_authenticate()
+            self.notify("Qwen authentication successful", severity="information")
+            if self.chat_panel:
+                self.chat_panel.add_system_message("✅ Qwen authentication completed.")
+        except QwenAuthError as e:
+            self.notify(f"Qwen authentication failed: {e}", severity="error")
+        except Exception as e:
+            self.notify(f"Unexpected auth error: {e}", severity="error")
+
+    def _should_show_onboarding(self) -> bool:
+        """Determine whether onboarding/login prompt should be shown."""
+        onboarding_incomplete = not bool(self.ui_settings.get("onboarding_completed", False))
+        prompt_auth = bool(self.ui_settings.get("prompt_qwen_auth_on_first_run", True))
+        has_qwen_auth = qwen_auth_manager.has_valid_cached_credentials()
+        auth_needed = prompt_auth and not has_qwen_auth
+        return onboarding_incomplete or auth_needed
+
+    def _load_ui_settings(self) -> dict:
+        """Load persisted UI settings from disk."""
+        defaults = {
+            "onboarding_completed": False,
+            "show_explorer": True,
+            "show_model_selector": False,
+            "use_ensemble_default": False,
+            "prompt_qwen_auth_on_first_run": True,
+            "theme": "midnight",
+        }
+
+        try:
+            if self.settings_path.exists():
+                with open(self.settings_path, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                defaults.update(payload)
+        except Exception:
+            pass
+
+        return defaults
+
+    def _save_ui_settings(self) -> None:
+        """Save persisted UI settings to disk."""
+        try:
+            self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.settings_path, "w", encoding="utf-8") as handle:
+                json.dump(self.ui_settings, handle, indent=2)
+        except Exception as e:
+            self.notify(f"Failed to save settings: {e}", severity="error")
+
+    def _apply_ui_settings(self) -> None:
+        """Apply startup settings to the current UI."""
+        try:
+            left_panel = self.query_one("#left-panel")
+            model_panel = self.query_one("#model-selector-panel")
+            chat_panel_container = self.query_one("#chat-panel-container")
+
+            if self.ui_settings.get("show_explorer", True):
+                left_panel.remove_class("hidden")
+            else:
+                left_panel.add_class("hidden")
+
+            if self.ui_settings.get("show_model_selector", False):
+                model_panel.remove_class("hidden")
+                chat_panel_container.add_class("shrink")
+            else:
+                model_panel.add_class("hidden")
+
+            self.use_ensemble = bool(self.ui_settings.get("use_ensemble_default", False))
+            self._apply_theme(self.ui_settings.get("theme", "midnight"))
+        except Exception:
+            pass
+
+    def _apply_theme(self, theme_name: str) -> None:
+        """Apply one of the predefined TUI themes."""
+        themes = [
+            "midnight", "ocean", "forest", "sunset", "violet",
+            "slate", "terminal", "desert", "arctic", "rose"
+        ]
+
+        try:
+            for theme in themes:
+                self.screen.remove_class(f"theme-{theme}")
+        except Exception:
+            pass
+
+        if theme_name not in themes:
+            theme_name = "midnight"
+
+        self.screen.add_class(f"theme-{theme_name}")
 
     def on_unmount(self) -> None:
         """Called when app is unmounted"""

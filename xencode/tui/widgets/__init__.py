@@ -14,4 +14,10 @@ __all__ = [
     "DiffPanel",
     "CommitDialog",
     "CommitWizard",
+    "CommandSuggestionPanel",
+    "CommandExplanationViewer",
+    "ErrorFixPanel",
+    "LearningProgressTracker",
+    "CommandHistoryBrowser",
+    "TerminalAssistantPanel",
 ]
