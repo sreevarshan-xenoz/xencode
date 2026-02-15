@@ -97,6 +97,6 @@ metadata:
   name: postgres-secret
   namespace: xencode
 type: Opaque
-data:
-  username: eGVuY29kZQ==  # xencode (base64)
-  password: eGVuY29kZTEyMw==  # xencode123 (base64)
+stringData:
+  username: ${POSTGRES_USERNAME}
+  password: ${POSTGRES_PASSWORD}

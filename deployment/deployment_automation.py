@@ -496,7 +496,7 @@ services:
     environment:
       - XENCODE_ENV=production
       - LOG_LEVEL=INFO
-      - DATABASE_URL=postgresql://xencode:xencode123@postgres:5432/xencode
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-xencode}:${POSTGRES_PASSWORD}@postgres:5432/xencode
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
@@ -510,7 +510,7 @@ services:
     environment:
       - POSTGRES_DB=xencode
       - POSTGRES_USER=xencode
-      - POSTGRES_PASSWORD=xencode123
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -519,7 +519,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass redis123
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     networks:
