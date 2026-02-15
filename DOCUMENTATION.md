@@ -52,6 +52,12 @@ Xencode features a hybrid caching system with:
 - LZMA compression for efficient storage
 - LRU eviction policies
 
+### Vector Store
+The canonical vector store implementation lives in `xencode.rag.vector_store` and includes:
+- Synchronous `VectorStore`
+- Asynchronous `AsyncVectorStore`
+- Batch-optimized `OptimizedVectorStore`
+
 ## Performance Optimizations
 
 ### Ensemble System Optimizations

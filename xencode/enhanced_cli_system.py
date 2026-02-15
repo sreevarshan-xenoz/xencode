@@ -1007,20 +1007,10 @@ Respond with ONLY the 3 branch names, one per line."""
 
 
 def main():
-    """Demo function for EnhancedXencodeCLI"""
-    print("🧪 Enhanced CLI System Demo")
-    print("=" * 40)
+    """Delegate to the canonical Click CLI entrypoint."""
+    from xencode.cli import cli
 
-    # Initialize enhanced CLI
-    cli = EnhancedXencodeCLI()
-
-    # Test argument parsing
-    parser = cli.create_parser()
-
-    # Test feature status
-    print("\n" + cli._handle_feature_status())
-
-    print("\n🎯 Enhanced CLI System ready!")
+    cli.main(prog_name="xencode")
 
 
 if __name__ == "__main__":

@@ -266,13 +266,12 @@ class AgentCoordinator:
     def _synthesize_parallel_results(self, original_task: str, results: List[Dict[str, Any]]) -> str:
         """Synthesize results from parallel agent execution."""
         # For now, we'll use a simple approach - could be enhanced with more sophisticated synthesis
-        result_texts = [r['result'] for r in results]
 
         # Join all results with agent labels
         synthesis_parts = [f"Original Task: {original_task}", "Results from participating agents:"]
         for i, result in enumerate(results):
-            agent_type = result['selected_agent']
-            result_text = result['result']
+            agent_type = result.get('selected_agent', 'unknown')
+            result_text = result.get('result', 'No result returned')
             synthesis_parts.append(f"\n{agent_type.upper()} AGENT:\n{result_text}")
 
         return "\n".join(synthesis_parts)

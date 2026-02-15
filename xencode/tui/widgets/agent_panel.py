@@ -173,21 +173,21 @@ class AgentPanel(Container):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses"""
         if event.button.id == "run_task":
-            self.submit_task()
+            self._submit_task()
         elif event.button.id == "multi_agent":
-            self.run_multi_agent()
+            self._run_multi_agent()
         elif event.button.id == "sequential":
-            self.toggle_sequential_mode()
+            self._toggle_sequential_mode()
         elif event.button.id == "adaptive":
-            self.run_adaptive_collaboration()
+            self._run_adaptive_collaboration()
         elif event.button.id == "clear_log":
-            self.clear_log()
+            self._clear_log()
         elif event.button.id == "apply_collab":
-            self.apply_sequential_collaboration()
+            self._apply_sequential_collaboration()
         elif event.button.id == "cancel_collab":
-            self.hide_collaboration_options()
+            self._hide_collaboration_options()
 
-    def toggle_sequential_mode(self):
+    def _toggle_sequential_mode(self):
         """Toggle sequential collaboration options"""
         self.show_collaboration_options = not self.show_collaboration_options
 
@@ -202,7 +202,7 @@ class AgentPanel(Container):
             collab_input.add_class("hidden")
             collab_options.add_class("hidden")
 
-    def hide_collaboration_options(self):
+    def _hide_collaboration_options(self):
         """Hide collaboration options"""
         self.show_collaboration_options = False
         collab_input = self.query_one("#collaboration-input")
@@ -211,7 +211,7 @@ class AgentPanel(Container):
         collab_options.add_class("hidden")
         self.input_field.focus()
 
-    def apply_sequential_collaboration(self):
+    def _apply_sequential_collaboration(self):
         """Apply sequential collaboration with specified agents"""
         if not self.collaboration_selector:
             return
@@ -247,7 +247,7 @@ class AgentPanel(Container):
             return
 
         self.input_field.value = ""
-        self.hide_collaboration_options()
+        self._hide_collaboration_options()
 
         # Update status
         if self.status:
@@ -256,7 +256,7 @@ class AgentPanel(Container):
         # Post message for sequential processing
         self.post_message(AgentTaskSubmitted(task, use_multi_agent=False, collaboration_type="sequential", agent_sequence=agent_types))
 
-    def run_adaptive_collaboration(self):
+    def _run_adaptive_collaboration(self):
         """Run task with adaptive collaboration system"""
         if not self.input_field:
             return
@@ -275,7 +275,7 @@ class AgentPanel(Container):
         # Post message for adaptive processing
         self.post_message(AgentTaskSubmitted(task, use_multi_agent=False, collaboration_type="adaptive"))
 
-    def submit_task(self):
+    def _submit_task(self):
         """Submit task to agent"""
         if not self.input_field:
             return
@@ -294,7 +294,7 @@ class AgentPanel(Container):
         # Post message for processing
         self.post_message(AgentTaskSubmitted(task, use_multi_agent=False))
 
-    def run_multi_agent(self):
+    def _run_multi_agent(self):
         """Run task with multi-agent system"""
         if not self.input_field:
             return
@@ -308,59 +308,17 @@ class AgentPanel(Container):
 
         # Post message for multi-agent processing
         self.post_message(AgentTaskSubmitted(task, use_multi_agent=True))
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses"""
-        if event.button.id == "run_task":
-            self.submit_task()
-        elif event.button.id == "multi_agent":
-            self.run_multi_agent()
-        elif event.button.id == "clear_log":
-            self.clear_log()
-    
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle input submission"""
-        self.submit_task()
-    
-    def submit_task(self):
-        """Submit task to agent"""
-        if not self.input_field:
-            return
-        
-        task = self.input_field.value.strip()
-        if not task:
-            return
-        
-        # Clear input
-        self.input_field.value = ""
-        
-        # Update status
-        if self.status:
-            self.status.update_status(is_thinking=True)
-        
-        # Post message for processing
-        self.post_message(AgentTaskSubmitted(task, use_multi_agent=False))
-    
-    def run_multi_agent(self):
-        """Run task with multi-agent system"""
-        if not self.input_field:
-            return
-        
-        task = self.input_field.value.strip()
-        if not task:
-            return
-        
-        # Clear input
-        self.input_field.value = ""
-        
-        # Post message for multi-agent processing
-        self.post_message(AgentTaskSubmitted(task, use_multi_agent=True))
-    
-    def clear_log(self):
+
+    def _clear_log(self):
         """Clear tool usage log"""
         if self.tool_log:
             for child in list(self.tool_log.children):
                 child.remove()
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle input submission"""
+        self._submit_task()
+    
     
     def log_tool_call(self, tool_name: str, tool_input: str, result: str = None):
         """Log a tool call"""

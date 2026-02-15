@@ -56,7 +56,7 @@ apiKeys:
     value: ""  # Only used if useExisting is false
 
 config:
-  databaseUrl: "postgresql://postgres:postgres@bytebot-postgresql:5432/bytebotdb"
+  databaseUrl: "${DATABASE_URL}"
   bytebotDesktopUrl: "http://bytebot-desktop:9990"
   llmProxyUrl: ""
 
@@ -75,7 +75,7 @@ postgresql:
   enabled: true
   auth:
     username: postgres
-    password: postgres
+    password: "${POSTGRES_PASSWORD}"
     database: bytebotdb
   service:
     port: 5432
@@ -89,6 +89,6 @@ externalDatabase:
   port: 5432
   database: bytebotdb
   username: postgres
-  password: postgres
+  password: "${EXTERNAL_DB_PASSWORD}"
   existingSecret: ""
   existingSecretPasswordKey: ""

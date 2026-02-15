@@ -13,5 +13,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from xencode.cli import cli
 
+
+def main() -> None:
+    """Run the canonical Click CLI entrypoint."""
+    cli.main(prog_name="xencode")
+
+
 if __name__ == '__main__':
-    cli()
+    main()

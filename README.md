@@ -94,15 +94,52 @@ Xencode is a cutting-edge AI assistant platform that transforms how developers i
 pip install xencode
 ```
 
+### Install via npm
+
+Install the Node wrapper package directly from GitHub:
+
+```bash
+npm install -g github:sreevarshan-xenoz/xencode
+```
+
+Requirements for npm install path:
+- Node.js 18+
+- Python 3.8+ available in `PATH`
+
+The npm wrapper runs the Python CLI (`python -m xencode.cli`) under the hood.
+
+If you prefer Python-native installation:
+
+```bash
+pip install xencode
+```
+
 ## Usage
 
 ```bash
-# Run the Xencode CLI
+# Run Xencode (opens TUI by default)
 xencode
+
+# Start an interactive agent session
+xencode agentic --model qwen3:4b
+
+# Launch the TUI
+xencode tui
+
+# Launch the TUI (module entrypoint)
+python -m xencode.tui
 
 # Or use as a module
 python -m xencode
 ```
+
+### First-run TUI onboarding
+
+- On first launch, Xencode shows onboarding in TUI with login/signup options.
+- Open the settings widget anytime with `Ctrl+,`.
+- Open the options panel (all major CLI commands) with `Ctrl+O`.
+- Choose from 10 themes in Settings and apply instantly.
+- Use explicit CLI subcommands (for example `xencode version`) to run non-TUI flows.
 
 ## Architecture
 

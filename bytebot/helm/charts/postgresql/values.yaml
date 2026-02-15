@@ -37,7 +37,7 @@ affinity: {}
 
 auth:
   username: postgres
-  password: postgres
+  password: "${POSTGRES_PASSWORD}"
   database: bytebotdb
 
 config:

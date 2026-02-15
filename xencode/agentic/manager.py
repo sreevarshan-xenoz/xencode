@@ -124,20 +124,38 @@ After receiving the tool result, respond with your final answer."""),
                     max_execution_time=30.0
                 )
             except ImportError:
-                # If neither is available, create a basic executor that just uses the LLM directly
-                # This is a fallback that provides basic functionality
-                class BasicAgentExecutor:
-                    def __init__(self, llm, tools):
-                        self.llm = llm
-                        self.tools = tools
+                # If neither is available, try create_structured_chat_agent as another option
+                try:
+                    from langchain.agents import create_structured_chat_agent
+                    agent = create_structured_chat_agent(
+                        llm=self.llm,
+                        tools=self.tools,
+                        prompt=prompt
+                    )
 
-                    def invoke(self, inputs):
-                        # Basic implementation that just sends the input to the LLM
-                        input_text = inputs.get("input", "")
-                        response = self.llm.invoke(input_text)
-                        return {"output": str(response)}
+                    return AgentExecutor(
+                        agent=agent,
+                        tools=self.tools,
+                        verbose=True,
+                        handle_parsing_errors=True,
+                        max_iterations=10,
+                        max_execution_time=30.0
+                    )
+                except ImportError:
+                    # If none of the above are available, create a basic executor that just uses the LLM directly
+                    # This is a fallback that provides basic functionality
+                    class BasicAgentExecutor:
+                        def __init__(self, llm, tools):
+                            self.llm = llm
+                            self.tools = tools
 
-                return BasicAgentExecutor(self.llm, self.tools)
+                        def invoke(self, inputs):
+                            # Basic implementation that just sends the input to the LLM
+                            input_text = inputs.get("input", "")
+                            response = self.llm.invoke(input_text)
+                            return {"output": str(response)}
+
+                    return BasicAgentExecutor(self.llm, self.tools)
 
     def run_agent(self, user_input: str) -> str:
         """Run the agent with the given input."""
@@ -155,16 +173,29 @@ After receiving the tool result, respond with your final answer."""),
                         context_block = "Context from Vector Store:\n" + "\n".join(context_strings) + "\nEnd of Context.\n"
                 except Exception as e:
                     print(f"RAG retrieval failed: {e}")
+                    # Continue without RAG context if it fails
 
             # Store user message
             if self.use_memory:
-                self.memory.add_message(role="user", content=user_input)
+                try:
+                    self.memory.add_message(role="user", content=user_input)
+                except Exception as e:
+                    print(f"Failed to store user message in memory: {e}")
 
-            # Run agent with context
-            result = self.agent_executor.invoke({
+            # Prepare inputs for agent
+            inputs = {
                 "input": user_input,
                 "context_block": context_block
-            })
+            }
+
+            # Add agent_scratchpad if needed by the agent
+            if hasattr(self.agent_executor, 'agent') and hasattr(self.agent_executor.agent, 'input_keys'):
+                if 'agent_scratchpad' in self.agent_executor.agent.input_keys:
+                    from langchain_core.messages import AIMessage, HumanMessage
+                    inputs["agent_scratchpad"] = []
+
+            # Run agent with context
+            result = self.agent_executor.invoke(inputs)
 
             # The new agent returns the result directly
             if isinstance(result, dict):
@@ -174,13 +205,19 @@ After receiving the tool result, respond with your final answer."""),
 
             # Store assistant response
             if self.use_memory:
-                self.memory.add_message(role="assistant", content=output)
+                try:
+                    self.memory.add_message(role="assistant", content=output)
+                except Exception as e:
+                    print(f"Failed to store assistant response in memory: {e}")
 
             return output
         except Exception as e:
             error_msg = f"Agent execution failed: {str(e)}"
             if self.use_memory:
-                self.memory.add_message(role="assistant", content=error_msg)
+                try:
+                    self.memory.add_message(role="assistant", content=error_msg)
+                except Exception as mem_e:
+                    print(f"Failed to store error message in memory: {mem_e}")
             return error_msg
     
     def suggest_model_for_task(self, task: str) -> str:
