@@ -189,26 +189,15 @@ class AdaptiveCacheManager:
         """Get a cache instance with optimal sizing"""
         config = self.sizer.get_current_configuration()
         
-        # Import the improved cache system we created earlier
-        try:
-            from .improved_cache_system import ImprovedHybridCacheManager
-            cache = ImprovedHybridCacheManager(
-                memory_cache_mb=config.memory_cache_mb,
-                disk_cache_mb=config.disk_cache_mb,
-                cache_dir=self.base_cache_dir / cache_name
-            )
-            self.cache_instances[cache_name] = cache
-            return cache
-        except ImportError:
-            # Fallback to basic cache if improved version not available
-            from .advanced_cache_system import HybridCacheManager
-            cache = HybridCacheManager(
-                memory_cache_mb=config.memory_cache_mb,
-                disk_cache_mb=config.disk_cache_mb,
-                cache_dir=self.base_cache_dir / cache_name
-            )
-            self.cache_instances[cache_name] = cache
-            return cache
+        from .advanced_cache_system import HybridCacheManager
+
+        cache = HybridCacheManager(
+            memory_cache_mb=config.memory_cache_mb,
+            disk_cache_mb=config.disk_cache_mb,
+            cache_dir=self.base_cache_dir / cache_name
+        )
+        self.cache_instances[cache_name] = cache
+        return cache
 
     async def update_cache_sizes(self):
         """Dynamically update cache sizes based on current system conditions"""
