@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 
 # Import Xencode systems
 from xencode.phase2_coordinator import Phase2Coordinator
@@ -142,6 +142,39 @@ def query(prompt, models, method, max_tokens, temperature, timeout, rag):
             sys.exit(1)
     
     asyncio.run(_run_query())
+
+
+@cli.command()
+@click.option('--model', default='qwen3:4b', help='Model to use for the agent')
+@click.option('--base-url', default='http://localhost:11434', help='Ollama base URL')
+def agentic(model, base_url):
+    """Start an interactive agentic session"""
+    console.print(Panel.fit(f"Starting Agentic Session with {model}", style="bold blue"))
+
+    try:
+        from xencode.agentic.manager import LangChainManager
+
+        manager = LangChainManager(model_name=model, base_url=base_url)
+        console.print("[green]Agent initialized successfully![/green]")
+        console.print("Type 'exit' or 'quit' to end the session.\n")
+
+        while True:
+            user_input = Prompt.ask("[bold cyan]You[/bold cyan]")
+
+            if user_input.lower() in ["exit", "quit"]:
+                console.print("[yellow]Goodbye![/yellow]")
+                break
+
+            if not user_input.strip():
+                continue
+
+            with console.status("[bold green]Agent is thinking...[/bold green]"):
+                response = manager.run_agent(user_input)
+
+            console.print(Panel(response, title="Agent", border_style="green"))
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
 
 
 @cli.group()
