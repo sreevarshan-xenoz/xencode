@@ -66,6 +66,13 @@ class QwenAuthManager:
         self.credentials = creds
         return creds
 
+    def has_valid_cached_credentials(self) -> bool:
+        """Return whether a valid cached Qwen credential is available."""
+        cached_creds = self._load_cached_credentials()
+        if not cached_creds:
+            return False
+        return self._is_token_valid(cached_creds)
+
     def _load_cached_credentials(self) -> Optional[QwenCredentials]:
         """Load cached credentials from file"""
         try:

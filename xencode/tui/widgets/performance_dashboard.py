@@ -15,7 +15,10 @@ from textual.containers import Container, Vertical, Horizontal, Grid
 from textual.reactive import reactive
 from textual.timer import Timer
 import psutil
-import GPUtil
+try:
+    import GPUtil
+except ImportError:
+    GPUtil = None
 from dataclasses import dataclass, field
 
 
@@ -200,13 +203,13 @@ class PerformanceDashboard(Container):
             gpu_percent = 0.0
             gpu_memory_percent = 0.0
             try:
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    gpu = gpus[0]  # Use first GPU
-                    gpu_percent = gpu.load * 100
-                    gpu_memory_percent = gpu.memoryUtil * 100
+                if GPUtil is not None:
+                    gpus = GPUtil.getGPUs()
+                    if gpus:
+                        gpu = gpus[0]  # Use first GPU
+                        gpu_percent = gpu.load * 100
+                        gpu_memory_percent = gpu.memoryUtil * 100
             except:
-                # GPU not available
                 pass
             
             # Simulate response time and throughput metrics
