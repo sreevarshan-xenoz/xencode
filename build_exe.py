@@ -42,19 +42,9 @@ def main():
     # Let's create a temporary entry point script for the standalone exe
     entry_script = project_root / "xencode_entry.py"
     with open(entry_script, "w", encoding="utf-8") as f:
-        f.write('from xencode.enhanced_cli_system import EnhancedXencodeCLI\n')
-        f.write('from xencode_core import main as core_main\n')
-        f.write('import sys\n')
-        f.write('import os\n\n')
+        f.write('from xencode_cli import main\n')
         f.write('if __name__ == "__main__":\n')
-        f.write('    # Determine mode based on args (similar to install.sh logic)\n')
-        f.write('    # However, for simplicity, we pass everything to xencode_core for now,\n')
-        f.write('    # OR we use enhanced CLI if arguments match new features.\n')
-        f.write('    # Let\'s stick to wrapping xencode_core.py as the primary for stability,\n')
-        f.write('    # since enhanced_cli_system isn\'t fully integrated yet as the MAIN entry.\n')
-        f.write('    # Wait, the user wants the "cli tool that runs the terminal".\n')
-        f.write('    # That means launching TUI/Chat mode by default.\n')
-        f.write('    core_main()\n')
+        f.write('    main()\n')
 
     print("📝 Created temporary entry point.")
 

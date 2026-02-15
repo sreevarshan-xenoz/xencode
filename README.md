@@ -100,6 +100,9 @@ pip install xencode
 # Run the Xencode CLI
 xencode
 
+# Start an interactive agent session
+xencode agentic --model qwen3:4b
+
 # Or use as a module
 python -m xencode
 ```
