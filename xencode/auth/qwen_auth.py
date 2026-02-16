@@ -12,7 +12,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 import aiohttp
 import base64
 
@@ -56,9 +56,19 @@ class QwenAuthManager:
         """
         # Check for cached credentials
         cached_creds = self._load_cached_credentials()
-        if cached_creds and self._is_token_valid(cached_creds):
-            self.credentials = cached_creds
-            return cached_creds
+        if cached_creds:
+            if self._is_token_valid(cached_creds):
+                self.credentials = cached_creds
+                return cached_creds
+
+            # If cached credentials are expired, prefer refresh before full re-auth.
+            if cached_creds.refresh_token:
+                try:
+                    refreshed = await self.refresh_access_token(cached_creds.refresh_token)
+                    return refreshed
+                except Exception:
+                    # Fall through to device flow when refresh fails.
+                    pass
 
         # Perform fresh authentication
         creds = await self._authenticate_via_device_flow()
@@ -108,6 +118,10 @@ class QwenAuthManager:
             
             with open(self.CREDS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
+
+            # Best-effort hardening: owner read/write only on POSIX systems.
+            if os.name == "posix":
+                os.chmod(self.CREDS_FILE, 0o600)
                 
         except IOError as e:
             raise QwenAuthError(f"Failed to save credentials: {e}")
@@ -151,7 +165,7 @@ class QwenAuthManager:
                 device_auth_resp = await response.json()
             
             # Step 2: Show user the verification details
-            verification_uri = device_auth_resp['verification_uri']
+            verification_uri = device_auth_resp.get('verification_uri_complete') or device_auth_resp['verification_uri']
             user_code = device_auth_resp['user_code']
             
             print("\n🚀 Qwen AI Authentication Required")
@@ -272,7 +286,7 @@ class QwenAuthManager:
             str: The completion response
         """
         if not self.credentials:
-            raise QwenAuthError("No credentials available. Please authenticate first.")
+            self.credentials = await self.get_or_authenticate()
         
         # Check if token is still valid, refresh if needed
         if not self._is_token_valid(self.credentials):

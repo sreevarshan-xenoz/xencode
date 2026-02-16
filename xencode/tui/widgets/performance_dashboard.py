@@ -67,12 +67,11 @@ class PerformanceDashboard(Container):
         border: solid $secondary;
         padding: 1;
         background: $panel;
-        margin: 0.5 0;
+        margin: 1 0;
     }
 
     PerformanceDashboard .metric-value {
         text-style: bold;
-        font-size: large;
     }
 
     PerformanceDashboard .metric-label {
@@ -84,7 +83,7 @@ class PerformanceDashboard(Container):
         border: solid $secondary;
         padding: 1;
         background: $panel;
-        margin: 0.5 0;
+        margin: 1 0;
     }
 
     PerformanceDashboard DataTable {
@@ -144,21 +143,21 @@ class PerformanceDashboard(Container):
         with Horizontal():
             with Vertical():
                 yield Label("CPU Usage (%)", classes="chart-title")
-                self.cpu_chart = Sparkline(id="cpu-chart", data=[], summary="CPU Usage")
+                self.cpu_chart = Sparkline(id="cpu-chart", data=[])
                 yield self.cpu_chart
             with Vertical():
                 yield Label("Memory Usage (%)", classes="chart-title")
-                self.memory_chart = Sparkline(id="memory-chart", data=[], summary="Memory Usage")
+                self.memory_chart = Sparkline(id="memory-chart", data=[])
                 yield self.memory_chart
 
         with Horizontal():
             with Vertical():
                 yield Label("Response Time (ms)", classes="chart-title")
-                self.response_chart = Sparkline(id="response-chart", data=[], summary="Response Time")
+                self.response_chart = Sparkline(id="response-chart", data=[])
                 yield self.response_chart
             with Vertical():
                 yield Label("Throughput (req/s)", classes="chart-title")
-                self.throughput_chart = Sparkline(id="throughput-chart", data=[], summary="Throughput")
+                self.throughput_chart = Sparkline(id="throughput-chart", data=[])
                 yield self.throughput_chart
 
         # Detailed metrics table
