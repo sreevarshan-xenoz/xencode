@@ -515,7 +515,7 @@ def status():
     async def _status():
         try:
             coordinator = Phase2Coordinator()
-            await coordinator.initialize()
+            await coordinator.initialize(include_rlhf=False)
             
             coordinator.display_system_status()
             
