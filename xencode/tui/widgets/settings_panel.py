@@ -146,6 +146,8 @@ class SettingsPanel(Container):
 
         with Vertical(id="settings-auth"):
             yield Label("Qwen account", classes="section-title")
+            self.lbl_qwen_auth_status = Label("Status: Not authenticated", id="qwen-auth-status", classes="dim")
+            yield self.lbl_qwen_auth_status
             with Horizontal():
                 yield Button("Login", id="btn-login", variant="success")
                 yield Button("Sign Up", id="btn-signup", variant="default")
@@ -213,3 +215,11 @@ class SettingsPanel(Container):
             self.post_message(self.LoginRequested())
         elif event.button.id == "btn-signup":
             self.post_message(self.SignupRequested())
+
+    def set_qwen_auth_status(self, is_authenticated: bool) -> None:
+        """Update Qwen auth status text with minimal UI impact."""
+        if not hasattr(self, "lbl_qwen_auth_status"):
+            return
+        self.lbl_qwen_auth_status.update(
+            "Status: Authenticated" if is_authenticated else "Status: Not authenticated"
+        )
