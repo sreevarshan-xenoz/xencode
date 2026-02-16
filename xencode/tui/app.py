@@ -431,6 +431,7 @@ class XencodeApp(App):
 
         if self.settings_panel:
             self.settings_panel.set_settings(self.ui_settings)
+            self._update_qwen_auth_status_in_settings()
 
         # Welcome message
         if self.chat_panel:
@@ -920,9 +921,6 @@ class XencodeApp(App):
         Yields:
             Response chunks
         """
-        import aiohttp
-        import json
-
         # Check if we're using a Qwen model that requires authentication
         if "qwen" in self.current_model.lower() and any(qwen_model in self.current_model.lower() for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]):
             # Use Qwen AI API with authentication via provider
@@ -942,36 +940,65 @@ class XencodeApp(App):
                     yield chunk
 
             except Exception as e:
-                yield f"\n\nError calling Qwen API: {str(e)}"
+                # Fallback path: try a local Ollama model when Qwen cloud auth/API fails.
+                available_models = ModelChecker.get_available_models()
+                local_candidates = [
+                    m for m in available_models
+                    if not any(marker in m.lower() for marker in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])
+                ]
+                preferred_local = (
+                    [m for m in local_candidates if "qwen" in m.lower()]
+                    or [m for m in local_candidates if "llama" in m.lower()]
+                    or local_candidates
+                )
+
+                if preferred_local:
+                    fallback_model = preferred_local[0]
+                    self.notify(
+                        f"Qwen cloud failed ({e}). Falling back to local model: {fallback_model}",
+                        severity="warning",
+                    )
+                    async for chunk in self._stream_ollama_response(prompt, model=fallback_model):
+                        yield chunk
+                else:
+                    yield f"\n\nError calling Qwen API: {str(e)}"
         else:
             # Use local Ollama API (existing behavior)
-            url = "http://localhost:11434/api/generate"
-            payload = {
-                "model": self.current_model,
-                "prompt": prompt,
-                "stream": True
-            }
+            async for chunk in self._stream_ollama_response(prompt, model=self.current_model):
+                yield chunk
 
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload) as response:
-                        if response.status != 200:
-                            yield f"\n\nError: API returned status {response.status}"
-                            return
+    async def _stream_ollama_response(self, prompt: str, model: str):
+        """Stream response from local Ollama generate API for a specific model."""
+        import aiohttp
+        import json
 
-                        async for line in response.content:
-                            if line:
-                                try:
-                                    data = json.loads(line)
-                                    if "response" in data:
-                                        yield data["response"]
-                                    if "error" in data:
-                                        yield f"\n\nError: {data['error']}"
-                                except json.JSONDecodeError:
-                                    pass
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True
+        }
 
-            except Exception as e:
-                yield f"\n\nError: {str(e)}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as response:
+                    if response.status != 200:
+                        yield f"\n\nError: API returned status {response.status}"
+                        return
+
+                    async for line in response.content:
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                if "response" in data:
+                                    yield data["response"]
+                                if "error" in data:
+                                    yield f"\n\nError: {data['error']}"
+                            except json.JSONDecodeError:
+                                pass
+
+        except Exception as e:
+            yield f"\n\nError: {str(e)}"
 
     def _get_language(self, suffix: str) -> str:
         """Get language identifier for file
@@ -1437,6 +1464,7 @@ class XencodeApp(App):
                 self.notify("Successfully logged out of Qwen AI", severity="information")
             else:
                 self.notify("Failed to clear Qwen credentials", severity="warning")
+            self._update_qwen_auth_status_in_settings()
         except Exception as e:
             self.notify(f"Error clearing Qwen credentials: {e}", severity="error")
 
@@ -1497,12 +1525,23 @@ class XencodeApp(App):
         try:
             await qwen_auth_manager.get_or_authenticate()
             self.notify("Qwen authentication successful", severity="information")
+            self._update_qwen_auth_status_in_settings()
             if self.chat_panel:
                 self.chat_panel.add_system_message("✅ Qwen authentication completed.")
         except QwenAuthError as e:
             self.notify(f"Qwen authentication failed: {e}", severity="error")
+            self._update_qwen_auth_status_in_settings()
         except Exception as e:
             self.notify(f"Unexpected auth error: {e}", severity="error")
+            self._update_qwen_auth_status_in_settings()
+
+    def _update_qwen_auth_status_in_settings(self) -> None:
+        """Refresh the settings panel auth status indicator."""
+        if not self.settings_panel:
+            return
+        self.settings_panel.set_qwen_auth_status(
+            qwen_auth_manager.has_valid_cached_credentials()
+        )
 
     def _should_show_onboarding(self) -> bool:
         """Determine whether onboarding/login prompt should be shown."""
