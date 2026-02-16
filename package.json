@@ -9,6 +9,7 @@
   "files": [
     "bin/",
     "xencode/",
+    "xencode_core.py",
     "xencode_cli.py",
     "requirements.txt",
     "README.md",
