@@ -28,7 +28,7 @@ class ModelSelected(Message):
         """
         super().__init__()
         self.models = models
-        is_ensemble = is_ensemble
+        self.is_ensemble = is_ensemble
         self.method = method
 
 
@@ -68,6 +68,12 @@ class ModelSelector(VerticalScroll):
     
     # Available models list
     AVAILABLE_MODELS = [
+        ("openrouter:openai/gpt-4o-mini", "OpenRouter GPT-4o Mini (Cloud)"),
+        ("openrouter:anthropic/claude-3.5-sonnet", "OpenRouter Claude 3.5 Sonnet (Cloud)"),
+        ("openrouter:meta-llama/llama-3.1-8b-instruct", "OpenRouter Llama 3.1 8B (Cloud)"),
+        ("qwen:qwen-max-coder-7b-instruct", "Qwen Max Coder 7B (Cloud)"),
+        ("qwen:qwen-plus", "Qwen Plus (Cloud)"),
+        ("qwen:qwen-max", "Qwen Max (Cloud)"),
         ("qwen2.5:7b", "Qwen 2.5 7B (Fast, Balanced)"),
         ("qwen2.5:14b", "Qwen 2.5 14B (Powerful)"),
         ("llama3.1:8b", "Llama 3.1 8B (High Quality)"),
@@ -111,20 +117,27 @@ class ModelSelector(VerticalScroll):
         covered_system_models = set()
         
         for model_id, model_name in self.AVAILABLE_MODELS:
+            is_cloud_provider = model_id.startswith("qwen:") or model_id.startswith("openrouter:")
+
             # Check if model is installed (exact or prefix match)
             # We match if any system model starts with our ID, OR if our ID starts with the system model (less likely)
             # Actually, let's find the best match
             matched_sys_model = None
-            for sys_model in available_system_models:
-                if sys_model.startswith(model_id) or model_id.startswith(sys_model.split(':')[0]):
-                    matched_sys_model = sys_model
-                    covered_system_models.add(sys_model)
-                    break
+            if not is_cloud_provider:
+                for sys_model in available_system_models:
+                    if sys_model.startswith(model_id) or model_id.startswith(sys_model.split(':')[0]):
+                        matched_sys_model = sys_model
+                        covered_system_models.add(sys_model)
+                        break
             
-            is_installed = matched_sys_model is not None
+            is_installed = matched_sys_model is not None or is_cloud_provider
             
             display_name = model_name
-            if not is_installed:
+            if model_id.startswith("qwen:"):
+                display_name += " (Qwen Auth Required)"
+            elif model_id.startswith("openrouter:"):
+                display_name += " (OpenRouter API Key Required)"
+            elif not is_installed:
                 display_name += " (Not Installed)"
             else:
                 # Use the actual installed name if it differs slightly
@@ -231,6 +244,8 @@ class ModelSelector(VerticalScroll):
         available = ModelChecker.get_available_models()
         missing = []
         for model in self.selected_models:
+            if model.startswith("qwen:") or model.startswith("openrouter:"):
+                continue
             if not any(m.startswith(model) for m in available):
                 missing.append(model)
         

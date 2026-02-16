@@ -448,7 +448,7 @@ def run_query(model: str, prompt: str) -> str:
     memory.add_message("user", prompt, model)
 
     # Determine if this is a cloud model
-    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
+    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:") or model.startswith("qwen:"):
         # Use the new model provider system for cloud models
         from xencode.model_providers import get_model_provider_manager
 
@@ -532,6 +532,23 @@ def run_query(model: str, prompt: str) -> str:
                     memory.add_message("assistant", response, model)
 
                     return response
+            elif model.startswith("qwen:"):
+                provider_manager.configure_provider("qwen", "")
+                asyncio.run(provider_manager.initialize_providers())
+
+                model_name = model.replace("qwen:", "")
+
+                async def run_async_call():
+                    return await provider_manager.generate_with_provider(
+                        prompt, "qwen", model_name, max_tokens=2048, temperature=0.7
+                    )
+
+                response = asyncio.run(run_async_call())
+
+                cache.set(prompt, model, response)
+                memory.add_message("assistant", response, model)
+
+                return response
     else:
         # Use Ollama for local models
         url = "http://localhost:11434/api/generate"

@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -13,6 +13,7 @@ from textual.widgets import Header, Footer, Label, Button
 from textual.binding import Binding
 from textual.screen import ModalScreen
 import websockets
+import aiohttp
 
 from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
 from xencode.tui.widgets.editor import CodeEditor
@@ -432,6 +433,7 @@ class XencodeApp(App):
         if self.settings_panel:
             self.settings_panel.set_settings(self.ui_settings)
             self._update_qwen_auth_status_in_settings()
+            self._update_openrouter_status_in_settings()
 
         # Welcome message
         if self.chat_panel:
@@ -921,8 +923,41 @@ class XencodeApp(App):
         Yields:
             Response chunks
         """
-        # Check if we're using a Qwen model that requires authentication
-        if "qwen" in self.current_model.lower() and any(qwen_model in self.current_model.lower() for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]):
+        # Check if we're using a Qwen cloud model that requires authentication
+        model_lower = self.current_model.lower()
+        if model_lower.startswith("openrouter:"):
+            try:
+                from xencode.smart_config_manager import get_config
+                from xencode.model_providers import OpenRouterProvider
+
+                config = get_config()
+                api_key = (config.api_keys.openrouter_api_key or "").strip()
+                if not api_key:
+                    yield "\n\nError: OpenRouter API key is not configured. Add it in Settings (Ctrl+,)."
+                    return
+
+                provider = OpenRouterProvider(api_key)
+                messages = [{"role": "user", "content": prompt}]
+                model_name = self.current_model.split(":", 1)[1]
+
+                async for chunk in provider.chat(messages, model_name, max_tokens=2048, temperature=0.7):
+                    yield chunk
+            except Exception as e:
+                yield f"\n\nError calling OpenRouter API: {str(e)}"
+            return
+
+        is_qwen_cloud_model = (
+            model_lower.startswith("qwen:")
+            or (
+                "qwen" in model_lower
+                and any(
+                    qwen_model in model_lower
+                    for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]
+                )
+            )
+        )
+
+        if is_qwen_cloud_model:
             # Use Qwen AI API with authentication via provider
             try:
                 from xencode.model_providers import QwenProvider
@@ -932,10 +967,11 @@ class XencodeApp(App):
 
                 # Format messages for chat API
                 messages = [{"role": "user", "content": prompt}]
+                qwen_model_name = self.current_model.split(":", 1)[1] if self.current_model.startswith("qwen:") else self.current_model
 
                 # Call Qwen completion API via provider
                 full_response = ""
-                async for chunk in provider.chat(messages, self.current_model, max_tokens=2048, temperature=0.7):
+                async for chunk in provider.chat(messages, qwen_model_name, max_tokens=2048, temperature=0.7):
                     full_response += chunk
                     yield chunk
 
@@ -1523,7 +1559,7 @@ class XencodeApp(App):
         self.notify(f"{action_name} to Qwen started. Follow terminal/browser instructions.", severity="information")
 
         try:
-            await qwen_auth_manager.get_or_authenticate()
+            await qwen_auth_manager.get_or_authenticate(force_reauth=True)
             self.notify("Qwen authentication successful", severity="information")
             self._update_qwen_auth_status_in_settings()
             if self.chat_panel:
@@ -1542,6 +1578,77 @@ class XencodeApp(App):
         self.settings_panel.set_qwen_auth_status(
             qwen_auth_manager.has_valid_cached_credentials()
         )
+
+    def _has_openrouter_api_key(self) -> bool:
+        """Return whether OpenRouter API key is configured."""
+        try:
+            from xencode.smart_config_manager import get_config
+            config = get_config()
+            return bool((config.api_keys.openrouter_api_key or "").strip())
+        except Exception:
+            return False
+
+    def _update_openrouter_status_in_settings(self) -> None:
+        """Refresh OpenRouter status indicator in settings panel."""
+        if not self.settings_panel:
+            return
+        self.settings_panel.set_openrouter_status(self._has_openrouter_api_key())
+
+    async def on_settings_panel_openrouter_save_requested(self, event: SettingsPanel.OpenRouterSaveRequested) -> None:
+        """Validate and persist OpenRouter API key from settings panel."""
+        api_key = (event.api_key or "").strip()
+        if not api_key:
+            self.notify("Please enter an OpenRouter API key", severity="warning")
+            return
+
+        self.notify("Validating OpenRouter API key...", severity="information")
+        ok, message = await self._validate_openrouter_api_key(api_key)
+        if not ok:
+            self.notify(f"OpenRouter key validation failed: {message}", severity="error")
+            self._update_openrouter_status_in_settings()
+            return
+
+        try:
+            from xencode.smart_config_manager import get_config_manager
+
+            manager = get_config_manager()
+            config = manager.get_config()
+            config.api_keys.openrouter_api_key = api_key
+            if manager.save_config():
+                self._update_openrouter_status_in_settings()
+                self.current_model = "openrouter:openai/gpt-4o-mini"
+                self.notify("OpenRouter key saved and cloud model selected", severity="information")
+                if self.chat_panel:
+                    self.chat_panel.add_system_message(
+                        "✅ OpenRouter configured. Active model set to openrouter:openai/gpt-4o-mini"
+                    )
+            else:
+                self.notify("Failed to save OpenRouter key to config", severity="error")
+        except Exception as e:
+            self.notify(f"Error saving OpenRouter key: {e}", severity="error")
+
+    async def _validate_openrouter_api_key(self, api_key: str) -> Tuple[bool, str]:
+        """Validate OpenRouter API key against models endpoint."""
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        timeout = aiohttp.ClientTimeout(total=12)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        return True, "OK"
+                    if response.status in (401, 403):
+                        return False, "Invalid or unauthorized API key"
+                    body = await response.text()
+                    return False, f"HTTP {response.status}: {body[:120]}"
+        except asyncio.TimeoutError:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
 
     def _should_show_onboarding(self) -> bool:
         """Determine whether onboarding/login prompt should be shown."""

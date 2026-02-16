@@ -8,7 +8,7 @@ from typing import Dict, Any
 from rich.text import Text
 from textual.containers import Container, Vertical, Horizontal
 from textual.message import Message
-from textual.widgets import Button, Checkbox, Label, RadioSet, RadioButton
+from textual.widgets import Button, Checkbox, Label, RadioSet, RadioButton, Input
 
 
 class SettingsPanel(Container):
@@ -62,6 +62,13 @@ class SettingsPanel(Container):
         def __init__(self, theme: str) -> None:
             super().__init__()
             self.theme = theme
+
+    class OpenRouterSaveRequested(Message):
+        """OpenRouter API key save requested."""
+
+        def __init__(self, api_key: str) -> None:
+            super().__init__()
+            self.api_key = api_key
 
     THEMES = [
         ("midnight", "Midnight"),
@@ -152,6 +159,18 @@ class SettingsPanel(Container):
                 yield Button("Login", id="btn-login", variant="success")
                 yield Button("Sign Up", id="btn-signup", variant="default")
 
+            yield Label("OpenRouter", classes="section-title")
+            self.lbl_openrouter_status = Label("Status: API key not configured", id="openrouter-status", classes="dim")
+            yield self.lbl_openrouter_status
+            self.input_openrouter_key = Input(
+                placeholder="Enter OpenRouter API key (sk-or-v1-...)",
+                password=True,
+                id="openrouter-key-input",
+            )
+            yield self.input_openrouter_key
+            with Horizontal():
+                yield Button("Save OpenRouter Key", id="btn-openrouter-save", variant="primary")
+
     def set_settings(self, settings: Dict[str, Any]) -> None:
         """Apply settings into form controls."""
         self.chk_show_explorer.value = bool(settings.get("show_explorer", True))
@@ -215,6 +234,9 @@ class SettingsPanel(Container):
             self.post_message(self.LoginRequested())
         elif event.button.id == "btn-signup":
             self.post_message(self.SignupRequested())
+        elif event.button.id == "btn-openrouter-save":
+            key = self.input_openrouter_key.value.strip() if hasattr(self, "input_openrouter_key") else ""
+            self.post_message(self.OpenRouterSaveRequested(key))
 
     def set_qwen_auth_status(self, is_authenticated: bool) -> None:
         """Update Qwen auth status text with minimal UI impact."""
@@ -222,4 +244,12 @@ class SettingsPanel(Container):
             return
         self.lbl_qwen_auth_status.update(
             "Status: Authenticated" if is_authenticated else "Status: Not authenticated"
+        )
+
+    def set_openrouter_status(self, has_api_key: bool) -> None:
+        """Update OpenRouter API key status."""
+        if not hasattr(self, "lbl_openrouter_status"):
+            return
+        self.lbl_openrouter_status.update(
+            "Status: API key configured" if has_api_key else "Status: API key not configured"
         )
