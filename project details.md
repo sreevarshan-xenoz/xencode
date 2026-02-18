@@ -605,3 +605,188 @@ This setup supports both local-dev orchestration and enterprise-style production
 ## 10) Notes on scope of this document
 
 This is a comprehensive project-level inventory built from repository manifests, documentation, API/router definitions, and package/module structure. Some modules may be experimental, optional, or partially wired depending on runtime configuration and environment setup.
+
+---
+
+## 11) Detailed Architecture, Routing, and Connection Diagrams
+
+This section adds concrete routing and connectivity views so you can quickly understand how requests move through Xencode and how major subsystems are connected.
+
+### 11.1 End-to-end request routing (CLI/TUI/API to model response)
+
+**What this shows:** How user input from CLI, TUI, or API is routed through orchestration, policy/safety layers, model providers, and result rendering.
+
+```mermaid
+flowchart TD
+	U[User]
+	CLI[xencode CLI / Commands]
+	TUI[Textual TUI Widgets]
+	API[FastAPI Endpoints]
+
+	CMD[Command Router / Session Manager]
+	ORCH[AgentWorkflowOrchestrator\nPlan -> Edit -> Test -> Fix]
+
+	CONTEXT[Project Context + Memory]
+	CACHE[Hybrid Cache\nMemory + Disk + TTL]
+	SAFE[Security/Validation Layer\nInput/Path/URL/Model checks]
+
+	PROV[Provider Resolver + Transport\nRetries/Timeouts/Diagnostics]
+	LOCAL[Local Path\nOllama + Fallback]
+	CLOUD[Cloud Path\nQwen/OpenRouter]
+	ENS[Ensemble + Confidence + Voting]
+
+	EXEC[Tool/Terminal/Git Actions]
+	OUT[Response + Reports + UI Updates]
+
+	U --> CLI
+	U --> TUI
+	U --> API
+
+	CLI --> CMD
+	TUI --> CMD
+	API --> CMD
+
+	CMD --> ORCH
+	ORCH --> CONTEXT
+	ORCH --> CACHE
+	ORCH --> SAFE
+	ORCH --> EXEC
+
+	SAFE --> PROV
+	CONTEXT --> PROV
+	CACHE --> PROV
+
+	PROV --> LOCAL
+	PROV --> CLOUD
+	LOCAL --> ENS
+	CLOUD --> ENS
+	ENS --> OUT
+	EXEC --> OUT
+```
+
+### 11.2 Internal API routing map (FastAPI router-level view)
+
+**What this shows:** Logical routing from the main service entrypoint into domain routers and then into supporting subsystem layers.
+
+```mermaid
+flowchart LR
+	CLIENT[CLI/TUI/External Client] --> NGINX[Nginx / Reverse Proxy]
+	NGINX --> APP[FastAPI App + Middleware\nCORS/GZip/Request Tracking]
+
+	APP --> R_ANALYTICS[/Analytics Router/]
+	APP --> R_CODE[/Code Analysis Router/]
+	APP --> R_DOCS[/Documents Router/]
+	APP --> R_WORK[/Workspace Router/]
+	APP --> R_MON[/Monitoring Router/]
+	APP --> R_PLUG[/Plugins Router/]
+
+	R_ANALYTICS --> S_ANALYTICS[Analytics Engine + Reporting]
+	R_CODE --> S_CODE[Code Analyzer + Security Scanner]
+	R_DOCS --> S_DOCS[Document Processor + RAG Index]
+	R_WORK --> S_WORK[Workspace + Collaboration Services]
+	R_MON --> S_MON[Resource/Health Monitoring]
+	R_PLUG --> S_PLUG[Plugin System + Marketplace]
+
+	S_ANALYTICS --> DB[(PostgreSQL / SQLite)]
+	S_WORK --> DB
+	S_DOCS --> VDB[(ChromaDB)]
+	S_MON --> TS[(Prometheus Metrics)]
+	S_PLUG --> FS[(Plugin Storage)]
+```
+
+### 11.3 Subsystem connectivity (data + control plane)
+
+**What this shows:** How core runtime subsystems exchange context, decisions, telemetry, and persisted state.
+
+```mermaid
+graph TD
+	CORE[Core Runtime\ncli.py / enhanced_cli_system.py]
+	AGENT[Agentic Layer\nagentic + workflows]
+	MODEL[Model Layer\nmodel_providers + ensembles]
+	RAG[RAG + Context Layer\nvector stores + context cache]
+	SEC[Security/Auth Layer\nauth + security modules]
+	API2[API Layer\napi + routers]
+	TUI2[TUI Layer\ntextual widgets]
+	MON[Monitoring/Analytics\nmonitoring + analytics]
+	DEVOPS[DevOps/Automation\ngit + deployment + scripts]
+
+	DB2[(Postgres/SQLite)]
+	REDIS[(Redis Cache/Session)]
+	CHROMA[(Chroma Vector Store)]
+	OBS[(Prometheus/Grafana/ELK)]
+
+	CORE --> AGENT
+	CORE --> TUI2
+	CORE --> API2
+
+	AGENT --> MODEL
+	AGENT --> RAG
+	AGENT --> DEVOPS
+	AGENT --> SEC
+
+	MODEL --> MON
+	RAG --> CHROMA
+	RAG --> REDIS
+	API2 --> SEC
+	API2 --> DB2
+	API2 --> REDIS
+
+	MON --> DB2
+	MON --> OBS
+	DEVOPS --> OBS
+	TUI2 --> AGENT
+	TUI2 --> MON
+```
+
+### 11.4 Agentic coding workflow flow diagram
+
+**What this shows:** Practical execution loop for autonomous coding tasks and where stop/repair decisions occur.
+
+```mermaid
+flowchart TD
+	A[Receive task/prompt] --> B[Classify task + select profile]
+	B --> C[Collect context\nrepo files, memory, cache]
+	C --> D[Generate plan]
+	D --> E[Propose edits]
+	E --> F[Apply edits]
+	F --> G[Run tests/lint/checks]
+	G --> H{Checks pass?}
+
+	H -- Yes --> I[Generate summary + diff/report]
+	I --> J[Return result to CLI/TUI/API]
+
+	H -- No --> K[Classify failure\nsyntax/import/test/runtime]
+	K --> L[Create targeted fix]
+	L --> M{Iteration cap reached?}
+	M -- No --> E
+	M -- Yes --> N[Stop with diagnostics\nmanual intervention suggestion]
+```
+
+### 11.5 Deployment traffic flow (compose/k8s style)
+
+**What this shows:** Runtime network path between client traffic, app services, persistence, and observability stack.
+
+```mermaid
+flowchart LR
+	USER[User / Client] --> INGRESS[Ingress or Nginx]
+	INGRESS --> APP2[Xencode App\n(FastAPI + Worker paths)]
+
+	APP2 --> PG[(PostgreSQL)]
+	APP2 --> RC[(Redis)]
+	APP2 --> VS[(Chroma/Vector Index)]
+
+	APP2 --> OLLAMA[Ollama Local Models]
+	APP2 --> CLOUD2[Cloud Model Providers]
+
+	APP2 --> PROM[Prometheus]
+	PROM --> GRAF[Grafana]
+	APP2 --> ELK[ELK Stack]
+```
+
+### 11.6 Routing notes (quick interpretation)
+
+- **Entry points converge:** CLI, TUI, and API all route into shared orchestration/runtime paths.
+- **Policy before provider:** security validation, profile/routing policy, and context retrieval happen before model invocation.
+- **Provider abstraction first:** transport/resolver isolate local/cloud differences and enforce retries/fallback rules.
+- **Feedback loop:** tests/checks and monitoring metrics feed back into the agent loop and optimization subsystems.
+- **Operational split:** data plane (requests/models) and observability plane (metrics/logs/traces) are connected but independently scalable.
