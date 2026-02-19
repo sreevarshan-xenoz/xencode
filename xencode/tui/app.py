@@ -30,6 +30,14 @@ from xencode.tui.widgets.code_review_panel import CodeReviewPanel
 from xencode.tui.widgets.performance_dashboard import PerformanceDashboard
 from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
 
+# Import feature panels
+from xencode.tui.features.project_analyzer_panel import ProjectAnalyzerPanel
+from xencode.tui.features.learning_mode_panel import LearningModePanel
+from xencode.tui.features.multi_language_panel import MultiLanguagePanel
+from xencode.tui.features.custom_models_panel import CustomModelsPanel
+from xencode.tui.features.security_auditor_panel import SecurityAuditorPanel
+from xencode.tui.features.performance_profiler_panel import PerformanceProfilerPanel
+
 from xencode.tui.utils.model_checker import ModelChecker
 
 # Import core functionality
@@ -204,6 +212,54 @@ class XencodeApp(App):
         display: none;
     }
 
+    #project-analyzer-panel-container {
+        height: 50%;
+    }
+
+    #project-analyzer-panel-container.hidden {
+        display: none;
+    }
+
+    #learning-mode-panel-container {
+        height: 50%;
+    }
+
+    #learning-mode-panel-container.hidden {
+        display: none;
+    }
+
+    #multi-language-panel-container {
+        height: 50%;
+    }
+
+    #multi-language-panel-container.hidden {
+        display: none;
+    }
+
+    #custom-models-panel-container {
+        height: 50%;
+    }
+
+    #custom-models-panel-container.hidden {
+        display: none;
+    }
+
+    #security-auditor-panel-container {
+        height: 50%;
+    }
+
+    #security-auditor-panel-container.hidden {
+        display: none;
+    }
+
+    #performance-profiler-panel-container {
+        height: 50%;
+    }
+
+    #performance-profiler-panel-container.hidden {
+        display: none;
+    }
+
     Screen.theme-midnight {
         background: #0f111a;
         color: #e6e6e6;
@@ -281,6 +337,12 @@ class XencodeApp(App):
         Binding("ctrl+r", "toggle_review", "Review"),
         Binding("ctrl+p", "toggle_performance", "Performance"),
         Binding("ctrl+y", "toggle_terminal_assistant", "Term Assist"),
+        Binding("f2", "toggle_project_analyzer", "Project"),
+        Binding("f3", "toggle_learning_mode", "Learning"),
+        Binding("f4", "toggle_multi_language", "Language"),
+        Binding("f5", "toggle_custom_models", "Models"),
+        Binding("f6", "toggle_security_auditor", "Security"),
+        Binding("f7", "toggle_performance_profiler", "Profiler"),
         Binding("ctrl+g", "refresh_git", "Git Refresh"),
         Binding("ctrl+shift+c", "commit_dialog", "Commit"),
         Binding("ctrl+t", "toggle_terminal", "Terminal"),
@@ -338,6 +400,14 @@ class XencodeApp(App):
         self.review_panel: Optional[CodeReviewPanel] = None
         self.performance_panel: Optional[PerformanceDashboard] = None
         self.terminal_assistant_panel: Optional[TerminalAssistantPanel] = None
+        
+        # Feature panels
+        self.project_analyzer_panel: Optional[ProjectAnalyzerPanel] = None
+        self.learning_mode_panel: Optional[LearningModePanel] = None
+        self.multi_language_panel: Optional[MultiLanguagePanel] = None
+        self.custom_models_panel: Optional[CustomModelsPanel] = None
+        self.security_auditor_panel: Optional[SecurityAuditorPanel] = None
+        self.performance_profiler_panel: Optional[PerformanceProfilerPanel] = None
         
         # Collaboration state
         self.server_process: Optional[subprocess.Popen] = None
@@ -418,6 +488,36 @@ class XencodeApp(App):
                     with Vertical(id="terminal-assistant-panel-container", classes="hidden"):
                         self.terminal_assistant_panel = TerminalAssistantPanel()
                         yield self.terminal_assistant_panel
+
+                    # Project analyzer panel (initially hidden)
+                    with Vertical(id="project-analyzer-panel-container", classes="hidden"):
+                        self.project_analyzer_panel = ProjectAnalyzerPanel()
+                        yield self.project_analyzer_panel
+
+                    # Learning mode panel (initially hidden)
+                    with Vertical(id="learning-mode-panel-container", classes="hidden"):
+                        self.learning_mode_panel = LearningModePanel()
+                        yield self.learning_mode_panel
+
+                    # Multi-language panel (initially hidden)
+                    with Vertical(id="multi-language-panel-container", classes="hidden"):
+                        self.multi_language_panel = MultiLanguagePanel()
+                        yield self.multi_language_panel
+
+                    # Custom models panel (initially hidden)
+                    with Vertical(id="custom-models-panel-container", classes="hidden"):
+                        self.custom_models_panel = CustomModelsPanel()
+                        yield self.custom_models_panel
+
+                    # Security auditor panel (initially hidden)
+                    with Vertical(id="security-auditor-panel-container", classes="hidden"):
+                        self.security_auditor_panel = SecurityAuditorPanel()
+                        yield self.security_auditor_panel
+
+                    # Performance profiler panel (initially hidden)
+                    with Vertical(id="performance-profiler-panel-container", classes="hidden"):
+                        self.performance_profiler_panel = PerformanceProfilerPanel()
+                        yield self.performance_profiler_panel
 
                     # Chat panel
                     with Vertical(id="chat-panel-container"):
@@ -1407,21 +1507,95 @@ class XencodeApp(App):
             self.chat_panel.history.clear_history()
             self.chat_panel.add_system_message("Chat cleared.")
     
+    def action_toggle_project_analyzer(self) -> None:
+        """Toggle project analyzer panel visibility."""
+        self._toggle_feature_panel("project-analyzer-panel-container")
+    
+    def action_toggle_learning_mode(self) -> None:
+        """Toggle learning mode panel visibility."""
+        self._toggle_feature_panel("learning-mode-panel-container")
+    
+    def action_toggle_multi_language(self) -> None:
+        """Toggle multi-language panel visibility."""
+        self._toggle_feature_panel("multi-language-panel-container")
+    
+    def action_toggle_custom_models(self) -> None:
+        """Toggle custom models panel visibility."""
+        self._toggle_feature_panel("custom-models-panel-container")
+    
+    def action_toggle_security_auditor(self) -> None:
+        """Toggle security auditor panel visibility."""
+        self._toggle_feature_panel("security-auditor-panel-container")
+    
+    def action_toggle_performance_profiler(self) -> None:
+        """Toggle performance profiler panel visibility."""
+        self._toggle_feature_panel("performance-profiler-panel-container")
+    
+    def _toggle_feature_panel(self, panel_id: str) -> None:
+        """Helper method to toggle feature panels."""
+        target_panel = self.query_one(f"#{panel_id}")
+        chat_container = self.query_one("#chat-panel-container")
+        
+        # List of all panels to hide
+        panel_ids = [
+            "model-selector-panel",
+            "collab-panel-container",
+            "bytebot-panel-container",
+            "settings-panel-container",
+            "options-panel-container",
+            "agent-panel-container",
+            "review-panel-container",
+            "performance-panel-container",
+            "terminal-assistant-panel-container",
+            "project-analyzer-panel-container",
+            "learning-mode-panel-container",
+            "multi-language-panel-container",
+            "custom-models-panel-container",
+            "security-auditor-panel-container",
+            "performance-profiler-panel-container",
+        ]
+        
+        # Hide all other panels
+        for pid in panel_ids:
+            if pid != panel_id:
+                panel = self.query_one(f"#{pid}")
+                if not panel.has_class("hidden"):
+                    panel.add_class("hidden")
+        
+        # Toggle target panel
+        if target_panel.has_class("hidden"):
+            target_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            target_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+    
     def action_help(self) -> None:
         """Show help"""
         if self.chat_panel:
             help_text = """
             # Xencode TUI Keybindings
 
+            ## Core Panels
             - **Ctrl+E**: Toggle file explorer
             - **Ctrl+M**: Toggle model selector
             - **Ctrl+B**: Toggle ByteBot panel
             - **Ctrl+A**: Toggle Agent panel
+            - **Ctrl+,**: Toggle settings panel
+            - **Ctrl+O**: Toggle options panel
+            
+            ## Feature Panels
             - **Ctrl+R**: Toggle Code Review panel
             - **Ctrl+P**: Toggle Performance panel
             - **Ctrl+Y**: Toggle Terminal Assistant panel
-            - **Ctrl+,**: Toggle settings panel
-            - **Ctrl+O**: Toggle options panel
+            - **F2**: Toggle Project Analyzer
+            - **F3**: Toggle Learning Mode
+            - **F4**: Toggle Multi-language Support
+            - **F5**: Toggle Custom Models
+            - **F6**: Toggle Security Auditor
+            - **F7**: Toggle Performance Profiler
+            
+            ## General
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
             - **Ctrl+C**: Quit application
