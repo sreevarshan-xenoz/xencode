@@ -146,4 +146,24 @@ class FeatureBase(ABC):
     
     def track_analytics(self, event: str, properties: Dict[str, Any] = None) -> None:
         """Track analytics for this feature"""
-        pass
+        try:
+            from xencode.analytics.event_tracker import event_tracker, EventCategory
+            
+            # Add feature context to properties
+            feature_properties = {
+                'feature_name': self.name,
+                'feature_version': self.version,
+                'feature_status': self.status.value,
+                **(properties or {})
+            }
+            
+            # Track the event
+            event_tracker.track_event(
+                event_type=f"feature_{self.name}_{event}",
+                category=EventCategory.USER_ACTION,
+                properties=feature_properties,
+                tags=['feature', self.name, event]
+            )
+        except Exception as e:
+            # Silently fail if analytics is not available
+            pass
