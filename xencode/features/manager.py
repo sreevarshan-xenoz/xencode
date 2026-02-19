@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Type
 from pathlib import Path
 
 from .base import FeatureBase, FeatureConfig, FeatureStatus, FeatureError
+from .core.schema import schema_validator
 
 
 class FeatureManager:
@@ -34,8 +35,11 @@ class FeatureManager:
             prefix='xencode.features.'
         ):
             try:
-                # Skip base module
-                if module_name.endswith('.base') or module_name.endswith('__init__'):
+                # Skip base module and core modules
+                if (module_name.endswith('.base') or 
+                    module_name.endswith('__init__') or
+                    '.core.' in module_name or
+                    module_name.endswith('.core')):
                     continue
                 
                 # Import the module
@@ -77,6 +81,15 @@ class FeatureManager:
         # Create config if not provided
         if config is None:
             config = FeatureConfig(name=name)
+        
+        # Validate and apply defaults from schema
+        if config.config:
+            valid, errors = schema_validator.validate_config(name, config.config)
+            if not valid:
+                raise FeatureError(f"Invalid configuration for feature '{name}': {', '.join(errors)}")
+            
+            # Apply defaults
+            config.config = schema_validator.apply_defaults(name, config.config)
         
         # Create feature instance
         feature = feature_class(config)
@@ -148,3 +161,30 @@ class FeatureManager:
             for feature in self.features.values() 
             if feature.get_status() == status
         ]
+    
+    def reload_feature(self, name: str) -> bool:
+        """Reload a feature (useful for development)"""
+        if name not in self.features:
+            return False
+        
+        # Get the feature's module
+        feature_class = self._feature_classes.get(name)
+        if not feature_class:
+            return False
+        
+        # Reload the module
+        module = importlib.import_module(feature_class.__module__)
+        importlib.reload(module)
+        
+        # Update the feature class
+        for attr_name in dir(module):
+            attr = getattr(module, attr_name)
+            if (isinstance(attr, type) and 
+                issubclass(attr, FeatureBase) and 
+                attr != FeatureBase):
+                feature_name = attr_name.lower().replace('feature', '')
+                if feature_name == name:
+                    self._feature_classes[name] = attr
+                    return True
+        
+        return False

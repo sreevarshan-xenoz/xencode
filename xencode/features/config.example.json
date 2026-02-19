@@ -1,0 +1,145 @@
+{
+  "$schema": "Feature Configuration Example",
+  "version": "1.0.0",
+  "description": "Example configuration for Xencode features",
+  
+  "code_review": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "integrations": ["github", "gitlab"],
+      "severity_levels": ["critical", "high", "medium"],
+      "auto_review": false,
+      "max_file_size_kb": 500,
+      "languages": ["python", "javascript", "typescript"],
+      "security_checks": {
+        "enabled": true,
+        "check_sql_injection": true,
+        "check_xss": true,
+        "check_secrets": true
+      },
+      "style_checks": {
+        "enabled": true,
+        "max_line_length": 120,
+        "enforce_docstrings": false
+      }
+    },
+    "dependencies": []
+  },
+  
+  "terminal_assistant": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "history_size": 1000,
+      "context_aware": true,
+      "learning_enabled": true,
+      "suggestion_limit": 5
+    },
+    "dependencies": []
+  },
+  
+  "project_analyzer": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "auto_generate_docs": false,
+      "include_diagrams": true,
+      "track_metrics": true,
+      "max_depth": 10
+    },
+    "dependencies": []
+  },
+  
+  "learning_mode": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "default_language": "en",
+      "adaptive_difficulty": true,
+      "track_progress": true,
+      "topics": ["python", "javascript", "rust"]
+    },
+    "dependencies": []
+  },
+  
+  "multi_language": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "supported_languages": ["en", "es", "fr", "de", "zh", "ja"],
+      "auto_detect": true,
+      "fallback_language": "en"
+    },
+    "dependencies": []
+  },
+  
+  "voice_interface": {
+    "enabled": false,
+    "version": "1.0.0",
+    "config": {
+      "speech_to_text": {
+        "provider": "whisper",
+        "model": "base"
+      },
+      "text_to_speech": {
+        "provider": "pyttsx3",
+        "voice": "en-US"
+      }
+    },
+    "dependencies": ["whisper", "pyttsx3"]
+  },
+  
+  "custom_models": {
+    "enabled": false,
+    "version": "1.0.0",
+    "config": {
+      "training": {
+        "max_epochs": 10,
+        "batch_size": 32
+      },
+      "performance": {
+        "min_accuracy": 0.85
+      }
+    },
+    "dependencies": []
+  },
+  
+  "security_auditor": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "checks": ["owasp_top_10", "dependency_vulnerabilities"],
+      "tools": ["bandit", "snyk"],
+      "auto_scan": false
+    },
+    "dependencies": ["bandit"]
+  },
+  
+  "performance_profiler": {
+    "enabled": true,
+    "version": "1.0.0",
+    "config": {
+      "tools": ["cprofile", "psutil"],
+      "auto_profile": false,
+      "threshold_ms": 100
+    },
+    "dependencies": ["psutil"]
+  },
+  
+  "collaborative_coding": {
+    "enabled": false,
+    "version": "1.0.0",
+    "config": {
+      "websocket": {
+        "port": 8765,
+        "max_connections": 10
+      },
+      "sync": {
+        "debounce_ms": 100,
+        "batch_size": 50
+      }
+    },
+    "dependencies": ["websockets"]
+  }
+}
