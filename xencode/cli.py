@@ -10,7 +10,7 @@ and all Phase 2 systems through a unified command interface.
 import asyncio
 import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import click
 from rich.console import Console
 from rich.panel import Panel
@@ -183,13 +183,34 @@ def agentic(model, base_url):
 
 @cli.group()
 def features():
-    """Feature management"""
+    """Feature management - Enable, disable, and configure Xencode features
+    
+    Xencode features provide modular functionality that can be enabled or disabled
+    as needed. Each feature has its own configuration and CLI commands.
+    
+    Available commands:
+        list      - List all available features
+        info      - Show detailed information about a feature
+        enable    - Enable a feature
+        disable   - Disable a feature
+        configure - Configure a feature
+    
+    Examples:
+        xencode features list
+        xencode features info code_review
+        xencode features enable terminal_assistant
+        xencode features configure code_review --show
+    """
     pass
 
 
 @features.command()
 def list():
-    """List all available features"""
+    """List all available features
+    
+    Examples:
+        xencode features list
+    """
     console.print("[blue]📋 Listing available features...[/blue]")
     
     feature_manager = FeatureManager()
@@ -199,25 +220,41 @@ def list():
     table.add_column("Name", style="cyan")
     table.add_column("Status", style="green")
     table.add_column("Version", style="yellow")
+    table.add_column("Description", style="white")
     
     for feature_name in sorted(features):
         feature = feature_manager.get_feature(feature_name)
+        if not feature:
+            # Try to load it to get info
+            try:
+                feature = feature_manager.load_feature(feature_name)
+            except:
+                pass
+        
         if feature:
             status = feature.get_status().value
             version = feature.version
+            description = feature.description[:50] + "..." if len(feature.description) > 50 else feature.description
         else:
             status = "not_loaded"
             version = "unknown"
+            description = "N/A"
         
-        table.add_row(feature_name, status, version)
+        table.add_row(feature_name, status, version, description)
     
     console.print(table)
+    console.print("\n[dim]Use 'xencode features info <feature_name>' for more details[/dim]")
 
 
 @features.command()
 @click.argument('feature_name')
 def enable(feature_name):
-    """Enable a feature"""
+    """Enable a feature
+    
+    Examples:
+        xencode features enable code_review
+        xencode features enable terminal_assistant
+    """
     console.print(f"[blue]⚡ Enabling feature: {feature_name}[/blue]")
     
     async def _enable():
@@ -226,6 +263,19 @@ def enable(feature_name):
         
         if success:
             console.print(f"[green]✅ Feature '{feature_name}' enabled successfully![/green]")
+            
+            # Show available commands
+            feature = feature_manager.get_feature(feature_name)
+            if feature and hasattr(feature, 'get_cli_commands'):
+                try:
+                    commands = feature.get_cli_commands()
+                    if commands:
+                        console.print(f"\n[cyan]Available commands for {feature_name}:[/cyan]")
+                        for cmd in commands:
+                            if hasattr(cmd, 'name') and hasattr(cmd, 'help'):
+                                console.print(f"  • [yellow]xencode {cmd.name}[/yellow]: {cmd.help}")
+                except:
+                    pass
         else:
             console.print(f"[red]❌ Failed to enable feature '{feature_name}'[/red]")
     
@@ -235,7 +285,12 @@ def enable(feature_name):
 @features.command()
 @click.argument('feature_name')
 def disable(feature_name):
-    """Disable a feature"""
+    """Disable a feature
+    
+    Examples:
+        xencode features disable code_review
+        xencode features disable terminal_assistant
+    """
     console.print(f"[blue]🛑 Disabling feature: {feature_name}[/blue]")
     
     async def _disable():
@@ -248,6 +303,158 @@ def disable(feature_name):
             console.print(f"[red]❌ Failed to disable feature '{feature_name}'[/red]")
     
     asyncio.run(_disable())
+
+
+@features.command()
+@click.argument('feature_name')
+@click.option('--show', is_flag=True, help='Show current configuration')
+@click.option('--set', 'config_key', help='Configuration key to set')
+@click.option('--value', help='Configuration value')
+@click.option('--reset', is_flag=True, help='Reset to default configuration')
+def configure(feature_name, show, config_key, value, reset):
+    """Configure a feature
+    
+    Examples:
+        xencode features configure code_review --show
+        xencode features configure code_review --set severity_levels --value "critical,high"
+        xencode features configure terminal_assistant --reset
+    """
+    console.print(f"[blue]⚙️  Configuring feature: {feature_name}[/blue]")
+    
+    feature_manager = FeatureManager()
+    feature = feature_manager.get_feature(feature_name)
+    
+    if not feature:
+        # Try to load the feature
+        feature = feature_manager.load_feature(feature_name)
+        if not feature:
+            console.print(f"[red]❌ Feature '{feature_name}' not found[/red]")
+            return
+    
+    if show:
+        # Show current configuration
+        config = feature.config.config or {}
+        
+        table = Table(title=f"Configuration for {feature_name}")
+        table.add_column("Key", style="cyan")
+        table.add_column("Value", style="yellow")
+        
+        for key, val in config.items():
+            table.add_row(key, str(val))
+        
+        console.print(table)
+        
+    elif reset:
+        # Reset to default configuration
+        feature.config.config = {}
+        console.print(f"[green]✅ Configuration reset to defaults for '{feature_name}'[/green]")
+        
+    elif config_key and value:
+        # Set a configuration value
+        if not feature.config.config:
+            feature.config.config = {}
+        
+        # Try to parse value as appropriate type
+        parsed_value = value
+        if value.lower() == 'true':
+            parsed_value = True
+        elif value.lower() == 'false':
+            parsed_value = False
+        elif value.isdigit():
+            parsed_value = int(value)
+        elif ',' in value:
+            parsed_value = [v.strip() for v in value.split(',')]
+        
+        feature.config.config[config_key] = parsed_value
+        console.print(f"[green]✅ Set {config_key} = {parsed_value} for '{feature_name}'[/green]")
+        
+    else:
+        console.print("[yellow]⚠️  Please specify --show, --set with --value, or --reset[/yellow]")
+
+
+@features.command()
+@click.argument('feature_name')
+def info(feature_name):
+    """Show detailed information about a feature
+    
+    Examples:
+        xencode features info code_review
+        xencode features info terminal_assistant
+    """
+    console.print(f"[blue]ℹ️  Feature information: {feature_name}[/blue]")
+    
+    feature_manager = FeatureManager()
+    feature = feature_manager.get_feature(feature_name)
+    
+    if not feature:
+        # Try to load the feature
+        feature = feature_manager.load_feature(feature_name)
+        if not feature:
+            console.print(f"[red]❌ Feature '{feature_name}' not found[/red]")
+            return
+    
+    # Create info panel
+    info_text = f"""
+[cyan]Name:[/cyan] {feature.name}
+[cyan]Description:[/cyan] {feature.description}
+[cyan]Version:[/cyan] {feature.version}
+[cyan]Status:[/cyan] {feature.get_status().value}
+[cyan]Enabled:[/cyan] {feature.is_enabled}
+    """
+    
+    panel = Panel(info_text.strip(), title=f"Feature: {feature_name}", border_style="blue")
+    console.print(panel)
+    
+    # Show available commands if any
+    if hasattr(feature, 'get_cli_commands'):
+        commands = feature.get_cli_commands()
+        if commands:
+            console.print("\n[cyan]Available Commands:[/cyan]")
+            for cmd_name, cmd_help in commands.items():
+                console.print(f"  • [yellow]{cmd_name}[/yellow]: {cmd_help}")
+
+
+# Feature-specific command registration system
+def register_feature_commands():
+    """
+    Dynamically register CLI commands from enabled features.
+    
+    This function discovers all enabled features and registers their
+    CLI commands with the main CLI group. Features can provide commands
+    through the get_cli_commands() method.
+    
+    Example:
+        A feature can return a list of Click commands that will be
+        automatically registered when the feature is enabled.
+    """
+    try:
+        feature_manager = FeatureManager()
+        enabled_features = feature_manager.get_enabled_features()
+        
+        for feature_name, feature in enabled_features.items():
+            if hasattr(feature, 'get_cli_commands'):
+                try:
+                    commands = feature.get_cli_commands()
+                    if commands and isinstance(commands, list):
+                        for command in commands:
+                            if hasattr(command, 'name'):
+                                # Register the command with the main CLI
+                                cli.add_command(command)
+                except Exception as e:
+                    # Silently skip features that fail to register commands
+                    if feature_manager.config_path and hasattr(feature_manager, 'config_path'):
+                        pass  # Could log this in verbose mode
+    except Exception as e:
+        # Don't fail CLI startup if feature registration fails
+        pass
+
+
+# Register feature commands on CLI initialization
+# This allows features to add their own commands dynamically
+try:
+    register_feature_commands()
+except:
+    pass  # Don't fail if feature registration fails
 
 
 @cli.group()
@@ -1567,6 +1774,623 @@ def patterns(ctx):
             sys.exit(1)
     
     asyncio.run(_patterns())
+
+
+@cli.group()
+def analyze():
+    """Project Analyzer commands - Analyze project structure, dependencies, and metrics"""
+    pass
+
+
+@analyze.command()
+@click.argument('path', required=False, default='.')
+@click.option('--output', '-o', type=click.Path(), help='Output file for analysis results')
+@click.option('--format', '-f', type=click.Choice(['json', 'markdown', 'html']), default='markdown', 
+              help='Output format')
+@click.pass_context
+def project(ctx, path, output, format):
+    """
+    Analyze project structure, dependencies, and metrics
+    
+    Examples:
+      xencode analyze project
+      xencode analyze project /path/to/project
+      xencode analyze project --output analysis.md
+      xencode analyze project --format json --output analysis.json
+    """
+    console.print(f"[cyan]📊 Analyzing project: {path}[/cyan]")
+    
+    async def _analyze():
+        try:
+            from xencode.features.project_analyzer import ProjectAnalyzerFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="project_analyzer", enabled=True)
+            feature = ProjectAnalyzerFeature(config)
+            await feature._initialize()
+            
+            # Analyze project
+            with console.status("[bold blue]🔍 Scanning project structure..."):
+                results = await feature.analyze_project(path)
+            
+            # Display summary
+            summary = results.get('summary', {})
+            console.print(Panel(
+                f"[bold]Project:[/bold] {results['project_path']}\n"
+                f"[bold]Total Files:[/bold] {summary.get('total_files', 0)}\n"
+                f"[bold]Total Lines:[/bold] {summary.get('total_lines', 0):,}\n"
+                f"[bold]Languages:[/bold] {', '.join(summary.get('languages', []))}\n"
+                f"[bold]Dependencies:[/bold] {summary.get('dependency_count', 0)}\n"
+                f"[bold]Complexity Score:[/bold] {summary.get('complexity_score', 0):.1f}\n"
+                f"[bold]Maintainability:[/bold] {summary.get('maintainability_index', 0):.1f}/100\n"
+                f"[bold]Health Score:[/bold] {summary.get('health_score', 0):.1f}/100\n"
+                f"[bold]Tech Debt Items:[/bold] {summary.get('tech_debt_items', 0)}",
+                title="📊 Project Analysis Summary",
+                border_style="green"
+            ))
+            
+            # Show metrics
+            metrics = results.get('metrics', {})
+            if metrics:
+                console.print("\n[bold]📈 Code Metrics:[/bold]")
+                table = Table()
+                table.add_column("Metric", style="cyan")
+                table.add_column("Value", style="yellow")
+                
+                table.add_row("Code Lines", f"{metrics.get('code_lines', 0):,}")
+                table.add_row("Comment Lines", f"{metrics.get('comment_lines', 0):,}")
+                table.add_row("Blank Lines", f"{metrics.get('blank_lines', 0):,}")
+                table.add_row("Comment Ratio", f"{metrics.get('comment_ratio', 0):.1f}%")
+                table.add_row("Avg Complexity", f"{metrics.get('average_complexity', 0):.1f}")
+                table.add_row("Max Complexity", f"{metrics.get('max_complexity', 0)}")
+                
+                console.print(table)
+            
+            # Show technical debt
+            tech_debt = results.get('technical_debt', {})
+            if tech_debt and tech_debt.get('issues'):
+                console.print(f"\n[bold red]⚠️  Technical Debt ({tech_debt['total_issues']} issues):[/bold red]")
+                
+                by_severity = tech_debt.get('by_severity', {})
+                severity_table = Table()
+                severity_table.add_column("Severity", style="cyan")
+                severity_table.add_column("Count", style="yellow")
+                
+                for severity in ['high', 'medium', 'low']:
+                    count = by_severity.get(severity, 0)
+                    if count > 0:
+                        severity_table.add_row(severity.capitalize(), str(count))
+                
+                console.print(severity_table)
+                
+                # Show top issues
+                console.print("\n[bold]Top Issues:[/bold]")
+                for issue in tech_debt['issues'][:5]:
+                    severity_color = {
+                        'high': 'red',
+                        'medium': 'yellow',
+                        'low': 'blue'
+                    }.get(issue['severity'], 'white')
+                    
+                    console.print(f"  [{severity_color}]•[/{severity_color}] {issue['message']}")
+                    if issue.get('suggestion'):
+                        console.print(f"    [dim]→ {issue['suggestion']}[/dim]")
+            
+            # Save output if requested
+            if output:
+                import json
+                from pathlib import Path
+                
+                output_path = Path(output)
+                
+                if format == 'json':
+                    with open(output_path, 'w') as f:
+                        json.dump(results, f, indent=2)
+                elif format == 'markdown':
+                    md_content = _generate_markdown_report(results)
+                    with open(output_path, 'w') as f:
+                        f.write(md_content)
+                elif format == 'html':
+                    html_content = _generate_html_report(results)
+                    with open(output_path, 'w') as f:
+                        f.write(html_content)
+                
+                console.print(f"\n[green]✅ Analysis saved to: {output_path}[/green]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Analysis failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_analyze())
+
+
+@analyze.command()
+@click.argument('path', required=False, default='.')
+@click.option('--output', '-o', type=click.Path(), help='Output directory for documentation')
+@click.option('--readme', is_flag=True, help='Generate README.md')
+@click.option('--architecture', is_flag=True, help='Generate architecture diagram')
+@click.option('--api-docs', is_flag=True, help='Generate API documentation')
+@click.pass_context
+def docs(ctx, path, output, readme, architecture, api_docs):
+    """
+    Generate project documentation
+    
+    Examples:
+      xencode analyze docs
+      xencode analyze docs --readme
+      xencode analyze docs --architecture --output ./docs
+      xencode analyze docs --readme --architecture --api-docs
+    """
+    console.print(f"[cyan]📝 Generating documentation for: {path}[/cyan]")
+    
+    # If no specific docs requested, generate all
+    if not (readme or architecture or api_docs):
+        readme = architecture = api_docs = True
+    
+    async def _generate_docs():
+        try:
+            from xencode.features.project_analyzer import ProjectAnalyzerFeature
+            from xencode.features import FeatureConfig
+            from pathlib import Path
+            
+            # Initialize feature
+            config = FeatureConfig(name="project_analyzer", enabled=True)
+            feature = ProjectAnalyzerFeature(config)
+            await feature._initialize()
+            
+            # Analyze project first
+            with console.status("[bold blue]🔍 Analyzing project..."):
+                results = await feature.analyze_project(path)
+            
+            output_dir = Path(output) if output else Path(path)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            generated_files = []
+            
+            # Generate README
+            if readme:
+                with console.status("[bold blue]📝 Generating README..."):
+                    readme_path = output_dir / "README.md"
+                    readme_content = _generate_readme(results)
+                    with open(readme_path, 'w') as f:
+                        f.write(readme_content)
+                    generated_files.append(str(readme_path))
+                    console.print(f"[green]✅ Generated README: {readme_path}[/green]")
+            
+            # Generate architecture diagram
+            if architecture:
+                with console.status("[bold blue]🏗️  Generating architecture diagram..."):
+                    arch_data = results.get('architecture', {})
+                    if arch_data.get('mermaid_diagram'):
+                        arch_path = output_dir / "ARCHITECTURE.md"
+                        arch_content = f"# Architecture\n\n```mermaid\n{arch_data['mermaid_diagram']}\n```\n"
+                        with open(arch_path, 'w') as f:
+                            f.write(arch_content)
+                        generated_files.append(str(arch_path))
+                        console.print(f"[green]✅ Generated architecture: {arch_path}[/green]")
+            
+            # Generate API docs
+            if api_docs:
+                with console.status("[bold blue]📚 Generating API documentation..."):
+                    api_path = output_dir / "API.md"
+                    api_content = _generate_api_docs(results)
+                    with open(api_path, 'w') as f:
+                        f.write(api_content)
+                    generated_files.append(str(api_path))
+                    console.print(f"[green]✅ Generated API docs: {api_path}[/green]")
+            
+            console.print(f"\n[bold green]✅ Documentation generated successfully![/bold green]")
+            console.print(f"[yellow]Generated {len(generated_files)} files in {output_dir}[/yellow]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Documentation generation failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_generate_docs())
+
+
+@analyze.command()
+@click.argument('path', required=False, default='.')
+@click.pass_context
+def metrics(ctx, path):
+    """
+    Show detailed project metrics
+    
+    Examples:
+      xencode analyze metrics
+      xencode analyze metrics /path/to/project
+    """
+    console.print(f"[cyan]📊 Calculating metrics for: {path}[/cyan]")
+    
+    async def _metrics():
+        try:
+            from xencode.features.project_analyzer import ProjectAnalyzerFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="project_analyzer", enabled=True)
+            feature = ProjectAnalyzerFeature(config)
+            await feature._initialize()
+            
+            # Analyze project
+            with console.status("[bold blue]📊 Calculating metrics..."):
+                results = await feature.analyze_project(path)
+            
+            metrics = results.get('metrics', {})
+            structure = results.get('structure', {})
+            
+            # Display detailed metrics
+            console.print(Panel(
+                f"[bold cyan]Code Metrics[/bold cyan]\n"
+                f"Total Lines: {metrics.get('total_lines', 0):,}\n"
+                f"Code Lines: {metrics.get('code_lines', 0):,}\n"
+                f"Comment Lines: {metrics.get('comment_lines', 0):,}\n"
+                f"Blank Lines: {metrics.get('blank_lines', 0):,}\n"
+                f"Comment Ratio: {metrics.get('comment_ratio', 0):.1f}%\n\n"
+                f"[bold cyan]Complexity Metrics[/bold cyan]\n"
+                f"Average Complexity: {metrics.get('average_complexity', 0):.1f}\n"
+                f"Max Complexity: {metrics.get('max_complexity', 0)}\n"
+                f"Maintainability Index: {metrics.get('maintainability_index', 0):.1f}/100\n\n"
+                f"[bold cyan]Project Structure[/bold cyan]\n"
+                f"Total Files: {structure.get('total_files', 0)}\n"
+                f"Total Directories: {structure.get('total_directories', 0)}\n"
+                f"Total Size: {structure.get('total_size', 0) / 1024 / 1024:.2f} MB",
+                title="📊 Detailed Metrics",
+                border_style="blue"
+            ))
+            
+            # Language breakdown
+            languages = structure.get('languages', {})
+            if languages:
+                console.print("\n[bold]Languages:[/bold]")
+                lang_table = Table()
+                lang_table.add_column("Language", style="cyan")
+                lang_table.add_column("Files", style="yellow")
+                lang_table.add_column("Percentage", style="green")
+                
+                total_files = sum(languages.values())
+                for lang, count in sorted(languages.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / total_files * 100) if total_files > 0 else 0
+                    lang_table.add_row(lang, str(count), f"{percentage:.1f}%")
+                
+                console.print(lang_table)
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Metrics calculation failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_metrics())
+
+
+@analyze.command()
+@click.argument('path', required=False, default='.')
+@click.option('--show-graph', is_flag=True, help='Show dependency graph')
+@click.pass_context
+def dependencies(ctx, path, show_graph):
+    """
+    Analyze project dependencies
+    
+    Examples:
+      xencode analyze dependencies
+      xencode analyze dependencies --show-graph
+      xencode analyze dependencies /path/to/project
+    """
+    console.print(f"[cyan]🔗 Analyzing dependencies for: {path}[/cyan]")
+    
+    async def _dependencies():
+        try:
+            from xencode.features.project_analyzer import ProjectAnalyzerFeature
+            from xencode.features import FeatureConfig
+            
+            # Initialize feature
+            config = FeatureConfig(name="project_analyzer", enabled=True)
+            feature = ProjectAnalyzerFeature(config)
+            await feature._initialize()
+            
+            # Analyze project
+            with console.status("[bold blue]🔗 Analyzing dependencies..."):
+                results = await feature.analyze_project(path)
+            
+            dependencies = results.get('dependencies', {})
+            
+            # Display external dependencies
+            external_deps = dependencies.get('dependencies', [])
+            if external_deps:
+                console.print(Panel(
+                    f"[bold]Total Dependencies:[/bold] {len(external_deps)}\n"
+                    f"[bold]External:[/bold] {len([d for d in external_deps if d.get('type') == 'external'])}\n"
+                    f"[bold]Dev:[/bold] {len([d for d in external_deps if d.get('type') == 'dev'])}",
+                    title="📦 Dependencies Summary",
+                    border_style="blue"
+                ))
+                
+                console.print("\n[bold]External Dependencies:[/bold]")
+                dep_table = Table()
+                dep_table.add_column("Name", style="cyan")
+                dep_table.add_column("Version", style="yellow")
+                dep_table.add_column("Type", style="green")
+                
+                for dep in external_deps[:20]:  # Show first 20
+                    dep_table.add_row(
+                        dep.get('name', ''),
+                        dep.get('version', ''),
+                        dep.get('type', '')
+                    )
+                
+                console.print(dep_table)
+                
+                if len(external_deps) > 20:
+                    console.print(f"\n[yellow]Showing 20 of {len(external_deps)} dependencies[/yellow]")
+            
+            # Show circular dependencies
+            circular = dependencies.get('circular_dependencies', [])
+            if circular:
+                console.print(f"\n[bold red]⚠️  Circular Dependencies Found ({len(circular)}):[/bold red]")
+                for cycle in circular[:5]:
+                    console.print(f"  • {' → '.join(cycle)}")
+            
+            # Show dependency graph if requested
+            if show_graph:
+                dep_graph = dependencies.get('dependency_graph', {})
+                if dep_graph:
+                    console.print("\n[bold]Dependency Graph:[/bold]")
+                    for module, deps in list(dep_graph.items())[:10]:
+                        if deps:
+                            console.print(f"  {module}")
+                            for dep in deps[:5]:
+                                console.print(f"    → {dep}")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Dependency analysis failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_dependencies())
+
+
+@analyze.command()
+@click.argument('path', required=False, default='.')
+@click.option('--output', '-o', type=click.Path(), help='Output file for architecture diagram')
+@click.pass_context
+def architecture(ctx, path, output):
+    """
+    Generate architecture diagram
+    
+    Examples:
+      xencode analyze architecture
+      xencode analyze architecture --output architecture.md
+      xencode analyze architecture /path/to/project
+    """
+    console.print(f"[cyan]🏗️  Generating architecture diagram for: {path}[/cyan]")
+    
+    async def _architecture():
+        try:
+            from xencode.features.project_analyzer import ProjectAnalyzerFeature
+            from xencode.features import FeatureConfig
+            from pathlib import Path
+            
+            # Initialize feature
+            config = FeatureConfig(name="project_analyzer", enabled=True)
+            feature = ProjectAnalyzerFeature(config)
+            await feature._initialize()
+            
+            # Analyze project
+            with console.status("[bold blue]🏗️  Analyzing architecture..."):
+                results = await feature.analyze_project(path)
+            
+            architecture = results.get('architecture', {})
+            
+            # Display components
+            components = architecture.get('components', [])
+            if components:
+                console.print(Panel(
+                    f"[bold]Total Components:[/bold] {len(components)}",
+                    title="🏗️  Architecture Overview",
+                    border_style="blue"
+                ))
+                
+                console.print("\n[bold]Components:[/bold]")
+                comp_table = Table()
+                comp_table.add_column("Component", style="cyan")
+                comp_table.add_column("Path", style="yellow")
+                comp_table.add_column("Files", style="green")
+                comp_table.add_column("Languages", style="blue")
+                
+                for comp in components[:15]:
+                    comp_table.add_row(
+                        comp.get('name', ''),
+                        comp.get('path', ''),
+                        str(comp.get('file_count', 0)),
+                        ', '.join(comp.get('languages', []))
+                    )
+                
+                console.print(comp_table)
+            
+            # Display Mermaid diagram
+            mermaid = architecture.get('mermaid_diagram', '')
+            if mermaid:
+                console.print("\n[bold]Architecture Diagram (Mermaid):[/bold]")
+                console.print(Panel(mermaid, border_style="green"))
+                
+                # Save if requested
+                if output:
+                    output_path = Path(output)
+                    with open(output_path, 'w') as f:
+                        f.write(f"# Architecture\n\n```mermaid\n{mermaid}\n```\n")
+                    console.print(f"\n[green]✅ Architecture diagram saved to: {output_path}[/green]")
+            
+            await feature._shutdown()
+            
+        except Exception as e:
+            console.print(f"[red]❌ Architecture generation failed: {e}[/red]")
+            if ctx.obj.get('verbose'):
+                import traceback
+                console.print(traceback.format_exc())
+            sys.exit(1)
+    
+    asyncio.run(_architecture())
+
+
+# Helper functions for report generation
+def _generate_markdown_report(results: Dict[str, Any]) -> str:
+    """Generate markdown report from analysis results"""
+    summary = results.get('summary', {})
+    metrics = results.get('metrics', {})
+    tech_debt = results.get('technical_debt', {})
+    
+    md = f"""# Project Analysis Report
+
+**Project:** {results['project_path']}  
+**Analyzed:** {results['analyzed_at']}
+
+## Summary
+
+- **Total Files:** {summary.get('total_files', 0)}
+- **Total Lines:** {summary.get('total_lines', 0):,}
+- **Languages:** {', '.join(summary.get('languages', []))}
+- **Dependencies:** {summary.get('dependency_count', 0)}
+- **Health Score:** {summary.get('health_score', 0):.1f}/100
+
+## Metrics
+
+- **Code Lines:** {metrics.get('code_lines', 0):,}
+- **Comment Lines:** {metrics.get('comment_lines', 0):,}
+- **Comment Ratio:** {metrics.get('comment_ratio', 0):.1f}%
+- **Average Complexity:** {metrics.get('average_complexity', 0):.1f}
+- **Maintainability Index:** {metrics.get('maintainability_index', 0):.1f}/100
+
+## Technical Debt
+
+**Total Issues:** {tech_debt.get('total_issues', 0)}
+
+"""
+    
+    # Add issues by severity
+    by_severity = tech_debt.get('by_severity', {})
+    if by_severity:
+        md += "### By Severity\n\n"
+        for severity in ['high', 'medium', 'low']:
+            count = by_severity.get(severity, 0)
+            if count > 0:
+                md += f"- **{severity.capitalize()}:** {count}\n"
+        md += "\n"
+    
+    # Add top issues
+    issues = tech_debt.get('issues', [])
+    if issues:
+        md += "### Top Issues\n\n"
+        for issue in issues[:10]:
+            md += f"- **{issue['type']}** ({issue['severity']}): {issue['message']}\n"
+            if issue.get('suggestion'):
+                md += f"  - Suggestion: {issue['suggestion']}\n"
+        md += "\n"
+    
+    return md
+
+
+def _generate_html_report(results: Dict[str, Any]) -> str:
+    """Generate HTML report from analysis results"""
+    summary = results.get('summary', {})
+    
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Project Analysis Report</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; }}
+        h1 {{ color: #333; }}
+        .metric {{ margin: 10px 0; }}
+        .score {{ font-size: 24px; font-weight: bold; }}
+        .good {{ color: green; }}
+        .warning {{ color: orange; }}
+        .bad {{ color: red; }}
+    </style>
+</head>
+<body>
+    <h1>Project Analysis Report</h1>
+    <p><strong>Project:</strong> {results['project_path']}</p>
+    <p><strong>Analyzed:</strong> {results['analyzed_at']}</p>
+    
+    <h2>Summary</h2>
+    <div class="metric">Total Files: {summary.get('total_files', 0)}</div>
+    <div class="metric">Total Lines: {summary.get('total_lines', 0):,}</div>
+    <div class="metric">Health Score: <span class="score">{summary.get('health_score', 0):.1f}/100</span></div>
+</body>
+</html>
+"""
+    return html
+
+
+def _generate_readme(results: Dict[str, Any]) -> str:
+    """Generate README from analysis results"""
+    summary = results.get('summary', {})
+    structure = results.get('structure', {})
+    
+    readme = f"""# Project
+
+## Overview
+
+This project contains {summary.get('total_files', 0)} files with {summary.get('total_lines', 0):,} lines of code.
+
+## Languages
+
+{', '.join(summary.get('languages', []))}
+
+## Project Type
+
+{structure.get('project_type', 'Unknown')}
+
+## Metrics
+
+- **Health Score:** {summary.get('health_score', 0):.1f}/100
+- **Maintainability:** {summary.get('maintainability_index', 0):.1f}/100
+- **Dependencies:** {summary.get('dependency_count', 0)}
+
+## Getting Started
+
+[Add your getting started instructions here]
+
+## License
+
+[Add your license information here]
+"""
+    return readme
+
+
+def _generate_api_docs(results: Dict[str, Any]) -> str:
+    """Generate API documentation from analysis results"""
+    return """# API Documentation
+
+[API documentation will be generated here based on code analysis]
+
+## Endpoints
+
+[List of API endpoints]
+
+## Models
+
+[Data models and schemas]
+"""
 
 
 @cli.command()
