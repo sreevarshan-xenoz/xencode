@@ -1,0 +1,155 @@
+{
+  "directory": "D:\\xencode",
+  "project_type": "python-poetry",
+  "git_info": {
+    "is_repo": true,
+    "branch": "dev",
+    "status": "unknown",
+    "remotes": [
+      "origin"
+    ],
+    "ahead_behind": {
+      "ahead": 0,
+      "behind": 0
+    },
+    "stashed": 0,
+    "has_changes": false,
+    "untracked_files": 0
+  },
+  "environment": {
+    "paths": {
+      "PATH": "D:\\xencode\\.venv\\Scripts;C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot\\bin;C:\\Program Files\\Common Files\\Oracle\\Java\\javapath;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\Void\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\whkd\\bin\\;C:\\Program Files\\komorebi\\bin\\;C:\\Program Files\\Git\\cmd;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\dotnet\\;C:\\Program Files\\glzr.io\\Zebar\\;C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\;C:\\Program Files\\eSpeak NG\\;C:\\Program Files\\Arduino CLI\\;C:\\Program Files\\Warp\\bin;C:\\Program Files\\Cloudflare\\Cloudflare WARP\\;C:\\Program Files\\Common Files\\Oracle\\Java\\javapath;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem;C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\;C:\\WINDOWS\\System32\\OpenSSH\\;C:\\Program Files\\Void\\bin;C:\\Program Files\\nodejs\\;C:\\Program Files\\whkd\\bin\\;C:\\Program Files\\komorebi\\bin\\;C:\\Program Files\\Git\\cmd;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\dotnet\\;C:\\Program Files\\cursor\\resources\\app\\bin;C:\\Users\\sreev\\.cargo\\bin;c:\\Users\\sreev\\AppData\\Local\\Programs\\Trae\\bin;C:\\Users\\sreev\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\sreev\\AppData\\Local\\Programs\\Kiro\\bin;C:\\Users\\sreev\\AppData\\Local\\Programs\\Ollama;C:\\Users\\sreev\\AppData\\Roaming\\npm;C:\\Users\\sreev\\AppData\\Local\\M;C:\\Users\\sreev\\AppData\\Local\\Programs\\Antigravity\\bin;C:\\Users\\sreev\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin;C:\\Users\\sreev\\AppData\\Local\\Microsoft\\WinGet\\Links;;C:\\flutter\\bin;C:\\Users\\sreev\\bin;C:\\Users\\sreev\\AppData\\Local\\Programs\\Zed Preview\\bin;C:\\Users\\sreev\\AppData\\Local\\Programs\\Qoder\\bin;C:\\Users\\sreev\\AppData\\Local\\Pandoc\\;C:\\Users\\sreev\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;c:\\Users\\sreev\\.kiro\\extensions\\ms-python.debugpy-2025.18.0-win32-x64\\bundled\\scripts\\noConfigScripts",
+      "PYTHONPATH": "D:\\xencode"
+    },
+    "development": {
+      "VIRTUAL_ENV": "D:\\xencode\\.venv",
+      "JAVA_HOME": "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.17.10-hotspot\\"
+    },
+    "cloud": {},
+    "shell": {
+      "LANG": "en_US.UTF-8"
+    },
+    "custom": {}
+  },
+  "filesystem": {
+    "disk_usage": {
+      "total": 323193139200,
+      "used": 181017575424,
+      "free": 142175563776,
+      "percent_used": 56.00910213381163
+    },
+    "permissions": {
+      "readable": true,
+      "writable": true,
+      "executable": true,
+      "mode": "0o40777"
+    },
+    "file_counts": {
+      ".md": 18,
+      ".py": 10,
+      "no_extension": 3,
+      ".json": 3,
+      ".sh": 2,
+      ".yml": 1,
+      ".ps1": 1,
+      ".in": 1,
+      ".toml": 1,
+      ".ini": 1
+    },
+    "recent_files": [
+      {
+        "name": "review_report.html",
+        "age_hours": 0.4
+      },
+      {
+        "name": "AI_REVIEW_ENGINE_SUMMARY.md",
+        "age_hours": 0.5
+      }
+    ]
+  },
+  "processes": {
+    "development_servers": [
+      {
+        "pid": 7796,
+        "name": "python.exe",
+        "cmdline": ""
+      },
+      {
+        "pid": 14836,
+        "name": "python.exe",
+        "cmdline": "d:\\xencode\\.venv\\Scripts\\python.exe c:\\Users\\sreev\\.kiro\\extensions\\ms-python.python-2026.0.0-universal\\python_files\\run-jedi-language-server.py"
+      },
+      {
+        "pid": 23640,
+        "name": "python3.12.exe",
+        "cmdline": "C:\\Users\\sreev\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\python.exe examples/context_analyzer_demo.py"
+      },
+      {
+        "pid": 28668,
+        "name": "python.exe",
+        "cmdline": "D:\\xencode\\.venv\\Scripts\\python.exe examples/context_analyzer_demo.py"
+      },
+      {
+        "pid": 29120,
+        "name": "python3.12.exe",
+        "cmdline": "C:\\Users\\sreev\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\python.exe c:\\Users\\sreev\\.kiro\\extensions\\ms-python.python-2026.0.0-universal\\python_files\\run-jedi-language-server.py"
+      }
+    ],
+    "databases": [
+      {
+        "pid": 5236,
+        "name": "mysqld.exe"
+      },
+      {
+        "pid": 5392,
+        "name": "mysqld.exe"
+      }
+    ],
+    "containers": [],
+    "relevant_processes": []
+  },
+  "network": {
+    "localhost_ports": [
+      {
+        "port": 5000,
+        "address": "::"
+      },
+      {
+        "port": 5000,
+        "address": "0.0.0.0"
+      }
+    ],
+    "vpn_active": false,
+    "network_interfaces": [
+      "Ethernet",
+      "Ethernet 3",
+      "Local Area Connection* 1",
+      "Local Area Connection* 2",
+      "Wi-Fi",
+      "Loopback Pseudo-Interface 1"
+    ]
+  },
+  "os": "nt",
+  "files": [
+    ".gitignore",
+    ".xencode.example.json",
+    "AI_REVIEW_ENGINE_SUMMARY.md",
+    "build_exe.py",
+    "CHANGELOG.md",
+    "cleanup_duplicates.py",
+    "CLI_GUIDE.md",
+    "conftest.py",
+    "debug_chroma.py",
+    "debug_ollama.py",
+    "diagnose_tui.py",
+    "docker-compose.yml",
+    "Dockerfile",
+    "DOCUMENTATION.md",
+    "ENSEMBLE_IMPROVEMENTS.md",
+    "IMPROVEMENT_PLAN.md",
+    "install.ps1",
+    "install.sh",
+    "LICENSE",
+    "MANIFEST.in"
+  ]
+}
