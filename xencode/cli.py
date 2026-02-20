@@ -2393,6 +2393,636 @@ def _generate_api_docs(results: Dict[str, Any]) -> str:
 """
 
 
+@cli.group()
+def learn():
+    """Learning Mode commands - Interactive tutorials and exercises"""
+    pass
+
+
+@learn.command()
+@click.argument('topic', required=True)
+@click.option('--difficulty', '-d', type=click.Choice(['beginner', 'intermediate', 'advanced', 'expert']),
+              help='Override difficulty level')
+@click.pass_context
+def start(ctx, topic, difficulty):
+    """
+    Start learning a topic
+    
+    Examples:
+        xencode learn start python
+        xencode learn start rust --difficulty intermediate
+        xencode learn start javascript -d beginner
+    """
+    console.print(f"[blue]🎓 Starting learning topic: {topic}[/blue]")
+    
+    async def _start_topic():
+        try:
+            from xencode.features import FeatureManager
+            
+            feature_manager = FeatureManager()
+            learning_feature = feature_manager.get_feature('learning_mode')
+            
+            if not learning_feature:
+                console.print("[red]❌ Learning Mode feature not enabled[/red]")
+                console.print("[yellow]💡 Enable it with: xencode features enable learning_mode[/yellow]")
+                return
+            
+            # Start the topic
+            result = await learning_feature.start_topic(topic, difficulty)
+            
+            # Display topic information
+            topic_info = result['topic']
+            console.print(f"\n[bold cyan]{topic_info['name']}[/bold cyan]")
+            console.print(f"[dim]{topic_info['description']}[/dim]")
+            console.print(f"\n[yellow]Difficulty:[/yellow] {result['difficulty']}")
+            console.print(f"[yellow]Estimated Time:[/yellow] {topic_info['estimated_time']} minutes")
+            
+            if topic_info.get('prerequisites'):
+                console.print(f"[yellow]Prerequisites:[/yellow] {', '.join(topic_info['prerequisites'])}")
+            
+            # Display lesson
+            lesson = result['lesson']
+            if lesson:
+                console.print(f"\n[bold green]📚 Lesson: {lesson.get('title', 'Introduction')}[/bold green]")
+                console.print(Panel(lesson.get('content', ''), border_style="green"))
+                
+                if lesson.get('key_concepts'):
+                    console.print("\n[cyan]Key Concepts:[/cyan]")
+                    for concept in lesson['key_concepts']:
+                        console.print(f"  • {concept}")
+                
+                if lesson.get('examples'):
+                    console.print("\n[cyan]Examples:[/cyan]")
+                    for example in lesson['examples']:
+                        console.print(Panel(example, border_style="blue"))
+            
+            # Display progress if available
+            if result.get('progress'):
+                progress = result['progress']
+                console.print(f"\n[yellow]Your Progress:[/yellow]")
+                console.print(f"  • Mastery Level: {progress['mastery_level']}")
+                console.print(f"  • Exercises Completed: {progress['exercises_completed']}/{progress['exercises_total']}")
+                console.print(f"  • Accuracy: {progress['accuracy']*100:.1f}%")
+            
+            console.print("\n[green]✅ Ready to learn! Use 'xencode learn exercises' to practice.[/green]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to start topic: {e}[/red]")
+    
+    asyncio.run(_start_topic())
+
+
+@learn.command()
+@click.option('--topic', '-t', help='Filter by topic')
+@click.pass_context
+def progress(ctx, topic):
+    """
+    Check learning progress
+    
+    Examples:
+        xencode learn progress
+        xencode learn progress --topic python
+        xencode learn progress -t rust
+    """
+    console.print("[blue]📊 Checking learning progress...[/blue]")
+    
+    async def _check_progress():
+        try:
+            from xencode.features import FeatureManager
+            
+            feature_manager = FeatureManager()
+            learning_feature = feature_manager.get_feature('learning_mode')
+            
+            if not learning_feature:
+                console.print("[red]❌ Learning Mode feature not enabled[/red]")
+                return
+            
+            # Get progress
+            progress_data = await learning_feature.get_progress(topic)
+            
+            if topic:
+                # Single topic progress
+                if not progress_data:
+                    console.print(f"[yellow]No progress found for topic: {topic}[/yellow]")
+                    return
+                
+                console.print(f"\n[bold cyan]Progress for {topic}:[/bold cyan]")
+                console.print(f"  • Mastery Level: {progress_data['mastery_level']}")
+                console.print(f"  • Exercises: {progress_data['exercises_completed']}/{progress_data['exercises_total']}")
+                console.print(f"  • Accuracy: {progress_data['accuracy']*100:.1f}%")
+                console.print(f"  • Time Spent: {progress_data['time_spent']} minutes")
+                
+                if progress_data.get('last_accessed'):
+                    console.print(f"  • Last Accessed: {progress_data['last_accessed']}")
+            else:
+                # Overall progress
+                if not progress_data or not progress_data.get('topics'):
+                    console.print("[yellow]No learning progress yet. Start a topic to begin![/yellow]")
+                    return
+                
+                # Create progress table
+                table = Table(title="📊 Learning Progress")
+                table.add_column("Topic", style="cyan")
+                table.add_column("Mastery", style="green")
+                table.add_column("Exercises", style="yellow")
+                table.add_column("Accuracy", style="blue")
+                table.add_column("Time", style="magenta")
+                
+                for topic_progress in progress_data['topics']:
+                    completion = f"{topic_progress['exercises_completed']}/{topic_progress['exercises_total']}"
+                    accuracy = f"{topic_progress['accuracy']*100:.1f}%"
+                    time_spent = f"{topic_progress['time_spent']}m"
+                    
+                    table.add_row(
+                        topic_progress['topic_id'],
+                        topic_progress['mastery_level'],
+                        completion,
+                        accuracy,
+                        time_spent
+                    )
+                
+                console.print(table)
+                
+                # Overall stats
+                console.print(f"\n[bold]Overall Statistics:[/bold]")
+                console.print(f"  • Overall Mastery: {progress_data['overall_mastery']*100:.1f}%")
+                console.print(f"  • Total Time: {progress_data['total_time']} minutes")
+                console.print(f"  • Topics Started: {len(progress_data['topics'])}")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to get progress: {e}[/red]")
+    
+    asyncio.run(_check_progress())
+
+
+@learn.command()
+@click.pass_context
+def topics(ctx):
+    """
+    List available learning topics
+    
+    Examples:
+        xencode learn topics
+    """
+    console.print("[blue]📚 Available learning topics...[/blue]")
+    
+    async def _list_topics():
+        try:
+            from xencode.features import FeatureManager
+            
+            feature_manager = FeatureManager()
+            learning_feature = feature_manager.get_feature('learning_mode')
+            
+            if not learning_feature:
+                console.print("[red]❌ Learning Mode feature not enabled[/red]")
+                return
+            
+            # Get all topics
+            topics = await learning_feature.get_topics()
+            
+            if not topics:
+                console.print("[yellow]No topics available[/yellow]")
+                return
+            
+            # Create topics table
+            table = Table(title="📚 Available Learning Topics")
+            table.add_column("Topic", style="cyan")
+            table.add_column("Difficulty", style="yellow")
+            table.add_column("Time", style="blue")
+            table.add_column("Progress", style="green")
+            table.add_column("Description", style="white")
+            
+            for topic in topics:
+                progress_str = "Not started"
+                if topic.get('progress'):
+                    prog = topic['progress']
+                    progress_str = f"{prog['mastery_level']} ({prog['exercises_completed']}/{prog['exercises_total']})"
+                
+                description = topic['description'][:50] + "..." if len(topic['description']) > 50 else topic['description']
+                
+                table.add_row(
+                    topic['id'],
+                    topic['difficulty'],
+                    f"{topic['estimated_time']}m",
+                    progress_str,
+                    description
+                )
+            
+            console.print(table)
+            console.print("\n[dim]Use 'xencode learn start <topic>' to begin learning[/dim]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to list topics: {e}[/red]")
+    
+    asyncio.run(_list_topics())
+
+
+@learn.command()
+@click.argument('topic', required=True)
+@click.option('--count', '-n', type=int, default=5, help='Number of exercises')
+@click.pass_context
+def exercises(ctx, topic, count):
+    """
+    Get exercises for a topic
+    
+    Examples:
+        xencode learn exercises python
+        xencode learn exercises rust --count 10
+        xencode learn exercises javascript -n 3
+    """
+    console.print(f"[blue]📝 Getting exercises for: {topic}[/blue]")
+    
+    async def _get_exercises():
+        try:
+            from xencode.features import FeatureManager
+            
+            feature_manager = FeatureManager()
+            learning_feature = feature_manager.get_feature('learning_mode')
+            
+            if not learning_feature:
+                console.print("[red]❌ Learning Mode feature not enabled[/red]")
+                return
+            
+            # Get exercises
+            exercises = await learning_feature.get_exercises(topic, count)
+            
+            if not exercises:
+                console.print(f"[yellow]No exercises available for topic: {topic}[/yellow]")
+                return
+            
+            console.print(f"\n[green]Found {len(exercises)} exercises:[/green]\n")
+            
+            for i, exercise in enumerate(exercises, 1):
+                console.print(f"[bold cyan]{i}. {exercise['title']}[/bold cyan]")
+                console.print(f"   [dim]{exercise['description']}[/dim]")
+                console.print(f"   Difficulty: {exercise['difficulty']}")
+                console.print(f"   Exercise ID: {exercise['id']}")
+                console.print()
+            
+            console.print("[dim]💡 Use the TUI (xencode tui) for an interactive exercise workspace[/dim]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to get exercises: {e}[/red]")
+    
+    asyncio.run(_get_exercises())
+
+
+@learn.command()
+@click.argument('topic', required=True)
+@click.pass_context
+def mastery(ctx, topic):
+    """
+    Check mastery level for a topic
+    
+    Examples:
+        xencode learn mastery python
+        xencode learn mastery rust
+    """
+    console.print(f"[blue]🎯 Checking mastery level for: {topic}[/blue]")
+    
+    async def _check_mastery():
+        try:
+            from xencode.features import FeatureManager
+            
+            feature_manager = FeatureManager()
+            learning_feature = feature_manager.get_feature('learning_mode')
+            
+            if not learning_feature:
+                console.print("[red]❌ Learning Mode feature not enabled[/red]")
+                return
+            
+            # Get mastery level
+            mastery_data = await learning_feature.get_mastery_level(topic)
+            
+            console.print(f"\n[bold cyan]Mastery Level for {topic}:[/bold cyan]")
+            console.print(f"  • Level: {mastery_data['mastery_level']}")
+            console.print(f"  • Mastery: {mastery_data['mastery_percentage']:.1f}%")
+            console.print(f"  • Exercises: {mastery_data['exercises_completed']}/{mastery_data['exercises_total']}")
+            console.print(f"  • Accuracy: {mastery_data['accuracy']:.1f}%")
+            
+            # Provide feedback
+            mastery_pct = mastery_data['mastery_percentage']
+            if mastery_pct >= 90:
+                console.print("\n[bold green]🏆 Excellent! You've mastered this topic![/bold green]")
+            elif mastery_pct >= 70:
+                console.print("\n[bold yellow]👍 Great progress! Keep practicing to reach mastery.[/bold yellow]")
+            elif mastery_pct >= 50:
+                console.print("\n[bold blue]📚 Good start! Continue learning to improve.[/bold blue]")
+            else:
+                console.print("\n[bold cyan]🌱 Just getting started! Keep going![/bold cyan]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to check mastery: {e}[/red]")
+    
+    asyncio.run(_check_mastery())
+
+
+@cli.group()
+def lang():
+    """Multi-language support commands - Set language, list languages, and detect language
+    
+    Xencode supports 10+ languages with runtime switching and RTL support.
+    
+    Available commands:
+        set      - Set the current language
+        list     - List all supported languages
+        detect   - Auto-detect language from system or text
+        translate - Translate text between languages
+        glossary - View technical term glossary
+    
+    Examples:
+        xencode lang set es
+        xencode lang list
+        xencode lang detect
+        xencode lang translate "Hello world" --to es
+    """
+    pass
+
+
+@lang.command()
+@click.argument('language_code')
+def set(language_code):
+    """Set the current language
+    
+    Examples:
+        xencode lang set es    # Set to Spanish
+        xencode lang set fr    # Set to French
+        xencode lang set zh    # Set to Chinese
+    """
+    console.print(f"[blue]🌍 Setting language to: {language_code}[/blue]")
+    
+    try:
+        from xencode.i18n import LanguageManager
+        
+        manager = LanguageManager()
+        
+        # Check if language is supported
+        if not manager.is_supported(language_code):
+            console.print(f"[red]❌ Language '{language_code}' is not supported[/red]")
+            console.print("\n[yellow]💡 Use 'xencode lang list' to see supported languages[/yellow]")
+            return
+        
+        # Set the language
+        success = manager.set_language(language_code)
+        
+        if success:
+            lang_info = manager.get_language_info(language_code)
+            console.print(f"[green]✅ Language set to: {lang_info.native_name} ({lang_info.name})[/green]")
+            
+            if lang_info.rtl:
+                console.print("[cyan]ℹ️  This is a right-to-left (RTL) language[/cyan]")
+            
+            console.print("\n[yellow]💡 The language change will take effect immediately[/yellow]")
+        else:
+            console.print(f"[red]❌ Failed to set language to '{language_code}'[/red]")
+            
+    except Exception as e:
+        console.print(f"[red]❌ Error setting language: {e}[/red]")
+
+
+@lang.command()
+@click.option('--enabled-only', is_flag=True, help='Show only enabled languages')
+@click.option('--rtl-only', is_flag=True, help='Show only RTL languages')
+def list(enabled_only, rtl_only):
+    """List all supported languages
+    
+    Examples:
+        xencode lang list
+        xencode lang list --enabled-only
+        xencode lang list --rtl-only
+    """
+    console.print("[blue]🌍 Supported languages:[/blue]\n")
+    
+    try:
+        from xencode.i18n import LanguageManager
+        
+        manager = LanguageManager()
+        current_lang = manager.get_current_language()
+        
+        # Get languages
+        if enabled_only:
+            languages = manager.get_enabled_languages()
+        else:
+            languages = manager.list_languages()
+        
+        # Filter RTL if requested
+        if rtl_only:
+            languages = [lang for lang in languages if lang.rtl]
+        
+        # Create table
+        table = Table(title="Supported Languages")
+        table.add_column("Code", style="cyan")
+        table.add_column("Name", style="white")
+        table.add_column("Native Name", style="yellow")
+        table.add_column("RTL", style="blue")
+        table.add_column("Status", style="green")
+        table.add_column("Current", style="magenta")
+        
+        for lang in languages:
+            rtl_marker = "✓" if lang.rtl else ""
+            status = "✓" if lang.enabled else "✗"
+            current_marker = "◄" if lang.code == current_lang else ""
+            
+            table.add_row(
+                lang.code,
+                lang.name,
+                lang.native_name,
+                rtl_marker,
+                status,
+                current_marker
+            )
+        
+        console.print(table)
+        
+        # Show summary
+        console.print(f"\n[cyan]Total languages: {len(languages)}[/cyan]")
+        console.print(f"[cyan]Current language: {manager.get_language_name(current_lang, native=True)} ({current_lang})[/cyan]")
+        
+        console.print("\n[dim]Use 'xencode lang set <code>' to change language[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error listing languages: {e}[/red]")
+
+
+@lang.command()
+@click.argument('text', required=False)
+def detect(text):
+    """Auto-detect language from system or text
+    
+    If no text is provided, detects language from system settings.
+    If text is provided, detects the language of the text.
+    
+    Examples:
+        xencode lang detect
+        xencode lang detect "Bonjour le monde"
+        xencode lang detect "こんにちは世界"
+    """
+    console.print("[blue]🔍 Detecting language...[/blue]\n")
+    
+    try:
+        from xencode.i18n import LanguageManager, TranslationEngine
+        
+        manager = LanguageManager()
+        
+        if text:
+            # Detect language from text
+            engine = TranslationEngine()
+            detected_code = engine.detect_language(text)
+            
+            lang_info = manager.get_language_info(detected_code)
+            if lang_info:
+                console.print(f"[green]✅ Detected language: {lang_info.native_name} ({lang_info.name})[/green]")
+                console.print(f"[cyan]Language code: {detected_code}[/cyan]")
+                
+                if lang_info.rtl:
+                    console.print("[yellow]ℹ️  This is a right-to-left (RTL) language[/yellow]")
+            else:
+                console.print(f"[yellow]⚠️  Detected language code: {detected_code} (not in supported list)[/yellow]")
+        else:
+            # Detect from system
+            current_lang = manager.get_current_language()
+            lang_info = manager.get_language_info(current_lang)
+            
+            console.print(f"[green]✅ System language: {lang_info.native_name} ({lang_info.name})[/green]")
+            console.print(f"[cyan]Language code: {current_lang}[/cyan]")
+            
+            if lang_info.rtl:
+                console.print("[yellow]ℹ️  This is a right-to-left (RTL) language[/yellow]")
+        
+        console.print("\n[dim]Use 'xencode lang set <code>' to change language[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error detecting language: {e}[/red]")
+
+
+@lang.command()
+@click.argument('text')
+@click.option('--to', 'target_lang', required=True, help='Target language code')
+@click.option('--from', 'source_lang', default='en', help='Source language code (default: en)')
+@click.option('--preserve-code', is_flag=True, default=True, help='Preserve code snippets')
+def translate(text, target_lang, source_lang, preserve_code):
+    """Translate text between languages
+    
+    Examples:
+        xencode lang translate "Hello world" --to es
+        xencode lang translate "Bonjour" --to en --from fr
+        xencode lang translate "def hello(): pass" --to es --preserve-code
+    """
+    console.print(f"[blue]🌐 Translating from {source_lang} to {target_lang}...[/blue]\n")
+    
+    try:
+        from xencode.i18n import TranslationEngine, LanguageManager
+        
+        manager = LanguageManager()
+        engine = TranslationEngine()
+        
+        # Validate languages
+        if not manager.is_supported(target_lang):
+            console.print(f"[red]❌ Target language '{target_lang}' is not supported[/red]")
+            return
+        
+        if not manager.is_supported(source_lang):
+            console.print(f"[red]❌ Source language '{source_lang}' is not supported[/red]")
+            return
+        
+        # Translate
+        with console.status("[bold blue]Translating..."):
+            result = engine.translate(
+                text,
+                target_lang,
+                source_lang,
+                preserve_code=preserve_code
+            )
+        
+        # Display results
+        console.print(Panel(
+            f"[yellow]Original ({source_lang}):[/yellow]\n{result.original_text}\n\n"
+            f"[green]Translation ({target_lang}):[/green]\n{result.translated_text}",
+            title="Translation Result",
+            border_style="green"
+        ))
+        
+        # Show metadata
+        console.print(f"\n[cyan]Confidence: {result.confidence:.2%}[/cyan]")
+        
+        if result.technical_terms:
+            console.print(f"[cyan]Technical terms preserved: {', '.join(result.technical_terms[:5])}[/cyan]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Translation error: {e}[/red]")
+
+
+@lang.command(name='glossary')
+@click.option('--language', '-l', help='Show glossary for specific language')
+@click.option('--search', '-s', help='Search for specific term')
+def glossary(language, search):
+    """View technical term glossary
+    
+    Shows technical terms and their translations in different languages.
+    
+    Examples:
+        xencode lang glossary
+        xencode lang glossary --language es
+        xencode lang glossary --search "function"
+    """
+    console.print("[blue]Technical Term Glossary[/blue]\n")
+    
+    try:
+        from xencode.i18n import TranslationEngine, LanguageManager
+        import builtins
+        
+        manager = LanguageManager()
+        engine = TranslationEngine()
+        
+        # Get technical terms
+        terms = builtins.sorted(builtins.list(engine.technical_terms))
+        
+        if search:
+            terms = [t for t in terms if search.lower() in t.lower()]
+        
+        if not terms:
+            console.print("[yellow]No terms found[/yellow]")
+            return
+        
+        # Show terms
+        if language:
+            # Show translations for specific language
+            if not manager.is_supported(language):
+                console.print(f"[red]❌ Language '{language}' is not supported[/red]")
+                return
+            
+            table = Table(title=f"Technical Terms - {manager.get_language_name(language, native=True)}")
+            table.add_column("English", style="cyan")
+            table.add_column(manager.get_language_name(language, native=True), style="yellow")
+            
+            for term in terms[:50]:  # Limit to 50 terms
+                # For now, technical terms are preserved (not translated)
+                table.add_row(term, term)
+            
+            console.print(table)
+        else:
+            # Show all terms
+            console.print("[cyan]Technical terms that are preserved during translation:[/cyan]\n")
+            
+            # Display in columns
+            cols = 4
+            rows = (len(terms) + cols - 1) // cols
+            
+            for i in range(rows):
+                row_terms = []
+                for j in range(cols):
+                    idx = i + j * rows
+                    if idx < len(terms):
+                        row_terms.append(f"• {terms[idx]:<20}")
+                console.print("".join(row_terms))
+        
+        console.print(f"\n[dim]Total terms: {len(terms)}[/dim]")
+        console.print("[dim]These terms are preserved in their original form during translation[/dim]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error displaying glossary: {e}[/red]")
+
+
 @cli.command()
 def version():
     """Show version information"""
