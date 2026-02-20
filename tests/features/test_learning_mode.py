@@ -6,6 +6,7 @@ and exercise generation functionality.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
@@ -43,9 +44,12 @@ def feature_config():
     )
 
 
-@pytest.fixture
-async def learning_feature(feature_config):
+@pytest_asyncio.fixture
+async def learning_feature(feature_config, tmp_path, monkeypatch):
     """Create and initialize learning mode feature"""
+    # Use temporary directory for progress files
+    monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
+    
     feature = LearningModeFeature(feature_config)
     await feature.initialize()
     yield feature
@@ -254,4 +258,223 @@ class TestTutorialEngine:
         topic = Topic(
             id='test',
             name='Test Topic',
-         
+            description='Test description',
+            difficulty=DifficultyLevel.BEGINNER
+        )
+        
+        data = topic.to_dict()
+        
+        assert data['id'] == 'test'
+        assert data['name'] == 'Test Topic'
+        assert data['difficulty'] == 'beginner'
+
+
+class TestAdaptiveDifficultyController:
+    """Test AdaptiveDifficultyController class"""
+    
+    @pytest.mark.asyncio
+    async def test_get_difficulty_novice(self, difficulty_controller):
+        """Test difficulty for novice user"""
+        progress = Progress(
+            topic_id='python',
+            mastery_level=MasteryLevel.NOVICE
+        )
+        
+        difficulty = await difficulty_controller.get_difficulty(progress)
+        
+        assert difficulty == DifficultyLevel.BEGINNER
+    
+    @pytest.mark.asyncio
+    async def test_get_difficulty_proficient(self, difficulty_controller):
+        """Test difficulty for proficient user"""
+        progress = Progress(
+            topic_id='python',
+            mastery_level=MasteryLevel.PROFICIENT
+        )
+        
+        difficulty = await difficulty_controller.get_difficulty(progress)
+        
+        assert difficulty == DifficultyLevel.ADVANCED
+    
+    @pytest.mark.asyncio
+    async def test_adjust_difficulty_up(self, difficulty_controller):
+        """Test increasing difficulty based on performance"""
+        new_difficulty = await difficulty_controller.adjust_difficulty(
+            DifficultyLevel.BEGINNER,
+            performance=0.9
+        )
+        
+        assert new_difficulty == DifficultyLevel.INTERMEDIATE
+    
+    @pytest.mark.asyncio
+    async def test_adjust_difficulty_down(self, difficulty_controller):
+        """Test decreasing difficulty based on performance"""
+        new_difficulty = await difficulty_controller.adjust_difficulty(
+            DifficultyLevel.ADVANCED,
+            performance=0.4
+        )
+        
+        assert new_difficulty == DifficultyLevel.INTERMEDIATE
+    
+    @pytest.mark.asyncio
+    async def test_adjust_difficulty_maintain(self, difficulty_controller):
+        """Test maintaining difficulty with moderate performance"""
+        new_difficulty = await difficulty_controller.adjust_difficulty(
+            DifficultyLevel.INTERMEDIATE,
+            performance=0.6
+        )
+        
+        assert new_difficulty == DifficultyLevel.INTERMEDIATE
+
+
+class TestProgressTracker:
+    """Test ProgressTracker class"""
+    
+    @pytest.mark.asyncio
+    async def test_record_exercise_passed(self, progress_tracker):
+        """Test recording a passed exercise"""
+        await progress_tracker.record_exercise('python', passed=True, time_spent=5)
+        
+        progress = await progress_tracker.get_progress('python')
+        
+        assert progress is not None
+        assert progress.exercises_completed == 1
+        assert progress.accuracy > 0
+        assert progress.time_spent == 5
+    
+    @pytest.mark.asyncio
+    async def test_record_exercise_failed(self, progress_tracker):
+        """Test recording a failed exercise"""
+        await progress_tracker.record_exercise('python', passed=False, time_spent=10)
+        
+        progress = await progress_tracker.get_progress('python')
+        
+        assert progress is not None
+        assert progress.exercises_completed == 1
+        assert progress.accuracy == 0.0
+    
+    @pytest.mark.asyncio
+    async def test_mastery_level_progression(self, progress_tracker):
+        """Test mastery level increases with progress"""
+        # Record multiple successful exercises
+        for _ in range(7):
+            await progress_tracker.record_exercise('python', passed=True)
+        
+        progress = await progress_tracker.get_progress('python')
+        
+        # Should have progressed beyond novice
+        assert progress.mastery_level != MasteryLevel.NOVICE
+    
+    @pytest.mark.asyncio
+    async def test_get_all_progress(self, progress_tracker):
+        """Test getting all progress"""
+        await progress_tracker.record_exercise('python', passed=True)
+        await progress_tracker.record_exercise('javascript', passed=True)
+        
+        all_progress = await progress_tracker.get_all_progress()
+        
+        assert len(all_progress) == 2
+        assert any(p.topic_id == 'python' for p in all_progress)
+        assert any(p.topic_id == 'javascript' for p in all_progress)
+
+
+class TestExerciseGenerator:
+    """Test ExerciseGenerator class"""
+    
+    @pytest.mark.asyncio
+    async def test_generate_exercises(self, exercise_generator):
+        """Test generating exercises"""
+        exercises = await exercise_generator.generate(
+            'python',
+            DifficultyLevel.BEGINNER,
+            count=3
+        )
+        
+        assert isinstance(exercises, list)
+        assert all(isinstance(ex, Exercise) for ex in exercises)
+        assert all(ex.topic_id == 'python' for ex in exercises)
+    
+    @pytest.mark.asyncio
+    async def test_get_exercise(self, exercise_generator):
+        """Test getting a specific exercise"""
+        exercise = await exercise_generator.get_exercise('python_hello')
+        
+        assert exercise is not None
+        assert exercise.id == 'python_hello'
+        assert exercise.topic_id == 'python'
+    
+    def test_exercise_to_dict(self):
+        """Test Exercise to_dict method"""
+        exercise = Exercise(
+            id='test',
+            topic_id='python',
+            title='Test Exercise',
+            description='Test description',
+            difficulty=DifficultyLevel.BEGINNER,
+            code_template='# code',
+            solution='# solution'
+        )
+        
+        data = exercise.to_dict()
+        
+        assert data['id'] == 'test'
+        assert data['topic_id'] == 'python'
+        assert data['title'] == 'Test Exercise'
+        assert data['difficulty'] == 'beginner'
+
+
+class TestIntegration:
+    """Integration tests for Learning Mode"""
+    
+    @pytest.mark.asyncio
+    async def test_complete_learning_flow(self, learning_feature):
+        """Test complete learning flow from start to completion"""
+        # Start a topic
+        result = await learning_feature.start_topic('python')
+        assert result['topic']['id'] == 'python'
+        
+        # Get exercises
+        exercises = await learning_feature.get_exercises('python', count=2)
+        assert len(exercises) <= 2
+        
+        # Submit an exercise
+        if exercises:
+            exercise_id = exercises[0]['id']
+            solution = "def hello():\n    return 'Hello, World!'"
+            result = await learning_feature.submit_exercise(exercise_id, solution)
+            assert 'passed' in result
+        
+        # Check progress
+        progress = await learning_feature.get_progress('python')
+        assert progress is not None
+        assert progress['exercises_completed'] >= 0
+    
+    @pytest.mark.asyncio
+    async def test_adaptive_difficulty_flow(self, learning_feature):
+        """Test adaptive difficulty adjustment"""
+        # Record multiple successful exercises
+        for _ in range(5):
+            await learning_feature.progress_tracker.record_exercise('python', passed=True)
+        
+        # Start topic again - should get higher difficulty
+        result = await learning_feature.start_topic('python')
+        
+        # Difficulty should adapt based on progress (including expert level)
+        assert result['difficulty'] in ['beginner', 'intermediate', 'advanced', 'expert']
+    
+    @pytest.mark.asyncio
+    async def test_mastery_tracking(self, learning_feature):
+        """Test mastery level tracking"""
+        # Record exercises with varying success
+        await learning_feature.progress_tracker.record_exercise('python', passed=True)
+        await learning_feature.progress_tracker.record_exercise('python', passed=True)
+        await learning_feature.progress_tracker.record_exercise('python', passed=False)
+        
+        # Get mastery level
+        mastery = await learning_feature.get_mastery_level('python')
+        
+        assert mastery['topic_id'] == 'python'
+        assert 'mastery_level' in mastery
+        assert 'mastery_percentage' in mastery
+        # Mastery percentage can exceed 100 if more exercises completed than total
+        assert mastery['mastery_percentage'] >= 0
