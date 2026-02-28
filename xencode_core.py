@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -397,7 +398,9 @@ def update_model(model: str) -> None:
         console.print(error_panel)
     except subprocess.CalledProcessError as e:
         # Model pull failed - could be missing model
-        stderr_text = e.stderr.decode() if e.stderr else "Unknown error"
+        stderr_text = e.stderr or e.stdout or "Unknown error"
+        if isinstance(stderr_text, bytes):
+            stderr_text = stderr_text.decode(errors="replace")
         if "not found" in stderr_text.lower():
             warning_panel = Panel(
                 f"⚠️ Model '{model}' not found in Ollama library\n\n"
@@ -960,18 +963,11 @@ def get_multiline_input():
 
 
 def update_online_status():
-    """Check internet connectivity with lightweight ping"""
+    """Check internet connectivity with a cross-platform socket probe"""
     try:
-        # Use a lightweight ping check without blocking user interaction
-        result = subprocess.run(
-            ["ping", "-c", "1", "-W", "1", "8.8.8.8"], capture_output=True, timeout=2
-        )
-        return "true" if result.returncode == 0 else "false"
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
+        with socket.create_connection(("8.8.8.8", 53), timeout=2):
+            return "true"
+    except OSError:
         return "false"
 
 
