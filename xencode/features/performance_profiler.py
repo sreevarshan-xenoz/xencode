@@ -1039,8 +1039,8 @@ class PerformanceProfiler(FeatureBase):
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for this feature"""
-        # TUI components will be implemented in a separate task
-        return []
+        from xencode.tui.widgets.performance_profiler_panel import PerformanceProfilerPanel
+        return [PerformanceProfilerPanel]
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for this feature"""
