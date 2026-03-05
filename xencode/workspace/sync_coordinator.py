@@ -262,9 +262,9 @@ class SyncCoordinator:
             if connection.websocket:
                 try:
                     await connection.websocket.close()
-                except:
-                    pass
-            
+                except Exception:
+                        pass  # Silently ignore
+
             del self.connections[connection_id]
             print(f"Client disconnected: {connection_id}")
             return True
@@ -609,9 +609,9 @@ class SyncCoordinator:
             if connection.websocket:
                 try:
                     await connection.websocket.close()
-                except:
-                    pass
-            
+                except Exception:
+                        pass  # Silently ignore
+
             del self.connections[connection_id]
             print(f"Client disconnected: {connection_id}")
             return True

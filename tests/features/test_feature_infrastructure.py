@@ -19,29 +19,29 @@ from xencode.features.core.schema import (
 
 
 # Test Feature Implementation
-class TestFeature(FeatureBase):
+class MockTestFeature(FeatureBase):
     """Test feature for unit tests"""
-    
+
     @property
     def name(self) -> str:
         return "test_feature"
-    
+
     @property
     def description(self) -> str:
         return "A test feature for unit testing"
-    
+
     async def _initialize(self) -> None:
         """Initialize the test feature"""
         self.initialized_called = True
-    
+
     async def _shutdown(self) -> None:
         """Shutdown the test feature"""
         self.shutdown_called = True
-    
+
     def get_cli_commands(self):
         """Get CLI commands"""
         return []
-    
+
     def get_tui_components(self):
         """Get TUI components"""
         return []

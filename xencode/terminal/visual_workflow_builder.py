@@ -229,7 +229,7 @@ class DecisionNodeProcessor(NodeProcessor):
             # Evaluate the condition
             result = eval(condition, {"__builtins__": {}}, eval_context)
             decision_result = bool(result)
-        except:
+        except Exception:
             # If condition evaluation fails, default to true
             decision_result = True
         

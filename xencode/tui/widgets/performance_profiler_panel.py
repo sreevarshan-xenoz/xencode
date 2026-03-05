@@ -170,9 +170,8 @@ class MetricsDashboard(Container):
             self.query_one("#memory-value", Label).update(f"{metrics.get('memory_usage', 0):.2f} MB")
             self.query_one("#bottlenecks-value", Label).update(str(metrics.get('bottlenecks', 0)))
             self.query_one("#hotspots-value", Label).update(str(metrics.get('hotspots', 0)))
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class BottleneckVisualization(Container):
     """Visualization of performance bottlenecks"""
@@ -236,9 +235,8 @@ class BottleneckVisualization(Container):
                         str(calls),
                         f"{time_per_call:.6f}"
                     )
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class ProfileViewer(Container):
     """Viewer for detailed profile results"""
@@ -302,9 +300,8 @@ class ProfileViewer(Container):
                         f"{stat.get('cumulative_time', 0):.4f}",
                         f"{stat.get('time_per_call', 0):.6f}"
                     )
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class OptimizationSuggestions(Container):
     """Panel showing optimization suggestions"""

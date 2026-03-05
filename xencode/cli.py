@@ -228,9 +228,9 @@ def list():
             # Try to load it to get info
             try:
                 feature = feature_manager.load_feature(feature_name)
-            except:
-                pass
-        
+            except Exception:
+                    pass  # Silently ignore
+
         if feature:
             status = feature.get_status().value
             version = feature.version
@@ -274,8 +274,9 @@ def enable(feature_name):
                         for cmd in commands:
                             if hasattr(cmd, 'name') and hasattr(cmd, 'help'):
                                 console.print(f"  • [yellow]xencode {cmd.name}[/yellow]: {cmd.help}")
-                except:
-                    pass
+                except Exception:
+                        pass  # Silently ignore
+
         else:
             console.print(f"[red]❌ Failed to enable feature '{feature_name}'[/red]")
     
@@ -453,8 +454,9 @@ def register_feature_commands():
 # This allows features to add their own commands dynamically
 try:
     register_feature_commands()
-except:
-    pass  # Don't fail if feature registration fails
+except Exception:
+        pass  # Silently ignore
+# Don't fail if feature registration fails
 
 
 @cli.group()
