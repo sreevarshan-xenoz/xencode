@@ -557,7 +557,7 @@ async def acknowledge_alert(alert_id: str):
 @router.get("/processes", response_model=List[ProcessInfoResponse])
 async def get_processes(
     limit: int = Query(20, le=100),
-    sort_by: str = Query("memory", regex="^(memory|cpu|name|pid)$")
+    sort_by: str = Query("memory", pattern="^(memory|cpu|name|pid)$")
 ):
     """Get running processes information"""
     try:

@@ -398,32 +398,82 @@ class LearningModePanel(BaseFeaturePanel):
         """Start a tutorial."""
         if self.topics:
             await self._start_topic(self.topics[0]['id'])
-    
+
     async def _next_step(self) -> None:
         """Move to next tutorial step."""
-        # TODO: Implement step navigation
-        pass
-    
+        if self.current_tutorial and self.current_step < len(self.current_tutorial.get('steps', [])) - 1:
+            self.current_step += 1
+            self._update_step_display()
+            self.notify(f"Step {self.current_step + 1}/{len(self.current_tutorial['steps'])}")
+        else:
+            self.notify("Already at the last step")
+
     async def _prev_step(self) -> None:
         """Move to previous tutorial step."""
-        # TODO: Implement step navigation
-        pass
-    
+        if self.current_tutorial and self.current_step > 0:
+            self.current_step -= 1
+            self._update_step_display()
+            self.notify(f"Step {self.current_step + 1}/{len(self.current_tutorial['steps'])}")
+        else:
+            self.notify("Already at the first step")
+
     async def _complete_tutorial(self) -> None:
         """Complete current tutorial."""
         self.current_tutorial = None
         self.view_mode = "topics"
         self._build_content()
-    
+
     async def _run_tests(self) -> None:
         """Run tests for current exercise."""
-        # TODO: Implement test execution
-        pass
-    
+        if not self.current_exercise:
+            self.notify("No active exercise")
+            return
+        
+        try:
+            code_area = self.query_one("#exercise-code", TextArea)
+            solution = code_area.text
+            
+            # Run tests using pytest
+            import subprocess
+            import tempfile
+            import os
+            
+            # Create temp file with solution
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(solution)
+                temp_file = f.name
+            
+            try:
+                # Run tests
+                result = subprocess.run(
+                    ["python", "-m", "pytest", temp_file, "-v"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    self.notify("✓ All tests passed!")
+                else:
+                    self.notify(f"Tests failed:\n{result.stdout}\n{result.stderr}")
+            finally:
+                os.unlink(temp_file)
+        except Exception as e:
+            self.notify(f"Error running tests: {e}")
+
     async def _show_hint(self) -> None:
         """Show a hint for current exercise."""
-        # TODO: Implement hint display
-        pass
+        if not self.current_exercise:
+            self.notify("No active exercise")
+            return
+        
+        hints = self.current_exercise.get('hints', [])
+        if hints:
+            hint_idx = min(self.hint_index, len(hints) - 1)
+            self.notify(f"Hint {hint_idx + 1}/{len(hints)}:\n{hints[hint_idx]}")
+            self.hint_index += 1
+        else:
+            self.notify("No hints available for this exercise")
     
     async def _submit_exercise(self) -> None:
         """Submit current exercise solution."""
@@ -442,10 +492,13 @@ class LearningModePanel(BaseFeaturePanel):
                     self.current_exercise['id'],
                     solution
                 )
-                
+
                 # Show result
-                # TODO: Display result in a modal or panel
-                
+                if result.get('passed', False):
+                    self.notify(f"✓ Exercise passed! Score: {result.get('score', 0):.1f}%")
+                else:
+                    self.notify(f"✗ Exercise failed. Feedback: {result.get('feedback', 'Try again')}")
+
                 # Move to next exercise if passed
                 if result['passed'] and self.exercises:
                     current_idx = self.exercises.index(self.current_exercise)
@@ -453,5 +506,5 @@ class LearningModePanel(BaseFeaturePanel):
                         self.current_exercise = self.exercises[current_idx + 1]
                         self._build_content()
         except Exception as e:
-            pass
+            self.notify(f"Error submitting exercise: {e}")
 
