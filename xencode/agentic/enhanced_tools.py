@@ -237,7 +237,7 @@ class DependencyAnalysisTool(BaseTool):
                                     module = module.split('.')[0]
                                 if module not in ['os', 'sys', 'json', 'datetime', 'typing', 'pathlib']:  # Skip stdlib
                                     imports.add(module)
-                except:
+                except Exception:
                     continue
             
             if imports:

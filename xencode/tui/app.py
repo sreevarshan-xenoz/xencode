@@ -767,10 +767,9 @@ class XencodeApp(App):
                         f"{file_content[:2000]}...\n"  # Limit context
                         f"```"
                     )
-                except:
-                    pass
-            
-            # Build enhanced prompt
+                except Exception:
+                        pass  # Silently ignore
+# Build enhanced prompt
             if context_parts:
                 enhanced_prompt = (
                     f"Context:\n{''.join(context_parts)}\n\n"
@@ -924,10 +923,9 @@ class XencodeApp(App):
                         f"{file_content[:2000]}...\n"  # Limit context
                         f"```"
                     )
-                except:
-                    pass
-
-            # Build enhanced prompt
+                except Exception:
+                        pass  # Silently ignore
+# Build enhanced prompt
             if context_parts:
                 enhanced_prompt = (
                     f"Context:\n{''.join(context_parts)}\n\n"

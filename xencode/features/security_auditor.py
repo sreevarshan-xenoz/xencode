@@ -497,7 +497,7 @@ class DependencyAnalyzer:
             elif vulnerable_range.startswith('<='):
                 threshold = vulnerable_range.lstrip('<=')
                 return self._compare_versions(current_version, threshold) <= 0
-        except:
+        except Exception:
             return False
         
         return False
@@ -729,7 +729,7 @@ class SecurityToolIntegration:
             result = subprocess.run(['bandit', '--version'], 
                                   capture_output=True, text=True, timeout=5)
             tools['bandit'] = result.returncode == 0
-        except:
+        except Exception:
             tools['bandit'] = False
         
         # Check for Snyk
@@ -737,7 +737,7 @@ class SecurityToolIntegration:
             result = subprocess.run(['snyk', '--version'], 
                                   capture_output=True, text=True, timeout=5)
             tools['snyk'] = result.returncode == 0
-        except:
+        except Exception:
             tools['snyk'] = False
         
         return tools

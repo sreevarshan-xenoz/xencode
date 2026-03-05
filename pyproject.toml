@@ -82,3 +82,9 @@ ignore = [
 line-length = 88
 target-version = ['py38']
 skip-string-normalization = true
+
+[tool.bandit]
+# Bandit security scanner configuration
+exclude_dirs = ["tests", ".venv", "venv", "__pycache__", "node_modules", "build", "dist"]
+skips = ["B101", "B311", "B320"]
+level = "MEDIUM"

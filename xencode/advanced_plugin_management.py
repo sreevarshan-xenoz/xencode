@@ -133,8 +133,10 @@ class AdvancedPluginManager:
                 for installed_plugin in bundle.plugins[:bundle.plugins.index(plugin_id)]:
                     try:
                         await self.plugin_manager.uninstall_plugin(installed_plugin)
-                    except:
-                        pass  # Ignore errors during rollback
+                    except Exception as rollback_error:
+                        # Log rollback error but continue with other rollbacks
+                        import logging
+                        logging.warning(f"Failed to rollback plugin {installed_plugin}: {rollback_error}")
                 raise e
         
         return True

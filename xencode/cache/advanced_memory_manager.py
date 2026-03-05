@@ -262,7 +262,7 @@ class DiskTierManager(MemoryTierManager):
             
             try:
                 value = pickle.loads(value_data)
-            except:
+            except Exception:
                 # Corrupted data, remove it
                 self.conn.execute("DELETE FROM cache_items WHERE key = ?", (key,))
                 self.conn.commit()
@@ -626,7 +626,7 @@ class AdvancedMemoryManager:
         try:
             value_bytes = pickle.dumps(value)
             size_bytes = len(value_bytes)
-        except:
+        except Exception:
             size_bytes = 1024  # Default estimate
         
         return CacheItem(

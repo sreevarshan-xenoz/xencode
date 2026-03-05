@@ -156,9 +156,8 @@ class VulnerabilityDashboard(Container):
             self.query_one("#high-count", Label).update(str(summary.get('high', 0)))
             self.query_one("#medium-count", Label).update(str(summary.get('medium', 0)))
             self.query_one("#low-count", Label).update(str(summary.get('low', 0)))
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class VulnerabilityListItem(ListItem):
     """A single vulnerability in the list"""
@@ -336,9 +335,8 @@ class DependencyTree(Container):
                         dep.get('cve_id', 'N/A'),
                         f"{risk_emoji} {dep.get('risk_level', 'low').upper()}"
                     )
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class FixSuggestions(Container):
     """Panel showing fix suggestions for selected vulnerability"""
@@ -474,7 +472,7 @@ class AuditHistory(Container):
                     try:
                         dt = datetime.fromisoformat(timestamp)
                         time_str = dt.strftime("%Y-%m-%d %H:%M")
-                    except:
+                    except Exception:
                         time_str = timestamp[:16] if len(timestamp) > 16 else timestamp
                     
                     summary = entry.get('summary', {})
@@ -488,9 +486,8 @@ class AuditHistory(Container):
                         str(summary.get('high', 0)),
                         status
                     )
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class SecurityAuditorPanel(Container):
     """Main security auditor panel with all components"""
