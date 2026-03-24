@@ -1,0 +1,94 @@
+# Example Fallback Policies
+# Save to: examples/fallback_policies/example_policies.yaml
+
+policies:
+  # Cost-optimized policy for simple tasks
+  - name: "cost_optimized"
+    description: "Minimize costs for simple queries"
+    priority: 1
+    task_types:
+      - "chat"
+      - "general"
+    fallback_chain:
+      - "llama3.2:3b"
+      - "qwen2.5:7b"
+      - "qwen-turbo"
+    retry_policy:
+      max_retries: 2
+      backoff_type: "fixed"
+      base_delay: 0.5
+    cost_cap:
+      max_per_request: 0.002
+      daily_budget: 0.50
+    latency_cap:
+      max_latency_ms: 3000
+    health_aware: true
+
+  # High-quality policy for complex coding
+  - name: "coding_premium"
+    description: "Best quality for complex coding tasks"
+    priority: 2
+    task_types:
+      - "code_generation"
+      - "architecture"
+      - "system_design"
+    fallback_chain:
+      - "qwen3-coder-next-instruct"
+      - "qwen-coder-plus"
+      - "qwen2.5-coder:32b"
+      - "qwen2.5-coder:7b"
+    retry_policy:
+      max_retries: 3
+      backoff_type: "exponential"
+      base_delay: 1.0
+      max_delay: 30.0
+    cost_cap:
+      max_per_request: 0.05
+      daily_budget: 5.00
+    latency_cap:
+      max_latency_ms: 10000
+      timeout_ms: 30000
+    health_aware: true
+
+  # Low-latency policy for real-time
+  - name: "low_latency"
+    description: "Fastest response for interactive use"
+    priority: 3
+    task_types:
+      - "chat"
+      - "code_explanation"
+    fallback_chain:
+      - "llama3.2:3b"
+      - "qwen2.5:7b"
+    retry_policy:
+      max_retries: 1
+      backoff_type: "fixed"
+      base_delay: 0.2
+    cost_cap:
+      max_per_request: 0.005
+    latency_cap:
+      max_latency_ms: 1500
+      timeout_ms: 3000
+    health_aware: true
+
+  # Balanced policy (default)
+  - name: "default"
+    description: "Balanced cost, quality, and latency"
+    priority: 10
+    fallback_chain:
+      - "qwen2.5:7b"
+      - "qwen-turbo"
+      - "qwen-plus"
+    retry_policy:
+      max_retries: 2
+      backoff_type: "exponential"
+      base_delay: 1.0
+    cost_cap:
+      max_per_request: 0.01
+      daily_budget: 1.00
+    latency_cap:
+      max_latency_ms: 5000
+    health_aware: true
+
+default_policy: "default"
+version: "1.0"

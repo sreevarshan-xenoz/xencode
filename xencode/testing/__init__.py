@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""
+Xencode Testing Package
+
+Automated test generation and execution system with:
+- Test generation engine (unittest, pytest, doctest)
+- Test execution loop with parallel execution
+- Failure analysis and auto-retry
+- Coverage reporting
+- API endpoints for integration
+"""
+
+from .test_generator import (
+    TestGenerator,
+    TestGenerationConfig,
+    TestFramework,
+    TestType,
+    EdgeCaseType,
+    FunctionSignature,
+    TestCase,
+    GeneratedTestFile,
+    CodeAnalyzer,
+    MockGenerator,
+    EdgeCaseGenerator,
+    PytestTemplateGenerator,
+    UnittestTemplateGenerator,
+    DoctestTemplateGenerator,
+    AgenticTestGenerator,
+    create_test_generator,
+    generate_tests_for_code,
+)
+
+from .test_runner import (
+    TestRunner,
+    TestExecutionResult,
+    TestResult,
+    TestStatus,
+    ExecutionConfig,
+    ExecutionMode,
+    CoverageCollector,
+    CoverageReport,
+    TestExecutionLoop,
+    ParallelTestExecutor,
+    create_test_runner,
+    create_execution_loop,
+    run_tests,
+)
+
+from .failure_analyzer import (
+    FailureAnalyzer,
+    FailureInfo,
+    FailureType,
+    FailureSeverity,
+    FixSuggestion,
+    FixStrategy,
+    FailurePattern,
+    AnalysisResult,
+    FailureClassifier,
+    FixSuggester,
+    FailurePatternRecognizer,
+    AutoRetryEngine,
+    create_failure_analyzer,
+    create_auto_retry_engine,
+    analyze_failures,
+)
+
+from .mock_services import (
+    MockOllamaService,
+    MockOpenAIService,
+    MockGoogleGenAIService,
+    MockHTTPClient,
+    MockFileSystem,
+    MockSubprocess,
+    mock_ollama_service,
+    mock_openai_service,
+    mock_google_genai_service,
+    mock_http_client,
+    mock_filesystem,
+    mock_subprocess,
+    get_mock_ollama_service,
+    get_mock_openai_service,
+    get_mock_google_genai_service,
+    get_mock_http_client,
+    get_mock_filesystem,
+    get_mock_subprocess,
+)
+
+__all__ = [
+    # Test Generator
+    "TestGenerator",
+    "TestGenerationConfig",
+    "TestFramework",
+    "TestType",
+    "EdgeCaseType",
+    "FunctionSignature",
+    "TestCase",
+    "GeneratedTestFile",
+    "CodeAnalyzer",
+    "MockGenerator",
+    "EdgeCaseGenerator",
+    "PytestTemplateGenerator",
+    "UnittestTemplateGenerator",
+    "DoctestTemplateGenerator",
+    "AgenticTestGenerator",
+    "create_test_generator",
+    "generate_tests_for_code",
+    # Test Runner
+    "TestRunner",
+    "TestExecutionResult",
+    "TestResult",
+    "TestStatus",
+    "ExecutionConfig",
+    "ExecutionMode",
+    "CoverageCollector",
+    "CoverageReport",
+    "TestExecutionLoop",
+    "ParallelTestExecutor",
+    "create_test_runner",
+    "create_execution_loop",
+    "run_tests",
+    # Failure Analyzer
+    "FailureAnalyzer",
+    "FailureInfo",
+    "FailureType",
+    "FailureSeverity",
+    "FixSuggestion",
+    "FixStrategy",
+    "FailurePattern",
+    "AnalysisResult",
+    "FailureClassifier",
+    "FixSuggester",
+    "FailurePatternRecognizer",
+    "AutoRetryEngine",
+    "create_failure_analyzer",
+    "create_auto_retry_engine",
+    "analyze_failures",
+    # Mock Services
+    "MockOllamaService",
+    "MockOpenAIService",
+    "MockGoogleGenAIService",
+    "MockHTTPClient",
+    "MockFileSystem",
+    "MockSubprocess",
+    "mock_ollama_service",
+    "mock_openai_service",
+    "mock_google_genai_service",
+    "mock_http_client",
+    "mock_filesystem",
+    "mock_subprocess",
+    "get_mock_ollama_service",
+    "get_mock_openai_service",
+    "get_mock_google_genai_service",
+    "get_mock_http_client",
+    "get_mock_filesystem",
+    "get_mock_subprocess",
+]
