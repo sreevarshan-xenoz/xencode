@@ -27,7 +27,21 @@ from .fallback_config import (
     BackoffType,
 )
 
+from .fallback_engine import (
+    FallbackEngine,
+    FallbackAttempt,
+    FallbackResult,
+    FallbackReason,
+    ExecutionStatus,
+)
+
+from .retry_budget import (
+    RetryBudgetManager,
+    RetryBudget,
+)
+
 __all__ = [
+    # Prompt Router
     'PromptRouter',
     'TaskClassifier',
     'TaskType',
@@ -37,7 +51,7 @@ __all__ = [
     'RoutingDecision',
     'get_router',
     'route_prompt',
-    # Fallback engine exports
+    # Fallback Config
     'FallbackPolicy',
     'FallbackPolicyConfig',
     'RetryPolicy',
@@ -45,4 +59,13 @@ __all__ = [
     'LatencyCap',
     'ProviderExclusionRule',
     'BackoffType',
+    # Fallback Engine
+    'FallbackEngine',
+    'FallbackAttempt',
+    'FallbackResult',
+    'FallbackReason',
+    'ExecutionStatus',
+    # Retry Budget
+    'RetryBudgetManager',
+    'RetryBudget',
 ]

@@ -45,6 +45,69 @@ except ImportError:
     get_resource_manager = None
     RESOURCE_MANAGER_AVAILABLE = False
 
+# Benchmark components
+try:
+    from .benchmark_engine import (
+        BenchmarkEngine,
+        BenchmarkTask,
+        BenchmarkResult,
+        BenchmarkMetrics,
+        TaskType,
+        create_benchmark_engine,
+        run_benchmark,
+    )
+    BENCHMARK_ENGINE_AVAILABLE = True
+except ImportError:
+    BenchmarkEngine = None
+    BenchmarkTask = None
+    BenchmarkResult = None
+    BenchmarkMetrics = None
+    TaskType = None
+    create_benchmark_engine = None
+    run_benchmark = None
+    BENCHMARK_ENGINE_AVAILABLE = False
+
+try:
+    from .benchmark_store import (
+        BenchmarkStore,
+        BenchmarkRecord,
+        BenchmarkQuery,
+        create_benchmark_store,
+    )
+    BENCHMARK_STORE_AVAILABLE = True
+except ImportError:
+    BenchmarkStore = None
+    BenchmarkRecord = None
+    BenchmarkQuery = None
+    create_benchmark_store = None
+    BENCHMARK_STORE_AVAILABLE = False
+
+try:
+    from .benchmark_suites import (
+        BenchmarkSuites,
+        BenchmarkDataset,
+        create_benchmark_suites,
+    )
+    BENCHMARK_SUITES_AVAILABLE = True
+except ImportError:
+    BenchmarkSuites = None
+    BenchmarkDataset = None
+    create_benchmark_suites = None
+    BENCHMARK_SUITES_AVAILABLE = False
+
+try:
+    from .benchmark_recommendations import (
+        BenchmarkRecommendations,
+        ModelRecommendation,
+        generate_recommendations,
+    )
+    BENCHMARK_RECOMMENDATIONS_AVAILABLE = True
+except ImportError:
+    BenchmarkRecommendations = None
+    ModelRecommendation = None
+    generate_recommendations = None
+    BENCHMARK_RECOMMENDATIONS_AVAILABLE = False
+
 
 def get_monitoring_status() -> dict:
     """Get status of monitoring components"""
@@ -53,21 +116,53 @@ def get_monitoring_status() -> dict:
         "health_monitor_available": HEALTH_MONITOR_AVAILABLE,
         "alert_manager_available": ALERT_MANAGER_AVAILABLE,
         "performance_optimizer_available": PERFORMANCE_OPTIMIZER_AVAILABLE,
-        "resource_manager_available": RESOURCE_MANAGER_AVAILABLE
+        "resource_manager_available": RESOURCE_MANAGER_AVAILABLE,
+        "benchmark_engine_available": BENCHMARK_ENGINE_AVAILABLE,
+        "benchmark_store_available": BENCHMARK_STORE_AVAILABLE,
+        "benchmark_suites_available": BENCHMARK_SUITES_AVAILABLE,
+        "benchmark_recommendations_available": BENCHMARK_RECOMMENDATIONS_AVAILABLE,
     }
 
 
 __all__ = [
+    # Core Monitoring
     'PrometheusMetricsCollector',
     'HealthMonitor',
     'AlertManager',
     'PerformanceOptimizer',
     'ResourceManager',
     'get_resource_manager',
+    # Benchmark Engine
+    'BenchmarkEngine',
+    'BenchmarkTask',
+    'BenchmarkResult',
+    'BenchmarkMetrics',
+    'TaskType',
+    'create_benchmark_engine',
+    'run_benchmark',
+    # Benchmark Store
+    'BenchmarkStore',
+    'BenchmarkRecord',
+    'BenchmarkQuery',
+    'create_benchmark_store',
+    # Benchmark Suites
+    'BenchmarkSuites',
+    'BenchmarkDataset',
+    'create_benchmark_suites',
+    # Benchmark Recommendations
+    'BenchmarkRecommendations',
+    'ModelRecommendation',
+    'generate_recommendations',
+    # Status
     'get_monitoring_status',
+    # Availability Flags
     'PROMETHEUS_METRICS_AVAILABLE',
     'HEALTH_MONITOR_AVAILABLE',
     'ALERT_MANAGER_AVAILABLE',
     'PERFORMANCE_OPTIMIZER_AVAILABLE',
-    'RESOURCE_MANAGER_AVAILABLE'
+    'RESOURCE_MANAGER_AVAILABLE',
+    'BENCHMARK_ENGINE_AVAILABLE',
+    'BENCHMARK_STORE_AVAILABLE',
+    'BENCHMARK_SUITES_AVAILABLE',
+    'BENCHMARK_RECOMMENDATIONS_AVAILABLE',
 ]
