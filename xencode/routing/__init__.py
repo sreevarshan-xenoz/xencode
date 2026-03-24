@@ -17,6 +17,16 @@ from .prompt_router import (
     route_prompt,
 )
 
+from .fallback_config import (
+    FallbackPolicy,
+    FallbackPolicyConfig,
+    RetryPolicy,
+    CostCap,
+    LatencyCap,
+    ProviderExclusionRule,
+    BackoffType,
+)
+
 __all__ = [
     'PromptRouter',
     'TaskClassifier',
@@ -27,4 +37,12 @@ __all__ = [
     'RoutingDecision',
     'get_router',
     'route_prompt',
+    # Fallback engine exports
+    'FallbackPolicy',
+    'FallbackPolicyConfig',
+    'RetryPolicy',
+    'CostCap',
+    'LatencyCap',
+    'ProviderExclusionRule',
+    'BackoffType',
 ]
