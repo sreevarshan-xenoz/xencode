@@ -1297,5 +1297,328 @@ async def get_memory_analysis(
         raise HTTPException(status_code=500, detail=f"Failed to get memory analysis: {e}")
 
 
+# ============================================================================
+# Provider Health Endpoints
+# ============================================================================
+
+class ProviderHealthStatusEnum(str, Enum):
+    """Provider health status"""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+    UNKNOWN = "unknown"
+    OFFLINE = "offline"
+
+
+class ProviderHealthResponse(BaseModel):
+    """Provider health information"""
+    provider: str
+    status: str
+    endpoint: Optional[str] = None
+    last_checked: Optional[str] = None
+    last_success: Optional[str] = None
+    uptime_percentage: float = 0.0
+    latency: Dict[str, Any] = Field(default_factory=dict)
+    errors: Dict[str, Any] = Field(default_factory=dict)
+    usage: Dict[str, Any] = Field(default_factory=dict)
+    model_count: int = 0
+    available_models: List[str] = Field(default_factory=list)
+
+
+class ProviderHealthSummaryResponse(BaseModel):
+    """Provider health summary"""
+    timestamp: str
+    providers: Dict[str, ProviderHealthResponse]
+    overall_status: str
+    healthy_count: int
+    degraded_count: int
+    unhealthy_count: int
+    recommended_provider: str
+
+
+@router.get("/providers/health", response_model=ProviderHealthSummaryResponse, tags=["providers"])
+async def get_provider_health_summary():
+    """
+    Get health summary for all configured providers
+    
+    Returns real-time health status including:
+    - Provider availability
+    - Response latency metrics
+    - Error rates and tracking
+    - Usage quotas and limits
+    - Model availability
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor
+        
+        monitor = get_health_monitor()
+        
+        # Check all providers
+        from ...monitoring.provider_health import ProviderType
+        import asyncio
+        
+        async def check_all():
+            tasks = [
+                monitor.check_provider_health(provider)
+                for provider in ProviderType
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        await check_all()
+        
+        # Get summary
+        summary = monitor.get_health_summary()
+        
+        # Get recommendation
+        recommended = monitor.get_recommended_provider()
+        
+        return ProviderHealthSummaryResponse(
+            timestamp=summary['timestamp'],
+            providers={
+                k: ProviderHealthResponse(**v)
+                for k, v in summary['providers'].items()
+            },
+            overall_status=summary['overall_status'],
+            healthy_count=summary['healthy_count'],
+            degraded_count=summary['degraded_count'],
+            unhealthy_count=summary['unhealthy_count'],
+            recommended_provider=recommended.value,
+        )
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get provider health: {e}"
+        )
+
+
+@router.get("/providers/{provider_name}/health", response_model=ProviderHealthResponse, tags=["providers"])
+async def get_provider_health(provider_name: str):
+    """
+    Get detailed health information for a specific provider
+    
+    Args:
+        provider_name: Provider identifier (e.g., 'local_ollama', 'cloud_qwen')
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        # Find provider
+        try:
+            provider = ProviderType(provider_name)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown provider: {provider_name}"
+            )
+        
+        # Check health
+        health = await monitor.check_provider_health(provider)
+        
+        return ProviderHealthResponse(
+            provider=health.provider.value,
+            status=health.status.value,
+            endpoint=health.endpoint,
+            last_checked=health.last_checked.isoformat() if health.last_checked else None,
+            last_success=health.last_success.isoformat() if health.last_success else None,
+            uptime_percentage=health.uptime_percentage,
+            latency=health.latency.to_dict(),
+            errors=health.errors.to_dict(),
+            usage=health.usage.to_dict(),
+            model_count=health.model_count,
+            available_models=health.available_models,
+        )
+        
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get provider health: {e}"
+        )
+
+
+@router.post("/providers/{provider_name}/check", tags=["providers"])
+async def check_provider(provider_name: str):
+    """
+    Force an immediate health check for a provider
+    
+    Args:
+        provider_name: Provider identifier
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        try:
+            provider = ProviderType(provider_name)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown provider: {provider_name}"
+            )
+        
+        health = await monitor.check_provider_health(provider)
+        
+        return {
+            "provider": health.provider.value,
+            "status": health.status.value,
+            "latency_ms": health.latency.current_ms,
+            "error_rate": health.errors.error_rate,
+            "checked_at": health.last_checked.isoformat() if health.last_checked else None,
+        }
+        
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check provider: {e}"
+        )
+
+
+@router.get("/providers/recommend", tags=["providers"])
+async def get_recommended_provider(task_type: str = Query(default="general")):
+    """
+    Get recommended provider based on current health and task type
+    
+    Args:
+        task_type: Type of task (general, code, chat, reasoning)
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor
+        
+        monitor = get_health_monitor()
+        recommended = monitor.get_recommended_provider(task_type)
+        
+        health = monitor.get_provider_health(recommended)
+        
+        return {
+            "provider": recommended.value,
+            "status": health.status.value if health else "unknown",
+            "reason": "Best combination of latency, error rate, and uptime",
+            "latency_avg_ms": health.latency.avg_ms if health else None,
+            "error_rate": health.errors.error_rate if health else None,
+            "uptime_percentage": health.uptime_percentage if health else None,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get recommendation: {e}"
+        )
+
+
+@router.get("/providers/latency/trends", tags=["providers"])
+async def get_latency_trends():
+    """
+    Get latency trends for all providers
+    
+    Returns historical latency data and trend analysis.
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        trends = {}
+        for provider in ProviderType:
+            health = monitor.get_provider_health(provider)
+            if health:
+                trends[provider.value] = {
+                    "current_ms": health.latency.current_ms,
+                    "avg_ms": health.latency.avg_ms,
+                    "min_ms": health.latency.min_ms,
+                    "max_ms": health.latency.max_ms,
+                    "p50_ms": health.latency.p50_ms,
+                    "p95_ms": health.latency.p95_ms,
+                    "trend": health.latency.get_trend(),
+                    "sample_count": health.latency.sample_count,
+                }
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "trends": trends,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get latency trends: {e}"
+        )
+
+
+@router.get("/providers/errors", tags=["providers"])
+async def get_provider_errors(hours: int = Query(default=24, ge=1, le=168)):
+    """
+    Get error summary for all providers
+    
+    Args:
+        hours: Number of hours to look back (1-168)
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        errors = {}
+        for provider in ProviderType:
+            health = monitor.get_provider_health(provider)
+            if health and health.errors.total_errors > 0:
+                errors[provider.value] = {
+                    "total_errors": health.errors.total_errors,
+                    "error_rate": health.errors.error_rate,
+                    "error_types": health.errors.error_types,
+                    "last_error_time": health.errors.last_error_time.isoformat() if health.errors.last_error_time else None,
+                    "last_error_message": health.errors.last_error_message,
+                    "consecutive_errors": health.errors.consecutive_errors,
+                }
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "hours": hours,
+            "errors": errors,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get error summary: {e}"
+        )
+
+
 # Add router tags and metadata
 router.tags = ["Monitoring"]
