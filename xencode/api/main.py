@@ -21,6 +21,8 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 import uvicorn
 
+from .feature_routes import register_dynamic_feature_routes
+
 # Import Xencode components
 try:
     from ..monitoring.resource_manager import get_resource_manager
@@ -368,6 +370,8 @@ if ROUTERS_AVAILABLE:
         app.include_router(monitoring_router, prefix="/api/v1/monitoring", tags=["Monitoring"])
         app.include_router(plugin_router, prefix="/api/v1/plugins", tags=["Plugins"])
         app.include_router(features_router, prefix="/api/v1/features", tags=["Features"])
+        dynamic_route_count = register_dynamic_feature_routes(app)
+        logger.info("✅ Registered %s dynamic feature routes", dynamic_route_count)
         logger.info("✅ All API routers included successfully")
     except Exception as e:
         logger.error(f"❌ Failed to include some routers: {e}")

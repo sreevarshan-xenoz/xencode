@@ -4,6 +4,31 @@
 
 Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. This document describes the public APIs and modules available in the Xencode platform.
 
+## Auth Matrix
+
+The API uses JWT bearer authentication for protected routes.
+
+- Public routes (no auth required):
+  - `GET /health`
+  - `GET /health/detailed`
+  - `GET /metrics`
+  - `GET /info`
+  - Docs/OpenAPI endpoints (`/docs`, `/redoc`, `/openapi.json`)
+
+- Protected core routes (JWT required):
+  - `POST /api/v1/code/analyze`
+  - `GET /api/v1/code/`
+  - `POST /api/v1/documents/upload`
+  - `GET /api/v1/documents/`
+  - `GET /api/v1/documents/{document_id}`
+
+- Protected dynamic feature routes (JWT required):
+  - Any route mounted from feature descriptors, including examples:
+    - `POST /api/v1/collab/start`
+    - `POST /api/v1/review/file`
+    - `POST /api/v1/security/scan`
+    - `POST /api/v1/profile/run`
+
 ## Core Modules
 
 ### Files Module (`xencode.core.files`)

@@ -11,7 +11,9 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, Field
 
-router = APIRouter()
+from xencode.api.auth import verify_jwt_token
+
+router = APIRouter(dependencies=[Depends(verify_jwt_token)])
 
 
 # Pydantic models
