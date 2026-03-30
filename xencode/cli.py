@@ -8,6 +8,7 @@ and all Phase 2 systems through a unified command interface.
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -411,8 +412,14 @@ def info(feature_name):
         commands = feature.get_cli_commands()
         if commands:
             console.print("\n[cyan]Available Commands:[/cyan]")
-            for cmd_name, cmd_help in commands.items():
-                console.print(f"  • [yellow]{cmd_name}[/yellow]: {cmd_help}")
+            if isinstance(commands, list):
+                for command in commands:
+                    command_name = getattr(command, 'name', str(command))
+                    command_help = getattr(command, 'help', '') or 'Feature command group'
+                    console.print(f"  • [yellow]{command_name}[/yellow]: {command_help}")
+            elif isinstance(commands, dict):
+                for cmd_name, cmd_help in commands.items():
+                    console.print(f"  • [yellow]{cmd_name}[/yellow]: {cmd_help}")
 
 
 # Feature-specific command registration system
@@ -430,22 +437,35 @@ def register_feature_commands():
     """
     try:
         feature_manager = FeatureManager()
-        enabled_features = feature_manager.get_enabled_features()
-        
-        for feature_name, feature in enabled_features.items():
-            if hasattr(feature, 'get_cli_commands'):
-                try:
-                    commands = feature.get_cli_commands()
-                    if commands and isinstance(commands, list):
-                        for command in commands:
-                            if hasattr(command, 'name'):
-                                # Register the command with the main CLI
-                                cli.add_command(command)
-                except Exception as e:
-                    # Silently skip features that fail to register commands
-                    if feature_manager.config_path and hasattr(feature_manager, 'config_path'):
-                        pass  # Could log this in verbose mode
-    except Exception as e:
+        available_features = feature_manager.get_available_features()
+        registration_errors = []
+
+        for feature_key in available_features:
+            try:
+                feature = feature_manager.get_feature(feature_key) or feature_manager.load_feature(feature_key)
+                if not feature or not hasattr(feature, 'get_cli_commands'):
+                    continue
+
+                commands = feature.get_cli_commands()
+                if not commands or not isinstance(commands, list):
+                    continue
+
+                for command in commands:
+                    command_name = getattr(command, 'name', None)
+                    if not command_name:
+                        continue
+                    if command_name in cli.commands:
+                        continue
+                    cli.add_command(command)
+            except Exception as feature_error:
+                registration_errors.append((feature_key, str(feature_error)))
+
+        if registration_errors and ("XENCODE_DEBUG_FEATURE_REGISTRATION" in os.environ):
+            for feature_key, error_message in registration_errors:
+                console.print(
+                    f"[yellow]⚠ Feature command registration failed for {feature_key}: {error_message}[/yellow]"
+                )
+    except Exception:
         # Don't fail CLI startup if feature registration fails
         pass
 

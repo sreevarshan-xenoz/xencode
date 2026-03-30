@@ -370,8 +370,8 @@ def add(a, b):
         commands = feature.get_cli_commands()
         
         assert isinstance(commands, list)
-        # CLI commands are defined in cli.py, so this returns empty list
-        assert len(commands) == 0
+        assert len(commands) == 1
+        assert commands[0].name == 'review'
     
     def test_get_tui_components(self, feature_config):
         """Test getting TUI components"""
@@ -387,8 +387,11 @@ def add(a, b):
         endpoints = feature.get_api_endpoints()
         
         assert isinstance(endpoints, list)
-        # API endpoints not implemented yet
-        assert len(endpoints) == 0
+        assert len(endpoints) >= 3
+        paths = [endpoint['path'] for endpoint in endpoints]
+        assert '/api/review/pr' in paths
+        assert '/api/review/file' in paths
+        assert '/api/review/directory' in paths
 
 
 class TestCodeReviewConfig:

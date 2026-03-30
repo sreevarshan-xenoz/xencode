@@ -1197,5 +1197,25 @@ class SecurityAuditor(FeatureBase):
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for security auditor"""
-        # API endpoints would be implemented here
-        return []
+        return [
+            {
+                'path': '/api/security/scan',
+                'method': 'POST',
+                'handler': self.scan,
+            },
+            {
+                'path': '/api/security/analyze',
+                'method': 'POST',
+                'handler': self.analyze,
+            },
+            {
+                'path': '/api/security/report',
+                'method': 'POST',
+                'handler': self.report,
+            },
+            {
+                'path': '/api/security/fix-suggestions',
+                'method': 'POST',
+                'handler': self.fix_suggestions,
+            },
+        ]

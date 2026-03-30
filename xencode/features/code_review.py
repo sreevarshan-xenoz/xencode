@@ -306,10 +306,44 @@ class CodeReviewFeature(FeatureBase):
     
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for this feature"""
-        from .core.cli import FeatureCommandGroup
-        
-        # This will be implemented in task 2.1.8
-        return []
+        import click
+
+        @click.group(name='review')
+        def review_group():
+            """AI-powered code review commands"""
+            pass
+
+        @review_group.command(name='file')
+        @click.argument('file_path', type=click.Path(exists=True))
+        @click.option('--language', default=None, help='Optional language override')
+        def review_file(file_path: str, language: Optional[str]):
+            """Analyze a single file."""
+            result = asyncio.run(self.analyze_file(file_path, language))
+            click.echo(f"Analyzed: {result['file']}")
+            click.echo(f"Language: {result['language']}")
+            click.echo(f"Issues: {len(result.get('issues', []))}")
+
+        @review_group.command(name='pr')
+        @click.argument('pr_url')
+        @click.option('--platform', default='github', type=click.Choice(['github', 'gitlab', 'bitbucket']))
+        def review_pr(pr_url: str, platform: str):
+            """Analyze a pull request URL."""
+            result = asyncio.run(self.analyze_pr(pr_url, platform))
+            summary = result.get('summary', {})
+            click.echo(f"Files analyzed: {summary.get('files_analyzed', 0)}")
+            click.echo(f"Total issues: {summary.get('total_issues', 0)}")
+            click.echo(f"Quality score: {summary.get('quality_score', 0)}")
+
+        @review_group.command(name='directory')
+        @click.argument('directory', type=click.Path(exists=True, file_okay=False))
+        def review_directory(directory: str):
+            """Analyze a directory recursively."""
+            result = asyncio.run(self.analyze_directory(directory))
+            click.echo(f"Directory: {result['directory']}")
+            click.echo(f"Files analyzed: {result['files_analyzed']}")
+            click.echo(f"Issues: {len(result.get('issues', []))}")
+
+        return [review_group]
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for this feature"""
@@ -339,8 +373,23 @@ class CodeReviewFeature(FeatureBase):
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for this feature"""
-        # This will be implemented in task 1.4.1
-        return []
+        return [
+            {
+                'path': '/api/review/pr',
+                'method': 'POST',
+                'handler': self.analyze_pr
+            },
+            {
+                'path': '/api/review/file',
+                'method': 'POST',
+                'handler': self.analyze_file
+            },
+            {
+                'path': '/api/review/directory',
+                'method': 'POST',
+                'handler': self.analyze_directory
+            }
+        ]
 
 
 class GitHubPRAnalyzer:

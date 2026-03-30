@@ -170,11 +170,28 @@ class ProjectAnalyzerFeature(FeatureBase):
     
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for Project Analyzer"""
-        return []
+        import click
+
+        @click.group(name='analyzer')
+        def analyzer_group():
+            """Project analyzer commands"""
+            pass
+
+        @analyzer_group.command(name='analyze')
+        @click.argument('project_path', type=click.Path(exists=True, file_okay=False))
+        def analyze_cmd(project_path: str):
+            result = asyncio.run(self.analyze_project(project_path))
+            summary = result.get('summary', {})
+            click.echo(f"Project: {result.get('project_path')}")
+            click.echo(f"Files: {summary.get('total_files', 0)}")
+            click.echo(f"Health score: {summary.get('health_score', 0)}")
+
+        return [analyzer_group]
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for Project Analyzer"""
-        return []
+        from xencode.tui.features.project_analyzer_panel import ProjectAnalyzerPanel
+        return [ProjectAnalyzerPanel]
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for Project Analyzer"""
