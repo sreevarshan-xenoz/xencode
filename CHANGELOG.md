@@ -36,6 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unsafe deserialization checks
 - Command injection vulnerability scanning
 
+## [2.1.0] - 2026-03-30
+
+### Added
+- Dynamic feature API route mounting with auth protection for runtime feature endpoints
+- Missing feature hook implementations for CLI, TUI, and API integration across core feature modules
+- API auth regression tests for protected routes and dynamically mounted feature routes
+- Integration smoke tests for health and info endpoints
+- Release and deployment validation scripts for version consistency and deployment secrets
+
+### Changed
+- Hardened collaborative CLI async execution and TUI panel update safety in unmounted contexts
+- Enforced JWT auth on code analysis and document routers
+- Improved CI/CD workflows with marker-matrix test jobs, collect-only precheck, and deploy secret preflight
+- Updated Kubernetes secret handling to use templated secrets manifest
+
 ## [3.0.0] - 2024-10-15
 
 ### Added

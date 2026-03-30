@@ -20,10 +20,14 @@ addopts = [
     "-ra",
     "--asyncio-mode=auto",
 ]
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "security: marks tests as security tests",
+    "e2e: marks tests as end-to-end tests",
+    "perf: marks tests as performance tests",
     "asyncio: marks tests as async tests",
 ]
 
