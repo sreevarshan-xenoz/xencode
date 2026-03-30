@@ -20,6 +20,7 @@ from xencode.api.auth import (
 )
 
 router = APIRouter()
+_feature_manager = None
 
 
 # Pydantic models for API
@@ -89,9 +90,17 @@ async def verify_token(payload: Dict[str, Any] = Depends(verify_jwt_token)) -> D
 # Dependency to get feature manager
 async def get_feature_manager():
     """Get the feature manager instance"""
+    global _feature_manager
     try:
         from xencode.features.manager import FeatureManager
-        return FeatureManager()
+        if _feature_manager is None:
+            _feature_manager = FeatureManager()
+        for feature_name in _feature_manager.get_available_features():
+            try:
+                _feature_manager.load_feature(feature_name)
+            except Exception:
+                continue
+        return _feature_manager
     except ImportError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -170,7 +179,10 @@ async def get_feature(
         api_endpoints = []
         try:
             endpoints = feature.get_api_endpoints()
-            api_endpoints = [str(ep) for ep in endpoints] if endpoints else []
+            api_endpoints = [
+                f"{endpoint.get('method', 'GET')} {endpoint.get('path', '')}"
+                for endpoint in endpoints
+            ] if endpoints else []
         except Exception:
                 pass  # Silently ignore
 
@@ -403,17 +415,14 @@ async def start_collaboration(
         user_id = user.get('user_id')
         username = user.get('username')
 
-        # Import collaboration manager
-        from xencode.collaboration.manager import CollaborationManager
-        
-        collab_manager = CollaborationManager()
-        
-        # Start collaboration session
-        session = await collab_manager.start_session(
-            owner_id=user_id,
-            owner_username=username,
-            room_id=room_id
-        )
+        if hasattr(feature, 'start'):
+            start_result = feature.start(
+                name=room_id,
+                owner_id=user_id,
+                username=username,
+            )
+            if hasattr(start_result, '__await__'):
+                await start_result
 
         return FeatureOperationResponse(
             success=True,
