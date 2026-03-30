@@ -11,85 +11,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test:
+  collect-only:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.9, 3.10, 3.11]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-asyncio
-
-    - name: Run linting
-      run: |
-        pip install flake8 black isort
-        flake8 xencode tests --max-line-length=100
-        black --check xencode tests
-        isort --check-only xencode tests
-
-    - name: Run security checks
-      run: |
-        pip install bandit safety
-        bandit -r xencode
-        safety check
-
-    - name: Run tests
-      run: |
-        pytest tests/ -v --cov=xencode --cov-report=xml --cov-report=html
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-
-  integration-tests:
-    runs-on: ubuntu-latest
-    needs: test
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD || 'postgres' }}
-          POSTGRES_DB: xencode_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
 
     steps:
     - uses: actions/checkout@v4
@@ -99,29 +22,110 @@ jobs:
       with:
         python-version: 3.11
 
-    - name: Install dependencies
+    - name: Install test dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
 
-    - name: Run integration tests
-      env:
-        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/xencode_test
-        REDIS_URL: redis://localhost:6379/0
+    - name: Collect tests
       run: |
-        pytest tests/test_integration_*.py -v
+        python -m pytest tests --collect-only -q -p no:cacheprovider
 
-    - name: Run performance tests
-      run: |
-        pytest tests/test_performance_*.py -v
+  quality:
+    runs-on: ubuntu-latest
+    needs: collect-only
 
-    - name: Run security tests
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install quality dependencies
       run: |
-        pytest tests/test_security_*.py -v
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit safety
+        pip install flake8 black isort
+
+    - name: Validate version consistency
+      run: |
+        python scripts/check_version_consistency.py
+
+    - name: Run linting
+      run: |
+        flake8 xencode tests --max-line-length=100
+        black --check xencode tests
+        isort --check-only xencode tests
+
+    - name: Run security checks
+      run: |
+        bandit -r xencode
+        safety check
+
+  marker-tests:
+    runs-on: ubuntu-latest
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.10, 3.11]
+        marker: [unit, integration, e2e, security, perf]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install test dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+
+    - name: Collect marker tests
+      id: collect-marker
+      shell: bash
+      run: |
+        set +e
+        python -m pytest tests -m "${{ matrix.marker }}" --collect-only -q -p no:cacheprovider
+        status=$?
+        set -e
+
+        if [ "$status" -eq 5 ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "No tests found for marker '${{ matrix.marker }}'. Skipping execution."
+          exit 0
+        fi
+
+        if [ "$status" -ne 0 ]; then
+          echo "Marker collection failed for '${{ matrix.marker }}'"
+          exit "$status"
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Run marker tests
+      if: steps.collect-marker.outputs.skip == 'false'
+      run: |
+        python -m pytest tests -m "${{ matrix.marker }}" -v --cov=xencode --cov-report=xml -p no:cacheprovider
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: ${{ matrix.marker }}
+        name: codecov-umbrella
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: [test, integration-tests]
+    needs: marker-tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
@@ -172,12 +176,33 @@ jobs:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
 
+    - name: Validate deployment secrets
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+        REDIS_URL: ${{ secrets.REDIS_URL_STAGING }}
+        JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_STAGING }}
+        POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_STAGING }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_STAGING }}
+      run: |
+        python scripts/validate_deploy_secrets.py --environment staging
+
+    - name: Render Kubernetes secrets
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+        REDIS_URL: ${{ secrets.REDIS_URL_STAGING }}
+        JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_STAGING }}
+        POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_STAGING }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_STAGING }}
+      run: |
+        sudo apt-get update && sudo apt-get install -y gettext-base
+        envsubst < k8s/secrets.template.yaml > k8s/secrets.generated.yaml
+
     - name: Deploy to staging
       run: |
-        kubectl apply -f k8s/namespace.yaml
-        kubectl apply -f k8s/secrets.yaml
+        kubectl create namespace xencode --dry-run=client -o yaml | kubectl apply -f -
+        kubectl apply -f k8s/secrets.generated.yaml
         kubectl apply -f k8s/postgres.yaml
-        kubectl apply -f k8s/redis.yaml
+        kubectl apply -f k8s/deployment.yaml
         kubectl set image deployment/xencode-app xencode-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:develop -n xencode
         kubectl rollout status deployment/xencode-app -n xencode
 
@@ -202,12 +227,33 @@ jobs:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
 
+    - name: Validate deployment secrets
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+        REDIS_URL: ${{ secrets.REDIS_URL_PRODUCTION }}
+        JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_PRODUCTION }}
+        POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_PRODUCTION }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_PRODUCTION }}
+      run: |
+        python scripts/validate_deploy_secrets.py --environment production
+
+    - name: Render Kubernetes secrets
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+        REDIS_URL: ${{ secrets.REDIS_URL_PRODUCTION }}
+        JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY_PRODUCTION }}
+        POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_PRODUCTION }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_PRODUCTION }}
+      run: |
+        sudo apt-get update && sudo apt-get install -y gettext-base
+        envsubst < k8s/secrets.template.yaml > k8s/secrets.generated.yaml
+
     - name: Deploy to production
       run: |
-        kubectl apply -f k8s/namespace.yaml
-        kubectl apply -f k8s/secrets.yaml
+        kubectl create namespace xencode --dry-run=client -o yaml | kubectl apply -f -
+        kubectl apply -f k8s/secrets.generated.yaml
         kubectl apply -f k8s/postgres.yaml
-        kubectl apply -f k8s/redis.yaml
+        kubectl apply -f k8s/deployment.yaml
         kubectl set image deployment/xencode-app xencode-app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest -n xencode
         kubectl rollout status deployment/xencode-app -n xencode
 
