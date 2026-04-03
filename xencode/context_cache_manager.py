@@ -220,8 +220,9 @@ class ContextCacheManager:
             if fd is not None:
                 try:
                     os.close(fd)
-                except:
-                    pass
+                except Exception:
+                        pass  # Silently ignore
+
             return None
 
     def _release_file_lock(self, fd: int):
@@ -232,8 +233,9 @@ class ContextCacheManager:
                 try:
                     os.lseek(fd, 0, os.SEEK_SET)
                     msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-                except:
-                    pass
+                except Exception:
+                        pass  # Silently ignore
+
             else:
                 # Unix file unlocking
                 fcntl.flock(fd, fcntl.LOCK_UN)

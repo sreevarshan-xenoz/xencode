@@ -89,14 +89,3 @@ spec:
     port: 5432
     targetPort: 5432
   type: ClusterIP
-
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: postgres-secret
-  namespace: xencode
-type: Opaque
-stringData:
-  username: ${POSTGRES_USERNAME}
-  password: ${POSTGRES_PASSWORD}

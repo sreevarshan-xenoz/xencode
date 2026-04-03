@@ -59,7 +59,9 @@ class TerminalCognitionLayer:
     
     def __init__(self, model_manager=None):
         self.model_manager = model_manager or ModelManager()
-        self.shell_genie = ShellGenie(model_name=self.model_manager.current_model)
+        # Use default model if current_model is None
+        model_name = getattr(self.model_manager, 'current_model', None) or "llama3.1:8b"
+        self.shell_genie = ShellGenie(model_name=model_name, base_url="http://localhost:11434")
         self.console = Console()
         self.state = self._get_current_state()
         self.command_history = []
@@ -364,7 +366,7 @@ class TerminalCognitionLayer:
                 "last_commit": last_commit,
                 "repo_path": os.path.dirname(result.stdout.strip())
             }
-        except:
+        except Exception:
             return {"is_git_repo": False}
     
     def suggest_command(self, natural_language: str) -> Dict[str, str]:

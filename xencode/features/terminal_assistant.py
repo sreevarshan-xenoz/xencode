@@ -363,13 +363,54 @@ class TerminalAssistantFeature(FeatureBase):
     
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for Terminal Assistant"""
-        # Will be implemented with actual CLI framework
-        return []
+        import click
+
+        @click.group(name='terminal-assistant')
+        def ta_group():
+            """Terminal assistant commands"""
+            pass
+
+        @ta_group.command(name='suggest')
+        @click.option('--context', default=None, help='Optional context string')
+        @click.option('--partial', default=None, help='Partial command input')
+        def suggest_cmd(context: Optional[str], partial: Optional[str]):
+            suggestions = asyncio.run(self.suggest_commands(context=context, partial=partial))
+            for suggestion in suggestions:
+                click.echo(f"- {suggestion.get('command', '')}")
+
+        @ta_group.command(name='explain')
+        @click.argument('command')
+        def explain_cmd(command: str):
+            explanation = asyncio.run(self.explain_command(command))
+            click.echo(explanation.get('description', ''))
+
+        @ta_group.command(name='fix')
+        @click.argument('command')
+        @click.argument('error')
+        def fix_cmd(command: str, error: str):
+            fixes = asyncio.run(self.fix_error(command=command, error=error))
+            for fix in fixes:
+                click.echo(f"- {fix.get('fix', '')}: {fix.get('explanation', '')}")
+
+        @ta_group.command(name='history')
+        @click.argument('pattern')
+        def history_cmd(pattern: str):
+            matches = asyncio.run(self.search_history(pattern))
+            for match in matches:
+                click.echo(f"- {match.get('command', '')}")
+
+        @ta_group.command(name='stats')
+        @click.option('--command', 'command_name', default=None, help='Specific command name')
+        def stats_cmd(command_name: Optional[str]):
+            stats = asyncio.run(self.get_statistics(command=command_name))
+            click.echo(json.dumps(stats, indent=2))
+
+        return [ta_group]
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for Terminal Assistant"""
-        # Will be implemented with actual TUI framework
-        return []
+        from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
+        return [TerminalAssistantPanel]
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for Terminal Assistant"""

@@ -302,7 +302,7 @@ class HybridModelConfigManager:
                 # Evaluate the condition
                 if eval(rule.condition, {"__builtins__": {}}, eval_context):
                     matching_rules.append(rule)
-            except:
+            except Exception:
                 # If condition evaluation fails, skip this rule
                 continue
         

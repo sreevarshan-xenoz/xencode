@@ -12,7 +12,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form, Query
 from pydantic import BaseModel, Field
 
-router = APIRouter()
+from xencode.api.auth import verify_jwt_token
+
+router = APIRouter(dependencies=[Depends(verify_jwt_token)])
 
 
 # Pydantic models

@@ -47,7 +47,18 @@ class DemoFeature(FeatureBase):
     
     def get_cli_commands(self):
         """Get CLI commands"""
-        return []
+        import click
+
+        @click.group(name="demo")
+        def demo_group():
+            """Demo feature commands."""
+            pass
+
+        @demo_group.command(name="ping")
+        def ping_cmd():
+            click.echo("demo_feature: pong")
+
+        return [demo_group]
     
     def get_tui_components(self):
         """Get TUI components"""

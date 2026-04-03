@@ -10,11 +10,17 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Body, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
+from xencode.api.auth import (
+    verify_jwt_token,
+    get_current_user,
+    verify_collaboration_auth,
+    verify_token_optional
+)
+
 router = APIRouter()
-security = HTTPBearer()
+_feature_manager = None
 
 
 # Pydantic models for API
@@ -76,28 +82,25 @@ class FeatureAnalyticsModel(BaseModel):
 
 
 # Dependency for authentication
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+async def verify_token(payload: Dict[str, Any] = Depends(verify_jwt_token)) -> Dict[str, Any]:
     """Verify JWT token for authenticated endpoints"""
-    token = credentials.credentials
-    
-    # TODO: Implement actual JWT verification
-    # For now, accept any token for collaborative features
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return token
+    return payload
 
 
 # Dependency to get feature manager
 async def get_feature_manager():
     """Get the feature manager instance"""
+    global _feature_manager
     try:
         from xencode.features.manager import FeatureManager
-        return FeatureManager()
+        if _feature_manager is None:
+            _feature_manager = FeatureManager()
+        for feature_name in _feature_manager.get_available_features():
+            try:
+                _feature_manager.load_feature(feature_name)
+            except Exception:
+                continue
+        return _feature_manager
     except ImportError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -170,17 +173,19 @@ async def get_feature(
         try:
             commands = feature.get_cli_commands()
             cli_commands = [str(cmd) for cmd in commands] if commands else []
-        except:
-            pass
-        
-        # Get API endpoints (simplified)
+        except Exception:
+                pass  # Silently ignore
+# Get API endpoints (simplified)
         api_endpoints = []
         try:
             endpoints = feature.get_api_endpoints()
-            api_endpoints = [str(ep) for ep in endpoints] if endpoints else []
-        except:
-            pass
-        
+            api_endpoints = [
+                f"{endpoint.get('method', 'GET')} {endpoint.get('path', '')}"
+                for endpoint in endpoints
+            ] if endpoints else []
+        except Exception:
+                pass  # Silently ignore
+
         return FeatureDetailResponse(
             name=feature.name,
             description=feature.description,
@@ -380,34 +385,45 @@ async def get_feature_status(
 async def start_collaboration(
     feature_name: str,
     room_id: str = Body(..., embed=True),
-    token: str = Depends(verify_token),
+    user: Dict[str, Any] = Depends(verify_collaboration_auth),
     manager = Depends(get_feature_manager)
 ):
     """
     Start a collaborative session for a feature (requires authentication)
-    
+
     - **feature_name**: Name of the feature
     - **room_id**: Collaboration room identifier
     - **Authorization**: Bearer token required
     """
     try:
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found"
             )
-        
+
         # Check if feature supports collaboration
         if feature_name != 'collaborative_coding':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Feature '{feature_name}' does not support collaboration"
             )
-        
-        # TODO: Implement actual collaboration logic
-        
+
+        # Get user info from JWT payload
+        user_id = user.get('user_id')
+        username = user.get('username')
+
+        if hasattr(feature, 'start'):
+            start_result = feature.start(
+                name=room_id,
+                owner_id=user_id,
+                username=username,
+            )
+            if hasattr(start_result, '__await__'):
+                await start_result
+
         return FeatureOperationResponse(
             success=True,
             message=f"Collaboration session started for '{feature_name}' in room '{room_id}'",
@@ -424,35 +440,37 @@ async def start_collaboration(
         )
 
 
-@router.get("/{feature_name}/analytics", response_model=FeatureAnalyticsModel)
+@router.get("/{feature_name}/analytics", response_model=FeatureAnalyticsModel, dependencies=[Depends(verify_jwt_token)])
 async def get_feature_analytics(
     feature_name: str,
     manager = Depends(get_feature_manager)
 ):
     """
-    Get analytics data for a feature
-    
+    Get analytics data for a feature (requires authentication)
+
     - **feature_name**: Name of the feature
     """
     try:
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found"
             )
+
+        # Get analytics from feature if available
+        # For now, return basic metrics from feature state
+        feature_status = feature.get_status()
         
-        # TODO: Implement actual analytics retrieval
-        # For now, return mock data
         return FeatureAnalyticsModel(
             feature_name=feature_name,
-            usage_count=0,
-            last_used=None,
-            error_count=0,
-            average_response_time_ms=0.0
+            usage_count=getattr(feature, 'usage_count', 0),
+            last_used=getattr(feature, 'last_used', None),
+            error_count=getattr(feature, 'error_count', 0),
+            average_response_time_ms=getattr(feature, 'avg_response_time', 0.0)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

@@ -15,6 +15,7 @@ from textual.widgets import Static, Label, Button, Input, ListView, ListItem, Te
 from textual.reactive import reactive
 from textual.message import Message
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from rich.text import Text
 from rich.panel import Panel
 
@@ -94,7 +95,10 @@ class PresenceIndicator(Container):
     
     def _refresh_user_list(self) -> None:
         """Refresh the user list display"""
-        user_list = self.query_one("#user-list", ListView)
+        try:
+            user_list = self.query_one("#user-list", ListView)
+        except NoMatches:
+            return
         user_list.clear()
         
         for user_id, user_data in self.users.items():
@@ -166,7 +170,10 @@ class CursorTracker(Container):
     
     def _refresh_cursors(self) -> None:
         """Refresh cursor display"""
-        container = self.query_one("#cursor-container", ScrollableContainer)
+        try:
+            container = self.query_one("#cursor-container", ScrollableContainer)
+        except NoMatches:
+            return
         container.remove_children()
         
         for user_id, cursor_data in self.cursors.items():
@@ -265,7 +272,10 @@ class ChatInterface(Container):
     
     def _send_message(self) -> None:
         """Send a chat message"""
-        chat_input = self.query_one("#chat-input", Input)
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+        except NoMatches:
+            return
         message_text = chat_input.value.strip()
         
         if message_text:
@@ -289,7 +299,10 @@ class ChatInterface(Container):
     
     def _refresh_messages(self) -> None:
         """Refresh message display"""
-        container = self.query_one("#chat-messages", ScrollableContainer)
+        try:
+            container = self.query_one("#chat-messages", ScrollableContainer)
+        except NoMatches:
+            return
         container.remove_children()
         
         for msg in self.messages:
@@ -391,7 +404,10 @@ class ConflictResolutionPanel(Container):
     
     def _refresh_conflicts(self) -> None:
         """Refresh conflict display"""
-        container = self.query_one("#conflict-info", ScrollableContainer)
+        try:
+            container = self.query_one("#conflict-info", ScrollableContainer)
+        except NoMatches:
+            return
         container.remove_children()
         
         for i, conflict in enumerate(self.conflicts, 1):
@@ -459,15 +475,21 @@ class RealTimeEditor(Container):
     def update_content(self, content: str, version: int) -> None:
         """Update editor content from remote"""
         self.is_syncing = True
-        editor = self.query_one("#editor-content", TextArea)
-        editor.text = content
+        try:
+            editor = self.query_one("#editor-content", TextArea)
+            editor.text = content
+        except NoMatches:
+            pass
         self.document_version = version
         self._update_status()
         self.is_syncing = False
     
     def _update_status(self) -> None:
         """Update status bar"""
-        status = self.query_one("#editor-status", Label)
+        try:
+            status = self.query_one("#editor-status", Label)
+        except NoMatches:
+            return
         sync_status = "Syncing..." if self.is_syncing else "Synced"
         status.update(f"Ready | Version: {self.document_version} | {sync_status}")
 

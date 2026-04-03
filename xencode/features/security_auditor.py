@@ -497,7 +497,7 @@ class DependencyAnalyzer:
             elif vulnerable_range.startswith('<='):
                 threshold = vulnerable_range.lstrip('<=')
                 return self._compare_versions(current_version, threshold) <= 0
-        except:
+        except Exception:
             return False
         
         return False
@@ -729,7 +729,7 @@ class SecurityToolIntegration:
             result = subprocess.run(['bandit', '--version'], 
                                   capture_output=True, text=True, timeout=5)
             tools['bandit'] = result.returncode == 0
-        except:
+        except Exception:
             tools['bandit'] = False
         
         # Check for Snyk
@@ -737,7 +737,7 @@ class SecurityToolIntegration:
             result = subprocess.run(['snyk', '--version'], 
                                   capture_output=True, text=True, timeout=5)
             tools['snyk'] = result.returncode == 0
-        except:
+        except Exception:
             tools['snyk'] = False
         
         return tools
@@ -1197,5 +1197,25 @@ class SecurityAuditor(FeatureBase):
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for security auditor"""
-        # API endpoints would be implemented here
-        return []
+        return [
+            {
+                'path': '/api/security/scan',
+                'method': 'POST',
+                'handler': self.scan,
+            },
+            {
+                'path': '/api/security/analyze',
+                'method': 'POST',
+                'handler': self.analyze,
+            },
+            {
+                'path': '/api/security/report',
+                'method': 'POST',
+                'handler': self.report,
+            },
+            {
+                'path': '/api/security/fix-suggestions',
+                'method': 'POST',
+                'handler': self.fix_suggestions,
+            },
+        ]

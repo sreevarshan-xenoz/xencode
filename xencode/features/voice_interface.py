@@ -459,7 +459,7 @@ class VoiceInterfaceFeature(FeatureBase):
                 try:
                     dt = datetime.fromisoformat(cmd['timestamp'])
                     time_str = dt.strftime("%H:%M:%S")
-                except:
+                except Exception:
                     time_str = cmd['timestamp']
                 
                 confidence_str = f"{cmd['confidence']:.0%}"
