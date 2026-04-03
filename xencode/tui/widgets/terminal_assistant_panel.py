@@ -545,7 +545,7 @@ class CommandHistoryBrowser(Container):
                 try:
                     dt = datetime.fromisoformat(timestamp)
                     time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                except:
+                except Exception:
                     time_str = timestamp
                 
                 # Create history item

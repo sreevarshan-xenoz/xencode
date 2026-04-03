@@ -220,7 +220,7 @@ class ContextCacheManager:
             if fd is not None:
                 try:
                     os.close(fd)
-                except:
+                except Exception:
                     pass
             return None
 
@@ -232,7 +232,7 @@ class ContextCacheManager:
                 try:
                     os.lseek(fd, 0, os.SEEK_SET)
                     msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-                except:
+                except Exception:
                     pass
             else:
                 # Unix file unlocking

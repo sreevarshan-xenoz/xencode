@@ -364,7 +364,7 @@ class TerminalCognitionLayer:
                 "last_commit": last_commit,
                 "repo_path": os.path.dirname(result.stdout.strip())
             }
-        except:
+        except Exception:
             return {"is_git_repo": False}
     
     def suggest_command(self, natural_language: str) -> Dict[str, str]:

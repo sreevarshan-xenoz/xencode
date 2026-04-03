@@ -208,7 +208,7 @@ class PerformanceDashboard(Container):
                         gpu = gpus[0]  # Use first GPU
                         gpu_percent = gpu.load * 100
                         gpu_memory_percent = gpu.memoryUtil * 100
-            except:
+            except Exception:
                 pass
             
             # Simulate response time and throughput metrics

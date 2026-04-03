@@ -133,7 +133,7 @@ class AdvancedPluginManager:
                 for installed_plugin in bundle.plugins[:bundle.plugins.index(plugin_id)]:
                     try:
                         await self.plugin_manager.uninstall_plugin(installed_plugin)
-                    except:
+                    except Exception:
                         pass  # Ignore errors during rollback
                 raise e
         

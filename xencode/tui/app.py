@@ -665,7 +665,7 @@ class XencodeApp(App):
                         f"{file_content[:2000]}...\n"  # Limit context
                         f"```"
                     )
-                except:
+                except Exception:
                     pass
             
             # Build enhanced prompt
@@ -822,7 +822,7 @@ class XencodeApp(App):
                         f"{file_content[:2000]}...\n"  # Limit context
                         f"```"
                     )
-                except:
+                except Exception:
                     pass
 
             # Build enhanced prompt

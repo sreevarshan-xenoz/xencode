@@ -447,10 +447,23 @@ class AuditLogEntry:
 
 
 # Utility functions
-def create_default_admin_user(username: str = "admin", 
-                             password: str = "admin123",
+def create_default_admin_user(username: str = "admin",
+                             password: str = None,
                              email: str = "admin@xencode.local") -> User:
-    """Create default admin user"""
+    """Create a default admin user.
+
+    WARNING: In production, password MUST be generated securely or set by admin.
+    A random password is generated if none is provided.
+    """
+    import secrets
+    if password is None:
+        password = secrets.token_urlsafe(16)
+        import warnings
+        warnings.warn(
+            f"Auto-generated admin password: {password}. "
+            "Change it immediately after first login.",
+            UserWarning
+        )
     user = User(
         username=username,
         email=email,

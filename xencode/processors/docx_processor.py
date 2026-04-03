@@ -129,7 +129,7 @@ class DOCXProcessor(ProcessorInterface):
             try:
                 # This is a basic check - more sophisticated detection would be needed
                 metadata.has_macros = False  # python-docx doesn't easily expose VBA info
-            except:
+            except Exception:
                 metadata.has_macros = False
             
             # Count paragraphs and estimate word count
