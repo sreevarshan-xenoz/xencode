@@ -1,9 +1,32 @@
 from typing import List, Optional
 
-from langchain_ollama import ChatOllama
-from langchain.tools import BaseTool
-from langchain_core.tools import BaseTool as BaseToolNew
-from langchain_core.prompts import ChatPromptTemplate
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    ChatOllama = None
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    ChatOpenAI = None
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:
+    ChatAnthropic = None
+try:
+    from langchain.tools import BaseTool
+except ImportError:
+    try:
+        from langchain_core.tools import BaseTool
+    except ImportError:
+        BaseTool = object
+try:
+    from langchain_core.tools import BaseTool as BaseToolNew
+except ImportError:
+    BaseToolNew = BaseTool
+try:
+    from langchain_core.prompts import ChatPromptTemplate
+except ImportError:
+    ChatPromptTemplate = None
 
 from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
 
@@ -20,14 +43,16 @@ except ImportError:
 class LangChainManager:
     """Manages the LangChain agent and tools."""
 
-    def __init__(self, model_name: str = "qwen3:4b", base_url: str = "http://localhost:11434", 
-                 use_memory: bool = True, db_path: str = "agentic_memory.db", 
-                 smart_model_selection: bool = False, use_rag: bool = False):
+    def __init__(self, model_name: str = "qwen3:4b", base_url: str = "http://localhost:11434",
+                 use_memory: bool = True, db_path: str = "agentic_memory.db",
+                 smart_model_selection: bool = False, use_rag: bool = False,
+                 provider: Optional[str] = None):
         self.model_name = model_name
         self.base_url = base_url
         self.smart_model_selection = smart_model_selection
         self.use_rag = use_rag
-        
+        self.provider = provider or self._detect_provider_from_model(model_name)
+
         # Initialize RAG if enabled
         self.vector_store = None
         if use_rag:
@@ -38,16 +63,56 @@ class LangChainManager:
                 print("Warning: RAG dependencies not found.")
             except Exception as e:
                 print(f"Warning: RAG initialization failed: {e}")
-        
+
         # Initialize model selector if enabled
         if smart_model_selection:
-            from ..multi_model_system import MultiModelManager
-            self.model_selector = MultiModelManager()
-        
-        self.llm = ChatOllama(model=model_name, base_url=base_url, temperature=0)
+            try:
+                from ..multi_model_system import MultiModelManager
+                self.model_selector = MultiModelManager()
+            except Exception:
+                self.model_selector = None
+
+        # Initialize LLM based on provider
+        self.llm = self._create_llm(model_name, base_url)
         self.tools = self._setup_tools()
         self.agent_executor = self._setup_agent()
-        
+
+    @staticmethod
+    def _detect_provider_from_model(model_name: str) -> str:
+        """Detect provider from model name prefix."""
+        known = {'openai', 'anthropic', 'google_gemini', 'openrouter', 'qwen', 'huggingface'}
+        if ':' in model_name:
+            prefix = model_name.split(':', 1)[0].lower()
+            if prefix in known:
+                return prefix
+        return 'ollama'
+
+    def _create_llm(self, model_name: str, base_url: str):
+        """Create the appropriate LLM based on provider."""
+        provider = self.provider
+
+        if provider == 'openai' and ChatOpenAI is not None:
+            clean = model_name.split(':', 1)[1] if ':' in model_name else model_name
+            return ChatOpenAI(model=clean, temperature=0)
+        elif provider == 'anthropic' and ChatAnthropic is not None:
+            clean = model_name.split(':', 1)[1] if ':' in model_name else model_name
+            return ChatAnthropic(model=clean, temperature=0)
+        elif provider == 'ollama':
+            if ChatOllama is None:
+                raise ImportError(
+                    "langchain-ollama is required for Ollama models. "
+                    "Install with: pip install langchain-ollama"
+                )
+            return ChatOllama(model=model_name, base_url=base_url, temperature=0)
+        else:
+            # Fallback: try ollama, then raise
+            if ChatOllama is not None:
+                return ChatOllama(model=model_name, base_url=base_url, temperature=0)
+            raise ImportError(
+                f"No langchain provider available for '{provider}'. "
+                "Install langchain-ollama, langchain-openai, or langchain-anthropic."
+            )
+
         # Memory system
         self.use_memory = use_memory
         if use_memory:

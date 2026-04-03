@@ -2,8 +2,19 @@ import os
 import subprocess
 from typing import Optional, Type
 
-from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
+try:
+    from langchain.tools import BaseTool
+except ImportError:
+    try:
+        from langchain_core.tools import BaseTool
+    except ImportError:
+        BaseTool = object
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    BaseModel = object
+    Field = lambda default=None, **kwargs: default
 
 
 class ReadFileSchema(BaseModel):

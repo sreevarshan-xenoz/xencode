@@ -7,7 +7,10 @@ import json
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, AsyncIterator
 from dataclasses import dataclass
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import time
 
 
