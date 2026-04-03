@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
 Settings Panel Widget for Xencode TUI
+
+Includes provider connectivity test buttons for Qwen, OpenRouter, and Ollama.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from rich.text import Text
 from textual.containers import Container, Vertical, Horizontal
 from textual.message import Message
-from textual.widgets import Button, Checkbox, Label, RadioSet, RadioButton
+from textual.widgets import Button, Checkbox, Label, RadioSet, RadioButton, Input
 
 
 class SettingsPanel(Container):
@@ -41,6 +43,39 @@ class SettingsPanel(Container):
         margin-top: 1;
         height: auto;
     }
+    
+    #provider-diagnostics {
+        margin-top: 1;
+        height: auto;
+    }
+    
+    .provider-test-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+    
+    .provider-test-label {
+        width: 1fr;
+        content-align: left middle;
+    }
+    
+    .provider-test-status {
+        width: auto;
+        content-align: right middle;
+        text-style: italic;
+    }
+    
+    .status-ok {
+        color: $success;
+    }
+    
+    .status-error {
+        color: $error;
+    }
+    
+    .status-warning {
+        color: $warning;
+    }
     """
 
     class SaveRequested(Message):
@@ -62,6 +97,38 @@ class SettingsPanel(Container):
         def __init__(self, theme: str) -> None:
             super().__init__()
             self.theme = theme
+
+    class OpenRouterSaveRequested(Message):
+        """OpenRouter API key save requested."""
+
+        def __init__(self, api_key: str) -> None:
+            super().__init__()
+            self.api_key = api_key
+
+    class TestProviderRequested(Message):
+        """Provider connectivity test requested."""
+
+        def __init__(self, provider: str) -> None:
+            super().__init__()
+            self.provider = provider
+
+    class ProviderTestResult(Message):
+        """Provider test result received."""
+
+        def __init__(
+            self,
+            provider: str,
+            status: str,
+            latency_ms: Optional[float] = None,
+            error_message: Optional[str] = None,
+            remediation: Optional[str] = None,
+        ) -> None:
+            super().__init__()
+            self.provider = provider
+            self.status = status
+            self.latency_ms = latency_ms
+            self.error_message = error_message
+            self.remediation = remediation
 
     THEMES = [
         ("midnight", "Midnight"),
@@ -144,6 +211,31 @@ class SettingsPanel(Container):
         with Horizontal(id="settings-actions"):
             yield Button("Save", id="btn-save", variant="primary")
 
+        with Vertical(id="provider-diagnostics"):
+            yield Label("🔌 Provider Diagnostics", classes="section-title")
+            yield Label("Test connectivity to AI providers", classes="dim")
+            
+            # Qwen test row
+            with Horizontal(classes="provider-test-row", id="qwen-test-row"):
+                yield Label("Qwen", classes="provider-test-label")
+                yield Button("Test", id="btn-test-qwen", variant="default", classes="provider-test-btn")
+                self.lbl_qwen_test_status = Label("", id="qwen-test-status", classes="provider-test-status")
+                yield self.lbl_qwen_test_status
+            
+            # OpenRouter test row
+            with Horizontal(classes="provider-test-row", id="openrouter-test-row"):
+                yield Label("OpenRouter", classes="provider-test-label")
+                yield Button("Test", id="btn-test-openrouter", variant="default", classes="provider-test-btn")
+                self.lbl_openrouter_test_status = Label("", id="openrouter-test-status", classes="provider-test-status")
+                yield self.lbl_openrouter_test_status
+            
+            # Ollama test row
+            with Horizontal(classes="provider-test-row", id="ollama-test-row"):
+                yield Label("Ollama (local)", classes="provider-test-label")
+                yield Button("Test", id="btn-test-ollama", variant="default", classes="provider-test-btn")
+                self.lbl_ollama_test_status = Label("", id="ollama-test-status", classes="provider-test-status")
+                yield self.lbl_ollama_test_status
+
         with Vertical(id="settings-auth"):
             yield Label("Qwen account", classes="section-title")
             self.lbl_qwen_auth_status = Label("Status: Not authenticated", id="qwen-auth-status", classes="dim")
@@ -151,6 +243,18 @@ class SettingsPanel(Container):
             with Horizontal():
                 yield Button("Login", id="btn-login", variant="success")
                 yield Button("Sign Up", id="btn-signup", variant="default")
+
+            yield Label("OpenRouter", classes="section-title")
+            self.lbl_openrouter_status = Label("Status: API key not configured", id="openrouter-status", classes="dim")
+            yield self.lbl_openrouter_status
+            self.input_openrouter_key = Input(
+                placeholder="Enter OpenRouter API key (sk-or-v1-...)",
+                password=True,
+                id="openrouter-key-input",
+            )
+            yield self.input_openrouter_key
+            with Horizontal():
+                yield Button("Save OpenRouter Key", id="btn-openrouter-save", variant="primary")
 
     def set_settings(self, settings: Dict[str, Any]) -> None:
         """Apply settings into form controls."""
@@ -215,6 +319,72 @@ class SettingsPanel(Container):
             self.post_message(self.LoginRequested())
         elif event.button.id == "btn-signup":
             self.post_message(self.SignupRequested())
+        elif event.button.id == "btn-openrouter-save":
+            key = self.input_openrouter_key.value.strip() if hasattr(self, "input_openrouter_key") else ""
+            self.post_message(self.OpenRouterSaveRequested(key))
+        elif event.button.id == "btn-test-qwen":
+            self.post_message(self.TestProviderRequested("qwen"))
+            self._set_test_status("qwen", "testing", "Testing...")
+        elif event.button.id == "btn-test-openrouter":
+            self.post_message(self.TestProviderRequested("openrouter"))
+            self._set_test_status("openrouter", "testing", "Testing...")
+        elif event.button.id == "btn-test-ollama":
+            self.post_message(self.TestProviderRequested("ollama"))
+            self._set_test_status("ollama", "testing", "Testing...")
+    
+    def _set_test_status(
+        self,
+        provider: str,
+        status: str,
+        message: str = "",
+        latency_ms: Optional[float] = None,
+    ) -> None:
+        """Update test status label for a provider"""
+        label = getattr(self, f"lbl_{provider}_test_status", None)
+        if not label:
+            return
+        
+        if status == "testing":
+            label.update(f"⏳ {message}")
+            label.add_class("status-warning")
+            label.remove_class("status-ok")
+            label.remove_class("status-error")
+        elif status == "ok":
+            latency_str = f" ({latency_ms:.0f}ms)" if latency_ms else ""
+            label.update(f"✅ OK{latency_str}")
+            label.add_class("status-ok")
+            label.remove_class("status-error")
+            label.remove_class("status-warning")
+        elif status in ["error", "auth_error"]:
+            label.update(f"❌ {message}")
+            label.add_class("status-error")
+            label.remove_class("status-ok")
+            label.remove_class("status-warning")
+        elif status == "not_configured":
+            label.update(f"⚠️  {message}")
+            label.add_class("status-warning")
+            label.remove_class("status-ok")
+            label.remove_class("status-error")
+    
+    def set_test_result(
+        self,
+        provider: str,
+        status: str,
+        latency_ms: Optional[float] = None,
+        error_message: Optional[str] = None,
+        remediation: Optional[str] = None,
+    ) -> None:
+        """
+        Set test result for a provider
+        
+        Args:
+            provider: Provider name (qwen, openrouter, ollama)
+            status: Status string (ok, error, auth_error, not_configured, connection_error)
+            latency_ms: Optional latency in milliseconds
+            error_message: Optional error message
+            remediation: Optional remediation hint
+        """
+        self._set_test_status(provider, status, error_message or remediation or "", latency_ms)
 
     def set_qwen_auth_status(self, is_authenticated: bool) -> None:
         """Update Qwen auth status text with minimal UI impact."""
@@ -222,4 +392,12 @@ class SettingsPanel(Container):
             return
         self.lbl_qwen_auth_status.update(
             "Status: Authenticated" if is_authenticated else "Status: Not authenticated"
+        )
+
+    def set_openrouter_status(self, has_api_key: bool) -> None:
+        """Update OpenRouter API key status."""
+        if not hasattr(self, "lbl_openrouter_status"):
+            return
+        self.lbl_openrouter_status.update(
+            "Status: API key configured" if has_api_key else "Status: API key not configured"
         )

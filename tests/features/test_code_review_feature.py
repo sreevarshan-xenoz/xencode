@@ -5,6 +5,7 @@ Tests the main CodeReviewFeature class methods and integration points.
 """
 
 import pytest
+import pytest_asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from xencode.features.code_review import CodeReviewFeature, CodeReviewConfig
@@ -426,7 +427,7 @@ class TestCodeReviewConfig:
 class TestCodeReviewFeatureEdgeCases:
     """Tests for edge cases in CodeReviewFeature"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def feature(self):
         """Create feature instance"""
         config = FeatureConfig(
@@ -443,7 +444,7 @@ class TestCodeReviewFeatureEdgeCases:
     async def test_analyze_file_with_unicode(self, feature, tmp_path):
         """Test analyzing file with Unicode content"""
         test_file = tmp_path / "unicode.py"
-        test_file.write_text("# 你好世界\ndef hello():\n    print('Hello 世界')")
+        test_file.write_text("# 你好世界\ndef hello():\n    print('Hello 世界')", encoding='utf-8')
         
         result = await feature.analyze_file(str(test_file))
         
@@ -577,7 +578,7 @@ class TestCodeReviewFeatureEdgeCases:
 class TestCodeReviewFeatureIntegration:
     """Integration tests for CodeReviewFeature with real components"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def feature(self):
         """Create feature instance"""
         config = FeatureConfig(

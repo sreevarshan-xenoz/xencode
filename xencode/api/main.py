@@ -39,6 +39,7 @@ try:
     from .routers.analytics import router as analytics_router
     from .routers.monitoring import router as monitoring_router
     from .routers.plugin import router as plugin_router
+    from .routers.features import router as features_router
     ROUTERS_AVAILABLE = True
 except ImportError:
     ROUTERS_AVAILABLE = False
@@ -366,6 +367,7 @@ if ROUTERS_AVAILABLE:
         app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["Analytics"])
         app.include_router(monitoring_router, prefix="/api/v1/monitoring", tags=["Monitoring"])
         app.include_router(plugin_router, prefix="/api/v1/plugins", tags=["Plugins"])
+        app.include_router(features_router, prefix="/api/v1/features", tags=["Features"])
         logger.info("✅ All API routers included successfully")
     except Exception as e:
         logger.error(f"❌ Failed to include some routers: {e}")

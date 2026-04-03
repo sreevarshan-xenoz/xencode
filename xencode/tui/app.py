@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -13,6 +13,7 @@ from textual.widgets import Header, Footer, Label, Button
 from textual.binding import Binding
 from textual.screen import ModalScreen
 import websockets
+import aiohttp
 
 from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
 from xencode.tui.widgets.editor import CodeEditor
@@ -28,6 +29,14 @@ from xencode.tui.widgets.options_panel import OptionsPanel
 from xencode.tui.widgets.code_review_panel import CodeReviewPanel
 from xencode.tui.widgets.performance_dashboard import PerformanceDashboard
 from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
+
+# Import feature panels
+from xencode.tui.features.project_analyzer_panel import ProjectAnalyzerPanel
+from xencode.tui.features.learning_mode_panel import LearningModePanel
+from xencode.tui.features.multi_language_panel import MultiLanguagePanel
+from xencode.tui.features.custom_models_panel import CustomModelsPanel
+from xencode.tui.features.security_auditor_panel import SecurityAuditorPanel
+from xencode.tui.features.performance_profiler_panel import PerformanceProfilerPanel
 
 from xencode.tui.utils.model_checker import ModelChecker
 
@@ -203,6 +212,54 @@ class XencodeApp(App):
         display: none;
     }
 
+    #project-analyzer-panel-container {
+        height: 50%;
+    }
+
+    #project-analyzer-panel-container.hidden {
+        display: none;
+    }
+
+    #learning-mode-panel-container {
+        height: 50%;
+    }
+
+    #learning-mode-panel-container.hidden {
+        display: none;
+    }
+
+    #multi-language-panel-container {
+        height: 50%;
+    }
+
+    #multi-language-panel-container.hidden {
+        display: none;
+    }
+
+    #custom-models-panel-container {
+        height: 50%;
+    }
+
+    #custom-models-panel-container.hidden {
+        display: none;
+    }
+
+    #security-auditor-panel-container {
+        height: 50%;
+    }
+
+    #security-auditor-panel-container.hidden {
+        display: none;
+    }
+
+    #performance-profiler-panel-container {
+        height: 50%;
+    }
+
+    #performance-profiler-panel-container.hidden {
+        display: none;
+    }
+
     Screen.theme-midnight {
         background: #0f111a;
         color: #e6e6e6;
@@ -280,6 +337,12 @@ class XencodeApp(App):
         Binding("ctrl+r", "toggle_review", "Review"),
         Binding("ctrl+p", "toggle_performance", "Performance"),
         Binding("ctrl+y", "toggle_terminal_assistant", "Term Assist"),
+        Binding("f2", "toggle_project_analyzer", "Project"),
+        Binding("f3", "toggle_learning_mode", "Learning"),
+        Binding("f4", "toggle_multi_language", "Language"),
+        Binding("f5", "toggle_custom_models", "Models"),
+        Binding("f6", "toggle_security_auditor", "Security"),
+        Binding("f7", "toggle_performance_profiler", "Profiler"),
         Binding("ctrl+g", "refresh_git", "Git Refresh"),
         Binding("ctrl+shift+c", "commit_dialog", "Commit"),
         Binding("ctrl+t", "toggle_terminal", "Terminal"),
@@ -337,6 +400,14 @@ class XencodeApp(App):
         self.review_panel: Optional[CodeReviewPanel] = None
         self.performance_panel: Optional[PerformanceDashboard] = None
         self.terminal_assistant_panel: Optional[TerminalAssistantPanel] = None
+        
+        # Feature panels
+        self.project_analyzer_panel: Optional[ProjectAnalyzerPanel] = None
+        self.learning_mode_panel: Optional[LearningModePanel] = None
+        self.multi_language_panel: Optional[MultiLanguagePanel] = None
+        self.custom_models_panel: Optional[CustomModelsPanel] = None
+        self.security_auditor_panel: Optional[SecurityAuditorPanel] = None
+        self.performance_profiler_panel: Optional[PerformanceProfilerPanel] = None
         
         # Collaboration state
         self.server_process: Optional[subprocess.Popen] = None
@@ -418,6 +489,36 @@ class XencodeApp(App):
                         self.terminal_assistant_panel = TerminalAssistantPanel()
                         yield self.terminal_assistant_panel
 
+                    # Project analyzer panel (initially hidden)
+                    with Vertical(id="project-analyzer-panel-container", classes="hidden"):
+                        self.project_analyzer_panel = ProjectAnalyzerPanel()
+                        yield self.project_analyzer_panel
+
+                    # Learning mode panel (initially hidden)
+                    with Vertical(id="learning-mode-panel-container", classes="hidden"):
+                        self.learning_mode_panel = LearningModePanel()
+                        yield self.learning_mode_panel
+
+                    # Multi-language panel (initially hidden)
+                    with Vertical(id="multi-language-panel-container", classes="hidden"):
+                        self.multi_language_panel = MultiLanguagePanel()
+                        yield self.multi_language_panel
+
+                    # Custom models panel (initially hidden)
+                    with Vertical(id="custom-models-panel-container", classes="hidden"):
+                        self.custom_models_panel = CustomModelsPanel()
+                        yield self.custom_models_panel
+
+                    # Security auditor panel (initially hidden)
+                    with Vertical(id="security-auditor-panel-container", classes="hidden"):
+                        self.security_auditor_panel = SecurityAuditorPanel()
+                        yield self.security_auditor_panel
+
+                    # Performance profiler panel (initially hidden)
+                    with Vertical(id="performance-profiler-panel-container", classes="hidden"):
+                        self.performance_profiler_panel = PerformanceProfilerPanel()
+                        yield self.performance_profiler_panel
+
                     # Chat panel
                     with Vertical(id="chat-panel-container"):
                         self.chat_panel = ChatPanel()
@@ -432,6 +533,7 @@ class XencodeApp(App):
         if self.settings_panel:
             self.settings_panel.set_settings(self.ui_settings)
             self._update_qwen_auth_status_in_settings()
+            self._update_openrouter_status_in_settings()
 
         # Welcome message
         if self.chat_panel:
@@ -921,8 +1023,41 @@ class XencodeApp(App):
         Yields:
             Response chunks
         """
-        # Check if we're using a Qwen model that requires authentication
-        if "qwen" in self.current_model.lower() and any(qwen_model in self.current_model.lower() for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]):
+        # Check if we're using a Qwen cloud model that requires authentication
+        model_lower = self.current_model.lower()
+        if model_lower.startswith("openrouter:"):
+            try:
+                from xencode.smart_config_manager import get_config
+                from xencode.model_providers import OpenRouterProvider
+
+                config = get_config()
+                api_key = (config.api_keys.openrouter_api_key or "").strip()
+                if not api_key:
+                    yield "\n\nError: OpenRouter API key is not configured. Add it in Settings (Ctrl+,)."
+                    return
+
+                provider = OpenRouterProvider(api_key)
+                messages = [{"role": "user", "content": prompt}]
+                model_name = self.current_model.split(":", 1)[1]
+
+                async for chunk in provider.chat(messages, model_name, max_tokens=2048, temperature=0.7):
+                    yield chunk
+            except Exception as e:
+                yield f"\n\nError calling OpenRouter API: {str(e)}"
+            return
+
+        is_qwen_cloud_model = (
+            model_lower.startswith("qwen:")
+            or (
+                "qwen" in model_lower
+                and any(
+                    qwen_model in model_lower
+                    for qwen_model in ["qwen-max", "qwen-plus", "qwen-max-coder", "qwen-chat", "chat.qwen.ai"]
+                )
+            )
+        )
+
+        if is_qwen_cloud_model:
             # Use Qwen AI API with authentication via provider
             try:
                 from xencode.model_providers import QwenProvider
@@ -932,10 +1067,11 @@ class XencodeApp(App):
 
                 # Format messages for chat API
                 messages = [{"role": "user", "content": prompt}]
+                qwen_model_name = self.current_model.split(":", 1)[1] if self.current_model.startswith("qwen:") else self.current_model
 
                 # Call Qwen completion API via provider
                 full_response = ""
-                async for chunk in provider.chat(messages, self.current_model, max_tokens=2048, temperature=0.7):
+                async for chunk in provider.chat(messages, qwen_model_name, max_tokens=2048, temperature=0.7):
                     full_response += chunk
                     yield chunk
 
@@ -1371,21 +1507,95 @@ class XencodeApp(App):
             self.chat_panel.history.clear_history()
             self.chat_panel.add_system_message("Chat cleared.")
     
+    def action_toggle_project_analyzer(self) -> None:
+        """Toggle project analyzer panel visibility."""
+        self._toggle_feature_panel("project-analyzer-panel-container")
+    
+    def action_toggle_learning_mode(self) -> None:
+        """Toggle learning mode panel visibility."""
+        self._toggle_feature_panel("learning-mode-panel-container")
+    
+    def action_toggle_multi_language(self) -> None:
+        """Toggle multi-language panel visibility."""
+        self._toggle_feature_panel("multi-language-panel-container")
+    
+    def action_toggle_custom_models(self) -> None:
+        """Toggle custom models panel visibility."""
+        self._toggle_feature_panel("custom-models-panel-container")
+    
+    def action_toggle_security_auditor(self) -> None:
+        """Toggle security auditor panel visibility."""
+        self._toggle_feature_panel("security-auditor-panel-container")
+    
+    def action_toggle_performance_profiler(self) -> None:
+        """Toggle performance profiler panel visibility."""
+        self._toggle_feature_panel("performance-profiler-panel-container")
+    
+    def _toggle_feature_panel(self, panel_id: str) -> None:
+        """Helper method to toggle feature panels."""
+        target_panel = self.query_one(f"#{panel_id}")
+        chat_container = self.query_one("#chat-panel-container")
+        
+        # List of all panels to hide
+        panel_ids = [
+            "model-selector-panel",
+            "collab-panel-container",
+            "bytebot-panel-container",
+            "settings-panel-container",
+            "options-panel-container",
+            "agent-panel-container",
+            "review-panel-container",
+            "performance-panel-container",
+            "terminal-assistant-panel-container",
+            "project-analyzer-panel-container",
+            "learning-mode-panel-container",
+            "multi-language-panel-container",
+            "custom-models-panel-container",
+            "security-auditor-panel-container",
+            "performance-profiler-panel-container",
+        ]
+        
+        # Hide all other panels
+        for pid in panel_ids:
+            if pid != panel_id:
+                panel = self.query_one(f"#{pid}")
+                if not panel.has_class("hidden"):
+                    panel.add_class("hidden")
+        
+        # Toggle target panel
+        if target_panel.has_class("hidden"):
+            target_panel.remove_class("hidden")
+            chat_container.add_class("shrink")
+        else:
+            target_panel.add_class("hidden")
+            chat_container.remove_class("shrink")
+    
     def action_help(self) -> None:
         """Show help"""
         if self.chat_panel:
             help_text = """
             # Xencode TUI Keybindings
 
+            ## Core Panels
             - **Ctrl+E**: Toggle file explorer
             - **Ctrl+M**: Toggle model selector
             - **Ctrl+B**: Toggle ByteBot panel
             - **Ctrl+A**: Toggle Agent panel
+            - **Ctrl+,**: Toggle settings panel
+            - **Ctrl+O**: Toggle options panel
+            
+            ## Feature Panels
             - **Ctrl+R**: Toggle Code Review panel
             - **Ctrl+P**: Toggle Performance panel
             - **Ctrl+Y**: Toggle Terminal Assistant panel
-            - **Ctrl+,**: Toggle settings panel
-            - **Ctrl+O**: Toggle options panel
+            - **F2**: Toggle Project Analyzer
+            - **F3**: Toggle Learning Mode
+            - **F4**: Toggle Multi-language Support
+            - **F5**: Toggle Custom Models
+            - **F6**: Toggle Security Auditor
+            - **F7**: Toggle Performance Profiler
+            
+            ## General
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
             - **Ctrl+C**: Quit application
@@ -1523,7 +1733,7 @@ class XencodeApp(App):
         self.notify(f"{action_name} to Qwen started. Follow terminal/browser instructions.", severity="information")
 
         try:
-            await qwen_auth_manager.get_or_authenticate()
+            await qwen_auth_manager.get_or_authenticate(force_reauth=True)
             self.notify("Qwen authentication successful", severity="information")
             self._update_qwen_auth_status_in_settings()
             if self.chat_panel:
@@ -1542,6 +1752,77 @@ class XencodeApp(App):
         self.settings_panel.set_qwen_auth_status(
             qwen_auth_manager.has_valid_cached_credentials()
         )
+
+    def _has_openrouter_api_key(self) -> bool:
+        """Return whether OpenRouter API key is configured."""
+        try:
+            from xencode.smart_config_manager import get_config
+            config = get_config()
+            return bool((config.api_keys.openrouter_api_key or "").strip())
+        except Exception:
+            return False
+
+    def _update_openrouter_status_in_settings(self) -> None:
+        """Refresh OpenRouter status indicator in settings panel."""
+        if not self.settings_panel:
+            return
+        self.settings_panel.set_openrouter_status(self._has_openrouter_api_key())
+
+    async def on_settings_panel_openrouter_save_requested(self, event: SettingsPanel.OpenRouterSaveRequested) -> None:
+        """Validate and persist OpenRouter API key from settings panel."""
+        api_key = (event.api_key or "").strip()
+        if not api_key:
+            self.notify("Please enter an OpenRouter API key", severity="warning")
+            return
+
+        self.notify("Validating OpenRouter API key...", severity="information")
+        ok, message = await self._validate_openrouter_api_key(api_key)
+        if not ok:
+            self.notify(f"OpenRouter key validation failed: {message}", severity="error")
+            self._update_openrouter_status_in_settings()
+            return
+
+        try:
+            from xencode.smart_config_manager import get_config_manager
+
+            manager = get_config_manager()
+            config = manager.get_config()
+            config.api_keys.openrouter_api_key = api_key
+            if manager.save_config():
+                self._update_openrouter_status_in_settings()
+                self.current_model = "openrouter:openai/gpt-4o-mini"
+                self.notify("OpenRouter key saved and cloud model selected", severity="information")
+                if self.chat_panel:
+                    self.chat_panel.add_system_message(
+                        "✅ OpenRouter configured. Active model set to openrouter:openai/gpt-4o-mini"
+                    )
+            else:
+                self.notify("Failed to save OpenRouter key to config", severity="error")
+        except Exception as e:
+            self.notify(f"Error saving OpenRouter key: {e}", severity="error")
+
+    async def _validate_openrouter_api_key(self, api_key: str) -> Tuple[bool, str]:
+        """Validate OpenRouter API key against models endpoint."""
+        url = "https://openrouter.ai/api/v1/models"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        timeout = aiohttp.ClientTimeout(total=12)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        return True, "OK"
+                    if response.status in (401, 403):
+                        return False, "Invalid or unauthorized API key"
+                    body = await response.text()
+                    return False, f"HTTP {response.status}: {body[:120]}"
+        except asyncio.TimeoutError:
+            return False, "Request timed out"
+        except Exception as e:
+            return False, str(e)
 
     def _should_show_onboarding(self) -> bool:
         """Determine whether onboarding/login prompt should be shown."""

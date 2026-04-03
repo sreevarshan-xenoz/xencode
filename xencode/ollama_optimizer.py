@@ -157,7 +157,7 @@ class OllamaOptimizer:
         """Check if Ollama is running and accessible"""
         try:
             # Try to list models to check if Ollama is running
-            await self.client.list()
+            await asyncio.wait_for(self.client.list(), timeout=3.0)
             return True
         except Exception:
             return False

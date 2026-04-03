@@ -29,7 +29,8 @@ try:
         workspace_router,
         analytics_router,
         monitoring_router,
-        plugin_router
+        plugin_router,
+        features_router
     )
     ROUTERS_AVAILABLE = True
 except ImportError:
@@ -39,6 +40,7 @@ except ImportError:
     analytics_router = None
     monitoring_router = None
     plugin_router = None
+    features_router = None
     ROUTERS_AVAILABLE = False
 
 try:
@@ -68,6 +70,7 @@ __all__ = [
     'analytics_router',
     'monitoring_router',
     'plugin_router',
+    'features_router',
     'setup_middleware',
     'FASTAPI_AVAILABLE',
     'ROUTERS_AVAILABLE',

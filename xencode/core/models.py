@@ -514,7 +514,9 @@ def update_model(model: str) -> None:
         console.print(error_panel)
     except subprocess.CalledProcessError as e:
         # Model pull failed - could be missing model
-        stderr_text = e.stderr.decode() if e.stderr else "Unknown error"
+        stderr_text = e.stderr or e.stdout or "Unknown error"
+        if isinstance(stderr_text, bytes):
+            stderr_text = stderr_text.decode(errors="replace")
         if "not found" in stderr_text.lower():
             warning_panel = Panel(
                 f"⚠️ Model '{model}' not found in Ollama library\n\n"

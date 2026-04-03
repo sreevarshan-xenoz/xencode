@@ -48,8 +48,17 @@ class Phase2Coordinator:
         self.rlhf_tuner: Optional[RLHFTuner] = None
         self.initialized = False
         
-    async def initialize(self, config_path: Optional[Path] = None) -> bool:
+    async def initialize(self, config_path: Optional[Path] = None, include_rlhf: bool = True) -> bool:
         """Initialize all Phase 2 systems"""
+
+        async def _run_with_timeout(coro, timeout_seconds: float, name: str):
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                console.print(
+                    f"[yellow]⚠️ {name} initialization timed out after {timeout_seconds:.0f}s; skipping[/yellow]"
+                )
+                return None
         
         with console.status("[bold blue]Initializing Xencode Phase 2 systems..."):
             try:
@@ -68,22 +77,36 @@ class Phase2Coordinator:
                 
                 # Initialize AI ensemble system (Phase 6)
                 if create_ensemble_reasoner:
-                    self.ensemble_reasoner = await create_ensemble_reasoner(self.cache_manager)
-                    console.print("[green]✅ AI Ensemble system initialized[/green]")
+                    self.ensemble_reasoner = await _run_with_timeout(
+                        create_ensemble_reasoner(self.cache_manager),
+                        8.0,
+                        "AI Ensemble system"
+                    )
+                    if self.ensemble_reasoner:
+                        console.print("[green]✅ AI Ensemble system initialized[/green]")
                 
                 # Initialize Ollama optimizer
                 if create_ollama_optimizer:
-                    self.ollama_optimizer = await create_ollama_optimizer()
+                    self.ollama_optimizer = await _run_with_timeout(
+                        create_ollama_optimizer(),
+                        6.0,
+                        "Ollama Optimizer"
+                    )
                     if self.ollama_optimizer:
                         console.print("[green]✅ Ollama Optimizer initialized[/green]")
                 
                 # Initialize RLHF tuner (lightweight config)
-                if create_rlhf_tuner:
+                if include_rlhf and create_rlhf_tuner:
                     try:
                         from xencode.rlhf_tuner import RLHFConfig
                         rlhf_config = RLHFConfig(max_epochs=1, synthetic_data_size=10)
-                        self.rlhf_tuner = await create_rlhf_tuner(rlhf_config)
-                        console.print("[green]✅ RLHF Tuner initialized[/green]")
+                        self.rlhf_tuner = await _run_with_timeout(
+                            create_rlhf_tuner(rlhf_config),
+                            10.0,
+                            "RLHF Tuner"
+                        )
+                        if self.rlhf_tuner:
+                            console.print("[green]✅ RLHF Tuner initialized[/green]")
                     except Exception as e:
                         console.print(f"[yellow]⚠️ RLHF Tuner initialization skipped: {e}[/yellow]")
                 

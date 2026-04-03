@@ -20,4 +20,9 @@ __all__ = [
     "LearningProgressTracker",
     "CommandHistoryBrowser",
     "TerminalAssistantPanel",
+    "VoiceInterfacePanel",
+    "VoiceStatusIndicator",
+    "AudioLevelMeter",
+    "VoiceCommandHistory",
+    "VoiceSettingsPanel",
 ]

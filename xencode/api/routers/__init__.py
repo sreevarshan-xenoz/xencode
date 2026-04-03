@@ -48,6 +48,13 @@ except ImportError:
     plugin_router = None
     PLUGIN_ROUTER_AVAILABLE = False
 
+try:
+    from .features import router as features_router
+    FEATURES_ROUTER_AVAILABLE = True
+except ImportError:
+    features_router = None
+    FEATURES_ROUTER_AVAILABLE = False
+
 
 def get_router_status() -> dict:
     """Get status of all routers"""
@@ -57,7 +64,8 @@ def get_router_status() -> dict:
         "workspace_router": WORKSPACE_ROUTER_AVAILABLE,
         "analytics_router": ANALYTICS_ROUTER_AVAILABLE,
         "monitoring_router": MONITORING_ROUTER_AVAILABLE,
-        "plugin_router": PLUGIN_ROUTER_AVAILABLE
+        "plugin_router": PLUGIN_ROUTER_AVAILABLE,
+        "features_router": FEATURES_ROUTER_AVAILABLE
     }
 
 
@@ -68,5 +76,6 @@ __all__ = [
     'analytics_router',
     'monitoring_router',
     'plugin_router',
+    'features_router',
     'get_router_status'
 ]

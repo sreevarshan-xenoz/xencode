@@ -34,8 +34,8 @@ class CodeReviewFeature(FeatureBase):
         self.status = FeatureStatus.DISABLED
         self._initialized = False
         self._pr_analyzers: Dict[str, Any] = {}
-        self._code_linter: Optional[Any] = None
-        self._review_engine: Optional[Any] = None
+        self._linter: Optional[Any] = None
+        self._ai_engine: Optional[Any] = None
         self._report_generator: Optional[ReportGenerator] = None
     
     @property
@@ -58,10 +58,10 @@ class CodeReviewFeature(FeatureBase):
         }
         
         # Initialize code linter
-        self._code_linter = CodeLinter()
+        self._linter = CodeLinter()
         
         # Initialize AI review engine
-        self._review_engine = AIReviewEngine()
+        self._ai_engine = AIReviewEngine()
         
         # Initialize report generator
         self._report_generator = ReportGenerator()
@@ -71,8 +71,8 @@ class CodeReviewFeature(FeatureBase):
     async def _shutdown(self) -> None:
         """Shutdown the code review feature"""
         self._pr_analyzers.clear()
-        self._code_linter = None
-        self._review_engine = None
+        self._linter = None
+        self._ai_engine = None
         self._report_generator = None
         self._initialized = False
     
@@ -88,10 +88,10 @@ class CodeReviewFeature(FeatureBase):
             raise ValueError(f"Failed to fetch PR: {pr_url}")
         
         # Analyze code changes
-        code_analysis = await self._code_linter.analyze(pr_data['files'])
+        code_analysis = await self._linter.analyze(pr_data['files'])
         
         # Generate AI review
-        review = await self._review_engine.generate_review(
+        review = await self._ai_engine.generate_review(
             pr_data['title'],
             pr_data['description'],
             pr_data['files'],
@@ -113,15 +113,17 @@ class CodeReviewFeature(FeatureBase):
         with open(path, 'r') as f:
             content = f.read()
         
+        detected_language = language or self._detect_language(path)
+        
         # Analyze the file
-        analysis = await self._code_linter.analyze([{
+        analysis = await self._linter.analyze([{
             'path': str(path),
             'content': content,
-            'language': language or self._detect_language(path)
+            'language': detected_language
         }])
         
         # Generate AI review
-        review = await self._review_engine.generate_review(
+        review = await self._ai_engine.generate_review(
             path.name,
             '',
             [{'path': str(path), 'content': content}],
@@ -130,7 +132,13 @@ class CodeReviewFeature(FeatureBase):
         
         return {
             'file': str(path),
+            'language': detected_language,
             'analysis': analysis,
+            'issues': review.get('issues', []),
+            'suggestions': review.get('suggestions', []),
+            'patterns_detected': review.get('patterns_detected', []),
+            'semantic_analysis': review.get('semantic_analysis', {}),
+            'positive_feedback': review.get('positive_feedback', []),
             'review': review
         }
     
@@ -148,33 +156,64 @@ class CodeReviewFeature(FeatureBase):
         
         # Analyze each file
         file_analyses = {}
+        all_issues = []
+        all_suggestions = []
+        all_patterns = []
+        
         for file_path in files:
             try:
                 with open(file_path, 'r') as f:
                     content = f.read()
                 
-                analysis = await self._code_linter.analyze([{
+                detected_language = self._detect_language(file_path)
+                
+                analysis = await self._linter.analyze([{
                     'path': str(file_path),
                     'content': content,
-                    'language': self._detect_language(file_path)
+                    'language': detected_language
                 }])
                 
-                file_analyses[str(file_path)] = analysis
+                # Generate AI review for this file
+                review = await self._ai_engine.generate_review(
+                    file_path.name,
+                    '',
+                    [{'path': str(file_path), 'content': content}],
+                    analysis
+                )
+                
+                file_analyses[str(file_path)] = {
+                    'analysis': analysis,
+                    'review': review,
+                    'language': detected_language
+                }
+                
+                # Collect issues and suggestions
+                all_issues.extend(review.get('issues', []))
+                all_suggestions.extend(review.get('suggestions', []))
+                all_patterns.extend(review.get('patterns_detected', []))
+                
             except Exception as e:
                 file_analyses[str(file_path)] = {'error': str(e)}
         
         return {
             'directory': str(directory),
             'files_analyzed': len(file_analyses),
-            'analyses': file_analyses
+            'files': list(file_analyses.keys()),
+            'analyses': file_analyses,
+            'issues': all_issues,
+            'suggestions': all_suggestions,
+            'patterns_detected': all_patterns
         }
     
     def _detect_language(self, file_path: Path) -> str:
         """Detect programming language from file extension"""
         extensions = {
             '.py': 'python',
+            '.pyw': 'python',
             '.js': 'javascript',
+            '.jsx': 'javascript',
             '.ts': 'typescript',
+            '.tsx': 'typescript',
             '.go': 'go',
             '.rs': 'rust',
             '.java': 'java',
@@ -223,11 +262,17 @@ class CodeReviewFeature(FeatureBase):
             'files_analyzed': len(pr_data.get('files', [])),
             'code_analysis': code_analysis,
             'review': review,
+            'issues': review.get('issues', []),
+            'suggestions': review.get('suggestions', []),
+            'patterns_detected': review.get('patterns_detected', []),
+            'semantic_analysis': review.get('semantic_analysis', {}),
+            'positive_feedback': review.get('positive_feedback', []),
             'summary': {
                 'total_issues': total_issues,
                 'severity_counts': severity_counts,
                 'quality_score': quality_score,
-                'generated_at': pr_data.get('timestamp', '')
+                'generated_at': pr_data.get('timestamp', ''),
+                'files_analyzed': len(pr_data.get('files', []))
             }
         }
     
@@ -333,6 +378,9 @@ class GitHubPRAnalyzer:
     
     def _parse_pr_url(self, pr_url: str) -> Dict[str, str]:
         """Parse GitHub PR URL and extract repository info"""
+        if not pr_url or not isinstance(pr_url, str):
+            raise ValueError(f"Invalid GitHub PR URL: {pr_url}")
+        
         # Pattern: https://github.com/owner/repo/pull/number
         pattern = r'https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)'
         match = re.match(pattern, pr_url)
@@ -423,15 +471,16 @@ class GitHubPRAnalyzer:
             # Extract file changes
             file_changes = []
             for file_data in files:
-                file_changes.append({
-                    'filename': file_data.get('filename', ''),
-                    'status': file_data.get('status', ''),
-                    'additions': file_data.get('additions', 0),
-                    'deletions': file_data.get('deletions', 0),
-                    'changes': file_data.get('changes', 0),
-                    'patch': file_data.get('patch', ''),
-                    'blob_url': file_data.get('blob_url', '')
-                })
+                if isinstance(file_data, dict):
+                    file_changes.append({
+                        'filename': file_data.get('filename', ''),
+                        'status': file_data.get('status', ''),
+                        'additions': file_data.get('additions', 0),
+                        'deletions': file_data.get('deletions', 0),
+                        'changes': file_data.get('changes', 0),
+                        'patch': file_data.get('patch', ''),
+                        'blob_url': file_data.get('blob_url', '')
+                    })
             
             # Extract line comments
             line_comments = []
@@ -462,7 +511,7 @@ class GitHubPRAnalyzer:
             return {
                 'url': pr_url,
                 'title': pr_data.get('title', ''),
-                'description': pr_data.get('body', ''),
+                'description': pr_data.get('body') or '',
                 'platform': 'github',
                 'timestamp': pr_data.get('created_at', ''),
                 'state': pr_state,
@@ -1013,18 +1062,42 @@ class CodeLinter:
         issues = []
         
         # Check for SQL injection patterns
-        sqli_patterns = [
-            r"execute\s*\(\s*['\"]",
-            r"eval\s*\(",
-            r"exec\s*\("
-        ]
+        # Pattern 1: String concatenation in SQL queries (variable assignment)
+        sql_concat_pattern = r"(query|sql)\s*=\s*['\"][^'\"]*['\"].*\+"
+        if re.search(sql_concat_pattern, content, re.IGNORECASE):
+            issues.append({
+                'type': 'sqli',
+                'severity': 'critical',
+                'message': 'Potential SQL injection detected',
+                'file': path,
+                'line': 0,
+                'column': 0
+            })
         
-        for pattern in sqli_patterns:
-            if re.search(pattern, content, re.IGNORECASE):
+        # Pattern 2: Detect execute/query calls but exclude parameterized queries
+        # Match: cursor.execute("SELECT...") but not cursor.execute("SELECT...", (...))
+        sqli_pattern = r"(execute|query)\s*\(\s*['\"][^'\"]*['\"](?!\s*,)"
+        if re.search(sqli_pattern, content, re.IGNORECASE):
+            # Additional check: make sure it's not a parameterized query with placeholder
+            # Parameterized queries use ? or %s placeholders with a second parameter
+            if not re.search(r"(execute|query)\s*\(\s*['\"][^'\"]*[\?%][^'\"]*['\"],", content, re.IGNORECASE):
                 issues.append({
                     'type': 'sqli',
                     'severity': 'critical',
                     'message': 'Potential SQL injection detected',
+                    'file': path,
+                    'line': 0,
+                    'column': 0
+                })
+        
+        # Check for eval/exec (code injection)
+        code_injection_patterns = [r"eval\s*\(", r"exec\s*\("]
+        for pattern in code_injection_patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                issues.append({
+                    'type': 'code_injection',
+                    'severity': 'critical',
+                    'message': 'Potential code injection detected',
                     'file': path,
                     'line': 0,
                     'column': 0
@@ -1036,22 +1109,18 @@ class CodeLinter:
         """Check for SQL injection vulnerabilities"""
         issues = []
         
-        sqli_patterns = [
-            r"execute\s*\(\s*['\"]",
-            r"cursor\.execute\s*\(",
-            r"db\.query\s*\("
-        ]
-        
-        for pattern in sqli_patterns:
-            if re.search(pattern, content, re.IGNORECASE):
-                issues.append({
-                    'type': 'sqli',
-                    'severity': 'critical',
-                    'message': 'Potential SQL injection detected',
-                    'file': path,
-                    'line': 0,
-                    'column': 0
-                })
+        # Patterns that indicate SQL injection (string concatenation or formatting)
+        # Check for string concatenation patterns (most dangerous)
+        concat_pattern = r"(execute|query)\s*\(\s*['\"].*['\"].*\+.*\)"
+        if re.search(concat_pattern, content, re.IGNORECASE):
+            issues.append({
+                'type': 'sqli',
+                'severity': 'critical',
+                'message': 'Potential SQL injection detected',
+                'file': path,
+                'line': 0,
+                'column': 0
+            })
         
         return issues
     
