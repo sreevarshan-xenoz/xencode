@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -397,7 +398,9 @@ def update_model(model: str) -> None:
         console.print(error_panel)
     except subprocess.CalledProcessError as e:
         # Model pull failed - could be missing model
-        stderr_text = e.stderr.decode() if e.stderr else "Unknown error"
+        stderr_text = e.stderr or e.stdout or "Unknown error"
+        if isinstance(stderr_text, bytes):
+            stderr_text = stderr_text.decode(errors="replace")
         if "not found" in stderr_text.lower():
             warning_panel = Panel(
                 f"⚠️ Model '{model}' not found in Ollama library\n\n"
@@ -448,7 +451,7 @@ def run_query(model: str, prompt: str) -> str:
     memory.add_message("user", prompt, model)
 
     # Determine if this is a cloud model
-    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
+    if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:") or model.startswith("qwen:"):
         # Use the new model provider system for cloud models
         from xencode.model_providers import get_model_provider_manager
 
@@ -532,6 +535,23 @@ def run_query(model: str, prompt: str) -> str:
                     memory.add_message("assistant", response, model)
 
                     return response
+            elif model.startswith("qwen:"):
+                provider_manager.configure_provider("qwen", "")
+                asyncio.run(provider_manager.initialize_providers())
+
+                model_name = model.replace("qwen:", "")
+
+                async def run_async_call():
+                    return await provider_manager.generate_with_provider(
+                        prompt, "qwen", model_name, max_tokens=2048, temperature=0.7
+                    )
+
+                response = asyncio.run(run_async_call())
+
+                cache.set(prompt, model, response)
+                memory.add_message("assistant", response, model)
+
+                return response
     else:
         # Use Ollama for local models
         url = "http://localhost:11434/api/generate"
@@ -943,18 +963,11 @@ def get_multiline_input():
 
 
 def update_online_status():
-    """Check internet connectivity with lightweight ping"""
+    """Check internet connectivity with a cross-platform socket probe"""
     try:
-        # Use a lightweight ping check without blocking user interaction
-        result = subprocess.run(
-            ["ping", "-c", "1", "-W", "1", "8.8.8.8"], capture_output=True, timeout=2
-        )
-        return "true" if result.returncode == 0 else "false"
-    except (
-        subprocess.TimeoutExpired,
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-    ):
+        with socket.create_connection(("8.8.8.8", 53), timeout=2):
+            return "true"
+    except OSError:
         return "false"
 
 

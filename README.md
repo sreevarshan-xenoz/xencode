@@ -1,167 +1,293 @@
 # Xencode - AI-Powered Development Platform
 
-Xencode is a cutting-edge AI assistant platform that transforms how developers interact with their command-line environment. It combines intelligent model selection, advanced caching, robust error handling, and innovative workflow capabilities to create a superior development experience.
+Xencode is an offline-first AI development assistant platform for serious engineering workflows. It combines local/cloud model routing, agentic execution loops, deep terminal/TUI ergonomics, analytics, and production-oriented deployment patterns.
 
-## Core Features
+## Table of Contents
 
-### 1. Intelligent Model Selection
-- Automatically detects system hardware (CPU, GPU, RAM, storage)
-- Recommends optimal AI models based on available resources
-- Interactive setup wizard for first-time users
-- Performance optimization for different system configurations
+- [Why Xencode](#why-xencode)
+- [Current Status](#current-status-feb-2026)
+- [Core Capabilities](#core-capabilities)
+- [Architecture](#architecture)
+- [Install](#install)
+- [Quick Start (5 minutes)](#quick-start-5-minutes)
+- [Command Reference](#command-reference)
+- [Configuration & Model Routing](#configuration--model-routing)
+- [Testing & Quality](#testing--quality)
+- [Deployment](#deployment)
+- [Documentation Map](#documentation-map)
+- [Troubleshooting](#troubleshooting)
+- [Security Notes](#security-notes)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
-### 2. Advanced Caching System
-- Hybrid memory/disk caching with LRU eviction
-- LZMA compression for efficient storage
-- Cache analytics and monitoring
-- Multi-level caching strategy
+## Why Xencode
 
-### 3. Robust Error Handling
-- Intelligent error classification and recovery
-- Automatic retry mechanisms with exponential backoff
-- Context-aware error messages
-- Comprehensive error monitoring
+- **Offline-first by design** with Ollama support and cloud fallback pathways.
+- **Agentic coding loop** supports plan → edit → test → fix with bounded retries.
+- **Developer workflow acceleration** via git automation, diff previews, and replay.
+- **Operational maturity** through analytics, monitoring, API routers, and deployment assets.
+- **Extensible platform** via feature flags and plugin lifecycle management.
 
-### 4. Performance Optimizations
-- Parallel model availability checking
-- Efficient consensus calculation algorithms
-- Streamlined confidence scoring in single pass
-- Optimized parallel inference with named tasks
-- Enhanced caching with hybrid memory/disk system
-- LZMA compression for efficient storage
+## Current Status (Feb 2026)
 
-### 5. Smart Configuration Management
-- Multi-format support (YAML, TOML, JSON, INI)
-- Schema validation with Pydantic
-- Interactive configuration wizard
-- Hot-reload configuration changes
+- ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, vault, smoke gate)
+- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
+- ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
+- 🚧 **Active backlog**: Phase 3+ intelligence, fallback governance, multimodal UX, secure team mode
 
-### 6. Plugin Architecture
-- Dynamic plugin loading and lifecycle management
-- Service registration and discovery
-- Event-driven plugin communication
-- Secure plugin context with permissions
+Roadmap tracking:
+- [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+- [NEXT_PLAN.md](NEXT_PLAN.md)
 
-### 7. Advanced Analytics Dashboard
-- Real-time performance metrics monitoring
-- SQLite-based metrics persistence
-- Usage pattern analysis
-- Cost tracking and optimization recommendations
+## Core Capabilities
 
-### 8. Hybrid Model Architecture
-- Dynamic switching between local and cloud models
-- Model chaining for complex workflows
-- Privacy-aware routing based on sensitivity levels
-- Fallback mechanisms for high availability
+### AI + Agentic
+- Multi-model ensemble methods: vote, weighted, consensus, hybrid.
+- Agentic orchestrator loop for multi-step coding tasks.
+- Error classification and targeted fix suggestions.
+- Session export/replay for reproducible execution history.
 
-### 9. Advanced Memory Management
-- Tiered storage system (RAM Hot/Warm, SSD Cold, HDD Archive)
-- Predictive caching based on usage patterns
-- Intelligent cache eviction policies
-- Cross-tier balancing algorithms
+### Developer Experience
+- Textual-based TUI with settings, options, and theme controls.
+- Command assistance and terminal-safe generation workflows.
+- Side-by-side diff inspection and hunk-level review flows.
+- Feature/plugin architecture for modular growth.
 
-### 10. Visual Workflow Builder
-- Drag-and-drop interface for creating AI workflows
-- Multiple node types (input, process, decision, model call)
-- Template library for common workflow patterns
-- Interactive execution and visualization
+### Reliability + Ops
+- Hybrid cache (memory + disk) with compression and eviction.
+- Structured provider transport with retries/timeouts.
+- Monitoring/analytics/reporting support across subsystems.
+- API service surfaces for analytics, monitoring, documents, code analysis, workspace, and plugins.
 
-### 11. Enhanced Xencode Terminal
-- Structured command blocks with rich output rendering
-- AI-powered command suggestions
-- Session persistence with crash recovery
-- Advanced UI components and command palette
+## Architecture
 
-### 12. Advanced Multi-Agent Collaboration
-- Market-based resource allocation system
-- Negotiation protocols between agents
-- Swarm intelligence behaviors for coordination
-- Human-in-the-loop supervision capabilities
-- Cross-domain expertise combination system
-- Advanced coordination strategies (hierarchical, market-based, swarm intelligence)
+Xencode is organized as layered runtime + service subsystems:
+- **Interface layer**: CLI, TUI, API entry points
+- **Orchestration layer**: agentic workflows and tool execution
+- **Policy layer**: validation, safety, routing, model/provider policy
+- **Execution layer**: local/cloud model providers, ensemble and inference logic
+- **Data layer**: context/memory/cache/vector stores + persistence
+- **Observability layer**: monitoring, analytics, reporting
 
-### 13. Performance Optimizations
-- Parallel model availability checking
-- Efficient consensus calculation algorithms
-- Streamlined confidence scoring in single pass
-- Optimized parallel inference with named tasks
-- Enhanced caching with hybrid memory/disk system
-- LZMA compression for efficient storage
+### High-level Routing Diagram
 
-## Installation
+```mermaid
+flowchart TD
+    U[User]
+    CLI[xencode CLI]
+    TUI[Textual TUI]
+    API[FastAPI API]
+
+    ORCH[Agent Orchestrator\nPlan -> Edit -> Test -> Fix]
+    CTX[Context + Memory + Cache]
+    SAFE[Security + Validation]
+    RES[Resolver + Transport]
+    LOCAL[Ollama Local Models]
+    CLOUD[Cloud Providers]
+    OUT[Response + Diff + Reports]
+
+    U --> CLI
+    U --> TUI
+    U --> API
+
+    CLI --> ORCH
+    TUI --> ORCH
+    API --> ORCH
+
+    ORCH --> CTX
+    ORCH --> SAFE
+    ORCH --> RES
+    RES --> LOCAL
+    RES --> CLOUD
+    LOCAL --> OUT
+    CLOUD --> OUT
+```
+
+### Agentic Flow Diagram
+
+```mermaid
+flowchart TD
+    A[Prompt Received] --> B[Task Classification]
+    B --> C[Context Retrieval]
+    C --> D[Plan Generation]
+    D --> E[Apply Edits]
+    E --> F[Run Tests/Lint]
+    F --> G{Pass?}
+    G -- Yes --> H[Summarize + Return]
+    G -- No --> I[Classify Failure]
+    I --> J[Generate Fix]
+    J --> K{Iteration Cap Hit?}
+    K -- No --> E
+    K -- Yes --> L[Stop with Diagnostics]
+```
+
+For expanded connectivity and deployment diagrams, see [project details.md](project%20details.md).
+
+## Install
+
+### Option A: Python package
 
 ```bash
 pip install xencode
 ```
 
-### Install via npm
-
-Install the Node wrapper package directly from GitHub:
+### Option B: npm wrapper
 
 ```bash
 npm install -g github:sreevarshan-xenoz/xencode
 ```
 
-Requirements for npm install path:
+Requirements:
 - Node.js 18+
-- Python 3.8+ available in `PATH`
+- Python 3.8+ in `PATH`
 
-The npm wrapper runs the Python CLI (`python -m xencode.cli`) under the hood.
-
-If you prefer Python-native installation:
+### Option C: Source setup (recommended for contributors)
 
 ```bash
-pip install xencode
+git clone https://github.com/sreevarshan-xenoz/xencode
+cd xencode
+pip install -e .
+pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start (5 minutes)
 
 ```bash
-# Run Xencode (opens TUI by default)
+# 1) Verify CLI
+xencode --help
+
+# 2) Start TUI (default app experience)
 xencode
 
-# Start an interactive agent session
+# 3) Run a quick query
+xencode query "Explain clean architecture briefly"
+
+# 4) Start an agentic coding session
 xencode agentic --model qwen3:4b
 
-# Launch the TUI
-xencode tui
-
-# Launch the TUI (module entrypoint)
-python -m xencode.tui
-
-# Or use as a module
-python -m xencode
+# 5) Check local model availability
+xencode ollama list --refresh
 ```
 
-### First-run TUI onboarding
+TUI productivity shortcuts:
+- `Ctrl+,` opens settings
+- `Ctrl+O` opens options panel
 
-- On first launch, Xencode shows onboarding in TUI with login/signup options.
-- Open the settings widget anytime with `Ctrl+,`.
-- Open the options panel (all major CLI commands) with `Ctrl+O`.
-- Choose from 10 themes in Settings and apply instantly.
-- Use explicit CLI subcommands (for example `xencode version`) to run non-TUI flows.
+## Command Reference
 
-## Architecture
+| Area | Command | Purpose |
+|---|---|---|
+| General | `xencode` | Launch default TUI experience |
+| General | `xencode version` | Show installed version |
+| System | `xencode status` | Show runtime status summary |
+| System | `xencode health` | Run health checks |
+| Query | `xencode query "..."` | Run ensemble query |
+| Agentic | `xencode agentic` | Start interactive agentic session |
+| Ollama | `xencode ollama list --refresh` | Refresh/list local models |
+| Ollama | `xencode ollama pull <model>` | Pull model from registry |
+| Ollama | `xencode ollama benchmark <model>` | Benchmark model performance |
 
-Xencode follows a modular architecture with clear separation of concerns:
+For a fuller command guide, see [CLI_GUIDE.md](CLI_GUIDE.md).
 
-- **Core**: Fundamental components and utilities
-- **Models**: AI model management and selection
-- **Cache**: Advanced caching mechanisms
-- **Analytics**: Performance monitoring and analytics
-- **Plugins**: Extension system
-- **Security**: Security and validation utilities
-- **TUI**: Terminal user interface components
-- **Workflows**: Workflow management and execution
+## Configuration & Model Routing
+
+- Supports multi-format config patterns (YAML/TOML/JSON/INI style ecosystems in project).
+- Routing supports local-first + cloud pathways with retry/fallback transport policy.
+- Model/provider behavior is designed to be policy-driven (including lock/override patterns in provider resolver modules).
+- Security-first handling includes validation and credential vault-backed secret storage paths.
+
+See:
+- [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md)
+- [docs/api_documentation.md](docs/api_documentation.md)
+- [project details.md](project%20details.md)
+
+## Testing & Quality
+
+Run from repository root:
+
+```bash
+pytest
+```
+
+Common quality checks:
+
+```bash
+ruff check .
+black --check .
+mypy xencode
+```
+
+Test areas currently include:
+- `tests/agentic`
+- `tests/auth`
+- `tests/features`
+- `tests/model_providers`
+- `tests/tui`
+
+## Deployment
+
+Xencode includes deployment assets for local, containerized, and orchestrated environments:
+- Docker + Compose definitions for multi-service environments
+- Kubernetes manifests in `k8s/`
+- Monitoring stack assets in `monitoring/`
+
+See:
+- [Dockerfile](Dockerfile)
+- [docker-compose.yml](docker-compose.yml)
+- [k8s/deployment.yaml](k8s/deployment.yaml)
+
+## Documentation Map
+
+- Product and architecture:
+  - [project details.md](project%20details.md)
+  - [docs/ROADMAP.md](docs/ROADMAP.md)
+- User/developer docs:
+  - [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
+  - [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md)
+  - [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
+  - [DOCUMENTATION.md](DOCUMENTATION.md)
+- Planning and execution:
+  - [NEXT_PLAN.md](NEXT_PLAN.md)
+  - [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+
+## Troubleshooting
+
+### Ollama/model issues
+- Ensure Ollama is running and reachable from your machine.
+- Refresh model list with `xencode ollama list --refresh`.
+- Pull a small model first to validate runtime path.
+
+### Slow responses
+- Use smaller/faster local models for lower latency.
+- Check system status with `xencode status` and `xencode health`.
+
+### Startup or environment issues
+- Confirm Python and package versions meet minimum requirements.
+- Reinstall in editable mode for local development consistency.
+
+## Security Notes
+
+- Treat API keys and tokens as secrets; avoid storing plaintext credentials in tracked files.
+- Review security scanning and auth-related modules before production deployment.
+- Use environment-specific secrets management and least-privilege access.
+
+## Roadmap
+
+Near-term direction focuses on:
+- Repo-wide context indexing + routing intelligence
+- Smart fallback policy governance + provider health UX
+- Multimodal inputs and secure team workflows
+
+Track progress in:
+- [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
 
 ## Contributing
 
-We welcome contributions to Xencode! Please see our contributing guidelines for more information.
+Contributions are welcome. For development context and standards, start with:
+- [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md)
+- [docs/terminal_integration_tests.md](docs/terminal_integration_tests.md)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-Xencode builds upon the excellent work of the open-source community and integrates with various AI model providers to deliver the best possible experience for developers.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

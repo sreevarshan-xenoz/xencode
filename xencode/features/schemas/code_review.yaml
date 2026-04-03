@@ -1,0 +1,98 @@
+$schema: http://json-schema.org/draft-07/schema#
+title: code_review
+version: 1.0.0
+description: Configuration schema for the AI Code Reviewer feature
+type: object
+
+properties:
+  enabled:
+    type: boolean
+    description: Enable or disable the code review feature
+    default: true
+  
+  integrations:
+    type: array
+    description: Version control platforms to integrate with
+    items:
+      type: string
+    default:
+      - github
+      - gitlab
+      - bitbucket
+  
+  severity_levels:
+    type: array
+    description: Severity levels to report
+    items:
+      type: string
+    default:
+      - critical
+      - high
+      - medium
+      - low
+  
+  auto_review:
+    type: boolean
+    description: Automatically review PRs when opened
+    default: false
+  
+  max_file_size_kb:
+    type: integer
+    description: Maximum file size to review (in KB)
+    default: 500
+    minimum: 1
+    maximum: 10000
+  
+  languages:
+    type: array
+    description: Programming languages to support
+    items:
+      type: string
+    default:
+      - python
+      - javascript
+      - typescript
+      - java
+      - go
+      - rust
+  
+  security_checks:
+    type: object
+    description: Security check configuration
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      
+      check_sql_injection:
+        type: boolean
+        default: true
+      
+      check_xss:
+        type: boolean
+        default: true
+      
+      check_secrets:
+        type: boolean
+        default: true
+  
+  style_checks:
+    type: object
+    description: Style check configuration
+    properties:
+      enabled:
+        type: boolean
+        default: true
+      
+      max_line_length:
+        type: integer
+        default: 120
+        minimum: 80
+        maximum: 200
+      
+      enforce_docstrings:
+        type: boolean
+        default: false
+
+required:
+  - enabled
