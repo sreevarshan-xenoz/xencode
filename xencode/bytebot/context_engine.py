@@ -183,7 +183,7 @@ class ContextEngine:
                         "scripts": list(pkg.get("scripts", {}).keys()),
                         "dependencies": list(pkg.get("dependencies", {}).keys())
                     }
-            except:
+            except Exception:
                 pass
         
         if 'requirements.txt' in files or 'pyproject.toml' in files or 'setup.py' in files:
@@ -194,7 +194,7 @@ class ContextEngine:
                 try:
                     with open('requirements.txt', 'r') as f:
                         deps = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-                except:
+                except Exception:
                     pass
             return {
                 "type": "python",
@@ -240,7 +240,7 @@ class ContextEngine:
                 )
                 if result.returncode == 0:
                     return {"pip_packages": json.loads(result.stdout)}
-            except:
+            except Exception:
                 pass
         elif project_type == "nodejs":
             try:
@@ -252,7 +252,7 @@ class ContextEngine:
                         "dependencies": deps,
                         "dev_dependencies": dev_deps
                     }
-            except:
+            except Exception:
                 pass
         
         return {}
@@ -308,7 +308,7 @@ class ContextEngine:
                 "connected": True,
                 "local_ip": ip
             }
-        except:
+        except Exception:
             return {
                 "connected": False,
                 "local_ip": "unknown"

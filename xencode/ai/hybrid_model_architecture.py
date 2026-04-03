@@ -134,7 +134,7 @@ class LocalOllamaModel(ModelInterface):
             from .model_providers.ollama_provider import OllamaProvider
             provider = OllamaProvider()
             return await provider.health_check()
-        except:
+        except Exception:
             return False
 
 
@@ -201,7 +201,7 @@ class CloudModel(ModelInterface):
             # Test with a simple request
             await self.generate("health check", {"max_tokens": 5})
             return True
-        except:
+        except Exception:
             return False
 
 

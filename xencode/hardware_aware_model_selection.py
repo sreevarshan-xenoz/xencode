@@ -109,7 +109,7 @@ class HardwareAnalyzer:
             cpu_freq = psutil.cpu_freq()
             if cpu_freq:
                 cpu_freq_max = cpu_freq.max / 1000.0  # Convert MHz to GHz
-        except:
+        except Exception:
             # Fallback: estimate from CPU count and system
             if cpu_count >= 8:
                 cpu_freq_max = 3.0  # High-end estimate
@@ -219,7 +219,7 @@ class HardwareAnalyzer:
                 pass
 
             return False
-        except:
+        except Exception:
             return False
 
 

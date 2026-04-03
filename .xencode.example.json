@@ -1,83 +1,90 @@
 {
-  "models": {
-    "large": {
-      "provider": "openai",
-      "model": "gpt-4"
-    },
-    "small": {
-      "provider": "openai",
-      "model": "gpt-3.5-turbo"
-    }
-  },
+  "_comment": "Xencode Configuration Example - Copy to .xencode.json and fill in your values",
+  
   "providers": {
+    "ollama": {
+      "enabled": true,
+      "base_url": "http://localhost:11434",
+      "models": ["llama3.1:8b", "qwen3:4b", "mistral:7b", "phi3:mini"],
+      "timeout_ms": 30000
+    },
     "openai": {
+      "enabled": true,
       "api_key": "${OPENAI_API_KEY}",
       "base_url": "https://api.openai.com/v1",
-      "price_per_1m_input": 30.0,
-      "price_per_1m_output": 60.0,
-      "timeout": 60,
-      "max_retries": 3
+      "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+      "timeout_ms": 30000
     },
     "anthropic": {
+      "enabled": true,
       "api_key": "${ANTHROPIC_API_KEY}",
-      "base_url": "https://api.anthropic.com",
-      "price_per_1m_input": 15.0,
-      "price_per_1m_output": 75.0,
-      "timeout": 60,
-      "max_retries": 3
-    }
-  },
-  "lsp": {
-    "python": {
-      "command": "pylsp",
-      "args": [],
-      "file_patterns": ["*.py"],
-      "root_markers": ["pyproject.toml", "setup.py", "requirements.txt"]
+      "base_url": "https://api.anthropic.com/v1",
+      "models": ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"],
+      "timeout_ms": 60000
     },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": ["--stdio"],
-      "file_patterns": ["*.ts", "*.tsx", "*.js", "*.jsx"],
-      "root_markers": ["package.json", "tsconfig.json"]
+    "google_gemini": {
+      "enabled": true,
+      "api_key": "${GOOGLE_API_KEY}",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "models": ["gemini-2.0-flash", "gemini-2.0-pro"],
+      "timeout_ms": 30000
+    },
+    "openrouter": {
+      "enabled": true,
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
+      "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4", "google/gemini-2.0-flash"],
+      "timeout_ms": 30000
+    },
+    "qwen": {
+      "enabled": true,
+      "auth_method": "oauth2_device_flow",
+      "base_url": "https://chat.qwen.ai/v1",
+      "models": ["qwen-max", "qwen-plus", "qwen-turbo"],
+      "timeout_ms": 30000
+    },
+    "huggingface": {
+      "enabled": false,
+      "api_key": "${HUGGINGFACE_API_KEY}",
+      "base_url": "https://api-inference.huggingface.co/models",
+      "models": ["meta-llama/Meta-Llama-3-8B-Instruct", "mistralai/Mixtral-8x7B-Instruct-v0.1"],
+      "timeout_ms": 60000
     }
   },
-  "mcp": {
-    "filesystem": {
-      "command": "uvx",
-      "args": ["mcp-server-filesystem"],
-      "disabled": false,
-      "auto_approve": ["read_file", "list_directory"]
-    }
+
+  "default_provider": "ollama",
+  "default_model": "llama3.1:8b",
+
+  "ensemble": {
+    "enabled": true,
+    "method": "hybrid",
+    "models": ["llama3.1:8b", "qwen3:4b", "phi3:mini"],
+    "require_consensus": false
   },
-  "options": {
-    "auto_summarize": true,
-    "max_context_tokens": 100000,
-    "log_level": "INFO",
-    "command_timeout": 60,
-    "background_job_timeout": 300,
-    "permission_timeout": 300
+
+  "cache": {
+    "enabled": true,
+    "max_memory_mb": 512,
+    "max_disk_mb": 2048,
+    "compression": "lzma"
   },
-  "permissions": {
-    "skip_requests": false,
-    "allowed_tools": ["view", "grep", "ls"],
-    "allowed_directories": [],
-    "blocked_commands": [
-      "sudo",
-      "rm -rf",
-      "dd",
-      "mkfs",
-      "fdisk",
-      "format",
-      "del /f",
-      "rmdir /s",
-      "> /dev/sda"
-    ]
+
+  "security": {
+    "scan_on_save": true,
+    "severity_threshold": "medium",
+    "report_format": "detailed"
   },
-  "agents": {
-    "default": {
-      "name": "default",
-      "system_prompt": "You are a helpful AI coding assistant. You can execute commands, read and modify files, and help with coding tasks.",
-      "tools": ["bash", "view", "edit", "write", "grep", "ls"]
-    }
+
+  "analytics": {
+    "enabled": true,
+    "track_usage": true,
+    "track_performance": true
+  },
+
+  "agent": {
+    "default_model": "qwen3:4b",
+    "provider": "auto",
+    "use_rag": false,
+    "smart_model_selection": false
   }
 }

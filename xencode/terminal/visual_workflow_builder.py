@@ -227,9 +227,9 @@ class DecisionNodeProcessor(NodeProcessor):
             eval_context.update({"len": len, "str": str, "int": int, "float": float})
             
             # Evaluate the condition
-            result = eval(condition, {"__builtins__": {}}, eval_context)
+            result = _safe_eval_condition(condition, eval_context) if condition else False
             decision_result = bool(result)
-        except:
+        except Exception:
             # If condition evaluation fails, default to true
             decision_result = True
         

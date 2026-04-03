@@ -262,7 +262,7 @@ class SyncCoordinator:
             if connection.websocket:
                 try:
                     await connection.websocket.close()
-                except:
+                except Exception:
                     pass
             
             del self.connections[connection_id]
@@ -609,7 +609,7 @@ class SyncCoordinator:
             if connection.websocket:
                 try:
                     await connection.websocket.close()
-                except:
+                except Exception:
                     pass
             
             del self.connections[connection_id]
