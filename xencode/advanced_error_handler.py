@@ -21,7 +21,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.traceback import install
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 
 # Install rich traceback for better error display
 install(show_locals=True)

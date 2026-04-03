@@ -16,7 +16,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import psutil
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.table import Table
