@@ -26,7 +26,11 @@ class GraphStore:
             
         self.persist_path = Path(persist_path)
         self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
+        if nx is None:
+            raise ImportError(
+                "networkx is required for GraphStore. Install with: pip install networkx"
+            )
         self.graph = nx.MultiDiGraph()
         self._load()
         

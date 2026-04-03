@@ -92,6 +92,35 @@ class SecurityScanner:
                 self._scanner = None
         return self._scanner
 
+    def _pattern_scan(self, code: str, filename: str = "") -> List[SecurityIssue]:
+        """Basic pattern-based security scanning."""
+        issues = []
+        patterns = [
+            (r'\beval\s*\(', 'Use of eval() - potential code injection', SeverityLevel.CRITICAL, 'CWE-95'),
+            (r'\bexec\s*\(', 'Use of exec() - potential code injection', SeverityLevel.CRITICAL, 'CWE-102'),
+            (r'os\.system\s*\(', 'os.system() use - potential command injection', SeverityLevel.HIGH, 'CWE-78'),
+            (r'subprocess\.(call|run|Popen).*shell\s*=\s*True', 'Shell=True in subprocess - command injection risk', SeverityLevel.HIGH, 'CWE-78'),
+            (r'["\']\s*(?:SELECT|INSERT|UPDATE|DELETE|DROP)\s+', 'Potential SQL injection pattern', SeverityLevel.CRITICAL, 'CWE-89'),
+            (r'<script|javascript:', 'Potential XSS pattern', SeverityLevel.HIGH, 'CWE-79'),
+            (r'\.\./|\.\.\\', 'Path traversal pattern', SeverityLevel.MEDIUM, 'CWE-22'),
+            (r'(?:password|secret|api_key|token)\s*=\s*["\'][^"\']+["\']', 'Hardcoded secret/credential', SeverityLevel.HIGH, 'CWE-798'),
+            (r'\bpickle\.loads?\s*\(', 'Unsafe pickle deserialization', SeverityLevel.HIGH, 'CWE-502'),
+            (r'(?:md5|sha1|DES)\s*\(', 'Weak cryptographic algorithm', SeverityLevel.MEDIUM, 'CWE-327'),
+        ]
+        import re
+        for i, line in enumerate(code.split('\n'), 1):
+            for pattern, desc, severity, cwe in patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    issues.append(SecurityIssue(
+                        rule_id=cwe,
+                        description=desc,
+                        severity=severity,
+                        line_number=i,
+                        filename=filename,
+                        cwe_id=cwe,
+                    ))
+        return issues
+
     def scan_file(self, filepath: str) -> ScanResult:
         """
         Scan a single file for security vulnerabilities.
@@ -146,11 +175,8 @@ class SecurityScanner:
         Returns:
             List of SecurityIssue objects.
         """
-        scanner = self._get_scanner()
-        if scanner is not None:
-            results = scanner.scan_code(code, language)
-            return results if isinstance(results, list) else []
-        return []
+        # Use built-in pattern scanner as primary implementation
+        return self._pattern_scan(code)
 
     def generate_report(self, result: ScanResult, format: str = "summary") -> str:
         """

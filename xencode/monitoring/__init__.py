@@ -17,20 +17,6 @@ except ImportError:
     PROMETHEUS_METRICS_AVAILABLE = False
 
 try:
-    from .health_monitor import HealthMonitor
-    HEALTH_MONITOR_AVAILABLE = True
-except ImportError:
-    HealthMonitor = None
-    HEALTH_MONITOR_AVAILABLE = False
-
-try:
-    from .alert_manager import AlertManager
-    ALERT_MANAGER_AVAILABLE = True
-except ImportError:
-    AlertManager = None
-    ALERT_MANAGER_AVAILABLE = False
-
-try:
     from .performance_optimizer import PerformanceOptimizer
     PERFORMANCE_OPTIMIZER_AVAILABLE = True
 except ImportError:
@@ -45,13 +31,18 @@ except ImportError:
     get_resource_manager = None
     RESOURCE_MANAGER_AVAILABLE = False
 
+# HealthMonitor and AlertManager don't exist as separate files
+# ResourceManager provides health check functionality
+HealthMonitor = ResourceManager
+AlertManager = None
+
 
 def get_monitoring_status() -> dict:
     """Get status of monitoring components"""
     return {
         "prometheus_metrics_available": PROMETHEUS_METRICS_AVAILABLE,
-        "health_monitor_available": HEALTH_MONITOR_AVAILABLE,
-        "alert_manager_available": ALERT_MANAGER_AVAILABLE,
+        "health_monitor_available": RESOURCE_MANAGER_AVAILABLE,
+        "alert_manager_available": False,
         "performance_optimizer_available": PERFORMANCE_OPTIMIZER_AVAILABLE,
         "resource_manager_available": RESOURCE_MANAGER_AVAILABLE
     }

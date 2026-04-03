@@ -23,10 +23,16 @@ except ImportError:
     ollama = None
 try:
     from pydantic import BaseModel, Field
+    HAS_PYDANTIC = True
 except ImportError:
-    # Fallback for environments without pydantic
-    BaseModel = object
-    Field = lambda default=None, **kwargs: default
+    # Fallback: use dataclasses instead of pydantic
+    from dataclasses import dataclass, field
+    HAS_PYDANTIC = False
+    class BaseModel:
+        """Minimal BaseModel compatibility using dataclasses."""
+        pass
+    def Field(default=None, **kwargs):
+        return default
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
@@ -81,44 +87,81 @@ class ModelConfig:
     fallback_priority: int = 0
 
 
-class QueryRequest(BaseModel):
-    """Structured query request"""
-    prompt: str = Field(..., description="Input prompt for reasoning")
-    models: List[str] = Field(default_factory=lambda: ["llama3.1:8b", "mistral:7b"], 
-                             description="Models to use in ensemble")
-    method: EnsembleMethod = Field(default=EnsembleMethod.VOTE, 
-                                  description="Ensemble fusion method")
-    max_tokens: int = Field(default=512, description="Maximum tokens per response")
-    temperature: float = Field(default=0.7, description="Sampling temperature")
-    timeout_ms: int = Field(default=2000, description="Per-model timeout in milliseconds")
-    require_consensus: bool = Field(default=False, description="Require model agreement")
-    use_rag: bool = Field(default=False, description="Use Local RAG for context")
-    
-    model_config = {"use_enum_values": True}
+if HAS_PYDANTIC:
+    class QueryRequest(BaseModel):
+        """Structured query request"""
+        prompt: str = Field(..., description="Input prompt for reasoning")
+        models: List[str] = Field(default_factory=lambda: ["llama3.1:8b", "mistral:7b"],
+                                 description="Models to use in ensemble")
+        method: EnsembleMethod = Field(default=EnsembleMethod.VOTE,
+                                      description="Ensemble fusion method")
+        max_tokens: int = Field(default=512, description="Maximum tokens per response")
+        temperature: float = Field(default=0.7, description="Sampling temperature")
+        timeout_ms: int = Field(default=2000, description="Per-model timeout in milliseconds")
+        require_consensus: bool = Field(default=False, description="Require model agreement")
+        use_rag: bool = Field(default=False, description="Use Local RAG for context")
+        model_config = {"use_enum_values": True}
 
+    class ModelResponse(BaseModel):
+        """Individual model response"""
+        model: str
+        response: str
+        confidence: float = 0.0
+        inference_time_ms: float = 0.0
+        tokens_generated: int = 0
+        success: bool = True
+        error: Optional[str] = None
 
-class ModelResponse(BaseModel):
-    """Individual model response"""
-    model: str
-    response: str
-    confidence: float = 0.0
-    inference_time_ms: float = 0.0
-    tokens_generated: int = 0
-    success: bool = True
-    error: Optional[str] = None
+    class QueryResponse(BaseModel):
+        """Ensemble query response"""
+        fused_response: str
+        method_used: EnsembleMethod
+        model_responses: List[ModelResponse]
+        total_time_ms: float
+        consensus_score: float = 0.0
+        confidence: float = 0.0
+        cache_hit: bool = False
+        model_config = {"use_enum_values": True}
+else:
+    @dataclass
+    class QueryRequest:
+        """Structured query request (dataclass fallback)"""
+        prompt: str = ""
+        models: List[str] = None
+        method: EnsembleMethod = EnsembleMethod.VOTE
+        max_tokens: int = 512
+        temperature: float = 0.7
+        timeout_ms: int = 2000
+        require_consensus: bool = False
+        use_rag: bool = False
+        def __post_init__(self):
+            if self.models is None:
+                self.models = ["llama3.1:8b", "mistral:7b"]
 
+    @dataclass
+    class ModelResponse:
+        """Individual model response (dataclass fallback)"""
+        model: str = ""
+        response: str = ""
+        confidence: float = 0.0
+        inference_time_ms: float = 0.0
+        tokens_generated: int = 0
+        success: bool = True
+        error: Optional[str] = None
 
-class QueryResponse(BaseModel):
-    """Ensemble query response"""
-    fused_response: str
-    method_used: EnsembleMethod
-    model_responses: List[ModelResponse]
-    total_time_ms: float
-    consensus_score: float = 0.0
-    confidence: float = 0.0
-    cache_hit: bool = False
-    
-    model_config = {"use_enum_values": True}
+    @dataclass
+    class QueryResponse:
+        """Ensemble query response (dataclass fallback)"""
+        fused_response: str = ""
+        method_used: EnsembleMethod = EnsembleMethod.VOTE
+        model_responses: List[ModelResponse] = None
+        total_time_ms: float = 0.0
+        consensus_score: float = 0.0
+        confidence: float = 0.0
+        cache_hit: bool = False
+        def __post_init__(self):
+            if self.model_responses is None:
+                self.model_responses = []
 
 
 class TokenVoter:
@@ -261,6 +304,11 @@ class EnsembleReasoner:
     def __init__(self, cache_manager=None):
         self.cache_manager = cache_manager
         self.model_configs = self._load_default_models()
+        if ollama is None:
+            raise ImportError(
+                "ollama is required for EnsembleReasoner. "
+                "Install with: pip install ollama"
+            )
         self.client = ollama.AsyncClient()
         self.voter = TokenVoter()
         
