@@ -299,17 +299,33 @@ class TokenVoter:
 
 
 class EnsembleReasoner:
-    """Main ensemble reasoning engine"""
-    
-    def __init__(self, cache_manager=None):
+    """Main ensemble reasoning engine
+
+    Supports both direct Ollama calls (legacy) and the unified multi-provider client.
+    Models prefixed with 'openai:', 'anthropic:', 'google_gemini:', 'openrouter:',
+    'qwen:', or 'huggingface:' will be routed through the appropriate provider.
+    """
+
+    def __init__(self, cache_manager=None, use_unified_client=True):
         self.cache_manager = cache_manager
         self.model_configs = self._load_default_models()
-        if ollama is None:
-            raise ImportError(
-                "ollama is required for EnsembleReasoner. "
-                "Install with: pip install ollama"
-            )
-        self.client = ollama.AsyncClient()
+        self.use_unified_client = use_unified_client
+
+        # Try unified client first (supports all providers)
+        self._unified_client = None
+        if use_unified_client:
+            try:
+                from xencode.unified_model_client import get_model_client
+                self._unified_client = get_model_client()
+            except Exception:
+                pass
+
+        # Fall back to ollama for local models
+        if ollama is not None:
+            self.client = ollama.AsyncClient()
+        else:
+            self.client = None
+
         self.voter = TokenVoter()
         
         # Performance tracking
@@ -576,41 +592,58 @@ class EnsembleReasoner:
 
         return valid_responses
     
-    async def _single_model_inference(self, query: QueryRequest, 
+    async def _single_model_inference(self, query: QueryRequest,
                                     model_config: ModelConfig) -> ModelResponse:
-        """Single model inference with error handling"""
+        """Single model inference with error handling and multi-provider support"""
         start_time = time.perf_counter()
-        
+        model_name = model_config.ollama_tag
+
         try:
-            response = await self.client.generate(
-                model=model_config.ollama_tag,
-                prompt=query.prompt,
-                options={
-                    "temperature": query.temperature,
-                    "num_predict": query.max_tokens,
-                },
-                stream=False
-            )
-            
+            # Detect provider from model name prefix
+            provider, clean_model = self._parse_model_provider(model_name)
+
+            if provider and self._unified_client is not None:
+                # Route through unified client for cloud providers
+                response_text = await self._unified_client.generate(
+                    prompt=query.prompt,
+                    model=clean_model,
+                    provider=provider,
+                    max_tokens=query.max_tokens,
+                    temperature=query.temperature,
+                )
+            elif self.client is not None:
+                # Use ollama client for local models
+                response = await self.client.generate(
+                    model=model_name,
+                    prompt=query.prompt,
+                    options={
+                        "temperature": query.temperature,
+                        "num_predict": query.max_tokens,
+                    },
+                    stream=False
+                )
+                response_text = response.get("response", "")
+            else:
+                raise RuntimeError("No available inference client")
+
             inference_time = (time.perf_counter() - start_time) * 1000
-            response_text = response.get("response", "")
-            
+
             # Simple confidence estimation based on response length and coherence
             confidence = min(1.0, len(response_text.split()) / 50.0)
-            
+
             return ModelResponse(
-                model=model_config.ollama_tag,
+                model=model_name,
                 response=response_text,
                 confidence=confidence,
                 inference_time_ms=inference_time,
                 tokens_generated=len(response_text.split()),
                 success=True
             )
-            
+
         except Exception as e:
             inference_time = (time.perf_counter() - start_time) * 1000
             return ModelResponse(
-                model=model_config.ollama_tag,
+                model=model_name,
                 response="",
                 confidence=0.0,
                 inference_time_ms=inference_time,
@@ -618,6 +651,23 @@ class EnsembleReasoner:
                 success=False,
                 error=str(e)
             )
+
+    @staticmethod
+    def _parse_model_provider(model_name: str) -> tuple:
+        """
+        Parse provider from model name prefix.
+
+        Examples:
+            'openai:gpt-4o' -> ('openai', 'gpt-4o')
+            'anthropic:claude-sonnet-4' -> ('anthropic', 'claude-sonnet-4')
+            'llama3.1:8b' -> (None, 'llama3.1:8b')  # ollama format, no prefix
+        """
+        known_providers = {'openai', 'anthropic', 'google_gemini', 'openrouter', 'qwen', 'huggingface'}
+        if ':' in model_name:
+            prefix, rest = model_name.split(':', 1)
+            if prefix.lower() in known_providers:
+                return (prefix.lower(), rest)
+        return (None, model_name)
     
     async def _fuse_responses(self, responses: List[ModelResponse],
                             method: EnsembleMethod,
