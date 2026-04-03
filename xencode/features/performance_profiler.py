@@ -1044,5 +1044,40 @@ class PerformanceProfiler(FeatureBase):
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for this feature"""
-        # API endpoints will be implemented if needed
-        return []
+        return [
+            {
+                'path': '/api/profile/run',
+                'method': 'POST',
+                'handler': self.profile,
+            },
+            {
+                'path': '/api/profile/analyze',
+                'method': 'POST',
+                'handler': self.analyze,
+            },
+            {
+                'path': '/api/profile/optimize',
+                'method': 'POST',
+                'handler': self.optimize,
+            },
+            {
+                'path': '/api/profile/compare',
+                'method': 'POST',
+                'handler': self.compare,
+            },
+            {
+                'path': '/api/profile/report',
+                'method': 'POST',
+                'handler': self.generate_report,
+            },
+            {
+                'path': '/api/profile/trends',
+                'method': 'GET',
+                'handler': self.visualize_trends,
+            },
+            {
+                'path': '/api/profile/history',
+                'method': 'GET',
+                'handler': self.list_history,
+            },
+        ]

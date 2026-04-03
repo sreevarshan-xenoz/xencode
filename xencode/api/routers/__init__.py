@@ -55,6 +55,20 @@ except ImportError:
     features_router = None
     FEATURES_ROUTER_AVAILABLE = False
 
+try:
+    from .fallback import router as fallback_router
+    FALLBACK_ROUTER_AVAILABLE = True
+except ImportError:
+    fallback_router = None
+    FALLBACK_ROUTER_AVAILABLE = False
+
+try:
+    from .testing import router as testing_router
+    TESTING_ROUTER_AVAILABLE = True
+except ImportError:
+    testing_router = None
+    TESTING_ROUTER_AVAILABLE = False
+
 
 def get_router_status() -> dict:
     """Get status of all routers"""
@@ -65,7 +79,9 @@ def get_router_status() -> dict:
         "analytics_router": ANALYTICS_ROUTER_AVAILABLE,
         "monitoring_router": MONITORING_ROUTER_AVAILABLE,
         "plugin_router": PLUGIN_ROUTER_AVAILABLE,
-        "features_router": FEATURES_ROUTER_AVAILABLE
+        "features_router": FEATURES_ROUTER_AVAILABLE,
+        "fallback_router": FALLBACK_ROUTER_AVAILABLE,
+        "testing_router": TESTING_ROUTER_AVAILABLE,
     }
 
 
@@ -77,5 +93,7 @@ __all__ = [
     'monitoring_router',
     'plugin_router',
     'features_router',
+    'fallback_router',
+    'testing_router',
     'get_router_status'
 ]

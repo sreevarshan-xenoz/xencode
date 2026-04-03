@@ -26,6 +26,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov flake8 mypy
+
+    - name: Validate version consistency
+      run: |
+        python scripts/check_version_consistency.py
+
+    - name: Collect tests
+      run: |
+        python -m pytest tests --collect-only -q -p no:cacheprovider
         
     - name: Lint with flake8
       run: |
@@ -36,7 +44,7 @@ jobs:
     
     - name: Test with pytest
       run: |
-        pytest tests/ -v --cov=xencode --cov-report=xml
+        python -m pytest tests/ -v --cov=xencode --cov-report=xml -p no:cacheprovider
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3

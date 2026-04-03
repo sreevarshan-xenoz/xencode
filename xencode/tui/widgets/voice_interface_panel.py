@@ -227,7 +227,7 @@ class VoiceCommandItem(ListItem):
         try:
             dt = datetime.fromisoformat(timestamp)
             time_str = dt.strftime("%H:%M:%S")
-        except:
+        except Exception:
             time_str = timestamp
         
         # Confidence indicator
@@ -446,9 +446,8 @@ class VoiceSettingsPanel(Container):
                 else:
                     input_widget = self.query_one(f"#{input_id}", Input)
                     input_widget.value = str(value)
-            except:
-                pass
-
+            except Exception:
+                    pass  # Silently ignore
 
 class VoiceInterfacePanel(Container):
     """Main voice interface panel with all components"""

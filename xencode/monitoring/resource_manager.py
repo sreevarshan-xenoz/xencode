@@ -587,7 +587,7 @@ class ResourceManager:
         usage[ResourceType.TEMPORARY_FILES] = ResourceUsage(
             resource_type=ResourceType.TEMPORARY_FILES,
             current_usage=temp_stats["total_size_mb"],
-            peak_usage=temp_stats["total_size_mb"],  # TODO: Track peak
+            peak_usage=temp_stats.get("peak_size_mb", temp_stats["total_size_mb"]),
             limit=self.resource_limits.get(ResourceType.TEMPORARY_FILES),
             metadata=temp_stats
         )

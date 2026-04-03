@@ -183,9 +183,9 @@ class ContextEngine:
                         "scripts": list(pkg.get("scripts", {}).keys()),
                         "dependencies": list(pkg.get("dependencies", {}).keys())
                     }
-            except:
-                pass
-        
+            except Exception:
+                    pass  # Silently ignore
+
         if 'requirements.txt' in files or 'pyproject.toml' in files or 'setup.py' in files:
             project_types.append("python")
             # Get Python project info
@@ -194,8 +194,9 @@ class ContextEngine:
                 try:
                     with open('requirements.txt', 'r') as f:
                         deps = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-                except:
-                    pass
+                except Exception:
+                        pass  # Silently ignore
+
             return {
                 "type": "python",
                 "dependencies": deps
@@ -228,8 +229,18 @@ class ContextEngine:
     
     def _get_dependencies(self) -> Dict[str, List[str]]:
         """Get project dependencies"""
-        project_type = self.context.get("project_info", {}).get("type", "unknown")
-        
+        # Note: Can't use self.context here as this is called during initialization
+        # Detect project type directly instead
+        project_type = "unknown"
+        if Path("requirements.txt").exists() or Path("pyproject.toml").exists() or Path("setup.py").exists():
+            project_type = "python"
+        elif Path("package.json").exists():
+            project_type = "nodejs"
+        elif Path("Cargo.toml").exists():
+            project_type = "rust"
+        elif Path("go.mod").exists():
+            project_type = "go"
+
         if project_type == "python":
             try:
                 result = subprocess.run(
@@ -240,8 +251,9 @@ class ContextEngine:
                 )
                 if result.returncode == 0:
                     return {"pip_packages": json.loads(result.stdout)}
-            except:
-                pass
+            except Exception:
+                pass  # Silently ignore
+
         elif project_type == "nodejs":
             try:
                 with open('package.json', 'r') as f:
@@ -252,9 +264,9 @@ class ContextEngine:
                         "dependencies": deps,
                         "dev_dependencies": dev_deps
                     }
-            except:
-                pass
-        
+            except Exception:
+                    pass  # Silently ignore
+
         return {}
     
     def _get_system_resources(self) -> Dict[str, Any]:
@@ -308,7 +320,7 @@ class ContextEngine:
                 "connected": True,
                 "local_ip": ip
             }
-        except:
+        except Exception:
             return {
                 "connected": False,
                 "local_ip": "unknown"

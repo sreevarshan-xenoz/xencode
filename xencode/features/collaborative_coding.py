@@ -1551,13 +1551,87 @@ class CollaborativeCodingFeature(FeatureBase):
 
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for collaborative coding"""
-        # Will be implemented with actual CLI framework
-        return []
+        import click
+        from concurrent.futures import ThreadPoolExecutor
+
+        def run_sync(coro):
+            """Run coroutine from both sync and async contexts safely."""
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(coro)).result()
+
+        @click.group(name='collab')
+        def collab_group():
+            """Collaborative coding commands"""
+            pass
+
+        @collab_group.command(name='start')
+        @click.argument('name')
+        @click.option('--owner-id', default='owner', help='Owner user ID')
+        @click.option('--username', default='Owner', help='Display username')
+        def start_cmd(name: str, owner_id: str, username: str):
+            """Start a new collaboration session."""
+            click.echo("Starting Collaboration Session...")
+            result = run_sync(self.start(name=name, owner_id=owner_id, username=username))
+            if result.get('success'):
+                click.echo(f"Session started: {result.get('session_id', 'unknown')}")
+            else:
+                click.echo(f"Failed: {result.get('error', 'unknown error')}")
+
+        @collab_group.command(name='join')
+        @click.argument('session_id')
+        @click.option('--user-id', default='user', help='User ID')
+        @click.option('--username', default='User', help='Display username')
+        def join_cmd(session_id: str, user_id: str, username: str):
+            """Join an existing collaboration session."""
+            click.echo("Joining Collaboration Session...")
+            result = run_sync(self.join(session_id=session_id, user_id=user_id, username=username))
+            if result.get('success'):
+                click.echo(f"Joined session: {session_id}")
+            else:
+                click.echo(f"Failed: {result.get('error', 'unknown error')}")
+
+        @collab_group.command(name='leave')
+        @click.argument('session_id')
+        @click.option('--user-id', default='user', help='User ID')
+        def leave_cmd(session_id: str, user_id: str):
+            """Leave a collaboration session."""
+            result = run_sync(self.leave(session_id=session_id, user_id=user_id))
+            if result.get('success'):
+                click.echo(f"Left session: {session_id}")
+            else:
+                click.echo(f"Failed: {result.get('error', 'unknown error')}")
+
+        @collab_group.command(name='list')
+        @click.option('--user-id', default=None, help='Optional filter by user ID')
+        def list_cmd(user_id: Optional[str]):
+            """List active sessions."""
+            result = run_sync(self.list_sessions(user_id=user_id))
+            if not result.get('success'):
+                click.echo(f"Failed: {result.get('error', 'unknown error')}")
+                return
+            click.echo(f"Active sessions: {result.get('count', 0)}")
+            for session in result.get('sessions', []):
+                click.echo(f"- {session.get('session_id')} ({session.get('name')})")
+
+        @collab_group.command(name='users')
+        @click.argument('session_id')
+        def users_cmd(session_id: str):
+            """List users in a collaboration session."""
+            result = run_sync(self.get_session_info(session_id=session_id))
+            if not result.get('success'):
+                click.echo(f"Failed: {result.get('error', 'unknown error')}")
+                return
+            participants = result.get('session', {}).get('participants', {})
+            click.echo(f"Users in {session_id}: {len(participants)}")
+            for user_id, user in participants.items():
+                click.echo(f"- {user_id}: {user.get('username', 'unknown')}")
+
+        return [collab_group]
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for collaborative coding"""
-        # Will be implemented with actual TUI framework
-        return []
+        from xencode.tui.widgets.collaborative_coding_panel import CollaborativeCodingPanel
+        return [CollaborativeCodingPanel]
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for collaborative coding"""
@@ -1606,6 +1680,16 @@ class CollaborativeCodingFeature(FeatureBase):
                 'path': '/api/collab/resolve',
                 'method': 'POST',
                 'handler': self.resolve_conflicts
+            },
+            {
+                'path': '/api/collab/history/{session_id}',
+                'method': 'GET',
+                'handler': self.get_edit_history
+            },
+            {
+                'path': '/api/collab/rollback',
+                'method': 'POST',
+                'handler': self.rollback_edits
             },
             {
                 'path': '/api/collab/presence',

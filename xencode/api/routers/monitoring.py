@@ -27,6 +27,16 @@ try:
 except ImportError:
     MONITORING_AVAILABLE = False
 
+# Import benchmark components
+try:
+    from ...monitoring.benchmark_engine import BenchmarkEngine, BenchmarkTask, TaskType
+    from ...monitoring.benchmark_suites import get_benchmark_suites, BenchmarkSuites
+    from ...monitoring.benchmark_recommendations import get_recommendations_engine
+    from ...monitoring.benchmark_store import BenchmarkStore
+    BENCHMARK_AVAILABLE = True
+except ImportError:
+    BENCHMARK_AVAILABLE = False
+
 router = APIRouter()
 
 
@@ -189,6 +199,50 @@ class CleanupRequest(BaseModel):
     priority: str = "normal"  # low, normal, high
     force: bool = False
     dry_run: bool = False
+
+
+# Benchmark Pydantic models
+class BenchmarkRunRequest(BaseModel):
+    """Request to run benchmark suite"""
+    suite_name: str = "code_generation"
+    providers: List[Dict[str, str]] = Field(default_factory=lambda: [{"provider": "ollama", "model": "llama3.2"}])
+    concurrent: bool = True
+    custom_tasks: Optional[List[Dict[str, Any]]] = None
+
+
+class BenchmarkResultResponse(BaseModel):
+    """Benchmark result"""
+    run_id: str
+    task_name: str
+    task_type: str
+    provider: str
+    model: str
+    latency_ms: float
+    tokens_per_sec: float
+    accuracy_score: float
+    cost_per_request: float
+    success: bool
+    timestamp: str
+
+
+class BenchmarkComparisonResponse(BaseModel):
+    """Provider comparison"""
+    task_type: str
+    providers: List[Dict[str, Any]]
+    best_provider: str
+    best_model: str
+
+
+class BenchmarkRecommendationResponse(BaseModel):
+    """Model recommendation"""
+    task_type: str
+    use_case: str
+    recommended_provider: str
+    recommended_model: str
+    confidence: float
+    reasons: List[str]
+    alternatives: List[Dict[str, Any]]
+    tradeoffs: Dict[str, str]
 
 
 # Dependencies
@@ -557,7 +611,7 @@ async def acknowledge_alert(alert_id: str):
 @router.get("/processes", response_model=List[ProcessInfoResponse])
 async def get_processes(
     limit: int = Query(20, le=100),
-    sort_by: str = Query("memory", regex="^(memory|cpu|name|pid)$")
+    sort_by: str = Query("memory", pattern="^(memory|cpu|name|pid)$")
 ):
     """Get running processes information"""
     try:
@@ -1077,10 +1131,9 @@ async def get_performance_metrics(
             cache_system = await get_multimodal_cache_async()
             cache_stats = await cache_system.get_cache_statistics()
             cache_hit_rate = cache_stats.get("base_cache", {}).get("hit_rate", 0.0)
-        except:
-            pass
-        
-        # Get actual CPU usage
+        except Exception:
+                pass  # Silently ignore
+# Get actual CPU usage
         cpu_usage = psutil.cpu_percent(interval=1)
 
         # For response time average, we'll use a mock value since we don't have actual request logs
@@ -1296,6 +1349,588 @@ async def get_memory_analysis(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get memory analysis: {e}")
+
+
+# ============================================================================
+# Provider Health Endpoints
+# ============================================================================
+
+class ProviderHealthStatusEnum(str, Enum):
+    """Provider health status"""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+    UNKNOWN = "unknown"
+    OFFLINE = "offline"
+
+
+class ProviderHealthResponse(BaseModel):
+    """Provider health information"""
+    provider: str
+    status: str
+    endpoint: Optional[str] = None
+    last_checked: Optional[str] = None
+    last_success: Optional[str] = None
+    uptime_percentage: float = 0.0
+    latency: Dict[str, Any] = Field(default_factory=dict)
+    errors: Dict[str, Any] = Field(default_factory=dict)
+    usage: Dict[str, Any] = Field(default_factory=dict)
+    model_count: int = 0
+    available_models: List[str] = Field(default_factory=list)
+
+
+class ProviderHealthSummaryResponse(BaseModel):
+    """Provider health summary"""
+    timestamp: str
+    providers: Dict[str, ProviderHealthResponse]
+    overall_status: str
+    healthy_count: int
+    degraded_count: int
+    unhealthy_count: int
+    recommended_provider: str
+
+
+@router.get("/providers/health", response_model=ProviderHealthSummaryResponse, tags=["providers"])
+async def get_provider_health_summary():
+    """
+    Get health summary for all configured providers
+    
+    Returns real-time health status including:
+    - Provider availability
+    - Response latency metrics
+    - Error rates and tracking
+    - Usage quotas and limits
+    - Model availability
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor
+        
+        monitor = get_health_monitor()
+        
+        # Check all providers
+        from ...monitoring.provider_health import ProviderType
+        import asyncio
+        
+        async def check_all():
+            tasks = [
+                monitor.check_provider_health(provider)
+                for provider in ProviderType
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        await check_all()
+        
+        # Get summary
+        summary = monitor.get_health_summary()
+        
+        # Get recommendation
+        recommended = monitor.get_recommended_provider()
+        
+        return ProviderHealthSummaryResponse(
+            timestamp=summary['timestamp'],
+            providers={
+                k: ProviderHealthResponse(**v)
+                for k, v in summary['providers'].items()
+            },
+            overall_status=summary['overall_status'],
+            healthy_count=summary['healthy_count'],
+            degraded_count=summary['degraded_count'],
+            unhealthy_count=summary['unhealthy_count'],
+            recommended_provider=recommended.value,
+        )
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get provider health: {e}"
+        )
+
+
+@router.get("/providers/{provider_name}/health", response_model=ProviderHealthResponse, tags=["providers"])
+async def get_provider_health(provider_name: str):
+    """
+    Get detailed health information for a specific provider
+    
+    Args:
+        provider_name: Provider identifier (e.g., 'local_ollama', 'cloud_qwen')
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        # Find provider
+        try:
+            provider = ProviderType(provider_name)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown provider: {provider_name}"
+            )
+        
+        # Check health
+        health = await monitor.check_provider_health(provider)
+        
+        return ProviderHealthResponse(
+            provider=health.provider.value,
+            status=health.status.value,
+            endpoint=health.endpoint,
+            last_checked=health.last_checked.isoformat() if health.last_checked else None,
+            last_success=health.last_success.isoformat() if health.last_success else None,
+            uptime_percentage=health.uptime_percentage,
+            latency=health.latency.to_dict(),
+            errors=health.errors.to_dict(),
+            usage=health.usage.to_dict(),
+            model_count=health.model_count,
+            available_models=health.available_models,
+        )
+        
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get provider health: {e}"
+        )
+
+
+@router.post("/providers/{provider_name}/check", tags=["providers"])
+async def check_provider(provider_name: str):
+    """
+    Force an immediate health check for a provider
+    
+    Args:
+        provider_name: Provider identifier
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        try:
+            provider = ProviderType(provider_name)
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown provider: {provider_name}"
+            )
+        
+        health = await monitor.check_provider_health(provider)
+        
+        return {
+            "provider": health.provider.value,
+            "status": health.status.value,
+            "latency_ms": health.latency.current_ms,
+            "error_rate": health.errors.error_rate,
+            "checked_at": health.last_checked.isoformat() if health.last_checked else None,
+        }
+        
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to check provider: {e}"
+        )
+
+
+@router.get("/providers/recommend", tags=["providers"])
+async def get_recommended_provider(task_type: str = Query(default="general")):
+    """
+    Get recommended provider based on current health and task type
+    
+    Args:
+        task_type: Type of task (general, code, chat, reasoning)
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor
+        
+        monitor = get_health_monitor()
+        recommended = monitor.get_recommended_provider(task_type)
+        
+        health = monitor.get_provider_health(recommended)
+        
+        return {
+            "provider": recommended.value,
+            "status": health.status.value if health else "unknown",
+            "reason": "Best combination of latency, error rate, and uptime",
+            "latency_avg_ms": health.latency.avg_ms if health else None,
+            "error_rate": health.errors.error_rate if health else None,
+            "uptime_percentage": health.uptime_percentage if health else None,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get recommendation: {e}"
+        )
+
+
+@router.get("/providers/latency/trends", tags=["providers"])
+async def get_latency_trends():
+    """
+    Get latency trends for all providers
+    
+    Returns historical latency data and trend analysis.
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        trends = {}
+        for provider in ProviderType:
+            health = monitor.get_provider_health(provider)
+            if health:
+                trends[provider.value] = {
+                    "current_ms": health.latency.current_ms,
+                    "avg_ms": health.latency.avg_ms,
+                    "min_ms": health.latency.min_ms,
+                    "max_ms": health.latency.max_ms,
+                    "p50_ms": health.latency.p50_ms,
+                    "p95_ms": health.latency.p95_ms,
+                    "trend": health.latency.get_trend(),
+                    "sample_count": health.latency.sample_count,
+                }
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "trends": trends,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get latency trends: {e}"
+        )
+
+
+@router.get("/providers/errors", tags=["providers"])
+async def get_provider_errors(hours: int = Query(default=24, ge=1, le=168)):
+    """
+    Get error summary for all providers
+    
+    Args:
+        hours: Number of hours to look back (1-168)
+    """
+    try:
+        from ...monitoring.provider_health import get_health_monitor, ProviderType
+        
+        monitor = get_health_monitor()
+        
+        errors = {}
+        for provider in ProviderType:
+            health = monitor.get_provider_health(provider)
+            if health and health.errors.total_errors > 0:
+                errors[provider.value] = {
+                    "total_errors": health.errors.total_errors,
+                    "error_rate": health.errors.error_rate,
+                    "error_types": health.errors.error_types,
+                    "last_error_time": health.errors.last_error_time.isoformat() if health.errors.last_error_time else None,
+                    "last_error_message": health.errors.last_error_message,
+                    "consecutive_errors": health.errors.consecutive_errors,
+                }
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "hours": hours,
+            "errors": errors,
+        }
+        
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="Provider health monitoring not available"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get error summary: {e}"
+        )
+
+
+# Benchmark Endpoints
+@router.post("/benchmarks/run", response_model=Dict[str, Any], tags=["benchmarks"])
+async def run_benchmark_suite(request: BenchmarkRunRequest):
+    """
+    Run a benchmark suite
+    
+    Executes benchmark tasks against specified providers and models.
+    Results are stored for analysis and recommendations.
+    """
+    if not BENCHMARK_AVAILABLE:
+        return {
+            "error": "Benchmark module not available",
+            "run_id": "mock_run",
+            "status": "mock",
+        }
+    
+    try:
+        engine = BenchmarkEngine()
+        suites = get_benchmark_suites()
+        
+        # Get tasks from suite
+        tasks = suites.get_suite(request.suite_name)
+        
+        if not tasks:
+            raise HTTPException(status_code=400, detail=f"Unknown suite: {request.suite_name}")
+        
+        # Add custom tasks if provided
+        if request.custom_tasks:
+            for custom in request.custom_tasks:
+                task = suites.create_custom_task(
+                    name=custom.get("name", "custom"),
+                    task_type=custom.get("task_type", "general"),
+                    prompt=custom.get("prompt", ""),
+                    expected_output=custom.get("expected_output"),
+                )
+                tasks.append(task)
+        
+        # Parse providers
+        providers = [(p["provider"], p["model"]) for p in request.providers]
+        
+        # Run benchmark
+        summary = await engine.run_benchmark_suite(
+            tasks=tasks,
+            providers=providers,
+            suite_name=request.suite_name,
+            concurrent=request.concurrent,
+        )
+        
+        # Close engine session
+        await engine.close()
+        
+        return {
+            "run_id": summary["run_id"],
+            "status": "completed",
+            "suite_name": summary["suite_name"],
+            "total_tasks": summary["total_tasks"],
+            "successful": summary["successful"],
+            "failed": summary["failed"],
+            "avg_latency_ms": summary.get("avg_latency_ms"),
+            "avg_accuracy_score": summary.get("avg_accuracy_score"),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Benchmark execution failed: {e}")
+
+
+@router.get("/benchmarks/results", response_model=List[BenchmarkResultResponse], tags=["benchmarks"])
+async def get_benchmark_results(
+    run_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    task_type: Optional[str] = None,
+    limit: int = 100,
+):
+    """Get benchmark results with optional filters"""
+    if not BENCHMARK_AVAILABLE:
+        return []
+    
+    try:
+        store = BenchmarkStore()
+        
+        if run_id:
+            # Get results for specific run
+            run = store.get_run(run_id)
+            if not run:
+                raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+            
+            # Query would need run_id filter - simplified for now
+            results = store.get_results_by_task_type("general", limit=limit)
+        elif provider and model:
+            results = store.get_results_by_model(provider, model, limit)
+        elif provider:
+            results = store.get_results_by_provider(provider, limit)
+        elif task_type:
+            results = store.get_results_by_task_type(task_type, limit)
+        else:
+            # Get recent results from all providers
+            results = store.get_results_by_task_type("general", limit)
+        
+        return [
+            BenchmarkResultResponse(
+                run_id=r.get("run_id", ""),
+                task_name=r.get("task_name", ""),
+                task_type=r.get("task_type", ""),
+                provider=r.get("provider", ""),
+                model=r.get("model", ""),
+                latency_ms=r.get("latency_ms", 0),
+                tokens_per_sec=r.get("tokens_per_sec", 0),
+                accuracy_score=r.get("accuracy_score", 0),
+                cost_per_request=r.get("cost_per_request", 0),
+                success=r.get("success", False),
+                timestamp=r.get("timestamp", ""),
+            )
+            for r in results
+        ]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get results: {e}")
+
+
+@router.get("/benchmarks/comparison", response_model=Dict[str, Any], tags=["benchmarks"])
+async def compare_providers(
+    task_type: Optional[str] = None,
+):
+    """Compare provider performance"""
+    if not BENCHMARK_AVAILABLE:
+        return {
+            "task_type": task_type or "general",
+            "providers": [],
+            "best_provider": "ollama",
+            "best_model": "llama3.2",
+        }
+    
+    try:
+        store = BenchmarkStore()
+        recommendations = get_recommendations_engine(store)
+        
+        # Get analysis
+        analysis = recommendations.get_cost_quality_analysis(task_type or "general")
+        
+        if "error" in analysis:
+            return {
+                "task_type": task_type or "general",
+                "providers": [],
+                "best_provider": "unknown",
+                "best_model": "unknown",
+                "message": analysis["error"],
+            }
+        
+        # Format comparison
+        providers = []
+        for model in analysis.get("all_models", []):
+            providers.append({
+                "provider": model["provider"],
+                "model": model["model"],
+                "overall_score": model["overall_score"],
+                "performance_score": model["performance_score"],
+                "quality_score": model["quality_score"],
+                "cost_score": model["cost_score"],
+                "avg_latency_ms": model["avg_latency_ms"],
+                "avg_accuracy": model["avg_accuracy"],
+                "avg_cost": model["avg_cost_per_request"],
+            })
+        
+        best = providers[0] if providers else {}
+        
+        return {
+            "task_type": task_type or "general",
+            "providers": providers,
+            "best_provider": best.get("provider", "unknown"),
+            "best_model": best.get("model", "unknown"),
+            "pareto_optimal_count": analysis.get("pareto_optimal", 0),
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")
+
+
+@router.get("/benchmarks/recommendations", response_model=BenchmarkRecommendationResponse, tags=["benchmarks"])
+async def get_recommendations(
+    task_type: str = "code_generation",
+    use_case: str = "production",
+    max_budget: Optional[float] = None,
+    max_latency_ms: Optional[float] = None,
+    min_accuracy: Optional[float] = None,
+):
+    """Get model recommendations based on benchmarks"""
+    if not BENCHMARK_AVAILABLE:
+        return {
+            "task_type": task_type,
+            "use_case": use_case,
+            "recommended_provider": "ollama",
+            "recommended_model": "llama3.2",
+            "confidence": 0.5,
+            "reasons": ["Default recommendation - no benchmark data"],
+            "alternatives": [],
+            "tradeoffs": {},
+        }
+    
+    try:
+        store = BenchmarkStore()
+        recommendations = get_recommendations_engine(store)
+        
+        rec = recommendations.get_recommendations(
+            task_type=task_type,
+            use_case=use_case,
+            max_budget=max_budget,
+            max_latency_ms=max_latency_ms,
+            min_accuracy=min_accuracy,
+        )
+        
+        return BenchmarkRecommendationResponse(
+            task_type=rec.task_type,
+            use_case=rec.use_case,
+            recommended_provider=rec.recommended_provider,
+            recommended_model=rec.recommended_model,
+            confidence=rec.confidence,
+            reasons=rec.reasons,
+            alternatives=rec.alternatives,
+            tradeoffs=rec.tradeoffs,
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recommendations failed: {e}")
+
+
+@router.get("/benchmarks/suites", response_model=Dict[str, Any], tags=["benchmarks"])
+async def list_benchmark_suites():
+    """List available benchmark suites"""
+    if not BENCHMARK_AVAILABLE:
+        return {
+            "suites": ["code_generation", "chat", "reasoning"],
+            "message": "Mock response - benchmark module not available",
+        }
+    
+    try:
+        suites = get_benchmark_suites()
+        
+        all_suites = suites.get_all_suites()
+        
+        return {
+            "suites": {
+                name: {
+                    "task_count": len(tasks),
+                    "task_types": list(set(t.task_type.value if hasattr(t.task_type, 'value') else str(t.task_type) for t in tasks)),
+                }
+                for name, tasks in all_suites.items()
+            },
+            "task_types": suites.get_task_types(),
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list suites: {e}")
 
 
 # Add router tags and metadata

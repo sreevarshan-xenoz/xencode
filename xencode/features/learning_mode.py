@@ -453,11 +453,39 @@ class LearningModeFeature(FeatureBase):
     
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for Learning Mode"""
-        return []
+        import click
+
+        @click.group(name='learn')
+        def learn_group():
+            """Learning mode commands"""
+            pass
+
+        @learn_group.command(name='topics')
+        def topics_cmd():
+            topics = asyncio.run(self.get_topics())
+            for topic in topics:
+                click.echo(f"- {topic.get('id')}: {topic.get('name')}")
+
+        @learn_group.command(name='start')
+        @click.argument('topic_id')
+        @click.option('--difficulty', default=None)
+        def start_cmd(topic_id: str, difficulty: Optional[str]):
+            result = asyncio.run(self.start_topic(topic_id=topic_id, difficulty=difficulty))
+            click.echo(f"Started topic: {result.get('topic', {}).get('name', topic_id)}")
+            click.echo(f"Difficulty: {result.get('difficulty')}")
+
+        @learn_group.command(name='progress')
+        @click.option('--topic-id', default=None)
+        def progress_cmd(topic_id: Optional[str]):
+            result = asyncio.run(self.get_progress(topic_id=topic_id))
+            click.echo(json.dumps(result, indent=2))
+
+        return [learn_group]
     
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for Learning Mode"""
-        return []
+        from xencode.tui.features.learning_mode_panel import LearningModePanel
+        return [LearningModePanel]
     
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for Learning Mode"""

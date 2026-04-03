@@ -289,7 +289,7 @@ class DebuggingManager:
         try:
             process = psutil.Process(os.getpid())
             return process.memory_info().rss / 1024 / 1024  # MB
-        except:
+        except Exception:
             return 0.0
     
     def start_performance_monitor(self, name: str, interval: float = 1.0):
@@ -415,7 +415,7 @@ class DebuggingManager:
                 "home_dir": os.path.expanduser("~"),
                 "temp_dir": tempfile.gettempdir()
             }
-        except:
+        except Exception:
             return {"error": "Could not get system info"}
     
     def _get_process_info(self) -> Dict[str, Any]:
@@ -435,7 +435,7 @@ class DebuggingManager:
                 "open_files": [f.path for f in process.open_files()] if process.open_files() else [],
                 "connections": [conn._asdict() for conn in process.connections()]
             }
-        except:
+        except Exception:
             return {"error": "Could not get process info"}
     
     def _get_performance_stats(self) -> Dict[str, Any]:

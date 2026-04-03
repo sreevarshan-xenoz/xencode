@@ -133,9 +133,9 @@ class TrainingDashboard(Container):
             )
             self.query_one("#training-accuracy", Label).update(f"{info.get('accuracy', 0):.1%}")
             self.query_one("#training-samples", Label).update(str(info.get('samples', 0)))
-        except:
-            pass
-    
+        except Exception:
+                pass  # Silently ignore
+
     def update_progress(self, progress: float, status: str = None) -> None:
         """Update training progress"""
         self.progress = progress
@@ -143,16 +143,15 @@ class TrainingDashboard(Container):
         try:
             progress_bar = self.query_one("#training-progress", ProgressBar)
             progress_bar.update(progress=int(progress * 100))
-        except:
-            pass
-        
+        except Exception:
+                pass  # Silently ignore
+
         if status:
             self.status = status
             try:
                 self.query_one("#training-status", Label).update(status)
-            except:
-                pass
-
+            except Exception:
+                    pass  # Silently ignore
 
 class PerformanceViewer(Container):
     """Viewer for model performance metrics"""
@@ -249,9 +248,8 @@ class PerformanceViewer(Container):
             self.query_one("#metric-accuracy", Label).update(f"{metrics.get('accuracy', 0):.1%}")
             self.query_one("#metric-memory", Label).update(f"{metrics.get('memory_mb', 0):.1f}MB")
             self.query_one("#metric-samples", Label).update(str(metrics.get('samples_tested', 0)))
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class VersionHistoryItem(ListItem):
     """A single version in the history"""
@@ -298,7 +296,7 @@ class VersionHistoryItem(ListItem):
         try:
             dt = datetime.fromisoformat(created_at)
             time_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
+        except Exception:
             time_str = created_at
         
         # Status emoji
@@ -422,9 +420,8 @@ class CodebaseAnalysisResults(Container):
                         f"{pattern.get('confidence', 0):.0%}",
                         examples
                     )
-        except:
-            pass
-
+        except Exception:
+                pass  # Silently ignore
 
 class ModelListItem(ListItem):
     """A single model in the list"""

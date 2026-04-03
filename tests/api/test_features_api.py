@@ -8,6 +8,7 @@ Tests all feature management endpoints including configuration, status, and cont
 import pytest
 from datetime import datetime
 from fastapi.testclient import TestClient
+from fastapi import Header, HTTPException, status
 from unittest.mock import Mock, AsyncMock
 
 # Import the FastAPI app and router
@@ -36,6 +37,10 @@ class MockFeatureManager:
         self.mock_feature.get_api_endpoints.return_value = []
         self.mock_feature.update_config = Mock()
         self.mock_feature.initialize = AsyncMock(return_value=True)
+        self.mock_feature.usage_count = 0
+        self.mock_feature.last_used = None
+        self.mock_feature.error_count = 0
+        self.mock_feature.avg_response_time = 0.0
         
         self.features = {"test_feature": self.mock_feature}
     
@@ -64,8 +69,34 @@ def mock_manager():
 @pytest.fixture
 def client(mock_manager):
     """Create test client with dependency override"""
+    async def mock_collaboration_auth(authorization: str = Header(default="")):
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+            )
+        return {
+            "user_id": "test-user",
+            "username": "tester",
+            "role": "developer",
+        }
+
+    async def mock_verify_jwt(authorization: str = Header(default="")):
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+            )
+        return {
+            "user_id": "test-user",
+            "username": "tester",
+            "role": "developer",
+        }
+
     # Override the dependency
     app.dependency_overrides[features.get_feature_manager] = lambda: mock_manager
+    app.dependency_overrides[features.verify_collaboration_auth] = mock_collaboration_auth
+    app.dependency_overrides[features.verify_jwt_token] = mock_verify_jwt
     
     client = TestClient(app)
     yield client
@@ -306,7 +337,10 @@ class TestFeatureAnalytics:
     
     def test_get_analytics(self, client):
         """Test getting feature analytics"""
-        response = client.get("/api/v1/features/test_feature/analytics")
+        response = client.get(
+            "/api/v1/features/test_feature/analytics",
+            headers={"Authorization": "Bearer test-token"},
+        )
         
         assert response.status_code == 200
         data = response.json()
