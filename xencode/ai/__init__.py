@@ -1,1 +1,27 @@
-  
+"""
+AI package for Xencode.
+
+Provides advanced AI capabilities including hybrid model architecture,
+adaptive reasoning, prompt optimization, and knowledge transfer.
+"""
+
+from .hybrid_model_architecture import HybridModelArchitecture, ModelRoutingStrategy
+from .hybrid_model_config import HybridModelConfig
+from .hybrid_model_integration import HybridModelIntegration
+from .orchestrator import AIOrchestrator
+from .prompt_optimizer import PromptOptimizer
+from .adaptive_reasoning import AdaptiveReasoningEngine
+from .knowledge_transfer import KnowledgeTransferEngine
+from .finetuned_models import FinetunedModelManager
+
+__all__ = [
+    "HybridModelArchitecture",
+    "ModelRoutingStrategy",
+    "HybridModelConfig",
+    "HybridModelIntegration",
+    "AIOrchestrator",
+    "PromptOptimizer",
+    "AdaptiveReasoningEngine",
+    "KnowledgeTransferEngine",
+    "FinetunedModelManager",
+]
