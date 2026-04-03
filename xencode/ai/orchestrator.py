@@ -14,7 +14,10 @@ import json
 import time
 import random
 from datetime import datetime
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import queue

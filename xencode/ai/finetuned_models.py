@@ -14,7 +14,10 @@ import json
 import os
 import hashlib
 from datetime import datetime
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import requests
 from pathlib import Path
 

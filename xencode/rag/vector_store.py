@@ -3,12 +3,27 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any, Optional
-import chromadb
-from chromadb.config import Settings
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from langchain_ollama import OllamaEmbeddings
-from langchain_core.documents import Document
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
+
+# Optional dependencies — loaded lazily or guarded
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+except ImportError:
+    chromadb = None
+    Settings = None
+    Documents = None
+    EmbeddingFunction = object
+    Embeddings = None
+
+try:
+    from langchain_ollama import OllamaEmbeddings
+    from langchain_core.documents import Document
+except ImportError:
+    OllamaEmbeddings = None
+    Document = None
+
 from .graph_store import GraphStore
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
@@ -541,7 +556,7 @@ class BatchIndexer:
                 separators=["\n\n", "\n", " ", ""]
             )
         except ImportError:
-            raise ImportError("Please install langchain-text-splitters: pip install langchain-text-splitters")
+            self.text_splitter = None  # Will split by paragraphs as fallback
 
     async def index_directory_batch(self, root_path: str, verbose: bool = True) -> None:
         from pathlib import Path

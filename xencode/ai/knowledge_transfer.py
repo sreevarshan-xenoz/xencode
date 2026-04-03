@@ -11,8 +11,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError:
+    TfidfVectorizer = None
+    cosine_similarity = None
 import json
 import pickle
 import hashlib
