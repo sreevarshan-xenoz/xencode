@@ -17,8 +17,16 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-import ollama
-from pydantic import BaseModel, Field
+try:
+    import ollama
+except ImportError:
+    ollama = None
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    # Fallback for environments without pydantic
+    BaseModel = object
+    Field = lambda default=None, **kwargs: default
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 

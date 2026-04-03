@@ -3,8 +3,12 @@ from pathlib import Path
 from typing import Dict, Optional, List
 from rich.console import Console
 from rich.prompt import Confirm
-from langchain_ollama import ChatOllama
-from langchain_core.prompts import PromptTemplate
+try:
+    from langchain_ollama import ChatOllama
+    from langchain_core.prompts import PromptTemplate
+except ImportError:
+    ChatOllama = None
+    PromptTemplate = None
 
 console = Console()
 

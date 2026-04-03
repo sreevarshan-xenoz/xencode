@@ -6,7 +6,7 @@ Provides vector store implementations, indexing, and graph-based knowledge extra
 
 from .vector_store import VectorStore, AsyncVectorStore, OptimizedVectorStore
 from .indexer import Indexer
-from .graph_extractor import GraphExtractor
+from .graph_extractor import CodeGraphExtractor
 from .graph_store import GraphStore
 
 __all__ = [
@@ -14,6 +14,6 @@ __all__ = [
     "AsyncVectorStore",
     "OptimizedVectorStore",
     "Indexer",
-    "GraphExtractor",
+    "CodeGraphExtractor",
     "GraphStore",
 ]

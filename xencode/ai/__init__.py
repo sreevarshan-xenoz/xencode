@@ -5,23 +5,24 @@ Provides advanced AI capabilities including hybrid model architecture,
 adaptive reasoning, prompt optimization, and knowledge transfer.
 """
 
-from .hybrid_model_architecture import HybridModelArchitecture, ModelRoutingStrategy
+from .hybrid_model_architecture import ModelRouter, ModelChain, HybridModelManager
 from .hybrid_model_config import HybridModelConfig
 from .hybrid_model_integration import HybridModelIntegration
-from .orchestrator import AIOrchestrator
+from .orchestrator import ModelOrchestrator
 from .prompt_optimizer import PromptOptimizer
 from .adaptive_reasoning import AdaptiveReasoningEngine
 from .knowledge_transfer import KnowledgeTransferEngine
-from .finetuned_models import FinetunedModelManager
+from .finetuned_models import FineTunedModelManager
 
 __all__ = [
-    "HybridModelArchitecture",
-    "ModelRoutingStrategy",
+    "ModelRouter",
+    "ModelChain",
+    "HybridModelManager",
     "HybridModelConfig",
     "HybridModelIntegration",
-    "AIOrchestrator",
+    "ModelOrchestrator",
     "PromptOptimizer",
     "AdaptiveReasoningEngine",
     "KnowledgeTransferEngine",
-    "FinetunedModelManager",
+    "FineTunedModelManager",
 ]

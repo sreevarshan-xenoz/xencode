@@ -1,8 +1,14 @@
 import os
 from pathlib import Path
 from typing import List, Set, Optional
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    RecursiveCharacterTextSplitter = None
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    Document = None
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .vector_store import VectorStore

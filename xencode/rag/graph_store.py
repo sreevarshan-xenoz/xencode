@@ -1,6 +1,9 @@
 import os
 import json
-import networkx as nx
+try:
+    import networkx as nx
+except ImportError:
+    nx = None
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 

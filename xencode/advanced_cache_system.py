@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 import psutil
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
