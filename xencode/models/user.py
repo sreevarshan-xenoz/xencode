@@ -145,11 +145,38 @@ class User:
     two_factor_enabled: bool = False
     two_factor_secret: Optional[str] = None
     
+    # Password policy constants
+    MIN_PASSWORD_LENGTH = 8
+    MAX_PASSWORD_LENGTH = 128
+    
     def set_password(self, password: str) -> None:
-        """Set user password with secure hashing"""
+        """Set user password with secure hashing and strength validation."""
+        self._validate_password_strength(password)
         self.salt = secrets.token_hex(32)
         self.password_hash = self._hash_password(password, self.salt)
         self.updated_at = datetime.now()
+    
+    def _validate_password_strength(self, password: str) -> None:
+        """Validate password meets minimum strength requirements."""
+        from xenocode.auth.auth_manager import AuthenticationError as AuthErr
+        
+        if len(password) < self.MIN_PASSWORD_LENGTH:
+            raise AuthErr(f"Password must be at least {self.MIN_PASSWORD_LENGTH} characters long")
+        
+        if len(password) > self.MAX_PASSWORD_LENGTH:
+            raise AuthErr(f"Password must not exceed {self.MAX_PASSWORD_LENGTH} characters")
+        
+        has_lower = any(c.islower() for c in password)
+        has_upper = any(c.isupper() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        has_special = any(not c.isalnum() for c in password)
+        
+        # Require at least 3 of: lower, upper, digit, special
+        strength_score = sum([has_lower, has_upper, has_digit, has_special])
+        if strength_score < 3:
+            raise AuthErr(
+                "Password must contain at least 3 of: lowercase, uppercase, digit, special character"
+            )
     
     def verify_password(self, password: str) -> bool:
         """Verify password against stored hash"""
