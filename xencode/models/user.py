@@ -475,7 +475,7 @@ class AuditLogEntry:
 
 # Utility functions
 def create_default_admin_user(username: str = "admin", 
-                             password: str = "admin123",
+                             password: str = "Admin@123abc",
                              email: str = "admin@xencode.local") -> User:
     """Create default admin user"""
     user = User(
