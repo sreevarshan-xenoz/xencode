@@ -36,7 +36,8 @@ class QwenAuthManager:
     """Manages Qwen OAuth2 device flow authentication"""
 
     # Qwen's exact constants from their code
-    CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+    # CLIENT_ID can be overridden via XENCODE_QWEN_CLIENT_ID env var
+    CLIENT_ID = os.environ.get("XENCODE_QWEN_CLIENT_ID", "f0304373b74a44d2b584a3fb70ca9e56")
     SCOPE = "openid profile email model.completion"
     DEVICE_AUTH_URL = "https://chat.qwen.ai/api/v1/oauth2/device/code"
     TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
