@@ -158,6 +158,10 @@ class AuthManager:
             self._record_failed_attempt(username_or_email, ip_address)
             raise AuthenticationError("Invalid credentials")
         
+        # Check if email is verified (skip for admin/guest)
+        if not user.is_verified and user.role not in [UserRole.ADMIN, UserRole.GUEST]:
+            raise AuthenticationError("Email not verified. Please verify your email first.")
+        
         # Successful authentication
         user.record_successful_login()
         self.update_user(user)
