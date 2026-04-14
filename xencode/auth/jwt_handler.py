@@ -168,8 +168,8 @@ class JWTHandler:
         except Exception:
             return None
     
-    def refresh_access_token(self, refresh_token: str) -> Optional[Tuple[str, UserSession]]:
-        """Generate new access token using refresh token"""
+    def refresh_access_token(self, refresh_token: str) -> Optional[Tuple[str, str, UserSession]]:
+        """Generate new access token using refresh token. Implements rotation — old refresh token is revoked after use."""
         
         # Verify refresh token
         payload = self.verify_token(refresh_token, 'refresh')
@@ -181,7 +181,9 @@ class JWTHandler:
         if not session or not session.is_valid():
             return None
         
-        # Generate new access token
+        # Rotate: revoke the old refresh token immediately after verification
+        self.blacklisted_tokens.add(refresh_token)
+        
         now = datetime.utcnow()
         access_payload = {
             'user_id': payload['user_id'],
@@ -194,11 +196,19 @@ class JWTHandler:
         }
         
         access_token = jwt.encode(access_payload, self.secret_key, algorithm=self.algorithm)
+        new_refresh_payload = {
+            'user_id': payload['user_id'],
+            'session_id': session_id,
+            'type': 'refresh',
+            'iat': now,
+            'exp': now + timedelta(days=self.refresh_token_expire_days)
+        }
+        new_refresh_token = jwt.encode(new_refresh_payload, self.secret_key, algorithm=self.algorithm)
         
-        # Update session activity
-        session.last_activity = datetime.now()
+        session.token = new_refresh_token
+        session.last_activity = now
         
-        return access_token, session
+        return access_token, new_refresh_token, session
     
     def revoke_token(self, token: str) -> bool:
         """Revoke a token (add to blacklist)"""
