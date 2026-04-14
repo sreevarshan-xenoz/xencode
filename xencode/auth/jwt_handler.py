@@ -37,7 +37,6 @@ class JWTHandler:
                 "Install with: pip install PyJWT"
             )
         
-        self.secret_key = secret_key or self._generate_secret_key()
         self.algorithm = algorithm
         self.access_token_expire_minutes = access_token_expire_minutes
         self.refresh_token_expire_days = refresh_token_expire_days
@@ -47,6 +46,42 @@ class JWTHandler:
         
         # Blacklisted tokens (for logout)
         self.blacklisted_tokens: set = set()
+        
+        # Load secret from vault or generate + persist
+        self.secret_key = self._load_or_generate_secret(secret_key)
+    
+    def _load_or_generate_secret(self, provided_key: Optional[str]) -> str:
+        """Load secret from CredentialVault, or generate and store a new one."""
+        if provided_key:
+            return provided_key
+        
+        # Try to load existing secret from vault
+        try:
+            from xenocode.auth.credential_vault import get_vault
+            vault = get_vault()
+            stored = vault.get_secret("jwt", "secret_key")
+            if stored:
+                return stored
+        except Exception:
+            pass
+        
+        # No secret found — generate one and persist
+        new_secret = self._generate_secret_key()
+        try:
+            from xenocode.auth.credential_vault import CredentialVault, Credential
+            vault = CredentialVault()
+            cred = Credential(
+                service="jwt",
+                username="secret_key",
+                secret=new_secret,
+                description="Xencode JWT signing secret — DO NOT share",
+            )
+            vault.set(cred)
+        except Exception:
+            # Vault unavailable — continue with ephemeral key (existing behaviour)
+            pass
+        
+        return new_secret
     
     def _generate_secret_key(self) -> str:
         """Generate a secure secret key"""
