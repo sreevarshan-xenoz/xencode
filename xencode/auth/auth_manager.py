@@ -229,8 +229,8 @@ class AuthManager:
         """Logout user from all sessions"""
         return self.jwt_handler.revoke_user_sessions(user_id)
     
-    def refresh_token(self, refresh_token: str) -> Optional[Tuple[str, UserSession]]:
-        """Refresh access token"""
+    def refresh_token(self, refresh_token: str) -> Optional[Tuple[str, str, UserSession]]:
+        """Refresh access token. Old refresh token is rotated for security."""
         return self.jwt_handler.refresh_access_token(refresh_token)
     
     def verify_token(self, token: str) -> Optional[User]:
