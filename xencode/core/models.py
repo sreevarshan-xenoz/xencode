@@ -2,6 +2,7 @@
 Model management module for Xencode
 """
 import subprocess
+import shutil
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,6 +45,9 @@ class ModelManager:
             ]
         except Exception:
             self.available_models = []
+
+        if shutil.which("gemini") and "gemini-cli" not in self.available_models:
+            self.available_models.append("gemini-cli")
 
         # Add cloud models if API keys are configured
         if self.config:
@@ -88,6 +92,15 @@ class ModelManager:
         # Check if this is a cloud model
         if model.startswith("openai:") or model.startswith("google_gemini:") or model.startswith("openrouter:"):
             return self.check_cloud_model_health(model)
+
+        if model.startswith("gemini-cli"):
+            is_available = shutil.which("gemini") is not None
+            self.model_health[model] = {
+                'status': 'healthy' if is_available else 'unavailable',
+                'response_time': 0,
+                'last_check': time.time(),
+            }
+            return is_available
 
         # Otherwise, it's an Ollama model
         try:
