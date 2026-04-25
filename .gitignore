@@ -53,6 +53,9 @@ Thumbs.db
 *.temp
 test.txt
 
+# Rust
+target/
+
 # Documentation and summary files (often generated or temporary)
 *_SUMMARY.md
 *_REPORT.md

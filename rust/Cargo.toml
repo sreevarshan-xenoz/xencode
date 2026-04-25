@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/xencode-core-rs",
+    "crates/xencode-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
