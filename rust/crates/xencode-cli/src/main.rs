@@ -76,6 +76,9 @@ enum Commands {
         #[command(subcommand)]
         action: MemoryAction,
     },
+
+    /// Launch the Terminal User Interface
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -125,7 +128,8 @@ enum MemoryAction {
     },
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
@@ -135,10 +139,11 @@ fn main() {
             max_depth,
         } => run_scan(path, hidden, max_depth),
         Commands::Config { action } => run_config(action),
-        Commands::Models { action } => run_models(action),
+        Commands::Models { action } => run_models(action).await,
         Commands::Cache { action } => run_cache(action),
-        Commands::Query { prompt, model, no_cache, session } => run_query(prompt, model, no_cache, session),
+        Commands::Query { prompt, model, no_cache, session } => run_query(prompt, model, no_cache, session).await,
         Commands::Memory { action } => run_memory(action),
+        Commands::Tui => run_tui().await,
     };
 
     if let Err(error) = result {
@@ -222,12 +227,12 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
     }
 }
 
-fn run_models(action: ModelAction) -> Result<(), String> {
+async fn run_models(action: ModelAction) -> Result<(), String> {
     let mut client = OllamaClient::default_client();
 
     match action {
         ModelAction::List => {
-            let models = client.list_models().map_err(|e| e.to_string())?;
+            let models = client.list_models().await.map_err(|e| e.to_string())?;
             if models.is_empty() {
                 println!("No models installed.");
                 println!("Install one with: ollama pull qwen2.5:7b");
@@ -249,7 +254,7 @@ fn run_models(action: ModelAction) -> Result<(), String> {
         }
         ModelAction::Health { model } => {
             println!("Checking health of {model}...");
-            let health = client.check_health(&model).map_err(|e| e.to_string())?;
+            let health = client.check_health(&model).await.map_err(|e| e.to_string())?;
             println!("  Status:        {}", health.status);
             println!("  Response time: {:.3}s", health.response_time);
             if let Some(ref err) = health.error_message {
@@ -258,7 +263,7 @@ fn run_models(action: ModelAction) -> Result<(), String> {
             Ok(())
         }
         ModelAction::Default => {
-            let default = client.get_smart_default().map_err(|e| e.to_string())?;
+            let default = client.get_smart_default().await.map_err(|e| e.to_string())?;
             match default {
                 Some(model) => println!("Smart default: {model}"),
                 None => println!("No models available"),
@@ -300,7 +305,7 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
     }
 }
 
-fn run_query(
+async fn run_query(
     prompt: String,
     model_override: Option<String>,
     no_cache: bool,
@@ -364,7 +369,7 @@ fn run_query(
         print!("{}", token);
         let _ = io::stdout().flush();
         response_content.push_str(token);
-    });
+    }).await;
 
     println!(); // Ensure final newline
 
@@ -412,4 +417,26 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+async fn run_tui() -> Result<(), String> {
+    crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableMouseCapture).map_err(|e| e.to_string())?;
+    
+    let backend = ratatui::backend::CrosstermBackend::new(stdout);
+    let mut terminal = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
+
+    let res = xencode_tui_rs::run_app(&mut terminal).await;
+
+    // Restore terminal
+    crossterm::terminal::disable_raw_mode().map_err(|e| e.to_string())?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    ).map_err(|e| e.to_string())?;
+    terminal.show_cursor().map_err(|e| e.to_string())?;
+
+    res.map_err(|e| e.to_string())
 }

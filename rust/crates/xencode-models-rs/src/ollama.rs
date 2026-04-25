@@ -71,15 +71,22 @@ pub struct OllamaClient {
     base_url: String,
     timeout_seconds: u64,
     pub health_tracker: HealthTracker,
+    client: reqwest::Client,
 }
 
 impl OllamaClient {
     /// Create a new client pointing at the given Ollama instance.
     pub fn new(base_url: &str, timeout_seconds: u64) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap_or_default();
+            
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             timeout_seconds,
             health_tracker: HealthTracker::new(),
+            client,
         }
     }
 
@@ -89,24 +96,25 @@ impl OllamaClient {
     }
 
     /// List all installed models.
-    pub fn list_models(&self) -> Result<Vec<ModelInfo>, OllamaError> {
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, OllamaError> {
         let url = format!("{}/api/tags", self.base_url);
-        let response = ureq::get(&url)
-            .timeout(std::time::Duration::from_secs(self.timeout_seconds))
-            .call()
-            .map_err(|e| match e {
-                ureq::Error::Transport(ref t) => {
-                    if t.kind() == ureq::ErrorKind::ConnectionFailed {
-                        OllamaError::NotRunning(e.to_string())
-                    } else {
-                        OllamaError::Api(e.to_string())
-                    }
+        
+        let response = self.client.get(&url)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    OllamaError::NotRunning(e.to_string())
+                } else if e.is_timeout() {
+                    OllamaError::Timeout(e.to_string())
+                } else {
+                    OllamaError::Api(e.to_string())
                 }
-                _ => OllamaError::Api(e.to_string()),
             })?;
 
         let tags: TagsResponse = response
-            .into_json()
+            .json()
+            .await
             .map_err(|e| OllamaError::Parse(e.to_string()))?;
 
         Ok(tags
@@ -122,7 +130,7 @@ impl OllamaClient {
     }
 
     /// Check the health of a specific model by sending a tiny prompt.
-    pub fn check_health(&mut self, model: &str) -> Result<ModelHealth, OllamaError> {
+    pub async fn check_health(&mut self, model: &str) -> Result<ModelHealth, OllamaError> {
         let url = format!("{}/api/generate", self.base_url);
         let payload = serde_json::json!({
             "model": model,
@@ -134,12 +142,13 @@ impl OllamaClient {
         });
 
         let start = Instant::now();
-        let result = ureq::post(&url)
-            .timeout(std::time::Duration::from_secs(self.timeout_seconds))
-            .send_json(&payload);
+        let result = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await;
 
         match result {
-            Ok(_) => {
+            Ok(resp) if resp.status().is_success() => {
                 let response_time = start.elapsed().as_secs_f64();
                 let health = ModelHealth {
                     status: HealthStatus::Healthy,
@@ -150,23 +159,26 @@ impl OllamaClient {
                 self.health_tracker.update(model, health.clone());
                 Ok(health)
             }
-            Err(ureq::Error::Transport(t)) => {
+            Ok(resp) => {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
                 let health = ModelHealth {
-                    status: if t.kind() == ureq::ErrorKind::ConnectionFailed {
-                        HealthStatus::Unavailable
-                    } else {
-                        HealthStatus::Error
-                    },
+                    status: HealthStatus::Error,
                     response_time: start.elapsed().as_secs_f64(),
                     last_check: crate::health::current_timestamp(),
-                    error_message: Some(t.to_string()),
+                    error_message: Some(format!("HTTP {}: {}", status, msg)),
                 };
                 self.health_tracker.update(model, health.clone());
                 Ok(health)
             }
             Err(e) => {
+                let status = if e.is_connect() {
+                    HealthStatus::Unavailable
+                } else {
+                    HealthStatus::Error
+                };
                 let health = ModelHealth {
-                    status: HealthStatus::Error,
+                    status,
                     response_time: start.elapsed().as_secs_f64(),
                     last_check: crate::health::current_timestamp(),
                     error_message: Some(e.to_string()),
@@ -180,8 +192,8 @@ impl OllamaClient {
     /// Select the best available model using a preferred-model priority list.
     ///
     /// Mirrors the Python `get_smart_default_model()` logic.
-    pub fn get_smart_default(&self) -> Result<Option<String>, OllamaError> {
-        let models = self.list_models()?;
+    pub async fn get_smart_default(&self) -> Result<Option<String>, OllamaError> {
+        let models = self.list_models().await?;
         if models.is_empty() {
             return Ok(None);
         }
@@ -245,11 +257,11 @@ mod tests {
     // Integration tests below require a running Ollama instance.
     // They are ignored by default and can be run with:
     //   cargo test -- --ignored
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn list_models_integration() {
+    async fn list_models_integration() {
         let client = OllamaClient::default_client();
-        let models = client.list_models().unwrap();
+        let models = client.list_models().await.unwrap();
         println!("Found {} models", models.len());
         for model in &models {
             println!("  - {} ({} bytes)", model.name, model.size);
@@ -257,21 +269,21 @@ mod tests {
         // Just verify it doesn't panic; we can't assert on specific models
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn smart_default_integration() {
+    async fn smart_default_integration() {
         let client = OllamaClient::default_client();
-        let default = client.get_smart_default().unwrap();
+        let default = client.get_smart_default().await.unwrap();
         println!("Smart default: {:?}", default);
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn health_check_integration() {
+    async fn health_check_integration() {
         let mut client = OllamaClient::default_client();
-        let models = client.list_models().unwrap();
+        let models = client.list_models().await.unwrap();
         if let Some(model) = models.first() {
-            let health = client.check_health(&model.name).unwrap();
+            let health = client.check_health(&model.name).await.unwrap();
             println!("Health for {}: {:?}", model.name, health);
         }
     }
