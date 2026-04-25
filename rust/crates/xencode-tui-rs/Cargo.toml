@@ -1,0 +1,18 @@
+[package]
+name = "xencode-tui-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "xencode_tui_rs"
+path = "src/lib.rs"
+
+[dependencies]
+xencode-models-rs = { path = "../xencode-models-rs" }
+xencode-providers-rs = { path = "../xencode-providers-rs" }
+xencode-memory-rs = { path = "../xencode-memory-rs" }
+xencode-config-rs = { path = "../xencode-config-rs" }
+tokio = { version = "1", features = ["full"] }
+crossterm = "0.28"
+ratatui = "0.29"
