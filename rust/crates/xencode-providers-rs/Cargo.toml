@@ -1,0 +1,15 @@
+[package]
+name = "xencode-providers-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "xencode_providers_rs"
+path = "src/lib.rs"
+
+[dependencies]
+xencode-models-rs = { path = "../xencode-models-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
