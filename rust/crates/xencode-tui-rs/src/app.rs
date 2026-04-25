@@ -31,7 +31,6 @@ pub struct App {
     pub is_generating: bool,
     config: XencodeConfig,
     memory: ConversationMemory,
-    provider_manager: ProviderManager,
 }
 
 impl App {
@@ -43,7 +42,8 @@ impl App {
         memory.start_session(None);
 
         let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
-        let provider_manager = ProviderManager::new(client);
+        // We only use the provider manager inside the spawned async task,
+        // so we don't need to keep it in App state right now.
 
         let mut app = Self {
             input: String::new(),
@@ -52,7 +52,6 @@ impl App {
             is_generating: false,
             config,
             memory,
-            provider_manager,
         };
 
         // Load context into UI
@@ -66,7 +65,7 @@ impl App {
         app
     }
 
-    pub fn submit_message(&mut self, tx: mpsc::Sender<String>) {
+    pub fn submit_message(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.input.trim().is_empty() {
             return;
         }
@@ -100,10 +99,10 @@ impl App {
             let manager = ProviderManager::new(client);
             
             let _ = manager.generate_stream(&model, &context_messages, |token| {
-                let _ = tx.blocking_send(token.to_string());
+                let _ = tx.send(token.to_string());
             }).await;
             
-            let _ = tx.blocking_send("[DONE]".to_string());
+            let _ = tx.send("[DONE]".to_string());
         });
     }
 
@@ -136,9 +135,15 @@ impl App {
     }
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
-    let (tx, mut rx) = mpsc::channel(100);
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;

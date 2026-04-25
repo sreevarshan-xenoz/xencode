@@ -69,7 +69,6 @@ impl std::error::Error for OllamaError {}
 /// Mirrors the model management functionality in `xencode/core/models.py`.
 pub struct OllamaClient {
     base_url: String,
-    timeout_seconds: u64,
     pub health_tracker: HealthTracker,
     client: reqwest::Client,
 }
@@ -84,7 +83,6 @@ impl OllamaClient {
             
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            timeout_seconds,
             health_tracker: HealthTracker::new(),
             client,
         }
