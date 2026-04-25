@@ -1,0 +1,12 @@
+[package]
+name = "xencode-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "xencode"
+path = "src/main.rs"
+
+[dependencies]
+xencode-core-rs = { path = "../xencode-core-rs" }
