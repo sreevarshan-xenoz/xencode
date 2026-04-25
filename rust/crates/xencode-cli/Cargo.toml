@@ -15,5 +15,7 @@ xencode-cache-rs = { path = "../xencode-cache-rs" }
 xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-providers-rs = { path = "../xencode-providers-rs" }
+xencode-tui-rs = { path = "../xencode-tui-rs" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["full", "rt-multi-thread"] }

@@ -6,6 +6,7 @@ members = [
     "crates/xencode-models-rs",
     "crates/xencode-memory-rs",
     "crates/xencode-providers-rs",
+    "crates/xencode-tui-rs",
     "crates/xencode-cli",
 ]
 resolver = "2"
