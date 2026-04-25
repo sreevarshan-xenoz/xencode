@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{BufRead, BufReader};
+use futures_util::StreamExt;
 
 use serde::{Deserialize, Serialize};
 use xencode_models_rs::OllamaClient;
@@ -40,15 +40,17 @@ struct OllamaResponse {
 /// Currently only supports local Ollama.
 pub struct ProviderManager {
     ollama_client: OllamaClient,
+    client: reqwest::Client,
 }
 
 impl ProviderManager {
     pub fn new(ollama_client: OllamaClient) -> Self {
-        Self { ollama_client }
+        let client = reqwest::Client::new();
+        Self { ollama_client, client }
     }
 
-    /// Generate a response synchronously (blocks until the full response is ready).
-    pub fn generate(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+    /// Generate a response asynchronously (resolves when the full response is ready).
+    pub async fn generate(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
         let url = format!("{}/api/chat", self.ollama_client.base_url());
         
         let payload = serde_json::json!({
@@ -57,19 +59,22 @@ impl ProviderManager {
             "stream": false
         });
 
-        let response = ureq::post(&url)
-            .send_json(&payload)
+        let response = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
 
         let body: OllamaResponse = response
-            .into_json()
+            .json()
+            .await
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         Ok(body.message.content)
     }
 
     /// Generate a response and stream it token-by-token.
-    pub fn generate_stream<F>(
+    pub async fn generate_stream<F>(
         &self,
         model: &str,
         messages: &[ChatMessage],
@@ -86,25 +91,30 @@ impl ProviderManager {
             "stream": true
         });
 
-        let response = ureq::post(&url)
-            .send_json(&payload)
+        let response = self.client.post(&url)
+            .json(&payload)
+            .send()
+            .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
 
-        let reader = BufReader::new(response.into_reader());
+        let mut stream = response.bytes_stream();
         let mut full_response = String::new();
 
-        for line in reader.lines() {
-            let line = line.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if let Ok(chunk) = serde_json::from_str::<OllamaResponse>(&line) {
-                callback(&chunk.message.content);
-                full_response.push_str(&chunk.message.content);
-                
-                if chunk.done {
-                    break;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            // Chunk might contain multiple JSON objects separated by newlines
+            if let Ok(text) = std::str::from_utf8(&chunk) {
+                for line in text.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(parsed) = serde_json::from_str::<OllamaResponse>(line) {
+                        callback(&parsed.message.content);
+                        full_response.push_str(&parsed.message.content);
+                        if parsed.done {
+                            return Ok(full_response);
+                        }
+                    }
                 }
             }
         }
