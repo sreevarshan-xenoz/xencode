@@ -1,0 +1,15 @@
+[package]
+name = "xencode-memory-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "xencode_memory_rs"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+chrono = "0.4"

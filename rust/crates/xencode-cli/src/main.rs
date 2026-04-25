@@ -1,11 +1,14 @@
 use std::path::PathBuf;
+use std::io::{self, Write};
 
 use clap::{Parser, Subcommand};
 
 use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
+use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::OllamaClient;
+use xencode_providers_rs::{ChatMessage, ProviderManager};
 
 /// Xencode — AI development assistant (Rust core)
 #[derive(Parser)]
@@ -49,6 +52,30 @@ enum Commands {
         #[command(subcommand)]
         action: CacheAction,
     },
+
+    /// Send a query to a model
+    Query {
+        /// The prompt to send
+        prompt: String,
+
+        /// Model to use (overrides config default)
+        #[arg(long, short)]
+        model: Option<String>,
+
+        /// Do not use cached responses
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Session ID to attach to
+        #[arg(long)]
+        session: Option<String>,
+    },
+
+    /// Manage conversation memory
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -87,6 +114,17 @@ enum CacheAction {
     Clear,
 }
 
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// List all conversation sessions
+    List,
+    /// Show transcript of a session
+    Show {
+        /// Session ID
+        session: String,
+    },
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -99,6 +137,8 @@ fn main() {
         Commands::Config { action } => run_config(action),
         Commands::Models { action } => run_models(action),
         Commands::Cache { action } => run_cache(action),
+        Commands::Query { prompt, model, no_cache, session } => run_query(prompt, model, no_cache, session),
+        Commands::Memory { action } => run_memory(action),
     };
 
     if let Err(error) = result {
@@ -254,6 +294,120 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
                 Err(_) => {
                     println!("No cache to clear");
                 }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn run_query(
+    prompt: String,
+    model_override: Option<String>,
+    no_cache: bool,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let config = XencodeConfig::load().unwrap_or_default();
+    let model = model_override.unwrap_or(config.default_model);
+
+    let mut cache = if config.cache_enabled && !no_cache {
+        ResponseCache::with_persistence(config.max_cache_size, config.response_timeout as f64).ok()
+    } else {
+        None
+    };
+
+    let mut memory = if config.memory_enabled {
+        ConversationMemory::with_persistence(config.max_memory_items).ok()
+    } else {
+        None
+    };
+
+    if let Some(ref mut mem) = memory {
+        if let Some(ref sid) = session_id {
+            mem.switch_session(sid);
+        } else {
+            mem.start_session(None);
+        }
+    }
+
+    if let Some(ref mut c) = cache {
+        if let Some(cached_resp) = c.get(&prompt, &model) {
+            println!("{}", cached_resp);
+            
+            if let Some(ref mut mem) = memory {
+                mem.add_message("user", &prompt, None);
+                mem.add_message("assistant", &cached_resp, Some(model.clone()));
+            }
+            return Ok(());
+        }
+    }
+
+    let mut context_messages = Vec::new();
+    if let Some(ref mem) = memory {
+        for msg in mem.get_context(10) {
+            context_messages.push(ChatMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+            });
+        }
+    }
+    
+    context_messages.push(ChatMessage {
+        role: "user".to_string(),
+        content: prompt.clone(),
+    });
+
+    let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
+    let manager = ProviderManager::new(client);
+
+    let mut response_content = String::new();
+    let result = manager.generate_stream(&model, &context_messages, |token| {
+        print!("{}", token);
+        let _ = io::stdout().flush();
+        response_content.push_str(token);
+    });
+
+    println!(); // Ensure final newline
+
+    match result {
+        Ok(_) => {
+            if let Some(ref mut c) = cache {
+                c.set(&prompt, &model, &response_content);
+            }
+            if let Some(ref mut mem) = memory {
+                mem.add_message("user", &prompt, None);
+                mem.add_message("assistant", &response_content, Some(model));
+            }
+            Ok(())
+        }
+        Err(e) => Err(format!("Query failed: {}", e)),
+    }
+}
+
+fn run_memory(action: MemoryAction) -> Result<(), String> {
+    let mem = ConversationMemory::with_persistence(50).map_err(|e| e.to_string())?;
+
+    match action {
+        MemoryAction::List => {
+            let sessions = mem.list_sessions();
+            if sessions.is_empty() {
+                println!("No conversation sessions found.");
+            } else {
+                println!("Conversation Sessions:");
+                for s in sessions {
+                    println!("  {}", s);
+                }
+            }
+            Ok(())
+        }
+        MemoryAction::Show { session } => {
+            if let Some(sess) = mem.get_session(&session) {
+                for msg in &sess.messages {
+                    let role = msg.role.to_uppercase();
+                    println!("[{}] {}", role, msg.timestamp);
+                    println!("{}\n", msg.content);
+                }
+            } else {
+                println!("Session not found: {}", session);
             }
             Ok(())
         }
