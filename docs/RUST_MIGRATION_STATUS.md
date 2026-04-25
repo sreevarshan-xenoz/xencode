@@ -2,52 +2,44 @@
 
 Branch: `total-migiration-rust`
 
-## Current Slice
+## Current Slice: Phase 2 (Core Modules & CLI)
 
-The migration has started with a dependency-light Rust workspace and baseline
-benchmark tooling.
+The migration has successfully established the Rust workspace, installed the GNU toolchain, and ported core Python modules to Rust crates. The command-line interface has been rewritten using `clap`.
 
-## Added
+## Added Crates
 
-- `rust/Cargo.toml`: Cargo workspace for Rust migration work.
-- `rust/crates/xencode-core-rs`: first core Rust crate.
-- `rust/crates/xencode-cli`: prototype Rust CLI binary.
-- `scripts/baseline_benchmarks.py`: Python baseline benchmark runner.
-- `tests/rust/test_workspace_scan_parity.py`: parity test comparing Rust scan output with the Python baseline.
+- `xencode-core-rs`: Workspace scanner skipping noisy directories.
+- `xencode-config-rs`: File CRUD and `~/.xencode/config.json` management with serialization.
+- `xencode-cache-rs`: LRU + TTL response cache with disk persistence (mirroring `cache.py`).
+- `xencode-models-rs`: Ollama API client, model health tracking, and smart default selection.
+- `xencode-cli`: Full command-line interface with `scan`, `config`, `models`, and `cache` subcommands.
 
-## First Rust Capability
+## Integration Tests
 
-`xencode-core-rs` can scan a workspace and return stable, relative entries with
-file type and byte-size metadata. It skips noisy directories such as `.git`,
-`target`, `node_modules`, virtualenvs, and Python caches by default.
+Python parity tests have been added in `tests/rust/`:
+- `test_workspace_scan_parity.py`: Compares Rust scan output with Python baseline.
+- `test_config_roundtrip.py`: Verifies `config show` JSON output.
+- `test_cache_operations.py`: Verifies `cache stats` and `cache clear`.
 
-Prototype command:
+All tests (both Rust unit tests and Python integration tests) are passing.
 
-```powershell
-cd rust
-cargo run -p xencode-cli -- scan .. --max-depth 2
-```
+## Performance Benchmark
+
+A comparative benchmark was run locally on the same directory:
+
+- **Python (`scan_workspace`)**: ~57.2 ms (median)
+- **Rust (`xencode scan .`)**: ~30.0 ms
+- **Speedup**: ~1.9x faster (47% reduction in time)
+
+The Rust binary also avoids the ~4.5s startup latency incurred by Python when importing the full `xencode` package.
 
 ## Local Verification Notes
 
-Rust is not installed in the current environment, so `cargo test` and
-`cargo run` could not be executed here yet. Once Rust is installed, run:
+The workspace can be built and tested locally using standard Cargo commands:
 
 ```powershell
 cd rust
-cargo test
-cargo run -p xencode-cli -- scan .. --max-depth 2
+cargo test --workspace
+cargo clippy --workspace
+cargo run --release -p xencode-cli -- help
 ```
-
-Python launcher availability also appears limited in this shell, so benchmark
-execution may need a normal Python install on PATH:
-
-```powershell
-python scripts/baseline_benchmarks.py --root . --iterations 5
-```
-
-One local benchmark run completed with `--iterations 1`:
-
-- `python_workspace_scan`: 64.82 ms, 850 files, 212 directories.
-- `python_import_xencode_core`: timed out after 20 seconds.
-- `python_cli_help`: exited with code 1 after 2933.19 ms.

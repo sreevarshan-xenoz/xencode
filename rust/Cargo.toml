@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "crates/xencode-core-rs",
+    "crates/xencode-config-rs",
+    "crates/xencode-cache-rs",
+    "crates/xencode-models-rs",
     "crates/xencode-cli",
 ]
 resolver = "2"
