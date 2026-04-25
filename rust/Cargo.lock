@@ -2385,6 +2385,7 @@ dependencies = [
  "ratatui",
  "tokio",
  "xencode-config-rs",
+ "xencode-core-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
  "xencode-providers-rs",

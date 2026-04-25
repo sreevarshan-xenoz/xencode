@@ -2,21 +2,61 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
-use crate::app::{App, InputMode};
+use crate::app::{App, FocusArea, InputMode};
 
 pub fn draw(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
+    let main_chunks = Layout::default()
+        .direction(Direction::Horizontal)
         .margin(1)
-        .constraints([Constraint::Min(1), Constraint::Length(3)].as_ref())
+        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)].as_ref())
         .split(f.area());
 
-    draw_messages(f, app, chunks[0]);
-    draw_input(f, app, chunks[1]);
+    let right_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(3)].as_ref())
+        .split(main_chunks[1]);
+
+    draw_file_explorer(f, app, main_chunks[0]);
+    draw_messages(f, app, right_chunks[0]);
+    draw_input(f, app, right_chunks[1]);
+}
+
+fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
+    let border_color = if app.focus == FocusArea::FileExplorer {
+        Color::Yellow
+    } else {
+        Color::Gray
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(" Workspace Explorer ");
+
+    let items: Vec<ListItem> = app.file_tree
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let style = if i == app.selected_file {
+                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(Line::from(Span::styled(path.clone(), style)))
+        })
+        .collect();
+
+    let list = List::new(items).block(block);
+
+    // Manual scrolling for now using list state
+    let mut state = ListState::default();
+    state.select(Some(app.selected_file));
+
+    f.render_stateful_widget(list, area, &mut state);
 }
 
 fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
@@ -60,7 +100,7 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let mode_color = match app.input_mode {
-        InputMode::Normal => Color::Gray,
+        InputMode::Normal => if app.focus == FocusArea::ChatInput { Color::White } else { Color::Gray },
         InputMode::Editing => Color::Yellow,
     };
 
