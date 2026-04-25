@@ -6,6 +6,7 @@ use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
 
 use xencode_config_rs::XencodeConfig;
+use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::OllamaClient;
 use xencode_providers_rs::{ChatMessage, ProviderManager};
@@ -18,6 +19,12 @@ pub enum InputMode {
     Editing,
 }
 
+#[derive(PartialEq)]
+pub enum FocusArea {
+    ChatInput,
+    FileExplorer,
+}
+
 /// Represents a message in the UI chat list
 pub struct UiMessage {
     pub role: String,
@@ -25,9 +32,12 @@ pub struct UiMessage {
 }
 
 pub struct App {
+    pub focus: FocusArea,
     pub input: String,
     pub input_mode: InputMode,
     pub messages: Vec<UiMessage>,
+    pub file_tree: Vec<String>,
+    pub selected_file: usize,
     pub is_generating: bool,
     config: XencodeConfig,
     memory: ConversationMemory,
@@ -45,10 +55,28 @@ impl App {
         // We only use the provider manager inside the spawned async task,
         // so we don't need to keep it in App state right now.
 
+        let scan_opts = ScanOptions {
+            max_depth: Some(5),
+            include_hidden: false,
+            excluded_dirs: vec![
+                ".git".to_string(),
+                "node_modules".to_string(),
+                "target".to_string(),
+                "__pycache__".to_string(),
+                ".pytest_cache".to_string(),
+                ".venv".to_string(),
+            ],
+        };
+        let tree = scan_workspace(".", &scan_opts).unwrap_or_default();
+        let file_tree = tree.into_iter().map(|f| f.path.display().to_string()).collect();
+
         let mut app = Self {
+            focus: FocusArea::ChatInput,
             input: String::new(),
             input_mode: InputMode::Normal,
             messages: Vec::new(),
+            file_tree,
+            selected_file: 0,
             is_generating: false,
             config,
             memory,
@@ -160,8 +188,26 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 if key.kind == KeyEventKind::Press {
                     match app.input_mode {
                         InputMode::Normal => match key.code {
+                            KeyCode::Tab => {
+                                app.focus = if app.focus == FocusArea::ChatInput {
+                                    FocusArea::FileExplorer
+                                } else {
+                                    FocusArea::ChatInput
+                                };
+                            }
+                            KeyCode::Up => {
+                                if app.focus == FocusArea::FileExplorer && app.selected_file > 0 {
+                                    app.selected_file -= 1;
+                                }
+                            }
+                            KeyCode::Down => {
+                                if app.focus == FocusArea::FileExplorer && app.selected_file + 1 < app.file_tree.len() {
+                                    app.selected_file += 1;
+                                }
+                            }
                             KeyCode::Char('i') => {
                                 app.input_mode = InputMode::Editing;
+                                app.focus = FocusArea::ChatInput;
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 return Ok(());
