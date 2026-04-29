@@ -23,6 +23,10 @@ pub struct XencodeConfig {
     #[serde(default = "default_model")]
     pub default_model: String,
 
+    /// Active UI theme.
+    #[serde(default = "default_theme")]
+    pub active_theme: String,
+
     /// Ollama base URL.
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
@@ -56,6 +60,10 @@ fn default_model() -> String {
     "qwen2.5:7b".to_string()
 }
 
+fn default_theme() -> String {
+    "ocean".to_string()
+}
+
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -80,6 +88,7 @@ impl Default for XencodeConfig {
     fn default() -> Self {
         Self {
             default_model: default_model(),
+            active_theme: default_theme(),
             ollama_url: default_ollama_url(),
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),

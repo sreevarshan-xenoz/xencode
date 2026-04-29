@@ -2,26 +2,18 @@
 
 Branch: `total-migiration-rust`
 
-## Current Slice: Phase 6 (Context Injection, Cloud Providers, Advanced Panels)
+## Current Slice: Phase 7 (Advanced TUI Features & Themes)
 
-The Rust migration has now achieved functional superiority over the Python baseline. We have added advanced context injection, cloud provider integrations via OpenRouter, and an interactive Model Selector.
+The Rust migration has achieved full feature parity with the foundational Python capabilities and is now catching up to the massive ecosystem of textual widgets previously built. We have established a robust overlay and routing system to manage complex TUI states.
 
-## Added/Updated Crates
+## Key Features Added in Phase 7
 
-- `xencode-core-rs`: Workspace scanner skipping noisy directories.
-- `xencode-config-rs`: **[UPDATED]** Added `api_keys` support for `openrouter_api_key`, `google_gemini_api_key`, etc.
-- `xencode-cache-rs`: LRU + TTL response cache with disk persistence.
-- `xencode-models-rs`: Async HTTP Ollama interactions.
-- `xencode-memory-rs`: Conversation session persistence.
-- `xencode-providers-rs`: **[UPDATED]** Upgraded to support dynamic routing. Added SSE streaming support for the OpenRouter completions API.
-- `xencode-tui-rs`: **[UPDATED]** Added `attached_files` state, `ModelSelector` overlay, and injected file contents into system prompts.
-- `xencode-cli`: **[UPDATED]** Passes API keys down from configuration.
-
-## Key Features Added in Phase 6
-
-1. **Context Injection (File Attachments)**: Users can select a file in the File Explorer and press `Enter` to attach it (`[x]`). Attached files are automatically read and injected as `<file>` blocks into the LLM context when querying.
-2. **Cloud Provider Integration**: The `ProviderManager` now detects if a model requires OpenRouter (e.g., contains a slash `/`) and utilizes an SSE streaming client to stream responses from models like `anthropic/claude-3.5-sonnet` and `openai/gpt-4o`.
-3. **Model Selector Panel**: Pressing `m` opens an interactive overlay that lists available models (both local and cloud). Selecting a model updates the application's configuration and instantly switches the backend.
+1. **Theme Engine**: The `ratatui` interface now supports dynamic theming. We've implemented several core palettes: `midnight`, `ocean`, `forest`, and `terminal`. The active theme is dynamically loaded from `~/.xencode/config.json`.
+2. **Git Integration**: The `FileExplorer` now executes an async `git status` check when you press `Ctrl+G` (or when the app starts). Files with changes are visually marked (`[M]`, `[?]`, `[A]`), giving you a real-time view of your working tree.
+3. **Advanced Overlays**: We mapped out the UI and routing architecture for the remaining critical components:
+   - **Settings Panel**: Press `Ctrl+,` to view active configurations.
+   - **Code Review**: Press `Ctrl+R` to review the actively selected file.
+   - **Integrated Terminal**: Press `Ctrl+T` to toggle a bottom-pane layout.
 
 ## Local Verification Notes
 
@@ -32,7 +24,6 @@ cd rust
 cargo run --release -p xencode-cli -- tui
 ```
 
-Within the TUI:
-- **File Explorer**: Press `Tab` to focus. Use `Up`/`Down` arrows to navigate. Press `Enter` to attach/detach a file to your LLM context.
-- **Model Selector**: Press `m` to open the overlay. Use `Up`/`Down` to navigate. Press `Enter` to confirm model selection.
-- **Chat**: Press `i` to enter Editing mode. Press `Enter` to submit. Press `Esc` to leave. Press `q` to quit.
+- Change your `active_theme` in `~/.xencode/config.json` to `"forest"` or `"midnight"` to see the dynamic color palettes.
+- Press `Ctrl+G` in a git repository to view file status indicators.
+- Test the new overlays using `Ctrl+,`, `Ctrl+R`, and `Ctrl+T`.
