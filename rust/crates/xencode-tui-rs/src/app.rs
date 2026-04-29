@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
+use std::process::Command;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -25,6 +26,90 @@ pub enum FocusArea {
     ChatInput,
     FileExplorer,
     ModelSelector,
+    Settings,
+    CodeReview,
+    Terminal,
+}
+
+#[derive(Clone, Copy)]
+pub struct ThemeColors {
+    pub bg: ratatui::style::Color,
+    pub fg: ratatui::style::Color,
+    pub accent: ratatui::style::Color,
+    pub border: ratatui::style::Color,
+    pub border_active: ratatui::style::Color,
+    pub highlight: ratatui::style::Color,
+    pub highlight_fg: ratatui::style::Color,
+    pub message_user: ratatui::style::Color,
+    pub message_assistant: ratatui::style::Color,
+    pub message_system: ratatui::style::Color,
+}
+
+impl ThemeColors {
+    pub fn get(name: &str) -> Self {
+        match name {
+            "midnight" => Self {
+                bg: ratatui::style::Color::Rgb(15, 17, 26),
+                fg: ratatui::style::Color::Rgb(230, 230, 230),
+                accent: ratatui::style::Color::Magenta,
+                border: ratatui::style::Color::DarkGray,
+                border_active: ratatui::style::Color::Magenta,
+                highlight: ratatui::style::Color::Magenta,
+                highlight_fg: ratatui::style::Color::Black,
+                message_user: ratatui::style::Color::Magenta,
+                message_assistant: ratatui::style::Color::Cyan,
+                message_system: ratatui::style::Color::DarkGray,
+            },
+            "ocean" => Self {
+                bg: ratatui::style::Color::Rgb(11, 27, 43),
+                fg: ratatui::style::Color::Rgb(234, 244, 255),
+                accent: ratatui::style::Color::Cyan,
+                border: ratatui::style::Color::DarkGray,
+                border_active: ratatui::style::Color::Cyan,
+                highlight: ratatui::style::Color::Cyan,
+                highlight_fg: ratatui::style::Color::Black,
+                message_user: ratatui::style::Color::Cyan,
+                message_assistant: ratatui::style::Color::Green,
+                message_system: ratatui::style::Color::DarkGray,
+            },
+            "forest" => Self {
+                bg: ratatui::style::Color::Rgb(15, 29, 20),
+                fg: ratatui::style::Color::Rgb(233, 245, 234),
+                accent: ratatui::style::Color::Green,
+                border: ratatui::style::Color::DarkGray,
+                border_active: ratatui::style::Color::Green,
+                highlight: ratatui::style::Color::Green,
+                highlight_fg: ratatui::style::Color::Black,
+                message_user: ratatui::style::Color::Green,
+                message_assistant: ratatui::style::Color::Yellow,
+                message_system: ratatui::style::Color::DarkGray,
+            },
+            "terminal" => Self {
+                bg: ratatui::style::Color::Rgb(0, 17, 0),
+                fg: ratatui::style::Color::Rgb(128, 255, 128),
+                accent: ratatui::style::Color::Rgb(128, 255, 128),
+                border: ratatui::style::Color::Rgb(0, 64, 0),
+                border_active: ratatui::style::Color::Rgb(128, 255, 128),
+                highlight: ratatui::style::Color::Rgb(0, 128, 0),
+                highlight_fg: ratatui::style::Color::Black,
+                message_user: ratatui::style::Color::Rgb(255, 255, 255),
+                message_assistant: ratatui::style::Color::Rgb(128, 255, 128),
+                message_system: ratatui::style::Color::Rgb(0, 128, 0),
+            },
+            _ => Self { // default fallback
+                bg: ratatui::style::Color::Reset,
+                fg: ratatui::style::Color::Reset,
+                accent: ratatui::style::Color::Cyan,
+                border: ratatui::style::Color::Reset,
+                border_active: ratatui::style::Color::Cyan,
+                highlight: ratatui::style::Color::Cyan,
+                highlight_fg: ratatui::style::Color::Black,
+                message_user: ratatui::style::Color::Blue,
+                message_assistant: ratatui::style::Color::Green,
+                message_system: ratatui::style::Color::DarkGray,
+            }
+        }
+    }
 }
 
 /// Represents a message in the UI chat list
@@ -41,9 +126,11 @@ pub struct App {
     pub file_tree: Vec<String>,
     pub selected_file: usize,
     pub attached_files: HashSet<String>,
+    pub git_status: HashMap<String, String>,
     pub available_models: Vec<String>,
     pub selected_model: usize,
     pub is_generating: bool,
+    pub theme: ThemeColors,
     pub config: XencodeConfig,
     memory: ConversationMemory,
 }
@@ -84,6 +171,22 @@ impl App {
         ];
         
         let selected_model = available_models.iter().position(|m| m == &config.default_model).unwrap_or(0);
+        let theme = ThemeColors::get(&config.active_theme);
+        
+        let mut git_status = HashMap::new();
+        if let Ok(output) = Command::new("git").args(["status", "--porcelain"]).output() {
+            if let Ok(status_str) = String::from_utf8(output.stdout) {
+                for line in status_str.lines() {
+                    if line.len() > 3 {
+                        let status_code = &line[0..2];
+                        let file_path = &line[3..];
+                        // Convert to display path format matching file_tree
+                        let formatted_path = format!(".\\{}", file_path.replace("/", "\\"));
+                        git_status.insert(formatted_path, status_code.trim().to_string());
+                    }
+                }
+            }
+        }
 
         let mut app = Self {
             focus: FocusArea::ChatInput,
@@ -93,9 +196,11 @@ impl App {
             file_tree,
             selected_file: 0,
             attached_files: HashSet::new(),
+            git_status,
             available_models,
             selected_model,
             is_generating: false,
+            theme,
             config,
             memory,
         };
@@ -271,6 +376,31 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 } else {
                                     FocusArea::ModelSelector
                                 };
+                            }
+                            KeyCode::Char('g') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                // Refresh git status
+                                app.git_status.clear();
+                                if let Ok(output) = Command::new("git").args(["status", "--porcelain"]).output() {
+                                    if let Ok(status_str) = String::from_utf8(output.stdout) {
+                                        for line in status_str.lines() {
+                                            if line.len() > 3 {
+                                                let status_code = &line[0..2];
+                                                let file_path = &line[3..];
+                                                let formatted_path = format!(".\\{}", file_path.replace("/", "\\"));
+                                                app.git_status.insert(formatted_path, status_code.trim().to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char(',') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                app.focus = if app.focus == FocusArea::Settings { FocusArea::ChatInput } else { FocusArea::Settings };
+                            }
+                            KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                app.focus = if app.focus == FocusArea::CodeReview { FocusArea::ChatInput } else { FocusArea::CodeReview };
+                            }
+                            KeyCode::Char('t') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                                app.focus = if app.focus == FocusArea::Terminal { FocusArea::ChatInput } else { FocusArea::Terminal };
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 return Ok(());
