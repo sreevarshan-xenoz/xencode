@@ -29,6 +29,10 @@ pub enum FocusArea {
     Settings,
     CodeReview,
     Terminal,
+    PerformanceDashboard,
+    ProviderHealth,
+    ProjectAnalyzer,
+    GitCommit,
 }
 
 #[derive(Clone, Copy)]
@@ -134,11 +138,13 @@ pub struct App {
     pub is_generating: bool,
     pub is_reviewing: bool,
     pub code_review_output: String,
+    pub commit_message: String,
+    pub commit_cursor: usize,
     pub spinner_tick: usize,
     pub theme: ThemeColors,
     pub config: XencodeConfig,
     pub show_terminal: bool,
-    memory: ConversationMemory,
+    pub memory: ConversationMemory,
 }
 
 impl App {
@@ -200,6 +206,8 @@ impl App {
             is_generating: false,
             is_reviewing: false,
             code_review_output: String::new(),
+            commit_message: String::new(),
+            commit_cursor: 0,
             spinner_tick: 0,
             theme,
             config,
@@ -440,6 +448,17 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::CodeReview => {
                                         if !app.is_reviewing { app.submit_review(tx.clone()); }
                                     }
+                                    FocusArea::GitCommit => {
+                                        if !app.commit_message.trim().is_empty() {
+                                            // Execute git commit async or blockingly
+                                            let msg = app.commit_message.clone();
+                                            let _ = Command::new("git").args(["commit", "-am", &msg]).output();
+                                            app.commit_message.clear();
+                                            app.commit_cursor = 0;
+                                            app.refresh_git();
+                                            app.focus = FocusArea::ChatInput;
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }
@@ -452,13 +471,31 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => {
-                                // Close any overlay, don't quit
                                 match app.focus {
-                                    FocusArea::ModelSelector | FocusArea::Settings | FocusArea::CodeReview => {
+                                    FocusArea::ModelSelector | FocusArea::Settings | FocusArea::CodeReview |
+                                    FocusArea::PerformanceDashboard | FocusArea::ProviderHealth | FocusArea::ProjectAnalyzer | FocusArea::GitCommit => {
                                         app.focus = FocusArea::ChatInput;
                                     }
                                     _ => {}
                                 }
+                            }
+                            KeyCode::Char(c) => {
+                                if app.focus == FocusArea::GitCommit {
+                                    app.commit_message.insert(app.commit_cursor, c);
+                                    app.commit_cursor += 1;
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 {
+                                    app.commit_cursor -= 1;
+                                    app.commit_message.remove(app.commit_cursor);
+                                }
+                            }
+                            KeyCode::Left => {
+                                if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 { app.commit_cursor -= 1; }
+                            }
+                            KeyCode::Right => {
+                                if app.focus == FocusArea::GitCommit && app.commit_cursor < app.commit_message.len() { app.commit_cursor += 1; }
                             }
                             _ => {}
                         },

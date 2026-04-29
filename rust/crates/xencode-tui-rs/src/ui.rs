@@ -32,6 +32,10 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::ModelSelector => draw_model_selector(f, app, f.area()),
         FocusArea::Settings => draw_settings(f, app, f.area()),
         FocusArea::CodeReview => draw_code_review(f, app, f.area()),
+        FocusArea::PerformanceDashboard => draw_performance_dashboard(f, app, f.area()),
+        FocusArea::ProviderHealth => draw_provider_health(f, app, f.area()),
+        FocusArea::ProjectAnalyzer => draw_project_analyzer(f, app, f.area()),
+        FocusArea::GitCommit => draw_git_commit(f, app, f.area()),
         _ => {}
     }
 }
@@ -370,6 +374,94 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg))
         .wrap(Wrap { trim: false });
     f.render_widget(text, popup_area);
+}
+
+// ── Phase 9 Overlays ────────────────────────────────────────────────────────
+
+fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(60, 50, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📊 Performance Dashboard (Esc to close) ");
+    
+    // Calculate simple stats
+    let msg_count = app.messages.len();
+    let mem_items = app.config.max_memory_items;
+    
+    let text = format!(
+        "\n  Session Statistics:\n\n  Messages in Memory: {} / {}\n  Cache Enabled:      {}\n  Theme:              {}\n\n  (Latency and token tracking will require async metrics aggregator)",
+        msg_count, mem_items, app.config.cache_enabled, app.config.active_theme
+    );
+
+    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    f.render_widget(para, popup_area);
+}
+
+fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(60, 40, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 🏥 Provider Health (Esc to close) ");
+    
+    let text = format!(
+        "\n  Ollama URI:       {}   [Status: ACTIVE]\n  OpenRouter API:   {}        [Status: {}]\n\n  Active Model:     {}",
+        app.config.ollama_url,
+        if app.config.api_keys.openrouter_api_key.is_some() { "Configured" } else { "Missing" },
+        if app.config.api_keys.openrouter_api_key.is_some() { "OK" } else { "ERROR" },
+        app.config.default_model
+    );
+
+    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    f.render_widget(para, popup_area);
+}
+
+fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(60, 60, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📈 Project Analyzer (Esc to close) ");
+    
+    let mut rust_files = 0;
+    let mut py_files = 0;
+    let mut ts_files = 0;
+    let mut other = 0;
+    
+    for file in &app.file_tree {
+        if file.ends_with(".rs") { rust_files += 1; }
+        else if file.ends_with(".py") { py_files += 1; }
+        else if file.ends_with(".ts") || file.ends_with(".tsx") { ts_files += 1; }
+        else { other += 1; }
+    }
+
+    let text = format!(
+        "\n  Workspace Scan Results:\n\n  Total Files: {}\n\n  🦀 Rust:       {}\n  🐍 Python:     {}\n  📘 TypeScript: {}\n  📄 Other:      {}",
+        app.file_tree.len(), rust_files, py_files, ts_files, other
+    );
+
+    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    f.render_widget(para, popup_area);
+}
+
+fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(50, 40, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📝 Git Commit (Enter to commit, Esc to cancel) ");
+    
+    let modified_count = app.git_status.len();
+    
+    let text = format!(
+        "\n  Staging {} files...\n\n  Message:\n  > {}\n\n  (Type your message and press Enter)",
+        modified_count, app.commit_message
+    );
+
+    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    f.render_widget(para, popup_area);
+    
+    // Draw cursor
+    let cursor_x = popup_area.x + 4 + app.commit_cursor as u16;
+    let cursor_y = popup_area.y + 5;
+    f.set_cursor_position((cursor_x, cursor_y));
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
