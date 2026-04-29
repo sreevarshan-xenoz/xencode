@@ -92,7 +92,9 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.border_active))
         .title(" Code Review (Ctrl+R to close) ");
 
-    let review_text = if let Some(file_path) = app.file_tree.get(app.selected_file) {
+    let review_text = if app.is_reviewing || !app.code_review_output.is_empty() {
+        app.code_review_output.clone()
+    } else if let Some(file_path) = app.file_tree.get(app.selected_file) {
         format!("Reviewing: {}\n\nPress 'Enter' to initiate an AI review of this file.", file_path)
     } else {
         "Select a file in the File Explorer first.".to_string()
@@ -100,7 +102,8 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
 
     let text = Paragraph::new(review_text)
         .block(block)
-        .style(Style::default().fg(app.theme.fg));
+        .style(Style::default().fg(app.theme.fg))
+        .wrap(Wrap { trim: false });
 
     f.render_widget(Clear, popup_area);
     f.render_widget(text, popup_area);
@@ -259,11 +262,13 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.is_generating {
-        " Thinking... "
+        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let frame = frames[app.spinner_tick % frames.len()];
+        format!(" {} Thinking... ", frame)
     } else {
         match app.input_mode {
-            InputMode::Normal => " Input (Press 'i' to edit, 'q' to quit) ",
-            InputMode::Editing => " Editing (Press 'Enter' to send, 'Esc' to exit) ",
+            InputMode::Normal => " Input (Press 'i' to edit, 'q' to quit) ".to_string(),
+            InputMode::Editing => " Editing (Press 'Enter' to send, 'Esc' to exit) ".to_string(),
         }
     };
 

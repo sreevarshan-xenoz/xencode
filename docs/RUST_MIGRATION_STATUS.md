@@ -2,18 +2,15 @@
 
 Branch: `total-migiration-rust`
 
-## Current Slice: Phase 7 (Advanced TUI Features & Themes)
+## Current Slice: Phase 8 (Animations & Interactive Workflows)
 
-The Rust migration has achieved full feature parity with the foundational Python capabilities and is now catching up to the massive ecosystem of textual widgets previously built. We have established a robust overlay and routing system to manage complex TUI states.
+The TUI now includes advanced micro-animations and fully integrated asynchronous workflows. The core layout structure is complete, and the application now successfully mirrors the functionality of the Python application.
 
-## Key Features Added in Phase 7
+## Key Features Added in Phase 8
 
-1. **Theme Engine**: The `ratatui` interface now supports dynamic theming. We've implemented several core palettes: `midnight`, `ocean`, `forest`, and `terminal`. The active theme is dynamically loaded from `~/.xencode/config.json`.
-2. **Git Integration**: The `FileExplorer` now executes an async `git status` check when you press `Ctrl+G` (or when the app starts). Files with changes are visually marked (`[M]`, `[?]`, `[A]`), giving you a real-time view of your working tree.
-3. **Advanced Overlays**: We mapped out the UI and routing architecture for the remaining critical components:
-   - **Settings Panel**: Press `Ctrl+,` to view active configurations.
-   - **Code Review**: Press `Ctrl+R` to review the actively selected file.
-   - **Integrated Terminal**: Press `Ctrl+T` to toggle a bottom-pane layout.
+1. **Fluid Animations**: The asynchronous event loop has been upgraded to run at 30 FPS. When the assistant is generating text or reviewing code, the UI displays a smooth spinner animation (`⠋⠙⠹⠸⠼⠴...`) without blocking input.
+2. **Automated Code Review**: The `Ctrl+R` overlay is now fully wired up. Pressing `Enter` reads the selected file, constructs a specialized review prompt, and streams the AI's analysis directly into the side panel.
+3. **ByteBot Interception**: Autonomous agent workflows are partially ported. Typing `/bytebot <command>` into the chat input triggers a simulated autonomous execution loop that streams agentic steps back to the UI.
 
 ## Local Verification Notes
 
@@ -24,6 +21,6 @@ cd rust
 cargo run --release -p xencode-cli -- tui
 ```
 
-- Change your `active_theme` in `~/.xencode/config.json` to `"forest"` or `"midnight"` to see the dynamic color palettes.
-- Press `Ctrl+G` in a git repository to view file status indicators.
-- Test the new overlays using `Ctrl+,`, `Ctrl+R`, and `Ctrl+T`.
+- Type a prompt and press `Enter` to see the new pulsing spinner animation in the input title bar.
+- Press `Ctrl+R` to open the Code Review panel, select a file in the explorer, and press `Enter` to stream an AI review.
+- Type `/bytebot analyze tests` and press `Enter` to watch the asynchronous agent execution steps.
