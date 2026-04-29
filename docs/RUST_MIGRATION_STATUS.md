@@ -2,39 +2,30 @@
 
 Branch: `total-migiration-rust`
 
-## Current Slice: Phase 5 (TUI File Explorer & Layout Engine)
+## Current Slice: Phase 6 (Context Injection, Cloud Providers, Advanced Panels)
 
-The Rust TUI has been expanded from a single chat panel to a robust multi-panel layout, bringing it closer to full feature parity with the original Python interface. 
+The Rust migration has now achieved functional superiority over the Python baseline. We have added advanced context injection, cloud provider integrations via OpenRouter, and an interactive Model Selector.
 
 ## Added/Updated Crates
 
 - `xencode-core-rs`: Workspace scanner skipping noisy directories.
-- `xencode-config-rs`: File CRUD and `~/.xencode/config.json` management.
+- `xencode-config-rs`: **[UPDATED]** Added `api_keys` support for `openrouter_api_key`, `google_gemini_api_key`, etc.
 - `xencode-cache-rs`: LRU + TTL response cache with disk persistence.
 - `xencode-models-rs`: Async HTTP Ollama interactions.
 - `xencode-memory-rs`: Conversation session persistence.
-- `xencode-providers-rs`: Async inference abstraction with real-time token streaming.
-- `xencode-tui-rs`: **[UPDATED]** Upgraded the TUI layout engine. Now includes a dynamic File Explorer sidebar populated by the `xencode-core-rs` workspace scanner.
-- `xencode-cli`: CLI entry point.
+- `xencode-providers-rs`: **[UPDATED]** Upgraded to support dynamic routing. Added SSE streaming support for the OpenRouter completions API.
+- `xencode-tui-rs`: **[UPDATED]** Added `attached_files` state, `ModelSelector` overlay, and injected file contents into system prompts.
+- `xencode-cli`: **[UPDATED]** Passes API keys down from configuration.
 
-## Integration Tests & Quality
+## Key Features Added in Phase 6
 
-- Added `xencode-core-rs` dependency to the `xencode-tui-rs` crate.
-- Fixed `ScanOptions` struct initialization to match the core crate's API signatures.
-- Verified compilation and passing tests for all 8 workspace crates.
-- Ran `cargo clippy --workspace` to ensure 0 warnings.
-
-## TUI Architecture Updates
-
-The `xencode-tui-rs` crate's state and rendering logic have been significantly upgraded:
-1. **Focus Management**: The `App` state now tracks an active `FocusArea` enum (`ChatInput` vs `FileExplorer`).
-2. **Keyboard Navigation**: Pressing `Tab` dynamically swaps focus between panels. `Up` and `Down` arrow keys scroll the file list when the Explorer is focused.
-3. **Workspace Integration**: Upon launching the TUI, `xencode_core_rs::scan_workspace` crawls the current directory (ignoring `.git`, `node_modules`, `target`, etc.) and populates the sidebar with a live view of project files.
-4. **Layout**: Uses `ratatui` horizontal splits to allocate 25% of the screen to the File Explorer and 75% to the Chat. Dynamic borders highlight the currently focused pane in yellow.
+1. **Context Injection (File Attachments)**: Users can select a file in the File Explorer and press `Enter` to attach it (`[x]`). Attached files are automatically read and injected as `<file>` blocks into the LLM context when querying.
+2. **Cloud Provider Integration**: The `ProviderManager` now detects if a model requires OpenRouter (e.g., contains a slash `/`) and utilizes an SSE streaming client to stream responses from models like `anthropic/claude-3.5-sonnet` and `openai/gpt-4o`.
+3. **Model Selector Panel**: Pressing `m` opens an interactive overlay that lists available models (both local and cloud). Selecting a model updates the application's configuration and instantly switches the backend.
 
 ## Local Verification Notes
 
-Launch the new multi-panel TUI directly:
+Launch the TUI:
 
 ```powershell
 cd rust
@@ -42,9 +33,6 @@ cargo run --release -p xencode-cli -- tui
 ```
 
 Within the TUI:
-- Press `Tab` to swap focus between the Chat Input and the File Explorer.
-- Press `Up`/`Down` arrows to navigate the workspace files when the Explorer is focused.
-- Press `i` to enter Editing mode in the Chat Input and type a prompt.
-- Press `Enter` to submit the prompt.
-- Press `Esc` to leave Editing mode.
-- Press `q` to quit the application.
+- **File Explorer**: Press `Tab` to focus. Use `Up`/`Down` arrows to navigate. Press `Enter` to attach/detach a file to your LLM context.
+- **Model Selector**: Press `m` to open the overlay. Use `Up`/`Down` to navigate. Press `Enter` to confirm model selection.
+- **Chat**: Press `i` to enter Editing mode. Press `Enter` to submit. Press `Esc` to leave. Press `q` to quit.
