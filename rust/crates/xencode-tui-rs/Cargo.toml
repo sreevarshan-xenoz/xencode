@@ -17,3 +17,4 @@ xencode-core-rs = { path = "../xencode-core-rs" }
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.28"
 ratatui = "0.29"
+tui-textarea = "0.7"
