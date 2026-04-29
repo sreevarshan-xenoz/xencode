@@ -6,6 +6,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind, MouseButton};
 use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
+use tui_textarea::TextArea;
 
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
@@ -25,6 +26,7 @@ pub enum InputMode {
 pub enum FocusArea {
     ChatInput,
     FileExplorer,
+    CodeEditor,
     ModelSelector,
     Settings,
     CodeReview,
@@ -33,7 +35,33 @@ pub enum FocusArea {
     ProviderHealth,
     ProjectAnalyzer,
     GitCommit,
+    FeatureNavigator,
+    ByteBotPanel,
+    CollaborationHub,
+    VoiceInterface,
+    TerminalAssistant,
+    SecurityAuditor,
+    PerformanceProfiler,
+    CustomModels,
+    LearningMode,
+    MultiLanguage,
 }
+
+pub const FEATURE_LIST: &[(&str, &str)] = &[
+    ("📊 Performance Dashboard", "Session stats & metrics"),
+    ("🏥 Provider Health", "API connection status"),
+    ("📈 Project Analyzer", "Workspace file breakdown"),
+    ("📝 Git Commit", "Stage and commit changes"),
+    ("🤖 ByteBot Agent", "Autonomous task execution"),
+    ("👥 Collaboration Hub", "Team collaboration tools"),
+    ("🎙️ Voice Interface", "Voice-to-code commands"),
+    ("💡 Terminal Assistant", "AI-powered shell helper"),
+    ("🛡️ Security Auditor", "Vulnerability scanning"),
+    ("⚡ Performance Profiler", "Code profiling tools"),
+    ("🧩 Custom Models", "Model configuration & tuning"),
+    ("📚 Learning Mode", "Interactive code tutorials"),
+    ("🌐 Multi-Language", "Language detection & tools"),
+];
 
 #[derive(Clone, Copy)]
 pub struct ThemeColors {
@@ -121,7 +149,7 @@ pub struct UiMessage {
     pub content: String,
 }
 
-pub struct App {
+pub struct App<'a> {
     pub focus: FocusArea,
     pub input: String,
     pub input_cursor: usize,
@@ -132,6 +160,9 @@ pub struct App {
     pub selected_file: usize,
     pub file_scroll_offset: usize,
     pub attached_files: HashSet<String>,
+    pub opened_file: Option<String>,
+    pub editor: TextArea<'a>,
+    pub editor_dirty: bool,
     pub git_status: HashMap<String, String>,
     pub available_models: Vec<String>,
     pub selected_model: usize,
@@ -145,9 +176,10 @@ pub struct App {
     pub config: XencodeConfig,
     pub show_terminal: bool,
     pub memory: ConversationMemory,
+    pub feature_nav_selected: usize,
 }
 
-impl App {
+impl<'a> App<'a> {
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
@@ -189,6 +221,9 @@ impl App {
             }
         }
 
+        let mut editor = TextArea::default();
+        editor.set_line_number_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+
         let mut app = Self {
             focus: FocusArea::ChatInput,
             input: String::new(),
@@ -200,6 +235,9 @@ impl App {
             selected_file: 0,
             file_scroll_offset: 0,
             attached_files: HashSet::new(),
+            opened_file: None,
+            editor,
+            editor_dirty: false,
             git_status,
             available_models,
             selected_model,
@@ -213,12 +251,57 @@ impl App {
             config,
             show_terminal: false,
             memory,
+            feature_nav_selected: 0,
         };
 
         for msg in app.memory.get_context(10) {
             app.messages.push(UiMessage { role: msg.role.clone(), content: msg.content.clone() });
         }
         app
+    }
+
+    pub fn open_file_in_editor(&mut self, path: &str) {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+                self.editor = TextArea::new(if lines.is_empty() { vec![String::new()] } else { lines });
+                self.editor.set_line_number_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+                self.opened_file = Some(path.to_string());
+                self.editor_dirty = false;
+            }
+            Err(_) => {
+                self.editor = TextArea::new(vec![format!("Unable to read file: {}", path)]);
+                self.opened_file = None;
+            }
+        }
+    }
+
+    pub fn save_editor(&mut self) {
+        if let Some(ref fp) = self.opened_file {
+            let content: String = self.editor.lines().join("\n");
+            if std::fs::write(fp, &content).is_ok() {
+                self.editor_dirty = false;
+            }
+        }
+    }
+
+    pub fn navigate_feature(&self, idx: usize) -> FocusArea {
+        match idx {
+            0 => FocusArea::PerformanceDashboard,
+            1 => FocusArea::ProviderHealth,
+            2 => FocusArea::ProjectAnalyzer,
+            3 => FocusArea::GitCommit,
+            4 => FocusArea::ByteBotPanel,
+            5 => FocusArea::CollaborationHub,
+            6 => FocusArea::VoiceInterface,
+            7 => FocusArea::TerminalAssistant,
+            8 => FocusArea::SecurityAuditor,
+            9 => FocusArea::PerformanceProfiler,
+            10 => FocusArea::CustomModels,
+            11 => FocusArea::LearningMode,
+            12 => FocusArea::MultiLanguage,
+            _ => FocusArea::ChatInput,
+        }
     }
 
     pub fn refresh_git(&mut self) {
@@ -351,7 +434,7 @@ impl App {
     }
 }
 
-impl Default for App {
+impl<'a> Default for App<'a> {
     fn default() -> Self { Self::new() }
 }
 
@@ -396,6 +479,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 }
                                 continue;
                             }
+                            KeyCode::Char('f') => {
+                                app.focus = if app.focus == FocusArea::FeatureNavigator { FocusArea::ChatInput } else { FocusArea::FeatureNavigator };
+                                continue;
+                            }
+                            KeyCode::Char('s') => {
+                                if app.focus == FocusArea::CodeEditor {
+                                    app.save_editor();
+                                } else {
+                                    app.focus = if app.focus == FocusArea::GitCommit { FocusArea::ChatInput } else { FocusArea::GitCommit };
+                                }
+                                continue;
+                            }
                             _ => {}
                         }
                     }
@@ -404,8 +499,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         InputMode::Normal => match key.code {
                             KeyCode::Tab => {
                                 app.focus = match app.focus {
+                                    FocusArea::FileExplorer => FocusArea::CodeEditor,
+                                    FocusArea::CodeEditor => FocusArea::ChatInput,
                                     FocusArea::ChatInput => FocusArea::FileExplorer,
-                                    FocusArea::FileExplorer => FocusArea::ChatInput,
                                     _ => FocusArea::ChatInput,
                                 };
                             }
@@ -414,6 +510,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::FileExplorer => { if app.selected_file > 0 { app.selected_file -= 1; } }
                                     FocusArea::ModelSelector => { if app.selected_model > 0 { app.selected_model -= 1; } }
                                     FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(1); }
+                                    FocusArea::FeatureNavigator => { if app.feature_nav_selected > 0 { app.feature_nav_selected -= 1; } }
+                                    FocusArea::CodeEditor => { app.editor.scroll((-1, 0)); }
                                     _ => {}
                                 }
                             }
@@ -426,16 +524,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         if app.selected_model + 1 < app.available_models.len() { app.selected_model += 1; }
                                     }
                                     FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_sub(1); }
+                                    FocusArea::FeatureNavigator => {
+                                        if app.feature_nav_selected + 1 < FEATURE_LIST.len() { app.feature_nav_selected += 1; }
+                                    }
+                                    FocusArea::CodeEditor => { app.editor.scroll((1, 0)); }
                                     _ => {}
                                 }
                             }
                             KeyCode::Enter => {
                                 match app.focus {
                                     FocusArea::FileExplorer => {
-                                        if let Some(fp) = app.file_tree.get(app.selected_file) {
-                                            let fp = fp.clone();
-                                            if app.attached_files.contains(&fp) { app.attached_files.remove(&fp); }
-                                            else { app.attached_files.insert(fp); }
+                                        if let Some(fp) = app.file_tree.get(app.selected_file).cloned() {
+                                            app.open_file_in_editor(&fp);
                                         }
                                     }
                                     FocusArea::ModelSelector => {
@@ -459,7 +559,20 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             app.focus = FocusArea::ChatInput;
                                         }
                                     }
+                                    FocusArea::FeatureNavigator => {
+                                        let target = app.navigate_feature(app.feature_nav_selected);
+                                        app.focus = target;
+                                    }
                                     _ => {}
+                                }
+                            }
+                            KeyCode::Char(' ') => {
+                                if app.focus == FocusArea::FileExplorer {
+                                    if let Some(fp) = app.file_tree.get(app.selected_file) {
+                                        let fp = fp.clone();
+                                        if app.attached_files.contains(&fp) { app.attached_files.remove(&fp); }
+                                        else { app.attached_files.insert(fp); }
+                                    }
                                 }
                             }
                             KeyCode::Char('i') | KeyCode::Char('/') => {
@@ -473,8 +586,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Esc => {
                                 match app.focus {
                                     FocusArea::ModelSelector | FocusArea::Settings | FocusArea::CodeReview |
-                                    FocusArea::PerformanceDashboard | FocusArea::ProviderHealth | FocusArea::ProjectAnalyzer | FocusArea::GitCommit => {
+                                    FocusArea::PerformanceDashboard | FocusArea::ProviderHealth | FocusArea::ProjectAnalyzer | FocusArea::GitCommit |
+                                    FocusArea::FeatureNavigator | FocusArea::ByteBotPanel | FocusArea::CollaborationHub |
+                                    FocusArea::VoiceInterface | FocusArea::TerminalAssistant | FocusArea::SecurityAuditor |
+                                    FocusArea::PerformanceProfiler | FocusArea::CustomModels | FocusArea::LearningMode | FocusArea::MultiLanguage => {
                                         app.focus = FocusArea::ChatInput;
+                                    }
+                                    FocusArea::CodeEditor => {
+                                        app.input_mode = InputMode::Normal;
                                     }
                                     _ => {}
                                 }
@@ -483,6 +602,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 if app.focus == FocusArea::GitCommit {
                                     app.commit_message.insert(app.commit_cursor, c);
                                     app.commit_cursor += 1;
+                                } else if c == 'e' && app.focus == FocusArea::CodeEditor {
+                                    app.input_mode = InputMode::Editing;
                                 }
                             }
                             KeyCode::Backspace => {
@@ -499,13 +620,23 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             _ => {}
                         },
-                        InputMode::Editing => match key.code {
+                        InputMode::Editing => {
+                            // If editor is focused, forward input to textarea
+                            if app.focus == FocusArea::CodeEditor {
+                                match key.code {
+                                    KeyCode::Esc => { app.input_mode = InputMode::Normal; }
+                                    _ => {
+                                        app.editor.input(key);
+                                        app.editor_dirty = true;
+                                    }
+                                }
+                            } else {
+                                // Normal chat input editing
+                                match key.code {
                             KeyCode::Enter => {
                                 if !app.is_generating {
-                                    // Add empty assistant message placeholder
-                                    app.messages.push(UiMessage { role: "assistant".to_string(), content: String::new() });
                                     app.submit_message(tx.clone());
-                                    app.chat_scroll = 0; // scroll to bottom
+                                    app.chat_scroll = 0;
                                 }
                             }
                             KeyCode::Char(c) => {
@@ -533,11 +664,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::End => { app.input_cursor = app.input.len(); }
                             KeyCode::Esc => { app.input_mode = InputMode::Normal; }
                             KeyCode::Tab => {
-                                // Insert 4 spaces
                                 app.input.insert_str(app.input_cursor, "    ");
                                 app.input_cursor += 4;
                             }
                             _ => {}
+                                }
+                            }
                         },
                     }
                 }
@@ -546,6 +678,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         MouseEventKind::ScrollUp => {
                             match app.focus {
                                 FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(3); }
+                                FocusArea::CodeEditor => { app.editor.scroll((-3, 0)); }
                                 FocusArea::FileExplorer => {
                                     if app.selected_file >= 3 { app.selected_file -= 3; }
                                     else { app.selected_file = 0; }
@@ -556,6 +689,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         MouseEventKind::ScrollDown => {
                             match app.focus {
                                 FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_sub(3); }
+                                FocusArea::CodeEditor => { app.editor.scroll((3, 0)); }
                                 FocusArea::FileExplorer => {
                                     app.selected_file = (app.selected_file + 3).min(app.file_tree.len().saturating_sub(1));
                                 }
@@ -563,15 +697,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                         }
                         MouseEventKind::Down(MouseButton::Left) => {
-                            // Click in left quarter = file explorer, else chat
                             let term_width = terminal.size()?.width;
-                            if mouse.column < term_width / 4 {
+                            let left_pane = term_width * 20 / 100;
+                            let center_pane = term_width * 70 / 100;
+                            
+                            if mouse.column < left_pane {
                                 app.focus = FocusArea::FileExplorer;
-                                // Approximate row click to file selection
-                                let row = mouse.row.saturating_sub(2) as usize; // account for margin+border
+                                let row = mouse.row.saturating_sub(2) as usize;
                                 if row < app.file_tree.len() {
                                     app.selected_file = row;
                                 }
+                            } else if mouse.column < center_pane {
+                                app.focus = FocusArea::CodeEditor;
                             } else {
                                 app.focus = FocusArea::ChatInput;
                             }
@@ -579,11 +716,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         _ => {}
                     }
                 }
-                Event::Resize(_, _) => {} // handled by ratatui automatically
+                Event::Resize(_, _) => {}
                 _ => {}
             }
         } else {
-            // Tick spinner when idle
             if app.is_generating || app.is_reviewing {
                 app.spinner_tick = app.spinner_tick.wrapping_add(1);
             }

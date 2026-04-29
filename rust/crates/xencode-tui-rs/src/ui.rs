@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, FocusArea, InputMode};
+use crate::app::{App, FocusArea, InputMode, FEATURE_LIST};
 
 pub fn draw(f: &mut Frame, app: &App) {
     // Full-screen themed background
@@ -36,6 +36,16 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::ProviderHealth => draw_provider_health(f, app, f.area()),
         FocusArea::ProjectAnalyzer => draw_project_analyzer(f, app, f.area()),
         FocusArea::GitCommit => draw_git_commit(f, app, f.area()),
+        FocusArea::FeatureNavigator => draw_feature_navigator(f, app, f.area()),
+        FocusArea::ByteBotPanel => draw_simple_panel(f, app, f.area(), "🤖 ByteBot Agent", "Autonomous task execution engine.\n\nType /bytebot <command> in the chat to trigger.\n\nFuture: Full multi-step agent with tool use."),
+        FocusArea::CollaborationHub => draw_simple_panel(f, app, f.area(), "👥 Collaboration Hub", "Real-time collaboration tools.\n\nShare your session, pair program, and\ncoordinate with team members.\n\nComing soon."),
+        FocusArea::VoiceInterface => draw_simple_panel(f, app, f.area(), "🎙️ Voice Interface", "Voice-to-code commands.\n\nSpeak natural language and have it\nconverted to code actions.\n\nRequires microphone + Whisper API.\nComing soon."),
+        FocusArea::TerminalAssistant => draw_simple_panel(f, app, f.area(), "💡 Terminal Assistant", "AI-powered shell helper.\n\nAsk questions about shell commands,\nget suggestions, and execute safely.\n\nComing soon."),
+        FocusArea::SecurityAuditor => draw_simple_panel(f, app, f.area(), "🛡️ Security Auditor", "Automated vulnerability scanning.\n\nScans your codebase for common\nsecurity issues (SQL injection, XSS, etc).\n\nComing soon."),
+        FocusArea::PerformanceProfiler => draw_simple_panel(f, app, f.area(), "⚡ Performance Profiler", "Code profiling tools.\n\nIdentify hot paths, memory leaks,\nand optimization opportunities.\n\nComing soon."),
+        FocusArea::CustomModels => draw_simple_panel(f, app, f.area(), "🧩 Custom Models", "Model configuration & fine-tuning.\n\nCreate custom model profiles,\nadjust temperature, and manage prompts.\n\nComing soon."),
+        FocusArea::LearningMode => draw_simple_panel(f, app, f.area(), "📚 Learning Mode", "Interactive code tutorials.\n\nLearn Rust, Python, and more\nwith guided AI explanations.\n\nComing soon."),
+        FocusArea::MultiLanguage => draw_simple_panel(f, app, f.area(), "🌐 Multi-Language", "Language detection & tools.\n\nAutomatic language detection,\ntranslation, and polyglot support.\n\nComing soon."),
         _ => {}
     }
 }
@@ -87,10 +97,15 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 fn draw_body(f: &mut Frame, app: &App, area: Rect) {
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+        .constraints([
+            Constraint::Percentage(20), // File Explorer
+            Constraint::Percentage(50), // Code Editor
+            Constraint::Percentage(30)  // Chat
+        ])
         .split(area);
 
     draw_file_explorer(f, app, main_chunks[0]);
+    draw_code_editor(f, app, main_chunks[1]);
 
     // Right side: chat + optional terminal + input
     if app.show_terminal {
@@ -101,7 +116,7 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
                 Constraint::Length(8),    // terminal
                 Constraint::Length(3),    // input
             ])
-            .split(main_chunks[1]);
+            .split(main_chunks[2]);
         draw_messages(f, app, right[0]);
         draw_terminal(f, app, right[1]);
         draw_input(f, app, right[2]);
@@ -109,9 +124,49 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
         let right = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(1), Constraint::Length(3)])
-            .split(main_chunks[1]);
+            .split(main_chunks[2]);
         draw_messages(f, app, right[0]);
         draw_input(f, app, right[1]);
+    }
+}
+
+fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
+    let is_focused = app.focus == FocusArea::CodeEditor;
+    let is_editing = is_focused && app.input_mode == InputMode::Editing;
+
+    let border_style = if is_editing {
+        Style::default().fg(app.theme.accent)
+    } else if is_focused {
+        Style::default().fg(app.theme.border_active)
+    } else {
+        Style::default().fg(app.theme.border)
+    };
+
+    let dirty_mark = if app.editor_dirty { " [modified]" } else { "" };
+    let mode_mark = if is_editing { " EDITING" } else { "" };
+
+    let title = if let Some(ref fp) = app.opened_file {
+        format!(" 📝 {}{}{} ", fp, dirty_mark, mode_mark)
+    } else {
+        " 📝 Code Editor (Select a file & press Enter) ".to_string()
+    };
+
+    let block = Block::default().borders(Borders::ALL).border_style(border_style).title(title);
+
+    if app.opened_file.is_some() {
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        f.render_widget(&app.editor, inner);
+    } else {
+        let text = vec![
+            Line::from(""),
+            Line::from(Span::styled("  No file opened.", Style::default().fg(app.theme.message_system))),
+            Line::from(""),
+            Line::from(Span::styled("  Select a file in the Explorer and press Enter.", Style::default().fg(app.theme.message_system))),
+            Line::from(Span::styled("  Press 'e' to enter edit mode, Ctrl+S to save.", Style::default().fg(app.theme.message_system))),
+        ];
+        let paragraph = Paragraph::new(text).block(block);
+        f.render_widget(paragraph, area);
     }
 }
 
@@ -481,4 +536,47 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(50, 60, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 🚀 Feature Navigator (↑↓ Enter, Esc to close) ");
+
+    let items: Vec<ListItem> = FEATURE_LIST.iter().enumerate().map(|(i, (name, desc))| {
+        let style = if i == app.feature_nav_selected {
+            Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.fg)
+        };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!(" {} ", name), style),
+            Span::styled(format!("— {}", desc), Style::default().fg(app.theme.message_system)),
+        ]))
+    }).collect();
+
+    let list = List::new(items).block(block);
+    let mut state = ListState::default();
+    state.select(Some(app.feature_nav_selected));
+    f.render_stateful_widget(list, popup_area, &mut state);
+}
+
+fn draw_simple_panel(f: &mut Frame, app: &App, area: Rect, title: &str, body: &str) {
+    let popup_area = centered_rect(50, 40, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(" {} (Esc to close) ", title));
+
+    let para = Paragraph::new(format!("\n  {}", body.replace('\n', "\n  ")))
+        .block(block)
+        .style(Style::default().fg(app.theme.fg))
+        .wrap(Wrap { trim: false });
+    f.render_widget(para, popup_area);
 }
