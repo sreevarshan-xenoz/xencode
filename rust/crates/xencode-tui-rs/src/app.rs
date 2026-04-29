@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
 
@@ -23,6 +24,7 @@ pub enum InputMode {
 pub enum FocusArea {
     ChatInput,
     FileExplorer,
+    ModelSelector,
 }
 
 /// Represents a message in the UI chat list
@@ -38,8 +40,11 @@ pub struct App {
     pub messages: Vec<UiMessage>,
     pub file_tree: Vec<String>,
     pub selected_file: usize,
+    pub attached_files: HashSet<String>,
+    pub available_models: Vec<String>,
+    pub selected_model: usize,
     pub is_generating: bool,
-    config: XencodeConfig,
+    pub config: XencodeConfig,
     memory: ConversationMemory,
 }
 
@@ -70,6 +75,16 @@ impl App {
         let tree = scan_workspace(".", &scan_opts).unwrap_or_default();
         let file_tree = tree.into_iter().map(|f| f.path.display().to_string()).collect();
 
+        let available_models = vec![
+            "qwen2.5:7b".to_string(),
+            "llama3.1:8b".to_string(),
+            "anthropic/claude-3.5-sonnet".to_string(),
+            "google/gemini-1.5-pro".to_string(),
+            "openai/gpt-4o".to_string(),
+        ];
+        
+        let selected_model = available_models.iter().position(|m| m == &config.default_model).unwrap_or(0);
+
         let mut app = Self {
             focus: FocusArea::ChatInput,
             input: String::new(),
@@ -77,6 +92,9 @@ impl App {
             messages: Vec::new(),
             file_tree,
             selected_file: 0,
+            attached_files: HashSet::new(),
+            available_models,
+            selected_model,
             is_generating: false,
             config,
             memory,
@@ -118,13 +136,29 @@ impl App {
             });
         }
 
+        // Inject attached files into context
+        let mut attached_context = String::new();
+        for path in &self.attached_files {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                attached_context.push_str(&format!("<file path=\"{}\">\n{}\n</file>\n\n", path, content));
+            }
+        }
+        
+        if !attached_context.is_empty() {
+            context_messages.insert(0, ChatMessage {
+                role: "system".to_string(),
+                content: format!("The following local files are attached for context:\n{}", attached_context),
+            });
+        }
+
         let model = self.config.default_model.clone();
         let ollama_url = self.config.ollama_url.clone();
         let timeout = self.config.response_timeout;
+        let api_key = self.config.api_keys.openrouter_api_key.clone();
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
-            let manager = ProviderManager::new(client);
+            let manager = ProviderManager::new(client, api_key);
             
             let _ = manager.generate_stream(&model, &context_messages, |token| {
                 let _ = tx.send(token.to_string());
@@ -198,16 +232,45 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Up => {
                                 if app.focus == FocusArea::FileExplorer && app.selected_file > 0 {
                                     app.selected_file -= 1;
+                                } else if app.focus == FocusArea::ModelSelector && app.selected_model > 0 {
+                                    app.selected_model -= 1;
                                 }
                             }
                             KeyCode::Down => {
                                 if app.focus == FocusArea::FileExplorer && app.selected_file + 1 < app.file_tree.len() {
                                     app.selected_file += 1;
+                                } else if app.focus == FocusArea::ModelSelector && app.selected_model + 1 < app.available_models.len() {
+                                    app.selected_model += 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if app.focus == FocusArea::FileExplorer {
+                                    if let Some(file_path) = app.file_tree.get(app.selected_file) {
+                                        let file_path_clone = file_path.clone();
+                                        if app.attached_files.contains(&file_path_clone) {
+                                            app.attached_files.remove(&file_path_clone);
+                                        } else {
+                                            app.attached_files.insert(file_path_clone);
+                                        }
+                                    }
+                                } else if app.focus == FocusArea::ModelSelector {
+                                    if let Some(model) = app.available_models.get(app.selected_model) {
+                                        app.config.default_model = model.clone();
+                                        let _ = app.config.save();
+                                        app.focus = FocusArea::ChatInput;
+                                    }
                                 }
                             }
                             KeyCode::Char('i') => {
                                 app.input_mode = InputMode::Editing;
                                 app.focus = FocusArea::ChatInput;
+                            }
+                            KeyCode::Char('m') => {
+                                app.focus = if app.focus == FocusArea::ModelSelector {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::ModelSelector
+                                };
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 return Ok(());

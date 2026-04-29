@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -23,6 +23,67 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_file_explorer(f, app, main_chunks[0]);
     draw_messages(f, app, right_chunks[0]);
     draw_input(f, app, right_chunks[1]);
+
+    if app.focus == FocusArea::ModelSelector {
+        draw_model_selector(f, app, f.area());
+    }
+}
+
+fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(50, 50, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Select Model (Enter to confirm) ");
+
+    let items: Vec<ListItem> = app.available_models
+        .iter()
+        .enumerate()
+        .map(|(i, model)| {
+            let style = if i == app.selected_model {
+                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            
+            let prefix = if model == &app.config.default_model {
+                "[*] "
+            } else {
+                "    "
+            };
+
+            ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, model), style)))
+        })
+        .collect();
+
+    let list = List::new(items).block(block);
+
+    let mut state = ListState::default();
+    state.select(Some(app.selected_model));
+
+    f.render_widget(Clear, popup_area); // This clears the background
+    f.render_stateful_widget(list, popup_area, &mut state);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ].as_ref())
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ].as_ref())
+        .split(popup_layout[1])[1]
 }
 
 fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
@@ -46,7 +107,14 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(Line::from(Span::styled(path.clone(), style)))
+            
+            let prefix = if app.attached_files.contains(path) {
+                "[x] "
+            } else {
+                "    "
+            };
+
+            ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, path), style)))
         })
         .collect();
 

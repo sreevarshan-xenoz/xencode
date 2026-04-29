@@ -362,10 +362,10 @@ async fn run_query(
     });
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
-    let manager = ProviderManager::new(client);
+    let provider = ProviderManager::new(client, config.api_keys.openrouter_api_key.clone());
 
     let mut response_content = String::new();
-    let result = manager.generate_stream(&model, &context_messages, |token| {
+    let result = provider.generate_stream(&model, &context_messages, |token| {
         print!("{}", token);
         let _ = io::stdout().flush();
         response_content.push_str(token);
