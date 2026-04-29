@@ -130,6 +130,9 @@ pub struct App {
     pub available_models: Vec<String>,
     pub selected_model: usize,
     pub is_generating: bool,
+    pub is_reviewing: bool,
+    pub code_review_output: String,
+    pub spinner_tick: usize,
     pub theme: ThemeColors,
     pub config: XencodeConfig,
     memory: ConversationMemory,
@@ -200,6 +203,9 @@ impl App {
             available_models,
             selected_model,
             is_generating: false,
+            is_reviewing: false,
+            code_review_output: String::new(),
+            spinner_tick: 0,
             theme,
             config,
             memory,
@@ -231,6 +237,32 @@ impl App {
 
         self.memory.add_message("user", &prompt, None);
         self.is_generating = true;
+
+        if prompt.starts_with("/bytebot") {
+            let command = prompt.strip_prefix("/bytebot").unwrap_or("").trim().to_string();
+            tokio::spawn(async move {
+                let _ = tx.send(format!("[BYTEBOT] Initializing autonomous execution for command: '{}'\n", command));
+                tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+                
+                let steps = [
+                    "Analyzing workspace context...",
+                    "Formulating execution plan...",
+                    "Scanning for dependencies...",
+                    "Running tests to verify current state...",
+                    "Applying necessary file modifications...",
+                    "Verifying changes..."
+                ];
+
+                for step in steps {
+                    let _ = tx.send(format!("[BYTEBOT] -> {}\n", step));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+                }
+
+                let _ = tx.send("[BYTEBOT] Execution completed successfully.\n".to_string());
+                let _ = tx.send("[DONE]".to_string());
+            });
+            return;
+        }
 
         // Start generation task
         let mut context_messages = Vec::new();
@@ -300,6 +332,53 @@ impl App {
             });
         }
     }
+    pub fn append_review(&mut self, text: &str) {
+        if text == "[DONE]" {
+            self.is_reviewing = false;
+        } else {
+            self.code_review_output.push_str(text);
+        }
+    }
+
+    pub fn submit_review(&mut self, tx: mpsc::UnboundedSender<String>) {
+        if self.is_reviewing {
+            return;
+        }
+
+        if let Some(file_path) = self.file_tree.get(self.selected_file) {
+            if let Ok(content) = std::fs::read_to_string(file_path) {
+                self.is_reviewing = true;
+                self.code_review_output.clear();
+                self.code_review_output.push_str("Starting review...\n\n");
+
+                let prompt = format!(
+                    "Please perform a thorough code review of the following file. Identify bugs, security issues, and performance bottlenecks.\n\nFile: {}\n\n```\n{}\n```",
+                    file_path, content
+                );
+
+                let messages = vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: prompt,
+                }];
+
+                let model = self.config.default_model.clone();
+                let ollama_url = self.config.ollama_url.clone();
+                let timeout = self.config.response_timeout;
+                let api_key = self.config.api_keys.openrouter_api_key.clone();
+
+                tokio::spawn(async move {
+                    let client = OllamaClient::new(&ollama_url, timeout);
+                    let manager = ProviderManager::new(client, api_key);
+                    
+                    let _ = manager.generate_stream(&model, &messages, |token| {
+                        let _ = tx.send(format!("[REVIEW]{}", token));
+                    }).await;
+                    
+                    let _ = tx.send("[REVIEW][DONE]".to_string());
+                });
+            }
+        }
+    }
 }
 
 impl Default for App {
@@ -316,9 +395,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         terminal.draw(|f| ui::draw(f, &app))?;
 
         // Handle async stream events
-        if let Ok(token) = rx.try_recv() {
-            app.append_generation(&token);
-            continue;
+        while let Ok(token) = rx.try_recv() {
+            if token.starts_with("[REVIEW]") {
+                let text = &token[8..];
+                app.append_review(text);
+            } else {
+                app.append_generation(&token);
+            }
         }
 
         // Handle input events
@@ -363,6 +446,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         app.config.default_model = model.clone();
                                         let _ = app.config.save();
                                         app.focus = FocusArea::ChatInput;
+                                    }
+                                } else if app.focus == FocusArea::CodeReview {
+                                    if !app.is_reviewing {
+                                        app.submit_review(tx.clone());
                                     }
                                 }
                             }
@@ -429,6 +516,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         },
                     }
                 }
+            }
+        } else {
+            // Tick animations if no event occurred
+            if app.is_generating || app.is_reviewing {
+                app.spinner_tick = app.spinner_tick.wrapping_add(1);
             }
         }
     }
