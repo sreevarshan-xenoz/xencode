@@ -42,6 +42,7 @@ try:
     from .routers.monitoring import router as monitoring_router
     from .routers.plugin import router as plugin_router
     from .routers.features import router as features_router
+    from .routers.vault import router as vault_router
     ROUTERS_AVAILABLE = True
 except ImportError:
     ROUTERS_AVAILABLE = False
@@ -370,6 +371,7 @@ if ROUTERS_AVAILABLE:
         app.include_router(monitoring_router, prefix="/api/v1/monitoring", tags=["Monitoring"])
         app.include_router(plugin_router, prefix="/api/v1/plugins", tags=["Plugins"])
         app.include_router(features_router, prefix="/api/v1/features", tags=["Features"])
+        app.include_router(vault_router, prefix="/api/v1/vault", tags=["Vault"])
         dynamic_route_count = register_dynamic_feature_routes(app)
         logger.info("✅ Registered %s dynamic feature routes", dynamic_route_count)
         logger.info("✅ All API routers included successfully")

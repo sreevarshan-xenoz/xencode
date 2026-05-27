@@ -35,6 +35,68 @@ pip install -e .
 
 ## Core Features
 
+### Credential Vault
+Xencode includes an encrypted credential vault (`JsonFileCredentialVault`) that securely stores API keys and secrets in a local JSON file using Fernet encryption (AES-128-CBC with HMAC SHA256).
+
+#### CLI Commands
+
+```bash
+# Initialize a new vault (creates ~/.xencode/vault.json)
+xencode vault init
+
+# Initialize with a custom path
+xencode vault init --vault-path /custom/path/vault.json
+
+# Check vault status
+xencode vault status
+```
+
+#### Migration from Plaintext Config
+
+```bash
+# Scan config and migrate plaintext API keys into the vault
+xencode vault migrate --config-path ~/.xencode/config.json
+
+# Migrate and replace migrated keys with env-var references
+xencode vault migrate --delete-after
+```
+
+#### First-Time Setup Integration
+During first-time setup (`xencode health` or `xencode status` on a fresh install), Xencode automatically prompts you to migrate plaintext API keys into the vault.
+
+#### Vault Encryption
+- **Algorithm**: Fernet (AES-128-CBC with HMAC SHA256)
+- **Key derivation**: PBKDF2 with machine-specific seed
+- **Fallback**: Base64 obfuscation when the `cryptography` package is not installed
+- **Storage**: Single JSON file at `~/.xencode/vault.json` (permissions: `0600`)
+
+#### Programmatic Usage
+
+```python
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+# Create or open vault
+vault = JsonFileCredentialVault()
+
+# Store a credential
+vault.set(Credential(
+    service="openai",
+    username="api_key",
+    secret="sk-...",
+    description="OpenAI API key",
+))
+
+# Retrieve a credential
+cred = vault.get("openai", "api_key")
+print(cred.secret)  # 'sk-...'
+
+# Bulk operations
+info = vault.get_storage_info()       # vault metadata
+vault.clear_vault()                    # remove all credentials
+export = vault.export_vault()          # export (secrets still encrypted)
+vault.import_vault(Path("backup.json"))  # import from another vault
+```
+
 ### AI Ensemble Reasoning
 The core of Xencode is its multi-model ensemble system that combines responses from multiple AI models for better accuracy and reliability.
 
