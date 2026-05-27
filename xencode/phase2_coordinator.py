@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Confirm
 from rich.table import Table
 import time
 
@@ -21,6 +22,14 @@ from xencode.intelligent_model_selector import FirstRunSetup, HardwareDetector
 from xencode.advanced_cache_system import get_cache_manager, HybridCacheManager
 from xencode.smart_config_manager import get_config_manager, ConfigurationManager, XencodeConfig
 from xencode.advanced_error_handler import get_error_handler, ErrorHandler, ErrorSeverity, ErrorCategory
+
+# Import vault for health checks
+try:
+    from xencode.auth.json_file_vault import JsonFileCredentialVault
+    VAULT_AVAILABLE = True
+except ImportError:
+    JsonFileCredentialVault = None  # type: ignore
+    VAULT_AVAILABLE = False
 
 # Phase 6 AI/ML imports
 try:
@@ -145,6 +154,37 @@ class Phase2Coordinator:
             if self.config_manager:
                 self.config = self.config_manager.interactive_setup()
             
+            # Step 3: Offer vault migration
+            console.print("\n[bold]Step 3: Credential Vault Migration[/bold]")
+            console.print("[yellow]💡 Migrate plaintext API keys to an encrypted vault for security.[/yellow]")
+            console.print("[yellow]   Keys like openai_api_key, anthropic_api_key will be stored[/yellow]")
+            console.print("[yellow]   encrypted with Fernet (AES-128-CBC) instead of plaintext.[/yellow]")
+
+            if Confirm.ask("Scan config for plaintext API keys and migrate to vault?", default=True):
+                try:
+                    from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+                    with console.status("[bold blue]🔍 Scanning config and migrating keys..."):
+                        result = JsonFileCredentialVault.migrate_from_config()
+
+                    migrated = result.get("migrated", 0)
+                    skipped = result.get("skipped", 0)
+                    errors = result.get("errors", [])
+
+                    if migrated > 0:
+                        console.print(f"[green]  ✅ Migrated {migrated} credential(s) to encrypted vault[/green]")
+                    if skipped > 0:
+                        console.print(f"[yellow]  ⏩ Skipped {skipped} env-var references (already secure)[/yellow]")
+                    if errors:
+                        for err in errors:
+                            console.print(f"  [yellow]⚠️  {err}[/yellow]")
+                    if migrated == 0 and not errors:
+                        console.print("[yellow]  No plaintext API keys found to migrate[/yellow]")
+                except ImportError:
+                    console.print("[yellow]  Vault module not available; skipping migration[/yellow]")
+                except Exception as e:
+                    console.print(f"[yellow]  Vault migration skipped: {e}[/yellow]")
+
             console.print("\n[green]✅ First-time setup complete! Xencode is ready to use.[/green]")
             return True
         else:
@@ -225,16 +265,35 @@ class Phase2Coordinator:
                 status["model_status"] = "configured"
                 status["selected_model"] = self.config.model.name
             
+            # Vault status
+            status["vault_status"] = "not_available"
+            if VAULT_AVAILABLE and JsonFileCredentialVault:
+                try:
+                    vault_health = JsonFileCredentialVault.health_check()
+                    if vault_health.get("vault_exists"):
+                        if vault_health.get("is_valid_json"):
+                            status["vault_status"] = "healthy"
+                            status["vault_credential_count"] = vault_health.get("credential_count", 0)
+                            status["vault_encrypted"] = vault_health.get("encryption_available", False)
+                        else:
+                            status["vault_status"] = "corrupted"
+                    else:
+                        status["vault_status"] = "empty"
+                except Exception:
+                    status["vault_status"] = "error"
+            
             # Performance score calculation
             score = 0
             if status["config_status"] == "healthy":
-                score += 25
+                score += 20
             if status["cache_status"] == "active":
-                score += 25
+                score += 20
             if status["model_status"] == "configured":
-                score += 25
+                score += 20
             if self.initialized:
-                score += 25
+                score += 20
+            if status["vault_status"] == "healthy":
+                score += 20
             
             status["performance_score"] = score
             
@@ -272,6 +331,25 @@ class Phase2Coordinator:
         model_icon = "✅" if status["model_status"] == "configured" else "❌"
         model_details = status.get("selected_model", "")
         table.add_row("AI Model", f"{model_icon} {status['model_status'].title()}", model_details)
+        
+        # Credential Vault
+        vault_status_str = status.get("vault_status", "not_available")
+        if vault_status_str == "healthy":
+            vault_icon = "✅"
+            vault_details = f"{status.get('vault_credential_count', 0)} credentials, encrypted={'✅' if status.get('vault_encrypted') else '❌'}"
+        elif vault_status_str == "empty":
+            vault_icon = "⏳"
+            vault_details = "No vault file yet — will be created on first use"
+        elif vault_status_str == "corrupted":
+            vault_icon = "❌"
+            vault_details = "Vault file is corrupted"
+        elif vault_status_str == "error":
+            vault_icon = "❌"
+            vault_details = "Health check error"
+        else:
+            vault_icon = "⚠️"
+            vault_details = "Module not available"
+        table.add_row("Credential Vault", f"{vault_icon} {vault_status_str.title()}", vault_details)
         
         # Performance Score
         score = status["performance_score"]
@@ -356,6 +434,28 @@ class Phase2Coordinator:
                     
             except Exception as e:
                 issues.append(f"Resource check failed: {e}")
+            
+            # Check credential vault
+            vault_health = {}
+            if VAULT_AVAILABLE and JsonFileCredentialVault:
+                progress.add_task("Checking credential vault...", total=None)
+                try:
+                    vault_health = JsonFileCredentialVault.health_check()
+                    if vault_health.get("vault_exists"):
+                        if vault_health.get("is_valid_json"):
+                            count = vault_health.get("credential_count", 0)
+                            console.print(
+                                f"[green]  ✅ Vault: {count} credential(s), "
+                                f"encryption={'✅' if vault_health.get('encryption_available') else '❌ base64'}"
+                                f"[/green]"
+                            )
+                        else:
+                            issues.append("Vault file exists but is corrupted (invalid JSON)")
+                            health_status = False
+                    # Non-existent vault is not an error — just unconfigured
+                except Exception as e:
+                    issues.append(f"Vault health check error: {e}")
+                    health_status = False
         
         # Display results
         if health_status:

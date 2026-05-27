@@ -12,6 +12,62 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
+
+
+@dataclass
+class BenchmarkQuery:
+    """Query parameters for filtering benchmark results"""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    task_type: Optional[str] = None
+    task_name: Optional[str] = None
+    limit: int = 100
+    offset: int = 0
+    sort_by: str = "created_at"
+    sort_desc: bool = True
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+    def to_filter_dict(self) -> Dict[str, Any]:
+        """Convert to filter parameters"""
+        return {k: v for k, v in self.__dict__.items() if v is not None and k not in ("limit", "offset", "sort_by", "sort_desc")}
+
+
+class BenchmarkRecord:
+    """
+    Represents a stored benchmark result record.
+
+    Wraps the raw dictionary returned by BenchmarkStore with
+    typed attribute access for convenience.
+    """
+
+    def __init__(self, data: Dict[str, Any], record_id: int):
+        self.id = record_id
+        self.run_id = data.get("run_id", "")
+        self.provider = data.get("provider", "")
+        self.model = data.get("model", "")
+        self.task_type = data.get("task_type", "")
+        self.task_name = data.get("task_name", "")
+        self.latency_ms = data.get("latency_ms", 0)
+        self.tokens_per_sec = data.get("tokens_per_sec", 0)
+        self.throughput_rps = data.get("throughput_rps", 0)
+        self.accuracy_score = data.get("accuracy_score", 0)
+        self.consistency_score = data.get("consistency_score", 0)
+        self.quality_rating = data.get("quality_rating", 0)
+        self.cost_per_request = data.get("cost_per_request", 0)
+        self.cost_per_1k_tokens = data.get("cost_per_1k_tokens", 0)
+        self.input_tokens = data.get("input_tokens", 0)
+        self.output_tokens = data.get("output_tokens", 0)
+        self.total_tokens = data.get("total_tokens", 0)
+        self.success = data.get("success", True)
+        self.error_message = data.get("error_message")
+        self.created_at = data.get("created_at", "")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert back to dictionary"""
+        return {k: v for k, v in self.__dict__.items()}
 
 
 class BenchmarkStore:
@@ -418,3 +474,16 @@ class BenchmarkStore:
             return cursor.rowcount
         finally:
             conn.close()
+
+
+def create_benchmark_store(db_path: Optional[str] = None) -> BenchmarkStore:
+    """
+    Create a new BenchmarkStore instance.
+
+    Args:
+        db_path: Optional path to SQLite database.
+
+    Returns:
+        A new BenchmarkStore instance.
+    """
+    return BenchmarkStore(db_path=db_path)

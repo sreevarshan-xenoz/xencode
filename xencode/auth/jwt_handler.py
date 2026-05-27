@@ -57,7 +57,7 @@ class JWTHandler:
         
         # Try to load existing secret from vault
         try:
-            from xenocode.auth.credential_vault import get_vault
+            from xencode.auth.credential_vault import get_vault
             vault = get_vault()
             stored = vault.get_secret("jwt", "secret_key")
             if stored:
@@ -68,7 +68,7 @@ class JWTHandler:
         # No secret found — generate one and persist
         new_secret = self._generate_secret_key()
         try:
-            from xenocode.auth.credential_vault import CredentialVault, Credential
+            from xencode.auth.credential_vault import CredentialVault, Credential
             vault = CredentialVault()
             cred = Credential(
                 service="jwt",

@@ -53,6 +53,14 @@ except ImportError as e:
     CredentialVault = None
     FILE_BACKEND_AVAILABLE = False
 
+try:
+    from .json_file_vault import JsonFileCredentialVault
+    JSON_FILE_VAULT_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Failed to import JsonFileCredentialVault: %s", e)
+    JsonFileCredentialVault = None
+    JSON_FILE_VAULT_AVAILABLE = False
+
 
 def get_auth_status() -> dict:
     """Get status of authentication components"""
@@ -62,6 +70,7 @@ def get_auth_status() -> dict:
         "permission_engine_available": PERMISSION_ENGINE_AVAILABLE,
         "audit_logger_available": AUDIT_LOGGER_AVAILABLE,
         "file_backend_available": FILE_BACKEND_AVAILABLE,
+        "json_file_vault_available": JSON_FILE_VAULT_AVAILABLE,
     }
 
 
@@ -72,10 +81,12 @@ __all__ = [
     'AuditLogger',
     'FileBasedCredentialBackend',
     'CredentialVault',
+    'JsonFileCredentialVault',
     'get_auth_status',
     'JWT_HANDLER_AVAILABLE',
     'AUTH_MANAGER_AVAILABLE',
     'PERMISSION_ENGINE_AVAILABLE',
     'AUDIT_LOGGER_AVAILABLE',
     'FILE_BACKEND_AVAILABLE',
+    'JSON_FILE_VAULT_AVAILABLE',
 ]

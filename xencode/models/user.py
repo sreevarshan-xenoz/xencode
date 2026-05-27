@@ -158,7 +158,7 @@ class User:
     
     def _validate_password_strength(self, password: str) -> None:
         """Validate password meets minimum strength requirements."""
-        from xenocode.auth.auth_manager import AuthenticationError as AuthErr
+        from xencode.auth.auth_manager import AuthenticationError as AuthErr
         
         if len(password) < self.MIN_PASSWORD_LENGTH:
             raise AuthErr(f"Password must be at least {self.MIN_PASSWORD_LENGTH} characters long")
