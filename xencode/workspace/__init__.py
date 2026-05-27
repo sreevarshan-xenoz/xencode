@@ -6,41 +6,49 @@ Provides workspace management, CRDT-based collaboration,
 and SQLite storage for the Xencode system.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 # Import main components with graceful fallback
 try:
     from .workspace_manager import WorkspaceManager
     WORKSPACE_MANAGER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import WorkspaceManager: %s", e)
     WorkspaceManager = None
     WORKSPACE_MANAGER_AVAILABLE = False
 
 try:
     from .crdt_engine import CRDTEngine
     CRDT_ENGINE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import CRDTEngine: %s", e)
     CRDTEngine = None
     CRDT_ENGINE_AVAILABLE = False
 
 try:
     from .storage_backend import SQLiteStorageBackend
     STORAGE_BACKEND_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import SQLiteStorageBackend: %s", e)
     SQLiteStorageBackend = None
     STORAGE_BACKEND_AVAILABLE = False
 
 try:
     from .collaboration_manager import CollaborationManager
     COLLABORATION_MANAGER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import CollaborationManager: %s", e)
     CollaborationManager = None
     COLLABORATION_MANAGER_AVAILABLE = False
 
 try:
     from .sync_coordinator import SyncCoordinator, SyncMessage, WebSocketConnection
     SYNC_COORDINATOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import SyncCoordinator: %s", e)
     SyncCoordinator = None
     SyncMessage = None
     WebSocketConnection = None
@@ -51,7 +59,8 @@ try:
         WorkspaceSecurityManager, WorkspacePermission, IsolationLevel, WorkspaceContext
     )
     WORKSPACE_SECURITY_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import WorkspaceSecurityManager: %s", e)
     WorkspaceSecurityManager = None
     WorkspacePermission = None
     IsolationLevel = None
