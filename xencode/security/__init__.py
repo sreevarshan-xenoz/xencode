@@ -1,11 +1,146 @@
 """
-Sanitization utilities for Xencode
-Provides input sanitization for user inputs
+Security module for Xencode
+Provides input sanitization, validation, authentication, encryption,
+adversarial defense, compliance, privacy analytics, and zero-knowledge proofs.
 """
 import html
 import re
 from typing import Any, Dict, List, Union
 
+# adversarial_defense
+from .adversarial_defense import (
+    AdversarialDefenseManager, AttackType, ThreatSeverity, DefenseStrategy,
+    AttackPattern, ThreatDetection, DefenseMechanism, PatternMatcher,
+    AnomalyDetector, AdversarialInputValidator, ThreatMitigator,
+    create_adversarial_defense_manager,
+)
+
+# api_validation
+from .api_validation import (
+    APIResponseValidator, validate_api_response, sanitize_api_response,
+)
+
+# authentication
+from .authentication import (
+    AuthToken, AuthenticationError, APIKeyAuthenticator, JWTAuthenticator,
+    HMACAuthenticator, Authenticator, authenticator, get_authenticator,
+    authenticate_request, create_user_session, create_api_key,
+)
+
+# compliance
+from .compliance import (
+    ComplianceStandard, ComplianceRequirement, ComplianceStatus, ComplianceCheck,
+    ComplianceFinding, AuditTrailEntry, ComplianceReport, ComplianceRuleEngine,
+    AuditTrailManager, ComplianceAlertManager, ComplianceManager, compliance_log,
+    create_compliance_manager,
+)
+
+# data_encryption
+from .data_encryption import (
+    DataEncryption, AESEncryption, SecureConfig, SensitiveDataManager,
+    sensitive_data_manager, secure_config, get_sensitive_data_manager,
+    get_secure_config, encrypt_data, decrypt_data, store_sensitive_data,
+    retrieve_sensitive_data, set_secure_config, get_secure_config_value,
+)
+
+# homomorphic_encryption
+from .homomorphic_encryption import (
+    HomomorphicEncryptionManager, EncryptionScheme, KeySecurityLevel,
+    EncryptionKey, EncryptedData, HomomorphicOperation, KeyManager,
+    BasicHomomorphicOperations, create_homomorphic_encryptor,
+)
+
+# privacy_analytics
+from .privacy_analytics import (
+    PrivacyAnalyticsEngine, PrivacyLevel, DataSensitivity,
+    AnonymizationEngine, DifferentialPrivacyEngine,
+    PseudonymizationEngine, PrivacyMetric,
+    create_privacy_analytics_engine,
+)
+
+# rate_limiting
+from .rate_limiting import (
+    RateLimiter, TokenBucketRateLimiter, RateLimitMiddleware,
+    get_default_rate_limiter, get_strict_rate_limiter, check_rate_limit,
+)
+
+# validation
+from .validation import (
+    InputValidator, validate_file_path,
+    validate_model_name, validate_prompt, sanitize_prompt,
+    detect_prompt_injection, sanitize_filename,
+    sanitize_filename as validation_sanitize_filename,
+)
+
+# zk_proofs
+from .zk_proofs import (
+    ZKProofType, ZKStatementType, ZKProof, VerificationKey,
+    ZKStatement, ArithmeticCircuit, ZKProofGenerator,
+    ZKProofVerifier, ZKProofKeyManager, ZKProofManager,
+    create_zk_proof_manager,
+)
+
+
+__all__ = [
+    # adversarial_defense
+    'AdversarialDefenseManager', 'AttackType', 'ThreatSeverity', 'DefenseStrategy',
+    'AttackPattern', 'ThreatDetection', 'DefenseMechanism', 'PatternMatcher',
+    'AnomalyDetector', 'AdversarialInputValidator', 'ThreatMitigator',
+    'create_adversarial_defense_manager',
+
+    # api_validation
+    'APIResponseValidator', 'validate_api_response', 'sanitize_api_response',
+
+    # authentication
+    'AuthToken', 'AuthenticationError', 'APIKeyAuthenticator', 'JWTAuthenticator',
+    'HMACAuthenticator', 'Authenticator', 'authenticator', 'get_authenticator',
+    'authenticate_request', 'create_user_session', 'create_api_key',
+
+    # compliance
+    'ComplianceStandard', 'ComplianceRequirement', 'ComplianceStatus', 'ComplianceCheck',
+    'ComplianceFinding', 'AuditTrailEntry', 'ComplianceReport', 'ComplianceRuleEngine',
+    'AuditTrailManager', 'ComplianceAlertManager', 'ComplianceManager', 'compliance_log',
+    'create_compliance_manager',
+
+    # data_encryption
+    'DataEncryption', 'AESEncryption', 'SecureConfig', 'SensitiveDataManager',
+    'sensitive_data_manager', 'secure_config', 'get_sensitive_data_manager',
+    'get_secure_config', 'encrypt_data', 'decrypt_data', 'store_sensitive_data',
+    'retrieve_sensitive_data', 'set_secure_config', 'get_secure_config_value',
+
+    # homomorphic_encryption
+    'HomomorphicEncryptionManager', 'EncryptionScheme', 'KeySecurityLevel',
+    'EncryptionKey', 'EncryptedData', 'HomomorphicOperation', 'KeyManager',
+    'BasicHomomorphicOperations', 'create_homomorphic_encryptor',
+
+    # privacy_analytics
+    'PrivacyAnalyticsEngine', 'PrivacyLevel', 'DataSensitivity',
+    'AnonymizationEngine', 'DifferentialPrivacyEngine',
+    'PseudonymizationEngine', 'PrivacyMetric',
+    'create_privacy_analytics_engine',
+
+    # rate_limiting
+    'RateLimiter', 'TokenBucketRateLimiter', 'RateLimitMiddleware',
+    'get_default_rate_limiter', 'get_strict_rate_limiter', 'check_rate_limit',
+
+    # validation
+    'InputValidator', 'validate_file_path', 'validate_model_name', 'validate_prompt',
+    'sanitize_prompt', 'detect_prompt_injection', 'validation_sanitize_filename',
+
+    # core sanitization functions (defined in this module)
+    'sanitize_input', 'strip_control_characters', 'normalize_whitespace', 'sanitize_filename',
+    'sanitize_sql_like_input', 'sanitize_path', 'remove_potential_injections',
+    'sanitize_for_logging', 'sanitize_json_keys', 'is_valid_utf8', 'sanitize_multiline_string',
+
+    # zk_proofs
+    'ZKProofType', 'ZKStatementType', 'ZKProof', 'VerificationKey', 'ZKStatement',
+    'ArithmeticCircuit', 'ZKProofGenerator', 'ZKProofVerifier', 'ZKProofKeyManager',
+    'ZKProofManager', 'create_zk_proof_manager',
+]
+
+# ---------------------------------------------------------------------------
+# Core sanitization functions (defined in this module)
+# ---------------------------------------------------------------------------
 
 def sanitize_input(input_data: Union[str, Dict, List, Any]) -> Union[str, Dict, List, Any]:
     """
@@ -297,3 +432,5 @@ def sanitize_multiline_string(input_str: str) -> str:
     
     # Normalize whitespace
     return normalize_whitespace(cleaned)
+
+
