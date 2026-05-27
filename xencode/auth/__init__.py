@@ -6,36 +6,52 @@ Provides JWT-based authentication, role-based access control,
 and security features for the Xencode system.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 # Import main components with graceful fallback
 try:
     from .jwt_handler import JWTHandler
     JWT_HANDLER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import JWTHandler: %s", e)
     JWTHandler = None
     JWT_HANDLER_AVAILABLE = False
 
 try:
     from .auth_manager import AuthManager
     AUTH_MANAGER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import AuthManager: %s", e)
     AuthManager = None
     AUTH_MANAGER_AVAILABLE = False
 
 try:
     from .permission_engine import PermissionEngine
     PERMISSION_ENGINE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import PermissionEngine: %s", e)
     PermissionEngine = None
     PERMISSION_ENGINE_AVAILABLE = False
 
 try:
     from .audit_logger import AuditLogger
     AUDIT_LOGGER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import AuditLogger: %s", e)
     AuditLogger = None
     AUDIT_LOGGER_AVAILABLE = False
+
+try:
+    from .credential_vault import FileBasedCredentialBackend, CredentialVault
+    FILE_BACKEND_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Failed to import FileBasedCredentialBackend: %s", e)
+    FileBasedCredentialBackend = None
+    CredentialVault = None
+    FILE_BACKEND_AVAILABLE = False
 
 
 def get_auth_status() -> dict:
@@ -44,7 +60,8 @@ def get_auth_status() -> dict:
         "jwt_handler_available": JWT_HANDLER_AVAILABLE,
         "auth_manager_available": AUTH_MANAGER_AVAILABLE,
         "permission_engine_available": PERMISSION_ENGINE_AVAILABLE,
-        "audit_logger_available": AUDIT_LOGGER_AVAILABLE
+        "audit_logger_available": AUDIT_LOGGER_AVAILABLE,
+        "file_backend_available": FILE_BACKEND_AVAILABLE,
     }
 
 
@@ -53,9 +70,12 @@ __all__ = [
     'AuthManager',
     'PermissionEngine',
     'AuditLogger',
+    'FileBasedCredentialBackend',
+    'CredentialVault',
     'get_auth_status',
     'JWT_HANDLER_AVAILABLE',
     'AUTH_MANAGER_AVAILABLE',
     'PERMISSION_ENGINE_AVAILABLE',
-    'AUDIT_LOGGER_AVAILABLE'
+    'AUDIT_LOGGER_AVAILABLE',
+    'FILE_BACKEND_AVAILABLE',
 ]
