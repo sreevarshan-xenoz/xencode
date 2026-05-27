@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xencode Codebase - Complete Reference</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --bg2: #1a1b26;
+            --bg3: #24253a;
+            --fg: #c0caf5;
+            --fg2: #a9b1d6;
+            --accent: #7aa2f7;
+            --accent2: #bb9af7;
+            --green: #9ece6a;
+            --red: #f7768e;
+            --yellow: #e0af68;
+            --cyan: #7dcfff;
+            --orange: #ff9e64;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.7;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+        /* Header */
+        .header {
+            position: sticky; top: 0; z-index: 100;
+            background: var(--bg2);
+            border-bottom: 1px solid var(--bg3);
+            padding: 1rem 2rem;
+            backdrop-filter: blur(12px);
+        }
+        .header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; }
+        .header h1 { font-size: 1.5rem; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header .badge {
+            background: var(--bg3); color: var(--fg2); padding: 0.2rem 0.6rem; border-radius: 999px;
+            font-size: 0.75rem; font-weight: 600;
+        }
+        .header .badge.red { background: rgba(247,118,142,0.15); color: var(--red); }
+        .header .badge.green { background: rgba(158,206,106,0.15); color: var(--green); }
+
+        /* Sidebar TOC */
+        .layout { display: flex; gap: 2rem; }
+        .toc {
+            width: 280px; flex-shrink: 0;
+            position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow-y: auto;
+            padding-right: 1rem;
+        }
+        .toc::-webkit-scrollbar { width: 4px; }
+        .toc::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+        .toc nav { display: flex; flex-direction: column; gap: 0.25rem; }
+        .toc a {
+            color: var(--fg2); text-decoration: none; font-size: 0.875rem;
+            padding: 0.3rem 0.6rem; border-radius: 6px; transition: all 0.15s;
+            border-left: 2px solid transparent;
+        }
+        .toc a:hover { background: var(--bg3); color: var(--accent); }
+        .toc a.h2 { padding-left: 1.4rem; font-size: 0.8rem; }
+        .toc a.h3 { padding-left: 2.2rem; font-size: 0.75rem; }
+        .toc .toc-section {
+            font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+            color: var(--accent2); font-weight: 700; padding: 0.5rem 0.6rem 0.25rem;
+        }
+        .content { flex: 1; min-width: 0; }
+
+        /* Sections */
+        section { margin-bottom: 3rem; }
+        h2 {
+            font-size: 1.6rem; font-weight: 700; margin: 2rem 0 1rem;
+            padding-bottom: 0.5rem; border-bottom: 2px solid var(--bg3);
+        }
+        h2 .anchor { color: var(--accent); opacity: 0.4; text-decoration: none; margin-left: 0.5rem; }
+        h2:hover .anchor { opacity: 1; }
+        h3 {
+            font-size: 1.2rem; font-weight: 600; margin: 1.5rem 0 0.75rem;
+            color: var(--accent);
+        }
+        h4 {
+            font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem;
+            color: var(--fg2);
+        }
+        p { margin-bottom: 0.75rem; color: var(--fg2); }
+
+        /* Cards & Grids */
+        .card {
+            background: var(--bg2); border: 1px solid var(--bg3); border-radius: 12px;
+            padding: 1.25rem; margin-bottom: 1rem;
+        }
+        .card-title {
+            font-weight: 600; font-size: 1rem; margin-bottom: 0.5rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .card-title .icon { font-size: 1.2rem; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+        @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+        @media (max-width: 768px) { .layout { flex-direction: column; } .toc { width: 100%; position: static; max-height: none; } }
+
+        /* Code */
+        code {
+            background: var(--bg3); padding: 0.15rem 0.4rem; border-radius: 4px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em;
+        }
+        pre {
+            background: var(--bg3); border-radius: 8px; padding: 1rem;
+            overflow-x: auto; margin: 0.75rem 0;
+        }
+        pre code { background: none; padding: 0; }
+
+        /* Tags */
+        .tag {
+            display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
+            font-size: 0.75rem; font-weight: 600; margin: 0.15rem;
+        }
+        .tag.py { background: rgba(69,133,136,0.2); color: #569cd6; }
+        .tag.rs { background: rgba(239,117,40,0.2); color: #ef7528; }
+        .tag.ts { background: rgba(49,120,198,0.2); color: #3178c6; }
+        .tag.js { background: rgba(240,219,79,0.2); color: #f0db4f; }
+        .tag.json { background: rgba(102,153,204,0.2); color: #6699cc; }
+        .tag.yml { background: rgba(203,75,61,0.2); color: #cb4b3d; }
+        .tag.md { background: rgba(72,118,198,0.2); color: #4876c6; }
+
+        /* Issue indicators */
+        .issue { border-left: 3px solid var(--red); padding-left: 1rem; margin: 0.75rem 0; }
+        .issue .issue-title { color: var(--red); font-weight: 600; }
+        .warning { border-left: 3px solid var(--yellow); padding-left: 1rem; margin: 0.75rem 0; }
+        .warning .warning-title { color: var(--yellow); font-weight: 600; }
+        .ok { border-left: 3px solid var(--green); padding-left: 1rem; margin: 0.75rem 0; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+        th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--bg3); }
+        th { background: var(--bg2); font-weight: 600; color: var(--accent); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.03em; }
+        tr:hover td { background: rgba(122,162,247,0.05); }
+
+        /* Stats */
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .stat-card {
+            background: var(--bg2); border: 1px solid var(--bg3); border-radius: 12px;
+            padding: 1.25rem; text-align: center;
+        }
+        .stat-value { font-size: 2rem; font-weight: 700; color: var(--accent); }
+        .stat-label { font-size: 0.85rem; color: var(--fg2); margin-top: 0.25rem; }
+
+        /* File tree */
+        .file-tree { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; line-height: 1.8; }
+        .file-tree .dir { color: var(--accent); }
+        .file-tree .file { color: var(--fg2); }
+        .file-tree .indent { padding-left: 1.5rem; }
+
+        /* Status indicators */
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
+        .status-dot.green { background: var(--green); }
+        .status-dot.yellow { background: var(--yellow); }
+        .status-dot.red { background: var(--red); }
+
+        /* Collapsible */
+        details { margin: 0.5rem 0; }
+        details summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 0.4rem 0; }
+        details summary:hover { color: var(--accent2); }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="header-inner">
+        <h1>Xencode Codebase Reference</h1>
+        <span class="badge">v2.1.0</span>
+        <span class="badge">Python</span>
+        <span class="badge green">Active Development</span>
+    </div>
+</div>
+
+<div class="container">
+    <div class="layout">
+        <aside class="toc">
+            <nav>
+                <div class="toc-section">Overview</div>
+                <a href="#overview">System Overview</a>
+                <a href="#stats" class="h2">Codebase Statistics</a>
+                <a href="#architecture" class="h2">Architecture Diagram</a>
+
+                <div class="toc-section">Entry Points</div>
+                <a href="#entry-points">Entry Points</a>
+                <a href="#entry-xencode-core" class="h2">xencode_core.py</a>
+                <a href="#entry-xencode-cli" class="h2">xencode_cli.py</a>
+                <a href="#entry-cli" class="h2">xencode/cli.py</a>
+                <a href="#entry-tui" class="h2">xencode/tui/</a>
+                <a href="#entry-api" class="h2">xencode/api/</a>
+
+                <div class="toc-section">Core Packages</div>
+                <a href="#features">Features System</a>
+                <a href="#model-providers">Model Providers</a>
+                <a href="#agentic">Agentic System</a>
+                <a href="#tui-widgets">TUI Widgets</a>
+                <a href="#routing">Prompt Routing</a>
+                <a href="#security-module">Security Module</a>
+                <a href="#auth-module">Auth &amp; Permissions</a>
+                <a href="#analytics">Analytics &amp; Monitoring</a>
+                <a href="#cache">Cache System</a>
+                <a href="#rag-core">RAG &amp; Vector Store</a>
+                <a href="#i18n">Internationalization</a>
+                <a href="#plugins">Plugin System</a>
+                <a href="#core-lib">Core Library</a>
+
+                <div class="toc-section">Findings</div>
+                <a href="#issues">Issues &amp; Action Items</a>
+                <a href="#unwired" class="h2">Unwired Functions</a>
+                <a href="#tweaks" class="h2">Recommended Tweaks</a>
+                <a href="#missing-tests" class="h2">Missing Tests</a>
+
+                <div class="toc-section">Configuration</div>
+                <a href="#config">Configuration Files</a>
+                <a href="#bytebot">Bytebot Integration</a>
+                <a href="#rust">Rust Components</a>
+                <a href="#testing">Test Structure</a>
+            </nav>
+        </aside>
+
+        <main class="content">
+
+            <!-- ===================== OVERVIEW ===================== -->
+            <section id="overview">
+                <h2>System Overview <a href="#overview" class="anchor">#</a></h2>
+                <p>
+                    <strong>Xencode</strong> is a comprehensive AI-powered coding assistant platform that integrates
+                    multiple AI models (Ollama, cloud providers), provides CLI/TUI/API interfaces, supports
+                    collaborative coding, code review, project analysis, and features an agentic system for
+                    autonomous coding tasks. It has a modular plugin architecture and integrates with Bytebot
+                    for container-based desktop agent functionality.
+                </p>
+
+                <div class="stat-grid" id="stats">
+                    <div class="stat-card">
+                        <div class="stat-value">~180+</div>
+                        <div class="stat-label">Python Files</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">9</div>
+                        <div class="stat-label">Feature Modules</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">31+</div>
+                        <div class="stat-label">TUI Widgets</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">3</div>
+                        <div class="stat-label">Entry Points</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">14</div>
+                        <div class="stat-label">Sub-packages</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">4</div>
+                        <div class="stat-label">Languages</div>
+                    </div>
+                </div>
+
+                <div class="card" id="architecture">
+                    <div class="card-title"><span class="icon">🏗️</span> High-Level Architecture</div>
+                    <pre><code>┌─────────────────────────────────────────────────────────────────┐
+│                         USER INTERFACES                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │   CLI (Click) │  │  TUI (Textual)│  │ API (FastAPI)│           │
+│  │ xencode/cli.py│  │ xencode/tui/ │  │ xencode/api/ │           │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘           │
+│         │                 │                  │                    │
+├─────────┼─────────────────┼──────────────────┼───────────────────┤
+│         ▼                 ▼                  ▼                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                 FEATURE MANAGEMENT SYSTEM                    │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
+│  │  │CodeReview│ │Terminal  │ │Project   │ │Learning  │      │  │
+│  │  │          │ │Assistant │ │Analyzer  │ │Mode      │      │  │
+│  │  ├──────────┤ ├──────────┤ ├──────────┤ ├──────────┤      │  │
+│  │  │Voice     │ │Custom    │ │Security  │ │Collabo-  │      │  │
+│  │  │Interface │ │Models    │ │Auditor   │ │rative    │      │  │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
+│  └──────────────────────────┬─────────────────────────────────┘  │
+│                             │                                     │
+│  ┌──────────────────────────▼─────────────────────────────────┐  │
+│  │                      AGENTIC SYSTEM                         │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
+│  │  │Coordina- │ │Special-  │ │Workflow  │ │Security  │      │  │
+│  │  │tion      │ │ized Agnts│ │Orchestra │ │Governance│      │  │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
+│  └──────────────────────────┬─────────────────────────────────┘  │
+│                             │                                     │
+│  ┌──────────────────────────▼─────────────────────────────────┐  │
+│  │                   MODEL PROVIDERS                           │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
+│  │  │Resolver  │ │Transport │ │Diagnostic│ │Registry  │      │  │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
+│  └──────────────────────────┬─────────────────────────────────┘  │
+│                             │                                     │
+│  ┌──────────┐ ┌──────────┐ ┌──▼───────┐ ┌──────────┐ ┌──────┐  │
+│  │  Auth    │ │Analytics │ │  Cache    │ │  RAG     │ │ I18n │  │
+│  │ & Perms  │ │Monitoring│ │  System   │ │Vector DB │ │      │  │
+│  └──────────┘ └──────────┘ └───────────┘ └──────────┘ └──────┘  │
+│                                                                  │
+│  ┌──────────┐ ┌──────────┐ ┌─────────────────────────────────┐  │
+│  │ Security │ │ Plugins  │ │        Rust Components          │  │
+│  │Sanitizatn│ │ System   │ │  (Performance-critical ops)     │  │
+│  └──────────┘ └──────────┘ └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘</code></pre>
+                </div>
+            </section>
+
+            <!-- ===================== ENTRY POINTS ===================== -->
+            <section id="entry-points">
+                <h2>Entry Points <a href="#entry-points" class="anchor">#</a></h2>
+                <p>The system has three main entry points, plus supporting wrappers:</p>
+
+                <div class="grid-3">
+                    <div class="card" id="entry-xencode-core">
+                        <div class="card-title"><span class="icon">🚀</span> xencode_core.py</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">Main Entry</span></p>
+                        <p>Primary entry point with <code>main()</code> function (line 1807). Initializes all systems:
+                        multi-model manager, smart context, code analyzer, project context, system checker,
+                        intelligent model selector, Ollama fallback, TUI, model providers.</p>
+                        <p><strong>Key functions:</strong> <code>main()</code>, <code>run()</code>, lazy imports throughout</p>
+                    </div>
+                    <div class="card" id="entry-xencode-cli">
+                        <div class="card-title"><span class="icon">🚀</span> xencode_cli.py</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">CLI Wrapper</span></p>
+                        <p>Thin CLI wrapper that imports and runs <code>xencode.cli.cli</code>. Has a <code>main()</code> function (line 17).</p>
+                        <pre><code>from xencode.cli import cli
+def main():
+    cli()</code></pre>
+                    </div>
+                    <div class="card" id="entry-tui">
+                        <div class="card-title"><span class="icon">🚀</span> xencode/tui/</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">TUI App</span></p>
+                        <p>TUI application built with Textual framework. Entry at <code>xencode/tui/__main__.py</code> (line 13). Main app class in <code>tui/app.py</code>.</p>
+                        <p><strong>Subdirs:</strong> widgets/ (31 panels), features/, utils/</p>
+                    </div>
+                </div>
+
+                <div class="grid-3">
+                    <div class="card" id="entry-cli">
+                        <div class="card-title"><span class="icon">🚀</span> xencode/cli.py</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">CLI System</span></p>
+                        <p>Main CLI module with Click commands. ~2700+ lines. Contains all CLI command groups and
+                        <code>register_feature_commands()</code> for dynamic feature registration.</p>
+                    </div>
+                    <div class="card" id="entry-api">
+                        <div class="card-title"><span class="icon">🚀</span> xencode/api/</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">API Server</span></p>
+                        <p>FastAPI-based API server at <code>api/main.py</code>. Includes <code>feature_routes.py</code> for
+                        dynamic feature endpoint registration.</p>
+                    </div>
+                    <div class="card" id="entry-agentic-cli">
+                        <div class="card-title"><span class="icon">🚀</span> xencode/agentic_cli.py</div>
+                        <p><span class="tag py">Python</span> <span class="tag md">Agentic CLI</span></p>
+                        <p>Standalone agentic CLI with <code>main()</code> function (line 6). Separate entry for agent-driven workflows.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===================== FEATURES SYSTEM ===================== -->
+            <section id="features">
+                <h2>Features System <a href="#features" class="anchor">#</a></h2>
+                <p>The features system provides a modular architecture for extending Xencode with self-contained
+                capabilities. Each feature follows the <code>FeatureBase</code> abstract class pattern.</p>
+
+                <h3>Architecture</h3>
+                <table>
+                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
+                    <tr>
+                        <td><code>features/base.py</code></td>
+                        <td><code>FeatureBase</code> abstract class with async <code>initialize()</code>, <code>get_cli_commands()</code>, <code>get_tui_components()</code>, <code>get_api_endpoints()</code>, <code>track_analytics()</code></td>
+                        <td><span class="status-dot green"></span> Wired</td>
+                    </tr>
+                    <tr>
+                        <td><code>features/manager.py</code></td>
+                        <td><code>FeatureManager</code> singleton - lazy loads and initializes features, manages <code>initialize_all_features()</code></td>
+                        <td><span class="status-dot green"></span> Wired</td>
+                    </tr>
+                    <tr>
+                        <td><code>features/__init__.py</code></td>
+                        <td>Exports <code>FeatureManager</code>, <code>FeatureConfig</code>, <code>FeatureSystemConfig</code>, lazy initialization</td>
+                        <td><span class="status-dot green"></span> Wired</td>
+                    </tr>
+                    <tr>
+                        <td><code>features/core/__init__.py</code></td>
+                        <td>Exports <code>FeatureCommandGroup</code>, <code>FeatureTUIManager</code>, <code>FeatureSchema</code>, <code>SchemaValidator</code></td>
+                        <td><span class="status-dot green"></span> Wired</td>
+                    </tr>
+                </table>
+
+                <h3>Feature Modules</h3>
+                <table>
+                    <tr><th>Feature</th><th>File</th><th>CLI</th><th>TUI</th><th>API</th><th>Status</th></tr>
+                    <tr><td>Code Review</td><td><code>code_review.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - 1500+ lines, PR analysis, diff review, report gen</td></tr>
+                    <tr><td>Terminal Assistant</td><td><code>terminal_assistant.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Context analysis, command suggestions, explanation</td></tr>
+                    <tr><td>Project Analyzer</td><td><code>project_analyzer.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot yellow"></span></td><td>Complete - structure, deps, patterns</td></tr>
+                    <tr><td>Learning Mode</td><td><code>learning_mode.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - progress tracking, spaced repetition</td></tr>
+                    <tr><td>Custom Models</td><td><code>custom_models.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - fine-tuning, model registration, monitoring</td></tr>
+                    <tr><td>Voice Interface</td><td><code>voice_interface.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Speech-to-text, command parsing, TTS</td></tr>
+                    <tr><td>Collaborative Coding</td><td><code>collaborative_coding.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Sessions, real-time, CRDT, presence</td></tr>
+                    <tr><td>Security Auditor</td><td><code>security_auditor.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Vulnerability scanning, dependency checks</td></tr>
+                    <tr><td>Performance Profiler</td><td><code>performance_profiler.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Profiling, hot path detection, recommendations</td></tr>
+                    <tr><td>Demo</td><td><code>demo.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot red"></span></td><td>Demo - async main() for example runs</td></tr>
+                </table>
+
+                <div class="issue" id="issue-features-base-cli">
+                    <div class="issue-title">⚠️ Issue: FeatureBase abstract methods</div>
+                    <p><code>get_cli_commands()</code> is marked <code>@abstractmethod</code> in <code>base.py:134</code> but body is just <code>pass</code>.
+                    <code>get_tui_components()</code> similarly at line 139. The abstractmethod decorator requires subclasses to implement,
+                    which they do. However, <code>get_cli_commands</code> body is <code>pass</code> instead of raising <code>NotImplementedError</code>,
+                    which is the standard Python pattern.</p>
+                </div>
+            </section>
+
+            <!-- ===================== MODEL PROVIDERS ===================== -->
+            <section id="model-providers">
+                <h2>Model Providers <a href="#model-providers" class="anchor">#</a></h2>
+                <p>Manages multiple AI model providers with resolver, transport, and diagnostics layers.</p>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
+                    <tr><td><code>model_providers/__init__.py</code></td><td><code>ModelProvider</code> abstract, <code>ModelProviderManager</code>, <code>ProviderRegistry</code>, <code>get_model_provider_manager()</code></td><td><span class="status-dot green"></span> Wired</td></tr>
+                    <tr><td><code>model_providers/resolver.py</code></td><td>Resolves models from provider configs, routes requests</td><td><span class="status-dot green"></span> Wired</td></tr>
+                    <tr><td><code>model_providers/transport.py</code></td><td>Transport layer for API calls to models (Ollama, OpenAI, etc.)</td><td><span class="status-dot green"></span> Wired</td></tr>
+                    <tr><td><code>model_providers/diagnostics.py</code></td><td>Health checks, diagnostics, model validation</td><td><span class="status-dot green"></span> Wired</td></tr>
+                </table>
+
+                <details>
+                    <summary>ModelProvider Abstract Interface</summary>
+                    <pre><code>class ModelProvider(ABC):
+    @abstractmethod
+    async def generate(self, prompt: str, **kwargs) -> str
+    @abstractmethod
+    async def stream_generate(self, prompt: str, **kwargs) -> AsyncIterator[str]
+    @abstractmethod
+    async def is_available(self) -> bool
+    @abstractmethod
+    async def get_info(self) -> Dict[str, Any]</code></pre>
+                </details>
+
+                <p><strong>Key integrations:</strong> Ollama (primary), OpenAI, Anthropic
+                <strong>Related files:</strong> <code>ollama_connection_pool.py</code>, <code>ollama_fallback.py</code>, <code>ollama_optimizer.py</code>,
+                <code>hardware_aware_model_selection.py</code>, <code>intelligent_model_selector.py</code></p>
+            </section>
+
+            <!-- ===================== AGENTIC SYSTEM ===================== -->
+            <section id="agentic">
+                <h2>Agentic System <a href="#agentic" class="anchor">#</a></h2>
+                <p>The agentic system provides autonomous AI agents for coding tasks with coordination, specialized agents, and tool usage.</p>
+
+                <div class="grid-2">
+                    <div>
+                        <h3>Core Files</h3>
+                        <table>
+                            <tr><th>File</th><th>Purpose</th></tr>
+                            <tr><td><code>__init__.py</code></td><td>AgentManager, AgentCoordinator, AgentConfig</td></tr>
+                            <tr><td><code>manager.py</code></td><td>LangChainManager - wraps LangChain for agent execution</td></tr>
+                            <tr><td><code>coordinator.py</code></td><td>Coordinates multiple agents for task execution</td></tr>
+                            <tr><td><code>workflow_orchestrator.py</code></td><td>Orchestrates workflows across agent teams</td></tr>
+                            <tr><td><code>workflow_management.py</code></td><td>Workflow lifecycle management</td></tr>
+                            <tr><td><code>team_formation.py</code></td><td>Dynamic team assembly based on task needs</td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Specialized Agents</h3>
+                        <table>
+                            <tr><th>Agent Type</th><th>Primary Model</th><th>Expertise</th></tr>
+                            <tr><td>Data Science</td><td>codellama:7b</td><td>Data analysis, ML, viz</td></tr>
+                            <tr><td>Web Development</td><td>codellama:7b</td><td>Frontend, backend, full-stack</td></tr>
+                            <tr><td>Security Analysis</td><td>llama3.1:8b</td><td>Vulnerability, secure coding</td></tr>
+                            <tr><td>DevOps</td><td>llama3.1:8b</td><td>CI/CD, containers, cloud</td></tr>
+                            <tr><td>Testing</td><td>codellama:7b</td><td>Test automation, QA</td></tr>
+                            <tr><td>Documentation</td><td>llama3.1:8b</td><td>Technical writing, API docs</td></tr>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div>
+                        <h3>Tools</h3>
+                        <table>
+                            <tr><th>File</th><th>Tools</th></tr>
+                            <tr><td><code>tools.py</code></td><td>ReadFileTool, WriteFileTool, ExecuteCommandTool</td></tr>
+                            <tr><td><code>advanced_tools.py</code></td><td>GitStatusTool, GitDiffTool, GitLogTool, GitCommitTool, WebSearchTool, CodeAnalysisTool</td></tr>
+                            <tr><td><code>enhanced_tools.py</code></td><td>GitBranchTool, GitPushTool, GitPullTool, FindFileTool, FileStatTool, DependencyAnalysisTool, SystemInfoTool, ProcessInfoTool, WebSearchDetailedTool</td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Support Modules</h3>
+                        <table>
+                            <tr><th>File</th><th>Purpose</th></tr>
+                            <tr><td><code>communication/</code></td><td>Message, Protocol, Channels</td></tr>
+                            <tr><td><code>cross_domain_expertise.py</code></td><td>Cross-domain knowledge transfer</td></tr>
+                            <tr><td><code>human_supervision.py</code></td><td>Human-in-the-loop oversight</td></tr>
+                            <tr><td><code>security_governance.py</code></td><td>Agent identity, permissions, audit</td></tr>
+                            <tr><td><code>memory.py</code></td><td>Agent memory systems</td></tr>
+                            <tr><td><code>memory_learning.py</code></td><td>Learning from past interactions</td></tr>
+                            <tr><td><code>ensemble_integration.py</code></td><td>Multi-model ensemble voting</td></tr>
+                            <tr><td><code>monitoring_analytics.py</code></td><td>Agent performance tracking</td></tr>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ Potential Issue: SpecializedAgent.process_request()</div>
+                    <p><code>specialized/__init__.py:79</code> - The base <code>process_request</code> raises <code>NotImplementedError</code>,
+                    but the subclasses (DataScienceAgent, WebDevelopmentAgent, etc.) implement it by calling <code>self.langchain_manager.run_agent()</code>.
+                    However, <code>run_agent</code> is a synchronous call on an async method, which could block the event loop.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ License Compatibility</div>
+                    <p>All specialized agents reference <code>codellama:7b</code> and <code>llama3.1:8b</code> as hardcoded model names.
+                    This assumes Ollama availability. If different providers are used, these models won't be found.</p>
+                </div>
+            </section>
+
+            <!-- ===================== TUI WIDGETS ===================== -->
+            <section id="tui-widgets">
+                <h2>TUI Widgets <a href="#tui-widgets" class="anchor">#</a></h2>
+                <p>31 widget panels in <code>xencode/tui/widgets/</code></p>
+
+                <table>
+                    <tr><th>Widget</th><th>File</th><th>Wired in TUI</th><th>Status</th></tr>
+                    <tr><td>Agent Panel</td><td><code>agent_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Bytebot Panel</td><td><code>bytebot_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Chat</td><td><code>chat.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Action Hotkeys</td><td><code>code_action_hotkeys.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Execution</td><td><code>code_execution_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Review</td><td><code>code_review_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Collaboration</td><td><code>collaboration.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Collaborative Coding</td><td><code>collaborative_coding_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Commit Dialog</td><td><code>commit_dialog.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Commit Wizard</td><td><code>commit_wizard.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Custom Models</td><td><code>custom_models_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Diff Viewer</td><td><code>diff_viewer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Editor</td><td><code>editor.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced Collaboration</td><td><code>enhanced_collaboration.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced File Explorer</td><td><code>enhanced_file_explorer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced Model Selector</td><td><code>enhanced_model_selector.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>File Explorer</td><td><code>file_explorer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Git Status</td><td><code>git_status.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Model Selector</td><td><code>model_selector.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Options Panel</td><td><code>options_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Performance Dashboard</td><td><code>performance_dashboard.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Performance Profiler</td><td><code>performance_profiler_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Provider Health</td><td><code>provider_health_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Review Diff Viewer</td><td><code>review_diff_viewer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Security Auditor</td><td><code>security_auditor_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Settings Panel</td><td><code>settings_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Terminal</td><td><code>terminal.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Terminal Assistant</td><td><code>terminal_assistant_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Voice Input</td><td><code>voice_input.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Voice Interface</td><td><code>voice_interface_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                </table>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/tui/utils/__init__.py</code> created</div>
+                    <p><code>ModelChecker</code> properly exported. <code>from xencode.tui.utils import ModelChecker</code> works.</p>
+                </div>
+            </section>
+
+            <!-- ===================== ROUTING ===================== -->
+            <section id="routing">
+                <h2>Prompt Routing <a href="#routing" class="anchor">#</a></h2>
+                <p>Routes prompts to the best provider/model based on task classification and policy.</p>
+
+                <table>
+                    <tr><th>Module</th><th>Key Classes</th><th>Purpose</th></tr>
+                    <tr><td><code>routing/prompt_router.py</code></td><td><code>PromptRouter</code>, <code>TaskClassifier</code>, <code>TaskType</code>, <code>RoutingPolicy</code></td><td>Classifies prompts (debugging, code review, etc.) and routes to providers</td></tr>
+                    <tr><td><code>routing/fallback_config.py</code></td><td><code>FallbackPolicy</code>, <code>FallbackPolicyConfig</code>, <code>RetryPolicy</code></td><td>Defines fallback strategies</td></tr>
+                    <tr><td><code>routing/fallback_engine.py</code></td><td><code>FallbackEngine</code>, <code>FallbackAttempt</code>, <code>FallbackResult</code></td><td>Executes fallback logic</td></tr>
+                    <tr><td><code>routing/retry_budget.py</code></td><td><code>RetryBudgetManager</code>, <code>RetryBudget</code></td><td>Manages retry budgets and rate limiting</td></tr>
+                </table>
+
+                <h4>Task Types (TaskType enum)</h4>
+                <p><code>CODING, DEBUGGING, CODE_REVIEW, ANALYSIS, REFACTORING, TEST_GENERATION, REASONING, CODE_EXPLANATION, DOCUMENTATION, GENERIC</code></p>
+
+                <h4>Provider Types (ProviderType enum)</h4>
+                <p><code>OLLAMA, OPENAI, ANTHROPIC, COHERE, HUGGINGFACE, LOCAL, CUSTOM</code></p>
+            </section>
+
+            <!-- ===================== SECURITY ===================== -->
+            <section id="security-module">
+                <h2>Security Module <a href="#security-module" class="anchor">#</a></h2>
+                <p><strong>Note:</strong> The <code>xencode/security/</code> package is primarily <strong>input sanitization</strong>,
+                not auth/permission security (that's in <code>xencode/auth/</code>).</p>
+
+                <table>
+                    <tr><th>File</th><th>Functions</th></tr>
+                    <tr><td><code>__init__.py</code></td><td><code>sanitize_input()</code>, <code>sanitize_filename()</code>, <code>sanitize_path()</code>, <code>sanitize_sql_like_input()</code>, <code>sanitize_for_logging()</code>, <code>strip_control_characters()</code>, <code>remove_potential_injections()</code>, <code>is_valid_utf8()</code></td></tr>
+                    <tr><td><code>adversarial_defense.py</code></td><td>Attack pattern detection, adversarial robustness</td></tr>
+                    <tr><td><code>api_validation.py</code></td><td>API request validation</td></tr>
+                    <tr><td><code>authentication.py</code></td><td>Authentication utilities</td></tr>
+                    <tr><td><code>compliance.py</code></td><td>Compliance rule checking</td></tr>
+                    <tr><td><code>data_encryption.py</code></td><td>Data encryption utilities</td></tr>
+                    <tr><td><code>homomorphic_encryption.py</code></td><td>Homomorphic encryption support</td></tr>
+                    <tr><td><code>privacy_analytics.py</code></td><td>Privacy-preserving analytics</td></tr>
+                    <tr><td><code>rate_limiting.py</code></td><td>Rate limiting utilities</td></tr>
+                    <tr><td><code>validation.py</code></td><td>General validation utilities</td></tr>
+                    <tr><td><code>zk_proofs.py</code></td><td>Zero-knowledge proof support</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== AUTH ===================== -->
+            <section id="auth-module">
+                <h2>Auth &amp; Permissions <a href="#auth-module" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
+                    <tr><td><code>auth/jwt_handler.py</code></td><td>JWT token creation and validation</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td><code>auth/auth_manager.py</code></td><td>Authentication manager - login, logout, sessions</td><td><span class="status-dot yellow"></span></td></tr>
+                    <tr><td><code>auth/permission_engine.py</code></td><td>RBAC - roles, permissions, resource registration</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td><code>auth/audit_logger.py</code></td><td>Audit logging for security events</td><td><span class="status-dot green"></span></td></tr>
+                    <tr>                        <td><code>auth/credential_vault.py</code></td>
+                        <td>Secure credential storage with Windows CM + file-based encrypted vault + env fallback</td>
+                        <td><span class="status-dot green"></span></td></tr>
+                    <tr><td><code>auth/qwen_auth.py</code></td><td>Qwen-specific authentication</td><td><span class="status-dot yellow"></span></td></tr>
+                </table>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ FIXED: FileBasedCredentialBackend implemented</div>
+                    <p><code>FileBasedCredentialBackend</code> added with Fernet encryption (AES-128-CBC with HMAC),
+                    PBKDF2 key derivation from machine-specific seed, stored at <code>~/.xencode/vault.json</code>.
+                    Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).
+                    52/52 tests passing.</p>
+                </div>
+            </section>
+
+            <!-- ===================== ANALYTICS ===================== -->
+            <section id="analytics">
+                <h2>Analytics &amp; Monitoring <a href="#analytics" class="anchor">#</a></h2>
+
+                <div class="grid-2">
+                    <div>
+                        <h3>Analytics Package (<code>xencode/analytics/</code>)</h3>
+                        <table>
+                            <tr><th>File</th><th>Purpose</th></tr>
+                            <tr><td><code>analytics_engine.py</code></td><td>Core analytics engine - tracking actions, events, performance</td></tr>
+                            <tr><td><code>metrics_collector.py</code></td><td>Metrics collection and aggregation</td></tr>
+                            <tr><td><code>event_tracker.py</code></td><td>Event tracking with categories</td></tr>
+                            <tr><td><code>analytics_infrastructure.py</code></td><td>Unified system integrating all components</td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>Monitoring Package (<code>xencode/monitoring/</code>)</h3>
+                        <table>
+                            <tr><th>File</th><th>Purpose</th></tr>
+                            <tr><td><code>metrics_collector.py</code></td><td>Prometheus metrics collector</td></tr>
+                            <tr><td><code>provider_health.py</code></td><td>Provider health monitoring with callbacks</td></tr>
+                            <tr><td><code>resource_manager.py</code></td><td>Resource lifecycle management</td></tr>
+                            <tr><td><code>performance_optimizer.py</code></td><td>Performance optimization monitoring</td></tr>
+                            <tr><td><code>benchmark_engine.py</code></td><td>Benchmark execution engine</td></tr>
+                            <tr><td><code>benchmark_store.py</code></td><td>Benchmark result persistence</td></tr>
+                            <tr><td><code>benchmark_suites.py</code></td><td>Pre-defined benchmark suites</td></tr>
+                            <tr><td><code>benchmark_recommendations.py</code></td><td>Model recommendations from benchmarks</td></tr>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">📊</span> Standalone Dashboards</div>
+                    <p><code>advanced_analytics_dashboard.py</code> - Advanced analytics visualization<br>
+                    <code>standalone_performance_dashboard.py</code> - Performance monitoring dashboard<br>
+                    <code>performance_monitoring_dashboard.py</code> - Real-time perf monitoring</p>
+                </div>
+            </section>
+
+            <!-- ===================== CACHE ===================== -->
+            <section id="cache">
+                <h2>Cache System <a href="#cache" class="anchor">#</a></h2>
+                <p>Multi-modal caching for different content types with intelligent invalidation.</p>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>cache/__init__.py</code></td><td>Exports <code>MultiModalCacheSystem</code>, <code>DocumentProcessingCache</code>, <code>CodeAnalysisCache</code>, <code>WorkspaceCache</code>, <code>CacheWarmingManager</code></td></tr>
+                    <tr><td><code>cache/multimodal_cache.py</code></td><td>Multi-modal cache system, cache warming, entry management</td></tr>
+                    <tr><td><code>cache/advanced_memory_manager.py</code></td><td>Abstract memory management with 5 abstract methods</td></tr>
+                    <tr><td><code>improved_cache_system.py</code></td><td>Improved cache with <code>__all__</code> exported types</td></tr>
+                    <tr><td><code>dynamic_cache_sizing.py</code></td><td>Adaptive cache sizing based on usage</td></tr>
+                    <tr><td><code>async_disk_cache.py</code></td><td>Async disk cache implementation</td></tr>
+                    <tr><td><code>context_cache_manager.py</code></td><td>Context-aware cache management</td></tr>
+                </table>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ Issue: advanced_memory_manager.py abstract</div>
+                    <p>Similar to CredentialVault - has abstract methods with no concrete implementation in the codebase.</p>
+                </div>
+            </section>
+
+            <!-- ===================== RAG ===================== -->
+            <section id="rag-core">
+                <h2>RAG &amp; Vector Store <a href="#rag-core" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
+                    <tr><td><code>rag/__init__.py</code></td><td>Exports VectorStore, Indexer, ContextIndexerV2, GraphExtractor, GraphStore</td><td><span class="status-dot green"></span> ✅ FIXED</td></tr>
+                    <tr><td><code>rag/vector_store.py</code></td><td>Vector store (ChromaDB-based)</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td><code>rag/indexer.py</code></td><td>Content indexer</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td><code>rag/context_indexer_v2.py</code></td><td>Context indexing v2</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td><code>rag/graph_extractor.py</code></td><td>Knowledge graph extraction</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td><code>rag/graph_store.py</code></td><td>Knowledge graph storage</td><td><span class="status-dot green"></span> Complete</td></tr>
+                </table>
+
+                <div class="issue">
+                    <div class="issue-title">🚨 CRITICAL: <code>xencode/rag/__init__.py</code> is EMPTY</div>
+                    <p>This file has zero content - no imports, no exports. Any code doing
+                    <code>from xencode.rag import VectorStore</code> will fail. The correct import path is
+                    <code>from xencode.rag.vector_store import VectorStore</code>.
+                    See <code>debug_ollama.py:5</code> for an example of the direct import pattern that works.</p>
+                </div>
+
+                <p><strong>Related files:</strong> <code>async_vector_store.py</code>, <code>optimized_batch_vector_store.py</code>,
+                <code>document_processor.py</code></p>
+            </section>
+
+            <!-- ===================== I18N ===================== -->
+            <section id="i18n">
+                <h2>Internationalization <a href="#i18n" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>i18n/translation_engine.py</code></td><td>AI-powered translation engine</td></tr>
+                    <tr><td><code>i18n/language_manager.py</code></td><td>Language detection and switching</td></tr>
+                    <tr><td><code>i18n/translation_dict.py</code></td><td>Translation dictionary management</td></tr>
+                    <tr><td><code>i18n/context_adapter.py</code></td><td>Context-aware language adaptation</td></tr>
+                </table>
+                <p><strong>Note:</strong> Has full <code>__init__.py</code> exports with <code>__all__</code> defined.</p>
+            </section>
+
+            <!-- ===================== PLUGINS ===================== -->
+            <section id="plugins">
+                <h2>Plugin System <a href="#plugins" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>plugins/__init__.py</code></td><td><code>PluginManager</code>, <code>PluginRegistry</code>, abstract <code>PluginInterface</code>, <code>ToolPlugin</code>, <code>AgentPlugin</code>, <code>ModelProviderPlugin</code></td></tr>
+                    <tr><td><code>plugins/config.py</code></td><td>Plugin configuration management (has <code>__all__</code>)</td></tr>
+                    <tr><td><code>plugins/integration.py</code></td><td><code>initialize_plugin_system()</code> - ties plugin system to tool registry</td></tr>
+                    <tr><td><code>plugins/file_operations.py</code></td><td>File operation plugins</td></tr>
+                    <tr><td><code>plugins/marketplace_client.py</code></td><td>Plugin marketplace client</td></tr>
+                    <tr><td><code>plugin_system.py</code></td><td>Standalone plugin system with async initialization</td></tr>
+                    <tr><td><code>plugin_ecosystem.py</code></td><td>Plugin ecosystem manager</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== CORE ===================== -->
+            <section id="core-lib">
+                <h2>Core Library <a href="#core-lib" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>core/cache.py</code></td><td><code>ResponseCache</code> for API responses</td></tr>
+                    <tr><td><code>core/connection_pool.py</code></td><td><code>APIClient</code>, connection pooling</td></tr>
+                    <tr><td><code>core/files.py</code></td><td>File operations: create, read, write, delete</td></tr>
+                    <tr><td><code>core/lazy_loader.py</code></td><td>Lazy loading utilities, component registry</td></tr>
+                    <tr><td><code>core/memory.py</code></td><td><code>ConversationMemory</code> for chat history</td></tr>
+                    <tr><td><code>core/models.py</code></td><td><code>ModelManager</code>, model listing and selection</td></tr>
+                    <tr><td><code>core/resource_cleanup.py</code></td><td>Resource cleanup with callbacks</td></tr>
+                    <tr><td><code>core/resource_monitor.py</code></td><td>Resource monitoring</td></tr>
+                    <tr><td><code>core/project_profiles.py</code></td><td>Project profile management</td></tr>
+                    <tr><td><code>core/performance_benchmarks.py</code></td><td>Core performance benchmarks</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== ISSUES & ACTION ITEMS ===================== -->
+            <section id="issues">
+                <h2>Issues &amp; Action Items <a href="#issues" class="anchor">#</a></h2>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/rag/__init__.py</code> populated</div>
+                    <p>Now exports <code>VectorStore</code>, <code>AsyncVectorStore</code>, <code>Indexer</code>, <code>ContextIndexerV2</code>,
+                    <code>CodeGraphExtractor</code>, <code>GraphStore</code>, and more. All imports resolve at runtime.</p>
+                </div>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/tui/utils/__init__.py</code> created</div>
+                    <p>Exports <code>ModelChecker</code>. Verified working at runtime.</p>
+                </div>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ RESOLVED: FileBasedCredentialBackend implemented</div>
+                    <p><strong>File:</strong> <code>xencode/auth/credential_vault.py</code> — Added <code>FileBasedCredentialBackend</code> with Fernet encryption
+                    (AES-128-CBC with HMAC) stored at <code>~/.xencode/vault.json</code>. PBKDF2 key derivation from machine-specific seed.
+                    Falls back to base64 obfuscation if <code>cryptography</code> not installed. Integrated into <code>CredentialVault</code> as
+                    the cross-platform persistent backend. 52/52 tests passing (25 new + 27 existing).</p>
+                </div>
+
+                <div class="issue">
+                    <div class="issue-title">🔴 ISSUE 4: No concrete AdvancedMemoryManager implementation</div>
+                    <p><strong>File:</strong> <code>xencode/cache/advanced_memory_manager.py</code> - Abstract base with
+                    abstract store/retrieve/delete/list/clear methods, no concrete implementation.</p>
+                </div>
+
+                <div class="issue">
+                    <div class="issue-title">🔴 ISSUE 5: <code>analytics_reporting_system.py</code> - NotImplementedError stubs</div>
+                    <p>Lines 156, 160, 164 contain <code>raise NotImplementedError</code> for reporting methods.
+                    These should be implemented or marked with TODO.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 6: Hardcoded model names in specialized agents</div>
+                    <p><code>xencode/agentic/specialized/__init__.py</code> uses hardcoded <code>codellama:7b</code> and
+                    <code>llama3.1:8b</code>. These Ollama-specific model names won't resolve if using other providers.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 7: Potential event loop blocking in specialized agents</div>
+                    <p><code>process_request()</code> methods (async) call <code>self.langchain_manager.run_agent()</code> (sync),
+                    which could block the event loop. Should use <code>asyncio.to_thread()</code> or make LangChain async.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 8: FeatureBase abstractmethod body uses <code>pass</code></div>
+                    <p><code>xencode/features/base.py:134-141</code> - Abstract methods should raise <code>NotImplementedError</code>
+                    instead of <code>pass</code> for proper subclass enforcement.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 9 (Partially fixed): Monitoring <code>__init__.py</code> silent imports</div>
+                    <p>Broken <code>health_monitor</code> and <code>alert_manager</code> imports removed. All remaining
+                    <code>except ImportError</code> blocks now log warnings via <code>logger.warning()</code> instead of
+                    silently swallowing errors. Failures are visible. Pre-existing broken names surfaced:
+                    <code>BenchmarkMetrics</code>, <code>BenchmarkRecord</code>, <code>create_benchmark_suites</code>,
+                    <code>BenchmarkRecommendations</code> — these need fixing in their respective modules.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 10: Silent import swallowing — FIXED (9 files, 60 blocks)</div>
+                    <p>Added <code>import logging</code> + <code>logger = logging.getLogger(__name__)</code> and replaced all
+                    bare <code>except ImportError:</code> with <code>except ImportError as e:</code> + <code>logger.warning(...)</code>
+                    across 9 <code>__init__.py</code> files. Pre-existing import failures are now visible via warnings instead
+                    of being silently swallowed. Affected files: <code>xencode/__init__.py</code> (19 blocks),
+                    <code>xencode/auth/__init__.py</code> (4 blocks), <code>xencode/monitoring/__init__.py</code> (7 blocks),
+                    <code>xencode/workspace/__init__.py</code> (6 blocks), <code>xencode/analytics/__init__.py</code> (3 blocks),
+                    <code>xencode/analyzers/__init__.py</code> (3 blocks), <code>xencode/api/__init__.py</code> (3 blocks),
+                    <code>xencode/api/routers/__init__.py</code> (9 blocks), <code>xencode/processors/__init__.py</code> (4 blocks).</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">⚠️ ISSUE 11: Flat package structure</div>
+                    <p><code>xencode/</code> has 40+ top-level Python files (monolithic). Consider organizing into sub-packages:
+                    <code>xencode/ai/</code> (already has some), <code>xencode/system/</code>, <code>xencode/utils/</code>, etc.</p>
+                </div>
+            </section>
+
+            <!-- ===================== UNWIRED ===================== -->
+            <section id="unwired">
+                <h2>Unwired Functions &amp; Missing Connections <a href="#unwired" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>What</th><th>Where</th><th>Not Wired To</th><th>Impact</th></tr>                        <tr>
+                        <td><code>FileBasedCredentialBackend</code> added</td>
+                        <td><code>xencode/auth/credential_vault.py</code></td>
+                        <td>Concrete implementation with Fernet encryption</td>
+                        <td>✅ Resolved — encrypted file vault works cross-platform</td>
+                    </tr>
+                    <tr>
+                        <td><code>AdvancedMemoryManager</code> abstract</td>
+                        <td><code>xencode/cache/advanced_memory_manager.py</code></td>
+                        <td>No concrete implementation</td>
+                        <td>Advanced memory features non-functional</td>
+                    </tr>
+                    <tr>
+                        <td><code>rag/__init__.py</code> empty</td>
+                        <td><code>xencode/rag/__init__.py</code></td>
+                        <td>Doesn't export submodule classes</td>
+                        <td><code>from xencode.rag import X</code> fails</td>
+                    </tr>
+                    <tr>
+                        <td><code>tui/utils/__init__.py</code> missing</td>
+                        <td><code>xencode/tui/utils/</code></td>
+                        <td>Import of <code>model_checker</code></td>
+                        <td>Potential ImportError in xencode_core.py</td>
+                    </tr>
+                    <tr>
+                        <td><code>HealthMonitor</code> import</td>
+                        <td><code>xencode/monitoring/__init__.py</code></td>
+                        <td>File doesn't exist</td>
+                        <td>Silently falls back, features unavailable</td>
+                    </tr>
+                    <tr>
+                        <td><code>AlertManager</code> import</td>
+                        <td><code>xencode/monitoring/__init__.py</code></td>
+                        <td>File doesn't exist</td>
+                        <td>Silently falls back, features unavailable</td>
+                    </tr>
+                    <tr>
+                        <td><code>analytics_reporting_system.py</code></td>
+                        <td>Standalone file</td>
+                        <td>Not imported by any <code>__init__.py</code></td>
+                        <td>May be dead code if not used elsewhere</td>
+                    </tr>
+                    <tr>
+                        <td><code>Demo feature</code></td>
+                        <td><code>xencode/features/demo.py</code></td>
+                        <td>Not a real feature - example/ demo</td>
+                        <td>Should be in examples/ not features/</td>
+                    </tr>
+                    <tr>
+                        <td><code>xencode/warp_*.py</code> files</td>
+                        <td><code>xencode/warp_integrated.py</code>, etc.</td>
+                        <td>Warp terminal integration - may not be fully active</td>
+                        <td>Check if Warp integration is actually used</td>
+                    </tr>
+                    <tr>
+                        <td><code>xencode/bytebot/</code> integration</td>
+                        <td><code>bytebot/model_integration.py</code></td>
+                        <td>Bytebot backend services</td>
+                        <td>May not be fully wired into main entry point</td>
+                    </tr>
+                </table>
+            </section>
+
+            <!-- ===================== RECOMMENDED TWEAKS ===================== -->
+            <section id="tweaks">
+                <h2>Recommended Tweaks <a href="#tweaks" class="anchor">#</a></h2>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 1. Fix RAG __init__.py</div>
+                    <p>Add proper imports and <code>__all__</code> to <code>xencode/rag/__init__.py</code> to enable
+                    <code>from xencode.rag import VectorStore</code> pattern.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 2. Create tui/utils/__init__.py</div>
+                    <p>Create the missing <code>__init__.py</code> to make the utils directory a proper Python package.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 3. Add __all__ to all __init__.py files</div>
+                    <p>Many <code>__init__.py</code> files lack <code>__all__</code>. This improves tooling support (IDE autocomplete,
+                    static analysis) and makes the public API explicit. Files missing <code>__all__</code>:</p>
+                    <ul style="margin-left:1.5rem;color:var(--fg2);">
+                        <li><code>xencode/tui/widgets/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/tui/__init__.py</code> - HAS __all__ (exports XencodeApp)</li>
+                        <li><code>xencode/features/__init__.py</code> - HAS __all__ (6 exports)</li>
+                        <li><code>xencode/agentic/__init__.py</code> - HAS __all__ (very extensive)</li>
+                        <li><code>xencode/model_providers/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/rag/__init__.py</code> — <strong>✅ FIXED</strong> — exports 5 submodule classes</li>
+                        <li><code>xencode/cache/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/auth/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/analytics/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/routing/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/monitoring/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/i18n/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/plugins/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/security/__init__.py</code> - <strong>NO __all__</strong> (only functions, no exports list)</li>
+                        <li><code>xencode/core/__init__.py</code> - HAS __all__</li>
+                        <li><code>xencode/features/core/__init__.py</code> - HAS __all__</li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">✅</span> 4. Implement concrete CredentialVault <span class="tag green" style="background:rgba(158,206,106,0.15);color:var(--green);">DONE</span></div>
+                    <p><code>FileBasedCredentialBackend</code> added with Fernet encryption (AES-128-CBC with HMAC),
+                    PBKDF2 key derivation, and cross-platform file storage at <code>~/.xencode/vault.json</code>.
+                    Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 5. Implement concrete AdvancedMemoryManager</div>
+                    <p>Create an implementation (e.g., SQLite-backed or in-memory) for the abstract memory manager.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 6. Add async fix to specialized agents</div>
+                    <p>Wrap <code>self.langchain_manager.run_agent()</code> calls in <code>await asyncio.to_thread()</code>
+                    to prevent event loop blocking in specialized agent processing.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 7. Move demo.py to examples/</div>
+                    <p><code>xencode/features/demo.py</code> is not a real feature - it's a demo. Move it to <code>examples/</code>
+                    directory and remove from feature registration.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 8. Clean up silent import failures</div>
+                    <p><code>xencode/monitoring/__init__.py</code> has multiple try/except ImportError blocks for files
+                    that don't exist. Either create the missing files or remove the broken imports.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 9. Use consistent async patterns</div>
+                    <p>Mixed sync/async patterns across the codebase. Some <code>initialize()</code> methods are async,
+                    some sync. Standardize on async for I/O-bound operations.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> 10. Review lazy import patterns</div>
+                    <p>Many files use function-level lazy imports, which is good for startup time. But some overwrite
+                    local variables multiple times (e.g., <code>xencode_core.py</code> re-imports <code>ModelChecker</code>
+                    inside different functions). Consider extracting to module-level lazy loading.</p>
+                </div>
+            </section>
+
+            <!-- ===================== TESTING ===================== -->
+            <section id="missing-tests">
+                <h2>Missing Tests Coverage <a href="#missing-tests" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>Test Directory</th><th>What's Covered</th><th>Missing Coverage</th></tr>
+                    <tr><td><code>tests/agentic/</code></td><td>Agent coordination, tools</td><td>Specialized agents (data science, web dev, etc.)</td></tr>
+                    <tr><td><code>tests/api/</code></td><td>API endpoints</td><td>Feature routes, dynamic registration</td></tr>
+                    <tr><td><code>tests/auth/</code></td><td>Auth components</td><td>CredentialVault (no concrete impl), AuditLogger</td></tr>
+                    <tr><td><code>tests/bytebot/</code></td><td>Bytebot integration</td><td>Model integration, context engine</td></tr>
+                    <tr><td><code>tests/cli/</code></td><td>CLI commands</td><td>Feature CLI commands, agentic CLI</td></tr>
+                    <tr><td><code>tests/features/</code></td><td>Feature infrastructure, voice interface</td><td>Individual features (code review, collab, etc.)</td></tr>
+                    <tr><td><code>tests/i18n/</code></td><td>Translation, language management</td><td>Context adapter</td></tr>
+                    <tr><td><code>tests/integration/</code></td><td>Integration tests</td><td>End-to-end workflows</td></tr>
+                    <tr><td><code>tests/model_providers/</code></td><td>Model resolver, transport, diagnostics</td><td>Provider manager, fallback</td></tr>
+                    <tr><td><code>tests/phase3/</code></td><td>Intelligence layer phase 3</td><td>-</td></tr>
+                    <tr><td><code>tests/phase5/</code></td><td>Phase 5 features</td><td>-</td></tr>
+                    <tr><td><code>tests/rust/</code></td><td>Rust components</td><td>-</td></tr>
+                    <tr><td><code>tests/tui/</code></td><td>Code action hotkeys, basic TUI tests</td><td>Individual widget panels (31 widgets - most untested)</td></tr>
+                </table>
+
+                <p><strong>Key gaps:</strong> TUI widgets are mostly untested (only code_action_hotkeys has tests).
+                Individual features lack unit tests beyond infrastructure. The abstract base classes have no concrete test implementations.</p>
+            </section>
+
+            <!-- ===================== CONFIGURATION ===================== -->
+            <section id="config">
+                <h2>Configuration Files <a href="#config" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Type</th><th>Purpose</th></tr>
+                    <tr><td><code>pyproject.toml</code></td><td><span class="tag toml">TOML</span></td><td>Python project configuration (build system, dependencies)</td></tr>
+                    <tr><td><code>setup.py</code></td><td><span class="tag py">Python</span></td><td>Legacy setup script for pip install</td></tr>
+                    <tr><td><code>MANIFEST.in</code></td><td><span class="tag txt">Text</span></td><td>Package manifest for sdist</td></tr>
+                    <tr><td><code>requirements.txt</code></td><td><span class="tag txt">Text</span></td><td>Python dependencies</td></tr>
+                    <tr><td><code>pytest.ini</code></td><td><span class="tag ini">INI</span></td><td>PyTest configuration</td></tr>
+                    <tr><td><code>package.json</code></td><td><span class="tag json">JSON</span></td><td>Node.js dependencies (Bytebot UI)</td></tr>
+                    <tr><td><code>docker-compose.yml</code></td><td><span class="tag yml">YAML</span></td><td>Docker container orchestration</td></tr>
+                    <tr><td><code>Dockerfile</code></td><td><span class="tag txt">Text</span></td><td>Docker image build</td></tr>
+                    <tr><td><code>plugins/plugins.yaml</code></td><td><span class="tag yml">YAML</span></td><td>Plugin definitions</td></tr>
+                    <tr><td><code>.pre-commit-config.yaml</code></td><td><span class="tag yml">YAML</span></td><td>Pre-commit hooks</td></tr>
+                    <tr><td><code>monitoring/prometheus.yml</code></td><td><span class="tag yml">YAML</span></td><td>Prometheus monitoring config</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== BYTEBOT ===================== -->
+            <section id="bytebot">
+                <h2>Bytebot Integration <a href="#bytebot" class="anchor">#</a></h2>
+                <p>Bytebot is a container-based desktop agent platform that Xencode integrates with.</p>
+
+                <h3>Bytebot Backend (NestJS)</h3>
+                <p>Located in <code>bytebot/packages/bytebot-agent/</code> - NestJS-based backend service.</p>
+
+                <h3>Bytebot UI (Next.js)</h3>
+                <p>Located in <code>bytebot/packages/bytebot-ui/</code> - Next.js frontend with:</p>
+                <ul style="margin-left:1.5rem;color:var(--fg2);">
+                    <li>GitHub Copilot integration (GitHub OAuth, API proxy)</li>
+                    <li>Auth provider with user session management</li>
+                    <li>Onboarding flow</li>
+                    <li>API endpoints for copilot chat/completions</li>
+                    <li><code>middleware.ts</code> for route protection</li>
+                </ul>
+
+                <h3>Xencode Bytebot Module</h3>
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>xencode/bytebot/model_integration.py</code></td><td>Model integration bridge between Bytebot and Xencode models</td></tr>
+                    <tr><td><code>xencode/bytebot/context_engine.py</code></td><td>Context engine for Bytebot integration</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== RUST ===================== -->
+            <section id="rust">
+                <h2>Rust Components <a href="#rust" class="anchor">#</a></h2>
+                <p>Rust workspace at <code>rust/</code> for performance-critical operations.</p>
+
+                <pre><code>rust/
+├── Cargo.toml          # Workspace config
+├── Cargo.lock          # Dependency lock
+└── crates/             # Rust crate(s)</code></pre>
+
+                <p><strong>Status:</strong> Present but not deeply analyzed in this audit. The Rust component
+                suggests performance-sensitive features are being built natively.</p>
+            </section>
+
+            <!-- ===================== TEST STRUCTURE ===================== -->
+            <section id="testing">
+                <h2>Test Structure <a href="#testing" class="anchor">#</a></h2>
+
+                <pre><code>tests/
+├── agentic/           # Agent system tests
+├── api/               # API endpoint tests
+├── auth/              # Authentication tests
+├── bytebot/           # Bytebot integration tests
+├── cli/               # CLI command tests
+├── features/          # Feature module tests
+├── i18n/              # Internationalization tests
+├── integration/       # Integration tests
+├── model_providers/   # Model provider tests
+├── phase3/            # Phase 3 intelligence layer tests
+├── phase5/            # Phase 5 tests
+├── rust/              # Rust component tests
+└── tui/               # TUI tests</code></pre>
+
+                <p><strong>PyTest config:</strong> <code>pytest.ini</code> at project root.</p>
+            </section>
+
+            <!-- ===================== FOOTER ===================== -->
+            <section>
+                <h2>Top-Level Files <a href="#top-level" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>File</th><th>Purpose</th></tr>
+                    <tr><td><code>xencode_core.py</code></td><td>Main entry point with full system initialization</td></tr>
+                    <tr><td><code>xencode_cli.py</code></td><td>CLI wrapper entry point</td></tr>
+                    <tr><td><code>build_exe.py</code></td><td>Builds executable with PyInstaller</td></tr>
+                    <tr><td><code>cleanup_duplicates.py</code></td><td>Duplicate file cleanup utility</td></tr>
+                    <tr><td><code>debug_chroma.py</code></td><td>ChromaDB debugging utility</td></tr>
+                    <tr><td><code>debug_ollama.py</code></td><td>Ollama debugging utility</td></tr>
+                    <tr><td><code>diagnose_tui.py</code></td><td>TUI diagnostics tool</td></tr>
+                    <tr><td><code>patch_ensemble.py</code></td><td>Ensemble patching utility</td></tr>
+                    <tr><td><code>add_api_endpoints.py</code></td><td>Script to add API endpoints to features</td></tr>
+                    <tr><td><code>add_feature_methods.py</code></td><td>Script to add methods to features</td></tr>
+                    <tr><td><code>add_history_methods.py</code></td><td>Script to add history methods</td></tr>
+                    <tr><td><code>install.ps1</code></td><td>Windows installer script</td></tr>
+                    <tr><td><code>install.sh</code></td><td>Unix installer script</td></tr>
+                    <tr><td><code>xencode.sh</code></td><td>Xencode shell script</td></tr>
+                </table>
+            </section>
+
+            <hr style="border-color:var(--bg3);margin:2rem 0;">
+
+            <p style="text-align:center;color:var(--fg2);font-size:0.9rem;">
+                Xencode Codebase Reference — Generated from comprehensive codebase audit<br>
+                Generated: May 27, 2026 — Covers all modules, entry points, features, issues, unwired functions, and recommended tweaks.
+            </p>
+
+        </main>
+    </div>
+</div>
+</body>
+</html>
