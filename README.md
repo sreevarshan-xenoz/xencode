@@ -187,6 +187,9 @@ TUI productivity shortcuts:
 | Ollama | `xencode ollama list --refresh` | Refresh/list local models |
 | Ollama | `xencode ollama pull <model>` | Pull model from registry |
 | Ollama | `xencode ollama benchmark <model>` | Benchmark model performance |
+| Vault | `xencode vault init` | Initialize an encrypted credential vault |
+| Vault | `xencode vault migrate` | Migrate plaintext API keys from config into the vault |
+| Vault | `xencode vault status` | Show vault path, credential count, encryption status |
 
 For a fuller command guide, see [CLI_GUIDE.md](CLI_GUIDE.md).
 
@@ -268,7 +271,10 @@ See:
 
 ## Security Notes
 
-- Treat API keys and tokens as secrets; avoid storing plaintext credentials in tracked files.
+- Use `xencode vault init` to create an encrypted credential vault for storing API keys and secrets.
+- Use `xencode vault migrate` to scan your config file for plaintext keys and move them into the vault.
+- Use `xencode vault status` to inspect the vault path, credential count, and encryption status.
+- Treat API keys and tokens as secrets; avoid storing plaintext credentials in tracked files or config files.
 - Review security scanning and auth-related modules before production deployment.
 - Use environment-specific secrets management and least-privilege access.
 
