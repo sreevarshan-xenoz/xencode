@@ -3058,5 +3058,208 @@ def version():
     ))
 
 
+
+
+
+@cli.group()
+def vault():
+    """Credential Vault commands - Manage encrypted API keys and secrets
+
+    Xencode's credential vault stores API keys and secrets in an encrypted
+    JSON file using Fernet (AES-128-CBC + HMAC SHA256). Commands allow you
+    to initialize, inspect, and migrate secrets into the vault.
+
+    Available commands:
+        init      - Initialize (create) a new credential vault
+        migrate   - Migrate plaintext API keys from config file into the vault
+        status    - Show vault status and storage information
+
+    Examples:
+        xencode vault init
+        xencode vault migrate --config-path ~/.xencode/config.json
+        xencode vault migrate --delete-after
+        xencode vault status
+    """
+    pass
+
+
+@vault.command()
+@click.option('--vault-path', type=click.Path(), help='Path for vault file (default: ~/.xencode/vault.json)')
+@click.option('--master-key', help='Master key for encryption (auto-derived if not provided)')
+def init(vault_path, master_key):
+    """Initialize (create) a new credential vault
+
+    Creates the vault directory and an empty vault file. Safe to run
+    multiple times — won't overwrite an existing vault.
+
+    Examples:
+        xencode vault init
+        xencode vault init --vault-path /custom/path/vault.json
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        result = JsonFileCredentialVault.init_vault(
+            vault_path=Path(vault_path) if vault_path else None,
+            master_key=master_key,
+        )
+
+        if result.get("error"):
+            console.print(f"[red]❌ {result['error']}[/red]")
+            return
+
+        if result.get("already_exists"):
+            console.print(f"[yellow]⏳ Vault already exists at: {result['vault_path']}[/yellow]")
+        else:
+            console.print(f"[green]✅ Vault initialized at: {result['vault_path']}[/green]")
+            console.print("[green]✅ Encryption available: Yes (Fernet AES-128-CBC)[/green]")
+            console.print("[yellow]💡 Use 'xencode vault migrate' to migrate existing keys[/yellow]")
+
+    except ImportError:
+        console.print("[red]❌ JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ Vault init failed: {e}[/red]")
+
+
+@vault.command()
+@click.option('--config-path', type=click.Path(), help='Path to config file to scan for plaintext API keys')
+@click.option('--vault-path', type=click.Path(), help='Path to vault file (default: ~/.xencode/vault.json)')
+@click.option('--master-key', help='Master key for encryption (auto-derived if not provided)')
+@click.option('--delete-after', is_flag=True, help='Replace migrated keys in config with env-var references')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompt')
+def migrate(config_path, vault_path, master_key, delete_after, yes):
+    """Migrate plaintext API keys from config file into the vault
+
+    Scans your config file for known API key fields (openai_api_key,
+    anthropic_api_key, etc.) and stores any plaintext values into
+    the encrypted vault. Environment variable references (${VAR})
+    are skipped automatically.
+
+    Examples:
+        xencode vault migrate
+        xencode vault migrate --config-path ~/.xencode/config.json
+        xencode vault migrate --delete-after
+        xencode vault migrate --vault-path ./vault.json -y
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        config_path_obj = Path(config_path) if config_path else None
+        vault_path_obj = Path(vault_path) if vault_path else None
+
+        if not yes:
+            msg = "Scan config file for plaintext API keys and migrate to encrypted vault?"
+            if not Confirm.ask(msg, default=True):
+                console.print("[yellow]Migration cancelled[/yellow]")
+                return
+
+        with console.status("[bold blue]\U0001f50d Scanning config and migrating keys..."):
+            result = JsonFileCredentialVault.migrate_from_config(
+                config_path=config_path_obj,
+                vault_path=vault_path_obj,
+                master_key=master_key,
+                delete_after=delete_after,
+            )
+
+        vault_path_display = result.get("vault_path", "")
+        if vault_path_display:
+            console.print(f"\n[cyan]Vault:[/cyan] {vault_path_display}")
+
+        if result.get("config_path"):
+            console.print(f"[cyan]Config:[/cyan] {result['config_path']}")
+
+        migrated = result.get("migrated", 0)
+        skipped = result.get("skipped", 0)
+        errors = result.get("errors", [])
+
+        if migrated > 0:
+            console.print(f"\n[green]\u2705 Migrated {migrated} credential(s) to encrypted vault[/green]")
+
+        if skipped > 0:
+            console.print(f"[yellow]\u23e9 Skipped {skipped} env-var references (already secure)[/yellow]")
+
+        if errors:
+            console.print(f"\n[yellow]\u26a0\ufe0f  Notes:[/yellow]")
+            for err in errors:
+                console.print(f"  \u2022 {err}")
+
+        if migrated > 0 and delete_after:
+            console.print("[green]\u2705 Config updated: plaintext keys replaced with env-var references[/green]")
+
+        if migrated == 0 and not errors:
+            console.print("[yellow]No plaintext API keys found to migrate[/yellow]")
+
+    except ImportError:
+        console.print("[red]\u274c JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]\u274c Migration failed: {e}[/red]")
+
+
+@vault.command()
+def status():
+    """Show vault status and storage information
+
+    Displays the vault path, credential count, encryption status,
+    file size, and registered services.
+
+    Examples:
+        xencode vault status
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        # Quick health check first
+        health = JsonFileCredentialVault.health_check()
+
+        if not health.get("vault_exists"):
+            console.print("[yellow]\u23f3 No vault file found at: " + health.get("vault_path", "") + "[/yellow]")
+            console.print("[yellow]\U0001f4a1 Initialize one with: xencode vault init[/yellow]")
+            return
+
+        if not health.get("is_valid_json"):
+            console.print("[red]\u274c Vault file exists but is corrupted (invalid JSON)[/red]")
+            console.print(f"[red]   Path: {health.get('vault_path', '')}[/red]")
+            return
+
+        # Full status via vault instance
+        vault = JsonFileCredentialVault()
+        info = vault.get_status()
+
+        table = Table(title="\U0001f510 Credential Vault Status")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+
+        table.add_row("Type", info.get("type", ""))
+        table.add_row("Vault Path", info.get("vault_path", ""))
+        table.add_row("Has Credentials", "\u2705 Yes" if info.get("has_credentials") else "\u274c No")
+        table.add_row("Credential Count", str(info.get("credential_count", 0)))
+        table.add_row("Encrypted", "\u2705 Yes (Fernet)" if info.get("encrypted") else "\u274c No (base64)")
+
+        file_size = info.get("file_size_bytes")
+        if file_size is not None:
+            size_str = f"{file_size:,} bytes"
+            if file_size > 1024:
+                size_str += f" ({file_size / 1024:.1f} KB)"
+            table.add_row("File Size", size_str)
+
+        services = info.get("services", [])
+        if services:
+            table.add_row("Services", ", ".join(services))
+
+        console.print(table)
+
+        if info.get("encrypted"):
+            console.print("\n[green]\U0001f512 Vault is properly encrypted[/green]")
+        else:
+            console.print("\n[yellow]\u26a0\ufe0f  Vault uses base64 encoding (install 'cryptography' for Fernet encryption)[/yellow]")
+
+    except ImportError:
+        console.print("[red]\u274c JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]\u274c Status check failed: {e}[/red]")
+
+
+
+
 if __name__ == '__main__':
     cli()

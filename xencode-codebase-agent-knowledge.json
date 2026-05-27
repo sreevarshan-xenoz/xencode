@@ -90,7 +90,7 @@
         "auth": {
           "path": "xencode/auth/",
           "description": "Authentication, authorization, and permissions",
-          "files": ["jwt_handler.py", "auth_manager.py", "permission_engine.py", "audit_logger.py", "credential_vault.py", "qwen_auth.py"]
+          "files": ["jwt_handler.py", "auth_manager.py", "permission_engine.py", "audit_logger.py", "credential_vault.py", "json_file_vault.py", "qwen_auth.py"]
         },
         "security": {
           "path": "xencode/security/",
@@ -175,6 +175,7 @@
     "rag_init_empty": {"status": "confirmed", "file": "xencode/rag/__init__.py", "detail": "File is empty - no imports or exports"},
     "tui_utils_init_missing": {"status": "confirmed", "file": "xencode/tui/utils/", "detail": "__init__.py does not exist on disk"},
     "credential_vault_no_impl": {"status": "resolved", "file": "xencode/auth/credential_vault.py", "detail": "FileBasedCredentialBackend added with Fernet encryption and PBKDF2 key derivation"},
+    "json_file_vault_impl": {"status": "resolved", "file": "xencode/auth/json_file_vault.py", "detail": "JsonFileCredentialVault — concrete CredentialVault subclass using only FileBasedCredentialBackend with Fernet encryption, async-safe operations, bulk export/import, static health_check(), and 39 tests"},
     "advanced_memory_no_impl": {"status": "confirmed", "file": "xencode/cache/advanced_memory_manager.py", "detail": "Abstract class with no concrete implementation"},
     "monitoring_broken_imports": {"status": "confirmed", "file": "xencode/monitoring/__init__.py", "detail": "Imports HealthMonitor, AlertManager from nonexistent files"},
     "security_no_all": {"status": "confirmed", "file": "xencode/security/__init__.py", "detail": "No __all__ defined despite exporting 10+ functions"},
@@ -210,6 +211,13 @@
         "file": "xencode/auth/credential_vault.py",
         "description": "RESOLVED: FileBasedCredentialBackend added with Fernet encryption, PBKDF2 key derivation, ~/.xencode/vault.json storage",
         "fix": "Done — 52/52 tests passing"
+      },
+      {
+        "id": "JSON_FILE_VAULT_IMPL",
+        "severity": "resolved",
+        "file": "xencode/auth/json_file_vault.py",
+        "description": "RESOLVED: JsonFileCredentialVault — concrete CredentialVault subclass using only FileBasedCredentialBackend with Fernet encryption, async-safe operations, bulk export/import, and static health_check()",
+        "fix": "Done — 39/39 tests passing"
       },
       {
         "id": "ADVANCED_MEMORY_NO_IMPL",
@@ -323,7 +331,7 @@
     "coverage_gaps": {
       "tui_widgets": "31 widgets, only code_action_hotkeys has tests",
       "features": "Only infrastructure and voice interface have tests",
-      "auth": "No tests for CredentialVault (no impl) or AuditLogger",
+      "auth": "CredentialVault has 39 tests (FileBasedCredentialBackend 25 + JsonFileCredentialVault 39); no tests for AuditLogger",
       "specialized_agents": "No tests for any specialized agent type"
     }
   },

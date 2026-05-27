@@ -622,6 +622,7 @@ def main():
                         <td>Secure credential storage with Windows CM + file-based encrypted vault + env fallback</td>
                         <td><span class="status-dot green"></span></td></tr>
                     <tr><td><code>auth/qwen_auth.py</code></td><td>Qwen-specific authentication</td><td><span class="status-dot yellow"></span></td></tr>
+                    <tr><td><code>auth/json_file_vault.py</code></td><td><code>JsonFileCredentialVault</code> — concrete vault subclass using encrypted JSON file with Fernet (AES-128-CBC + HMAC SHA256), single-backend deterministic storage, async-safe operations, export/import, health check</td><td><span class="status-dot green"></span> ✅ 39 tests</td></tr>
                 </table>
 
                 <div class="ok">
@@ -630,6 +631,16 @@ def main():
                     PBKDF2 key derivation from machine-specific seed, stored at <code>~/.xencode/vault.json</code>.
                     Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).
                     52/52 tests passing.</p>
+                </div>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ RESOLVED: JsonFileCredentialVault implemented</div>
+                    <p><strong>File:</strong> <code>xencode/auth/json_file_vault.py</code> — Added <code>JsonFileCredentialVault</code>, a concrete
+                    <code>CredentialVault</code> subclass using exclusively <code>FileBasedCredentialBackend</code> with Fernet encryption.
+                    Features: single-backend deterministic storage, async-safe operations via <code>asyncio.to_thread()</code>,
+                    vault introspection (<code>get_storage_info()</code>, <code>get_vault_path()</code>), bulk operations
+                    (<code>clear_vault()</code>, <code>export_vault()</code>, <code>import_vault()</code>), and a static
+                    <code>health_check()</code> for diagnostics (usable from <code>xencode doctor</code>). 39/39 tests passing.</p>
                 </div>
             </section>
 
@@ -962,6 +973,11 @@ def main():
                     <p><code>FileBasedCredentialBackend</code> added with Fernet encryption (AES-128-CBC with HMAC),
                     PBKDF2 key derivation, and cross-platform file storage at <code>~/.xencode/vault.json</code>.
                     Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).</p>
+                    <p style="margin-top:0.5rem;"><strong>Also added:</strong> <code>JsonFileCredentialVault</code> — concrete <code>CredentialVault</code> subclass
+                    in <code>xencode/auth/json_file_vault.py</code> using exclusively <code>FileBasedCredentialBackend</code>.
+                    Features single-backend deterministic storage, async-safe operations (<code>asyncio.to_thread()</code>),
+                    vault introspection, bulk export/import, and static <code>health_check()</code> for diagnostics.
+                    39 tests passing.</p>
                 </div>
 
                 <div class="card">

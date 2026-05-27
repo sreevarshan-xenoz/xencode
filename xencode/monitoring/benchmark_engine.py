@@ -110,6 +110,101 @@ class BenchmarkResult:
         }
 
 
+class BenchmarkMetrics:
+    """
+    Lightweight metrics wrapper for benchmark results.
+
+    Provides aggregated metric access from a BenchmarkResult
+    for use by the monitoring package and recommendation engine.
+    """
+
+    def __init__(self, result: BenchmarkResult):
+        self.latency_ms = result.latency_ms
+        self.tokens_per_sec = result.tokens_per_sec
+        self.throughput_rps = result.throughput_rps
+        self.accuracy_score = result.accuracy_score
+        self.consistency_score = result.consistency_score
+        self.quality_rating = result.quality_rating
+        self.cost_per_request = result.cost_per_request
+        self.cost_per_1k_tokens = result.cost_per_1k_tokens
+        self.input_tokens = result.input_tokens
+        self.output_tokens = result.output_tokens
+        self.total_tokens = result.total_tokens
+        self.success = result.success
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BenchmarkMetrics":
+        """Create from a result dictionary"""
+        return cls(
+            BenchmarkResult(
+                task_name=data.get("task_name", ""),
+                task_type=data.get("task_type", ""),
+                provider=data.get("provider", ""),
+                model=data.get("model", ""),
+                run_id=data.get("run_id", ""),
+                latency_ms=data.get("latency_ms", 0),
+                tokens_per_sec=data.get("tokens_per_sec", 0),
+                throughput_rps=data.get("throughput_rps", 0),
+                accuracy_score=data.get("accuracy_score", 0),
+                consistency_score=data.get("consistency_score", 0),
+                quality_rating=data.get("quality_rating", 0),
+                cost_per_request=data.get("cost_per_request", 0),
+                cost_per_1k_tokens=data.get("cost_per_1k_tokens", 0),
+                input_tokens=data.get("input_tokens", 0),
+                output_tokens=data.get("output_tokens", 0),
+                total_tokens=data.get("total_tokens", 0),
+                success=data.get("success", True),
+            )
+        )
+
+    @classmethod
+    def from_results(cls, results: List[BenchmarkResult]) -> "BenchmarkMetrics":
+        """Create aggregate metrics from a list of results"""
+        if not results:
+            return cls(BenchmarkResult(
+                task_name="", task_type="", provider="", model="", run_id="",
+                latency_ms=0, tokens_per_sec=0, throughput_rps=0,
+                accuracy_score=0, consistency_score=0, quality_rating=0,
+                cost_per_request=0, cost_per_1k_tokens=0,
+                input_tokens=0, output_tokens=0, total_tokens=0,
+                success=False,
+            ))
+        successful = [r for r in results if r.success]
+        count = len(successful) or 1
+        return cls(BenchmarkResult(
+            task_name="", task_type="", provider="", model="", run_id="",
+            latency_ms=sum(r.latency_ms for r in successful) / count,
+            tokens_per_sec=sum(r.tokens_per_sec for r in successful) / count,
+            throughput_rps=sum(r.throughput_rps for r in successful) / count,
+            accuracy_score=sum(r.accuracy_score for r in successful) / count,
+            consistency_score=sum(r.consistency_score for r in successful) / count,
+            quality_rating=sum(r.quality_rating for r in successful) / count,
+            cost_per_request=sum(r.cost_per_request for r in successful) / count,
+            cost_per_1k_tokens=sum(r.cost_per_1k_tokens for r in successful) / count,
+            input_tokens=sum(r.input_tokens for r in successful),
+            output_tokens=sum(r.output_tokens for r in successful),
+            total_tokens=sum(r.total_tokens for r in successful),
+            success=True,
+        ))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            "latency_ms": self.latency_ms,
+            "tokens_per_sec": self.tokens_per_sec,
+            "throughput_rps": self.throughput_rps,
+            "accuracy_score": self.accuracy_score,
+            "consistency_score": self.consistency_score,
+            "quality_rating": self.quality_rating,
+            "cost_per_request": self.cost_per_request,
+            "cost_per_1k_tokens": self.cost_per_1k_tokens,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "success": self.success,
+        }
+
+
 class BenchmarkEngine:
     """
     Core benchmark execution engine
@@ -514,3 +609,42 @@ class BenchmarkEngine:
             "provider_summary": provider_summary,
             "results": [r.to_dict() for r in successful],
         }
+
+
+# Factory & convenience functions for monitoring/__init__.py
+
+
+def create_benchmark_engine(store: Optional[BenchmarkStore] = None) -> BenchmarkEngine:
+    """
+    Create a new BenchmarkEngine instance.
+
+    Args:
+        store: Optional BenchmarkStore to attach.
+
+    Returns:
+        A new BenchmarkEngine instance.
+    """
+    return BenchmarkEngine(store=store or BenchmarkStore())
+
+
+async def run_benchmark(
+    engine: 'BenchmarkEngine',
+    tasks: List['BenchmarkTask'],
+    providers: List[tuple[str, str]],
+    suite_name: str = "run",
+    concurrent: bool = True,
+) -> Dict[str, Any]:
+    """
+    Convenience function to run a benchmark suite.
+
+    Args:
+        engine: A BenchmarkEngine instance.
+        tasks: List of benchmark tasks.
+        providers: List of (provider, model) tuples.
+        suite_name: Name for this benchmark run.
+        concurrent: Whether to run tasks concurrently.
+
+    Returns:
+        Summary dictionary of benchmark results.
+    """
+    return await engine.run_benchmark_suite(tasks, providers, suite_name, concurrent)
