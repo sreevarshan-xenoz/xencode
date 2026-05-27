@@ -9,13 +9,19 @@ import {
   TaskDaily01Icon,
   Home01Icon,
   ComputerIcon,
+  UserIcon,
+  Logout01Icon,
 } from "@hugeicons/core-free-icons";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
 
 export function Header() {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
+  const { user, isAuthenticated, logout } = useAuth();
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // After mounting, we can safely show the theme-dependent content
   useEffect(() => {
@@ -88,7 +94,56 @@ export function Header() {
           </Link>
         </div>
       </div>
-      <div className="flex items-center gap-3"></div>
+      <div className="flex items-center gap-3">
+        {isAuthenticated && user ? (
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors hover:bg-bytebot-bronze-light-a1"
+            >
+              {user.picture ? (
+                <Image
+                  src={user.picture}
+                  alt={user.name}
+                  width={28}
+                  height={28}
+                  className="rounded-full"
+                />
+              ) : (
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-bytebot-bronze-light-a3">
+                  <HugeiconsIcon
+                    icon={UserIcon}
+                    className="h-4 w-4 text-bytebot-bronze-light-12"
+                  />
+                </div>
+              )}
+              <span className="text-sm font-medium">{user.name}</span>
+            </button>
+            {showUserMenu && (
+              <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border bg-background p-2 shadow-lg">
+                <div className="border-b px-3 py-2">
+                  <p className="text-sm font-medium">{user.name}</p>
+                  <p className="text-xs text-gray-500">{user.email}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  onClick={logout}
+                  className="w-full justify-start text-red-500 hover:text-red-600"
+                >
+                  <HugeiconsIcon icon={Logout01Icon} className="mr-2 h-4 w-4" />
+                  Sign out
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <Link href="/onboarding">
+            <Button variant="outline" size="sm">
+              Sign in
+            </Button>
+          </Link>
+        )}
+      </div>
     </header>
   );
 }

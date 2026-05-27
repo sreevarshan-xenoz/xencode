@@ -133,7 +133,7 @@ class DataScienceAgent(SpecializedAgent):
         - Evaluation metrics
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class WebDevelopmentAgent(SpecializedAgent):
@@ -179,7 +179,7 @@ class WebDevelopmentAgent(SpecializedAgent):
         - Responsive design principles
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class SecurityAnalysisAgent(SpecializedAgent):
@@ -225,7 +225,7 @@ class SecurityAnalysisAgent(SpecializedAgent):
         - Security testing recommendations
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class DevOpsAgent(SpecializedAgent):
@@ -275,7 +275,7 @@ class DevOpsAgent(SpecializedAgent):
         - Monitoring and alerting
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class TestingAgent(SpecializedAgent):
@@ -319,7 +319,7 @@ class TestingAgent(SpecializedAgent):
         - Continuous testing practices
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class DocumentationAgent(SpecializedAgent):
@@ -364,7 +364,7 @@ class DocumentationAgent(SpecializedAgent):
         - Maintenance and versioning
         """
         
-        return self.langchain_manager.run_agent(enhanced_prompt)
+        return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class SpecializedAgentFactory:

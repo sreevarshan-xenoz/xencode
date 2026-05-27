@@ -97,6 +97,204 @@ export = vault.export_vault()          # export (secrets still encrypted)
 vault.import_vault(Path("backup.json"))  # import from another vault
 ```
 
+#### Migration Tutorial: Plaintext Config to Vault
+
+This tutorial walks through migrating API keys from a plaintext config file into the encrypted credential vault.
+
+---
+
+##### Before You Start
+
+Your config file likely looks like this:
+
+```json
+{
+  "features": {
+    "code_review": {
+      "openai_api_key": "sk-your-openai-key-here",
+      "model": "gpt-4"
+    },
+    "learning_mode": {
+      "anthropic_api_key": "sk-ant-your-anthropic-key-here",
+      "model": "claude-3"
+    }
+  }
+}
+```
+
+Keys are stored as **plaintext** — any process that can read the file can steal them.
+
+---
+
+##### Step 1: Initialize the Vault
+
+```bash
+xencode vault init
+```
+
+This creates an encrypted vault at `~/.xencode/vault.json`.
+
+* Vault directory created
+* Empty vault file written with `0600` permissions
+* Safe to run multiple times -- won't overwrite an existing vault
+
+To check it exists:
+
+```bash
+ls -la ~/.xencode/vault.json
+```
+
+---
+
+##### Step 2: Check Vault Status
+
+```bash
+xencode vault status
+```
+
+Expected output (before migration):
+
+```
+Vault Path:    C:\Users\you\.xencode\vault.json
+Credential Count:  0
+Encryption:    Fernet (AES-128-CBC)
+```
+
+---
+
+##### Step 3: Migrate Plaintext Keys into the Vault
+
+```bash
+xencode vault migrate --config-path ~/.xencode/config.json
+```
+
+The migrator scans your config for known API key field names (`openai_api_key`, `anthropic_api_key`, `google_gemini_api_key`, etc.), encrypts each value, and stores it in the vault.
+
+Expected output:
+
+```
+OK: Stored credential for openai (encrypted)
+OK: Stored credential for anthropic (encrypted)
+Migrated 2 credentials from config
+```
+
+---
+
+##### Step 4: Verify the Migration
+
+```bash
+xencode vault status
+```
+
+Expected output (after migration):
+
+```
+Vault Path:    C:\Users\you\.xencode\vault.json
+Credential Count:  2
+Encryption:    Fernet (AES-128-CBC)
+```
+
+You can also check via the REST API:
+
+```bash
+curl http://localhost:8000/api/v1/vault/health
+```
+
+---
+
+##### Step 5 (Optional): Delete Plaintext Keys
+
+Pass `--delete-after` to replace plaintext keys with environment-variable references:
+
+```bash
+xencode vault migrate --config-path ~/.xencode/config.json --delete-after
+```
+
+After this, your config file is marked as migrated:
+
+```json
+{
+  "_migrated_to_vault": true,
+  "_vault_migrated_at": "2026-05-27T14:30:00+00:00",
+  "features": {
+    "code_review": {
+      "openai_api_key": "${OPENAI_API_KEY}",
+      "model": "gpt-4"
+    }
+  }
+}
+```
+
+Original plaintext values are removed from the config they exist only in the encrypted vault.
+
+---
+
+##### Step 6: Use the Vault in Code
+
+```python
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+vault = JsonFileCredentialVault()
+
+# Retrieve the key at runtime
+cred = vault.get("openai", "api_key")
+api_key = cred.secret  # "sk-your-openai-key-here"
+
+# Pass it to your AI client
+client = OpenAI(api_key=api_key)
+```
+
+---
+
+##### One-Command Migration (If Eligible)
+
+If both `~/.xencode/config.json` and default paths apply, you can combine init + migrate:
+
+```bash
+xencode vault init
+xencode vault migrate --delete-after
+```
+
+---
+
+##### Machine-to-Machine Migration
+
+To move credentials to another machine, use export/import:
+
+```bash
+# On source machine
+python -c "
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+from pathlib import Path
+vault = JsonFileCredentialVault()
+vault.export_vault(Path('vault-export.json'))
+"
+
+# Copy vault-export.json to the target machine
+
+# On target machine
+python -c "
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+from pathlib import Path
+vault = JsonFileCredentialVault()
+count = vault.import_vault(Path('vault-export.json'))
+print(f'Imported {count} credentials')
+"
+```
+
+> **Note:** Encrypted credentials from another machine cannot be decrypted without the original machine's key. Use a shared master key (`--master-key`) when initializing vaults on machines that need to share credentials.
+
+---
+
+##### What the Vault Protects Against
+
+| Threat | Protection |
+|---|---|
+| Config file leaked to git | Plaintext keys never reach tracked config after `--delete-after` |
+| Backup file exposed | Vault JSON is encrypted with Fernet |
+| File read by unauthorized process | Vault file permissions are `0600` (owner only) |
+| Credential rollover | Single vault path to audit and update |
+
 ### AI Ensemble Reasoning
 The core of Xencode is its multi-model ensemble system that combines responses from multiple AI models for better accuracy and reliability.
 

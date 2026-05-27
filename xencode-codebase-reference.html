@@ -353,7 +353,9 @@ def main():
                         <div class="card-title"><span class="icon">🚀</span> xencode/api/</div>
                         <p><span class="tag py">Python</span> <span class="tag md">API Server</span></p>
                         <p>FastAPI-based API server at <code>api/main.py</code>. Includes <code>feature_routes.py</code> for
-                        dynamic feature endpoint registration.</p>
+                        dynamic feature endpoint registration. <code>api/routers/vault.py</code> adds
+                        <strong>3 vault endpoints</strong> (<code>GET /health</code>, <code>POST /init</code>, <code>POST /migrate</code>)
+                        for credential vault management via the API.</p>
                     </div>
                     <div class="card" id="entry-agentic-cli">
                         <div class="card-title"><span class="icon">🚀</span> xencode/agentic_cli.py</div>
@@ -623,6 +625,7 @@ def main():
                         <td><span class="status-dot green"></span></td></tr>
                     <tr><td><code>auth/qwen_auth.py</code></td><td>Qwen-specific authentication</td><td><span class="status-dot yellow"></span></td></tr>
                     <tr><td><code>auth/json_file_vault.py</code></td><td><code>JsonFileCredentialVault</code> — concrete vault subclass using encrypted JSON file with Fernet (AES-128-CBC + HMAC SHA256), single-backend deterministic storage, async-safe operations, export/import, health check</td><td><span class="status-dot green"></span> ✅ 39 tests</td></tr>
+                    <tr><td><code>api/routers/vault.py</code></td><td>Vault API router — 3 FastAPI endpoints for vault operations: <code>GET /health</code>, <code>POST /init</code>, <code>POST /migrate</code>. Graceful 503 fallback when vault module missing.</td><td><span class="status-dot green"></span> ✅ 18 tests</td></tr>
                 </table>
 
                 <div class="ok">
@@ -641,6 +644,10 @@ def main():
                     vault introspection (<code>get_storage_info()</code>, <code>get_vault_path()</code>), bulk operations
                     (<code>clear_vault()</code>, <code>export_vault()</code>, <code>import_vault()</code>), and a static
                     <code>health_check()</code> for diagnostics (usable from <code>xencode doctor</code>). 39/39 tests passing.</p>
+                    <p><strong>API Router:</strong> <code>xencode/api/routers/vault.py</code> — 3 FastAPI endpoints
+                    (<code>GET /api/v1/vault/health</code>, <code>POST /api/v1/vault/init</code>, <code>POST /api/v1/vault/migrate</code>)
+                    with Pydantic request/response models, graceful 503 fallback, and 18/18 API tests passing.
+                    Registered in <code>xencode/api/main.py</code> under the <code>/api/v1/vault</code> prefix.</p>
                 </div>
             </section>
 
@@ -978,6 +985,10 @@ def main():
                     Features single-backend deterministic storage, async-safe operations (<code>asyncio.to_thread()</code>),
                     vault introspection, bulk export/import, and static <code>health_check()</code> for diagnostics.
                     39 tests passing.</p>
+                    <p style="margin-top:0.5rem;"><strong>API Router:</strong> <code>xencode/api/routers/vault.py</code> —
+                    3 FastAPI endpoints (<code>GET /api/v1/vault/health</code>, <code>POST /api/v1/vault/init</code>,
+                    <code>POST /api/v1/vault/migrate</code>) with Pydantic models, graceful 503 fallback,
+                    and 18 API-level tests. Registered in <code>xencode/api/main.py</code> under <code>/api/v1/vault</code>.</p>
                 </div>
 
                 <div class="card">

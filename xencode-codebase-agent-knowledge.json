@@ -176,6 +176,7 @@
     "tui_utils_init_missing": {"status": "confirmed", "file": "xencode/tui/utils/", "detail": "__init__.py does not exist on disk"},
     "credential_vault_no_impl": {"status": "resolved", "file": "xencode/auth/credential_vault.py", "detail": "FileBasedCredentialBackend added with Fernet encryption and PBKDF2 key derivation"},
     "json_file_vault_impl": {"status": "resolved", "file": "xencode/auth/json_file_vault.py", "detail": "JsonFileCredentialVault — concrete CredentialVault subclass using only FileBasedCredentialBackend with Fernet encryption, async-safe operations, bulk export/import, static health_check(), and 39 tests"},
+    "vault_api_router": {"status": "resolved", "file": "xencode/api/routers/vault.py", "detail": "Vault API router with 3 FastAPI endpoints (health, init, migrate), Pydantic request/response models, graceful 503 fallback on missing vault module, 18 API tests, registered at /api/v1/vault in xencode/api/main.py"},
     "advanced_memory_no_impl": {"status": "confirmed", "file": "xencode/cache/advanced_memory_manager.py", "detail": "Abstract class with no concrete implementation"},
     "monitoring_broken_imports": {"status": "confirmed", "file": "xencode/monitoring/__init__.py", "detail": "Imports HealthMonitor, AlertManager from nonexistent files"},
     "security_no_all": {"status": "confirmed", "file": "xencode/security/__init__.py", "detail": "No __all__ defined despite exporting 10+ functions"},
@@ -322,16 +323,14 @@
     "python_optional": ["ollama", "openai", "anthropic", "cohere"],
     "node": ["next", "react", "nest", "hugeicons"],
     "devops": ["docker", "prometheus"]
-  },
-
-  "testing": {
+  },    "testing": {
     "framework": "pytest",
     "config": "pytest.ini",
     "directories": ["tests/agentic", "tests/api", "tests/auth", "tests/bytebot", "tests/cli", "tests/features", "tests/i18n", "tests/integration", "tests/model_providers", "tests/phase3", "tests/phase5", "tests/rust", "tests/tui"],
     "coverage_gaps": {
       "tui_widgets": "31 widgets, only code_action_hotkeys has tests",
       "features": "Only infrastructure and voice interface have tests",
-      "auth": "CredentialVault has 39 tests (FileBasedCredentialBackend 25 + JsonFileCredentialVault 39); no tests for AuditLogger",
+      "auth": "CredentialVault has 39 tests (FileBasedCredentialBackend 25 + JsonFileCredentialVault 39); Vault API has 18 TestClient tests; no tests for AuditLogger",
       "specialized_agents": "No tests for any specialized agent type"
     }
   },

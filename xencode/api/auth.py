@@ -69,45 +69,45 @@ async def verify_jwt_token(
     try:
         # Import JWT handler
         from xencode.auth.jwt_handler import JWTHandler
-        from xencode.auth.vault import get_vault
-        
-        # Get secret key from vault or environment
-        vault = get_vault()
-        secret_key = vault.get_secret("jwt_secret_key")
-        
+
+        # Resolve secret key: vault → env var → dev default
+        secret_key: Optional[str] = None
+
+        # 1. Try the credential vault (may not exist — skip gracefully)
+        try:
+            from xencode.auth.vault import get_vault
+            vault = get_vault()
+            secret_key = vault.get_secret("jwt_secret_key")
+        except (ImportError, Exception) as vault_err:
+            logger.debug("Vault-based secret lookup unavailable: %s", vault_err)
+
+        # 2. Fallback to environment variable
         if not secret_key:
-            # Fallback to environment variable
             import os
             secret_key = os.getenv("XENCODE_JWT_SECRET_KEY")
-        
+
+        # 3. Development default
         if not secret_key:
-            logger.warning("No JWT secret key configured - using default (INSECURE)")
-            # Use a default for development only
+            logger.warning("No JWT secret key configured — using dev default (INSECURE)")
             secret_key = "dev-secret-key-change-in-production"
-        
-        # Create JWT handler with the secret
+
+        # Create JWT handler with the resolved secret
         jwt_handler = JWTHandler(secret_key=secret_key)
-        
+
         # Verify the token
         payload = jwt_handler.verify_token(token, token_type='access')
-        
+
         if payload is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
+
         return payload
-        
+
     except HTTPException:
         raise
-    except ImportError as e:
-        logger.error(f"JWT handler import failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication service unavailable"
-        )
     except Exception as e:
         logger.error(f"Token verification failed: {e}")
         raise HTTPException(
