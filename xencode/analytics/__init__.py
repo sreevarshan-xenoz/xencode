@@ -6,27 +6,33 @@ Provides comprehensive analytics and monitoring capabilities for Xencode,
 including metrics collection, performance monitoring, and data visualization.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 # Import analytics components with graceful fallback
 try:
     from .metrics_collector import MetricsCollector
     METRICS_COLLECTOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import MetricsCollector: %s", e)
     MetricsCollector = None
     METRICS_COLLECTOR_AVAILABLE = False
 
 try:
     from .event_tracker import EventTracker
     EVENT_TRACKER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import EventTracker: %s", e)
     EventTracker = None
     EVENT_TRACKER_AVAILABLE = False
 
 try:
     from .analytics_engine import AnalyticsEngine
     ANALYTICS_ENGINE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import AnalyticsEngine: %s", e)
     AnalyticsEngine = None
     ANALYTICS_ENGINE_AVAILABLE = False
 
