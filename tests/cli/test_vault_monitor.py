@@ -19,26 +19,8 @@ from xencode.cli import cli
 
 
 # ---------------------------------------------------------------------------
-# Helpers for async websocket iteration mocks
+# Helpers for async websocket mocks
 # ---------------------------------------------------------------------------
-
-class _AsyncMsgIterator:
-    """Async iterator that yields a list of string messages, then stops."""
-
-    def __init__(self, messages):
-        self._messages = list(messages)
-        self._idx = 0
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._idx >= len(self._messages):
-            raise StopAsyncIteration
-        msg = self._messages[self._idx]
-        self._idx += 1
-        return msg
-
 
 class _FakeWebsocketExceptions:
     """Minimal stand-in for websockets.exceptions with real exception classes."""
