@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import asyncio
 import json
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -404,13 +406,14 @@ class XencodeApp(App):
             # Filter out embedding models for chat
             chat_models = [m for m in available_models if "embed" not in m]
             if chat_models:
-                # Prefer qwen cloud models, then local qwen, then llama
+                # Prefer qwen cloud models, then local qwen, then Gemini CLI, then llama
                 cloud_qwen_models = [m for m in chat_models if any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
                 local_qwen_models = [m for m in chat_models if "qwen" in m.lower() and not any(cloud_model in m.lower() for cloud_model in ["qwen-max", "qwen-plus", "qwen-chat", "chat.qwen.ai"])]
+                gemini_cli_models = [m for m in chat_models if m.startswith("gemini-cli")]
                 llama_models = [m for m in chat_models if "llama" in m.lower()]
 
-                # Prioritize cloud Qwen models first, then local Qwen, then Llama
-                preferred = cloud_qwen_models or local_qwen_models or llama_models
+                # Prioritize cloud Qwen models first, then local Qwen, then Gemini CLI, then Llama
+                preferred = cloud_qwen_models or local_qwen_models or gemini_cli_models or llama_models
                 self.current_model = preferred[0] if preferred else chat_models[0]
             else:
                 self.current_model = available_models[0]
@@ -1071,6 +1074,11 @@ class XencodeApp(App):
         """
         # Check if we're using a Qwen cloud model that requires authentication
         model_lower = self.current_model.lower()
+        if model_lower.startswith("gemini-cli"):
+            async for chunk in self._stream_gemini_cli_response(prompt):
+                yield chunk
+            return
+
         if model_lower.startswith("openrouter:"):
             try:
                 from xencode.smart_config_manager import get_config
@@ -1148,6 +1156,70 @@ class XencodeApp(App):
             # Use local Ollama API (existing behavior)
             async for chunk in self._stream_ollama_response(prompt, model=self.current_model):
                 yield chunk
+
+    async def _stream_gemini_cli_response(self, prompt: str):
+        """Stream a response from the locally installed Gemini CLI."""
+        executable = os.environ.get("XENCODE_GEMINI_CLI") or shutil.which("gemini")
+        if not executable:
+            yield (
+                "\n\nError: Gemini CLI is not installed or is not on PATH. "
+                "Install it and run `gemini auth login`, then select Gemini CLI again."
+            )
+            return
+
+        env = os.environ.copy()
+        if self.current_model.startswith("gemini-cli:"):
+            env.setdefault("GEMINI_MODEL", self.current_model.split(":", 1)[1])
+
+        command = [executable, "-p", prompt]
+        timeout_seconds = float(os.environ.get("XENCODE_GEMINI_CLI_TIMEOUT", "120"))
+        emitted_output = False
+        process = None
+
+        try:
+            if sys.platform.startswith("win") and executable.lower().endswith((".cmd", ".bat")):
+                process = await asyncio.create_subprocess_shell(
+                    subprocess.list2cmdline(command),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.root_path),
+                    env=env,
+                )
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.root_path),
+                    env=env,
+                )
+
+            stderr_task = asyncio.create_task(process.stderr.read())
+
+            while True:
+                chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=timeout_seconds)
+                if not chunk:
+                    break
+                emitted_output = True
+                yield chunk.decode("utf-8", errors="replace")
+
+            return_code = await asyncio.wait_for(process.wait(), timeout=5)
+            stderr_text = (await stderr_task).decode("utf-8", errors="replace").strip()
+
+            if return_code != 0:
+                detail = stderr_text or "Gemini CLI exited without an error message."
+                prefix = "\n\n" if emitted_output else ""
+                yield f"{prefix}Error: Gemini CLI exited with code {return_code}: {detail}"
+            elif not emitted_output and stderr_text:
+                yield stderr_text
+
+        except asyncio.TimeoutError:
+            if process and process.returncode is None:
+                process.kill()
+                await process.wait()
+            yield f"\n\nError: Gemini CLI timed out after {timeout_seconds:.0f}s."
+        except Exception as e:
+            yield f"\n\nError calling Gemini CLI: {str(e)}"
 
     async def _stream_ollama_response(self, prompt: str, model: str):
         """Stream response from local Ollama generate API for a specific model."""
@@ -1389,6 +1461,10 @@ class XencodeApp(App):
             ## Ensemble Mode
             Select 2-4 models in Model Selector to enable ensemble.
             Choose method: Vote, Weighted, Consensus, or Hybrid.
+
+            ## Gemini CLI
+            Install and authenticate the Gemini CLI, then select "Gemini CLI" from Model Selector.
+            Xencode runs it from the current workspace for chat responses.
 
             ## Git Integration
             - **Ctrl+G**: Refresh Git status

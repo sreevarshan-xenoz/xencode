@@ -20,11 +20,23 @@ logger = logging.getLogger(__name__)
 
 class ModelChecker:
     """Checks for available models in the system"""
+
+    @staticmethod
+    def _with_external_cli_models(models: List[str]) -> List[str]:
+        """Add non-Ollama CLI-backed models that are installed locally."""
+        if ModelChecker.is_gemini_cli_installed() and "gemini-cli" not in models:
+            models.append("gemini-cli")
+        return models
     
     @staticmethod
     def is_ollama_installed() -> bool:
         """Check if Ollama is installed and accessible"""
         return shutil.which("ollama") is not None
+
+    @staticmethod
+    def is_gemini_cli_installed() -> bool:
+        """Check if the Gemini CLI is installed and accessible."""
+        return shutil.which("gemini") is not None
     
     @staticmethod
     def get_available_models() -> List[str]:
@@ -46,7 +58,7 @@ class ModelChecker:
                             if name:
                                 models_list.append(name)
                     if models_list:
-                        return models_list
+                        return ModelChecker._with_external_cli_models(models_list)
             except Exception as e:
                 logger.warning(f"Failed to list models via library: {e}")
         
@@ -67,7 +79,7 @@ class ModelChecker:
                         if parts:
                             models.append(parts[0])
                 if models:
-                    return models
+                    return ModelChecker._with_external_cli_models(models)
             except subprocess.CalledProcessError as e:
                 logger.warning(f"Failed to list models via CLI: {e}")
 
@@ -78,11 +90,11 @@ class ModelChecker:
             with urllib.request.urlopen("http://localhost:11434/api/tags") as url:
                 data = json.loads(url.read().decode())
                 if 'models' in data:
-                    return [m['name'] for m in data['models']]
+                    models = [m['name'] for m in data['models']]
         except Exception as e:
             logger.warning(f"Failed to list models via REST API: {e}")
-                
-        return models
+
+        return ModelChecker._with_external_cli_models(models)
     
     @staticmethod
     def check_model_availability(model_name: str) -> bool:
@@ -93,6 +105,9 @@ class ModelChecker:
         # Exact match
         if model_name in available:
             return True
+
+        if model_name.startswith("gemini-cli"):
+            return ModelChecker.is_gemini_cli_installed()
             
         # Check without tag if input has no tag
         if ":" not in model_name:

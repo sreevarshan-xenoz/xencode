@@ -71,6 +71,7 @@ class ModelSelector(VerticalScroll):
         ("openrouter:openai/gpt-4o-mini", "OpenRouter GPT-4o Mini (Cloud)"),
         ("openrouter:anthropic/claude-3.5-sonnet", "OpenRouter Claude 3.5 Sonnet (Cloud)"),
         ("openrouter:meta-llama/llama-3.1-8b-instruct", "OpenRouter Llama 3.1 8B (Cloud)"),
+        ("gemini-cli", "Gemini CLI (Local CLI)"),
         ("qwen:qwen-max-coder-7b-instruct", "Qwen Max Coder 7B (Cloud)"),
         ("qwen:qwen-plus", "Qwen Plus (Cloud)"),
         ("qwen:qwen-max", "Qwen Max (Cloud)"),
@@ -118,6 +119,7 @@ class ModelSelector(VerticalScroll):
         
         for model_id, model_name in self.AVAILABLE_MODELS:
             is_cloud_provider = model_id.startswith("qwen:") or model_id.startswith("openrouter:")
+            is_cli_provider = model_id.startswith("gemini-cli")
 
             # Check if model is installed (exact or prefix match)
             # We match if any system model starts with our ID, OR if our ID starts with the system model (less likely)
@@ -130,13 +132,17 @@ class ModelSelector(VerticalScroll):
                         covered_system_models.add(sys_model)
                         break
             
-            is_installed = matched_sys_model is not None or is_cloud_provider
+            is_installed = matched_sys_model is not None or is_cloud_provider or (
+                is_cli_provider and ModelChecker.is_gemini_cli_installed()
+            )
             
             display_name = model_name
             if model_id.startswith("qwen:"):
                 display_name += " (Qwen Auth Required)"
             elif model_id.startswith("openrouter:"):
                 display_name += " (OpenRouter API Key Required)"
+            elif model_id.startswith("gemini-cli"):
+                display_name += " (Requires `gemini` on PATH)" if not is_installed else " (Uses Gemini CLI auth)"
             elif not is_installed:
                 display_name += " (Not Installed)"
             else:
@@ -245,6 +251,10 @@ class ModelSelector(VerticalScroll):
         missing = []
         for model in self.selected_models:
             if model.startswith("qwen:") or model.startswith("openrouter:"):
+                continue
+            if model.startswith("gemini-cli"):
+                if not ModelChecker.is_gemini_cli_installed():
+                    missing.append(model)
                 continue
             if not any(m.startswith(model) for m in available):
                 missing.append(model)
