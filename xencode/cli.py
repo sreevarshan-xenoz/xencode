@@ -1522,7 +1522,7 @@ def history(ctx, pattern, limit):
                 timestamp = cmd_data.get('timestamp', '')
                 if timestamp:
                     try:
-                        from datetime import datetime
+                        from datetime import datetime, timedelta
                         dt = datetime.fromisoformat(timestamp)
                         timestamp = dt.strftime("%Y-%m-%d %H:%M")
                     except Exception:
@@ -3300,7 +3300,7 @@ async def _run_vault_monitor(
 ) -> None:
     """Async coroutine that connects to the vault health WS and displays live updates."""
     import json
-    from datetime import datetime
+    from datetime import datetime, timedelta
 
     # ---- dependency checks ---------------------------------------------------
     try:
@@ -3334,7 +3334,7 @@ async def _run_vault_monitor(
                 "session_id": "cli-monitor-session",
                 "type": "access",
                 "iat": now,
-                "exp": now.replace(hour=23, minute=59, second=59),
+                "exp": now + timedelta(hours=1),
             }
             token = pyjwt.encode(payload, secret, algorithm="HS256")
         except Exception as e:
