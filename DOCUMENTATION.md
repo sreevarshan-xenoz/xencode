@@ -4,6 +4,11 @@
 1. [Overview](#overview)
 2. [Installation](#installation)
 3. [Core Features](#core-features)
+    - [Credential Vault](#credential-vault)
+    - [Real-Time Health Monitoring (WebSocket)](#real-time-health-monitoring-websocket)
+    - [AI Ensemble Reasoning](#ai-ensemble-reasoning)
+    - [Caching System](#caching-system)
+    - [Vector Store](#vector-store)
 4. [Performance Optimizations](#performance-optimizations)
 5. [Visual Workflow Builder](#visual-workflow-builder)
 6. [Multi-Agent Collaboration](#multi-agent-collaboration)
@@ -294,6 +299,139 @@ print(f'Imported {count} credentials')
 | Backup file exposed | Vault JSON is encrypted with Fernet |
 | File read by unauthorized process | Vault file permissions are `0600` (owner only) |
 | Credential rollover | Single vault path to audit and update |
+
+#### Real-Time Health Monitoring (WebSocket)
+
+Xencode exposes a WebSocket endpoint for streaming live vault health updates.
+
+**Endpoint:** `ws://localhost:8000/api/v1/vault/health/ws`
+
+##### Query Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `token` | string | *required* | JWT access token for authentication |
+| `interval` | float | `5.0` | Polling interval in seconds (1–300) |
+| `vault_path` | string | *optional* | Custom path to the vault file |
+
+##### Authentication
+
+All WebSocket connections require a valid JWT token passed as a query parameter:
+
+```
+ws://localhost:8000/api/v1/vault/health/ws?token=<JWT>
+```
+
+If the token is missing or invalid, the server closes the connection with code **4001**. The secret key is resolved using the same chain as REST endpoints (vault → `XENCODE_JWT_SECRET_KEY` env var → dev default).
+
+##### Server → Client Messages
+
+On connect the server immediately sends an initial `health_update` snapshot, then repeats every *interval* seconds.
+
+```json
+{
+  "type": "health_update",
+  "available": true,
+  "vault_exists": true,
+  "vault_path": "/home/user/.xencode/vault.json",
+  "is_readable": true,
+  "is_valid_json": true,
+  "credential_count": 3,
+  "encryption_available": true,
+  "timestamp": "2026-06-01T12:00:00.000000"
+}
+```
+
+##### Client → Server Messages
+
+| Message | Response |
+|---|---|
+| `{"type": "ping"}` | `{"type": "pong", "timestamp": "..."}` |
+| `{"type": "check_now"}` | Immediate `health_update` payload |
+| `{"type": "set_interval", "interval": 10}` | `{"type": "interval_updated", "interval": 10, "timestamp": "..."}` |
+
+##### CLI Monitor Command
+
+The quickest way to watch vault health from a terminal:
+
+```bash
+# Connect with defaults (localhost:8000, 5 s interval)
+xencode vault monitor
+
+# Custom server and interval
+xencode vault monitor --server-url http://my-host:8000 --interval 10
+
+# Watch a non-default vault file
+xencode vault monitor --vault-path /custom/path/vault.json
+
+# Provide a token manually
+xencode vault monitor --token eyJhbGci...
+```
+
+The command renders a live Rich table that refreshes on every update.
+
+> **Requirements:** `websockets` and `PyJWT` must be installed (`pip install websockets PyJWT`).
+
+##### Programmatic WebSocket Client
+
+```python
+import asyncio
+import json
+from datetime import datetime, timedelta
+from websockets.asyncio.client import connect
+
+import jwt
+from xencode.api.auth import resolve_jwt_secret
+
+# Generate a token
+secret = resolve_jwt_secret()
+now = datetime.utcnow()
+token = jwt.encode(
+    {
+        "user_id": "monitor-client",
+        "role": "admin",
+        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(hours=1),
+    },
+    secret,
+    algorithm="HS256",
+)
+
+async def monitor():
+    uri = f"ws://localhost:8000/api/v1/vault/health/ws?token={token}&interval=5"
+    async with connect(uri) as ws:
+        # Receive initial snapshot
+        data = json.loads(await ws.recv())
+        print(f"Vault exists: {data['vault_exists']}, credentials: {data['credential_count']}")
+
+        # Request an on-demand check
+        await ws.send(json.dumps({"type": "check_now"}))
+        data = json.loads(await ws.recv())
+        print(f"Updated credential count: {data['credential_count']}")
+
+        # Change interval to 10 s
+        await ws.send(json.dumps({"type": "set_interval", "interval": 10}))
+        ack = json.loads(await ws.recv())  # interval_updated
+        print(f"Server acknowledged: interval={ack['interval']}")
+
+        # Listen for a few updates
+        for _ in range(3):
+            data = json.loads(await ws.recv())
+            if data["type"] == "health_update":
+                print(f"[{data['timestamp']}] credentials={data['credential_count']}")
+
+asyncio.run(monitor())
+```
+
+##### REST Endpoints Summary
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/vault/health` | Bearer JWT | One-shot vault health check |
+| `POST` | `/api/v1/vault/init` | Bearer JWT | Initialize a new vault |
+| `POST` | `/api/v1/vault/migrate` | Bearer JWT | Migrate plaintext keys into vault |
+| `WS` | `/api/v1/vault/health/ws` | `?token=` | Real-time health monitoring stream |
 
 ### AI Ensemble Reasoning
 The core of Xencode is its multi-model ensemble system that combines responses from multiple AI models for better accuracy and reliability.
