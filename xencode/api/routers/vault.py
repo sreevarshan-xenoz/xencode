@@ -25,7 +25,7 @@ except ImportError:
     VAULT_AVAILABLE = False
 
 # Import authentication
-from xencode.api.auth import verify_jwt_token
+from xencode.api.auth import verify_jwt_token, resolve_jwt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +338,8 @@ async def vault_health_ws(
 
     try:
         from xencode.auth.jwt_handler import JWTHandler
-        _ws_jwt = JWTHandler(secret_key="dev-secret-key-change-in-production")
+        _ws_secret = resolve_jwt_secret()
+        _ws_jwt = JWTHandler(secret_key=_ws_secret)
         _ws_payload = _ws_jwt.verify_token(token, token_type="access")
         if _ws_payload is None:
             await websocket.close(code=4001, reason="Invalid or expired token")
