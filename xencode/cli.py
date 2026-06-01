@@ -3259,6 +3259,166 @@ def status():
         console.print(f"[red]\u274c Status check failed: {e}[/red]")
 
 
+@vault.command()
+@click.option('--server-url', default='http://localhost:8000',
+              help='FastAPI server base URL (default: http://localhost:8000)')
+@click.option('--interval', type=float, default=5.0,
+              help='Polling interval in seconds, 1-300 (default: 5)')
+@click.option('--vault-path', type=click.Path(),
+              help='Custom vault file path')
+@click.option('--token',
+              help='JWT access token (auto-generated if not provided)')
+def monitor(server_url, interval, vault_path, token):
+    """Monitor vault health in real-time via WebSocket
+
+    Connects to the vault health WebSocket endpoint and displays
+    live health updates including vault status, credential count,
+    and encryption status. Updates are shown live in the terminal.
+
+    Examples:
+
+        xencode vault monitor
+
+        xencode vault monitor --server-url http://localhost:8000
+
+        xencode vault monitor --interval 10
+
+        xencode vault monitor --vault-path /custom/path/vault.json
+    """
+    console.print("[blue]\U0001f50c Connecting to vault health WebSocket...[/blue]")
+    try:
+        asyncio.run(_run_vault_monitor(server_url, interval, vault_path, token))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]\U0001f44b Disconnected[/yellow]")
+
+
+async def _run_vault_monitor(
+    server_url: str,
+    interval: float,
+    vault_path: Optional[str],
+    token: Optional[str],
+) -> None:
+    """Async coroutine that connects to the vault health WS and displays live updates."""
+    import json
+    from datetime import datetime
+
+    # ---- dependency checks ---------------------------------------------------
+    try:
+        import websockets
+    except ImportError:
+        console.print(
+            "[red]\u274c 'websockets' library is required. "
+            "Install with: pip install websockets[/red]"
+        )
+        return
+
+    try:
+        import jwt as pyjwt
+    except ImportError:
+        console.print(
+            "[red]\u274c 'PyJWT' library is required. "
+            "Install with: pip install PyJWT[/red]"
+        )
+        return
+
+    # ---- token generation (if not provided) ----------------------------------
+    if not token:
+        try:
+            from xencode.api.auth import resolve_jwt_secret
+            secret = resolve_jwt_secret()
+            now = datetime.utcnow()
+            payload = {
+                "user_id": "cli-monitor",
+                "username": "cli-user",
+                "role": "admin",
+                "session_id": "cli-monitor-session",
+                "type": "access",
+                "iat": now,
+                "exp": now.replace(hour=23, minute=59, second=59),
+            }
+            token = pyjwt.encode(payload, secret, algorithm="HS256")
+        except Exception as e:
+            console.print(f"[red]\u274c Failed to generate auth token: {e}[/red]")
+            return
+
+    # ---- build WebSocket URL -------------------------------------------------
+    ws_base = server_url.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_base}/api/v1/vault/health/ws?token={token}&interval={interval}"
+    if vault_path:
+        ws_url += f"&vault_path={vault_path}"
+
+    # ---- connect & display live updates --------------------------------------
+    try:
+        async with websockets.connect(ws_url) as ws:
+            console.print("[green]\u2705 Connected! Receiving health updates...[/green]")
+            console.print("[dim]Press Ctrl+C to disconnect[/dim]\n")
+
+            from rich.live import Live
+            from rich.table import Table
+
+            def _build_table(data: dict) -> Table:
+                table = Table(title="\U0001f510 Vault Health Monitor", title_style="bold blue")
+                table.add_column("Status", style="cyan", width=16)
+                table.add_column("Value", style="green")
+
+                available = data.get("available", False)
+                vault_exists = data.get("vault_exists", False)
+
+                table.add_row("Available", f"{'\u2705' if available else '\u274c'} {available}")
+                table.add_row("Vault Exists", f"{'\u2705' if vault_exists else '\u274c'} {vault_exists}")
+                table.add_row("Vault Path", data.get("vault_path", "N/A"))
+                table.add_row("Readable", f"{'\u2705' if data.get('is_readable') else '\u274c'} {data.get('is_readable', False)}")
+                table.add_row("Valid JSON", f"{'\u2705' if data.get('is_valid_json') else '\u274c'} {data.get('is_valid_json', False)}")
+                table.add_row("Credentials", str(data.get("credential_count", 0)))
+                table.add_row("Encryption", "\u2705 Enabled" if data.get("encryption_available") else "\u274c Not available")
+
+                ts = data.get("timestamp", "")
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts)
+                        ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
+                table.add_row("Last Updated", ts)
+                return table
+
+            with Live(refresh_per_second=4, screen=False) as live:
+                while True:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=max(interval * 2, 10))
+                        data = json.loads(raw)
+                        kind = data.get("type", "")
+
+                        if kind == "health_update":
+                            live.update(_build_table(data))
+                        elif kind == "pong":
+                            continue
+                        elif kind == "interval_updated":
+                            console.print(
+                                f"[yellow]\u23f1\ufe0f  Interval updated to "
+                                f"{data.get('interval', 'N/A')}s[/yellow]"
+                            )
+                        elif kind == "error":
+                            console.print(
+                                f"[red]\u26a0\ufe0f  Server error: "
+                                f"{data.get('message', 'Unknown')}[/red]"
+                            )
+                        else:
+                            console.print(f"[dim]Received: {json.dumps(data, indent=2)}[/dim]")
+
+                    except asyncio.TimeoutError:
+                        console.print("[yellow]\u26a0\ufe0f  No update received \u2014 reconnecting...[/yellow]")
+                        break
+                    except websockets.exceptions.ConnectionClosed:
+                        console.print("[red]\u274c Connection closed by server[/red]")
+                        break
+
+    except websockets.exceptions.InvalidURI:
+        console.print(f"[red]\u274c Invalid server URL: {server_url}[/red]")
+    except websockets.exceptions.WebSocketException as e:
+        console.print(f"[red]\u274c WebSocket error: {e}[/red]")
+    except asyncio.CancelledError:
+        pass
 
 
 if __name__ == '__main__':

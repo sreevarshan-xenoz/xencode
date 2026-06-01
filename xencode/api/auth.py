@@ -7,6 +7,7 @@ Provides JWT verification, user extraction, and authorization dependencies.
 """
 
 import logging
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -27,6 +28,49 @@ class AuthenticationError(Exception):
 class AuthorizationError(Exception):
     """Authorization failed"""
     pass
+
+
+# ---------------------------------------------------------------------------
+# Shared JWT secret resolution
+# ---------------------------------------------------------------------------
+
+
+def resolve_jwt_secret() -> str:
+    """Resolve the JWT signing secret.
+
+    Resolution chain:
+      1. Credential vault (``xencode.auth.vault.get_vault``)
+      2. ``XENCODE_JWT_SECRET_KEY`` environment variable
+      3. Hard-coded development default
+
+    Returns:
+        The resolved secret key as a string.
+    """
+    secret_key: Optional[str] = None
+
+    # 1. Try the credential vault (may not exist — skip gracefully)
+    try:
+        from xencode.auth.vault import get_vault
+        vault = get_vault()
+        secret_key = vault.get_secret("jwt_secret_key")
+    except (ImportError, Exception) as vault_err:
+        logger.debug("Vault-based secret lookup unavailable: %s", vault_err)
+
+    # 2. Fallback to environment variable
+    if not secret_key:
+        secret_key = os.getenv("XENCODE_JWT_SECRET_KEY")
+
+    # 3. Development default
+    if not secret_key:
+        logger.warning("No JWT secret key configured — using dev default (INSECURE)")
+        secret_key = "dev-secret-key-change-in-production"
+
+    return secret_key
+
+
+# ---------------------------------------------------------------------------
+# JWT verification dependency
+# ---------------------------------------------------------------------------
 
 
 async def verify_jwt_token(
@@ -70,26 +114,8 @@ async def verify_jwt_token(
         # Import JWT handler
         from xencode.auth.jwt_handler import JWTHandler
 
-        # Resolve secret key: vault → env var → dev default
-        secret_key: Optional[str] = None
-
-        # 1. Try the credential vault (may not exist — skip gracefully)
-        try:
-            from xencode.auth.vault import get_vault
-            vault = get_vault()
-            secret_key = vault.get_secret("jwt_secret_key")
-        except (ImportError, Exception) as vault_err:
-            logger.debug("Vault-based secret lookup unavailable: %s", vault_err)
-
-        # 2. Fallback to environment variable
-        if not secret_key:
-            import os
-            secret_key = os.getenv("XENCODE_JWT_SECRET_KEY")
-
-        # 3. Development default
-        if not secret_key:
-            logger.warning("No JWT secret key configured — using dev default (INSECURE)")
-            secret_key = "dev-secret-key-change-in-production"
+        # Resolve secret key via shared helper
+        secret_key = resolve_jwt_secret()
 
         # Create JWT handler with the resolved secret
         jwt_handler = JWTHandler(secret_key=secret_key)
