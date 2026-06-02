@@ -4,6 +4,9 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use xencode_models_rs::OllamaClient;
 
+pub mod gemini;
+pub mod qwen;
+
 #[derive(Debug)]
 pub enum ProviderError {
     Network(String),
@@ -37,21 +40,63 @@ struct OllamaResponse {
 
 /// ProviderManager abstracts over local and cloud models.
 ///
-/// Currently supports local Ollama and OpenRouter.
+/// Supports Ollama (local), OpenRouter (cloud), Qwen (cloud), and Gemini (cloud).
 pub struct ProviderManager {
     ollama_client: OllamaClient,
     openrouter_api_key: Option<String>,
+    qwen_api_key: Option<String>,
+    gemini_api_key: Option<String>,
     client: reqwest::Client,
 }
 
 impl ProviderManager {
-    pub fn new(ollama_client: OllamaClient, openrouter_api_key: Option<String>) -> Self {
+    pub fn new(
+        ollama_client: OllamaClient,
+        openrouter_api_key: Option<String>,
+        qwen_api_key: Option<String>,
+        gemini_api_key: Option<String>,
+    ) -> Self {
         let client = reqwest::Client::new();
-        Self { ollama_client, openrouter_api_key, client }
+        Self {
+            ollama_client,
+            openrouter_api_key,
+            qwen_api_key,
+            gemini_api_key,
+            client,
+        }
     }
 
     /// Generate a response asynchronously (resolves when the full response is ready).
+    ///
+    /// Routes to the appropriate provider based on the model prefix:
+    /// - `qwen:` → Qwen cloud API
+    /// - `google_gemini:` → Google Gemini API
+    /// - contains `/` with OpenRouter key → OpenRouter
+    /// - else → local Ollama
     pub async fn generate(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        // Route based on model prefix
+        if let Some(inner_model) = model.strip_prefix("qwen:") {
+            if let Some(ref key) = self.qwen_api_key {
+                let provider = qwen::QwenProvider::new(key.clone(), None);
+                return provider.generate(inner_model, messages).await;
+            }
+            return Err(ProviderError::Api("Qwen API key not configured".to_string()));
+        }
+
+        if let Some(inner_model) = model.strip_prefix("google_gemini:") {
+            if let Some(ref key) = self.gemini_api_key {
+                let provider = gemini::GeminiProvider::new(key.clone(), None);
+                return provider.generate(inner_model, messages, None, None).await;
+            }
+            return Err(ProviderError::Api("Google Gemini API key not configured".to_string()));
+        }
+
+        // OpenRouter route
+        if model.contains('/') && self.openrouter_api_key.is_some() {
+            return self.generate_nonstream_openrouter(model, messages).await;
+        }
+
+        // Default: local Ollama
         let url = format!("{}/api/chat", self.ollama_client.base_url());
         
         let payload = serde_json::json!({
@@ -75,6 +120,12 @@ impl ProviderManager {
     }
 
     /// Generate a response and stream it token-by-token.
+    ///
+    /// Routes to the appropriate provider based on the model prefix:
+    /// - `qwen:` → Qwen cloud API
+    /// - `google_gemini:` → Google Gemini API
+    /// - contains `/` with OpenRouter key → OpenRouter
+    /// - else → local Ollama
     pub async fn generate_stream<F>(
         &self,
         model: &str,
@@ -84,8 +135,24 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
-        // Simple routing based on model prefix or available keys
-        // OpenRouter models usually contain a slash, e.g., "anthropic/claude-3-opus"
+        // Route based on model prefix
+        if let Some(inner_model) = model.strip_prefix("qwen:") {
+            if let Some(ref key) = self.qwen_api_key {
+                let provider = qwen::QwenProvider::new(key.clone(), None);
+                return provider.generate_stream(inner_model, messages, callback).await;
+            }
+            return Err(ProviderError::Api("Qwen API key not configured".to_string()));
+        }
+
+        if let Some(inner_model) = model.strip_prefix("google_gemini:") {
+            if let Some(ref key) = self.gemini_api_key {
+                let provider = gemini::GeminiProvider::new(key.clone(), None);
+                return provider.generate_stream(inner_model, messages, None, None, callback).await;
+            }
+            return Err(ProviderError::Api("Google Gemini API key not configured".to_string()));
+        }
+
+        // OpenRouter route
         if model.contains('/') && self.openrouter_api_key.is_some() {
             self.generate_stream_openrouter(model, messages, callback).await
         } else {
@@ -138,6 +205,60 @@ impl ProviderManager {
         }
 
         Ok(full_response)
+    }
+
+    /// Non-streaming OpenRouter request (called from `generate()`).
+    async fn generate_nonstream_openrouter(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+    ) -> Result<String, ProviderError> {
+        let url = "https://openrouter.ai/api/v1/chat/completions";
+        let api_key = self.openrouter_api_key.as_ref().unwrap();
+
+        let payload = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": false
+        });
+
+        let response = self.client.post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("HTTP-Referer", "http://localhost")
+            .header("X-Title", "Xencode")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("OpenRouter {} - {}", status, msg)));
+        }
+
+        #[derive(Deserialize)]
+        struct OpenRouterNonStreamResponse {
+            choices: Vec<OpenRouterNonStreamChoice>,
+        }
+        #[derive(Deserialize)]
+        struct OpenRouterNonStreamChoice {
+            message: OpenRouterMessage,
+        }
+        #[derive(Deserialize)]
+        struct OpenRouterMessage {
+            content: String,
+        }
+
+        let body: OpenRouterNonStreamResponse = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(e.to_string()))?;
+
+        body.choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| ProviderError::Parse("OpenRouter: empty response".to_string()))
     }
 
     async fn generate_stream_openrouter<F>(
