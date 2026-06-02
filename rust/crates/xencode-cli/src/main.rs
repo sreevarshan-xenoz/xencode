@@ -9,6 +9,18 @@ use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::OllamaClient;
 use xencode_providers_rs::{ChatMessage, ProviderManager};
+use xencode_analysis_rs::analyzer::CodeAnalyzer;
+use xencode_analysis_rs::security::VulnerabilityScanner;
+use xencode_server_rs::ws::AppState as ServerState;
+use xencode_plugin_rs::PluginRegistry;
+use std::sync::Arc;
+
+/// Output format for analysis results
+#[derive(clap::ValueEnum, Clone)]
+enum OutputFormat {
+    Text,
+    Json,
+}
 
 /// Xencode — AI development assistant (Rust core)
 #[derive(Parser)]
@@ -77,10 +89,48 @@ enum Commands {
         action: MemoryAction,
     },
 
+    /// Start the collaboration server
+    Server {
+        /// Port to listen on
+        #[arg(long, default_value = "8765")]
+        port: u16,
+    },
+
+    /// Analyze code for issues and vulnerabilities
+    Analyze {
+        /// Path to analyze (file or directory)
+        path: std::path::PathBuf,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+
     /// Launch the Terminal User Interface
     Tui,
 }
 
+#[derive(Subcommand)]
+enum PluginAction {
+    /// List installed plugins
+    List,
+    /// Install a plugin from a path
+    Install {
+        /// Path to plugin directory or manifest
+        path: std::path::PathBuf,
+    },
+    /// Remove a plugin by name
+    Remove {
+        /// Name of the plugin
+        name: String,
+    },
+}
 #[derive(Subcommand)]
 enum ConfigAction {
     /// Display current configuration
@@ -143,6 +193,9 @@ async fn main() {
         Commands::Cache { action } => run_cache(action),
         Commands::Query { prompt, model, no_cache, session } => run_query(prompt, model, no_cache, session).await,
         Commands::Memory { action } => run_memory(action),
+        Commands::Server { port } => run_server(port).await,
+        Commands::Analyze { path, format } => run_analyze(path, format),
+        Commands::Plugin { action } => run_plugin_action(action),
         Commands::Tui => run_tui().await,
     };
 
@@ -362,7 +415,12 @@ async fn run_query(
     });
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
-    let provider = ProviderManager::new(client, config.api_keys.openrouter_api_key.clone());
+    let provider = ProviderManager::new(
+        client,
+        config.api_keys.openrouter_api_key.clone(),
+        config.api_keys.qwen_api_key.clone(),
+        config.api_keys.google_gemini_api_key.clone(),
+    );
 
     let mut response_content = String::new();
     let result = provider.generate_stream(&model, &context_messages, |token| {
@@ -417,6 +475,168 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+async fn run_server(port: u16) -> Result<(), String> {
+    use std::net::SocketAddr;
+    let state = Arc::new(ServerState::new());
+    let app = xencode_server_rs::build_app_with_state(state.clone());
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    println!("🚀 Xencode server starting on http://0.0.0.0:{}", port);
+    println!("   WebSocket: ws://0.0.0.0:{}/ws/{{session_id}}/{{username}}", port);
+    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| e.to_string())?;
+    axum::serve(listener, app).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
+    if path.is_dir() {
+        // Scan directory
+        let mut all_issue_lists = Vec::new();
+        let walker = walkdir::WalkDir::new(&path)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file());
+
+        for entry in walker {
+            let fp = entry.path();
+            let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
+            match ext {
+                "py" | "rs" | "ts" | "js" | "tsx" | "jsx" | "go" | "rb" | "java" => {
+                    match CodeAnalyzer::analyze_file(fp) {
+                        Ok(issues) => {
+                            all_issue_lists.push((fp.display().to_string(), issues));
+                        }
+                        Err(e) => eprintln!("  Skipping {}: {}", fp.display(), e),
+                    }
+                    // Run security scan
+                    if let Ok(findings) = VulnerabilityScanner::scan_file(fp) {
+                        if !findings.is_empty() {
+                            println!("  Security: {} issues in {}", findings.len(), fp.display());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        match format {
+            OutputFormat::Json => {
+                println!("{}", serde_json::to_string_pretty(&all_issue_lists).map_err(|e| e.to_string())?);
+            }
+            OutputFormat::Text => {
+                let total: usize = all_issue_lists.iter().map(|(_, issues)| issues.len()).sum();
+                println!("Results for: {}", path.display());
+                println!("   Files analyzed: {}", all_issue_lists.len());
+                println!("   Total issues:   {}", total);
+                for (file_path, issues) in &all_issue_lists {
+                    if !issues.is_empty() {
+                        println!("
+  {} ({} issues)", file_path, issues.len());
+                        for issue in issues {
+                            let icon = match issue.severity.label() {
+                                "critical" | "high" => "R",
+                                "medium" => "Y",
+                                _ => "G",
+                            };
+                            println!("    {} [{}] Ln{}: {} -- {}",
+                                icon, issue.severity.label(), issue.line_number, issue.message, issue.suggestion);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Single file
+        let issues = CodeAnalyzer::analyze_file(&path).map_err(|e| e.to_string())?;
+
+        match format {
+            OutputFormat::Json => {
+                println!("{}", serde_json::to_string_pretty(&issues).map_err(|e| e.to_string())?);
+            }
+            OutputFormat::Text => {
+                println!("Analysis of: {}", path.display());
+                println!("   Issues: {}", issues.len());
+                for issue in &issues {
+                    println!("  [{}] Ln{}: {} -- {}",
+                        issue.severity.label(), issue.line_number, issue.message, issue.suggestion);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_plugin_action(action: PluginAction) -> Result<(), String> {
+    let plugin_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("xencode")
+        .join("plugins");
+
+    match action {
+        PluginAction::List => {
+            let registry = PluginRegistry::new(std::path::PathBuf::from(&plugin_dir));
+            let manifests = registry.discover();
+            if manifests.is_empty() {
+                println!("No plugins installed in: {}", plugin_dir.display());
+                println!("Use 'xencode plugin install <path>' to install a plugin.");
+            } else {
+                println!("📦 Installed Plugins (from {}):", plugin_dir.display());
+                for m in &manifests {
+                    println!("  {} v{} — {} (by {})",
+                        m.name, m.version, m.description, m.author);
+                }
+            }
+        }
+        PluginAction::Install { path } => {
+            if !path.exists() {
+                return Err(format!("Path does not exist: {}", path.display()));
+            }
+            // Copy plugin directory to plugin folder
+            let name = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("plugin");
+            let dest = plugin_dir.join(name);
+            if dest.exists() {
+                return Err(format!("Plugin '{}' is already installed", name));
+            }
+            std::fs::create_dir_all(&plugin_dir).map_err(|e| e.to_string())?;
+
+            if path.is_dir() {
+                copy_dir_recursive(&path, &dest).map_err(|e| format!("Failed to install: {}", e))?;
+            } else {
+                std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+                std::fs::copy(&path, dest.join(path.file_name().unwrap())).map_err(|e| e.to_string())?;
+            }
+            println!("✅ Plugin '{}' installed successfully.", name);
+        }
+        PluginAction::Remove { name } => {
+            let path = plugin_dir.join(&name);
+            if path.exists() {
+                std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to remove: {}", e))?;
+                println!("✅ Plugin '{}' removed.", name);
+            } else {
+                return Err(format!("Plugin '{}' not found", name));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_recursive(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(&entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
 }
 
 async fn run_tui() -> Result<(), String> {
