@@ -705,6 +705,15 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
         Line::from(format!("   Avg Latency:      {} ms", if avg_latency > 0.0 { format!("{:.0}", avg_latency) } else { "N/A".to_string() })),
         Line::from(format!("   Total LLM Calls:  {}", app.total_llm_calls)),
         Line::from(""),
+        Line::from(Span::styled(" System Utilization (simulated)", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+        Line::from(format!("   CPU:     [{}{}]  {:.0}%", "\u{2588}".repeat((app.profiler_gauge_cpu / 10.0) as usize), "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_cpu / 10.0) as usize)), app.profiler_gauge_cpu)),
+        Line::from(format!("   Memory:  [{}{}]  {:.0}%", "\u{2588}".repeat((app.profiler_gauge_mem / 10.0) as usize), "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_mem / 10.0) as usize)), app.profiler_gauge_mem)),
+        Line::from(""),
+        Line::from(Span::styled(" Session Timeline", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+        Line::from(format!("   {}  Started TUI session", if app.session_start_time > 0.0 { "\u{25B6}" } else { "\u{25CB}" })),
+        Line::from(format!("   {}  Workspace scanned ({} files)", "\u{25B6}", app.file_tree.len())),
+        Line::from(format!("   {}  {} LLM calls made", "\u{25B6}", app.total_llm_calls)),
+        Line::from(""),
         Line::from(Span::styled(" Press 'h' to refresh health checks. Esc to close.", Style::default().fg(app.theme.message_system))),
     ];
 
@@ -1088,6 +1097,40 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg))
         .wrap(Wrap { trim: false });
     f.render_widget(log_para, bottom[1]);
+
+    // Command history
+    let history_lines: Vec<Line> = if !app.bytebot_history.is_empty() {
+        let mut hl = vec![
+            Line::from(Span::styled(" History (press Up to recall)", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+            Line::from(""),
+        ];
+        for cmd in app.bytebot_history.iter().rev().take(5) {
+            hl.push(Line::from(Span::styled(format!("  \u{25B6} {}", cmd), Style::default().fg(app.theme.message_system))));
+        }
+        hl
+    } else {
+        vec![
+            Line::from(Span::styled(" History", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+            Line::from(""),
+            Line::from(Span::styled("  No previous commands", Style::default().fg(app.theme.message_system))),
+        ]
+    };
+    
+    // Add history as a small section below the split panels if there's room
+    if bottom[1].height > 8 {
+        let hist_bottom_y = popup_area.y + popup_area.height - 7;
+        let hist_area = Rect { x: popup_area.x + 1, y: hist_bottom_y, width: popup_area.width - 2, height: 6 };
+        f.render_widget(Clear, hist_area);
+        let hist_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(app.theme.border))
+            .title(" History ");
+        let inner_hist = hist_block.inner(hist_area);
+        f.render_widget(hist_block, hist_area);
+        let hist_para = Paragraph::new(history_lines)
+            .style(Style::default().fg(app.theme.fg));
+        f.render_widget(hist_para, inner_hist);
+    }
 }
 
 // ── Collaboration Hub Panel ────────────────────────────────────────────────
@@ -1183,10 +1226,17 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
                 "busy" => ("\u{25A0}", ratatui::style::Color::Red),
                 _ => ("?", app.theme.message_system),
             };
+            let role_badge = match name.as_str() {
+                "You (local)" => " [Admin]",
+                "alice" => " [Editor]",
+                "bob" => " [Viewer]",
+                "carol" => " [Editor]",
+                _ => "",
+            };
             member_lines.push(Line::from(vec![
                 Span::styled(format!(" {} ", status_icon), Style::default().fg(status_color)),
                 Span::styled(
-                    format!("{}  {}", name, connection),
+                    format!("{}{}  {}", name, role_badge, connection),
                     Style::default().fg(app.theme.fg),
                 ),
             ]));
@@ -1943,6 +1993,57 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(ratatui::style::Color::Yellow),
             )));
         }
+
+        // Quiz section
+        if app.learn_quiz_active {
+            content_lines.push(Line::from(""));
+            content_lines.push(Line::from(Span::styled(
+                "  Quiz:",
+                Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            )));
+            content_lines.push(Line::from(Span::styled(
+                format!("    {}", app.learn_quiz_question),
+                Style::default().fg(app.theme.fg),
+            )));
+            content_lines.push(Line::from(""));
+            for (i, option) in app.learn_quiz_options.iter().enumerate() {
+                let is_selected = i == app.learn_quiz_selected;
+                let prefix = if is_selected && !app.learn_quiz_answered { "  \u{25B6} " } else { "    " };
+                let style = if is_selected && !app.learn_quiz_answered {
+                    Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight)
+                } else if app.learn_quiz_answered && i == 0 {
+                    Style::default().fg(ratatui::style::Color::Green)
+                } else if app.learn_quiz_answered && is_selected && !app.learn_quiz_correct {
+                    Style::default().fg(ratatui::style::Color::Red)
+                } else {
+                    Style::default().fg(app.theme.fg)
+                };
+                content_lines.push(Line::from(Span::styled(
+                    format!("{}{}", prefix, option),
+                    style,
+                )));
+            }
+            if app.learn_quiz_answered {
+                content_lines.push(Line::from(""));
+                if app.learn_quiz_correct {
+                    content_lines.push(Line::from(Span::styled(
+                        "  Correct! +20% progress",
+                        Style::default().fg(ratatui::style::Color::Green),
+                    )));
+                } else {
+                    content_lines.push(Line::from(Span::styled(
+                        "  Not quite. Try again next time!",
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    )));
+                }
+            } else {
+                content_lines.push(Line::from(""));
+                content_lines.push(Line::from(Span::styled(
+                    "  Select with \u{2190}\u{2192}, confirm with Enter",
+                    Style::default().fg(app.theme.message_system),
+                )));
+            }
+        }
     }
 
     let content_para = Paragraph::new(content_lines)
@@ -2050,8 +2151,8 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 
     let mut trans_lines: Vec<Line> = Vec::new();
     trans_lines.push(Line::from(Span::styled(
-        "  Powered by AI language models.",
-        Style::default().fg(app.theme.message_system),
+        format!("  Source: {}  Target: {}", app.lang_translate_source, app.lang_translate_target),
+        Style::default().fg(app.theme.accent),
     )));
     trans_lines.push(Line::from(""));
     trans_lines.push(Line::from(Span::styled(

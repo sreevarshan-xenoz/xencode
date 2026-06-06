@@ -236,6 +236,7 @@ pub struct App<'a> {
     pub bytebot_progress: f64,
     pub bytebot_running: bool,
     pub bytebot_log: Vec<String>,
+    pub bytebot_history: Vec<String>,  // previously executed commands
 
     // Collaboration Hub state
     pub collab_session_active: bool,
@@ -245,6 +246,8 @@ pub struct App<'a> {
     pub collab_last_sync: f64,
     pub collab_pending_changes: u32,
     pub collab_activity_log: Vec<String>,
+    pub collab_commit_stream: Vec<(String, String)>,  // (author, message)
+    pub collab_shared_files: Vec<String>,  // shared file names
 
     // Voice Interface state
     pub voice_active: bool,
@@ -252,6 +255,9 @@ pub struct App<'a> {
     pub voice_level: f64,      // simulated audio level 0.0-1.0
     pub voice_transcript: Vec<String>,
     pub voice_commands: Vec<(String, String)>,  // (command, result)
+    pub voice_confidence: f64,
+    pub voice_muted: bool,
+    pub voice_language: String,
 
     // Terminal Assistant state
     pub term_asst_active: bool,
@@ -260,6 +266,7 @@ pub struct App<'a> {
     pub term_asst_suggestions: Vec<String>,
     pub term_asst_output: String,
     pub term_asst_history: Vec<(String, String, String)>,  // (command, risk, explanation)
+    pub term_risk_filter: String,  // "All", "Safe", "Destructive"
 
     // Security Auditor state
     pub sec_scan_active: bool,
@@ -268,6 +275,8 @@ pub struct App<'a> {
     pub sec_scan_summary: (u32, u32, u32, u32),  // (critical, high, medium, low)
     pub sec_scan_progress: f64,
     pub sec_scan_log: Vec<String>,
+    pub sec_filter_severity: String,  // "All", "Critical", "High", "Medium", "Low"
+    pub sec_sort_mode: String,  // "severity" or "category"
 
     // Performance Profiler state
     pub profiler_active: bool,
@@ -282,6 +291,7 @@ pub struct App<'a> {
     pub models_profiles: Vec<(String, String, f64, u32, f64)>,  // (name, provider, temp, max_tokens, top_p)
     pub models_selected: usize,
     pub models_test_output: String,
+    pub models_saving: bool,
 
     // Learning Mode state
     pub learn_active: bool,
@@ -292,6 +302,12 @@ pub struct App<'a> {
     pub learn_code_example: String,
     pub learn_exercise: String,
     pub learn_progress_pct: f64,
+    pub learn_quiz_active: bool,
+    pub learn_quiz_question: String,
+    pub learn_quiz_options: Vec<String>,
+    pub learn_quiz_selected: usize,
+    pub learn_quiz_answered: bool,
+    pub learn_quiz_correct: bool,
 
     // Multi-Language state
     pub lang_active: bool,
@@ -299,6 +315,8 @@ pub struct App<'a> {
     pub lang_supported: Vec<(String, String)>,  // (language, status)
     pub lang_translate_input: String,
     pub lang_translate_output: String,
+    pub lang_translate_source: String,
+    pub lang_translate_target: String,
 
     // Panel scroll state
     pub provider_health_scroll: u16,
@@ -408,6 +426,7 @@ impl<'a> App<'a> {
             bytebot_progress: 0.0,
             bytebot_running: false,
             bytebot_log: Vec::new(),
+            bytebot_history: Vec::new(),
             collab_session_active: false,
             collab_session_id: String::new(),
             collab_members: Vec::new(),
@@ -415,12 +434,17 @@ impl<'a> App<'a> {
             collab_last_sync: 0.0,
             collab_pending_changes: 0,
             collab_activity_log: Vec::new(),
+            collab_commit_stream: Vec::new(),
+            collab_shared_files: Vec::new(),
 
             voice_active: false,
             voice_status: "idle".to_string(),
             voice_level: 0.0,
             voice_transcript: Vec::new(),
             voice_commands: Vec::new(),
+            voice_confidence: 0.0,
+            voice_muted: false,
+            voice_language: "en-US".to_string(),
 
             term_asst_active: false,
             term_asst_query: String::new(),
@@ -428,6 +452,7 @@ impl<'a> App<'a> {
             term_asst_suggestions: Vec::new(),
             term_asst_output: String::new(),
             term_asst_history: Vec::new(),
+            term_risk_filter: "All".to_string(),
 
             sec_scan_active: false,
             sec_scan_path: String::new(),
@@ -435,6 +460,8 @@ impl<'a> App<'a> {
             sec_scan_summary: (0, 0, 0, 0),
             sec_scan_progress: 0.0,
             sec_scan_log: Vec::new(),
+            sec_filter_severity: "All".to_string(),
+            sec_sort_mode: "severity".to_string(),
 
             profiler_active: false,
             profiler_running: false,
@@ -447,6 +474,7 @@ impl<'a> App<'a> {
             models_profiles: Vec::new(),
             models_selected: 0,
             models_test_output: String::new(),
+            models_saving: false,
 
             learn_active: false,
             learn_current_lesson: 0,
@@ -456,12 +484,20 @@ impl<'a> App<'a> {
             learn_code_example: String::new(),
             learn_exercise: String::new(),
             learn_progress_pct: 0.0,
+            learn_quiz_active: false,
+            learn_quiz_question: String::new(),
+            learn_quiz_options: Vec::new(),
+            learn_quiz_selected: 0,
+            learn_quiz_answered: false,
+            learn_quiz_correct: false,
 
             lang_active: false,
             lang_detection_results: Vec::new(),
             lang_supported: Vec::new(),
             lang_translate_input: String::new(),
             lang_translate_output: String::new(),
+            lang_translate_source: "auto".to_string(),
+            lang_translate_target: "en".to_string(),
 
             provider_health_scroll: 0,
             security_scroll: 0,
@@ -914,6 +950,7 @@ impl<'a> App<'a> {
     pub fn start_custom_models(&mut self) {
         if self.models_editing { return; }
         self.models_editing = true;
+        self.models_saving = false;
         self.models_profiles = vec![
             ("Code Assistant".to_string(), "ollama".to_string(), 0.3, 4096, 0.9),
             ("Creative Writer".to_string(), "openrouter".to_string(), 0.8, 2048, 0.95),
@@ -951,6 +988,18 @@ impl<'a> App<'a> {
         ].join("\n");
         self.learn_exercise = "Fix the ownership error: let s2 = s; println!(\"{}\", s);".to_string();
         self.learn_progress_pct = 20.0;
+        // Seed quiz for lesson 1
+        self.learn_quiz_active = true;
+        self.learn_quiz_question = "What owns a String value in Rust?".to_string();
+        self.learn_quiz_options = vec![
+            "The variable that declares it".to_string(),
+            "The heap allocator".to_string(),
+            "The garbage collector".to_string(),
+            "All references to it".to_string(),
+        ];
+        self.learn_quiz_selected = 0;
+        self.learn_quiz_answered = false;
+        self.learn_quiz_correct = false;
     }
 
     /// Start Multi-Language panel with detection results.
@@ -1442,6 +1491,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::CustomModels => {
                                         if app.models_selected > 0 { app.models_selected -= 1; }
                                     }
+                                    FocusArea::ByteBotPanel => {
+                                        if !app.bytebot_running && !app.bytebot_history.is_empty() {
+                                            app.bytebot_command = app.bytebot_history.last().unwrap().clone();
+                                            app.bytebot_cursor = app.bytebot_command.len();
+                                        }
+                                    }
                                     _ => {}
                                 }
                             }
@@ -1465,6 +1520,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::CodeEditor => { app.editor.scroll((1, 0)); }
                                     FocusArea::CustomModels => {
                                         if app.models_selected + 1 < app.models_profiles.len() { app.models_selected += 1; }
+                                    }
+                                    FocusArea::ByteBotPanel => {
+                                        // Down in ByteBot - no-op
                                     }
                                     _ => {}
                                 }
@@ -1499,7 +1557,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                     FocusArea::ByteBotPanel => {
                                         if !app.bytebot_running {
-                                            app.run_bytebot(tx.clone());
+                                            // ↑ recalls last command from history
+                                            if !app.bytebot_history.is_empty() {
+                                                app.bytebot_command = app.bytebot_history.last().unwrap().clone();
+                                                app.bytebot_cursor = app.bytebot_command.len();
+                                            }
                                         }
                                     }
                                     FocusArea::CollaborationHub => {
@@ -1535,6 +1597,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::LearningMode => {
                                         if !app.learn_active {
                                             app.start_learning_mode();
+                                        } else if app.learn_quiz_active && !app.learn_quiz_answered {
+                                            // Check quiz answer
+                                            app.learn_quiz_answered = true;
+                                            // Simple check: first option is correct
+                                            app.learn_quiz_correct = app.learn_quiz_selected == 0;
+                                            if app.learn_quiz_correct {
+                                                app.learn_progress_pct = (app.learn_progress_pct + 20.0).min(100.0);
+                                            }
                                         }
                                     }
                                     FocusArea::MultiLanguage => {
@@ -1581,6 +1651,25 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         if app.attached_files.contains(&fp) { app.attached_files.remove(&fp); }
                                         else { app.attached_files.insert(fp); }
                                     }
+                                } else if app.focus == FocusArea::SecurityAuditor {
+                                    // Cycle severity filter
+                                    app.sec_filter_severity = match app.sec_filter_severity.as_str() {
+                                        "All" => "Critical",
+                                        "Critical" => "High",
+                                        "High" => "Medium",
+                                        "Medium" => "Low",
+                                        _ => "All",
+                                    }.to_string();
+                                } else if app.focus == FocusArea::TerminalAssistant {
+                                    // Cycle risk filter
+                                    app.term_risk_filter = match app.term_risk_filter.as_str() {
+                                        "All" => "Safe",
+                                        "Safe" => "Destructive",
+                                        _ => "All",
+                                    }.to_string();
+                                } else if app.focus == FocusArea::VoiceInterface {
+                                    // Toggle mute
+                                    app.voice_muted = !app.voice_muted;
                                 }
                             }
                             KeyCode::Char('i') | KeyCode::Char('/') => {
@@ -1624,6 +1713,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 } else if app.focus == FocusArea::ByteBotPanel {
                                     app.bytebot_command.insert(app.bytebot_cursor, c);
                                     app.bytebot_cursor += 1;
+                                } else if c == 's' && app.focus == FocusArea::SecurityAuditor {
+                                    // Toggle sort mode
+                                    app.sec_sort_mode = if app.sec_sort_mode == "severity" { "category".to_string() } else { "severity".to_string() };
+                                } else if c == 'm' && app.focus == FocusArea::VoiceInterface {
+                                    // Toggle mute
+                                    app.voice_muted = !app.voice_muted;
+                                } else if c == 's' && app.focus == FocusArea::CustomModels && app.models_editing {
+                                    // Save profile
+                                    app.models_saving = true;
+                                    app.models_test_output = "Profile saved!".to_string();
                                 } else if c == 'e' && app.focus == FocusArea::CodeEditor {
                                     app.input_mode = InputMode::Editing;
                                 }
@@ -1671,6 +1770,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                 } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 { app.commit_cursor -= 1; }
                                 else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor > 0 { app.bytebot_cursor -= 1; }
+                                else if app.focus == FocusArea::LearningMode && app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected > 0 {
+                                    app.learn_quiz_selected -= 1;
+                                }
+                                else if app.focus == FocusArea::CustomModels && app.models_editing && app.models_selected > 0 {
+                                    app.models_selected -= 1;
+                                }
                             }
                             KeyCode::Right => {
                                 if app.focus == FocusArea::Settings {
@@ -1703,6 +1808,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                 } else if app.focus == FocusArea::GitCommit && app.commit_cursor < app.commit_message.len() { app.commit_cursor += 1; }
                                 else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor < app.bytebot_command.len() { app.bytebot_cursor += 1; }
+                                else if app.focus == FocusArea::LearningMode && app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected + 1 < app.learn_quiz_options.len() {
+                                    app.learn_quiz_selected += 1;
+                                }
+                                else if app.focus == FocusArea::CustomModels && app.models_editing && app.models_selected + 1 < app.models_profiles.len() {
+                                    app.models_selected += 1;
+                                }
                             }
                             _ => {}
                         },
