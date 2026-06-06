@@ -107,6 +107,131 @@ async fn list_models() -> Json<serde_json::Value> {
     }))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_health_check_body() {
+        let resp = health_check().await;
+        assert_eq!(resp.status, "online");
+        assert_eq!(resp.service, "Xencode Server");
+        assert_eq!(resp.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn test_get_config_fields() {
+        let config = get_config().await;
+        assert_eq!(config.0["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(config.0["max_session_size"], 10);
+        let features = config.0["features"].as_array().unwrap();
+        assert!(features.contains(&serde_json::json!("collaboration")));
+        assert!(features.contains(&serde_json::json!("code_analysis")));
+        assert!(features.contains(&serde_json::json!("rag")));
+        assert!(features.contains(&serde_json::json!("plugins")));
+    }
+
+    #[tokio::test]
+    async fn test_list_models_count() {
+        let models = list_models().await;
+        let model_list = models.0["models"].as_array().unwrap();
+        assert_eq!(model_list.len(), 4);
+        let names: Vec<&str> = model_list
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"qwen2.5:7b"));
+        assert!(names.contains(&"llama3.1:8b"));
+        assert!(names.contains(&"gpt-4o"));
+        assert!(names.contains(&"claude-3.5-sonnet"));
+    }
+
+    #[tokio::test]
+    async fn test_server_status_initial() {
+        let state = Arc::new(AppState::new());
+        let resp = server_status(State(state)).await;
+        assert!(resp.online);
+        assert_eq!(resp.sessions, 0);
+    }
+
+    #[tokio::test]
+    async fn test_create_session_returns_id() {
+        let state = Arc::new(AppState::new());
+        let session = create_session(State(state)).await;
+        assert!(session.id.starts_with("xencode-"));
+        assert!(session.members.is_empty());
+        assert!(!session.created_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_not_found() {
+        let state = Arc::new(AppState::new());
+        let session = get_session(Path("nonexistent".to_string()), State(state)).await;
+        assert_eq!(session.id, "nonexistent");
+        assert!(session.members.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_session_with_members() {
+        let state = Arc::new(AppState::new());
+        // Manually add a session with members
+        {
+            let mut sessions = state.sessions.lock().await;
+            sessions.insert("active-session".to_string(), vec!["alice".to_string(), "bob".to_string()]);
+        }
+        let session = get_session(Path("active-session".to_string()), State(state)).await;
+        assert_eq!(session.members, vec!["alice", "bob"]);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_response_json() {
+        let resp = health_check().await;
+        let json = serde_json::to_value(&resp.0).unwrap();
+        assert_eq!(json["status"], "online");
+        assert_eq!(json["service"], "Xencode Server");
+        assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn test_health_response_struct_serialize() {
+        let resp = HealthResponse {
+            status: "online".to_string(),
+            service: "Test".to_string(),
+            version: "0.1.0".to_string(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["status"], "online");
+        assert_eq!(json["service"], "Test");
+        assert_eq!(json["version"], "0.1.0");
+    }
+
+    #[test]
+    fn test_status_response_struct_serialize() {
+        let resp = StatusResponse {
+            online: true,
+            sessions: 5,
+            uptime_secs: 3600,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["online"], true);
+        assert_eq!(json["sessions"], 5);
+        assert_eq!(json["uptime_secs"], 3600);
+    }
+
+    #[test]
+    fn test_session_info_struct_serialize() {
+        let resp = SessionInfo {
+            id: "xencode-abc123".to_string(),
+            members: vec!["alice".to_string(), "bob".to_string()],
+            created_at: "2026-06-06T12:00:00+00:00".to_string(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["id"], "xencode-abc123");
+        assert_eq!(json["members"], serde_json::json!(["alice", "bob"]));
+        assert_eq!(json["created_at"], "2026-06-06T12:00:00+00:00");
+    }
+}
+
 /// Build the complete axum Router with all routes.
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
