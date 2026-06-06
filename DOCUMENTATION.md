@@ -19,23 +19,35 @@
 
 Xencode is an AI-powered development assistant platform that combines multiple AI models for superior reasoning through ensemble methods. It features advanced multi-agent collaboration, visual workflow building, and comprehensive monitoring capabilities.
 
+The project is a **dual-stack architecture** — Python feature system + Rust core runtime. The Rust workspace (**12 crates, 65 tests, zero warnings**) handles workspace scanning, config management, caching, conversation memory, model health, provider streaming, code analysis, security scanning, HTTP/WebSocket server, collaboration sync, plugin lifecycle, and a ratatui-based TUI with 14 interactive feature panels. The Python stack (~180+ files) covers the full feature system, Textual-based TUI widget library, agentic workflows, analytics, security, and the FastAPI server.
+
+The **Rust migration is complete** — all 8 phases implemented across 5 execution batches. The Rust binary (`xencode`) is the primary entry point with `server`, `analyze`, and `plugin` subcommands, and a rich TUI with 14 panels.
+
 ## Installation
 
-### Prerequisites
-- Python 3.8+
-- Ollama (for local AI models)
-- Git
+### Option A: Rust binary (recommended)
+```bash
+cd rust && cargo build --release -p xencode-cli
+./target/release/xencode --help
+```
 
-### Quick Start
+### Option B: Python package
 ```bash
 pip install xencode
 ```
+
+### Prerequisites
+- Rust 1.75+ (for building from source)
+- Python 3.8+ (for Python stack)
+- Ollama (for local AI models)
+- Git
 
 ### Development Setup
 ```bash
 git clone <repository-url>
 cd xencode
 pip install -e .
+cd rust && cargo build --release -p xencode-cli
 ```
 
 ## Core Features
