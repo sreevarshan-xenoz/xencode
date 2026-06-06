@@ -1,6 +1,6 @@
 # Xencode Future Features
 
-> All wild ideas go here. Revisit after Rust migration is complete.
+> Wild ideas for post-Rust-migration development.
 
 ---
 
@@ -8,17 +8,24 @@
 
 | Tag | Meaning |
 |-----|---------|
-| `post-migration` | Implement after full Rust TUI migration |
+| `ready` | Migration complete, ready for feature work |
 | `exploration-needed` | Need more design before spec |
 | `nice-to-have` | Lower priority, opportunistic |
 | `blocked` | Depends on another feature |
 
 ---
 
+## ✅ Rust Migration Complete
+
+The full Rust migration (Phases 5–8) is now **complete** — 12 crates, 65 tests, zero warnings.
+
+All features below are now on the `ready` track. The foundation (scan, config, cache, memory, providers, TUI, CLI, analysis, server, collaboration, plugin) is implemented.
+
+---
+
 ## 1. Multi-Model Arena Mode
-**Tag:** `post-migration`  
-**Priority:** High  
-**Owner:** TBD
+**Tag:** `ready`  
+**Priority:** High
 
 ### What
 Run the same prompt through N local models simultaneously and render a
@@ -46,9 +53,8 @@ streaming token output + latency/metrics strip at the bottom.
 ---
 
 ## 2. Git Autopilot Agent
-**Tag:** `post-migration`  
-**Priority:** High  
-**Owner:** TBD
+**Tag:** `ready`  
+**Priority:** High
 
 ### What
 Autonomous git loop that watches your workspace for changes, drafts commit
@@ -58,7 +64,7 @@ TUI — you review and approve before anything runs. Opens PRs via `gh`.
 ### Why
 - The most tedious part of dev workflow is commit message writing and PR hygiene
 - Current tooling (commitizen, git-cz) uses generic templates
-- An AI that sees your actualdiff + message history → genuinely great commits without
+- An AI that sees your actual diff + message history → genuinely great commits without
   you having to explain context
 - Fits naturally into the TUI as a persistent sidebar panel
 
@@ -90,8 +96,7 @@ TUI — you review and approve before anything runs. Opens PRs via `gh`.
 
 ## 3. Project Genome Browser
 **Tag:** `exploration-needed`  
-**Priority:** Medium  
-**Blocked by:** Core workspace scan already exists in `xencode_core_rs`
+**Priority:** Medium
 
 ### What
 Transform the flat file explorer into an **interactive dependency graph**.
@@ -121,20 +126,12 @@ with drill-down at each node. Like a mini IDE code map built into the TUI.
 - Graph layout: simple force-directed or hierarchical — `petgraph` crate supports this
 - Render via ratatui using block drawing for nodes + ASCII edges, or a simpler
   tree-collapse mode if graphs are too complex for terminal
-- **Exploration mode**: start focused, expand relationships on demand
-
-### Exploration Items
-- Is force-directed layout feasible in terminal without a GUI? Maybe simpler:
-  collapsible tree with relationship expansion
-- Performance: large repos (50k+ files) need indexing + lazy loading
-- Should this be `post-migration` or can it be a Rust-only feature first?
 
 ---
 
 ## 4. Voice-First Coding Mode
 **Tag:** `exploration-needed`  
-**Priority:** Low-Medium  
-**Owner:** TBD
+**Priority:** Low-Medium
 
 ### What
 A `/voice` toggle in the TUI: use your mic to speak to the AI, and have
@@ -143,77 +140,40 @@ touching a keyboard.
 
 ### Why
 - Developers spend a lot of time hands-off — on walks, cooking, commuting
-- Idea: "debug this todo list" while making coffee
 - Complements, doesn't replace, the text interface
 - Impressive demo factor
-
-### Core UX
-- `/voice on` → starts listening (WebRTC-compatible via `cpal` + `hound` or
-  a speech-to-text API)
-- Speak prompt → transcribed via Whisper.cpp (local) or cloud STT → sent to Ollama
-- Response streamed to TTS engine (e.g., `rodio`, `kaldi` via subprocess)
-- `Ctrl+C` interrupts and stops audio
-- Toggle off → back to text mode
 
 ### Technical Notes
 - STT: Whisper.cpp via `whisper-rs` crate (fully local, no cloud)
 - TTS: `kaldi` or `espeak` subprocess for simple speech output
 - Audio capture: `cpal` crate or platform-specific (Windows: `winapi`)
-- Fallback: if local STT fails, prompt user to use cloud (OpenAI Whisper or similar)
-- Mode indicator in TUI: waveform/stereo bars when recording
-
-### Exploration Items
-- Does local Whisper model work well enough for coding jargon?
-- Should TTS be optional (audio-only) or also stream text in TUI?
-- Mic hotword detection vs. push-to-talk? Push-to-talk safer for terminal environments
 
 ---
 
 ## 5. Context Time-Travel Replay
 **Tag:** `exploration-needed`  
-**Priority:** Medium  
-**Owner:** TBD
+**Priority:** Medium
 
 ### What
 A session replay debugger for AI reasoning. After a chat session ends,
 you can scrub through it like a video timeline and see what context
-(conversation history, retrieved files, memory) the AI had *at each step*.
+the AI had at each step.
 
 ### Why
-- AI gave a bad answer? Now you can see *why* — was it bad context?
-  wrong memory retrieval? wrong model prompt?
+- AI gave a bad answer? Now you can see *why*
 - Extremely powerful for debugging AI behavior, trust-building, and training
 - Turns the TUI into a research tool for your own coding workflow
 
-### Core UX
-- `/replay` → opens replay mode after session ends
-- Timeline scrubber: one stop per AI turn
-- At each stop: shows prompt sent + full context bundle at that moment
-  (memory retrieval results, file reads, config state, model params)
-- `←/→` to scrub, `Enter` to expand a context item, `q` to exit
-- Final screen: "Why was this wrong?" — AI classifier on worst turns
-- Export: save session as JSON for sharing/debugging
-
 ### Technical Notes
 - `ConversationMemory` already stores history — needs a richer snapshot model
-  that captures context at each turn (not just messages)
 - New `SessionReplay` struct alongside `ConversationMemory`
-- Snapshots: turn number, timestamp, messages so far, retrieved docs,
-  file reads, config snapshot, model + temperature used
 - Replay UI: separate `ReplayMode` in TUI with timeline widget
-- Serialization: snapshots + messages → JSON, stored in `~/.xencode/replays/`
-- Optional: diff view showing what changed in context between turn N and turn N+1
-
-### Exploration Items
-- How much context is too much to display? Need smart summaries per snapshot
-- Can this integrate with Arena Mode? "Why did Model A win here vs. Model B?"
 
 ---
 
 ## 6. Smart Fallback Health Dashboard
 **Tag:** `exploration-needed`  
-**Priority:** Medium  
-**Blocker:** Depends on existing provider health work in `xencode-providers-rs`
+**Priority:** Medium
 
 ### What
 A live TUI panel showing the real-time health of every configured model
@@ -222,33 +182,23 @@ automated fallback governance (auto-disable sick providers, auto-escalate to clo
 
 ### Why
 - Ollama going down is a silent failure right now
-- Users don't know which model is actually responding or why the response
-  came from Cloud instead of Local
-- Would turn "it works / it doesn't" into observable engineering
+- Users don't know which model is actually responding or why
 
 ### Core UX
-- `Ctrl+h` opens the Health Dashboard as an overlay panel
-- Shows: provider card per Model (name, last response time, error count,
-  cache hits, current status badge)
+- `Ctrl+H` opens the Health Dashboard overlay (already wired in TUI)
 - Status badges: `🟢 Healthy`, `🟡 Degraded`, `🔴 Disabled`, `☁️ Cloud Fallback`
 - Auto-governance toggle: ON = system silently switches providers
-- Manual mode: you see a prompt before each fallback
 
 ### Technical Notes
 - Extend `ProviderManager` with health metrics collection
 - Metrics: request latency p50/p95, error count, timeout count, fallback count
 - Health check pings at configurable intervals (default: 60s)
-- Store health history in `xencode-cache-rs` for trend analysis
-- Governance rules as config: `providers[].health.threshold_error_rate = 0.3`
-- TUI: existing ratatui dashboard, update via tokio channel
 
 ---
 
 ## 7. Workspace RAG + Context Indexing
 **Tag:** `exploration-needed`  
-**Priority:** High  
-**Blocker:** Needs Phase 3 intelligence work  
-**Owner:** TBD
+**Priority:** High
 
 ### What
 Offline RAG index of the current workspace. When you ask about code,
@@ -260,98 +210,74 @@ it hasn't seen in the current conversation.
 - "What does this codebase do?" → currently needs a long-running chat
 - With RAG, you get instant codebase-aware answers from local embeddings
 - Offline-first: everything runs on Ollama, no cloud needed
-- Complements the existing `ConversationMemory` with **semantic** retrieval
-
-### Core UX
-- `/index` → builds initial workspace index (show progress bar in TUI)
-- `/index update` → incremental re-index on file changes
-- `/index off` → disable
-- Query behavior: transparently injects top-K relevant chunks into prompt
-- Index stats shown in status bar: `📚 1,247 chunks indexed`
 
 ### Technical Notes
-- Embeddings: `nomic-embed-text` via Ollama (small, fast, already local)
-- Chunking: language-aware (Rust fn boundaries, Python class boundaries,
-  generic line-based fallback)
-- Vector store: `xencode-memory-rs` extends to store embeddings (Qdrant-like
-  HNSW, but lightweight — can use `r3bl_hnsw` or simple cosine top-K scan)
-- Index file format: JSON with file path + chunk + embedding vector
-- Re-index triggers: manual, on startup, or via file watcher
-- Query path: embed question → top-K ANN search → inject into context
+- Embeddings: `nomic-embed-text` via Ollama (already in xencode-analysis-rs)
+- Chunking: language-aware (Rust fn boundaries, Python class boundaries) — already in xencode-analysis-rs
+- Vector store: in-memory with cosine similarity search — already in xencode-analysis-rs
+
+> **Note:** The core building blocks (chunking, embeddings, vector store) already exist in `xencode-analysis-rs`. This feature needs the glue layer + TUI integration.
 
 ---
 
 ## 8. Secure Team Mode
 **Tag:** `exploration-needed`  
-**Priority:** Low  
-**Owner:** TBD
+**Priority:** Low
 
 ### What
 A shared Xencode instance (or CLI tool) for engineering teams.
 Each member has their own config/model cache. The AI can answer
-questions using the shared team's codebase RAG index without leaking
-personal project state.
+questions using the shared team's codebase RAG index.
 
 ### Why
 - Solo tools don't scale to teams
 - Shared context bank + shared local models = huge efficiency multiplier
 - Teams don't want their data in the cloud
 
-### Core UX
-- Team server: `xencode team serve` (uses existing FastAPI or new Rust HTTP layer)
-- Members register with invite token
-- Shared workspace index visible to all members
-- Personal memory remains private
-- Per-user audit log in team dashboard
-
 ### Technical Notes
-- Auth: shared secret or per-user token (stored in team vault)
-- Model layer: team runs models, members connect via HTTP
-- Shared index: compute once, serve many (workspace RAG needed first — Feature #7)
-- Isolation: personal memory per user, team memory shared (separate stores)
-- Deployment: single Docker image for team server
+- Team server: `xencode server` (already implemented in xencode-server-rs)
+- Auth: uses existing auth layer from xencode-server-rs
+- Shared index: compute once, serve many (needs Workspace RAG first — Feature #7)
 
 ---
 
 ## Feature Dependency Graph
 
 ```
-Arena Mode ───────────────────────────────┐
-  ↑ (uses ProviderManager.generate_stream) │
-  │                                       │
-Git Autopilot ────────────────────────────┤ (all post-migration)
-  ↑ (uses Ollama + git diff parsing)      │
-  │                                       │
-Workspace RAG ────────────────────────────┤
-  ↑                                       │
-  │                                       │
-Context Time-Travel ──────────────────────┤
-  ↑ (extends ConversationMemory)          │
-  │                                       │
-Project Genome Browser ───────────────────┤
-  ↑ (extends scan_workspace)              │
-  │                                       │
-Voice Mode ───────────────────────────────┘
-  ↑ (uses Ollama)
+  Arena Mode ───────────────┐
+  ↑ (uses ProviderManager)  │
+                             │
+  Git Autopilot ─────────────┤
+  ↑ (uses Ollama + git)      │ (all ready for implementation)
+                             │
+  Workspace RAG ─────────────┤
+  ↑ (chunk/embed/store done) │
+                             │
+  Context Time-Travel ───────┤
+  ↑ (extends Memory)         │
+                             │
+  Project Genome ────────────┘
+  ↑ (extends scan)
 
-Health Dashboard ─────────────────────────┐
-  ↑ (extends ProviderManager)             │ (can run in parallel)
-  │                                       │
-Secure Team Mode ─────────────────────────┘
-  ↑ (needs Health + RAG as prerequisites)
+  Health Dashboard ──────────┐
+  ↑ (extends ProviderManager)│ (can run in parallel)
+                             │
+  Secure Team Mode ──────────┘
+  ↑ (needs Health + RAG)
 ```
 
 ---
 
 ## Next Steps
 
-Before implementing any feature:
-
-1. **Finish Rust migration** — migration must be stable and tested first
-2. **Set up integration tests** for the TUI — no feature should break existing flows
-3. **Choose feature #1** from this list based on team priorities
-4. Follow the brainstorming → design → implementation workflow for that feature
+1. ✅ **Rust migration complete** — foundation is in place
+2. 🔲 **Pick a feature** from the list above and follow the brainstorming → design → implementation workflow
+3. 🔲 **Set up integration tests** for the TUI before adding major features
 
 ---
 
-_Last updated: 2026-04-26 | Branch: `total-migration-rust`_
+_Last updated: 2026-06-02 | Branch: `main` | Rust migration fully complete_
+
+---
+
+> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Complete codebase reference with Rust crate details, TUI panel statuses, test coverage, architecture diagrams, backlog items, and phase-by-phase migration tracking.
