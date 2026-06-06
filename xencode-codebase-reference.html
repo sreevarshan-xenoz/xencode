@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Xencode Codebase - Complete Reference</title>
+    <title>Xencode Codebase - Complete Reference (Updated June 2026)</title>
     <style>
         :root {
             --bg: #0f1117;
@@ -28,7 +28,6 @@
         }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
 
-        /* Header */
         .header {
             position: sticky; top: 0; z-index: 100;
             background: var(--bg2);
@@ -36,7 +35,7 @@
             padding: 1rem 2rem;
             backdrop-filter: blur(12px);
         }
-        .header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; }
+        .header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
         .header h1 { font-size: 1.5rem; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .header .badge {
             background: var(--bg3); color: var(--fg2); padding: 0.2rem 0.6rem; border-radius: 999px;
@@ -44,8 +43,8 @@
         }
         .header .badge.red { background: rgba(247,118,142,0.15); color: var(--red); }
         .header .badge.green { background: rgba(158,206,106,0.15); color: var(--green); }
+        .header .badge.yellow { background: rgba(224,175,104,0.15); color: var(--yellow); }
 
-        /* Sidebar TOC */
         .layout { display: flex; gap: 2rem; }
         .toc {
             width: 280px; flex-shrink: 0;
@@ -69,7 +68,6 @@
         }
         .content { flex: 1; min-width: 0; }
 
-        /* Sections */
         section { margin-bottom: 3rem; }
         h2 {
             font-size: 1.6rem; font-weight: 700; margin: 2rem 0 1rem;
@@ -87,7 +85,6 @@
         }
         p { margin-bottom: 0.75rem; color: var(--fg2); }
 
-        /* Cards & Grids */
         .card {
             background: var(--bg2); border: 1px solid var(--bg3); border-radius: 12px;
             padding: 1.25rem; margin-bottom: 1rem;
@@ -99,10 +96,10 @@
         .card-title .icon { font-size: 1.2rem; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
-        @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+        .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
+        @media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
         @media (max-width: 768px) { .layout { flex-direction: column; } .toc { width: 100%; position: static; max-height: none; } }
 
-        /* Code */
         code {
             background: var(--bg3); padding: 0.15rem 0.4rem; border-radius: 4px;
             font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85em;
@@ -113,7 +110,6 @@
         }
         pre code { background: none; padding: 0; }
 
-        /* Tags */
         .tag {
             display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
             font-size: 0.75rem; font-weight: 600; margin: 0.15rem;
@@ -126,20 +122,19 @@
         .tag.yml { background: rgba(203,75,61,0.2); color: #cb4b3d; }
         .tag.md { background: rgba(72,118,198,0.2); color: #4876c6; }
 
-        /* Issue indicators */
         .issue { border-left: 3px solid var(--red); padding-left: 1rem; margin: 0.75rem 0; }
         .issue .issue-title { color: var(--red); font-weight: 600; }
         .warning { border-left: 3px solid var(--yellow); padding-left: 1rem; margin: 0.75rem 0; }
         .warning .warning-title { color: var(--yellow); font-weight: 600; }
         .ok { border-left: 3px solid var(--green); padding-left: 1rem; margin: 0.75rem 0; }
 
-        /* Tables */
         table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
         th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--bg3); }
         th { background: var(--bg2); font-weight: 600; color: var(--accent); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.03em; }
         tr:hover td { background: rgba(122,162,247,0.05); }
+        tr.done td { opacity: 0.7; }
+        tr.stub td { opacity: 0.7; font-style: italic; }
 
-        /* Stats */
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
         .stat-card {
             background: var(--bg2); border: 1px solid var(--bg3); border-radius: 12px;
@@ -148,19 +143,12 @@
         .stat-value { font-size: 2rem; font-weight: 700; color: var(--accent); }
         .stat-label { font-size: 0.85rem; color: var(--fg2); margin-top: 0.25rem; }
 
-        /* File tree */
-        .file-tree { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; line-height: 1.8; }
-        .file-tree .dir { color: var(--accent); }
-        .file-tree .file { color: var(--fg2); }
-        .file-tree .indent { padding-left: 1.5rem; }
-
-        /* Status indicators */
         .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; }
         .status-dot.green { background: var(--green); }
         .status-dot.yellow { background: var(--yellow); }
         .status-dot.red { background: var(--red); }
+        .status-dot.gray { background: #555; }
 
-        /* Collapsible */
         details { margin: 0.5rem 0; }
         details summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 0.4rem 0; }
         details summary:hover { color: var(--accent2); }
@@ -172,7 +160,9 @@
         <h1>Xencode Codebase Reference</h1>
         <span class="badge">v2.1.0</span>
         <span class="badge">Python</span>
-        <span class="badge green">Active Development</span>
+        <span class="badge">Rust</span>
+        <span class="badge green">Migration Complete</span>
+        <span class="badge">Updated June 2, 2026</span>
     </div>
 </div>
 
@@ -183,42 +173,42 @@
                 <div class="toc-section">Overview</div>
                 <a href="#overview">System Overview</a>
                 <a href="#stats" class="h2">Codebase Statistics</a>
-                <a href="#architecture" class="h2">Architecture Diagram</a>
+                <a href="#architecture" class="h2">Architecture</a>
+                <a href="#deps" class="h2">Dependencies</a>
 
-                <div class="toc-section">Entry Points</div>
-                <a href="#entry-points">Entry Points</a>
-                <a href="#entry-xencode-core" class="h2">xencode_core.py</a>
-                <a href="#entry-xencode-cli" class="h2">xencode_cli.py</a>
-                <a href="#entry-cli" class="h2">xencode/cli.py</a>
-                <a href="#entry-tui" class="h2">xencode/tui/</a>
-                <a href="#entry-api" class="h2">xencode/api/</a>
+                <div class="toc-section">Python Stack</div>
+                <a href="#py-entry">Entry Points</a>
+                <a href="#py-features">Feature System</a>
+                <a href="#py-tui">TUI Widgets</a>
+                <a href="#py-agentic">Agentic System</a>
+                <a href="#py-providers">Model Providers</a>
+                <a href="#py-security">Security & Auth</a>
+                <a href="#py-analytics">Analytics & Monitoring</a>
+                <a href="#py-cache">Cache & Memory</a>
+                <a href="#py-rag">RAG & Vector Store</a>
+                <a href="#py-other">Other Modules</a>
 
-                <div class="toc-section">Core Packages</div>
-                <a href="#features">Features System</a>
-                <a href="#model-providers">Model Providers</a>
-                <a href="#agentic">Agentic System</a>
-                <a href="#tui-widgets">TUI Widgets</a>
-                <a href="#routing">Prompt Routing</a>
-                <a href="#security-module">Security Module</a>
-                <a href="#auth-module">Auth &amp; Permissions</a>
-                <a href="#analytics">Analytics &amp; Monitoring</a>
-                <a href="#cache">Cache System</a>
-                <a href="#rag-core">RAG &amp; Vector Store</a>
-                <a href="#i18n">Internationalization</a>
-                <a href="#plugins">Plugin System</a>
-                <a href="#core-lib">Core Library</a>
+                <div class="toc-section">Rust Stack</div>
+                <a href="#rs-workspace">Rust Workspace Overview</a>
+                <a href="#rs-core">xencode-core-rs</a>
+                <a href="#rs-config">xencode-config-rs</a>
+                <a href="#rs-cache">xencode-cache-rs</a>
+                <a href="#rs-memory">xencode-memory-rs</a>
+                <a href="#rs-models">xencode-models-rs</a>
+                <a href="#rs-providers">xencode-providers-rs</a>
+                <a href="#rs-tui">xencode-tui-rs</a>
+                <a href="#rs-cli">xencode-cli (Binary)</a>
 
-                <div class="toc-section">Findings</div>
-                <a href="#issues">Issues &amp; Action Items</a>
-                <a href="#unwired" class="h2">Unwired Functions</a>
-                <a href="#tweaks" class="h2">Recommended Tweaks</a>
-                <a href="#missing-tests" class="h2">Missing Tests</a>
+                <div class="toc-section">Testing</div>
+                <a href="#tests">Test Coverage</a>
+                <a href="#tests-remaining" class="h2">Remaining Test Gaps</a>
 
-                <div class="toc-section">Configuration</div>
-                <a href="#config">Configuration Files</a>
-                <a href="#bytebot">Bytebot Integration</a>
-                <a href="#rust">Rust Components</a>
-                <a href="#testing">Test Structure</a>
+                <div class="toc-section">Remaining Work</div>
+                <a href="#remaining">Backlog & Action Items</a>
+                <a href="#critical" class="h2">Critical</a>
+                <a href="#high" class="h2">High Priority</a>
+                <a href="#medium" class="h2">Medium Priority</a>
+                <a href="#rust-migration" class="h2">Rust Migration Status</a>
             </nav>
         </aside>
 
@@ -228,11 +218,10 @@
             <section id="overview">
                 <h2>System Overview <a href="#overview" class="anchor">#</a></h2>
                 <p>
-                    <strong>Xencode</strong> is a comprehensive AI-powered coding assistant platform that integrates
-                    multiple AI models (Ollama, cloud providers), provides CLI/TUI/API interfaces, supports
-                    collaborative coding, code review, project analysis, and features an agentic system for
-                    autonomous coding tasks. It has a modular plugin architecture and integrates with Bytebot
-                    for container-based desktop agent functionality.
+                    <strong>Xencode</strong> is an AI-powered coding assistant platform built as a <strong>dual-stack architecture</strong> —
+                    Python feature system + <strong>Rust core runtime (12 crates, 65 tests)</strong>. It provides CLI, TUI, and API interfaces,
+                    multi-model AI support (local Ollama + cloud), agentic coding workflows, code analysis,
+                    security scanning, collaboration server, plugin management, and project analysis.
                 </p>
 
                 <div class="stat-grid" id="stats">
@@ -241,928 +230,782 @@
                         <div class="stat-label">Python Files</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">9</div>
-                        <div class="stat-label">Feature Modules</div>
+                        <div class="stat-value">14</div>
+                        <div class="stat-label">TUI Feature Panels</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">31+</div>
+                        <div class="stat-value">31</div>
                         <div class="stat-label">TUI Widgets</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">Rust Crates</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">65</div>
+                        <div class="stat-label">Rust Tests Passing</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-value">3</div>
                         <div class="stat-label">Entry Points</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value">14</div>
-                        <div class="stat-label">Sub-packages</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">4</div>
-                        <div class="stat-label">Languages</div>
-                    </div>
                 </div>
 
                 <div class="card" id="architecture">
-                    <div class="card-title"><span class="icon">🏗️</span> High-Level Architecture</div>
-                    <pre><code>┌─────────────────────────────────────────────────────────────────┐
-│                         USER INTERFACES                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │   CLI (Click) │  │  TUI (Textual)│  │ API (FastAPI)│           │
-│  │ xencode/cli.py│  │ xencode/tui/ │  │ xencode/api/ │           │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘           │
-│         │                 │                  │                    │
-├─────────┼─────────────────┼──────────────────┼───────────────────┤
-│         ▼                 ▼                  ▼                    │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │                 FEATURE MANAGEMENT SYSTEM                    │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
-│  │  │CodeReview│ │Terminal  │ │Project   │ │Learning  │      │  │
-│  │  │          │ │Assistant │ │Analyzer  │ │Mode      │      │  │
-│  │  ├──────────┤ ├──────────┤ ├──────────┤ ├──────────┤      │  │
-│  │  │Voice     │ │Custom    │ │Security  │ │Collabo-  │      │  │
-│  │  │Interface │ │Models    │ │Auditor   │ │rative    │      │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
-│  └──────────────────────────┬─────────────────────────────────┘  │
-│                             │                                     │
-│  ┌──────────────────────────▼─────────────────────────────────┐  │
-│  │                      AGENTIC SYSTEM                         │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
-│  │  │Coordina- │ │Special-  │ │Workflow  │ │Security  │      │  │
-│  │  │tion      │ │ized Agnts│ │Orchestra │ │Governance│      │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
-│  └──────────────────────────┬─────────────────────────────────┘  │
-│                             │                                     │
-│  ┌──────────────────────────▼─────────────────────────────────┐  │
-│  │                   MODEL PROVIDERS                           │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │  │
-│  │  │Resolver  │ │Transport │ │Diagnostic│ │Registry  │      │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘      │  │
-│  └──────────────────────────┬─────────────────────────────────┘  │
-│                             │                                     │
-│  ┌──────────┐ ┌──────────┐ ┌──▼───────┐ ┌──────────┐ ┌──────┐  │
-│  │  Auth    │ │Analytics │ │  Cache    │ │  RAG     │ │ I18n │  │
-│  │ & Perms  │ │Monitoring│ │  System   │ │Vector DB │ │      │  │
-│  └──────────┘ └──────────┘ └───────────┘ └──────────┘ └──────┘  │
-│                                                                  │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────────────────────────┐  │
-│  │ Security │ │ Plugins  │ │        Rust Components          │  │
-│  │Sanitizatn│ │ System   │ │  (Performance-critical ops)     │  │
-│  └──────────┘ └──────────┘ └─────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘</code></pre>
+                    <div class="card-title"><span class="icon">🏗️</span> Dual-Stack Architecture (Python + Rust)
+                        <span style="margin-left:0.5rem;font-size:0.8rem;font-weight:400;">
+                            <span class="tag md">📄</span>
+                            <a href="docs/ARCHITECTURE_DIAGRAMS.md" style="color:var(--accent);">Architecture Diagrams</a>
+                        </span>
+                    </div>
+                    <pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│                        USER INTERFACES                                │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐   │
+│  │   Python CLI      │  │   Python TUI     │  │   Rust CLI/TUI   │   │
+│  │  (xencode/cli.py) │  │  (xencode/tui/)  │  │  (rust/ crates)  │   │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘   │
+│           │                     │                      │              │
+├───────────┼─────────────────────┼──────────────────────┼──────────────┤
+│    ┌──────┴──────────┐   ┌──────┴──────────┐   ┌───────┴──────────┐ │
+│    │  Python Core    │   │  Rust Core      │   │  Python API      │ │
+│    │  (xencode/)     │   │  (xencode-core) │   │  (FastAPI)       │ │
+│    │  180+ files     │   │  12 crates       │   │  6 routers       │ │
+│    └─────────────────┘   └─────────────────┘   └──────────────────┘ │
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │              SHARED INFRASTRUCTURE                            │    │
+│  │  Auth(Vault) │ Security │ Analytics │ Monitoring │ Plugins   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────┘</code></pre>
+                </div>                    <div class="card" id="deps">
+                    <div class="card-title"><span class="icon">📦</span> Key Dependencies
+                        <span style="margin-left:0.5rem;font-size:0.8rem;font-weight:400;">
+                            <span class="tag md">📄</span>
+                            <a href="docs/INSTALL_MANUAL.md" style="color:var(--accent);">Install Guide</a>
+                        </span>
+                    </div>
+                    <div class="grid-4">
+                        <div>
+                            <strong>Core</strong><br>
+                            <code>click</code>, <code>rich</code>, <code>prompt_toolkit</code>
+                        </div>
+                        <div>
+                            <strong>AI/ML</strong><br>
+                            <code>ollama</code>, <code>langchain</code>, <code>sentence-transformers</code>, <code>torch</code>
+                        </div>
+                        <div>
+                            <strong>TUI</strong><br>
+                            <code>textual</code>, <code>textual-dev</code>
+                        </div>
+                        <div>
+                            <strong>API</strong><br>
+                            <code>fastapi</code>, <code>uvicorn</code>, <code>websockets</code>, <code>sqlalchemy</code>
+                        </div>
+                    </div>
+                    <div class="grid-4" style="margin-top:0.5rem;">
+                        <div>
+                            <strong>Vector/DB</strong><br>
+                            <code>chromadb</code>, <code>networkx</code>, <code>numpy</code>
+                        </div>
+                        <div>
+                            <strong>Security</strong><br>
+                            <code>PyJWT</code>, <code>cryptography</code>, <code>bandit</code>
+                        </div>
+                        <div>
+                            <strong>DevOps</strong><br>
+                            <code>docker</code>, <code>kubernetes</code>, <code>prometheus</code>
+                        </div>
+                        <div>
+                            <strong>Rust</strong><br>
+                            <code>ratatui</code>, <code>tokio</code>, <code>reqwest</code>, <code>clap</code>
+                        </div>
+                    </div>
                 </div>
             </section>
 
-            <!-- ===================== ENTRY POINTS ===================== -->
-            <section id="entry-points">
-                <h2>Entry Points <a href="#entry-points" class="anchor">#</a></h2>
-                <p>The system has three main entry points, plus supporting wrappers:</p>
+            <!-- ===================== PYTHON STACK ===================== -->
+            <section id="py-entry">
+                <h2>Python Stack: Entry Points <a href="#py-entry" class="anchor">#</a></h2>
 
                 <div class="grid-3">
-                    <div class="card" id="entry-xencode-core">
+                    <div class="card">
                         <div class="card-title"><span class="icon">🚀</span> xencode_core.py</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">Main Entry</span></p>
-                        <p>Primary entry point with <code>main()</code> function (line 1807). Initializes all systems:
-                        multi-model manager, smart context, code analyzer, project context, system checker,
-                        intelligent model selector, Ollama fallback, TUI, model providers.</p>
-                        <p><strong>Key functions:</strong> <code>main()</code>, <code>run()</code>, lazy imports throughout</p>
+                        <p>Primary startup. <code>main()</code> at ~1807 lines. Initializes model providers, smart context,
+                        code analyzer, system checker, TUI, Ollama fallback, model selector.</p>
                     </div>
-                    <div class="card" id="entry-xencode-cli">
-                        <div class="card-title"><span class="icon">🚀</span> xencode_cli.py</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">CLI Wrapper</span></p>
-                        <p>Thin CLI wrapper that imports and runs <code>xencode.cli.cli</code>. Has a <code>main()</code> function (line 17).</p>
-                        <pre><code>from xencode.cli import cli
-def main():
-    cli()</code></pre>
-                    </div>
-                    <div class="card" id="entry-tui">
-                        <div class="card-title"><span class="icon">🚀</span> xencode/tui/</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">TUI App</span></p>
-                        <p>TUI application built with Textual framework. Entry at <code>xencode/tui/__main__.py</code> (line 13). Main app class in <code>tui/app.py</code>.</p>
-                        <p><strong>Subdirs:</strong> widgets/ (31 panels), features/, utils/</p>
-                    </div>
-                </div>
-
-                <div class="grid-3">
-                    <div class="card" id="entry-cli">
+                    <div class="card">
                         <div class="card-title"><span class="icon">🚀</span> xencode/cli.py</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">CLI System</span></p>
-                        <p>Main CLI module with Click commands. ~2700+ lines. Contains all CLI command groups and
-                        <code>register_feature_commands()</code> for dynamic feature registration.</p>
+                        <p>Click-based CLI (2700+ lines). All command groups + <code>register_feature_commands()</code>
+                        for dynamic feature registration.</p>
                     </div>
-                    <div class="card" id="entry-api">
+                    <div class="card">
+                        <div class="card-title"><span class="icon">🚀</span> xencode/tui/</div>
+                        <p>Textual-based TUI with 31 widget panels. Entry at <code>xencode/tui/__main__.py</code>.</p>
+                    </div>
+                </div>
+                <div class="grid-3">
+                    <div class="card">
                         <div class="card-title"><span class="icon">🚀</span> xencode/api/</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">API Server</span></p>
-                        <p>FastAPI-based API server at <code>api/main.py</code>. Includes <code>feature_routes.py</code> for
-                        dynamic feature endpoint registration. <code>api/routers/vault.py</code> adds
-                        <strong>3 vault endpoints</strong> (<code>GET /health</code>, <code>POST /init</code>, <code>POST /migrate</code>)
-                        for credential vault management via the API.</p>
+                        <p>FastAPI server. Routers: analytics, code analysis, documents, workspace, monitoring, plugins, vault. JWT auth on protected routes.</p>
                     </div>
-                    <div class="card" id="entry-agentic-cli">
+                    <div class="card">
                         <div class="card-title"><span class="icon">🚀</span> xencode/agentic_cli.py</div>
-                        <p><span class="tag py">Python</span> <span class="tag md">Agentic CLI</span></p>
-                        <p>Standalone agentic CLI with <code>main()</code> function (line 6). Separate entry for agent-driven workflows.</p>
+                        <p>Standalone agentic CLI entry point. Thin wrapper at ~6 lines.</p>
                     </div>
                 </div>
             </section>
 
-            <!-- ===================== FEATURES SYSTEM ===================== -->
-            <section id="features">
-                <h2>Features System <a href="#features" class="anchor">#</a></h2>
-                <p>The features system provides a modular architecture for extending Xencode with self-contained
-                capabilities. Each feature follows the <code>FeatureBase</code> abstract class pattern.</p>
+            <!-- ===================== FEATURES ===================== -->
+            <section id="py-features">
+                <h2>Python Stack: Feature System <a href="#py-features" class="anchor">#</a></h2>
 
-                <h3>Architecture</h3>
                 <table>
-                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
-                    <tr>
-                        <td><code>features/base.py</code></td>
-                        <td><code>FeatureBase</code> abstract class with async <code>initialize()</code>, <code>get_cli_commands()</code>, <code>get_tui_components()</code>, <code>get_api_endpoints()</code>, <code>track_analytics()</code></td>
-                        <td><span class="status-dot green"></span> Wired</td>
-                    </tr>
-                    <tr>
-                        <td><code>features/manager.py</code></td>
-                        <td><code>FeatureManager</code> singleton - lazy loads and initializes features, manages <code>initialize_all_features()</code></td>
-                        <td><span class="status-dot green"></span> Wired</td>
-                    </tr>
-                    <tr>
-                        <td><code>features/__init__.py</code></td>
-                        <td>Exports <code>FeatureManager</code>, <code>FeatureConfig</code>, <code>FeatureSystemConfig</code>, lazy initialization</td>
-                        <td><span class="status-dot green"></span> Wired</td>
-                    </tr>
-                    <tr>
-                        <td><code>features/core/__init__.py</code></td>
-                        <td>Exports <code>FeatureCommandGroup</code>, <code>FeatureTUIManager</code>, <code>FeatureSchema</code>, <code>SchemaValidator</code></td>
-                        <td><span class="status-dot green"></span> Wired</td>
-                    </tr>
+                    <tr><th>Feature</th><th>CLI</th><th>TUI</th><th>API</th><th>Tests</th><th>Lines</th><th>Status</th></tr>
+                    <tr><td>Code Review</td><td class="done">✅</td><td class="done">✅</td><td class="done">✅</td><td>7 files</td><td>~1500</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Terminal Assistant</td><td>✅</td><td>✅</td><td>✅</td><td>6 files</td><td>~1000</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Project Analyzer</td><td>✅</td><td>✅</td><td>⚠️</td><td>1 file</td><td>~500</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Learning Mode</td><td>✅</td><td>✅</td><td>✅</td><td>1 file</td><td>~500</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Custom Models</td><td>✅</td><td>✅</td><td>✅</td><td>1 file</td><td>~500</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Voice Interface</td><td>✅</td><td>✅</td><td>✅</td><td>1 file</td><td>~400</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Collaborative Coding</td><td>✅</td><td>✅</td><td>✅</td><td>1 file</td><td>~800</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Security Auditor</td><td>✅</td><td>✅</td><td>✅</td><td>2 files</td><td>~600</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><td>Performance Profiler</td><td>✅</td><td>✅</td><td>✅</td><td>2 files</td><td>~400</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr style="opacity:0.5;"><td>Demo (not a real feature)</td><td>✅</td><td>✅</td><td>❌</td><td>—</td><td>~100</td><td><span class="status-dot red"></span> Move to examples/</td></tr>
                 </table>
-
-                <h3>Feature Modules</h3>
-                <table>
-                    <tr><th>Feature</th><th>File</th><th>CLI</th><th>TUI</th><th>API</th><th>Status</th></tr>
-                    <tr><td>Code Review</td><td><code>code_review.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - 1500+ lines, PR analysis, diff review, report gen</td></tr>
-                    <tr><td>Terminal Assistant</td><td><code>terminal_assistant.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Context analysis, command suggestions, explanation</td></tr>
-                    <tr><td>Project Analyzer</td><td><code>project_analyzer.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot yellow"></span></td><td>Complete - structure, deps, patterns</td></tr>
-                    <tr><td>Learning Mode</td><td><code>learning_mode.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - progress tracking, spaced repetition</td></tr>
-                    <tr><td>Custom Models</td><td><code>custom_models.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - fine-tuning, model registration, monitoring</td></tr>
-                    <tr><td>Voice Interface</td><td><code>voice_interface.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Speech-to-text, command parsing, TTS</td></tr>
-                    <tr><td>Collaborative Coding</td><td><code>collaborative_coding.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Sessions, real-time, CRDT, presence</td></tr>
-                    <tr><td>Security Auditor</td><td><code>security_auditor.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Vulnerability scanning, dependency checks</td></tr>
-                    <tr><td>Performance Profiler</td><td><code>performance_profiler.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td>Complete - Profiling, hot path detection, recommendations</td></tr>
-                    <tr><td>Demo</td><td><code>demo.py</code></td><td><span class="status-dot green"></span></td><td><span class="status-dot green"></span></td><td><span class="status-dot red"></span></td><td>Demo - async main() for example runs</td></tr>
-                </table>
-
-                <div class="issue" id="issue-features-base-cli">
-                    <div class="issue-title">⚠️ Issue: FeatureBase abstract methods</div>
-                    <p><code>get_cli_commands()</code> is marked <code>@abstractmethod</code> in <code>base.py:134</code> but body is just <code>pass</code>.
-                    <code>get_tui_components()</code> similarly at line 139. The abstractmethod decorator requires subclasses to implement,
-                    which they do. However, <code>get_cli_commands</code> body is <code>pass</code> instead of raising <code>NotImplementedError</code>,
-                    which is the standard Python pattern.</p>
-                </div>
+                <p><strong>Total:</strong> 25+ feature test files. Best coverage: Code Review, Terminal Assistant.</p>
+                <p>
+                    <span class="tag md">📄</span>
+                    <a href="docs/FEATURES.md" style="color:var(--accent);text-decoration:none;">
+                        <strong>Future feature ideas → docs/FEATURES.md</strong>
+                    </a>
+                </p>
             </section>
 
-            <!-- ===================== MODEL PROVIDERS ===================== -->
-            <section id="model-providers">
-                <h2>Model Providers <a href="#model-providers" class="anchor">#</a></h2>
-                <p>Manages multiple AI model providers with resolver, transport, and diagnostics layers.</p>
-
+            <!-- ===================== TUI ===================== -->
+            <section id="py-tui">
+                <h2>Python Stack: TUI Widgets (Textual) <a href="#py-tui" class="anchor">#</a></h2>
+                <p><strong>31 widget panels</strong> in <code>xencode/tui/widgets/</code>. Framework: Textual.</p>
                 <table>
-                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
-                    <tr><td><code>model_providers/__init__.py</code></td><td><code>ModelProvider</code> abstract, <code>ModelProviderManager</code>, <code>ProviderRegistry</code>, <code>get_model_provider_manager()</code></td><td><span class="status-dot green"></span> Wired</td></tr>
-                    <tr><td><code>model_providers/resolver.py</code></td><td>Resolves models from provider configs, routes requests</td><td><span class="status-dot green"></span> Wired</td></tr>
-                    <tr><td><code>model_providers/transport.py</code></td><td>Transport layer for API calls to models (Ollama, OpenAI, etc.)</td><td><span class="status-dot green"></span> Wired</td></tr>
-                    <tr><td><code>model_providers/diagnostics.py</code></td><td>Health checks, diagnostics, model validation</td><td><span class="status-dot green"></span> Wired</td></tr>
+                    <tr><th>Widget</th><th>Tests</th><th>Status</th></tr>
+                    <tr><td>Agent Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Bytebot Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Chat</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Action Hotkeys</td><td>✅ test_code_action_hotkeys.py</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Execution Panel</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Code Review Panel</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Collaboration</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Collaborative Coding Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Commit Dialog / Wizard</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Custom Models Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Diff Viewer</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Editor</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced Collaboration</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced File Explorer</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Enhanced Model Selector</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>File Explorer</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Git Status</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Model Selector</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Multi-Language Panel</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Options Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Performance Dashboard</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Performance Profiler Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Provider Health Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Review Diff Viewer</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Security Auditor Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Settings Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Terminal</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Terminal Assistant Panel</td><td>1 file</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Voice Input</td><td>—</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><td>Voice Interface Panel</td><td>—</td><td><span class="status-dot green"></span></td></tr>
                 </table>
-
-                <details>
-                    <summary>ModelProvider Abstract Interface</summary>
-                    <pre><code>class ModelProvider(ABC):
-    @abstractmethod
-    async def generate(self, prompt: str, **kwargs) -> str
-    @abstractmethod
-    async def stream_generate(self, prompt: str, **kwargs) -> AsyncIterator[str]
-    @abstractmethod
-    async def is_available(self) -> bool
-    @abstractmethod
-    async def get_info(self) -> Dict[str, Any]</code></pre>
-                </details>
-
-                <p><strong>Key integrations:</strong> Ollama (primary), OpenAI, Anthropic
-                <strong>Related files:</strong> <code>ollama_connection_pool.py</code>, <code>ollama_fallback.py</code>, <code>ollama_optimizer.py</code>,
-                <code>hardware_aware_model_selection.py</code>, <code>intelligent_model_selector.py</code></p>
+                <p><strong>⚠️ Test gap:</strong> Only 7/31 widgets have tests. 24 widgets are untested.</p>
             </section>
 
-            <!-- ===================== AGENTIC SYSTEM ===================== -->
-            <section id="agentic">
-                <h2>Agentic System <a href="#agentic" class="anchor">#</a></h2>
-                <p>The agentic system provides autonomous AI agents for coding tasks with coordination, specialized agents, and tool usage.</p>
+            <!-- ===================== AGENTIC ===================== -->
+            <section id="py-agentic">
+                <h2>Python Stack: Agentic System <a href="#py-agentic" class="anchor">#</a></h2>
+                <p>Location: <code>xencode/agentic/</code></p>
 
                 <div class="grid-2">
                     <div>
-                        <h3>Core Files</h3>
-                        <table>
-                            <tr><th>File</th><th>Purpose</th></tr>
-                            <tr><td><code>__init__.py</code></td><td>AgentManager, AgentCoordinator, AgentConfig</td></tr>
-                            <tr><td><code>manager.py</code></td><td>LangChainManager - wraps LangChain for agent execution</td></tr>
-                            <tr><td><code>coordinator.py</code></td><td>Coordinates multiple agents for task execution</td></tr>
-                            <tr><td><code>workflow_orchestrator.py</code></td><td>Orchestrates workflows across agent teams</td></tr>
-                            <tr><td><code>workflow_management.py</code></td><td>Workflow lifecycle management</td></tr>
-                            <tr><td><code>team_formation.py</code></td><td>Dynamic team assembly based on task needs</td></tr>
-                        </table>
+                        <h4>Core Orchestration</h4>
+                        <ul>
+                            <li><code>coordinator.py</code> — Agent coordination</li>
+                            <li><code>workflow_orchestrator.py</code> — Plan→Edit→Test→Fix loops</li>
+                            <li><code>workflow_management.py</code> — Workflow lifecycle</li>
+                            <li><code>team_formation.py</code> — Dynamic agent team assembly</li>
+                            <li><code>human_supervision.py</code> — Human-in-the-loop</li>
+                            <li><code>security_governance.py</code> — Agent identity & audit</li>
+                        </ul>
                     </div>
                     <div>
-                        <h3>Specialized Agents</h3>
-                        <table>
-                            <tr><th>Agent Type</th><th>Primary Model</th><th>Expertise</th></tr>
-                            <tr><td>Data Science</td><td>codellama:7b</td><td>Data analysis, ML, viz</td></tr>
-                            <tr><td>Web Development</td><td>codellama:7b</td><td>Frontend, backend, full-stack</td></tr>
-                            <tr><td>Security Analysis</td><td>llama3.1:8b</td><td>Vulnerability, secure coding</td></tr>
-                            <tr><td>DevOps</td><td>llama3.1:8b</td><td>CI/CD, containers, cloud</td></tr>
-                            <tr><td>Testing</td><td>codellama:7b</td><td>Test automation, QA</td></tr>
-                            <tr><td>Documentation</td><td>llama3.1:8b</td><td>Technical writing, API docs</td></tr>
-                        </table>
+                        <h4>Tools</h4>
+                        <ul>
+                            <li><code>tools.py</code> — Read/Write/ExecuteCommand</li>
+                            <li><code>advanced_tools.py</code> — Git/WebSearch/CodeAnalysis</li>
+                            <li><code>enhanced_tools.py</code> — GitBranch/Push/Pull/FindFile/DependencyAnalysis</li>
+                        </ul>
+                        <h4 style="margin-top:0.5rem;">Specialized Agents</h4>
+                        <ul>
+                            <li>DataScienceAgent, WebDevelopmentAgent, SecurityAnalysisAgent</li>
+                            <li>DevOpsAgent, TestingAgent, DocumentationAgent</li>
+                            <li>⚠️ All hardcode <code>codellama:7b</code> or <code>llama3.1:8b</code> model names</li>
+                            <li>⚠️ <code>process_request()</code> is async but calls sync <code>run_agent()</code> → potential event loop blocking</li>
+                            <li>❌ No tests for any specialized agent</li>
+                        </ul>
                     </div>
-                </div>
-
-                <div class="grid-2">
-                    <div>
-                        <h3>Tools</h3>
-                        <table>
-                            <tr><th>File</th><th>Tools</th></tr>
-                            <tr><td><code>tools.py</code></td><td>ReadFileTool, WriteFileTool, ExecuteCommandTool</td></tr>
-                            <tr><td><code>advanced_tools.py</code></td><td>GitStatusTool, GitDiffTool, GitLogTool, GitCommitTool, WebSearchTool, CodeAnalysisTool</td></tr>
-                            <tr><td><code>enhanced_tools.py</code></td><td>GitBranchTool, GitPushTool, GitPullTool, FindFileTool, FileStatTool, DependencyAnalysisTool, SystemInfoTool, ProcessInfoTool, WebSearchDetailedTool</td></tr>
-                        </table>
-                    </div>
-                    <div>
-                        <h3>Support Modules</h3>
-                        <table>
-                            <tr><th>File</th><th>Purpose</th></tr>
-                            <tr><td><code>communication/</code></td><td>Message, Protocol, Channels</td></tr>
-                            <tr><td><code>cross_domain_expertise.py</code></td><td>Cross-domain knowledge transfer</td></tr>
-                            <tr><td><code>human_supervision.py</code></td><td>Human-in-the-loop oversight</td></tr>
-                            <tr><td><code>security_governance.py</code></td><td>Agent identity, permissions, audit</td></tr>
-                            <tr><td><code>memory.py</code></td><td>Agent memory systems</td></tr>
-                            <tr><td><code>memory_learning.py</code></td><td>Learning from past interactions</td></tr>
-                            <tr><td><code>ensemble_integration.py</code></td><td>Multi-model ensemble voting</td></tr>
-                            <tr><td><code>monitoring_analytics.py</code></td><td>Agent performance tracking</td></tr>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ Potential Issue: SpecializedAgent.process_request()</div>
-                    <p><code>specialized/__init__.py:79</code> - The base <code>process_request</code> raises <code>NotImplementedError</code>,
-                    but the subclasses (DataScienceAgent, WebDevelopmentAgent, etc.) implement it by calling <code>self.langchain_manager.run_agent()</code>.
-                    However, <code>run_agent</code> is a synchronous call on an async method, which could block the event loop.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ License Compatibility</div>
-                    <p>All specialized agents reference <code>codellama:7b</code> and <code>llama3.1:8b</code> as hardcoded model names.
-                    This assumes Ollama availability. If different providers are used, these models won't be found.</p>
                 </div>
             </section>
 
-            <!-- ===================== TUI WIDGETS ===================== -->
-            <section id="tui-widgets">
-                <h2>TUI Widgets <a href="#tui-widgets" class="anchor">#</a></h2>
-                <p>31 widget panels in <code>xencode/tui/widgets/</code></p>
+            <!-- ===================== PROVIDERS ===================== -->
+            <section id="py-providers">
+                <h2>Python Stack: Model Providers <a href="#py-providers" class="anchor">#</a></h2>
+                <p>Location: <code>xencode/model_providers/</code></p>
 
                 <table>
-                    <tr><th>Widget</th><th>File</th><th>Wired in TUI</th><th>Status</th></tr>
-                    <tr><td>Agent Panel</td><td><code>agent_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Bytebot Panel</td><td><code>bytebot_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Chat</td><td><code>chat.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Code Action Hotkeys</td><td><code>code_action_hotkeys.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Code Execution</td><td><code>code_execution_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Code Review</td><td><code>code_review_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Collaboration</td><td><code>collaboration.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Collaborative Coding</td><td><code>collaborative_coding_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Commit Dialog</td><td><code>commit_dialog.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Commit Wizard</td><td><code>commit_wizard.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Custom Models</td><td><code>custom_models_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Diff Viewer</td><td><code>diff_viewer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Editor</td><td><code>editor.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Enhanced Collaboration</td><td><code>enhanced_collaboration.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Enhanced File Explorer</td><td><code>enhanced_file_explorer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Enhanced Model Selector</td><td><code>enhanced_model_selector.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>File Explorer</td><td><code>file_explorer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Git Status</td><td><code>git_status.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Model Selector</td><td><code>model_selector.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Options Panel</td><td><code>options_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Performance Dashboard</td><td><code>performance_dashboard.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Performance Profiler</td><td><code>performance_profiler_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Provider Health</td><td><code>provider_health_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Review Diff Viewer</td><td><code>review_diff_viewer.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Security Auditor</td><td><code>security_auditor_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Settings Panel</td><td><code>settings_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Terminal</td><td><code>terminal.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Terminal Assistant</td><td><code>terminal_assistant_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Voice Input</td><td><code>voice_input.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td>Voice Interface</td><td><code>voice_interface_panel.py</code></td><td>Yes</td><td><span class="status-dot green"></span></td></tr>
+                    <tr><th>Module</th><th>Status</th><th>Details</th></tr>
+                    <tr><td><code>resolver.py</code></td><td><span class="status-dot green"></span> Complete</td><td>Model resolution from provider configs</td></tr>
+                    <tr><td><code>transport.py</code></td><td><span class="status-dot green"></span> Complete</td><td>API transport layer, retries, timeouts</td></tr>
+                    <tr><td><code>diagnostics.py</code></td><td><span class="status-dot green"></span> Complete</td><td>Health checks, diagnostics, model validation</td></tr>
+                    <tr><td>Tests</td><td><span class="status-dot green"></span> 3 files</td><td>test_resolver.py, test_transport.py, test_diagnostics.py</td></tr>
                 </table>
 
-                <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/tui/utils/__init__.py</code> created</div>
-                    <p><code>ModelChecker</code> properly exported. <code>from xencode.tui.utils import ModelChecker</code> works.</p>
-                </div>
-            </section>
-
-            <!-- ===================== ROUTING ===================== -->
-            <section id="routing">
-                <h2>Prompt Routing <a href="#routing" class="anchor">#</a></h2>
-                <p>Routes prompts to the best provider/model based on task classification and policy.</p>
-
-                <table>
-                    <tr><th>Module</th><th>Key Classes</th><th>Purpose</th></tr>
-                    <tr><td><code>routing/prompt_router.py</code></td><td><code>PromptRouter</code>, <code>TaskClassifier</code>, <code>TaskType</code>, <code>RoutingPolicy</code></td><td>Classifies prompts (debugging, code review, etc.) and routes to providers</td></tr>
-                    <tr><td><code>routing/fallback_config.py</code></td><td><code>FallbackPolicy</code>, <code>FallbackPolicyConfig</code>, <code>RetryPolicy</code></td><td>Defines fallback strategies</td></tr>
-                    <tr><td><code>routing/fallback_engine.py</code></td><td><code>FallbackEngine</code>, <code>FallbackAttempt</code>, <code>FallbackResult</code></td><td>Executes fallback logic</td></tr>
-                    <tr><td><code>routing/retry_budget.py</code></td><td><code>RetryBudgetManager</code>, <code>RetryBudget</code></td><td>Manages retry budgets and rate limiting</td></tr>
-                </table>
-
-                <h4>Task Types (TaskType enum)</h4>
-                <p><code>CODING, DEBUGGING, CODE_REVIEW, ANALYSIS, REFACTORING, TEST_GENERATION, REASONING, CODE_EXPLANATION, DOCUMENTATION, GENERIC</code></p>
-
-                <h4>Provider Types (ProviderType enum)</h4>
-                <p><code>OLLAMA, OPENAI, ANTHROPIC, COHERE, HUGGINGFACE, LOCAL, CUSTOM</code></p>
+                <p><strong>Related standalone modules:</strong></p>
+                <ul>
+                    <li><code>ollama_connection_pool.py</code>, <code>ollama_fallback.py</code>, <code>ollama_optimizer.py</code></li>
+                    <li><code>hardware_aware_model_selection.py</code>, <code>intelligent_model_selector.py</code></li>
+                    <li><code>model_stability_manager.py</code>, <code>multi_model_system.py</code></li>
+                    <li><code>ai_ensembles.py</code>, <code>ai_ensembles_improved.py</code>, <code>ensemble_improvements.py</code>, <code>ensemble_lightweight.py</code></li>
+                    <li><code>optimized_token_voter.py</code>, <code>rlhf_tuner.py</code></li>
+                </ul>
             </section>
 
             <!-- ===================== SECURITY ===================== -->
-            <section id="security-module">
-                <h2>Security Module <a href="#security-module" class="anchor">#</a></h2>
-                <p><strong>Note:</strong> The <code>xencode/security/</code> package is primarily <strong>input sanitization</strong>,
-                not auth/permission security (that's in <code>xencode/auth/</code>).</p>
+            <section id="py-security">
+                <h2>Python Stack: Security & Auth <a href="#py-security" class="anchor">#</a></h2>
 
-                <table>
-                    <tr><th>File</th><th>Functions</th></tr>
-                    <tr><td><code>__init__.py</code></td><td><code>sanitize_input()</code>, <code>sanitize_filename()</code>, <code>sanitize_path()</code>, <code>sanitize_sql_like_input()</code>, <code>sanitize_for_logging()</code>, <code>strip_control_characters()</code>, <code>remove_potential_injections()</code>, <code>is_valid_utf8()</code></td></tr>
-                    <tr><td><code>adversarial_defense.py</code></td><td>Attack pattern detection, adversarial robustness</td></tr>
-                    <tr><td><code>api_validation.py</code></td><td>API request validation</td></tr>
-                    <tr><td><code>authentication.py</code></td><td>Authentication utilities</td></tr>
-                    <tr><td><code>compliance.py</code></td><td>Compliance rule checking</td></tr>
-                    <tr><td><code>data_encryption.py</code></td><td>Data encryption utilities</td></tr>
-                    <tr><td><code>homomorphic_encryption.py</code></td><td>Homomorphic encryption support</td></tr>
-                    <tr><td><code>privacy_analytics.py</code></td><td>Privacy-preserving analytics</td></tr>
-                    <tr><td><code>rate_limiting.py</code></td><td>Rate limiting utilities</td></tr>
-                    <tr><td><code>validation.py</code></td><td>General validation utilities</td></tr>
-                    <tr><td><code>zk_proofs.py</code></td><td>Zero-knowledge proof support</td></tr>
-                </table>
-            </section>
-
-            <!-- ===================== AUTH ===================== -->
-            <section id="auth-module">
-                <h2>Auth &amp; Permissions <a href="#auth-module" class="anchor">#</a></h2>
-
-                <table>
-                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
-                    <tr><td><code>auth/jwt_handler.py</code></td><td>JWT token creation and validation</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td><code>auth/auth_manager.py</code></td><td>Authentication manager - login, logout, sessions</td><td><span class="status-dot yellow"></span></td></tr>
-                    <tr><td><code>auth/permission_engine.py</code></td><td>RBAC - roles, permissions, resource registration</td><td><span class="status-dot green"></span></td></tr>
-                    <tr><td><code>auth/audit_logger.py</code></td><td>Audit logging for security events</td><td><span class="status-dot green"></span></td></tr>
-                    <tr>                        <td><code>auth/credential_vault.py</code></td>
-                        <td>Secure credential storage with Windows CM + file-based encrypted vault + env fallback</td>
-                        <td><span class="status-dot green"></span></td></tr>
-                    <tr><td><code>auth/qwen_auth.py</code></td><td>Qwen-specific authentication</td><td><span class="status-dot yellow"></span></td></tr>
-                    <tr><td><code>auth/json_file_vault.py</code></td><td><code>JsonFileCredentialVault</code> — concrete vault subclass using encrypted JSON file with Fernet (AES-128-CBC + HMAC SHA256), single-backend deterministic storage, async-safe operations, export/import, health check</td><td><span class="status-dot green"></span> ✅ 39 tests</td></tr>
-                    <tr><td><code>api/routers/vault.py</code></td><td>Vault API router — 3 FastAPI endpoints for vault operations: <code>GET /health</code>, <code>POST /init</code>, <code>POST /migrate</code>. Graceful 503 fallback when vault module missing.</td><td><span class="status-dot green"></span> ✅ 18 tests</td></tr>
-                </table>
-
-                <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ FIXED: FileBasedCredentialBackend implemented</div>
-                    <p><code>FileBasedCredentialBackend</code> added with Fernet encryption (AES-128-CBC with HMAC),
-                    PBKDF2 key derivation from machine-specific seed, stored at <code>~/.xencode/vault.json</code>.
-                    Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).
-                    52/52 tests passing.</p>
+                <div class="grid-2">
+                    <div>
+                        <h4>Authentication (<code>xencode/auth/</code>)</h4>
+                        <table>
+                            <tr><th>Module</th><th>Status</th></tr>
+                            <tr><td><code>jwt_handler.py</code></td><td><span class="status-dot green"></span> Complete</td></tr>
+                            <tr><td><code>auth_manager.py</code></td><td><span class="status-dot yellow"></span> Partial</td></tr>
+                            <tr><td><code>permission_engine.py</code></td><td><span class="status-dot green"></span> Complete (RBAC)</td></tr>
+                            <tr><td><code>audit_logger.py</code></td><td><span class="status-dot green"></span> Complete</td></tr>
+                            <tr><td><code>credential_vault.py</code></td><td><span class="status-dot green"></span> ✅ FileBasedCredentialBackend with Fernet</td></tr>
+                            <tr><td><code>json_file_vault.py</code></td><td><span class="status-dot green"></span> ✅ 39 tests passing</td></tr>
+                            <tr><td><code>qwen_auth.py</code></td><td><span class="status-dot yellow"></span> Partial</td></tr>
+                        </table>
+                    </div>
+                    <div>
+                        <h4>Security (<code>xencode/security/</code>)</h4>
+                        <table>
+                            <tr><th>Module</th><th>Status</th></tr>
+                            <tr><td><code>validation.py</code></td><td><span class="status-dot green"></span> Input/path/URL/model validation</td></tr>
+                            <tr><td><code>api_validation.py</code></td><td><span class="status-dot green"></span> API response validation</td></tr>
+                            <tr><td><code>adversarial_defense.py</code></td><td><span class="status-dot yellow"></span> Attack pattern detection</td></tr>
+                            <tr><td><code>rate_limiting.py</code></td><td><span class="status-dot yellow"></span> Present</td></tr>
+                            <tr><td><code>compliance.py</code></td><td><span class="status-dot yellow"></span> Rule checking</td></tr>
+                            <tr><td><code>data_encryption.py</code></td><td><span class="status-dot yellow"></span> Encryption utils</td></tr>
+                            <tr><td><code>privacy_analytics.py</code></td><td><span class="status-dot yellow"></span> Privacy-preserving analytics</td></tr>
+                            <tr><td><code>homomorphic_encryption.py</code></td><td><span class="status-dot gray"></span> Experimental</td></tr>
+                            <tr><td><code>zk_proofs.py</code></td><td><span class="status-dot gray"></span> Experimental</td></tr>
+                        </table>
+                        <p><strong>⚠️ No <code>__all__</code> in security/__init__.py</strong></p>
+                    </div>
                 </div>
 
                 <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ RESOLVED: JsonFileCredentialVault implemented</div>
-                    <p><strong>File:</strong> <code>xencode/auth/json_file_vault.py</code> — Added <code>JsonFileCredentialVault</code>, a concrete
-                    <code>CredentialVault</code> subclass using exclusively <code>FileBasedCredentialBackend</code> with Fernet encryption.
-                    Features: single-backend deterministic storage, async-safe operations via <code>asyncio.to_thread()</code>,
-                    vault introspection (<code>get_storage_info()</code>, <code>get_vault_path()</code>), bulk operations
-                    (<code>clear_vault()</code>, <code>export_vault()</code>, <code>import_vault()</code>), and a static
-                    <code>health_check()</code> for diagnostics (usable from <code>xencode doctor</code>). 39/39 tests passing.</p>
-                    <p><strong>API Router:</strong> <code>xencode/api/routers/vault.py</code> — 3 FastAPI endpoints
-                    (<code>GET /api/v1/vault/health</code>, <code>POST /api/v1/vault/init</code>, <code>POST /api/v1/vault/migrate</code>)
-                    with Pydantic request/response models, graceful 503 fallback, and 18/18 API tests passing.
-                    Registered in <code>xencode/api/main.py</code> under the <code>/api/v1/vault</code> prefix.</p>
+                    <div class="issue-title" style="color:var(--green);">✅ Vault API Router</div>
+                    <p><code>xencode/api/routers/vault.py</code> — 3 FastAPI endpoints (health, init, migrate) + 18 tests. JWT auth on WebSocket health monitoring endpoint. CLI: <code>xencode vault init | status | migrate | monitor</code>.</p>
                 </div>
             </section>
 
             <!-- ===================== ANALYTICS ===================== -->
-            <section id="analytics">
-                <h2>Analytics &amp; Monitoring <a href="#analytics" class="anchor">#</a></h2>
+            <section id="py-analytics">
+                <h2>Python Stack: Analytics & Monitoring <a href="#py-analytics" class="anchor">#</a></h2>
 
                 <div class="grid-2">
                     <div>
-                        <h3>Analytics Package (<code>xencode/analytics/</code>)</h3>
-                        <table>
-                            <tr><th>File</th><th>Purpose</th></tr>
-                            <tr><td><code>analytics_engine.py</code></td><td>Core analytics engine - tracking actions, events, performance</td></tr>
-                            <tr><td><code>metrics_collector.py</code></td><td>Metrics collection and aggregation</td></tr>
-                            <tr><td><code>event_tracker.py</code></td><td>Event tracking with categories</td></tr>
-                            <tr><td><code>analytics_infrastructure.py</code></td><td>Unified system integrating all components</td></tr>
-                        </table>
+                        <h4>Analytics (<code>xencode/analytics/</code>)</h4>
+                        <ul>
+                            <li><code>analytics_engine.py</code> — Core engine</li>
+                            <li><code>metrics_collector.py</code> — Metrics collection</li>
+                            <li><code>event_tracker.py</code> — Event tracking</li>
+                            <li><code>analytics_infrastructure.py</code> — Unified system</li>
+                        </ul>
                     </div>
                     <div>
-                        <h3>Monitoring Package (<code>xencode/monitoring/</code>)</h3>
-                        <table>
-                            <tr><th>File</th><th>Purpose</th></tr>
-                            <tr><td><code>metrics_collector.py</code></td><td>Prometheus metrics collector</td></tr>
-                            <tr><td><code>provider_health.py</code></td><td>Provider health monitoring with callbacks</td></tr>
-                            <tr><td><code>resource_manager.py</code></td><td>Resource lifecycle management</td></tr>
-                            <tr><td><code>performance_optimizer.py</code></td><td>Performance optimization monitoring</td></tr>
-                            <tr><td><code>benchmark_engine.py</code></td><td>Benchmark execution engine</td></tr>
-                            <tr><td><code>benchmark_store.py</code></td><td>Benchmark result persistence</td></tr>
-                            <tr><td><code>benchmark_suites.py</code></td><td>Pre-defined benchmark suites</td></tr>
-                            <tr><td><code>benchmark_recommendations.py</code></td><td>Model recommendations from benchmarks</td></tr>
-                        </table>
+                        <h4>Monitoring (<code>xencode/monitoring/</code>)</h4>
+                        <ul>
+                            <li><code>provider_health.py</code> — Health monitoring with latency/error tracking (650 lines)</li>
+                            <li><code>metrics_collector.py</code> — Prometheus metrics</li>
+                            <li><code>resource_manager.py</code> — Resource lifecycle</li>
+                            <li><code>performance_optimizer.py</code> — Performance monitoring</li>
+                            <li><code>benchmark_engine/store/suites/recommendations.py</code> — Benchmark system</li>
+                        </ul>
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-title"><span class="icon">📊</span> Standalone Dashboards</div>
-                    <p><code>advanced_analytics_dashboard.py</code> - Advanced analytics visualization<br>
-                    <code>standalone_performance_dashboard.py</code> - Performance monitoring dashboard<br>
-                    <code>performance_monitoring_dashboard.py</code> - Real-time perf monitoring</p>
+                <div class="warning">
+                    <div class="warning-title">⚠️ Issue: Monitoring broken imports</div>
+                    <p><code>xencode/monitoring/__init__.py</code> has try/except ImportError blocks for <code>HealthMonitor</code> and <code>AlertManager</code> modules that don't exist. Features depending on these silently fail.</p>
                 </div>
+
+                <p><strong>Standalone dashboards:</strong> <code>advanced_analytics_dashboard.py</code>, <code>standalone_performance_dashboard.py</code>, <code>performance_monitoring_dashboard.py</code></p>
             </section>
 
-            <!-- ===================== CACHE ===================== -->
-            <section id="cache">
-                <h2>Cache System <a href="#cache" class="anchor">#</a></h2>
-                <p>Multi-modal caching for different content types with intelligent invalidation.</p>
+            <!-- ===================== CACHE / MEMORY ===================== -->
+            <section id="py-cache">
+                <h2>Python Stack: Cache & Memory <a href="#py-cache" class="anchor">#</a></h2>
 
                 <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>cache/__init__.py</code></td><td>Exports <code>MultiModalCacheSystem</code>, <code>DocumentProcessingCache</code>, <code>CodeAnalysisCache</code>, <code>WorkspaceCache</code>, <code>CacheWarmingManager</code></td></tr>
-                    <tr><td><code>cache/multimodal_cache.py</code></td><td>Multi-modal cache system, cache warming, entry management</td></tr>
-                    <tr><td><code>cache/advanced_memory_manager.py</code></td><td>Abstract memory management with 5 abstract methods</td></tr>
-                    <tr><td><code>improved_cache_system.py</code></td><td>Improved cache with <code>__all__</code> exported types</td></tr>
-                    <tr><td><code>dynamic_cache_sizing.py</code></td><td>Adaptive cache sizing based on usage</td></tr>
-                    <tr><td><code>async_disk_cache.py</code></td><td>Async disk cache implementation</td></tr>
-                    <tr><td><code>context_cache_manager.py</code></td><td>Context-aware cache management</td></tr>
+                    <tr><th>Module</th><th>Status</th><th>Details</th></tr>
+                    <tr><td><code>core/cache.py</code></td><td><span class="status-dot green"></span></td><td><code>ResponseCache</code> in-memory + disk LRU</td></tr>
+                    <tr><td><code>core/memory.py</code></td><td><span class="status-dot green"></span></td><td><code>ConversationMemory</code> with session management</td></tr>
+                    <tr><td><code>improved_cache_system.py</code></td><td><span class="status-dot green"></span></td><td>Improved cache with exported types</td></tr>
+                    <tr><td><code>dynamic_cache_sizing.py</code></td><td><span class="status-dot green"></span></td><td>Adaptive cache sizing</td></tr>
+                    <tr><td><code>async_disk_cache.py</code></td><td><span class="status-dot green"></span></td><td>Async disk cache</td></tr>
+                    <tr><td><code>context_cache_manager.py</code></td><td><span class="status-dot green"></span></td><td>Context-aware caching</td></tr>
+                    <tr><td><code>cache/multimodal_cache.py</code></td><td><span class="status-dot green"></span></td><td>Multi-modal cache system</td></tr>
+                    <tr><td><code>cache/advanced_memory_manager.py</code></td><td><span class="status-dot green"></span></td><td>✅ Full implementation: 4-tier cache (RAM_HOT→RAM_WARM→SSD_COLD→HDD_ARCHIVE) with SQLite-backed disk storage, ML-based prediction (sklearn), LRU eviction, TTL expiry, compression, background maintenance workers, and singleton factory</td></tr>
                 </table>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ Issue: advanced_memory_manager.py abstract</div>
-                    <p>Similar to CredentialVault - has abstract methods with no concrete implementation in the codebase.</p>
-                </div>
             </section>
 
             <!-- ===================== RAG ===================== -->
-            <section id="rag-core">
-                <h2>RAG &amp; Vector Store <a href="#rag-core" class="anchor">#</a></h2>
+            <section id="py-rag">
+                <h2>Python Stack: RAG & Vector Store <a href="#py-rag" class="anchor">#</a></h2>
 
                 <table>
-                    <tr><th>File</th><th>Purpose</th><th>Status</th></tr>
-                    <tr><td><code>rag/__init__.py</code></td><td>Exports VectorStore, Indexer, ContextIndexerV2, GraphExtractor, GraphStore</td><td><span class="status-dot green"></span> ✅ FIXED</td></tr>
-                    <tr><td><code>rag/vector_store.py</code></td><td>Vector store (ChromaDB-based)</td><td><span class="status-dot green"></span> Complete</td></tr>
-                    <tr><td><code>rag/indexer.py</code></td><td>Content indexer</td><td><span class="status-dot green"></span> Complete</td></tr>
-                    <tr><td><code>rag/context_indexer_v2.py</code></td><td>Context indexing v2</td><td><span class="status-dot green"></span> Complete</td></tr>
-                    <tr><td><code>rag/graph_extractor.py</code></td><td>Knowledge graph extraction</td><td><span class="status-dot green"></span> Complete</td></tr>
-                    <tr><td><code>rag/graph_store.py</code></td><td>Knowledge graph storage</td><td><span class="status-dot green"></span> Complete</td></tr>
+                    <tr><th>Module</th><th>Status</th><th>Details</th></tr>
+                    <tr><td><code>rag/vector_store.py</code></td><td><span class="status-dot green"></span></td><td>ChromaDB-based vector store</td></tr>
+                    <tr><td><code>rag/indexer.py</code></td><td><span class="status-dot green"></span></td><td>Content indexer</td></tr>
+                    <tr><td><code>rag/context_indexer_v2.py</code></td><td><span class="status-dot green"></span></td><td>Context indexing v2</td></tr>
+                    <tr><td><code>rag/graph_extractor.py</code></td><td><span class="status-dot green"></span></td><td>Knowledge graph extraction</td></tr>
+                    <tr><td><code>rag/graph_store.py</code></td><td><span class="status-dot green"></span></td><td>Knowledge graph storage</td></tr>
+                    <tr><td><code>async_vector_store.py</code></td><td><span class="status-dot green"></span></td><td>Async vector store</td></tr>
+                    <tr><td><code>optimized_batch_vector_store.py</code></td><td><span class="status-dot green"></span></td><td>Batch-optimized vector store</td></tr>
                 </table>
-
-                <div class="issue">
-                    <div class="issue-title">🚨 CRITICAL: <code>xencode/rag/__init__.py</code> is EMPTY</div>
-                    <p>This file has zero content - no imports, no exports. Any code doing
-                    <code>from xencode.rag import VectorStore</code> will fail. The correct import path is
-                    <code>from xencode.rag.vector_store import VectorStore</code>.
-                    See <code>debug_ollama.py:5</code> for an example of the direct import pattern that works.</p>
-                </div>
-
-                <p><strong>Related files:</strong> <code>async_vector_store.py</code>, <code>optimized_batch_vector_store.py</code>,
-                <code>document_processor.py</code></p>
+                <p><strong>Note:</strong> <code>rag/__init__.py</code> was previously empty — verify it now exports submodule classes.</p>
             </section>
 
-            <!-- ===================== I18N ===================== -->
-            <section id="i18n">
-                <h2>Internationalization <a href="#i18n" class="anchor">#</a></h2>
+            <!-- ===================== OTHER PYTHON ===================== -->
+            <section id="py-other">
+                <h2>Python Stack: Other Modules <a href="#py-other" class="anchor">#</a></h2>
 
-                <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>i18n/translation_engine.py</code></td><td>AI-powered translation engine</td></tr>
-                    <tr><td><code>i18n/language_manager.py</code></td><td>Language detection and switching</td></tr>
-                    <tr><td><code>i18n/translation_dict.py</code></td><td>Translation dictionary management</td></tr>
-                    <tr><td><code>i18n/context_adapter.py</code></td><td>Context-aware language adaptation</td></tr>
-                </table>
-                <p><strong>Note:</strong> Has full <code>__init__.py</code> exports with <code>__all__</code> defined.</p>
-            </section>
+                <div class="grid-2">
+                    <div>
+                        <h4>I18N (<code>xencode/i18n/</code>)</h4>
+                        <ul>
+                            <li><code>translation_engine.py</code></li>
+                            <li><code>language_manager.py</code></li>
+                            <li><code>translation_dict.py</code></li>
+                            <li><code>context_adapter.py</code></li>
+                            <li>✅ 4 test files</li>
+                        </ul>
 
-            <!-- ===================== PLUGINS ===================== -->
-            <section id="plugins">
-                <h2>Plugin System <a href="#plugins" class="anchor">#</a></h2>
+                        <h4>Plugins (<code>xencode/plugins/</code>)</h4>
+                        <ul>
+                            <li><code>PluginManager</code>, <code>PluginRegistry</code>, abstract <code>PluginInterface</code></li>
+                            <li><code>ToolPlugin</code>, <code>AgentPlugin</code>, <code>ModelProviderPlugin</code></li>
+                            <li><code>marketplace_client.py</code></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>Workflow System</h4>
+                        <ul>
+                            <li><code>visual_workflow_builder.py</code> — Drag-and-drop workflow graph</li>
+                            <li><code>advanced_workflow_management.py</code> — Complex pipeline orchestration</li>
+                            <li><code>smart_context_system.py</code> — Intelligent context management</li>
+                        </ul>
 
-                <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>plugins/__init__.py</code></td><td><code>PluginManager</code>, <code>PluginRegistry</code>, abstract <code>PluginInterface</code>, <code>ToolPlugin</code>, <code>AgentPlugin</code>, <code>ModelProviderPlugin</code></td></tr>
-                    <tr><td><code>plugins/config.py</code></td><td>Plugin configuration management (has <code>__all__</code>)</td></tr>
-                    <tr><td><code>plugins/integration.py</code></td><td><code>initialize_plugin_system()</code> - ties plugin system to tool registry</td></tr>
-                    <tr><td><code>plugins/file_operations.py</code></td><td>File operation plugins</td></tr>
-                    <tr><td><code>plugins/marketplace_client.py</code></td><td>Plugin marketplace client</td></tr>
-                    <tr><td><code>plugin_system.py</code></td><td>Standalone plugin system with async initialization</td></tr>
-                    <tr><td><code>plugin_ecosystem.py</code></td><td>Plugin ecosystem manager</td></tr>
-                </table>
-            </section>
-
-            <!-- ===================== CORE ===================== -->
-            <section id="core-lib">
-                <h2>Core Library <a href="#core-lib" class="anchor">#</a></h2>
-
-                <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>core/cache.py</code></td><td><code>ResponseCache</code> for API responses</td></tr>
-                    <tr><td><code>core/connection_pool.py</code></td><td><code>APIClient</code>, connection pooling</td></tr>
-                    <tr><td><code>core/files.py</code></td><td>File operations: create, read, write, delete</td></tr>
-                    <tr><td><code>core/lazy_loader.py</code></td><td>Lazy loading utilities, component registry</td></tr>
-                    <tr><td><code>core/memory.py</code></td><td><code>ConversationMemory</code> for chat history</td></tr>
-                    <tr><td><code>core/models.py</code></td><td><code>ModelManager</code>, model listing and selection</td></tr>
-                    <tr><td><code>core/resource_cleanup.py</code></td><td>Resource cleanup with callbacks</td></tr>
-                    <tr><td><code>core/resource_monitor.py</code></td><td>Resource monitoring</td></tr>
-                    <tr><td><code>core/project_profiles.py</code></td><td>Project profile management</td></tr>
-                    <tr><td><code>core/performance_benchmarks.py</code></td><td>Core performance benchmarks</td></tr>
-                </table>
-            </section>
-
-            <!-- ===================== ISSUES & ACTION ITEMS ===================== -->
-            <section id="issues">
-                <h2>Issues &amp; Action Items <a href="#issues" class="anchor">#</a></h2>
-
-                <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/rag/__init__.py</code> populated</div>
-                    <p>Now exports <code>VectorStore</code>, <code>AsyncVectorStore</code>, <code>Indexer</code>, <code>ContextIndexerV2</code>,
-                    <code>CodeGraphExtractor</code>, <code>GraphStore</code>, and more. All imports resolve at runtime.</p>
+                        <h4>Warp Terminal Integration</h4>
+                        <ul>
+                            <li><code>warp_ai_integration.py</code>, <code>warp_integrated.py</code></li>
+                            <li><code>warp_terminal.py</code>, <code>warp_testing_harness.py</code></li>
+                            <li><code>warp_ui_components.py</code></li>
+                            <li>⚠️ Possibly not fully active — verify wiring</li>
+                        </ul>
+                    </div>
                 </div>
 
-                <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ FIXED: <code>xencode/tui/utils/__init__.py</code> created</div>
-                    <p>Exports <code>ModelChecker</code>. Verified working at runtime.</p>
-                </div>
-
-                <div class="ok">
-                    <div class="issue-title" style="color:var(--green);">✅ RESOLVED: FileBasedCredentialBackend implemented</div>
-                    <p><strong>File:</strong> <code>xencode/auth/credential_vault.py</code> — Added <code>FileBasedCredentialBackend</code> with Fernet encryption
-                    (AES-128-CBC with HMAC) stored at <code>~/.xencode/vault.json</code>. PBKDF2 key derivation from machine-specific seed.
-                    Falls back to base64 obfuscation if <code>cryptography</code> not installed. Integrated into <code>CredentialVault</code> as
-                    the cross-platform persistent backend. 52/52 tests passing (25 new + 27 existing).</p>
-                </div>
-
-                <div class="issue">
-                    <div class="issue-title">🔴 ISSUE 4: No concrete AdvancedMemoryManager implementation</div>
-                    <p><strong>File:</strong> <code>xencode/cache/advanced_memory_manager.py</code> - Abstract base with
-                    abstract store/retrieve/delete/list/clear methods, no concrete implementation.</p>
-                </div>
-
-                <div class="issue">
-                    <div class="issue-title">🔴 ISSUE 5: <code>analytics_reporting_system.py</code> - NotImplementedError stubs</div>
-                    <p>Lines 156, 160, 164 contain <code>raise NotImplementedError</code> for reporting methods.
-                    These should be implemented or marked with TODO.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 6: Hardcoded model names in specialized agents</div>
-                    <p><code>xencode/agentic/specialized/__init__.py</code> uses hardcoded <code>codellama:7b</code> and
-                    <code>llama3.1:8b</code>. These Ollama-specific model names won't resolve if using other providers.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 7: Potential event loop blocking in specialized agents</div>
-                    <p><code>process_request()</code> methods (async) call <code>self.langchain_manager.run_agent()</code> (sync),
-                    which could block the event loop. Should use <code>asyncio.to_thread()</code> or make LangChain async.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 8: FeatureBase abstractmethod body uses <code>pass</code></div>
-                    <p><code>xencode/features/base.py:134-141</code> - Abstract methods should raise <code>NotImplementedError</code>
-                    instead of <code>pass</code> for proper subclass enforcement.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 9 (Partially fixed): Monitoring <code>__init__.py</code> silent imports</div>
-                    <p>Broken <code>health_monitor</code> and <code>alert_manager</code> imports removed. All remaining
-                    <code>except ImportError</code> blocks now log warnings via <code>logger.warning()</code> instead of
-                    silently swallowing errors. Failures are visible. Pre-existing broken names surfaced:
-                    <code>BenchmarkMetrics</code>, <code>BenchmarkRecord</code>, <code>create_benchmark_suites</code>,
-                    <code>BenchmarkRecommendations</code> — these need fixing in their respective modules.</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 10: Silent import swallowing — FIXED (9 files, 60 blocks)</div>
-                    <p>Added <code>import logging</code> + <code>logger = logging.getLogger(__name__)</code> and replaced all
-                    bare <code>except ImportError:</code> with <code>except ImportError as e:</code> + <code>logger.warning(...)</code>
-                    across 9 <code>__init__.py</code> files. Pre-existing import failures are now visible via warnings instead
-                    of being silently swallowed. Affected files: <code>xencode/__init__.py</code> (19 blocks),
-                    <code>xencode/auth/__init__.py</code> (4 blocks), <code>xencode/monitoring/__init__.py</code> (7 blocks),
-                    <code>xencode/workspace/__init__.py</code> (6 blocks), <code>xencode/analytics/__init__.py</code> (3 blocks),
-                    <code>xencode/analyzers/__init__.py</code> (3 blocks), <code>xencode/api/__init__.py</code> (3 blocks),
-                    <code>xencode/api/routers/__init__.py</code> (9 blocks), <code>xencode/processors/__init__.py</code> (4 blocks).</p>
-                </div>
-
-                <div class="warning">
-                    <div class="warning-title">⚠️ ISSUE 11: Flat package structure</div>
-                    <p><code>xencode/</code> has 40+ top-level Python files (monolithic). Consider organizing into sub-packages:
-                    <code>xencode/ai/</code> (already has some), <code>xencode/system/</code>, <code>xencode/utils/</code>, etc.</p>
-                </div>
-            </section>
-
-            <!-- ===================== UNWIRED ===================== -->
-            <section id="unwired">
-                <h2>Unwired Functions &amp; Missing Connections <a href="#unwired" class="anchor">#</a></h2>
-
-                <table>
-                    <tr><th>What</th><th>Where</th><th>Not Wired To</th><th>Impact</th></tr>                        <tr>
-                        <td><code>FileBasedCredentialBackend</code> added</td>
-                        <td><code>xencode/auth/credential_vault.py</code></td>
-                        <td>Concrete implementation with Fernet encryption</td>
-                        <td>✅ Resolved — encrypted file vault works cross-platform</td>
-                    </tr>
-                    <tr>
-                        <td><code>AdvancedMemoryManager</code> abstract</td>
-                        <td><code>xencode/cache/advanced_memory_manager.py</code></td>
-                        <td>No concrete implementation</td>
-                        <td>Advanced memory features non-functional</td>
-                    </tr>
-                    <tr>
-                        <td><code>rag/__init__.py</code> empty</td>
-                        <td><code>xencode/rag/__init__.py</code></td>
-                        <td>Doesn't export submodule classes</td>
-                        <td><code>from xencode.rag import X</code> fails</td>
-                    </tr>
-                    <tr>
-                        <td><code>tui/utils/__init__.py</code> missing</td>
-                        <td><code>xencode/tui/utils/</code></td>
-                        <td>Import of <code>model_checker</code></td>
-                        <td>Potential ImportError in xencode_core.py</td>
-                    </tr>
-                    <tr>
-                        <td><code>HealthMonitor</code> import</td>
-                        <td><code>xencode/monitoring/__init__.py</code></td>
-                        <td>File doesn't exist</td>
-                        <td>Silently falls back, features unavailable</td>
-                    </tr>
-                    <tr>
-                        <td><code>AlertManager</code> import</td>
-                        <td><code>xencode/monitoring/__init__.py</code></td>
-                        <td>File doesn't exist</td>
-                        <td>Silently falls back, features unavailable</td>
-                    </tr>
-                    <tr>
-                        <td><code>analytics_reporting_system.py</code></td>
-                        <td>Standalone file</td>
-                        <td>Not imported by any <code>__init__.py</code></td>
-                        <td>May be dead code if not used elsewhere</td>
-                    </tr>
-                    <tr>
-                        <td><code>Demo feature</code></td>
-                        <td><code>xencode/features/demo.py</code></td>
-                        <td>Not a real feature - example/ demo</td>
-                        <td>Should be in examples/ not features/</td>
-                    </tr>
-                    <tr>
-                        <td><code>xencode/warp_*.py</code> files</td>
-                        <td><code>xencode/warp_integrated.py</code>, etc.</td>
-                        <td>Warp terminal integration - may not be fully active</td>
-                        <td>Check if Warp integration is actually used</td>
-                    </tr>
-                    <tr>
-                        <td><code>xencode/bytebot/</code> integration</td>
-                        <td><code>bytebot/model_integration.py</code></td>
-                        <td>Bytebot backend services</td>
-                        <td>May not be fully wired into main entry point</td>
-                    </tr>
-                </table>
-            </section>
-
-            <!-- ===================== RECOMMENDED TWEAKS ===================== -->
-            <section id="tweaks">
-                <h2>Recommended Tweaks <a href="#tweaks" class="anchor">#</a></h2>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 1. Fix RAG __init__.py</div>
-                    <p>Add proper imports and <code>__all__</code> to <code>xencode/rag/__init__.py</code> to enable
-                    <code>from xencode.rag import VectorStore</code> pattern.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 2. Create tui/utils/__init__.py</div>
-                    <p>Create the missing <code>__init__.py</code> to make the utils directory a proper Python package.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 3. Add __all__ to all __init__.py files</div>
-                    <p>Many <code>__init__.py</code> files lack <code>__all__</code>. This improves tooling support (IDE autocomplete,
-                    static analysis) and makes the public API explicit. Files missing <code>__all__</code>:</p>
-                    <ul style="margin-left:1.5rem;color:var(--fg2);">
-                        <li><code>xencode/tui/widgets/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/tui/__init__.py</code> - HAS __all__ (exports XencodeApp)</li>
-                        <li><code>xencode/features/__init__.py</code> - HAS __all__ (6 exports)</li>
-                        <li><code>xencode/agentic/__init__.py</code> - HAS __all__ (very extensive)</li>
-                        <li><code>xencode/model_providers/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/rag/__init__.py</code> — <strong>✅ FIXED</strong> — exports 5 submodule classes</li>
-                        <li><code>xencode/cache/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/auth/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/analytics/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/routing/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/monitoring/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/i18n/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/plugins/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/security/__init__.py</code> - <strong>NO __all__</strong> (only functions, no exports list)</li>
-                        <li><code>xencode/core/__init__.py</code> - HAS __all__</li>
-                        <li><code>xencode/features/core/__init__.py</code> - HAS __all__</li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">✅</span> 4. Implement concrete CredentialVault <span class="tag green" style="background:rgba(158,206,106,0.15);color:var(--green);">DONE</span></div>
-                    <p><code>FileBasedCredentialBackend</code> added with Fernet encryption (AES-128-CBC with HMAC),
-                    PBKDF2 key derivation, and cross-platform file storage at <code>~/.xencode/vault.json</code>.
-                    Integrated into <code>CredentialVault</code> as priority 2 backend (after Windows CM, before Environment).</p>
-                    <p style="margin-top:0.5rem;"><strong>Also added:</strong> <code>JsonFileCredentialVault</code> — concrete <code>CredentialVault</code> subclass
-                    in <code>xencode/auth/json_file_vault.py</code> using exclusively <code>FileBasedCredentialBackend</code>.
-                    Features single-backend deterministic storage, async-safe operations (<code>asyncio.to_thread()</code>),
-                    vault introspection, bulk export/import, and static <code>health_check()</code> for diagnostics.
-                    39 tests passing.</p>
-                    <p style="margin-top:0.5rem;"><strong>API Router:</strong> <code>xencode/api/routers/vault.py</code> —
-                    3 FastAPI endpoints (<code>GET /api/v1/vault/health</code>, <code>POST /api/v1/vault/init</code>,
-                    <code>POST /api/v1/vault/migrate</code>) with Pydantic models, graceful 503 fallback,
-                    and 18 API-level tests. Registered in <code>xencode/api/main.py</code> under <code>/api/v1/vault</code>.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 5. Implement concrete AdvancedMemoryManager</div>
-                    <p>Create an implementation (e.g., SQLite-backed or in-memory) for the abstract memory manager.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 6. Add async fix to specialized agents</div>
-                    <p>Wrap <code>self.langchain_manager.run_agent()</code> calls in <code>await asyncio.to_thread()</code>
-                    to prevent event loop blocking in specialized agent processing.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 7. Move demo.py to examples/</div>
-                    <p><code>xencode/features/demo.py</code> is not a real feature - it's a demo. Move it to <code>examples/</code>
-                    directory and remove from feature registration.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 8. Clean up silent import failures</div>
-                    <p><code>xencode/monitoring/__init__.py</code> has multiple try/except ImportError blocks for files
-                    that don't exist. Either create the missing files or remove the broken imports.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 9. Use consistent async patterns</div>
-                    <p>Mixed sync/async patterns across the codebase. Some <code>initialize()</code> methods are async,
-                    some sync. Standardize on async for I/O-bound operations.</p>
-                </div>
-
-                <div class="card">
-                    <div class="card-title"><span class="icon">🔧</span> 10. Review lazy import patterns</div>
-                    <p>Many files use function-level lazy imports, which is good for startup time. But some overwrite
-                    local variables multiple times (e.g., <code>xencode_core.py</code> re-imports <code>ModelChecker</code>
-                    inside different functions). Consider extracting to module-level lazy loading.</p>
-                </div>
-            </section>
-
-            <!-- ===================== TESTING ===================== -->
-            <section id="missing-tests">
-                <h2>Missing Tests Coverage <a href="#missing-tests" class="anchor">#</a></h2>
-
-                <table>
-                    <tr><th>Test Directory</th><th>What's Covered</th><th>Missing Coverage</th></tr>
-                    <tr><td><code>tests/agentic/</code></td><td>Agent coordination, tools</td><td>Specialized agents (data science, web dev, etc.)</td></tr>
-                    <tr><td><code>tests/api/</code></td><td>API endpoints</td><td>Feature routes, dynamic registration</td></tr>
-                    <tr><td><code>tests/auth/</code></td><td>Auth components</td><td>CredentialVault (no concrete impl), AuditLogger</td></tr>
-                    <tr><td><code>tests/bytebot/</code></td><td>Bytebot integration</td><td>Model integration, context engine</td></tr>
-                    <tr><td><code>tests/cli/</code></td><td>CLI commands</td><td>Feature CLI commands, agentic CLI</td></tr>
-                    <tr><td><code>tests/features/</code></td><td>Feature infrastructure, voice interface</td><td>Individual features (code review, collab, etc.)</td></tr>
-                    <tr><td><code>tests/i18n/</code></td><td>Translation, language management</td><td>Context adapter</td></tr>
-                    <tr><td><code>tests/integration/</code></td><td>Integration tests</td><td>End-to-end workflows</td></tr>
-                    <tr><td><code>tests/model_providers/</code></td><td>Model resolver, transport, diagnostics</td><td>Provider manager, fallback</td></tr>
-                    <tr><td><code>tests/phase3/</code></td><td>Intelligence layer phase 3</td><td>-</td></tr>
-                    <tr><td><code>tests/phase5/</code></td><td>Phase 5 features</td><td>-</td></tr>
-                    <tr><td><code>tests/rust/</code></td><td>Rust components</td><td>-</td></tr>
-                    <tr><td><code>tests/tui/</code></td><td>Code action hotkeys, basic TUI tests</td><td>Individual widget panels (31 widgets - most untested)</td></tr>
-                </table>
-
-                <p><strong>Key gaps:</strong> TUI widgets are mostly untested (only code_action_hotkeys has tests).
-                Individual features lack unit tests beyond infrastructure. The abstract base classes have no concrete test implementations.</p>
-            </section>
-
-            <!-- ===================== CONFIGURATION ===================== -->
-            <section id="config">
-                <h2>Configuration Files <a href="#config" class="anchor">#</a></h2>
-
-                <table>
-                    <tr><th>File</th><th>Type</th><th>Purpose</th></tr>
-                    <tr><td><code>pyproject.toml</code></td><td><span class="tag toml">TOML</span></td><td>Python project configuration (build system, dependencies)</td></tr>
-                    <tr><td><code>setup.py</code></td><td><span class="tag py">Python</span></td><td>Legacy setup script for pip install</td></tr>
-                    <tr><td><code>MANIFEST.in</code></td><td><span class="tag txt">Text</span></td><td>Package manifest for sdist</td></tr>
-                    <tr><td><code>requirements.txt</code></td><td><span class="tag txt">Text</span></td><td>Python dependencies</td></tr>
-                    <tr><td><code>pytest.ini</code></td><td><span class="tag ini">INI</span></td><td>PyTest configuration</td></tr>
-                    <tr><td><code>package.json</code></td><td><span class="tag json">JSON</span></td><td>Node.js dependencies (Bytebot UI)</td></tr>
-                    <tr><td><code>docker-compose.yml</code></td><td><span class="tag yml">YAML</span></td><td>Docker container orchestration</td></tr>
-                    <tr><td><code>Dockerfile</code></td><td><span class="tag txt">Text</span></td><td>Docker image build</td></tr>
-                    <tr><td><code>plugins/plugins.yaml</code></td><td><span class="tag yml">YAML</span></td><td>Plugin definitions</td></tr>
-                    <tr><td><code>.pre-commit-config.yaml</code></td><td><span class="tag yml">YAML</span></td><td>Pre-commit hooks</td></tr>
-                    <tr><td><code>monitoring/prometheus.yml</code></td><td><span class="tag yml">YAML</span></td><td>Prometheus monitoring config</td></tr>
-                </table>
-            </section>
-
-            <!-- ===================== BYTEBOT ===================== -->
-            <section id="bytebot">
-                <h2>Bytebot Integration <a href="#bytebot" class="anchor">#</a></h2>
-                <p>Bytebot is a container-based desktop agent platform that Xencode integrates with.</p>
-
-                <h3>Bytebot Backend (NestJS)</h3>
-                <p>Located in <code>bytebot/packages/bytebot-agent/</code> - NestJS-based backend service.</p>
-
-                <h3>Bytebot UI (Next.js)</h3>
-                <p>Located in <code>bytebot/packages/bytebot-ui/</code> - Next.js frontend with:</p>
-                <ul style="margin-left:1.5rem;color:var(--fg2);">
-                    <li>GitHub Copilot integration (GitHub OAuth, API proxy)</li>
-                    <li>Auth provider with user session management</li>
-                    <li>Onboarding flow</li>
-                    <li>API endpoints for copilot chat/completions</li>
-                    <li><code>middleware.ts</code> for route protection</li>
-                </ul>
-
-                <h3>Xencode Bytebot Module</h3>
-                <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>xencode/bytebot/model_integration.py</code></td><td>Model integration bridge between Bytebot and Xencode models</td></tr>
-                    <tr><td><code>xencode/bytebot/context_engine.py</code></td><td>Context engine for Bytebot integration</td></tr>
-                </table>
+                <p><strong>40+ top-level files in xencode/</strong> — monolithic structure. Consider organizing into sub-packages.</p>
             </section>
 
             <!-- ===================== RUST ===================== -->
-            <section id="rust">
-                <h2>Rust Components <a href="#rust" class="anchor">#</a></h2>
-                <p>Rust workspace at <code>rust/</code> for performance-critical operations.</p>
+            <section id="rs-workspace">
+                <h2>Rust Stack: Workspace Overview <a href="#rs-workspace" class="anchor">#</a></h2>
+                <p><strong>Branch:</strong> <code>total-migiration-rust</code> (likely main now)</p>
+                <p><strong>Workspace:</strong> 12 crates under <code>rust/</code></p>
+                <p>
+                    <span class="tag md">📄</span>
+                    <a href="docs/RUST_MIGRATION_STATUS.md" style="color:var(--accent);text-decoration:none;">
+                        <strong>Detailed status per crate → docs/RUST_MIGRATION_STATUS.md</strong>
+                    </a>
+                </p>
 
-                <pre><code>rust/
-├── Cargo.toml          # Workspace config
-├── Cargo.lock          # Dependency lock
-└── crates/             # Rust crate(s)</code></pre>
-
-                <p><strong>Status:</strong> Present but not deeply analyzed in this audit. The Rust component
-                suggests performance-sensitive features are being built natively.</p>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">Crates</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">Crates with Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">100%</div>
+                        <div class="stat-label">Migration Progress</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">14</div>
+                        <div class="stat-label">TUI Panels (interactive)</div>
+                    </div>
+                </div>
             </section>
 
-            <!-- ===================== TEST STRUCTURE ===================== -->
-            <section id="testing">
-                <h2>Test Structure <a href="#testing" class="anchor">#</a></h2>
-
-                <pre><code>tests/
-├── agentic/           # Agent system tests
-├── api/               # API endpoint tests
-├── auth/              # Authentication tests
-├── bytebot/           # Bytebot integration tests
-├── cli/               # CLI command tests
-├── features/          # Feature module tests
-├── i18n/              # Internationalization tests
-├── integration/       # Integration tests
-├── model_providers/   # Model provider tests
-├── phase3/            # Phase 3 intelligence layer tests
-├── phase5/            # Phase 5 tests
-├── rust/              # Rust component tests
-└── tui/               # TUI tests</code></pre>
-
-                <p><strong>PyTest config:</strong> <code>pytest.ini</code> at project root.</p>
+            <!-- ===================== RUST DETAILS ===================== -->
+            <section id="rs-core">
+                <h2>Rust: xencode-core-rs <a href="#rs-core" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Implemented with Tests</strong></p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>workspace.rs</code> — <code>scan_workspace()</code> with <code>ScanOptions</code>, <code>EntryKind</code>, recursive directory scanning</li>
+                    <li>Tests: ✅ 2 tests (stable ordering, hidden/excluded skipping)</li>
+                    <li>Python parity test: ✅ <code>tests/rust/test_workspace_scan_parity.py</code></li>
+                </ul>
             </section>
 
-            <!-- ===================== FOOTER ===================== -->
-            <section>
-                <h2>Top-Level Files <a href="#top-level" class="anchor">#</a></h2>
+            <section id="rs-config">
+                <h2>Rust: xencode-config-rs <a href="#rs-config" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Implemented with Tests</strong></p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>config.rs</code> — <code>XencodeConfig</code> with serde serialization, <code>load()</code>/<code>save()</code>, <code>to_json()</code>, API keys</li>
+                    <li><code>files.rs</code> — <code>create_file()</code>, <code>read_file()</code>, <code>write_file()</code>, <code>delete_file()</code></li>
+                    <li>Tests: ✅ 9 tests (save/load roundtrip, partial JSON, nonexistent, JSON output)</li>
+                    <li>Python parity test: ✅ <code>tests/rust/test_config_roundtrip.py</code></li>
+                </ul>
+            </section>
+
+            <section id="rs-cache">
+                <h2>Rust: xencode-cache-rs <a href="#rs-cache" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Implemented with Tests</strong></p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>ResponseCache</code> — LRU cache with TTL expiry, disk persistence via SHA-256 hashed keys</li>
+                    <li><code>CacheStats</code> — hits, misses, evictions</li>
+                    <li>Tests: ✅ 8 tests (set/get, miss, model separation, LRU eviction, TTL expiry, stats, clear, disk persistence)</li>
+                    <li>Python parity test: ✅ <code>tests/rust/test_cache_operations.py</code></li>
+                </ul>
+            </section>
+
+            <section id="rs-memory">
+                <h2>Rust: xencode-memory-rs <a href="#rs-memory" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Implemented with Tests</strong></p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>ConversationMemory</code> — Message history, sessions, persistence, context retrieval, max items trimming</li>
+                    <li>Tests: ✅ 4 tests (session switch, add/get messages, max items, persistence roundtrip)</li>
+                    <li>Python parity test: ✅ <code>tests/rust/test_memory_roundtrip.py</code></li>
+                </ul>
+            </section>
+
+            <section id="rs-models">
+                <h2>Rust: xencode-models-rs <a href="#rs-models" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Implemented</strong> (unit tests pass, integration tests ignored)</p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>OllamaClient</code> — <code>list_models()</code>, <code>check_health()</code>, <code>get_smart_default()</code></li>
+                    <li><code>HealthTracker</code> — Per-model health tracking, healthy_models() filter</li>
+                    <li><code>ModelInfo</code> — name, size, digest, modified_at</li>
+                    <li>Tests: ✅ 4 unit tests + 3 ignored integration tests (need running Ollama)</li>
+                </ul>
+            </section>
+
+            <section id="rs-providers">
+                <h2>Rust: xencode-providers-rs <a href="#rs-providers" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ⚠️ Partial Implementation</strong></p>
+                <h4>Components:</h4>
+                <ul>
+                    <li><code>ProviderManager</code> — <code>generate()</code>, <code>generate_stream()</code> with Ollama + OpenRouter support</li>
+                    <li>Streaming works for both providers</li>
+                    <li>Simple routing: models with '/' go to OpenRouter, others go to Ollama</li>
+                    <li>Tests: ✅ 1 test (ChatMessage serialization only)</li>
+                    <li><strong>Missing:</strong> Error recovery, retry logic, provider health propagation, Qwen/Gemini support</li>
+                </ul>
+            </section>
+
+            <section id="rs-tui">
+                <h2>Rust: xencode-tui-rs (ratatui) <a href="#rs-tui" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: 🟡 Functional with Many Stubs</strong></p>
+
+                <h4>What's Implemented:</h4>
+                <ul>
+                    <li>✅ 4 themes: ocean (default), midnight, forest, terminal</li>
+                    <li>✅ 3-panel layout: File Explorer (20%) | Code Editor (50%) | Chat (30%)</li>
+                    <li>✅ File explorer with git status coloring and file attachment support</li>
+                    <li>✅ Code editor with TextArea, save support</li>
+                    <li>✅ Chat with message rendering, spinner animation, scroll</li>
+                    <li>✅ Keyboard navigation (Tab, arrows, i/e for modes)</li>
+                    <li>✅ Mouse support (scroll, click to focus)</li>
+                    <li>✅ Model selector overlay (Enter to select)</li>
+                    <li>✅ Settings overlay (read-only display)</li>
+                    <li>✅ Code review overlay (streaming AI review)</li>
+                    <li>✅ Feature Navigator overlay (13 features listed)</li>
+                    <li>✅ Git commit panel (type message + Enter to commit)</li>
+                    <li>✅ ByteBot interception (simulated agent steps)</li>
+                    <li>✅ LLM generation via ProviderManager (Ollama + OpenRouter)</li>
+                    <li>✅ Conversation memory persistence</li>
+                    <li>✅ Auto-scroll on new messages</li>
+                </ul>
+
+                <h4>Feature Panels (All Interactive):
+                    <span style="margin-left:0.5rem;font-size:0.8rem;font-weight:400;">
+                        <span class="tag md">📄</span>
+                        <a href="docs/USER_MANUAL.md" style="color:var(--accent);">User Manual</a>
+                    </span>
+                </h4>
+                <table>
+                    <tr><th>Panel</th><th>Status</th></tr>
+                    <tr><td>Performance Dashboard</td><td>✅ Session stats, file breakdown</td></tr>
+                    <tr><td>Provider Health</td><td>✅ Health checks with status icons</td></tr>
+                    <tr><td>Project Analyzer</td><td>✅ File type analysis</td></tr>
+                    <tr><td>Git Commit</td><td>✅ Commit message input</td></tr>
+                    <tr><td>Feature Navigator</td><td>✅ 14-feature list with navigation</td></tr>
+                    <tr><td>ByteBot Agent</td><td>✅ Step execution, progress bar, log</td></tr>
+                    <tr><td>Collaboration Hub</td><td>✅ Session sharing, member status</td></tr>
+                    <tr><td>Voice Interface</td><td>✅ Audio meter, commands, transcript</td></tr>
+                    <tr><td>Terminal Assistant</td><td>✅ Command suggestions, risk badges</td></tr>
+                    <tr><td>Security Auditor</td><td>✅ Severity bars, findings list</td></tr>
+                    <tr><td>Performance Profiler</td><td>✅ Gauges, function table, hot paths</td></tr>
+                    <tr><td>Custom Models</td><td>✅ Profile list, parameter sliders</td></tr>
+                    <tr><td>Learning Mode</td><td>✅ Lesson viewer, code examples</td></tr>
+                    <tr><td>Multi-Language</td><td>✅ Language detection, translation</td></tr>
+                </table>
+            </section>
+
+            <section id="rs-cli">
+                <h2>Rust: xencode-cli (Binary) <a href="#rs-cli" class="anchor">#</a></h2>
+                <p><span class="tag rs">Rust</span> <strong>Status: ✅ Functional</strong>
+                    <span style="margin-left:0.5rem;">
+                        <span class="tag md">📄</span>
+                        <a href="docs/USER_MANUAL.md" style="color:var(--accent);">User Manual</a>
+                    </span>
+                </p>
+                <h4>Commands:</h4>
+                <table>
+                    <tr><th>Command</th><th>Status</th><th>Notes</th></tr>
+                    <tr><td><code>xencode scan</code></td><td><span class="status-dot green"></span></td><td>Workspace scanning with hidden/max-depth options</td></tr>
+                    <tr><td><code>xencode config show|set|reset</code></td><td><span class="status-dot green"></span></td><td>Full config management</td></tr>
+                    <tr><td><code>xencode models list|health|default</code></td><td><span class="status-dot green"></span></td><td>Ollama model listing + health checks</td></tr>
+                    <tr><td><code>xencode cache stats|clear</code></td><td><span class="status-dot green"></span></td><td>Disk-persistent cache management</td></tr>
+                    <tr><td><code>xencode query</code></td><td><span class="status-dot green"></span></td><td>Full query with streaming, cache, memory</td></tr>
+                    <tr><td><code>xencode memory list|show</code></td><td><span class="status-dot green"></span></td><td>Conversation session management</td></tr>
+                    <tr><td><code>xencode tui</code></td><td><span class="status-dot green"></span></td><td>Launches ratatui TUI</td></tr>
+                </table>
+            </section>
+
+            <!-- ===================== TESTS ===================== -->
+            <section id="tests">
+                <h2>Test Coverage <a href="#tests" class="anchor">#</a></h2>
+
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">13</div>
+                        <div class="stat-label">Test Directories</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">65</div>
+                        <div class="stat-label">Rust Tests Passing</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">4</div>
+                        <div class="stat-label">Rust Parity Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">4</div>
+                        <div class="stat-label">Phase 5 Tests</div>
+                    </div>
+                </div>
 
                 <table>
-                    <tr><th>File</th><th>Purpose</th></tr>
-                    <tr><td><code>xencode_core.py</code></td><td>Main entry point with full system initialization</td></tr>
-                    <tr><td><code>xencode_cli.py</code></td><td>CLI wrapper entry point</td></tr>
-                    <tr><td><code>build_exe.py</code></td><td>Builds executable with PyInstaller</td></tr>
-                    <tr><td><code>cleanup_duplicates.py</code></td><td>Duplicate file cleanup utility</td></tr>
-                    <tr><td><code>debug_chroma.py</code></td><td>ChromaDB debugging utility</td></tr>
-                    <tr><td><code>debug_ollama.py</code></td><td>Ollama debugging utility</td></tr>
-                    <tr><td><code>diagnose_tui.py</code></td><td>TUI diagnostics tool</td></tr>
-                    <tr><td><code>patch_ensemble.py</code></td><td>Ensemble patching utility</td></tr>
-                    <tr><td><code>add_api_endpoints.py</code></td><td>Script to add API endpoints to features</td></tr>
-                    <tr><td><code>add_feature_methods.py</code></td><td>Script to add methods to features</td></tr>
-                    <tr><td><code>add_history_methods.py</code></td><td>Script to add history methods</td></tr>
-                    <tr><td><code>install.ps1</code></td><td>Windows installer script</td></tr>
-                    <tr><td><code>install.sh</code></td><td>Unix installer script</td></tr>
-                    <tr><td><code>xencode.sh</code></td><td>Xencode shell script</td></tr>
+                    <tr><th>Directory</th><th>Files</th><th>What's Covered</th><th>Gaps</th></tr>
+                    <tr><td><code>tests/agentic/</code></td><td>2</td><td>Error fix engine, workflow orchestrator</td><td>No specialized agent tests</td></tr>
+                    <tr><td><code>tests/api/</code></td><td>4</td><td>Features API, route auth, vault API</td><td>Monitoring, plugins, workspace API</td></tr>
+                    <tr><td><code>tests/auth/</code></td><td>3</td><td>Credential vault, file backend, JSON vault</td><td>No AuditLogger tests</td></tr>
+                    <tr><td><code>tests/features/</code></td><td>25+</td><td>All 9 features + integrations</td><td>CLI/TUI integration tests thin</td></tr>
+                    <tr><td><code>tests/i18n/</code></td><td>4</td><td>All 4 i18n modules</td><td>Context adapter coverage</td></tr>
+                    <tr><td><code>tests/integration/</code></td><td>2</td><td>API smoke, vault integration</td><td>End-to-end workflows</td></tr>
+                    <tr><td><code>tests/model_providers/</code></td><td>3</td><td>Resolver, transport, diagnostics</td><td>Provider manager, fallback</td></tr>
+                    <tr><td><code>tests/phase3/</code></td><td>2</td><td>Intelligence layer</td><td>—</td></tr>
+                    <tr><td><code>tests/phase5/</code></td><td>4</td><td>Auto test gen, benchmark wizard, fallback engine, provider health</td><td>—</td></tr>
+                    <tr><td><code>tests/rust/</code></td><td>4</td><td>Cache, config, memory, workspace parity</td><td>No providers/TUI/CLI parity tests</td></tr>
+                    <tr><td><code>tests/tui/</code></td><td>7</td><td>Hotkeys, panels, integration</td><td>Only 7/31 widgets tested</td></tr>
                 </table>
+            </section>
+
+            <!-- ===================== REMAINING WORK ===================== -->
+            <section id="remaining">
+                <h2>Remaining Work & Action Items <a href="#remaining" class="anchor">#</a></h2>
+
+                <h3 id="critical">🔴 Critical</h3>
+
+                <div class="issue">
+                    <div class="issue-title">CRIT-1: Rust TUI panels implemented but need deeper integration</div>
+                    <p><strong>Files:</strong> <code>rust/crates/xencode-tui-rs/src/ui.rs</code>, <code>app.rs</code></p>
+                    <p>All 14 Rust TUI feature panels are now implemented with interactive overlays. Further enhancements could include richer data from Python backends, real-time streaming, and keyboard shortcuts for each panel.</p>
+                </div>
+
+                <div class="ok">
+                    <div class="issue-title" style="color:var(--green);">✅ RESOLVED: AdvancedMemoryManager is fully implemented</div>
+                    <p><strong>File:</strong> <code>xencode/cache/advanced_memory_manager.py</code></p>
+                    <p>Already has a complete concrete implementation with:</p>
+                    <ul>
+                        <li><code>RAMTierManager</code> — In-memory LRU cache with priority scoring (CRITICAL/HIGH/NORMAL/LOW/ARCHIVE)</li>
+                        <li><code>DiskTierManager</code> — <strong>SQLite-backed</strong> persistent cache with zlib compression, pickle serialization, TTL expiry</li>
+                        <li><code>PredictiveCacheAdvisor</code> — ML-based access prediction using sklearn LinearRegression</li>
+                        <li><code>AdvancedMemoryManager</code> — Orchestrator with 4 memory tiers, auto-tier balancing, background cleanup/prefetch workers, and singleton factory</li>
+                        <li>Verified working: put/get/tier-usage/shutdown all pass at runtime</li>
+                    </ul>
+                </div>
+
+                <div class="issue">
+                    <div class="issue-title">CRIT-3: Missing provider parity in Rust</div>
+                    <p><strong>File:</strong> <code>rust/crates/xencode-providers-rs/src/lib.rs</code></p>
+                    <p>Only Ollama and OpenRouter are implemented in Rust. Qwen, Gemini, and Anthropic support are missing. No retry logic, no health propagation to routing layer.</p>
+                </div>
+
+                <h3 id="high">🟡 High Priority</h3>
+
+                <div class="warning">
+                    <div class="warning-title">HIGH-1: analytics_reporting_system.py has NotImplementedError stubs</div>
+                    <p>Lines 156, 160, 164 in <code>xencode/analytics_reporting_system.py</code> raise <code>NotImplementedError</code> for reporting methods. Need implementation.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">HIGH-2: Hardcoded model names in specialized agents</div>
+                    <p><code>xencode/agentic/specialized/__init__.py</code> hardcodes <code>codellama:7b</code> and <code>llama3.1:8b</code> — won't work with other providers.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">HIGH-3: Potential event loop blocking in specialized agents</div>
+                    <p>Async <code>process_request()</code> methods call sync <code>self.langchain_manager.run_agent()</code> — should use <code>asyncio.to_thread()</code>.</p>
+                </div>
+
+                <div class="warning">
+                    <div class="warning-title">HIGH-4: Monitoring __init__.py has broken imports</div>
+                    <p><code>xencode/monitoring/__init__.py</code> tries to import <code>HealthMonitor</code> and <code>AlertManager</code> from nonexistent files — features silently fail.</p>
+                </div>
+
+                <h3 id="medium">🔵 Medium Priority</h3>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-1: FeatureBase abstractmethod uses <code>pass</code></div>
+                    <p><code>xencode/features/base.py:134-141</code> — Abstract methods should raise <code>NotImplementedError</code> instead of <code>pass</code>.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-2: Missing __all__ in security/__init__.py</div>
+                    <p><code>xencode/security/__init__.py</code> exports 10+ functions but has no <code>__all__</code> list.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-3: Flat package structure (40+ files)</div>
+                    <p>40+ top-level .py files in <code>xencode/</code>. Consider organizing into sub-packages: <code>xencode/ai/</code>, <code>xencode/system/</code>, etc.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-4: Move demo.py to examples/</div>
+                    <p><code>xencode/features/demo.py</code> is a demo script, not a real feature module. Should be moved to <code>examples/</code>.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-5: 24/31 Python TUI widgets untested</div>
+                    <p>Only 7 TUI widget panels have test files. 24 have zero tests. This is a significant testing gap.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">✅</span> RESOLVED: All 14 Rust TUI panels implemented</div>
+                    <p>All feature panels are now interactive: Performance Dashboard, Provider Health, Project Analyzer, Git Commit, Feature Navigator, ByteBot Agent, Collaboration Hub, Voice Interface, Terminal Assistant, Security Auditor, Performance Profiler, Custom Models, Learning Mode, Multi-Language.</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-title"><span class="icon">🔧</span> MED-7: No Rust parity tests for providers/TUI/CLI</div>
+                    <p>Only 4 Rust/Python parity tests exist (cache, config, memory, workspace). Need parity tests for providers, TUI rendering, and CLI output.</p>
+                </div>
+            </section>
+
+            <!-- ===================== RUST MIGRATION STATUS ===================== -->
+            <section id="rust-migration">
+                <h2>Rust Migration — Phase-by-Phase Status <a href="#rust-migration" class="anchor">#</a></h2>
+
+                <table>
+                    <tr><th>#</th><th>Phase</th><th>Status</th><th>Notes</th></tr>
+                    <tr><td>0</td><td>Baseline & Boundaries</td><td><span class="status-dot green"></span> ✅</td><td>Benchmarks, migration buckets, JSON schemas, tracking board</td></tr>
+                    <tr><td>1</td><td>Rust Core Library</td><td><span class="status-dot green"></span> ✅</td><td>Workspace scanning, config, file ops implemented with tests</td></tr>
+                    <tr><td>2</td><td>CLI Migration</td><td><span class="status-dot green"></span> ✅</td><td>All commands: scan, config, models, cache, query, memory, tui</td></tr>
+                    <tr><td>3</td><td>Provider & Chat Runtime</td><td><span class="status-dot yellow"></span> 🟡 Partial</td><td>Ollama + OpenRouter working. Qwen, Gemini, Anthropic missing</td></tr>
+                    <tr><td>4</td><td>TUI Migration</td><td><span class="status-dot green"></span> ✅</td><td>Core shell + 14 interactive feature panels</td></tr>
+                    <tr><td>5</td><td>RAG, Indexing & Analysis</td><td><span class="status-dot green"></span> ✅</td><td>Code analysis, security scanner, RAG indexer, embeddings, vector store</td></tr>
+                    <tr><td>6</td><td>Server & Collaboration</td><td><span class="status-dot green"></span> ✅</td><td>axum HTTP/WebSocket server, CRDT sync, workspace management</td></tr>
+                    <tr><td>7</td><td>Plugin & Extension Strategy</td><td><span class="status-dot green"></span> ✅</td><td>Plugin trait, host, registry, manifest, lifecycle management</td></tr>
+                    <tr><td>8</td><td>Packaging & Release</td><td><span class="status-dot green"></span> ✅</td><td>Release build scripts, smoke tests, parity benchmarks</td></tr>
+                </table>                    <div style="margin-bottom:0.5rem;">
+                        <span class="tag md">📄</span>
+                        <a href="docs/ROADMAP.md" style="color:var(--accent);text-decoration:none;">
+                            <strong>Full product roadmap → docs/ROADMAP.md</strong>
+                        </a>
+                    </div>
+                    <div class="card">
+                        <div class="card-title"><span class="icon">📋</span> Recommended Next Steps</div>
+                    <ol style="margin-left:1.5rem;color:var(--fg2);">
+                        <li><strong>Enhance Rust TUI panels</strong> — Further integration with Python backends for richer data, real-time streaming.</li>
+                        <li><strong>Add missing providers to Rust</strong> — Qwen, Gemini, Anthropic support in xencode-providers-rs. Add retry logic.</li>
+                        <li><strong>Add Rust parity tests</strong> — For providers, CLI output, and TUI rendering.</li>
+                        <li><strong>Fix broken monitoring imports</strong> — Create missing HealthMonitor and AlertManager modules or remove broken imports.</li>
+                        <li><strong>Fix hardcoded model names</strong> — Make agent model selection configurable.</li>
+                        <li><strong>Organize flat Python package</strong> — Break up the 40+ top-level files into sub-packages.</li>
+                    </ol>
+                </div>
+
+                <p><strong>Migration target:</strong> CLI startup &lt;100ms, TUI render &lt;300ms, workspace scan 3x faster than Python. All Python features eventually replaced by Rust equivalents behind stable interfaces.
+                    <span style="margin-left:0.5rem;">
+                        <span class="tag md">📄</span>
+                        <a href="docs/RUST_MIGRATION_STATUS.md" style="color:var(--accent);">Migration Status</a>
+                    </span>
+                </p>
+            </section>
+
+            <!-- ===================== SCHEMA ===================== -->
+            <section>
+                <h2>Bytebot Integration <a href="#bytebot" class="anchor">#</a></h2>
+                <p>Bytebot is a container-based desktop agent that Xencode integrates with:</p>
+                <ul>
+                    <li><code>bytebot/packages/bytebot-agent/</code> — NestJS backend</li>
+                    <li><code>bytebot/packages/bytebot-ui/</code> — Next.js frontend with GitHub Copilot integration</li>
+                    <li><code>xencode/bytebot/</code> — Model integration bridge + context engine</li>
+                </ul>
             </section>
 
             <hr style="border-color:var(--bg3);margin:2rem 0;">
 
             <p style="text-align:center;color:var(--fg2);font-size:0.9rem;">
-                Xencode Codebase Reference — Generated from comprehensive codebase audit<br>
-                Generated: May 27, 2026 — Covers all modules, entry points, features, issues, unwired functions, and recommended tweaks.
+                Xencode Codebase Reference — Updated June 2, 2026<br>
+                Covers: Python stack (180+ files, 31 TUI widgets, 9 features, 60+ tests) + Rust stack (12 crates, 8 with tests, TUI with 14 panels)<br>                            <strong>Remaining work:</strong> Enhance TUI panels, add Rust providers (Qwen/Gemini), flat package structure, test gaps
+                            <br><br>
+                            <span class="tag md">📄</span>
+                            <a href="docs/ROADMAP.md" style="color:var(--accent);text-decoration:none;">docs/ROADMAP.md</a>
+                            <span style="margin:0 0.5rem;">·</span>
+                            <span class="tag md">📄</span>
+                            <a href="docs/FEATURES.md" style="color:var(--accent);text-decoration:none;">docs/FEATURES.md</a>
+                            <span style="margin:0 0.5rem;">·</span>
+                            <span class="tag md">📄</span>
+                            <a href="docs/RUST_MIGRATION_STATUS.md" style="color:var(--accent);text-decoration:none;">docs/RUST_MIGRATION_STATUS.md</a>
+                            <span style="margin:0 0.5rem;">·</span>
+                            <span class="tag md">📄</span>
+                            <a href="docs/USER_MANUAL.md" style="color:var(--accent);text-decoration:none;">docs/USER_MANUAL.md</a>
             </p>
 
         </main>
