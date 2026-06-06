@@ -82,12 +82,58 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         InputMode::Editing => "EDITING",
     };
 
-    let hints = match app.input_mode {
-        InputMode::Normal => "i:edit  m:models  Tab:switch  q:quit  Ctrl+,:settings  Ctrl+R:review  Ctrl+T:terminal  Ctrl+H:health",
-        InputMode::Editing => "Enter:send  Esc:normal  ←→:cursor  Ctrl+C:quit",
+    // Git branch
+    let branch_str = format!(" \u{1F9F0} {}", app.git_branch);
+
+    // Provider health indicator
+    let ollama_ok = app.ollama_health_entries.get("ollama")
+        .map(|(s, _, _)| s == "healthy")
+        .unwrap_or(false);
+    let health_icon = if ollama_ok { "\u{2705}" } else { "\u{2753}" };
+
+    // Uptime
+    let uptime_secs = (xencode_models_rs::current_timestamp() - app.session_start_time).max(0.0);
+    let uptime_mins = (uptime_secs / 60.0) as u64;
+    let uptime_secs_rem = (uptime_secs % 60.0) as u64;
+    let uptime_str = if uptime_mins > 0 {
+        format!("{}m {}s", uptime_mins, uptime_secs_rem)
+    } else {
+        format!("{}s", uptime_secs_rem)
     };
 
-    let status_text = format!(" {} │ {} ", mode_str, hints);
+    // File count
+    let files_str = format!("\u{1F4C4} {}", app.file_tree.len());
+
+    // Build status text chunks
+    let left_parts = match app.input_mode {
+        InputMode::Normal => format!(" {}  {} | {}  {}  {}  \u{394} {}  | ", mode_str, branch_str, health_icon, uptime_str, files_str, app.git_status.len()),
+        InputMode::Editing => format!(" {}  | ", mode_str),
+    };
+
+    // Context-sensitive hints based on current focus
+    let hints = if app.input_mode == InputMode::Editing {
+        "Enter:send  Esc:normal  \u{2190}\u{2192}:cursor"
+    } else {
+        match app.focus {
+            FocusArea::Settings => "\u{2191}\u{2193}:nav  \u{2190}\u{2192}:change  Enter:save  Esc:close",
+            FocusArea::FileExplorer => "\u{2191}\u{2193}:select  Enter:open  Space:attach  m:models",
+            FocusArea::CodeEditor => "e:edit  \u{2191}\u{2193}:scroll  Ctrl+S:save  Tab:next",
+            FocusArea::ModelSelector => "\u{2191}\u{2193}:select  Enter:confirm  Esc:close",
+            FocusArea::CodeReview => "Enter:review  Esc:close",
+            FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
+            FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
+            FocusArea::ProviderHealth => "h:refresh  Esc:close",
+            FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
+            FocusArea::GitCommit | FocusArea::CollaborationHub |
+            FocusArea::VoiceInterface | FocusArea::TerminalAssistant |
+            FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
+            FocusArea::CustomModels | FocusArea::LearningMode |
+            FocusArea::MultiLanguage => "Enter:start  Esc:close",
+            _ => "i:edit  m:models  Tab:switch  Ctrl+,:settings  Ctrl+R:review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
+        }
+    };
+
+    let status_text = format!("{}{}", left_parts, hints);
 
     let bar = Paragraph::new(status_text)
         .style(Style::default().bg(app.theme.status_bg).fg(app.theme.status_fg));
@@ -773,7 +819,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
-    let para = Paragraph::new(lines).block(block).style(Style::default().fg(app.theme.fg));
+    let para = Paragraph::new(lines).block(block).style(Style::default().fg(app.theme.fg)).scroll((app.provider_health_scroll, 0));
     f.render_widget(para, popup_area);
 }
 
@@ -1568,7 +1614,8 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let find_para = Paragraph::new(find_lines)
         .block(find_block)
         .style(Style::default().fg(app.theme.fg))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((app.security_scroll, 0));
     f.render_widget(find_para, chunks[1]);
 }
 
