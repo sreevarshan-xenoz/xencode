@@ -29,16 +29,25 @@ Xencode is an offline-first AI development assistant platform for serious engine
 - **Operational maturity** through analytics, monitoring, API routers, and deployment assets.
 - **Extensible platform** via feature flags and plugin lifecycle management.
 
-## Current Status (Feb 2026)
+## Current Status (June 2026)
 
-- ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, vault, smoke gate)
-- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
-- ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
-- 🚧 **Active backlog**: Phase 3+ intelligence, fallback governance, multimodal UX, secure team mode
+### Rust Migration — All 8 Phases Complete ✅
 
-Roadmap tracking:
-- [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
-- [NEXT_PLAN.md](NEXT_PLAN.md)
+The full Rust migration is complete — **12 crates, 65 tests, zero warnings.**
+
+| Phase | What | Status |
+|-------|------|--------|
+| 0–4 | Core lib, CLI, Providers, TUI | ✅ Complete |
+| 5 | Code Analysis, Security Scanner, RAG Indexer | ✅ Complete |
+| 6 | HTTP/WebSocket Server, Collaboration CRDT | ✅ Complete |
+| 7 | Plugin System (trait, host, registry) | ✅ Complete |
+| 8 | Release scripts, smoke tests, parity benchmarks | ✅ Complete |
+
+- ✅ **12 Rust crates** — workspace scan, config, cache, memory, models, providers, TUI, CLI, analysis, server, collaboration, plugin
+- ✅ **Rust binary** as primary entry point (`xencode`) — single-file, no Python dependency
+- ✅ **14 rich TUI feature panels** — ByteBot, Collaboration, Voice, Security, Profiler, Custom Models, Learning Mode, Multi-Language
+- ✅ **Release build scripts** — Windows (`build-release.ps1`) and Linux/macOS (`smoke-test.sh`)
+- ✅ **Python stack** still available for legacy compatibility and plugin development
 
 ## Core Capabilities
 
@@ -49,10 +58,12 @@ Roadmap tracking:
 - Session export/replay for reproducible execution history.
 
 ### Developer Experience
-- Textual-based TUI with settings, options, and theme controls.
+- **Rust ratatui TUI** (primary) — 14 interactive feature panels: ByteBot, Collaboration, Voice, Security, Profiler, etc.
+- **Python Textual TUI** (legacy) — 31 widget panels with settings, options, and theme controls.
 - Command assistance and terminal-safe generation workflows.
 - Side-by-side diff inspection and hunk-level review flows.
 - Feature/plugin architecture for modular growth.
+- Rich CLI with `server`, `analyze`, and `plugin` subcommands.
 
 ### Reliability + Ops
 - Hybrid cache (memory + disk) with compression and eviction.
@@ -126,21 +137,29 @@ For expanded connectivity and deployment diagrams, see [project details.md](proj
 
 ## Install
 
-### Option A: Python package
+### Option A: Rust binary (recommended — fastest, no dependencies)
+
+```bash
+# Build from source (requires Rust toolchain)
+cd rust && cargo build --release -p xencode-cli
+./target/release/xencode --help
+
+# Or download a prebuilt binary from GitHub Releases
+```
+
+Requirements:
+- Rust 1.75+ (for building from source)
+- Ollama (for local AI models)
+
+### Option B: Python package
 
 ```bash
 pip install xencode
 ```
 
-### Option B: npm wrapper
-
-```bash
-npm install -g github:sreevarshan-xenoz/xencode
-```
-
 Requirements:
-- Node.js 18+
-- Python 3.8+ in `PATH`
+- Python 3.8+
+- Ollama (for local AI models)
 
 ### Option C: Source setup (recommended for contributors)
 
@@ -149,49 +168,67 @@ git clone https://github.com/sreevarshan-xenoz/xencode
 cd xencode
 pip install -e .
 pip install -r requirements.txt
+
+# Optional: build Rust binary too
+cd rust && cargo build --release -p xencode-cli
 ```
 
 ## Quick Start (5 minutes)
 
 ```bash
-# 1) Verify CLI
+# 1) Verify CLI (Rust binary)
 xencode --help
 
 # 2) Start TUI (default app experience)
-xencode
+xencode tui
 
 # 3) Run a quick query
 xencode query "Explain clean architecture briefly"
 
-# 4) Start an agentic coding session
-xencode agentic --model qwen3:4b
+# 4) Analyze code for issues and vulnerabilities
+xencode analyze src/
 
-# 5) Check local model availability
-xencode ollama list --refresh
+# 5) Start the collaboration server
+xencode server --port 8765
+
+# 6) Manage plugins
+xencode plugin list
+xencode plugin install ./my-plugin/
+
+# 7) Check local model availability
+xencode models list
 ```
 
 TUI productivity shortcuts:
-- `Ctrl+,` opens settings
-- `Ctrl+O` opens options panel
+- `Tab` cycle panels, `Esc` close overlay, `Ctrl+F` open Feature Navigator
+- 14 interactive panels: ByteBot, Collaboration Hub, Voice Interface, Security Auditor, etc.
 
 ## Command Reference
 
 | Area | Command | Purpose |
 |---|---|---|
-| General | `xencode` | Launch default TUI experience |
-| General | `xencode version` | Show installed version |
+| General | `xencode` | Launch Rust TUI (default experience) |
+| General | `xencode --version` | Show installed version |
 | System | `xencode status` | Show runtime status summary |
 | System | `xencode health` | Run health checks |
 | Query | `xencode query "..."` | Run ensemble query |
-| Agentic | `xencode agentic` | Start interactive agentic session |
-| Ollama | `xencode ollama list --refresh` | Refresh/list local models |
-| Ollama | `xencode ollama pull <model>` | Pull model from registry |
-| Ollama | `xencode ollama benchmark <model>` | Benchmark model performance |
-| Vault | `xencode vault init` | Initialize an encrypted credential vault |
-| Vault | `xencode vault migrate` | Migrate plaintext API keys from config into the vault |
-| Vault | `xencode vault status` | Show vault path, credential count, encryption status |
+| Scan | `xencode scan . --max-depth 2` | Scan workspace |
+| Config | `xencode config show` | Show runtime config |
+| Models | `xencode models list` | List available models with health |
+| Memory | `xencode memory list` | List conversation sessions |
+| Cache | `xencode cache stats` | Show cache statistics |
+| **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
+| **Analyze** | `xencode analyze <path>` | Code analysis + security vulnerability scan |
+| **Plugin** | `xencode plugin list` | List installed plugins |
+| **Plugin** | `xencode plugin install <path>` | Install a plugin |
+| **Plugin** | `xencode plugin remove <name>` | Remove a plugin |
+| Ollama | `xencode models list` | List/refresh local models |
+| Vault | `xencode vault init` | Initialize encrypted credential vault |
+| Vault | `xencode vault migrate` | Migrate plaintext API keys into the vault |
+| Vault | `xencode vault status` | Show vault path, credential count, encryption |
+| Vault | `xencode vault monitor` | Watch vault health via WebSocket (Python) |
 
-For a fuller command guide, see [CLI_GUIDE.md](CLI_GUIDE.md).
+For the Rust binary command reference, run `xencode --help`. For Python CLI, run `python xencode_cli.py --help`.
 
 ## Configuration & Model Routing
 
@@ -207,26 +244,23 @@ See:
 
 ## Testing & Quality
 
-Run from repository root:
-
+### Rust (primary)
 ```bash
-pytest
+cd rust && cargo test           # Run all 65+ Rust tests
+cargo test -p xencode-analysis-rs  # Single crate
 ```
 
-Common quality checks:
-
+### Python (legacy)
 ```bash
-ruff check .
-black --check .
-mypy xencode
+pytest                         # Run Python test suite
+ruff check .                   # Lint
+black --check .                # Format check
+mypy xencode                   # Type check
 ```
 
-Test areas currently include:
-- `tests/agentic`
-- `tests/auth`
-- `tests/features`
-- `tests/model_providers`
-- `tests/tui`
+Key test areas:
+- Rust: 65 tests across 12 crates (workspace, config, cache, memory, models, analysis, server, collaboration, plugin)
+- Python: 60+ test files across agentic, auth, features, model_providers, TUI widgets
 
 ## Deployment
 
@@ -245,14 +279,17 @@ See:
 - Product and architecture:
   - [project details.md](project%20details.md)
   - [docs/ROADMAP.md](docs/ROADMAP.md)
+  - [docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md)
+  - [docs/RUST_MIGRATION_PLAN.md](docs/RUST_MIGRATION_PLAN.md)
 - User/developer docs:
   - [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
   - [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md)
   - [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
   - [DOCUMENTATION.md](DOCUMENTATION.md)
-- Planning and execution:
-  - [NEXT_PLAN.md](NEXT_PLAN.md)
-  - [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+- Feature documentation:
+  - [docs/FEATURES.md](docs/FEATURES.md)
+  - [docs/api_documentation.md](docs/api_documentation.md)
+  - [docs/enhanced_security_scanning.md](docs/enhanced_security_scanning.md)
 
 ## Troubleshooting
 
@@ -280,13 +317,16 @@ See:
 
 ## Roadmap
 
-Near-term direction focuses on:
+### ✅ Rust migration complete — all 8 phases shipped
+
+Near-term direction:
 - Repo-wide context indexing + routing intelligence
 - Smart fallback policy governance + provider health UX
 - Multimodal inputs and secure team workflows
 
 Track progress in:
-- [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)
+- [docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md)
 
 ## Contributing
 
