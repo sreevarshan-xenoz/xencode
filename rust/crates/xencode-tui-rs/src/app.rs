@@ -206,6 +206,7 @@ pub struct App<'a> {
     pub editor: TextArea<'a>,
     pub editor_dirty: bool,
     pub git_status: HashMap<String, String>,
+    pub git_branch: String,
     pub available_models: Vec<String>,
     pub selected_model: usize,
     pub is_generating: bool,
@@ -299,6 +300,10 @@ pub struct App<'a> {
     pub lang_translate_input: String,
     pub lang_translate_output: String,
 
+    // Panel scroll state
+    pub provider_health_scroll: u16,
+    pub security_scroll: u16,
+
     // Settings interactive state
     pub settings_cursor: usize,
     pub settings_reset_active: bool,
@@ -348,6 +353,14 @@ impl<'a> App<'a> {
                 }
             }
         }
+        let git_branch = Command::new("git")
+            .args(["branch", "--show-current"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "main".to_string());
 
         let mut editor = TextArea::default();
         editor.set_line_number_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
@@ -369,6 +382,7 @@ impl<'a> App<'a> {
             editor,
             editor_dirty: false,
             git_status,
+            git_branch,
             available_models,
             selected_model,
             is_generating: false,
@@ -448,6 +462,9 @@ impl<'a> App<'a> {
             lang_supported: Vec::new(),
             lang_translate_input: String::new(),
             lang_translate_output: String::new(),
+
+            provider_health_scroll: 0,
+            security_scroll: 0,
 
             settings_cursor: 0,
             settings_reset_active: false,
@@ -547,6 +564,14 @@ impl<'a> App<'a> {
                         let fp = format!(".\\{}", path.replace("/", "\\"));
                         self.git_status.insert(fp, code.trim().to_string());
                     }
+                }
+            }
+        }
+        if let Ok(output) = Command::new("git").args(["branch", "--show-current"]).output() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                let branch = s.trim().to_string();
+                if !branch.is_empty() {
+                    self.git_branch = branch;
                 }
             }
         }
@@ -1321,6 +1346,44 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.focus = if app.focus == FocusArea::Settings { FocusArea::ChatInput } else { FocusArea::Settings };
                                 continue;
                             }
+                            KeyCode::Char('b') => {
+                                if !app.bytebot_running && app.focus != FocusArea::ByteBotPanel {
+                                    app.focus = FocusArea::ByteBotPanel;
+                                } else if app.focus == FocusArea::ByteBotPanel {
+                                    app.focus = FocusArea::ChatInput;
+                                }
+                                continue;
+                            }
+                            KeyCode::Char('d') => {
+                                app.focus = if app.focus == FocusArea::PerformanceDashboard { FocusArea::ChatInput } else { FocusArea::PerformanceDashboard };
+                                continue;
+                            }
+                            KeyCode::Char('p') => {
+                                app.focus = if app.focus == FocusArea::ProjectAnalyzer { FocusArea::ChatInput } else { FocusArea::ProjectAnalyzer };
+                                continue;
+                            }
+                            KeyCode::Char('e') => {
+                                app.focus = if app.focus == FocusArea::FileExplorer { FocusArea::ChatInput } else { FocusArea::FileExplorer };
+                                continue;
+                            }
+                            KeyCode::Char('w') => {
+                                // Close current panel and return to ChatInput
+                                match app.focus {
+                                    FocusArea::ByteBotPanel | FocusArea::CollaborationHub |
+                                    FocusArea::VoiceInterface | FocusArea::TerminalAssistant |
+                                    FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
+                                    FocusArea::CustomModels | FocusArea::LearningMode |
+                                    FocusArea::MultiLanguage | FocusArea::ProviderHealth |
+                                    FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
+                                    FocusArea::GitCommit | FocusArea::CodeReview |
+                                    FocusArea::FeatureNavigator | FocusArea::ModelSelector |
+                                    FocusArea::Settings => {
+                                        app.focus = FocusArea::ChatInput;
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
                             KeyCode::Char('r') => {
                                 app.focus = if app.focus == FocusArea::CodeReview { FocusArea::ChatInput } else { FocusArea::CodeReview };
                                 continue;
@@ -1373,6 +1436,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::ModelSelector => { if app.selected_model > 0 { app.selected_model -= 1; } }
                                     FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(1); }
                                     FocusArea::FeatureNavigator => { if app.feature_nav_selected > 0 { app.feature_nav_selected -= 1; } }
+                                    FocusArea::ProviderHealth => { if app.provider_health_scroll > 0 { app.provider_health_scroll -= 1; } }
+                                    FocusArea::SecurityAuditor => { if app.security_scroll > 0 { app.security_scroll -= 1; } }
                                     FocusArea::CodeEditor => { app.editor.scroll((-1, 0)); }
                                     FocusArea::CustomModels => {
                                         if app.models_selected > 0 { app.models_selected -= 1; }
@@ -1395,6 +1460,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::FeatureNavigator => {
                                         if app.feature_nav_selected + 1 < FEATURE_LIST.len() { app.feature_nav_selected += 1; }
                                     }
+                                    FocusArea::ProviderHealth => { app.provider_health_scroll += 1; }
+                                    FocusArea::SecurityAuditor => { app.security_scroll += 1; }
                                     FocusArea::CodeEditor => { app.editor.scroll((1, 0)); }
                                     FocusArea::CustomModels => {
                                         if app.models_selected + 1 < app.models_profiles.len() { app.models_selected += 1; }
@@ -1702,6 +1769,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     if app.selected_file >= 3 { app.selected_file -= 3; }
                                     else { app.selected_file = 0; }
                                 }
+                                FocusArea::FeatureNavigator => {
+                                    if app.feature_nav_selected >= 3 { app.feature_nav_selected -= 3; }
+                                    else { app.feature_nav_selected = 0; }
+                                }
+                                FocusArea::ProviderHealth => {
+                                    if app.provider_health_scroll >= 3 { app.provider_health_scroll -= 3; }
+                                    else { app.provider_health_scroll = 0; }
+                                }
+                                FocusArea::SecurityAuditor => {
+                                    if app.security_scroll >= 3 { app.security_scroll -= 3; }
+                                    else { app.security_scroll = 0; }
+                                }
                                 _ => {}
                             }
                         }
@@ -1712,6 +1791,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 FocusArea::FileExplorer => {
                                     app.selected_file = (app.selected_file + 3).min(app.file_tree.len().saturating_sub(1));
                                 }
+                                FocusArea::FeatureNavigator => {
+                                    app.feature_nav_selected = (app.feature_nav_selected + 3).min(FEATURE_LIST.len().saturating_sub(1));
+                                }
+                                FocusArea::ProviderHealth => { app.provider_health_scroll += 3; }
+                                FocusArea::SecurityAuditor => { app.security_scroll += 3; }
                                 _ => {}
                             }
                         }
