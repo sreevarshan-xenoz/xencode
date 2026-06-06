@@ -377,29 +377,170 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(60, 50, area);
+    let popup_area = centered_rect(65, 75, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" ⚙️  Settings (Esc to close) ");
+        .title(" ⚙️  Settings (↑↓ select, ←→ change, Enter save, Esc close) ");
 
-    let openrouter_status = if app.config.api_keys.openrouter_api_key.is_some() { "✅ Set" } else { "❌ Not Set" };
-    let settings_text = format!(
-        "\n  Theme:           {}\n  Default Model:   {}\n  Ollama URL:      {}\n  Cache Enabled:   {}\n  Memory Enabled:  {}\n  Memory Items:    {}\n  Timeout:         {}s\n\n  OpenRouter Key:  {}\n\n  Edit ~/.xencode/config.json to modify settings.",
-        app.config.active_theme, app.config.default_model, app.config.ollama_url,
-        app.config.cache_enabled, app.config.memory_enabled,
-        app.config.max_memory_items, app.config.response_timeout,
-        openrouter_status
-    );
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
 
-    let text = Paragraph::new(settings_text)
-        .block(block)
-        .style(Style::default().fg(app.theme.fg))
-        .wrap(Wrap { trim: false });
-    f.render_widget(text, popup_area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(15),
+            Constraint::Min(5),
+            Constraint::Length(8),
+        ])
+        .split(inner);
+
+    // ── Settings List ──────────────────────────────────────────────────────
+    let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
+    let theme_pos = themes.iter().position(|t| *t == app.config.active_theme).unwrap_or(0);
+    let theme_indicators: String = (0..4).map(|i| if i == theme_pos { "●" } else { "○" }).collect::<Vec<_>>().join(" ");
+
+    let cache_str = if app.config.cache_enabled { "✅ Enabled".to_string() } else { "❌ Disabled".to_string() };
+    let memory_str = if app.config.memory_enabled { "✅ Enabled".to_string() } else { "❌ Disabled".to_string() };
+    let cache_size_str = format!("{} entries", app.config.max_cache_size);
+    let memory_items_str = format!("{} entries", app.config.max_memory_items);
+    let timeout_str = format!("{}s", app.config.response_timeout);
+    let theme_str = format!("{}  [{}]", app.config.active_theme, theme_indicators);
+
+    let url_str = if app.settings_url_editing {
+        format!("{}|", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        app.config.ollama_url.clone()
+    };
+
+    let reset_label = if app.settings_reset_active { "✅ Reset to defaults!" } else { "⚠️  Reset to defaults" };
+
+    let settings_values: [(&str, &str); 8] = [
+        ("Theme           ", &theme_str),
+        ("Cache Enabled   ", &cache_str),
+        ("Memory Enabled  ", &memory_str),
+        ("Max Cache Size  ", &cache_size_str),
+        ("Memory Items    ", &memory_items_str),
+        ("Response Timeout", &timeout_str),
+        ("Ollama URL      ", &url_str),
+        ("Factory Reset   ", reset_label),
+    ];
+
+    let sections: [(usize, usize, &str); 5] = [
+        (0, 1, "  Display"),
+        (1, 3, "  Performance"),
+        (3, 6, "  Limits"),
+        (6, 7, "  Connection"),
+        (7, 8, "  Actions"),
+    ];
+
+    let mut settings_lines: Vec<Line> = Vec::new();
+    for &(start, end, section_name) in &sections {
+        settings_lines.push(Line::from(Span::styled(
+            section_name,
+            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        )));
+        settings_lines.push(Line::from(""));
+
+        for idx in start..end {
+            let (label, value) = settings_values[idx];
+            let is_selected = app.settings_cursor == idx;
+            let style = if is_selected {
+                Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            let pointer = if is_selected { " ▶" } else { "  " };
+            let is_reset = idx == 7;
+            let is_url_item = idx == 6;
+            let value_color = if is_reset && is_selected {
+                ratatui::style::Color::Red
+            } else if is_reset {
+                app.theme.message_system
+            } else if is_url_item && app.settings_url_editing {
+                ratatui::style::Color::Yellow
+            } else {
+                app.theme.accent
+            };
+            settings_lines.push(Line::from(vec![
+                Span::styled(format!("{}{}", pointer, label), style),
+                Span::styled(value, Style::default().fg(value_color)),
+            ]));
+        }
+        settings_lines.push(Line::from(""));
+    }
+
+    let settings_para = Paragraph::new(settings_lines).style(Style::default().fg(app.theme.fg));
+    f.render_widget(settings_para, chunks[0]);
+
+    // ── Provider Status ────────────────────────────────────────────────────
+    let mut provider_lines: Vec<Line> = Vec::new();
+    provider_lines.push(Line::from(Span::styled(
+        "  API Providers",
+        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+    )));
+    provider_lines.push(Line::from(""));
+
+    let checks: [(&str, bool, &str); 4] = [
+        ("Ollama   ", true, &app.config.ollama_url),
+        ("OpenRouter", app.config.api_keys.openrouter_api_key.is_some(),
+         if app.config.api_keys.openrouter_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
+        ("Gemini   ", app.config.api_keys.google_gemini_api_key.is_some(),
+         if app.config.api_keys.google_gemini_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
+        ("Qwen     ", app.config.api_keys.qwen_api_key.is_some(),
+         if app.config.api_keys.qwen_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
+    ];
+
+    for &(name, configured, detail) in &checks {
+        let icon = if configured { "✅" } else { "❌" };
+        let color = if configured { ratatui::style::Color::Green } else { ratatui::style::Color::Red };
+        provider_lines.push(Line::from(vec![
+            Span::styled(format!("  {}  {}", icon, name), Style::default().fg(color)),
+            Span::styled(detail, Style::default().fg(app.theme.message_system)),
+        ]));
+    }
+    provider_lines.push(Line::from(""));
+    provider_lines.push(Line::from(Span::styled(
+        format!("  Active Model: {}  (press 'm' to change)", app.config.default_model),
+        Style::default().fg(app.theme.message_system),
+    )));
+
+    let provider_para = Paragraph::new(provider_lines).style(Style::default().fg(app.theme.fg));
+    f.render_widget(provider_para, chunks[1]);
+
+    // ── Keyboard Shortcuts ─────────────────────────────────────────────────
+    let shortcut_lines = vec![
+        Line::from(Span::styled("  Keyboard Shortcuts", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ↑↓", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("  Navigate  ", Style::default().fg(app.theme.fg)),
+            Span::styled("←→", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("  Change value  ", Style::default().fg(app.theme.fg)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("  Save & close  ", Style::default().fg(app.theme.fg)),
+            Span::styled("Esc", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("    Close", Style::default().fg(app.theme.fg)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Ctrl+,", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("  Open/close  ", Style::default().fg(app.theme.fg)),
+            Span::styled("m", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("       Change model", Style::default().fg(app.theme.fg)),
+        ]),
+    ];
+
+    let shortcuts_para = Paragraph::new(shortcut_lines).style(Style::default().fg(app.theme.fg));
+    f.render_widget(shortcuts_para, chunks[2]);
 }
+
+
+
+
 
 fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(80, 80, area);
