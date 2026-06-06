@@ -124,6 +124,48 @@ impl ThemeColors {
                 status_bg: ratatui::style::Color::Rgb(0, 30, 0),
                 status_fg: ratatui::style::Color::Rgb(128, 255, 128),
             },
+            "dracula" => Self {
+                bg: ratatui::style::Color::Rgb(40, 42, 54),
+                fg: ratatui::style::Color::Rgb(248, 248, 242),
+                accent: ratatui::style::Color::Rgb(255, 121, 198),
+                border: ratatui::style::Color::Rgb(68, 71, 90),
+                border_active: ratatui::style::Color::Rgb(255, 121, 198),
+                highlight: ratatui::style::Color::Rgb(189, 147, 249),
+                highlight_fg: ratatui::style::Color::Rgb(40, 42, 54),
+                message_user: ratatui::style::Color::Rgb(255, 121, 198),
+                message_assistant: ratatui::style::Color::Rgb(80, 250, 123),
+                message_system: ratatui::style::Color::Rgb(98, 114, 164),
+                status_bg: ratatui::style::Color::Rgb(30, 31, 41),
+                status_fg: ratatui::style::Color::Rgb(248, 248, 242),
+            },
+            "solarized" => Self {
+                bg: ratatui::style::Color::Rgb(0, 43, 54),
+                fg: ratatui::style::Color::Rgb(131, 148, 150),
+                accent: ratatui::style::Color::Rgb(38, 139, 210),
+                border: ratatui::style::Color::Rgb(7, 54, 66),
+                border_active: ratatui::style::Color::Rgb(38, 139, 210),
+                highlight: ratatui::style::Color::Rgb(42, 161, 152),
+                highlight_fg: ratatui::style::Color::Rgb(0, 43, 54),
+                message_user: ratatui::style::Color::Rgb(38, 139, 210),
+                message_assistant: ratatui::style::Color::Rgb(133, 153, 0),
+                message_system: ratatui::style::Color::Rgb(88, 110, 117),
+                status_bg: ratatui::style::Color::Rgb(0, 30, 38),
+                status_fg: ratatui::style::Color::Rgb(147, 161, 161),
+            },
+            "nord" => Self {
+                bg: ratatui::style::Color::Rgb(46, 52, 64),
+                fg: ratatui::style::Color::Rgb(216, 222, 233),
+                accent: ratatui::style::Color::Rgb(136, 192, 208),
+                border: ratatui::style::Color::Rgb(59, 66, 82),
+                border_active: ratatui::style::Color::Rgb(136, 192, 208),
+                highlight: ratatui::style::Color::Rgb(94, 129, 172),
+                highlight_fg: ratatui::style::Color::Rgb(236, 239, 244),
+                message_user: ratatui::style::Color::Rgb(136, 192, 208),
+                message_assistant: ratatui::style::Color::Rgb(163, 190, 140),
+                message_system: ratatui::style::Color::Rgb(97, 108, 135),
+                status_bg: ratatui::style::Color::Rgb(36, 41, 51),
+                status_fg: ratatui::style::Color::Rgb(216, 222, 233),
+            },
             // "ocean" and default
             _ => Self {
                 bg: ratatui::style::Color::Rgb(11, 27, 43),
@@ -256,6 +298,13 @@ pub struct App<'a> {
     pub lang_supported: Vec<(String, String)>,  // (language, status)
     pub lang_translate_input: String,
     pub lang_translate_output: String,
+
+    // Settings interactive state
+    pub settings_cursor: usize,
+    pub settings_reset_active: bool,
+    pub settings_url_editing: bool,
+    pub settings_url_buffer: String,
+    pub settings_url_cursor: usize,
 }
 
 impl<'a> App<'a> {
@@ -399,6 +448,12 @@ impl<'a> App<'a> {
             lang_supported: Vec::new(),
             lang_translate_input: String::new(),
             lang_translate_output: String::new(),
+
+            settings_cursor: 0,
+            settings_reset_active: false,
+            settings_url_editing: false,
+            settings_url_buffer: String::new(),
+            settings_url_cursor: 0,
         };
 
         // Seed initial health entries for configured providers
@@ -1311,6 +1366,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
                                 match app.focus {
+                                    FocusArea::Settings => {
+                                        if app.settings_cursor > 0 { app.settings_cursor -= 1; }
+                                    }
                                     FocusArea::FileExplorer => { if app.selected_file > 0 { app.selected_file -= 1; } }
                                     FocusArea::ModelSelector => { if app.selected_model > 0 { app.selected_model -= 1; } }
                                     FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(1); }
@@ -1324,6 +1382,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 match app.focus {
+                                    FocusArea::Settings => {
+                                        if app.settings_cursor + 1 < 8 { app.settings_cursor += 1; }
+                                    }
                                     FocusArea::FileExplorer => {
                                         if app.selected_file + 1 < app.file_tree.len() { app.selected_file += 1; }
                                     }
@@ -1414,6 +1475,31 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             app.start_multi_language();
                                         }
                                     }
+                                    FocusArea::Settings => {
+                                        if app.settings_url_editing {
+                                            // Commit URL edit
+                                            app.config.ollama_url = app.settings_url_buffer.clone();
+                                            app.settings_url_editing = false;
+                                            let _ = app.config.save();
+                                        } else if app.settings_cursor == 7 {
+                                            // Start URL editing
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app.config.ollama_url.clone();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 6 {
+                                            // Factory reset
+                                            let defaults = XencodeConfig::default();
+                                            app.config = defaults;
+                                            app.theme = ThemeColors::get(&app.config.active_theme);
+                                            app.settings_reset_active = true;
+                                            app.settings_cursor = 0;
+                                            let _ = app.config.save();
+                                            app.focus = FocusArea::ChatInput;
+                                        } else {
+                                            let _ = app.config.save();
+                                            app.focus = FocusArea::ChatInput;
+                                        }
+                                    }
                                     FocusArea::FeatureNavigator => {
                                         let target = app.navigate_feature(app.feature_nav_selected);
                                         app.focus = target;
@@ -1440,7 +1526,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => {
                                 match app.focus {
-                                    FocusArea::ModelSelector | FocusArea::Settings | FocusArea::CodeReview |
+                                    FocusArea::Settings => {
+                                        if app.settings_url_editing {
+                                            app.settings_url_editing = false;
+                                        } else {
+                                            app.settings_reset_active = false;
+                                            app.focus = FocusArea::ChatInput;
+                                        }
+                                    }
+                                    FocusArea::ModelSelector | FocusArea::CodeReview |
                                     FocusArea::PerformanceDashboard | FocusArea::ProviderHealth | FocusArea::ProjectAnalyzer | FocusArea::GitCommit |
                                     FocusArea::FeatureNavigator | FocusArea::ByteBotPanel | FocusArea::CollaborationHub |
                                     FocusArea::VoiceInterface | FocusArea::TerminalAssistant | FocusArea::SecurityAuditor |
@@ -1454,7 +1548,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 }
                             }
                             KeyCode::Char(c) => {
-                                if app.focus == FocusArea::GitCommit {
+                                if app.focus == FocusArea::Settings && app.settings_url_editing {
+                                    app.settings_url_buffer.insert(app.settings_url_cursor, c);
+                                    app.settings_url_cursor += 1;
+                                } else if app.focus == FocusArea::GitCommit {
                                     app.commit_message.insert(app.commit_cursor, c);
                                     app.commit_cursor += 1;
                                 } else if app.focus == FocusArea::ByteBotPanel {
@@ -1465,7 +1562,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 }
                             }
                             KeyCode::Backspace => {
-                                if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 {
+                                if app.focus == FocusArea::Settings && app.settings_url_editing && app.settings_url_cursor > 0 {
+                                    app.settings_url_cursor -= 1;
+                                    app.settings_url_buffer.remove(app.settings_url_cursor);
+                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 {
                                     app.commit_cursor -= 1;
                                     app.commit_message.remove(app.commit_cursor);
                                 } else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor > 0 {
@@ -1474,11 +1574,67 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 }
                             }
                             KeyCode::Left => {
-                                if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 { app.commit_cursor -= 1; }
+                                if app.focus == FocusArea::Settings {
+                                    if app.settings_url_editing && app.settings_cursor == 7 && app.settings_url_cursor > 0 {
+                                        app.settings_url_cursor -= 1;
+                                    } else if !app.settings_url_editing {
+                                        match app.settings_cursor {
+                                            0 => {
+                                                let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
+                                                if let Some(pos) = themes.iter().position(|t| *t == app.config.active_theme) {
+                                                    app.config.active_theme = themes[(pos + themes.len() - 1) % themes.len()].to_string();
+                                                    app.theme = ThemeColors::get(&app.config.active_theme);
+                                                }
+                                            }
+                                            1 => app.config.cache_enabled = !app.config.cache_enabled,
+                                            2 => app.config.memory_enabled = !app.config.memory_enabled,
+                                            3 => { if app.config.max_cache_size >= 20 { app.config.max_cache_size -= 10; } }
+                                            4 => { if app.config.max_memory_items >= 10 { app.config.max_memory_items -= 5; } }
+                                            5 => { if app.config.response_timeout >= 10 { app.config.response_timeout -= 5; } }
+                                            7 => {
+                                                let defaults = XencodeConfig::default();
+                                                app.config = defaults;
+                                                app.theme = ThemeColors::get(&app.config.active_theme);
+                                                app.settings_reset_active = true;
+                                                app.settings_url_editing = false;
+                                                app.settings_url_buffer.clear();
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 { app.commit_cursor -= 1; }
                                 else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor > 0 { app.bytebot_cursor -= 1; }
                             }
                             KeyCode::Right => {
-                                if app.focus == FocusArea::GitCommit && app.commit_cursor < app.commit_message.len() { app.commit_cursor += 1; }
+                                if app.focus == FocusArea::Settings {
+                                    if app.settings_url_editing && app.settings_cursor == 7 && app.settings_url_cursor < app.settings_url_buffer.len() {
+                                        app.settings_url_cursor += 1;
+                                    } else if !app.settings_url_editing {
+                                        match app.settings_cursor {
+                                            0 => {
+                                                let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
+                                                if let Some(pos) = themes.iter().position(|t| *t == app.config.active_theme) {
+                                                    app.config.active_theme = themes[(pos + 1) % themes.len()].to_string();
+                                                    app.theme = ThemeColors::get(&app.config.active_theme);
+                                                }
+                                            }
+                                            1 => app.config.cache_enabled = !app.config.cache_enabled,
+                                            2 => app.config.memory_enabled = !app.config.memory_enabled,
+                                            3 => app.config.max_cache_size = app.config.max_cache_size.saturating_add(10).min(1000),
+                                            4 => app.config.max_memory_items = app.config.max_memory_items.saturating_add(5).min(500),
+                                            5 => app.config.response_timeout = app.config.response_timeout.saturating_add(5).min(300),
+                                            7 => {
+                                                let defaults = XencodeConfig::default();
+                                                app.config = defaults;
+                                                app.theme = ThemeColors::get(&app.config.active_theme);
+                                                app.settings_reset_active = true;
+                                                app.settings_url_editing = false;
+                                                app.settings_url_buffer.clear();
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor < app.commit_message.len() { app.commit_cursor += 1; }
                                 else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor < app.bytebot_command.len() { app.bytebot_cursor += 1; }
                             }
                             _ => {}
