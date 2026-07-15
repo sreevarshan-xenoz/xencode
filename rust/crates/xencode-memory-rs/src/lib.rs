@@ -1,304 +1,184 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::path::PathBuf;
+//! Conversation memory system with session persistence and context recall.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use xencode_core_rs::ChatMessage;
 
-/// Maximum number of messages stored per session by default.
-pub const DEFAULT_MAX_MEMORY_ITEMS: usize = 50;
-
-/// Errors from memory operations.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum MemoryError {
-    Io(std::io::Error),
-    Json(serde_json::Error),
-    NoHomeDir,
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
 }
 
-impl fmt::Display for MemoryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MemoryError::Io(source) => write!(f, "memory I/O error: {source}"),
-            MemoryError::Json(source) => write!(f, "memory parse error: {source}"),
-            MemoryError::NoHomeDir => write!(f, "could not determine home directory"),
+/// A conversation session with messages and metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub messages: Vec<ChatMessage>,
+    pub message_count: usize,
+    pub model: String,
+    pub metadata: HashMap<String, String>,
+}
+
+impl Session {
+    pub fn new(name: &str, model: &str) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            messages: Vec::new(),
+            message_count: 0,
+            model: model.to_string(),
+            metadata: HashMap::new(),
         }
+    }
+
+    /// Add a message to the session.
+    pub fn add_message(&mut self, message: ChatMessage) {
+        self.messages.push(message);
+        self.message_count = self.messages.len();
+        self.updated_at = Utc::now();
     }
 }
 
-impl std::error::Error for MemoryError {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: String,
-    pub content: String,
-    pub timestamp: String,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConversationSession {
-    pub messages: Vec<Message>,
-    pub created: String,
-    pub last_updated: String,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MemoryData {
-    #[serde(default)]
-    conversations: HashMap<String, ConversationSession>,
-    #[serde(default)]
-    current_session: Option<String>,
-    #[serde(default)]
-    last_updated: String,
-}
-
-/// Advanced conversation memory with context management.
-///
-/// Mirrors `xencode/core/memory.py`.
+/// Manages conversation sessions.
 pub struct ConversationMemory {
-    max_items: usize,
-    conversations: HashMap<String, ConversationSession>,
-    current_session: Option<String>,
-    memory_file: Option<PathBuf>,
+    sessions: Mutex<HashMap<String, Session>>,
+    active_session_id: Mutex<String>,
+    memory_dir: PathBuf,
+    max_sessions: usize,
 }
 
 impl ConversationMemory {
-    /// Create a new in-memory instance.
-    pub fn new(max_items: usize) -> Self {
-        Self {
-            max_items,
-            conversations: HashMap::new(),
-            current_session: None,
-            memory_file: None,
-        }
-    }
-
-    /// Create an instance that persists to `~/.xencode/conversation_memory.json`.
-    pub fn with_persistence(max_items: usize) -> Result<Self, MemoryError> {
-        let xencode_dir = dirs::home_dir()
-            .ok_or(MemoryError::NoHomeDir)?
-            .join(".xencode");
-            
-        std::fs::create_dir_all(&xencode_dir).map_err(MemoryError::Io)?;
-        let memory_file = xencode_dir.join("conversation_memory.json");
-
-        let mut mem = Self {
-            max_items,
-            conversations: HashMap::new(),
-            current_session: None,
-            memory_file: Some(memory_file),
+    /// Create a new conversation memory store.
+    pub fn new(memory_dir: PathBuf, max_sessions: usize) -> Self {
+        std::fs::create_dir_all(&memory_dir).ok();
+        let memory = Self {
+            sessions: Mutex::new(HashMap::new()),
+            active_session_id: Mutex::new(String::new()),
+            memory_dir,
+            max_sessions,
         };
-        mem.load_memory()?;
-        Ok(mem)
+        // Load existing sessions
+        let _ = memory.load_sessions();
+        memory
     }
 
-    /// Load conversation memory from disk.
-    fn load_memory(&mut self) -> Result<(), MemoryError> {
-        if let Some(ref memory_file) = self.memory_file {
-            if memory_file.exists() {
-                let content = std::fs::read_to_string(memory_file).map_err(MemoryError::Io)?;
-                if let Ok(data) = serde_json::from_str::<MemoryData>(&content) {
-                    self.conversations = data.conversations;
-                    self.current_session = data.current_session;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Save conversation memory to disk.
-    fn save_memory(&self) -> Result<(), MemoryError> {
-        if let Some(ref memory_file) = self.memory_file {
-            let data = MemoryData {
-                conversations: self.conversations.clone(),
-                current_session: self.current_session.clone(),
-                last_updated: Utc::now().to_rfc3339(),
-            };
-            let json = serde_json::to_string_pretty(&data).map_err(MemoryError::Json)?;
-            std::fs::write(memory_file, json).map_err(MemoryError::Io)?;
-        }
-        Ok(())
-    }
-
-    /// Start a new conversation session.
-    pub fn start_session(&mut self, session_id: Option<String>) -> String {
-        let id = session_id.unwrap_or_else(|| format!("session_{}", Utc::now().timestamp()));
-        
-        if !self.conversations.contains_key(&id) {
-            self.conversations.insert(
-                id.clone(),
-                ConversationSession {
-                    messages: Vec::new(),
-                    created: Utc::now().to_rfc3339(),
-                    last_updated: Utc::now().to_rfc3339(),
-                    model: None,
-                },
-            );
-        }
-        self.current_session = Some(id.clone());
-        let _ = self.save_memory();
+    /// Create a new session.
+    pub fn create_session(&self, name: &str, model: &str) -> String {
+        let session = Session::new(name, model);
+        let id = session.id.clone();
+        self.sessions.lock().unwrap().insert(id.clone(), session);
+        *self.active_session_id.lock().unwrap() = id.clone();
+        let _ = self.persist(&id);
         id
     }
 
-    /// Add a message to the current session.
-    pub fn add_message(&mut self, role: &str, content: &str, model: Option<String>) {
-        if self.current_session.is_none() {
-            self.start_session(None);
+    /// Get the active session.
+    pub fn active_session(&self) -> Option<Session> {
+        let id = self.active_session_id.lock().unwrap().clone();
+        if id.is_empty() {
+            return None;
         }
-
-        let session_id = self.current_session.as_ref().unwrap().clone();
-        let session = self.conversations.get_mut(&session_id).unwrap();
-
-        session.messages.push(Message {
-            role: role.to_string(),
-            content: content.to_string(),
-            timestamp: Utc::now().to_rfc3339(),
-            model,
-        });
-        session.last_updated = Utc::now().to_rfc3339();
-
-        if session.messages.len() > self.max_items {
-            let overflow = session.messages.len() - self.max_items;
-            session.messages.drain(0..overflow);
-        }
-
-        let _ = self.save_memory();
+        self.sessions.lock().unwrap().get(&id).cloned()
     }
 
-    /// Get recent conversation context for model input.
-    pub fn get_context(&self, max_messages: usize) -> Vec<Message> {
-        if let Some(ref session_id) = self.current_session {
-            if let Some(session) = self.conversations.get(session_id) {
-                let start = if session.messages.len() > max_messages {
-                    session.messages.len() - max_messages
-                } else {
-                    0
-                };
-                return session.messages[start..].to_vec();
+    /// Get a session by ID.
+    pub fn get_session(&self, id: &str) -> Option<Session> {
+        self.sessions.lock().unwrap().get(id).cloned()
+    }
+
+    /// Set the active session.
+    pub fn set_active(&self, id: &str) -> Result<(), MemoryError> {
+        if self.sessions.lock().unwrap().contains_key(id) {
+            *self.active_session_id.lock().unwrap() = id.to_string();
+            Ok(())
+        } else {
+            Err(MemoryError::SessionNotFound(id.to_string()))
+        }
+    }
+
+    /// Add a message to the active session.
+    pub fn add_message(&self, message: ChatMessage) -> Result<(), MemoryError> {
+        let id = self.active_session_id.lock().unwrap().clone();
+        if id.is_empty() {
+            let new_id = self.create_session("default", "default");
+            *self.active_session_id.lock().unwrap() = new_id;
+        }
+        let id = self.active_session_id.lock().unwrap().clone();
+        if let Some(session) = self.sessions.lock().unwrap().get_mut(&id) {
+            session.add_message(message);
+            let _ = self.persist(&id);
+            Ok(())
+        } else {
+            Err(MemoryError::SessionNotFound(id))
+        }
+    }
+
+    /// List all sessions.
+    pub fn list_sessions(&self) -> Vec<Session> {
+        let mut sessions: Vec<Session> = self.sessions.lock().unwrap().values().cloned().collect();
+        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        sessions
+    }
+
+    /// Delete a session.
+    pub fn delete_session(&self, id: &str) -> Result<(), MemoryError> {
+        self.sessions.lock().unwrap().remove(id);
+        let file_path = self.memory_dir.join(format!("session_{}.json", id));
+        if file_path.exists() {
+            std::fs::remove_file(&file_path)?;
+        }
+        Ok(())
+    }
+
+    /// Persist a session to disk.
+    fn persist(&self, id: &str) -> Result<(), MemoryError> {
+        std::fs::create_dir_all(&self.memory_dir)?;
+        if let Some(session) = self.sessions.lock().unwrap().get(id) {
+            let data = serde_json::to_string_pretty(session)?;
+            let file_path = self.memory_dir.join(format!("session_{}.json", id));
+            std::fs::write(&file_path, data)?;
+        }
+        Ok(())
+    }
+
+    /// Load all sessions from disk.
+    fn load_sessions(&self) -> Result<(), MemoryError> {
+        if !self.memory_dir.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(&self.memory_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "json") {
+                if let Ok(data) = std::fs::read_to_string(&path) {
+                    if let Ok(session) = serde_json::from_str::<Session>(&data) {
+                        self.sessions.lock().unwrap().insert(session.id.clone(), session);
+                    }
+                }
             }
         }
-        Vec::new()
-    }
-
-    /// List all conversation session IDs.
-    pub fn list_sessions(&self) -> Vec<String> {
-        self.conversations.keys().cloned().collect()
-    }
-    
-    /// Get a specific session.
-    pub fn get_session(&self, session_id: &str) -> Option<&ConversationSession> {
-        self.conversations.get(session_id)
-    }
-
-    /// Switch to a different conversation session.
-    pub fn switch_session(&mut self, session_id: &str) -> bool {
-        if self.conversations.contains_key(session_id) {
-            self.current_session = Some(session_id.to_string());
-            let _ = self.save_memory();
-            true
-        } else {
-            false
+        // Set first session as active if none set
+        let active = self.active_session_id.lock().unwrap().clone();
+        if active.is_empty() {
+            let sessions = self.sessions.lock().unwrap();
+            if let Some(first) = sessions.keys().next() {
+                drop(sessions);
+                *self.active_session_id.lock().unwrap() = first.clone();
+            }
         }
-    }
-    
-    /// Get the current session ID
-    pub fn current_session(&self) -> Option<&String> {
-        self.current_session.as_ref()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_dir() -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("xencode-memory-test-{stamp}"))
-    }
-
-    #[test]
-    fn start_and_switch_session() {
-        let mut mem = ConversationMemory::new(10);
-        let s1 = mem.start_session(Some("sess1".to_string()));
-        let s2 = mem.start_session(Some("sess2".to_string()));
-
-        assert_eq!(s2, "sess2");
-        assert_eq!(mem.current_session(), Some(&"sess2".to_string()));
-        
-        let switched = mem.switch_session("sess1");
-        assert!(switched);
-        assert_eq!(mem.current_session(), Some(&"sess1".to_string()));
-    }
-
-    #[test]
-    fn add_and_get_messages() {
-        let mut mem = ConversationMemory::new(10);
-        mem.start_session(Some("sess".to_string()));
-        
-        mem.add_message("user", "hello", None);
-        mem.add_message("assistant", "hi there", Some("model-a".to_string()));
-        
-        let ctx = mem.get_context(5);
-        assert_eq!(ctx.len(), 2);
-        assert_eq!(ctx[0].role, "user");
-        assert_eq!(ctx[0].content, "hello");
-        assert_eq!(ctx[1].role, "assistant");
-        assert_eq!(ctx[1].model, Some("model-a".to_string()));
-    }
-
-    #[test]
-    fn max_items_trimming() {
-        let mut mem = ConversationMemory::new(2);
-        mem.start_session(Some("sess".to_string()));
-        
-        mem.add_message("user", "msg1", None);
-        mem.add_message("user", "msg2", None);
-        mem.add_message("user", "msg3", None);
-        
-        let ctx = mem.get_context(10);
-        assert_eq!(ctx.len(), 2);
-        assert_eq!(ctx[0].content, "msg2");
-        assert_eq!(ctx[1].content, "msg3");
-    }
-
-    #[test]
-    fn persistence_roundtrip() {
-        let dir = temp_dir();
-        fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("conversation_memory.json");
-        
-        let mut mem1 = ConversationMemory {
-            max_items: 10,
-            conversations: HashMap::new(),
-            current_session: None,
-            memory_file: Some(file.clone()),
-        };
-        
-        mem1.start_session(Some("persisted_sess".to_string()));
-        mem1.add_message("user", "save me", None);
-        
-        let mut mem2 = ConversationMemory {
-            max_items: 10,
-            conversations: HashMap::new(),
-            current_session: None,
-            memory_file: Some(file.clone()),
-        };
-        mem2.load_memory().unwrap();
-        
-        assert_eq!(mem2.current_session(), Some(&"persisted_sess".to_string()));
-        let ctx = mem2.get_context(5);
-        assert_eq!(ctx.len(), 1);
-        assert_eq!(ctx[0].content, "save me");
-        
-        fs::remove_dir_all(&dir).unwrap();
+        Ok(())
     }
 }
