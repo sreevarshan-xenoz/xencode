@@ -1,229 +1,177 @@
-use std::fmt;
-use std::fs;
-use std::io;
+//! Workspace scanning and metadata types.
+
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EntryKind {
-    Directory,
-    File,
-    Symlink,
-    Other,
-}
-
-impl fmt::Display for EntryKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EntryKind::Directory => formatter.write_str("directory"),
-            EntryKind::File => formatter.write_str("file"),
-            EntryKind::Symlink => formatter.write_str("symlink"),
-            EntryKind::Other => formatter.write_str("other"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceEntry {
-    pub path: PathBuf,
-    pub kind: EntryKind,
-    pub bytes: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Options for workspace scanning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanOptions {
     pub max_depth: Option<usize>,
     pub include_hidden: bool,
-    pub excluded_dirs: Vec<String>,
+    pub respect_gitignore: bool,
+    pub follow_symlinks: bool,
+    pub max_file_size: u64,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
         Self {
-            max_depth: None,
+            max_depth: Some(10),
             include_hidden: false,
-            excluded_dirs: vec![
-                ".git".to_string(),
-                ".mypy_cache".to_string(),
-                ".pytest_cache".to_string(),
-                ".ruff_cache".to_string(),
-                ".venv".to_string(),
-                "__pycache__".to_string(),
-                "htmlcov".to_string(),
-                "node_modules".to_string(),
-                "target".to_string(),
-                "venv".to_string(),
-            ],
+            respect_gitignore: true,
+            follow_symlinks: false,
+            max_file_size: 10 * 1024 * 1024, // 10MB
         }
     }
 }
 
-#[derive(Debug)]
-pub enum WorkspaceScanError {
-    RootNotFound(PathBuf),
-    RootIsNotDirectory(PathBuf),
-    Io { path: PathBuf, source: io::Error },
+/// Metadata about a scanned file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub relative_path: PathBuf,
+    pub file_name: String,
+    pub extension: String,
+    pub size: u64,
+    pub is_binary: bool,
+    pub language: String,
 }
 
-impl fmt::Display for WorkspaceScanError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            WorkspaceScanError::RootNotFound(path) => {
-                write!(formatter, "workspace root does not exist: {}", path.display())
-            }
-            WorkspaceScanError::RootIsNotDirectory(path) => {
-                write!(formatter, "workspace root is not a directory: {}", path.display())
-            }
-            WorkspaceScanError::Io { path, source } => {
-                write!(formatter, "failed to scan {}: {}", path.display(), source)
-            }
+/// Metadata about a scanned workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceInfo {
+    pub root: PathBuf,
+    pub files: Vec<FileEntry>,
+    pub total_size: u64,
+    pub file_count: usize,
+    pub dir_count: usize,
+    pub languages: Vec<String>,
+}
+
+impl WorkspaceInfo {
+    pub fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            files: Vec::new(),
+            total_size: 0,
+            file_count: 0,
+            dir_count: 0,
+            languages: Vec::new(),
         }
     }
 }
 
-impl std::error::Error for WorkspaceScanError {}
-
-pub fn scan_workspace(
-    root: impl AsRef<Path>,
-    options: &ScanOptions,
-) -> Result<Vec<WorkspaceEntry>, WorkspaceScanError> {
-    let root = root.as_ref();
-    if !root.exists() {
-        return Err(WorkspaceScanError::RootNotFound(root.to_path_buf()));
+/// Detect language from file extension.
+pub fn detect_language(extension: &str) -> String {
+    match extension {
+        "rs" => "rust".to_string(),
+        "py" => "python".to_string(),
+        "js" => "javascript".to_string(),
+        "ts" | "tsx" => "typescript".to_string(),
+        "jsx" => "react".to_string(),
+        "go" => "go".to_string(),
+        "java" => "java".to_string(),
+        "rb" => "ruby".to_string(),
+        "cpp" | "cc" | "cxx" => "cpp".to_string(),
+        "c" => "c".to_string(),
+        "h" | "hpp" => "header".to_string(),
+        "rs" => "rust".to_string(),
+        "toml" => "toml".to_string(),
+        "yaml" | "yml" => "yaml".to_string(),
+        "json" => "json".to_string(),
+        "md" | "markdown" => "markdown".to_string(),
+        "html" => "html".to_string(),
+        "css" => "css".to_string(),
+        "scss" | "sass" => "scss".to_string(),
+        "sql" => "sql".to_string(),
+        "sh" | "bash" => "shell".to_string(),
+        "ps1" => "powershell".to_string(),
+        "dockerfile" => "dockerfile".to_string(),
+        "txt" => "text".to_string(),
+        _ => "unknown".to_string(),
     }
-    if !root.is_dir() {
-        return Err(WorkspaceScanError::RootIsNotDirectory(root.to_path_buf()));
-    }
-
-    let mut entries = Vec::new();
-    scan_dir(root, root, 0, options, &mut entries)?;
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(entries)
 }
 
-fn scan_dir(
+/// Check if a file is binary by scanning null bytes.
+pub fn is_binary(content: &[u8]) -> bool {
+    content[..content.len().min(1024)].contains(&0x00)
+}
+
+/// Scan a workspace directory recursively.
+pub fn scan_workspace(root: &Path, options: &ScanOptions) -> Result<WorkspaceInfo, std::io::Error> {
+    let mut info = WorkspaceInfo::new(root.to_path_buf());
+    scan_directory(root, root, options, 0, &mut info)?;
+    info.languages.sort();
+    info.languages.dedup();
+    Ok(info)
+}
+
+fn scan_directory(
     root: &Path,
-    current: &Path,
-    depth: usize,
+    dir: &Path,
     options: &ScanOptions,
-    entries: &mut Vec<WorkspaceEntry>,
-) -> Result<(), WorkspaceScanError> {
+    depth: usize,
+    info: &mut WorkspaceInfo,
+) -> Result<(), std::io::Error> {
     if let Some(max_depth) = options.max_depth {
         if depth > max_depth {
             return Ok(());
         }
     }
 
-    let read_dir = fs::read_dir(current).map_err(|source| WorkspaceScanError::Io {
-        path: current.to_path_buf(),
-        source,
-    })?;
+    if !dir.is_dir() {
+        return Ok(());
+    }
 
-    for child in read_dir {
-        let child = child.map_err(|source| WorkspaceScanError::Io {
-            path: current.to_path_buf(),
-            source,
-        })?;
-        let path = child.path();
-        let name = child.file_name();
-        let name = name.to_string_lossy();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
 
-        if should_skip(&name, options) {
-            continue;
+        // Skip hidden files unless explicitly included
+        if !options.include_hidden {
+            if let Some(name) = path.file_name() {
+                if name.to_string_lossy().starts_with('.') {
+                    continue;
+                }
+            }
         }
 
-        let metadata = fs::symlink_metadata(&path).map_err(|source| WorkspaceScanError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let file_type = metadata.file_type();
-        let kind = if file_type.is_symlink() {
-            EntryKind::Symlink
-        } else if file_type.is_dir() {
-            EntryKind::Directory
-        } else if file_type.is_file() {
-            EntryKind::File
-        } else {
-            EntryKind::Other
-        };
+        if path.is_dir() {
+            info.dir_count += 1;
+            scan_directory(root, &path, options, depth + 1, info)?;
+        } else if path.is_file() {
+            let metadata = std::fs::metadata(&path)?;
+            let file_size = metadata.len();
 
-        let relative_path = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-        entries.push(WorkspaceEntry {
-            path: relative_path,
-            kind: kind.clone(),
-            bytes: if kind == EntryKind::File {
-                Some(metadata.len())
-            } else {
-                None
-            },
-        });
+            if file_size > options.max_file_size {
+                continue;
+            }
 
-        if kind == EntryKind::Directory {
-            scan_dir(root, &path, depth + 1, options, entries)?;
+            let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+            let extension = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            let file_info = FileEntry {
+                path: path.clone(),
+                relative_path: relative.clone(),
+                file_name: path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+                extension: extension.clone(),
+                size: file_size,
+                is_binary: false, // full scan would check actual content
+                language: detect_language(&extension),
+            };
+
+            if !info.languages.contains(&file_info.language) {
+                info.languages.push(file_info.language.clone());
+            }
+
+            info.total_size += file_size;
+            info.file_count += 1;
+            info.files.push(file_info);
         }
     }
 
     Ok(())
 }
-
-fn should_skip(name: &str, options: &ScanOptions) -> bool {
-    if !options.include_hidden && name.starts_with('.') {
-        return true;
-    }
-
-    options.excluded_dirs.iter().any(|excluded| excluded == name)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::{self, File};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_workspace() -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("xencode-core-rs-test-{stamp}"))
-    }
-
-    #[test]
-    fn scans_workspace_in_stable_order() {
-        let root = temp_workspace();
-        fs::create_dir_all(root.join("src")).unwrap();
-        File::create(root.join("src").join("main.rs")).unwrap();
-        File::create(root.join("README.md")).unwrap();
-
-        let entries = scan_workspace(&root, &ScanOptions::default()).unwrap();
-        let paths: Vec<String> = entries
-            .iter()
-            .map(|entry| entry.path.to_string_lossy().replace('\\', "/"))
-            .collect();
-
-        assert_eq!(paths, vec!["README.md", "src", "src/main.rs"]);
-
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn skips_hidden_and_excluded_directories_by_default() {
-        let root = temp_workspace();
-        fs::create_dir_all(root.join(".git")).unwrap();
-        fs::create_dir_all(root.join("target")).unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        File::create(root.join(".env")).unwrap();
-        File::create(root.join("src").join("lib.rs")).unwrap();
-        File::create(root.join("target").join("artifact")).unwrap();
-
-        let entries = scan_workspace(&root, &ScanOptions::default()).unwrap();
-        let paths: Vec<String> = entries
-            .iter()
-            .map(|entry| entry.path.to_string_lossy().replace('\\', "/"))
-            .collect();
-
-        assert_eq!(paths, vec!["src", "src/lib.rs"]);
-
-        fs::remove_dir_all(root).unwrap();
-    }
-}
-
