@@ -3,6 +3,7 @@
   "version": "2.1.0",
   "description": "Node wrapper for the Xencode Python CLI",
   "license": "MIT",
+  "private": true,
   "bin": {
     "xencode": "bin/xencode.js"
   },
@@ -23,5 +24,10 @@
     "cli",
     "ai",
     "developer-tools"
-  ]
+  ],
+  "scripts": {
+    "preview": "echo 'Xencode is a design/planning repository. See README.md for the full project vision.'",
+    "setup": "pip install -r requirements.txt",
+    "build": "echo 'No build step configured yet. See docs/ for the implementation plan.'"
+  }
 }
