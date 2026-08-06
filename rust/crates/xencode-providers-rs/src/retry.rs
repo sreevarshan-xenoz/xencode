@@ -110,25 +110,55 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<T, ProviderError>>,
 {
+    retry_async_with_guard(config, || false, operation).await
+}
+
+/// Execute an async operation with retry logic and an early-stop predicate.
+///
+/// Identical to [`retry_async`] except that `should_stop` is consulted before
+/// each attempt (and again before sleeping after a retriable error): when it
+/// returns `true`, retrying stops and the most recent error is returned.
+///
+/// This is for operations with irreversible side effects — e.g. a stream that
+/// has already delivered tokens to a consumer. Re-running such an operation
+/// would duplicate the side effects, so the predicate lets the caller cut the
+/// retry loop short once delivery has begun.
+pub async fn retry_async_with_guard<F, Fut, T>(
+    config: &RetryConfig,
+    mut should_stop: impl FnMut() -> bool,
+    operation: F,
+) -> Result<T, ProviderError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ProviderError>>,
+{
     let mut last_error: Option<ProviderError> = None;
 
     for attempt in 0..=config.max_retries {
+        // Belt-and-suspenders safety: the primary stop check happens in the
+        // error branch below (before sleeping), but this guard guarantees the
+        // operation is never re-invoked once the caller's side effects have
+        // begun (e.g. tokens already delivered), even if the error path were
+        // ever refactored to miss that check.
+        if attempt > 0 && should_stop() {
+            break;
+        }
+
         match operation().await {
             Ok(value) => return Ok(value),
             Err(err) => {
+                // Stop on non-retriable errors, after the final attempt, or
+                // when the caller's side effects have started — checking here
+                // (before sleeping) avoids a wasted backoff delay.
+                let retriable = is_retriable(&err);
                 last_error = Some(err);
 
-                if let Some(ref err) = last_error {
-                    if !is_retriable(err) {
-                        // Non-retriable error — bail out immediately
-                        return Err(std::mem::take(&mut last_error).unwrap());
-                    }
+                if !retriable || attempt == config.max_retries || should_stop() {
+                    break;
                 }
 
-                if attempt < config.max_retries {
-                    let delay = config.delay_for_attempt(attempt);
-                    sleep(delay).await;
-                }
+                let delay = config.delay_for_attempt(attempt);
+                sleep(delay).await;
             }
         }
     }
@@ -265,5 +295,109 @@ mod tests {
         }).await;
         assert!(result.is_err());
         assert_eq!(counter.load(Ordering::SeqCst), 3); // initial + 2 retries
+    }
+
+    // --- retry_async_with_guard (used by streaming: never re-deliver tokens) ---
+
+    /// Fast config so guard tests run quickly.
+    fn fast_config() -> RetryConfig {
+        RetryConfig {
+            max_retries: 3,
+            base_delay_ms: 1,
+            max_delay_ms: 5,
+            backoff_factor: 2.0,
+        }
+    }
+
+    /// A stream that fails midway must NOT be retried, because tokens have
+    /// already been delivered to the consumer — retrying would duplicate them.
+    #[tokio::test]
+    async fn guard_does_not_retry_after_tokens_emitted() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+        let calls = AtomicU32::new(0);
+        let emitted = AtomicBool::new(false);
+
+        let result: Result<String, ProviderError> = retry_async_with_guard(
+            &fast_config(),
+            || emitted.load(Ordering::SeqCst),
+            || async {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    emitted.store(true, Ordering::SeqCst);
+                    Err(ProviderError::Network("mid-stream disconnect".to_string()))
+                } else {
+                    unreachable!("operation must not be re-invoked after tokens emitted")
+                }
+            },
+        ).await;
+
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Before any token is emitted, transient failures should still be retried
+    /// (the guard is false, so the operation runs up to max_retries + 1 times).
+    #[tokio::test]
+    async fn guard_retries_when_nothing_emitted() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+        let calls = AtomicU32::new(0);
+        let emitted = AtomicBool::new(false);
+
+        let result: Result<String, ProviderError> = retry_async_with_guard(
+            &fast_config(),
+            || emitted.load(Ordering::SeqCst),
+            || async {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    Err(ProviderError::Network("transient".to_string()))
+                } else {
+                    Ok("success".to_string())
+                }
+            },
+        ).await;
+
+        assert_eq!(result.unwrap(), "success");
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    /// The guard is also consulted *before* sleeping after a retriable error,
+    /// so a mid-stream failure returns immediately instead of paying the
+    /// backoff delay. A 1s base delay makes a broken guard (which would sleep
+    /// first) fail this test by taking far longer than the 250ms bound.
+    #[tokio::test]
+    async fn guard_avoids_wasted_backoff_sleep() {
+        use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+        use std::time::Instant;
+
+        let emitted = AtomicBool::new(false);
+        let attempts = AtomicU32::new(0);
+
+        let cfg = RetryConfig {
+            max_retries: 3,
+            base_delay_ms: 1_000,
+            max_delay_ms: 1_000,
+            backoff_factor: 2.0,
+        };
+
+        let start = Instant::now();
+        let result: Result<String, ProviderError> = retry_async_with_guard(
+            &cfg,
+            || emitted.load(Ordering::SeqCst),
+            || async {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                emitted.store(true, Ordering::SeqCst);
+                Err(ProviderError::Network("mid-stream disconnect".to_string()))
+            },
+        ).await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert!(
+            elapsed.as_millis() < 250,
+            "expected no backoff sleep, took {elapsed:?}"
+        );
     }
 }

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use futures_util::StreamExt;
@@ -176,7 +177,10 @@ impl ProviderManager {
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
     ///
-    /// Retries on transient errors (network failures, 5xx, 429) using exponential backoff.
+    /// Retries on transient errors (network failures, 5xx, 429) using exponential
+    /// backoff — but only until the first token has been delivered to the
+    /// callback. Once streaming has started, retrying would re-deliver the same
+    /// tokens (duplicated output), so a mid-stream failure is surfaced as-is.
     pub async fn generate_stream<F>(
         &self,
         model: &str,
@@ -193,10 +197,16 @@ impl ProviderManager {
         // The mutex is locked only during the synchronous callback invocation (per token),
         // not across await points, so it remains Send-compatible.
         let cb = Mutex::new(callback);
+        // Tracks whether any token has already been delivered to the consumer.
+        // A stream must not be retried once tokens have been emitted, because a
+        // fresh attempt would re-deliver the same tokens (duplicate output).
+        let emitted = AtomicBool::new(false);
 
-        retry::retry_async(&self.retry_config, || async {
+        retry::retry_async_with_guard(&self.retry_config, || emitted.load(Ordering::SeqCst), || async {
             let cb_ref = &cb;
+            let emitted_ref = &emitted;
             self.generate_stream_inner(&model_owned, &messages_owned, |token| {
+                emitted_ref.store(true, Ordering::SeqCst);
                 let mut guard = cb_ref.lock().unwrap();
                 guard(token);
             }).await
@@ -270,6 +280,15 @@ impl ProviderManager {
             .send()
             .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
+
+        // Surface HTTP error statuses (5xx, 429) as retriable Api errors —
+        // without this, an error body fails to parse as NDJSON and the failure
+        // is silently swallowed as an empty success, defeating the retry layer.
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("Ollama {} - {}", status, msg)));
+        }
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
