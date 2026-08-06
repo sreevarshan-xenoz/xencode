@@ -1,19 +1,22 @@
 [package]
 name = "xencode-tui-rs"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "xencode_tui_rs"
+path = "src/lib.rs"
+
 [dependencies]
-xencode-core-rs = { path = "../xencode-core-rs" }
+xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-providers-rs = { path = "../xencode-providers-rs" }
-xencode-analysis-rs = { path = "../xencode-analysis-rs" }
-xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
-serde.workspace = true
-serde_json.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-thiserror.workspace = true
-chrono.workspace = true
+xencode-memory-rs = { path = "../xencode-memory-rs" }
+xencode-config-rs = { path = "../xencode-config-rs" }
+xencode-core-rs = { path = "../xencode-core-rs" }
+tokio = { version = "1", features = ["full"] }
+crossterm = "0.28"
+ratatui = "0.29"
+tui-textarea = "0.7"
+reqwest = { version = "0.12", features = ["json"] }
+fastrand = "2"

@@ -41,9 +41,9 @@ except ImportError as e:
 try:
     from .benchmark_engine import (
         BenchmarkEngine,
-        BenchmarkTask,
-        BenchmarkResult,
         BenchmarkMetrics,
+        BenchmarkResult,
+        BenchmarkTask,
         TaskType,
         create_benchmark_engine,
         run_benchmark,
@@ -62,9 +62,9 @@ except ImportError as e:
 
 try:
     from .benchmark_store import (
-        BenchmarkStore,
-        BenchmarkRecord,
         BenchmarkQuery,
+        BenchmarkRecord,
+        BenchmarkStore,
         create_benchmark_store,
     )
     BENCHMARK_STORE_AVAILABLE = True
@@ -78,8 +78,8 @@ except ImportError as e:
 
 try:
     from .benchmark_suites import (
-        BenchmarkSuites,
         BenchmarkDataset,
+        BenchmarkSuites,
         create_benchmark_suites,
     )
     BENCHMARK_SUITES_AVAILABLE = True

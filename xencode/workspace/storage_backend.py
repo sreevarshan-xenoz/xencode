@@ -6,12 +6,11 @@ Provides SQLite-based storage for workspaces with isolation,
 transactions, and efficient querying capabilities.
 """
 
-import asyncio
 import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 try:
     import aiosqlite
@@ -20,35 +19,35 @@ except ImportError:
     AIOSQLITE_AVAILABLE = False
     aiosqlite = None
 
-from xencode.models.workspace import Workspace, WorkspaceFile, Change, Conflict
+from xencode.models.workspace import Change, Workspace, WorkspaceFile
 
 
 class SQLiteStorageBackend:
     """SQLite storage backend for workspaces"""
-    
+
     def __init__(self, db_path: str = "workspaces.db"):
         if not AIOSQLITE_AVAILABLE:
             raise ImportError(
                 "aiosqlite is required for SQLite storage. "
                 "Install with: pip install aiosqlite"
             )
-        
+
         self.db_path = Path(db_path)
         self.connection_pool: Dict[str, aiosqlite.Connection] = {}
         self._initialized = False
-    
+
     async def initialize(self) -> None:
         """Initialize database schema"""
         if self._initialized:
             return
-        
+
         # Ensure database directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         async with aiosqlite.connect(self.db_path) as db:
             # Enable foreign keys
             await db.execute("PRAGMA foreign_keys = ON")
-            
+
             # Create workspaces table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS workspaces (
@@ -70,7 +69,7 @@ class SQLiteStorageBackend:
                     active_collaborators INTEGER DEFAULT 0
                 )
             """)
-            
+
             # Create collaborators table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS collaborators (
@@ -89,7 +88,7 @@ class SQLiteStorageBackend:
                     UNIQUE (workspace_id, user_id)
                 )
             """)
-            
+
             # Create files table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS files (
@@ -113,7 +112,7 @@ class SQLiteStorageBackend:
                     UNIQUE (workspace_id, path)
                 )
             """)
-            
+
             # Create changes table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS changes (
@@ -134,7 +133,7 @@ class SQLiteStorageBackend:
                     FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE
                 )
             """)
-            
+
             # Create conflicts table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS conflicts (
@@ -156,7 +155,7 @@ class SQLiteStorageBackend:
                     FOREIGN KEY (resolution_change_id) REFERENCES changes (id) ON DELETE SET NULL
                 )
             """)
-            
+
             # Create indexes for performance
             await db.execute("CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces (owner_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces (status)")
@@ -169,19 +168,19 @@ class SQLiteStorageBackend:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_changes_timestamp ON changes (timestamp)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_workspace ON conflicts (workspace_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_resolved ON conflicts (resolved)")
-            
+
             await db.commit()
-        
+
         self._initialized = True
-    
+
     async def create_workspace(self, workspace: Workspace) -> bool:
         """Create a new workspace"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("BEGIN TRANSACTION")
-                
+
                 # Insert workspace
                 await db.execute("""
                     INSERT INTO workspaces (
@@ -200,7 +199,7 @@ class SQLiteStorageBackend:
                     json.dumps(workspace.vector_clock), workspace.total_size_bytes,
                     workspace.file_count, workspace.active_collaborators
                 ))
-                
+
                 # Insert collaborators
                 for collaborator in workspace.collaborators:
                     await db.execute("""
@@ -216,7 +215,7 @@ class SQLiteStorageBackend:
                         collaborator.session_id, collaborator.joined_at.isoformat(),
                         collaborator.invited_by
                     ))
-                
+
                 # Insert files
                 for file in workspace.files.values():
                     await db.execute("""
@@ -232,20 +231,20 @@ class SQLiteStorageBackend:
                         file.file_type, file.language, file.encoding, file.version,
                         json.dumps(file.vector_clock)
                     ))
-                
+
                 await db.commit()
                 return True
-                
+
         except sqlite3.IntegrityError:
             return False
         except Exception as e:
             print(f"Error creating workspace: {e}")
             return False
-    
+
     async def get_workspace(self, workspace_id: str, include_content: bool = True) -> Optional[Workspace]:
         """Get workspace by ID"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 # Get workspace
@@ -255,15 +254,15 @@ class SQLiteStorageBackend:
                     row = await cursor.fetchone()
                     if not row:
                         return None
-                
+
                 # Convert row to dict
                 columns = [desc[0] for desc in cursor.description]
                 workspace_data = dict(zip(columns, row))
-                
+
                 # Parse JSON fields
                 workspace_data['config'] = json.loads(workspace_data['config'])
                 workspace_data['vector_clock'] = json.loads(workspace_data['vector_clock'])
-                
+
                 # Get collaborators
                 collaborators = []
                 async with db.execute("""
@@ -274,9 +273,9 @@ class SQLiteStorageBackend:
                         collab_data = dict(zip(collab_columns, row))
                         collab_data['permissions'] = json.loads(collab_data['permissions'])
                         collaborators.append(collab_data)
-                
+
                 workspace_data['collaborators'] = collaborators
-                
+
                 # Get files if requested
                 if include_content:
                     files = {}
@@ -288,9 +287,9 @@ class SQLiteStorageBackend:
                             file_data = dict(zip(file_columns, row))
                             file_data['vector_clock'] = json.loads(file_data['vector_clock'])
                             files[file_data['id']] = file_data
-                    
+
                     workspace_data['files'] = files
-                    
+
                     # Get changes
                     changes = []
                     async with db.execute("""
@@ -302,11 +301,10 @@ class SQLiteStorageBackend:
                             change_data['vector_clock'] = json.loads(change_data['vector_clock'])
                             change_data['parent_changes'] = json.loads(change_data['parent_changes'])
                             changes.append(change_data)
-                    
+
                     workspace_data['changes'] = changes
-                    
+
                     # Get conflicts
-                    conflicts = []
                     async with db.execute("""
                         SELECT c.*, ca.*, cb.*
                         FROM conflicts c
@@ -318,20 +316,20 @@ class SQLiteStorageBackend:
                             # This would need more complex parsing for conflicts
                             # For now, we'll skip detailed conflict loading
                             pass
-                    
+
                     workspace_data['conflicts'] = []
-                
+
                 # Create workspace object
                 return Workspace.from_dict(workspace_data)
-                
+
         except Exception as e:
             print(f"Error getting workspace: {e}")
             return None
-    
+
     async def update_workspace(self, workspace: Workspace) -> bool:
         """Update workspace"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("""
@@ -350,55 +348,55 @@ class SQLiteStorageBackend:
                     json.dumps(workspace.vector_clock), workspace.total_size_bytes,
                     workspace.file_count, workspace.active_collaborators, workspace.id
                 ))
-                
+
                 await db.commit()
                 return True
-                
+
         except Exception as e:
             print(f"Error updating workspace: {e}")
             return False
-    
+
     async def delete_workspace(self, workspace_id: str) -> bool:
         """Delete workspace"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
                 await db.commit()
                 return True
-                
+
         except Exception as e:
             print(f"Error deleting workspace: {e}")
             return False
-    
-    async def list_workspaces(self, 
+
+    async def list_workspaces(self,
                              owner_id: Optional[str] = None,
                              user_id: Optional[str] = None,
                              status: Optional[str] = None) -> List[Workspace]:
         """List workspaces with optional filters"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 query = "SELECT * FROM workspaces WHERE 1=1"
                 params = []
-                
+
                 if owner_id:
                     query += " AND owner_id = ?"
                     params.append(owner_id)
-                
+
                 if status:
                     query += " AND status = ?"
                     params.append(status)
-                
+
                 if user_id and not owner_id:
                     # Find workspaces where user is a collaborator
                     query += " AND id IN (SELECT workspace_id FROM collaborators WHERE user_id = ?)"
                     params.append(user_id)
-                
+
                 query += " ORDER BY updated_at DESC"
-                
+
                 workspaces = []
                 async with db.execute(query, params) as cursor:
                     async for row in cursor:
@@ -410,19 +408,19 @@ class SQLiteStorageBackend:
                         workspace_data['files'] = {}
                         workspace_data['changes'] = []
                         workspace_data['conflicts'] = []
-                        
+
                         workspaces.append(Workspace.from_dict(workspace_data))
-                
+
                 return workspaces
-                
+
         except Exception as e:
             print(f"Error listing workspaces: {e}")
             return []
-    
+
     async def add_file(self, workspace_id: str, file: WorkspaceFile) -> bool:
         """Add file to workspace"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("""
@@ -438,7 +436,7 @@ class SQLiteStorageBackend:
                     file.file_type, file.language, file.encoding, file.version,
                     json.dumps(file.vector_clock)
                 ))
-                
+
                 # Update workspace file count and size
                 await db.execute("""
                     UPDATE workspaces SET
@@ -447,27 +445,27 @@ class SQLiteStorageBackend:
                         updated_at = ?
                     WHERE id = ?
                 """, (file.size_bytes, datetime.now().isoformat(), workspace_id))
-                
+
                 await db.commit()
                 return True
-                
+
         except sqlite3.IntegrityError:
             return False
         except Exception as e:
             print(f"Error adding file: {e}")
             return False
-    
+
     async def update_file(self, file: WorkspaceFile) -> bool:
         """Update file"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 # Get old file size
                 async with db.execute("SELECT size_bytes FROM files WHERE id = ?", (file.id,)) as cursor:
                     row = await cursor.fetchone()
                     old_size = row[0] if row else 0
-                
+
                 # Update file
                 await db.execute("""
                     UPDATE files SET
@@ -482,7 +480,7 @@ class SQLiteStorageBackend:
                     file.file_type, file.language, file.encoding, file.version,
                     json.dumps(file.vector_clock), file.id
                 ))
-                
+
                 # Update workspace size
                 size_diff = file.size_bytes - old_size
                 await db.execute("""
@@ -491,18 +489,18 @@ class SQLiteStorageBackend:
                         updated_at = ?
                     WHERE id = (SELECT workspace_id FROM files WHERE id = ?)
                 """, (size_diff, datetime.now().isoformat(), file.id))
-                
+
                 await db.commit()
                 return True
-                
+
         except Exception as e:
             print(f"Error updating file: {e}")
             return False
-    
+
     async def delete_file(self, file_id: str) -> bool:
         """Delete file"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 # Get file info before deletion
@@ -512,12 +510,12 @@ class SQLiteStorageBackend:
                     row = await cursor.fetchone()
                     if not row:
                         return False
-                    
+
                     workspace_id, size_bytes = row
-                
+
                 # Delete file
                 await db.execute("DELETE FROM files WHERE id = ?", (file_id,))
-                
+
                 # Update workspace stats
                 await db.execute("""
                     UPDATE workspaces SET
@@ -526,18 +524,18 @@ class SQLiteStorageBackend:
                         updated_at = ?
                     WHERE id = ?
                 """, (size_bytes, datetime.now().isoformat(), workspace_id))
-                
+
                 await db.commit()
                 return True
-                
+
         except Exception as e:
             print(f"Error deleting file: {e}")
             return False
-    
+
     async def add_change(self, change: Change) -> bool:
         """Add change to workspace"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("""
@@ -553,36 +551,36 @@ class SQLiteStorageBackend:
                     json.dumps(change.parent_changes), change.is_conflicted,
                     change.conflict_resolution
                 ))
-                
+
                 await db.commit()
                 return True
-                
+
         except Exception as e:
             print(f"Error adding change: {e}")
             return False
-    
-    async def get_changes(self, 
+
+    async def get_changes(self,
                          workspace_id: str,
                          file_id: Optional[str] = None,
                          since: Optional[datetime] = None) -> List[Change]:
         """Get changes for workspace or file"""
         await self.initialize()
-        
+
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 query = "SELECT * FROM changes WHERE workspace_id = ?"
                 params = [workspace_id]
-                
+
                 if file_id:
                     query += " AND file_id = ?"
                     params.append(file_id)
-                
+
                 if since:
                     query += " AND timestamp > ?"
                     params.append(since.isoformat())
-                
+
                 query += " ORDER BY timestamp"
-                
+
                 changes = []
                 async with db.execute(query, params) as cursor:
                     async for row in cursor:
@@ -591,13 +589,13 @@ class SQLiteStorageBackend:
                         change_data['vector_clock'] = json.loads(change_data['vector_clock'])
                         change_data['parent_changes'] = json.loads(change_data['parent_changes'])
                         changes.append(Change.from_dict(change_data))
-                
+
                 return changes
-                
+
         except Exception as e:
             print(f"Error getting changes: {e}")
             return []
-    
+
     async def close(self) -> None:
         """Close database connections"""
         for connection in self.connection_pool.values():

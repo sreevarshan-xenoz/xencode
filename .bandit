@@ -1,0 +1,81 @@
+[bandit]
+# =============================================================================
+# Bandit Security Scanner Configuration
+# =============================================================================
+# Baseline generated: 2026-07-30
+# This file tracks known pre-existing issues in the Xencode codebase.
+# New findings should NOT be added here — fix them instead.
+# =============================================================================
+
+# Directories to exclude from scanning
+exclude: tests,.venv,venv,__pycache__,node_modules,build,dist,.git,eggs,*.egg
+
+# =============================================================================
+# SKIP — Known pre-existing issues (baseline)
+# =============================================================================
+# These are suppressed to reduce noise so new findings stand out.
+# Remove from this list as issues are fixed over time.
+skips: B101, B110, B112, B311, B320, B607, B603, B108
+
+    # B101 (assert-used, ~3925) — Guard clauses + validation. Not security vulns.
+    # B110 (try-except-pass, ~148) — Silent error handling in cleanup/opts.
+    # B112 (try-except-continue, ~17) — Retry loops, batch processing.
+    # B311 (non-crypto-random, ~56) — Sampling, test data, IDs, noise.
+    # B320 (marshal-usage, <5) — Legacy RPC serialization, controlled envs.
+    # B607 (partial-path, ~59) — Explicit argv[0] via PATH resolution.
+    # B603 (no-shell, ~31) — Intentional — secure argv-based calls.
+    # B108 (hardcoded-temp, ~8) — Legacy test helpers, non-production paths.
+
+# =============================================================================
+# ACTIVE — Issues we DO care about (not skipped)
+# =============================================================================
+# These findings will still be reported. They should be investigated and fixed.
+# (Listed here for tracking purposes only — the tool reports them by default.)
+#
+#   B102: exec-builtin              — Count: 3  — Investigate/restrict
+#   B105: hardcoded-password-string — Count: 23 — Investigate/move to env vars
+#   B106: hardcoded-password-func   — Count: 11 — Investigate/move to secrets
+#   B107: hardcoded-password-default — Count: 2  — Investigate
+#   B113: request-without-timeout   — Count: 2  — Add timeouts
+#   B301: suspicious-pickle-usage   — Count: 14 — Investigate alternatives
+#   B304: suspicious-cipher-mode    — Count: TBD
+#   B306: suspicious-mktemp-usage   — Count: 1  — Replace with tempfile
+#   B307: suspicious-eval-usage     — Count: 2  — Restrict or replace
+#   B308: suspicious-mark-safe-import — Count: TBD
+#   B404: import-subprocess         — Count: TBD
+#   B602: subprocess-popen-shell    — Count: 0  — ✅ All fixed
+#   B604: call-with-shell-equals-true — Count: 0 — ✅ All fixed
+#   B608: hardcoded-sql-expression  — Count: 4  — Use parameterized queries
+#   B104: hardcoded-bind-all-ints   — Count: 2  — Bind to specific host
+
+# =============================================================================
+# Severity / Confidence thresholds
+# =============================================================================
+# Only report issues at MEDIUM severity or higher
+level: MEDIUM
+
+# =============================================================================
+# Baseline counts — ruff S rules (2026-07-30)
+# =============================================================================
+# The following ruff S-rule equivalencies serve as the baseline reference.
+# Run `ruff check . --select S --statistics` to see current counts.
+#
+#   S101 (B101)  — count: 3925  — assert-used
+#   S102 (B102)  — count:    3  — exec-builtin
+#   S104 (B104)  — count:    2  — hardcoded-bind-all-interfaces
+#   S105 (B105)  — count:   23  — hardcoded-password-string
+#   S106 (B106)  — count:   11  — hardcoded-password-func-arg
+#   S107 (B107)  — count:    2  — hardcoded-password-default
+#   S108 (B108)  — count:    8  — hardcoded-temp-file
+#   S110 (B110)  — count:  148  — try-except-pass
+#   S112 (B112)  — count:   17  — try-except-continue
+#   S113 (B113)  — count:    2  — request-without-timeout
+#   S301 (B301)  — count:   14  — suspicious-pickle-usage
+#   S306 (B306)  — count:    1  — suspicious-mktemp-usage
+#   S307 (B307)  — count:    2  — suspicious-eval-usage
+#   S311 (B311)  — count:   56  — suspicious-non-cryptographic-random-usage
+#   S603 (B603)  — count:   31  — subprocess-without-shell-equals-true
+#   S604 (B604)  — count:    0  — call-with-shell-equals-true  ✅
+#   S607 (B607)  — count:   59  — start-process-with-partial-path
+#   S608 (B608)  — count:    4  — hardcoded-sql-expression
+#   ===== total: 4308 errors across 17 rule categories =====

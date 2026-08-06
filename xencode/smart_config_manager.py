@@ -6,19 +6,19 @@ Advanced configuration system with YAML/TOML support, environment variables,
 user profiles, and intelligent defaults with validation.
 """
 
+import configparser
+import json
 import os
 import sys
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Set
-import json
-import yaml
-import configparser
-from rich.console import Console
-from rich.prompt import Prompt, Confirm, IntPrompt, FloatPrompt
-from rich.table import Table
-from rich.panel import Panel
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+from rich.console import Console
+from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
+from rich.table import Table
 
 # Try to import toml, fall back to tomli for Python < 3.11
 try:
@@ -91,7 +91,7 @@ class ModelConfig:
     repeat_penalty: float = 1.1
     system_prompt: str = "You are a helpful AI coding assistant."
     context_length: int = 4096
-    
+
     def validate(self) -> List[str]:
         """Validate model configuration"""
         errors = []
@@ -108,7 +108,7 @@ class ModelConfig:
         return errors
 
 
-@dataclass 
+@dataclass
 class CacheConfig:
     """Cache system configuration"""
     enabled: bool = True
@@ -117,7 +117,7 @@ class CacheConfig:
     max_age_days: int = 7
     compression_enabled: bool = True
     auto_cleanup: bool = True
-    
+
     def validate(self) -> List[str]:
         """Validate cache configuration"""
         errors = []
@@ -140,7 +140,7 @@ class SecurityConfig:
     log_conversations: bool = False
     anonymize_logs: bool = True
     max_log_size_mb: int = 100
-    
+
     def validate(self) -> List[str]:
         """Validate security configuration"""
         errors = []
@@ -159,7 +159,7 @@ class PerformanceConfig:
     retry_delay_seconds: float = 1.0
     resource_monitoring: bool = True
     auto_optimization: bool = True
-    
+
     def validate(self) -> List[str]:
         """Validate performance configuration"""
         errors = []
@@ -183,7 +183,7 @@ class UIConfig:
     verbose_mode: bool = False
     auto_save: bool = True
     editor_integration: bool = True
-    
+
     def validate(self) -> List[str]:
         """Validate UI configuration"""
         errors = []
@@ -219,7 +219,7 @@ class XencodeConfig:
     ui: UIConfig = field(default_factory=UIConfig)
     api_keys: APIKeysConfig = field(default_factory=APIKeysConfig)
     custom: Dict[str, Any] = field(default_factory=dict)
-    
+
     def validate(self) -> Dict[str, List[str]]:
         """Validate all configuration sections"""
         validation_results = {}
@@ -240,11 +240,11 @@ class XencodeConfig:
                     validation_results[section_name] = errors
 
         return validation_results
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return asdict(self)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'XencodeConfig':
         """Create configuration from dictionary"""
@@ -272,26 +272,26 @@ class XencodeConfig:
 
 class ConfigurationManager:
     """Smart configuration manager with multiple format support"""
-    
+
     DEFAULT_CONFIG_PATHS = [
         Path.home() / ".xencode" / "config.yaml",
-        Path.home() / ".xencode" / "config.toml", 
+        Path.home() / ".xencode" / "config.toml",
         Path.home() / ".xencode" / "config.json",
         Path.home() / ".config" / "xencode" / "config.yaml",
         Path("xencode.yaml"),
         Path("xencode.toml"),
         Path(".xencode.yaml"),
     ]
-    
+
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path
         self.config: Optional[XencodeConfig] = None
         self.config_format: Optional[ConfigFormat] = None
         self.environment_overrides: Dict[str, Any] = {}
-        
+
         # Load environment variables
         self._load_environment_overrides()
-    
+
     def _load_environment_overrides(self):
         """Load configuration overrides from environment variables"""
         env_mapping = {
@@ -310,7 +310,7 @@ class ConfigurationManager:
             'ANTHROPIC_API_KEY': ('api_keys', 'anthropic_api_key'),
             'HUGGINGFACE_API_KEY': ('api_keys', 'huggingface_api_key'),
         }
-        
+
         for env_var, config_path in env_mapping.items():
             value = os.getenv(env_var)
             if value is not None:
@@ -322,28 +322,28 @@ class ConfigurationManager:
                     except (ValueError, TypeError):
                         console.print(f"[yellow]⚠️  Invalid environment variable {env_var}: {value}[/yellow]")
                         continue
-                
+
                 # Store override
                 section, key = config_path[0], config_path[1]
                 if section not in self.environment_overrides:
                     self.environment_overrides[section] = {}
                 self.environment_overrides[section][key] = value
-    
+
     def find_config_file(self) -> Optional[Path]:
         """Find configuration file in standard locations"""
         if self.config_path and self.config_path.exists():
             return self.config_path
-        
+
         for path in self.DEFAULT_CONFIG_PATHS:
             if path.exists():
                 return path
-        
+
         return None
-    
+
     def detect_format(self, config_path: Path) -> ConfigFormat:
         """Detect configuration file format"""
         suffix = config_path.suffix.lower()
-        
+
         if suffix in ['.yaml', '.yml']:
             return ConfigFormat.YAML
         elif suffix == '.toml':
@@ -357,7 +357,7 @@ class ConfigurationManager:
             try:
                 with open(config_path, 'r') as f:
                     content = f.read().strip()
-                
+
                 if content.startswith('{') or content.startswith('['):
                     return ConfigFormat.JSON
                 elif '=' in content and '[' in content:
@@ -368,17 +368,17 @@ class ConfigurationManager:
                     return ConfigFormat.TOML
             except (OSError, IOError, UnicodeDecodeError):
                 return ConfigFormat.YAML  # Default
-    
+
     def load_config(self, config_path: Optional[Path] = None) -> XencodeConfig:
         """Load configuration from file or create default"""
         # Find config file
         config_file = config_path or self.find_config_file()
-        
+
         if config_file:
             try:
                 self.config_format = self.detect_format(config_file)
                 self.config_path = config_file
-                
+
                 # Load based on format
                 if self.config_format == ConfigFormat.YAML:
                     config_data = self._load_yaml(config_file)
@@ -390,10 +390,10 @@ class ConfigurationManager:
                     config_data = self._load_ini(config_file)
                 else:
                     raise ValueError(f"Unsupported format: {self.config_format}")
-                
+
                 self.config = XencodeConfig.from_dict(config_data)
                 console.print(f"[green]OK Configuration loaded from {config_file}[/green]")
-                
+
             except Exception as e:
                 console.print(f"[red]ERROR Error loading config: {e}[/red]")
                 console.print("[yellow]Using default configuration[/yellow]")
@@ -402,50 +402,50 @@ class ConfigurationManager:
             # Create default configuration
             self.config = XencodeConfig()
             console.print("[yellow]⚠️  No config file found, using defaults[/yellow]")
-        
+
         # Apply environment overrides
         self._apply_environment_overrides()
-        
+
         # Validate configuration
         self._validate_and_fix_config()
-        
+
         return self.config
-    
+
     def _load_yaml(self, path: Path) -> Dict[str, Any]:
         """Load YAML configuration"""
         with open(path, 'r') as f:
             return yaml.safe_load(f) or {}
-    
+
     def _load_toml(self, path: Path) -> Dict[str, Any]:
         """Load TOML configuration"""
         if not TOML_AVAILABLE:
             raise ImportError("TOML support not available. Install 'tomli' package.")
-        
+
         with open(path, 'rb') as f:
             return tomllib.load(f)
-    
+
     def _load_json(self, path: Path) -> Dict[str, Any]:
         """Load JSON configuration"""
         with open(path, 'r') as f:
             return json.load(f)
-    
+
     def _load_ini(self, path: Path) -> Dict[str, Any]:
         """Load INI configuration"""
         config = configparser.ConfigParser()
         config.read(path)
-        
+
         # Convert to nested dictionary
         result = {}
         for section_name in config.sections():
             result[section_name] = dict(config[section_name])
-        
+
         return result
-    
+
     def _apply_environment_overrides(self):
         """Apply environment variable overrides to configuration"""
         if not self.config:
             return
-        
+
         for section_name, overrides in self.environment_overrides.items():
             if hasattr(self.config, section_name):
                 section = getattr(self.config, section_name)
@@ -453,57 +453,57 @@ class ConfigurationManager:
                     if hasattr(section, key):
                         setattr(section, key, value)
                         console.print(f"[blue]🔧 Environment override: {section_name}.{key} = {value}[/blue]")
-    
+
     def _validate_and_fix_config(self):
         """Validate configuration and fix common issues"""
         if not self.config:
             return
-        
+
         validation_errors = self.config.validate()
-        
+
         if validation_errors:
             console.print("[yellow]⚠️  Configuration validation warnings:[/yellow]")
             for section, errors in validation_errors.items():
                 console.print(f"  {section}:")
                 for error in errors:
                     console.print(f"    • {error}")
-            
+
             # Auto-fix common issues
             self._auto_fix_config()
-    
+
     def _auto_fix_config(self):
         """Automatically fix common configuration issues"""
         if not self.config:
             return
-        
+
         # Fix model config
         if self.config.model.temperature < 0.0:
             self.config.model.temperature = 0.0
         elif self.config.model.temperature > 2.0:
             self.config.model.temperature = 2.0
-        
+
         if self.config.model.max_tokens < 1:
             self.config.model.max_tokens = 1024
         elif self.config.model.max_tokens > 8192:
             self.config.model.max_tokens = 8192
-        
+
         # Fix cache config
         if self.config.cache.memory_cache_mb < 32:
             self.config.cache.memory_cache_mb = 32
         elif self.config.cache.memory_cache_mb > 2048:
             self.config.cache.memory_cache_mb = 2048
-        
+
         console.print("[green]OK Configuration auto-fixed[/green]")
-    
-    def save_config(self, config_path: Optional[Path] = None, 
+
+    def save_config(self, config_path: Optional[Path] = None,
                    format: Optional[ConfigFormat] = None) -> bool:
         """Save configuration to file"""
         if not self.config:
             return False
-        
+
         save_path = config_path or self.config_path
         save_format = format or self.config_format or ConfigFormat.YAML
-        
+
         # Ensure directory exists
         if save_path:
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -511,10 +511,10 @@ class ConfigurationManager:
             # Create default path
             save_path = Path.home() / ".xencode" / f"config.{save_format.value}"
             save_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             config_dict = self.config.to_dict()
-            
+
             # Save based on format
             if save_format == ConfigFormat.YAML:
                 self._save_yaml(save_path, config_dict)
@@ -524,26 +524,26 @@ class ConfigurationManager:
                 self._save_json(save_path, config_dict)
             elif save_format == ConfigFormat.INI:
                 self._save_ini(save_path, config_dict)
-            
+
             self.config_path = save_path
             self.config_format = save_format
             console.print(f"[green]OK Configuration saved to {save_path}[/green]")
             return True
-            
+
         except Exception as e:
             console.print(f"[red]ERROR Error saving config: {e}[/red]")
             return False
-    
+
     def _save_yaml(self, path: Path, data: Dict[str, Any]):
         """Save YAML configuration"""
         with open(path, 'w') as f:
             yaml.dump(data, f, default_flow_style=False, indent=2)
-    
+
     def _save_toml(self, path: Path, data: Dict[str, Any]):
         """Save TOML configuration"""
         if not TOML_AVAILABLE:
             raise ImportError("TOML support not available.")
-        
+
         try:
             # Try tomli-w for writing
             import tomli_w
@@ -553,12 +553,12 @@ class ConfigurationManager:
             # Fall back to basic TOML writing (limited)
             with open(path, 'w') as f:
                 f.write(self._dict_to_toml(data))
-    
+
     def _dict_to_toml(self, data: Dict[str, Any], indent: int = 0) -> str:
         """Basic TOML serialization fallback"""
         lines = []
         prefix = "  " * indent
-        
+
         for key, value in data.items():
             if isinstance(value, dict):
                 lines.append(f"\n{prefix}[{key}]")
@@ -569,38 +569,38 @@ class ConfigurationManager:
                 lines.append(f'{prefix}{key} = {str(value).lower()}')
             else:
                 lines.append(f'{prefix}{key} = {value}')
-        
+
         return "\n".join(lines)
-    
+
     def _save_json(self, path: Path, data: Dict[str, Any]):
         """Save JSON configuration"""
         with open(path, 'w') as f:
             json.dump(data, f, indent=2)
-    
+
     def _save_ini(self, path: Path, data: Dict[str, Any]):
         """Save INI configuration"""
         config = configparser.ConfigParser()
-        
+
         for section_name, section_data in data.items():
             if isinstance(section_data, dict):
                 config.add_section(section_name)
                 for key, value in section_data.items():
                     config.set(section_name, key, str(value))
-        
+
         with open(path, 'w') as f:
             config.write(f)
-    
+
     def get_config(self) -> XencodeConfig:
         """Get current configuration"""
         if self.config is None:
             self.config = self.load_config()
         return self.config
-    
+
     def update_config(self, updates: Dict[str, Any], save: bool = True) -> bool:
         """Update configuration with new values"""
         if not self.config:
             self.config = XencodeConfig()
-        
+
         try:
             # Apply updates
             for section_name, section_updates in updates.items():
@@ -612,23 +612,23 @@ class ConfigurationManager:
                                 setattr(section, key, value)
                     else:
                         setattr(self.config, section_name, section_updates)
-            
+
             # Validate
             validation_errors = self.config.validate()
             if validation_errors:
                 console.print("[yellow]⚠️  Configuration validation warnings after update[/yellow]")
                 self._auto_fix_config()
-            
+
             # Save if requested
             if save:
                 return self.save_config()
-            
+
             return True
-            
+
         except Exception as e:
             console.print(f"[red]❌ Error updating config: {e}[/red]")
             return False
-    
+
     def show_config(self):
         """Display current configuration"""
         if not self.config:
@@ -662,7 +662,7 @@ class ConfigurationManager:
                 table.add_row(section_name, "", str(section_data))
 
         console.print(table)
-    
+
     def interactive_setup(self) -> XencodeConfig:
         """Interactive configuration setup wizard"""
         console.print("[bold blue]🔧 Xencode Configuration Setup[/bold blue]\n")
@@ -735,7 +735,7 @@ def get_config(config_path: Optional[Path] = None) -> XencodeConfig:
 if __name__ == "__main__":
     # Demo and testing
     manager = ConfigurationManager()
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         # Interactive setup
         config = manager.interactive_setup()
@@ -743,7 +743,7 @@ if __name__ == "__main__":
         # Load and display config
         config = manager.load_config()
         manager.show_config()
-        
+
         # Show environment overrides
         if manager.environment_overrides:
             console.print("\n[bold blue]Environment Overrides:[/bold blue]")

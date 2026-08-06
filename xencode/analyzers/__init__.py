@@ -43,16 +43,16 @@ except ImportError as e:
 def get_available_analyzers() -> List[str]:
     """Get list of available analyzer names"""
     available = []
-    
+
     if SECURITY_ANALYZER_AVAILABLE:
         available.append("SecurityAnalyzer")
-    
+
     if ERROR_DETECTOR_AVAILABLE:
         available.append("ErrorDetector")
-    
+
     if REFACTORING_ENGINE_AVAILABLE:
         available.append("RefactoringEngine")
-    
+
     return available
 
 

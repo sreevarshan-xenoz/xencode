@@ -7,20 +7,20 @@ Provides comprehensive error detection for multiple programming languages.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import List
 
 from xencode.models.code_analysis import (
     AnalysisIssue,
     AnalysisType,
     CodeLocation,
     Language,
-    SeverityLevel
+    SeverityLevel,
 )
 
 
 class ErrorDetector:
     """Detects common programming errors and bugs"""
-    
+
     def __init__(self):
         # Error patterns for different languages
         self.error_patterns = {
@@ -103,7 +103,7 @@ class ErrorDetector:
                 ]
             }
         }
-        
+
         # Common anti-patterns across languages
         self.common_antipatterns = {
             'magic_numbers': r'\b\d{2,}\b(?!\s*[;,\)])',  # Numbers with 2+ digits not at end of statement
@@ -111,62 +111,62 @@ class ErrorDetector:
             'deep_nesting': r'^\s{20,}',  # Lines with 20+ spaces (5+ levels of nesting)
             'commented_code': r'^\s*#.*[=\(\)\[\]{}]',  # Commented out code patterns
         }
-    
-    async def detect_errors(self, 
-                           code: str, 
+
+    async def detect_errors(self,
+                           code: str,
                            language: Language,
                            file_path: str = "") -> List[AnalysisIssue]:
         """Detect errors and issues in code"""
-        
+
         issues = []
         lines = code.split('\n')
-        
+
         # Language-specific error detection
         if language in self.error_patterns:
             patterns = self.error_patterns[language]
-            
+
             for category, pattern_list in patterns.items():
                 for pattern, description in pattern_list:
                     category_issues = await self._find_error_pattern(
                         lines, pattern, description, category, file_path
                     )
                     issues.extend(category_issues)
-        
+
         # Common anti-pattern detection
         common_issues = await self._detect_common_antipatterns(lines, file_path)
         issues.extend(common_issues)
-        
+
         # Language-specific additional checks
         if language == Language.PYTHON:
             issues.extend(await self._detect_python_specific_errors(lines, file_path))
         elif language == Language.JAVASCRIPT:
             issues.extend(await self._detect_javascript_specific_errors(lines, file_path))
-        
+
         return issues
-    
-    async def _find_error_pattern(self, 
-                                 lines: List[str], 
-                                 pattern: str, 
+
+    async def _find_error_pattern(self,
+                                 lines: List[str],
+                                 pattern: str,
                                  description: str,
                                  category: str,
                                  file_path: str) -> List[AnalysisIssue]:
         """Find error pattern in code lines"""
-        
+
         issues = []
         regex = re.compile(pattern, re.IGNORECASE)
-        
+
         for line_num, line in enumerate(lines, 1):
             # Skip comments for most patterns
             line_stripped = line.strip()
-            if (line_stripped.startswith('#') or 
-                line_stripped.startswith('//') or 
+            if (line_stripped.startswith('#') or
+                line_stripped.startswith('//') or
                 line_stripped.startswith('/*')):
                 continue
-            
+
             matches = regex.finditer(line)
             for match in matches:
                 severity = self._get_severity_for_category(category)
-                
+
                 issue = AnalysisIssue(
                     analysis_type=AnalysisType.SYNTAX,
                     severity=severity,
@@ -183,18 +183,18 @@ class ErrorDetector:
                     rule_name=category.replace('_', ' ').title(),
                     confidence=0.7
                 )
-                
+
                 issues.append(issue)
-        
+
         return issues
-    
-    async def _detect_common_antipatterns(self, 
-                                         lines: List[str], 
+
+    async def _detect_common_antipatterns(self,
+                                         lines: List[str],
                                          file_path: str) -> List[AnalysisIssue]:
         """Detect common anti-patterns"""
-        
+
         issues = []
-        
+
         for line_num, line in enumerate(lines, 1):
             # Check for magic numbers
             if re.search(self.common_antipatterns['magic_numbers'], line):
@@ -211,7 +211,7 @@ class ErrorDetector:
                         rule_id="magic_numbers",
                         confidence=0.6
                     ))
-            
+
             # Check for long lines
             if len(line) > 120:
                 issues.append(AnalysisIssue(
@@ -225,7 +225,7 @@ class ErrorDetector:
                     rule_id="long_lines",
                     confidence=1.0
                 ))
-            
+
             # Check for deep nesting
             if re.match(self.common_antipatterns['deep_nesting'], line):
                 issues.append(AnalysisIssue(
@@ -239,16 +239,16 @@ class ErrorDetector:
                     rule_id="deep_nesting",
                     confidence=0.8
                 ))
-        
+
         return issues
-    
-    async def _detect_python_specific_errors(self, 
-                                            lines: List[str], 
+
+    async def _detect_python_specific_errors(self,
+                                            lines: List[str],
                                             file_path: str) -> List[AnalysisIssue]:
         """Detect Python-specific errors"""
-        
+
         issues = []
-        
+
         # Check for mutable default arguments
         for line_num, line in enumerate(lines, 1):
             if 'def ' in line and ('=[]' in line or '={}' in line):
@@ -263,11 +263,11 @@ class ErrorDetector:
                     rule_id="mutable_default_argument",
                     confidence=0.9
                 ))
-        
+
         # Check for unused variables (basic check)
         variable_assignments = {}
         variable_usage = set()
-        
+
         for line_num, line in enumerate(lines, 1):
             # Find variable assignments
             assignment_match = re.search(r'(\w+)\s*=', line)
@@ -275,12 +275,12 @@ class ErrorDetector:
                 var_name = assignment_match.group(1)
                 if not var_name.startswith('_'):  # Skip private variables
                     variable_assignments[var_name] = line_num
-            
+
             # Find variable usage
             for var_name in variable_assignments:
                 if var_name in line and f'{var_name} =' not in line:
                     variable_usage.add(var_name)
-        
+
         # Report unused variables
         for var_name, line_num in variable_assignments.items():
             if var_name not in variable_usage:
@@ -295,27 +295,27 @@ class ErrorDetector:
                     rule_id="unused_variable",
                     confidence=0.7
                 ))
-        
+
         return issues
-    
-    async def _detect_javascript_specific_errors(self, 
-                                                lines: List[str], 
+
+    async def _detect_javascript_specific_errors(self,
+                                                lines: List[str],
                                                 file_path: str) -> List[AnalysisIssue]:
         """Detect JavaScript-specific errors"""
-        
+
         issues = []
-        
+
         # Check for function hoisting issues
         function_declarations = {}
         function_calls = {}
-        
+
         for line_num, line in enumerate(lines, 1):
             # Find function declarations
             func_match = re.search(r'function\s+(\w+)', line)
             if func_match:
                 func_name = func_match.group(1)
                 function_declarations[func_name] = line_num
-            
+
             # Find function calls
             call_match = re.search(r'(\w+)\s*\(', line)
             if call_match:
@@ -324,7 +324,7 @@ class ErrorDetector:
                     if func_name not in function_calls:
                         function_calls[func_name] = []
                     function_calls[func_name].append(line_num)
-        
+
         # Check for calls before declaration (potential hoisting issues)
         for func_name, call_lines in function_calls.items():
             if func_name in function_declarations:
@@ -342,31 +342,30 @@ class ErrorDetector:
                             rule_id="function_hoisting",
                             confidence=0.6
                         ))
-        
+
         return issues
-    
+
     def _get_severity_for_category(self, category: str) -> SeverityLevel:
         """Get severity level for error category"""
-        
+
         critical_errors = ['logic_errors', 'resource_leaks', 'exception_handling']
         warnings = ['performance_issues', 'async_issues', 'scope_issues', 'type_issues']
-        info_issues = ['naming_issues', 'concurrency_issues']
-        
+
         if category in critical_errors:
             return SeverityLevel.ERROR
         elif category in warnings:
             return SeverityLevel.WARNING
         else:
             return SeverityLevel.INFO
-    
+
     def get_error_categories(self) -> List[str]:
         """Get list of error categories detected"""
         categories = set()
         for lang_patterns in self.error_patterns.values():
             categories.update(lang_patterns.keys())
         categories.update(['magic_numbers', 'long_lines', 'deep_nesting'])
-        return sorted(list(categories))
-    
+        return sorted(categories)
+
     def is_language_supported(self, language: Language) -> bool:
         """Check if language is supported for error detection"""
         return language in self.error_patterns

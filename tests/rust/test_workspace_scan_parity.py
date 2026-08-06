@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 EXCLUDED_DIRS = {
     ".git",
     ".mypy_cache",

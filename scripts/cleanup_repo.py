@@ -28,7 +28,7 @@ FILES_TO_DELETE = [
     "WEEK3_AI_COMPLETION_REPORT.md",
     "XENCODE_ANALYSIS_AND_IMPROVEMENTS.md",
     "XENCODE_WARP_FINAL_SUMMARY.md",
-    
+
     # Old/duplicate test files in root
     "test_advanced_analytics_dashboard.py",
     "test_analytics_infrastructure.py",
@@ -42,16 +42,16 @@ FILES_TO_DELETE = [
     "test_resource_management_simple.py",
     "test_workspace.py",
     "simple_test.py",
-    
+
     # Duplicate test files
     "debug_chat.log",
     "debug_traceback.py",
-    
+
     # Old benchmark/demo files
     "benchmark_leviathan.py",
     "quick_leviathan_demo.py",
     "example_enhanced_xencode.py",
-    
+
     # Test fixtures
     "test_fixes.sh",
     "verify_fixes.py",
@@ -60,23 +60,23 @@ FILES_TO_DELETE = [
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.dirname(base_dir)
-    
+
     os.chdir(repo_root)
-    
+
     deleted_count = 0
     not_found_count = 0
-    
+
     print("=" * 80)
     print("REPOSITORY CLEANUP")
     print("=" * 80)
     print()
-    
+
     for file_path in FILES_TO_DELETE:
         full_path = os.path.join(repo_root, file_path)
-        
+
         if os.path.exists(full_path):
             print(f"Deleting: {file_path}")
-            
+
             # Remove from git if tracked
             try:
                 subprocess.run(
@@ -87,11 +87,11 @@ def main():
             except Exception:
                 # If git rm fails, just delete the file
                 os.remove(full_path)
-            
+
             deleted_count += 1
         else:
             not_found_count += 1
-    
+
     print()
     print("=" * 80)
     print(f"✅ Deleted: {deleted_count} files")

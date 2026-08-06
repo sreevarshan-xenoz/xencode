@@ -264,7 +264,7 @@ async def get_performance_optimizer():
     try:
         return PerformanceOptimizer()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get performance optimizer: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get performance optimizer: {e}")  from e
 
 
 async def get_monitoring_dashboard():
@@ -287,7 +287,7 @@ async def get_monitoring_dashboard():
     try:
         return PerformanceMonitoringDashboard()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get monitoring dashboard: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get monitoring dashboard: {e}")  from e
 
 
 @router.get("/health", response_model=SystemHealthResponse)
@@ -345,7 +345,7 @@ async def get_system_health():
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")  from e
 
 
 @router.get("/resources/{resource_type}", response_model=ResourceUsageResponse)
@@ -415,7 +415,7 @@ async def get_resource_usage(
             )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
 
 
 @router.get("/resources", response_model=List[ResourceUsageResponse])
@@ -466,7 +466,7 @@ async def get_all_resources():
         return resources
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get all resources: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get all resources: {e}")  from e
 
 
 @router.get("/performance", response_model=PerformanceMetricsResponse)
@@ -503,7 +503,7 @@ async def get_performance_metrics(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")  from e
 
 
 @router.post("/cleanup", response_model=CleanupResultResponse)
@@ -535,7 +535,7 @@ async def trigger_cleanup(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")  from e
 
 
 @router.get("/alerts", response_model=List[AlertResponse])
@@ -589,7 +589,7 @@ async def get_alerts(
         return alerts[:limit]
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")  from e
 
 
 @router.post("/alerts/{alert_id}/acknowledge")
@@ -605,7 +605,7 @@ async def acknowledge_alert(alert_id: str):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to acknowledge alert: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to acknowledge alert: {e}")  from e
 
 
 @router.get("/processes", response_model=List[ProcessInfoResponse])
@@ -649,7 +649,7 @@ async def get_processes(
         return processes[:limit]
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get processes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get processes: {e}")  from e
 
 
 @router.get("/network", response_model=List[NetworkStatsResponse])
@@ -677,7 +677,7 @@ async def get_network_stats():
         return network_stats
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get network stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get network stats: {e}")  from e
 
 
 @router.get("/disk", response_model=List[DiskStatsResponse])
@@ -711,7 +711,7 @@ async def get_disk_stats():
         return disk_stats
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get disk stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get disk stats: {e}")  from e
 
 
 @router.get("/dashboard")
@@ -751,7 +751,7 @@ async def get_monitoring_dashboard(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get monitoring dashboard: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get monitoring dashboard: {e}")  from e
 
 
 @router.post("/config")
@@ -770,7 +770,7 @@ async def update_monitoring_config(request: MonitoringConfigRequest):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update monitoring config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update monitoring config: {e}")  from e
 
 
 # Background tasks
@@ -847,7 +847,7 @@ async def get_resource_manager_dep():
     try:
         return await get_resource_manager()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource manager: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get resource manager: {e}")  from e
 
 
 @router.get("/health", response_model=SystemHealthResponse)
@@ -915,7 +915,7 @@ async def get_system_health(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")  from e
 
 
 @router.get("/resources", response_model=List[ResourceUsageResponse])
@@ -980,7 +980,7 @@ async def get_resource_usage(
         ]
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
 
 
 @router.get("/resources/{resource_type}")
@@ -1032,7 +1032,7 @@ async def get_specific_resource_usage(
         try:
             resource_enum = ResourceType(resource_type.lower())
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")
+            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")  from None
         
         usage_data = await resource_manager.get_resource_usage()
         
@@ -1054,7 +1054,7 @@ async def get_specific_resource_usage(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
 
 
 @router.post("/cleanup", response_model=CleanupResultResponse)
@@ -1081,7 +1081,7 @@ async def trigger_cleanup(
         try:
             priority_enum = CleanupPriority(priority.lower())
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")
+            raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")  from None
         
         # Trigger cleanup
         results = await resource_manager.trigger_cleanup(priority_enum)
@@ -1097,7 +1097,7 @@ async def trigger_cleanup(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")  from e
 
 
 @router.get("/metrics", response_model=PerformanceMetricsResponse)
@@ -1155,7 +1155,7 @@ async def get_performance_metrics(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")  from e
 
 
 @router.get("/statistics")
@@ -1182,7 +1182,7 @@ async def get_monitoring_statistics(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")  from e
 
 
 @router.post("/limits/{resource_type}")
@@ -1207,7 +1207,7 @@ async def update_resource_limit(
         try:
             resource_enum = ResourceType(resource_type.lower())
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")
+            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")  from None
         
         # Create new resource limit
         from ...monitoring.resource_manager import ResourceLimit
@@ -1236,7 +1236,7 @@ async def update_resource_limit(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update resource limit: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update resource limit: {e}")  from e
 
 
 @router.get("/alerts")
@@ -1288,7 +1288,7 @@ async def get_active_alerts(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")  from e
 
 
 @router.post("/memory/snapshot")
@@ -1320,7 +1320,7 @@ async def take_memory_snapshot(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to take memory snapshot: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to take memory snapshot: {e}")  from e
 
 
 @router.get("/memory/analysis")
@@ -1348,7 +1348,7 @@ async def get_memory_analysis(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get memory analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get memory analysis: {e}")  from e
 
 
 # ============================================================================
@@ -1443,12 +1443,12 @@ async def get_provider_health_summary():
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get provider health: {e}"
-        )
+        )  from e
 
 
 @router.get("/providers/{provider_name}/health", response_model=ProviderHealthResponse, tags=["providers"])
@@ -1471,7 +1471,7 @@ async def get_provider_health(provider_name: str):
             raise HTTPException(
                 status_code=404,
                 detail=f"Unknown provider: {provider_name}"
-            )
+            )  from None
         
         # Check health
         health = await monitor.check_provider_health(provider)
@@ -1496,12 +1496,12 @@ async def get_provider_health(provider_name: str):
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get provider health: {e}"
-        )
+        )  from e
 
 
 @router.post("/providers/{provider_name}/check", tags=["providers"])
@@ -1523,7 +1523,7 @@ async def check_provider(provider_name: str):
             raise HTTPException(
                 status_code=404,
                 detail=f"Unknown provider: {provider_name}"
-            )
+            )  from None
         
         health = await monitor.check_provider_health(provider)
         
@@ -1541,12 +1541,12 @@ async def check_provider(provider_name: str):
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to check provider: {e}"
-        )
+        )  from e
 
 
 @router.get("/providers/recommend", tags=["providers"])
@@ -1578,12 +1578,12 @@ async def get_recommended_provider(task_type: str = Query(default="general")):
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get recommendation: {e}"
-        )
+        )  from e
 
 
 @router.get("/providers/latency/trends", tags=["providers"])
@@ -1622,12 +1622,12 @@ async def get_latency_trends():
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get latency trends: {e}"
-        )
+        )  from e
 
 
 @router.get("/providers/errors", tags=["providers"])
@@ -1666,12 +1666,12 @@ async def get_provider_errors(hours: int = Query(default=24, ge=1, le=168)):
         raise HTTPException(
             status_code=503,
             detail="Provider health monitoring not available"
-        )
+        )  from None
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get error summary: {e}"
-        )
+        )  from e
 
 
 # Benchmark Endpoints
@@ -1739,7 +1739,7 @@ async def run_benchmark_suite(request: BenchmarkRunRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Benchmark execution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Benchmark execution failed: {e}")  from e
 
 
 @router.get("/benchmarks/results", response_model=List[BenchmarkResultResponse], tags=["benchmarks"])
@@ -1795,7 +1795,7 @@ async def get_benchmark_results(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get results: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get results: {e}")  from e
 
 
 @router.get("/benchmarks/comparison", response_model=Dict[str, Any], tags=["benchmarks"])
@@ -1853,7 +1853,7 @@ async def compare_providers(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")  from e
 
 
 @router.get("/benchmarks/recommendations", response_model=BenchmarkRecommendationResponse, tags=["benchmarks"])
@@ -1901,7 +1901,7 @@ async def get_recommendations(
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Recommendations failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Recommendations failed: {e}")  from e
 
 
 @router.get("/benchmarks/suites", response_model=Dict[str, Any], tags=["benchmarks"])
@@ -1930,7 +1930,7 @@ async def list_benchmark_suites():
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list suites: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list suites: {e}")  from e
 
 
 # Add router tags and metadata

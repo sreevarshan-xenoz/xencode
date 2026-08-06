@@ -72,7 +72,26 @@ crush/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 .xencode/
+
+# Build artifacts
+*.tgz
+
+# Security scan outputs
+bandit_*.json
+bandit_*.txt
+
+# Runtime / tooling
+.freebuff/
+.agents/
+nul
+
+# Editor backup files
+*.bak
+*.orig
+*~
 
 # Environment and secrets
 .env
@@ -89,8 +108,3 @@ secrets/
 
 # Jupyter
 *.ipynb_checkpoints
-
-# Editor backup files
-*~
-*.bak
-*.orig

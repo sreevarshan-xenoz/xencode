@@ -1,17 +1,15 @@
 """
 Monitoring and analytics system for multi-agent collaboration in Xencode
 """
-from typing import Dict, List, Optional, Any, Tuple
-from enum import Enum
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import uuid
 import json
 import sqlite3
-import threading
-import time
-from collections import defaultdict, deque
 import statistics
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class MetricType(Enum):
@@ -81,25 +79,25 @@ class CollaborationStats:
 
 class MetricsCollector:
     """Collects metrics from various sources in the multi-agent system."""
-    
+
     def __init__(self, db_path: str = "metrics.db"):
         self.db_path = db_path
         self.metrics_buffer: List[Metric] = []
         self.alerts_buffer: List[Alert] = []
         self.access_lock = threading.RLock()
         self.metric_thresholds: Dict[MetricType, Tuple[float, float]] = {}  # (warning, critical)
-        
+
         # Initialize database
         self._init_db()
-        
+
         # Set default thresholds
         self._set_default_thresholds()
-    
+
     def _init_db(self):
         """Initialize the metrics database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Create metrics table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS metrics (
@@ -113,7 +111,7 @@ class MetricsCollector:
                 source TEXT
             )
         ''')
-        
+
         # Create alerts table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS alerts (
@@ -128,7 +126,7 @@ class MetricsCollector:
                 resolved_at TEXT
             )
         ''')
-        
+
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_metric_type ON metrics(metric_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_agent_metrics ON metrics(agent_id)')
@@ -136,10 +134,10 @@ class MetricsCollector:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_metric_timestamp ON metrics(timestamp)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_severity ON alerts(severity)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_alert_resolved ON alerts(resolved)')
-        
+
         conn.commit()
         conn.close()
-    
+
     def _set_default_thresholds(self):
         """Set default thresholds for metrics."""
         self.metric_thresholds = {
@@ -152,16 +150,16 @@ class MetricsCollector:
             MetricType.TEAM_FORMATION_SUCCESS: (0.7, 0.5),  # Warning at 70%, Critical at 50%
             MetricType.LEARNING_EFFICIENCY: (0.5, 0.3)  # Warning at 50%, Critical at 30%
         }
-    
+
     def record_metric(self, metric: Metric) -> Optional[Alert]:
         """Record a metric and potentially generate an alert."""
         with self.access_lock:
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
-                INSERT INTO metrics 
+                INSERT INTO metrics
                 (metric_id, metric_type, agent_id, team_id, value, timestamp, metadata, source)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -174,30 +172,30 @@ class MetricsCollector:
                 json.dumps(metric.metadata),
                 metric.source
             ))
-            
+
             conn.commit()
             conn.close()
-            
+
             # Check if this metric triggers an alert
             alert = self._check_metric_threshold(metric)
             if alert:
                 self._store_alert(alert)
-            
+
             return alert
-    
+
     def _check_metric_threshold(self, metric: Metric) -> Optional[Alert]:
         """Check if a metric exceeds its threshold and create an alert if needed."""
         if metric.metric_type not in self.metric_thresholds:
             return None
-        
+
         warning_thresh, critical_thresh = self.metric_thresholds[metric.metric_type]
-        
+
         # Determine severity based on thresholds
         severity = None
         title = ""
         description = ""
-        
-        if metric.metric_type in [MetricType.AGENT_UTILIZATION, MetricType.RESOURCE_USAGE, 
+
+        if metric.metric_type in [MetricType.AGENT_UTILIZATION, MetricType.RESOURCE_USAGE,
                                   MetricType.RESPONSE_TIME, MetricType.COMMUNICATION_LATENCY]:
             # Higher values are worse for these metrics
             if metric.value >= critical_thresh:
@@ -218,7 +216,7 @@ class MetricsCollector:
                 severity = AlertSeverity.WARNING
                 title = f"Warning {metric.metric_type.value} threshold exceeded"
                 description = f"Value {metric.value} falls below warning threshold {warning_thresh}"
-        
+
         if severity:
             return Alert(
                 severity=severity,
@@ -227,14 +225,14 @@ class MetricsCollector:
                 metric_id=metric.metric_id,
                 agent_id=metric.agent_id
             )
-        
+
         return None
-    
+
     def _store_alert(self, alert: Alert):
         """Store an alert in the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             INSERT INTO alerts
             (alert_id, severity, title, description, timestamp, metric_id, agent_id, resolved, resolved_at)
@@ -250,32 +248,32 @@ class MetricsCollector:
             alert.resolved,
             alert.resolved_at.isoformat() if alert.resolved_at else None
         ))
-        
+
         conn.commit()
         conn.close()
-    
-    def get_metrics_by_type(self, metric_type: MetricType, start_time: datetime, 
+
+    def get_metrics_by_type(self, metric_type: MetricType, start_time: datetime,
                            end_time: datetime, agent_id: Optional[str] = None) -> List[Metric]:
         """Get metrics of a specific type within a time range."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         query = '''
-            SELECT * FROM metrics 
+            SELECT * FROM metrics
             WHERE metric_type = ? AND timestamp BETWEEN ? AND ?
         '''
         params = [metric_type.value, start_time.isoformat(), end_time.isoformat()]
-        
+
         if agent_id:
             query += " AND agent_id = ?"
             params.append(agent_id)
-        
+
         query += " ORDER BY timestamp DESC"
-        
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
-        
+
         metrics = []
         for row in rows:
             metric = Metric(
@@ -289,33 +287,33 @@ class MetricsCollector:
                 source=row[7]
             )
             metrics.append(metric)
-        
+
         return metrics
-    
-    def get_recent_alerts(self, limit: int = 50, severity: Optional[AlertSeverity] = None, 
+
+    def get_recent_alerts(self, limit: int = 50, severity: Optional[AlertSeverity] = None,
                          resolved: Optional[bool] = None) -> List[Alert]:
         """Get recent alerts with optional filters."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         query = "SELECT * FROM alerts WHERE 1=1"
         params = []
-        
+
         if severity:
             query += " AND severity = ?"
             params.append(severity.value)
-        
+
         if resolved is not None:
             query += " AND resolved = ?"
             params.append(resolved)
-        
+
         query += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
-        
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
-        
+
         alerts = []
         for row in rows:
             alert = Alert(
@@ -330,31 +328,31 @@ class MetricsCollector:
                 resolved_at=datetime.fromisoformat(row[8]) if row[8] else None
             )
             alerts.append(alert)
-        
+
         return alerts
-    
+
     def resolve_alert(self, alert_id: str):
         """Mark an alert as resolved."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            UPDATE alerts 
-            SET resolved = ?, resolved_at = ? 
+            UPDATE alerts
+            SET resolved = ?, resolved_at = ?
             WHERE alert_id = ?
         ''', (True, datetime.now().isoformat(), alert_id))
-        
+
         conn.commit()
         conn.close()
 
 
 class CollaborationAnalyzer:
     """Analyzes collaboration patterns and generates insights."""
-    
+
     def __init__(self, metrics_collector: MetricsCollector):
         self.metrics_collector = metrics_collector
         self.access_lock = threading.RLock()
-    
+
     def generate_collaboration_stats(self, start_time: datetime, end_time: datetime) -> CollaborationStats:
         """Generate aggregated collaboration statistics for a time period."""
         with self.access_lock:
@@ -362,50 +360,50 @@ class CollaborationAnalyzer:
             all_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.TASK_COMPLETION_RATE, start_time, end_time
             )
-            
+
             # Count successful and failed tasks
             successful_tasks = sum(1 for m in all_metrics if m.value >= 0.8)  # Assuming 0.8+ is success
             failed_tasks = sum(1 for m in all_metrics if m.value < 0.8)
-            
+
             # Get response times
             response_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.RESPONSE_TIME, start_time, end_time
             )
             avg_response_time = statistics.mean([m.value for m in response_metrics]) if response_metrics else 0.0
-            
+
             # Get collaboration efficiency
             efficiency_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.COLLABORATION_EFFICIENCY, start_time, end_time
             )
             avg_efficiency = statistics.mean([m.value for m in efficiency_metrics]) if efficiency_metrics else 0.0
-            
+
             # Get agent utilization
             utilization_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.AGENT_UTILIZATION, start_time, end_time
             )
             avg_utilization = statistics.mean([m.value for m in utilization_metrics]) if utilization_metrics else 0.0
-            
+
             # Get unique agents active
-            active_agents = set(m.agent_id for m in all_metrics if m.agent_id)
-            
+            active_agents = {m.agent_id for m in all_metrics if m.agent_id}
+
             # Get communication events
             comm_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.COMMUNICATION_LATENCY, start_time, end_time
             )
-            
+
             # Get resource allocations
             resource_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.RESOURCE_USAGE, start_time, end_time
             )
-            
+
             # Get team formations
             team_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.TEAM_FORMATION_SUCCESS, start_time, end_time
             )
-            
+
             # Calculate average team size (simplified)
             avg_team_size = 3.0 if team_metrics else 0.0  # Placeholder
-            
+
             return CollaborationStats(
                 period_start=start_time,
                 period_end=end_time,
@@ -421,7 +419,7 @@ class CollaborationAnalyzer:
                 team_formations=len(team_metrics),
                 avg_team_size=avg_team_size
             )
-    
+
     def get_agent_performance(self, agent_id: str, start_time: datetime, end_time: datetime) -> Dict[str, Any]:
         """Get performance metrics for a specific agent."""
         with self.access_lock:
@@ -429,24 +427,24 @@ class CollaborationAnalyzer:
             utilization_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.AGENT_UTILIZATION, start_time, end_time, agent_id
             )
-            
+
             response_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.RESPONSE_TIME, start_time, end_time, agent_id
             )
-            
+
             efficiency_metrics = self.metrics_collector.get_metrics_by_type(
                 MetricType.COLLABORATION_EFFICIENCY, start_time, end_time, agent_id
             )
-            
+
             # Calculate averages
             avg_utilization = statistics.mean([m.value for m in utilization_metrics]) if utilization_metrics else 0.0
             avg_response_time = statistics.mean([m.value for m in response_metrics]) if response_metrics else 0.0
             avg_efficiency = statistics.mean([m.value for m in efficiency_metrics]) if efficiency_metrics else 0.0
-            
+
             # Get alert count for this agent
             all_alerts = self.metrics_collector.get_recent_alerts(limit=1000)
             agent_alerts = [a for a in all_alerts if a.agent_id == agent_id and start_time <= a.timestamp <= end_time]
-            
+
             return {
                 'agent_id': agent_id,
                 'period_start': start_time,
@@ -458,22 +456,22 @@ class CollaborationAnalyzer:
                 'alert_count': len(agent_alerts),
                 'last_seen': max((m.timestamp for m in utilization_metrics), default=None)
             }
-    
-    def get_trend_analysis(self, metric_type: MetricType, start_time: datetime, 
+
+    def get_trend_analysis(self, metric_type: MetricType, start_time: datetime,
                           end_time: datetime, interval_hours: int = 1) -> List[Dict[str, Any]]:
         """Get trend analysis for a specific metric type."""
         with self.access_lock:
             # Divide the time period into intervals
             current_time = start_time
             trends = []
-            
+
             while current_time < end_time:
                 interval_end = min(current_time + timedelta(hours=interval_hours), end_time)
-                
+
                 metrics = self.metrics_collector.get_metrics_by_type(
                     metric_type, current_time, interval_end
                 )
-                
+
                 if metrics:
                     values = [m.value for m in metrics]
                     trend_point = {
@@ -486,15 +484,15 @@ class CollaborationAnalyzer:
                         'std_dev': statistics.stdev(values) if len(values) > 1 else 0.0
                     }
                     trends.append(trend_point)
-                
+
                 current_time = interval_end
-            
+
             return trends
 
 
 class RealTimeDashboard:
     """Real-time dashboard for monitoring multi-agent collaboration."""
-    
+
     def __init__(self, metrics_collector: MetricsCollector, collaboration_analyzer: CollaborationAnalyzer):
         self.metrics_collector = metrics_collector
         self.collaboration_analyzer = collaboration_analyzer
@@ -502,30 +500,30 @@ class RealTimeDashboard:
         self.dashboard_refresh_interval = 5  # seconds
         self.is_running = False
         self.dashboard_data = {}
-    
+
     def start_monitoring(self):
         """Start the real-time monitoring loop."""
         if not self.is_running:
             self.is_running = True
             # In a real implementation, this would start a background thread
             # For now, we'll just update the data when requested
-    
+
     def stop_monitoring(self):
         """Stop the real-time monitoring."""
         self.is_running = False
-    
+
     def get_current_dashboard_data(self) -> Dict[str, Any]:
         """Get current dashboard data."""
         with self.access_lock:
             now = datetime.now()
             start_time = now - timedelta(minutes=15)  # Last 15 minutes
-            
+
             # Get collaboration stats
             stats = self.collaboration_analyzer.generate_collaboration_stats(start_time, now)
-            
+
             # Get recent alerts
             recent_alerts = self.metrics_collector.get_recent_alerts(limit=10)
-            
+
             # Get agent performance
             # For this example, we'll simulate getting active agent IDs
             # In a real system, we'd get this from the active agents list
@@ -534,16 +532,16 @@ class RealTimeDashboard:
             for agent_id in sample_agents:
                 perf = self.collaboration_analyzer.get_agent_performance(agent_id, start_time, now)
                 agent_performance.append(perf)
-            
+
             # Get trend data for key metrics
             response_trends = self.collaboration_analyzer.get_trend_analysis(
                 MetricType.RESPONSE_TIME, start_time, now, interval_hours=1
             )
-            
+
             efficiency_trends = self.collaboration_analyzer.get_trend_analysis(
                 MetricType.COLLABORATION_EFFICIENCY, start_time, now, interval_hours=1
             )
-            
+
             self.dashboard_data = {
                 'timestamp': now,
                 'collaboration_stats': stats,
@@ -553,15 +551,15 @@ class RealTimeDashboard:
                 'efficiency_trends': efficiency_trends,
                 'system_health': self._calculate_system_health(recent_alerts, stats)
             }
-            
+
             return self.dashboard_data
-    
+
     def _calculate_system_health(self, alerts: List[Alert], stats: CollaborationStats) -> str:
         """Calculate overall system health based on alerts and stats."""
         critical_alerts = [a for a in alerts if a.severity == AlertSeverity.CRITICAL]
         error_alerts = [a for a in alerts if a.severity == AlertSeverity.ERROR]
         warning_alerts = [a for a in alerts if a.severity == AlertSeverity.WARNING]
-        
+
         if critical_alerts:
             return "CRITICAL"
         elif error_alerts:
@@ -578,16 +576,16 @@ class RealTimeDashboard:
 
 class MonitoringAnalyticsEngine:
     """Main engine for monitoring and analytics of multi-agent collaboration."""
-    
+
     def __init__(self, metrics_db_path: str = "metrics.db"):
         self.metrics_collector = MetricsCollector(metrics_db_path)
         self.collaboration_analyzer = CollaborationAnalyzer(self.metrics_collector)
         self.real_time_dashboard = RealTimeDashboard(
-            self.metrics_collector, 
+            self.metrics_collector,
             self.collaboration_analyzer
         )
         self.access_lock = threading.RLock()
-    
+
     def record_agent_utilization(self, agent_id: str, utilization: float, metadata: Dict[str, Any] = None):
         """Record agent utilization metric."""
         metadata = metadata or {}
@@ -599,8 +597,8 @@ class MonitoringAnalyticsEngine:
             source="agent_monitor"
         )
         return self.metrics_collector.record_metric(metric)
-    
-    def record_task_completion_rate(self, agent_id: str, completion_rate: float, 
+
+    def record_task_completion_rate(self, agent_id: str, completion_rate: float,
                                    task_details: Dict[str, Any] = None):
         """Record task completion rate metric."""
         task_details = task_details or {}
@@ -612,8 +610,8 @@ class MonitoringAnalyticsEngine:
             source="task_manager"
         )
         return self.metrics_collector.record_metric(metric)
-    
-    def record_response_time(self, agent_id: str, response_time: float, 
+
+    def record_response_time(self, agent_id: str, response_time: float,
                            request_details: Dict[str, Any] = None):
         """Record response time metric."""
         request_details = request_details or {}
@@ -625,8 +623,8 @@ class MonitoringAnalyticsEngine:
             source="communication_layer"
         )
         return self.metrics_collector.record_metric(metric)
-    
-    def record_collaboration_efficiency(self, team_id: str, efficiency: float, 
+
+    def record_collaboration_efficiency(self, team_id: str, efficiency: float,
                                       collaboration_details: Dict[str, Any] = None):
         """Record collaboration efficiency metric."""
         collaboration_details = collaboration_details or {}
@@ -638,8 +636,8 @@ class MonitoringAnalyticsEngine:
             source="team_coordinator"
         )
         return self.metrics_collector.record_metric(metric)
-    
-    def record_resource_usage(self, agent_id: str, usage_percentage: float, 
+
+    def record_resource_usage(self, agent_id: str, usage_percentage: float,
                             resource_details: Dict[str, Any] = None):
         """Record resource usage metric."""
         resource_details = resource_details or {}
@@ -651,30 +649,30 @@ class MonitoringAnalyticsEngine:
             source="resource_manager"
         )
         return self.metrics_collector.record_metric(metric)
-    
+
     def get_collaboration_insights(self, start_time: datetime, end_time: datetime) -> Dict[str, Any]:
         """Get comprehensive collaboration insights for a time period."""
         with self.access_lock:
             stats = self.collaboration_analyzer.generate_collaboration_stats(start_time, end_time)
-            
+
             # Get top performing agents
             sample_agents = [f"agent_{i}" for i in range(5)]
             agent_performances = []
             for agent_id in sample_agents:
                 perf = self.collaboration_analyzer.get_agent_performance(agent_id, start_time, end_time)
                 agent_performances.append(perf)
-            
+
             # Sort by efficiency
             agent_performances.sort(key=lambda x: x['avg_efficiency'], reverse=True)
-            
+
             # Get trend analysis
             efficiency_trends = self.collaboration_analyzer.get_trend_analysis(
                 MetricType.COLLABORATION_EFFICIENCY, start_time, end_time
             )
-            
+
             # Get recent alerts
             recent_alerts = self.metrics_collector.get_recent_alerts(limit=20)
-            
+
             return {
                 'collaboration_stats': stats,
                 'top_performing_agents': agent_performances[:3],
@@ -682,28 +680,28 @@ class MonitoringAnalyticsEngine:
                 'recent_alerts': recent_alerts,
                 'insights_summary': self._generate_insights_summary(stats, recent_alerts)
             }
-    
+
     def _generate_insights_summary(self, stats: CollaborationStats, alerts: List[Alert]) -> List[str]:
         """Generate a summary of insights from the data."""
         insights = []
-        
+
         if stats.total_tasks > 0:
             success_rate = stats.successful_tasks / stats.total_tasks
             if success_rate < 0.8:
                 insights.append(f"Task success rate is low at {success_rate:.2%}")
             else:
                 insights.append(f"Good task success rate of {success_rate:.2%}")
-        
+
         if stats.avg_response_time > 5.0:
             insights.append(f"Average response time is high at {stats.avg_response_time:.2f}s")
-        
+
         if stats.avg_collaboration_efficiency < 0.6:
             insights.append(f"Collaboration efficiency could be improved at {stats.avg_collaboration_efficiency:.2f}")
-        
+
         critical_alerts = [a for a in alerts if a.severity in [AlertSeverity.CRITICAL, AlertSeverity.ERROR]]
         if critical_alerts:
             insights.append(f"Attention needed: {len(critical_alerts)} critical/error alerts in the period")
-        
+
         return insights
 
 

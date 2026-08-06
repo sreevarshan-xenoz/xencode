@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 
 from xencode.api.main import app
 
-
 client = TestClient(app)
 
 

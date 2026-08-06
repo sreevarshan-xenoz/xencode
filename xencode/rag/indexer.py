@@ -1,29 +1,30 @@
-import os
 from pathlib import Path
-from typing import List, Set, Optional
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from typing import List, Optional
+
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .vector_store import VectorStore
-from .graph_store import GraphStore
 from .graph_extractor import CodeGraphExtractor
+from .graph_store import GraphStore
+from .vector_store import VectorStore
+
 
 class Indexer:
     """
     Handles indexing of a codebase into the VectorStore and GraphStore.
     """
-    
+
     DEFAULT_EXCLUDES = {
-        '.git', '__pycache__', 'node_modules', '.venv', 'venv', 
+        '.git', '__pycache__', 'node_modules', '.venv', 'venv',
         '.env', '.vscode', '.idea', 'dist', 'build', '.xencode'
     }
-    
+
     DEFAULT_EXTENSIONS = {
-        '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', 
+        '.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css',
         '.md', '.txt', '.json', '.yaml', '.yml', '.sql', '.sh'
     }
-    
+
     def __init__(self, vector_store: VectorStore, graph_store: Optional[GraphStore] = None):
         self.vector_store = vector_store
         self.graph_store = graph_store or GraphStore()
@@ -33,32 +34,32 @@ class Indexer:
             chunk_overlap=200,
             separators=["\n\n", "\n", " ", ""]
         )
-        
+
     def index_directory(self, root_path: str, verbose: bool = True):
         """
         Walks the directory and indexes allowed files.
         """
         root = Path(root_path)
         documents: List[Document] = []
-        
+
         files_to_index = []
-        
+
         # Discovery Phase
         if verbose:
             print(f"Scanning {root_path}...")
-            
+
         for path in root.rglob('*'):
             if path.is_file():
                 # Check excludes
                 if any(p in path.parts for p in self.DEFAULT_EXCLUDES):
                     continue
-                
+
                 # Check extension
                 if path.suffix not in self.DEFAULT_EXTENSIONS:
                     continue
-                    
+
                 files_to_index.append(path)
-        
+
         # Processing Phase
         if verbose:
             with Progress(
@@ -66,16 +67,16 @@ class Indexer:
                 TextColumn("[progress.description]{task.description}"),
             ) as progress:
                 task = progress.add_task(f"Indexing {len(files_to_index)} files...", total=len(files_to_index))
-                
+
                 for file_path in files_to_index:
                     try:
                         # Extract graph relationships
                         self.graph_extractor.extract_from_file(str(file_path))
-                        
+
                         docs = self._process_file(file_path)
                         documents.extend(docs)
                         progress.advance(task)
-                    except Exception as e:
+                    except Exception:
                         # Silently fail on individual files but log if needed
                         pass
         else:
@@ -83,7 +84,7 @@ class Indexer:
                 try:
                     # Extract graph relationships
                     self.graph_extractor.extract_from_file(str(file_path))
-                    
+
                     docs = self._process_file(file_path)
                     documents.extend(docs)
                 except Exception:
@@ -94,19 +95,19 @@ class Indexer:
             if verbose:
                 print(f"Storing {len(documents)} chunks to vector store...")
             self.vector_store.add_documents(documents)
-            
+
             # Store graph data
             nodes, rels = self.graph_extractor.get_data()
             if verbose:
                 print(f"Storing {len(nodes)} nodes and {len(rels)} relationships to graph store...")
-            
+
             for node_id, node_type, metadata in nodes:
                 self.graph_store.add_node(node_id, node_type, metadata)
             for src, target, rel_type, metadata in rels:
                 self.graph_store.add_relationship(src, target, rel_type, metadata)
-                
+
             self.graph_store.persist()
-            
+
             if verbose:
                 print("Indexing complete.")
         else:
@@ -118,7 +119,7 @@ class Indexer:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                
+
             metadatas = {"source": str(file_path), "filename": file_path.name}
             docs = self.text_splitter.create_documents([content], metadatas=[metadatas])
             return docs

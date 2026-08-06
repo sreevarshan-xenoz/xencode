@@ -1,10 +1,10 @@
 """Workspace management for teams."""
 
 import uuid
-from typing import Optional, List
+from typing import List, Optional
 
 from .database import CollaborationDatabase
-from .models import Workspace, WorkspaceMember, Role, User
+from .models import Role, Workspace, WorkspaceMember
 
 
 class WorkspaceManager:
@@ -25,10 +25,10 @@ class WorkspaceManager:
             created_by=created_by
         )
         workspace = self.db.create_workspace(workspace)
-        
+
         # Add creator as admin
         self.add_member(workspace.id, created_by, Role.ADMIN)
-        
+
         return workspace
 
     def get_workspace(self, workspace_id: str) -> Optional[Workspace]:

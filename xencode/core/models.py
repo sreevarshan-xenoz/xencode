@@ -1,15 +1,14 @@
 """
 Model management module for Xencode
 """
-import subprocess
 import shutil
+import subprocess
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -155,7 +154,7 @@ class ModelManager:
                 model_name = model.replace("openai:", "")
                 try:
                     # Just check if the model is accessible
-                    response = client.models.retrieve(model_name)
+                    client.models.retrieve(model_name)
                     response_time = time.time() - start_time
 
                     self.model_health[model] = {
@@ -179,7 +178,7 @@ class ModelManager:
                 model_name = model.replace("google_gemini:", "")
                 try:
                     # Test if we can access the model
-                    test_model = genai.GenerativeModel(model_name)
+                    genai.GenerativeModel(model_name)
                     response_time = time.time() - start_time
 
                     self.model_health[model] = {
@@ -206,7 +205,7 @@ class ModelManager:
                 model_name = model.replace("openrouter:", "")
                 try:
                     # Test if we can access the model
-                    response = client.models.retrieve(model_name)
+                    client.models.retrieve(model_name)
                     response_time = time.time() - start_time
 
                     self.model_health[model] = {
@@ -399,7 +398,7 @@ def list_models() -> None:
         for model in model_manager.available_models:
             # Actively check model health
             try:
-                is_healthy = model_manager.check_model_health(model)
+                model_manager.check_model_health(model)
                 health = model_manager.model_health.get(model, {})
                 status = health.get('status', 'unknown')
 
@@ -487,7 +486,7 @@ def update_model(model: str) -> None:
             task = progress.add_task(f"Pulling {model}...", total=None)
 
             # Run the pull command
-            result = subprocess.run(
+            subprocess.run(
                 ["ollama", "pull", model], check=True, capture_output=True, text=True
             )
 

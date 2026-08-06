@@ -4,7 +4,7 @@ Document Processors Package
 
 Contains specialized processors for different document types:
 - PDFProcessor: PDF document processing with PyMuPDF
-- DOCXProcessor: DOCX document processing with python-docx  
+- DOCXProcessor: DOCX document processing with python-docx
 - WebContentExtractor: HTML/web content processing with BeautifulSoup4
 """
 
@@ -50,37 +50,37 @@ except ImportError as e:
 def get_available_processors() -> List[str]:
     """Get list of available processor names"""
     available = []
-    
+
     if PDF_PROCESSOR_AVAILABLE:
         available.append("PDFProcessor")
-    
+
     if DOCX_PROCESSOR_AVAILABLE:
         available.append("DOCXProcessor")
-    
+
     if WEB_PROCESSOR_AVAILABLE:
         available.append("WebContentExtractor")
-    
+
     if TEXT_PROCESSOR_AVAILABLE:
         available.append("TextProcessor")
-    
+
     return available
 
 
 def create_processor(processor_type: str, **kwargs):
     """Factory function to create processors"""
-    
+
     if processor_type.lower() == "pdf" and PDF_PROCESSOR_AVAILABLE:
         return PDFProcessor(**kwargs)
-    
+
     elif processor_type.lower() == "docx" and DOCX_PROCESSOR_AVAILABLE:
         return DOCXProcessor(**kwargs)
-    
+
     elif processor_type.lower() in ["html", "web"] and WEB_PROCESSOR_AVAILABLE:
         return WebContentExtractor(**kwargs)
-    
+
     elif processor_type.lower() in ["text", "markdown", "code"] and TEXT_PROCESSOR_AVAILABLE:
         return TextProcessor(**kwargs)
-    
+
     else:
         raise ValueError(f"Processor type '{processor_type}' not available or not supported")
 
@@ -98,7 +98,7 @@ def get_processor_status() -> dict:
 
 __all__ = [
     'PDFProcessor',
-    'DOCXProcessor', 
+    'DOCXProcessor',
     'WebContentExtractor',
     'TextProcessor',
     'get_available_processors',

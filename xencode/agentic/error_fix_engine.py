@@ -12,8 +12,7 @@ Detects common failure signatures and suggests targeted fixes:
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
 
@@ -64,7 +63,7 @@ class FixSuggestion:
     confidence: FixConfidence = FixConfidence.MEDIUM
     category: ErrorCategory = ErrorCategory.UNKNOWN
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -88,32 +87,32 @@ class ErrorAnalysis:
     traceback: Optional[str] = None
     suggestions: List[FixSuggestion] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
-    
+
     @property
     def has_suggestions(self) -> bool:
         """Check if there are fix suggestions"""
         return len(self.suggestions) > 0
-    
+
     @property
     def best_suggestion(self) -> Optional[FixSuggestion]:
         """Get highest confidence suggestion"""
         if not self.suggestions:
             return None
-        
+
         # Sort by confidence
         confidence_order = {
             FixConfidence.HIGH: 0,
             FixConfidence.MEDIUM: 1,
             FixConfidence.LOW: 2,
         }
-        
+
         sorted_suggestions = sorted(
             self.suggestions,
             key=lambda s: confidence_order.get(s.confidence, 3),
         )
-        
+
         return sorted_suggestions[0]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -131,16 +130,16 @@ class ErrorAnalysis:
 class ErrorFixEngine:
     """
     Auto-fix suggestion engine
-    
+
     Analyzes errors and suggests targeted fixes based on
     pattern matching and common error knowledge.
-    
+
     Usage:
         engine = ErrorFixEngine()
         analysis = engine.analyze_error("NameError: name 'x' is not defined")
         print(analysis.best_suggestion)
     """
-    
+
     # Error patterns library
     ERROR_PATTERNS: List[ErrorPattern] = [
         # Syntax errors
@@ -154,28 +153,28 @@ class ErrorFixEngine:
             ErrorCategory.SYNTAX,
             "Indentation error",
         ),
-        
+
         # Name errors
         ErrorPattern(
             r"NameError:\s*name\s+'(\w+)'\s+is\s+not\s+defined",
             ErrorCategory.NAME_ERROR,
             "Undefined variable or function",
         ),
-        
+
         # Type errors
         ErrorPattern(
             r"TypeError:\s*(?:unsupported operand|cannot concatenate|'NoneType')",
             ErrorCategory.TYPE_ERROR,
             "Type mismatch or incompatible operation",
         ),
-        
+
         # Attribute errors
         ErrorPattern(
             r"AttributeError:\s*(?:'(\w+)' object has no attribute|module '\w+' has no attribute)",
             ErrorCategory.ATTRIBUTE_ERROR,
             "Missing attribute or method",
         ),
-        
+
         # Import errors
         ErrorPattern(
             r"ImportError:\s*(?:No module named|cannot import name)",
@@ -187,7 +186,7 @@ class ErrorFixEngine:
             ErrorCategory.IMPORT_ERROR,
             "Module not found",
         ),
-        
+
         # File errors
         ErrorPattern(
             r"FileNotFoundError:\s*\[Errno 2\]",
@@ -199,7 +198,7 @@ class ErrorFixEngine:
             ErrorCategory.PERMISSION,
             "Permission denied",
         ),
-        
+
         # Index/Key errors
         ErrorPattern(
             r"IndexError:\s*list index out of range",
@@ -211,21 +210,21 @@ class ErrorFixEngine:
             ErrorCategory.KEY_ERROR,
             "Dictionary key not found",
         ),
-        
+
         # Value errors
         ErrorPattern(
             r"ValueError:\s*(?:invalid literal|too many values|not enough values)",
             ErrorCategory.VALUE_ERROR,
             "Invalid value or argument",
         ),
-        
+
         # Zero division
         ErrorPattern(
             r"ZeroDivisionError:",
             ErrorCategory.ZERO_DIVISION,
             "Division by zero",
         ),
-        
+
         # Timeout/Connection
         ErrorPattern(
             r"(?:asyncio\.exceptions\.)?TimeoutError",
@@ -238,7 +237,7 @@ class ErrorFixEngine:
             "Network connection error",
         ),
     ]
-    
+
     # Fix suggestions library
     FIX_SUGGESTIONS: Dict[ErrorCategory, List[FixSuggestion]] = {
         ErrorCategory.SYNTAX: [
@@ -255,7 +254,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.NAME_ERROR: [
             FixSuggestion(
                 title="Define Variable",
@@ -276,7 +275,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.TYPE_ERROR: [
             FixSuggestion(
                 title="Check Types",
@@ -291,7 +290,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.ATTRIBUTE_ERROR: [
             FixSuggestion(
                 title="Check Object Type",
@@ -306,7 +305,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.IMPORT_ERROR: [
             FixSuggestion(
                 title="Install Package",
@@ -321,7 +320,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.FILE_ERROR: [
             FixSuggestion(
                 title="Check File Path",
@@ -336,7 +335,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.INDEX_ERROR: [
             FixSuggestion(
                 title="Check List Length",
@@ -345,7 +344,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
             ),
         ],
-        
+
         ErrorCategory.KEY_ERROR: [
             FixSuggestion(
                 title="Use .get() Method",
@@ -354,7 +353,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
             ),
         ],
-        
+
         ErrorCategory.ZERO_DIVISION: [
             FixSuggestion(
                 title="Check Divisor",
@@ -363,7 +362,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
             ),
         ],
-        
+
         ErrorCategory.TIMEOUT: [
             FixSuggestion(
                 title="Increase Timeout",
@@ -378,7 +377,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.LOW,
             ),
         ],
-        
+
         ErrorCategory.CONNECTION: [
             FixSuggestion(
                 title="Check Connection",
@@ -387,7 +386,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
             ),
         ],
-        
+
         ErrorCategory.PERMISSION: [
             FixSuggestion(
                 title="Check Permissions",
@@ -396,7 +395,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
             ),
         ],
-        
+
         ErrorCategory.VALUE_ERROR: [
             FixSuggestion(
                 title="Validate Input",
@@ -406,12 +405,12 @@ class ErrorFixEngine:
             ),
         ],
     }
-    
+
     def __init__(self):
         """Initialize error fix engine"""
         self._compiled_patterns: List[Tuple[re.Pattern, ErrorPattern]] = []
         self._compile_patterns()
-    
+
     def _compile_patterns(self):
         """Compile regex patterns for efficiency"""
         for error_pattern in self.ERROR_PATTERNS:
@@ -420,7 +419,7 @@ class ErrorFixEngine:
                 self._compiled_patterns.append((compiled, error_pattern))
             except re.error as e:
                 console.print(f"[yellow]Warning: Invalid pattern '{error_pattern.pattern}': {e}[/yellow]")
-    
+
     def analyze_error(
         self,
         error_message: str,
@@ -429,27 +428,27 @@ class ErrorFixEngine:
     ) -> ErrorAnalysis:
         """
         Analyze error and generate fix suggestions
-        
+
         Args:
             error_message: Full error message
             traceback: Optional traceback string
             context: Optional context (file path, line number, code snippet)
-            
+
         Returns:
             ErrorAnalysis with suggestions
         """
         # Extract error type
         error_type = self._extract_error_type(error_message)
-        
+
         # Categorize error
         category = self._categorize_error(error_message)
-        
+
         # Extract message
         message = self._extract_message(error_message)
-        
+
         # Generate suggestions
         suggestions = self._generate_suggestions(category, error_message, context)
-        
+
         return ErrorAnalysis(
             original_error=error_message,
             error_type=error_type,
@@ -459,7 +458,7 @@ class ErrorFixEngine:
             suggestions=suggestions,
             context=context or {},
         )
-    
+
     def _extract_error_type(self, error_message: str) -> str:
         """Extract error type from message"""
         # Match patterns like "ErrorType:" at start
@@ -467,15 +466,15 @@ class ErrorFixEngine:
         if match:
             return match.group(1)
         return "UnknownError"
-    
+
     def _categorize_error(self, error_message: str) -> ErrorCategory:
         """Categorize error using pattern matching"""
         for pattern, error_pattern in self._compiled_patterns:
             if pattern.search(error_message):
                 return error_pattern.category
-        
+
         return ErrorCategory.UNKNOWN
-    
+
     def _extract_message(self, error_message: str) -> str:
         """Extract the error message portion"""
         # Remove error type prefix
@@ -483,7 +482,7 @@ class ErrorFixEngine:
         if match:
             return match.group(1).strip()
         return error_message.strip()
-    
+
     def _generate_suggestions(
         self,
         category: ErrorCategory,
@@ -492,10 +491,10 @@ class ErrorFixEngine:
     ) -> List[FixSuggestion]:
         """Generate fix suggestions based on error category"""
         suggestions = []
-        
+
         # Get base suggestions for category
         base_suggestions = self.FIX_SUGGESTIONS.get(category, [])
-        
+
         for suggestion in base_suggestions:
             # Create a copy with updated context
             new_suggestion = FixSuggestion(
@@ -507,19 +506,19 @@ class ErrorFixEngine:
                 category=category,
                 metadata={**suggestion.metadata},
             )
-            
+
             # Add extracted info to metadata
             if context:
                 new_suggestion.metadata.update(context)
-            
+
             suggestions.append(new_suggestion)
-        
+
         # Add context-specific suggestions
         if context:
             suggestions.extend(self._context_specific_suggestions(category, error_message, context))
-        
+
         return suggestions
-    
+
     def _context_specific_suggestions(
         self,
         category: ErrorCategory,
@@ -528,7 +527,7 @@ class ErrorFixEngine:
     ) -> List[FixSuggestion]:
         """Generate suggestions based on context"""
         suggestions = []
-        
+
         # File path context
         if "file_path" in context:
             suggestions.append(FixSuggestion(
@@ -538,7 +537,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
                 category=category,
             ))
-        
+
         # Line number context
         if "line_number" in context and "code_snippet" in context:
             suggestions.append(FixSuggestion(
@@ -548,7 +547,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.MEDIUM,
                 category=category,
             ))
-        
+
         # Variable name context (from NameError)
         var_match = re.search(r"name\s+'(\w+)'\s+is\s+not\s+defined", error_message)
         if var_match:
@@ -560,7 +559,7 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
                 category=ErrorCategory.NAME_ERROR,
             ))
-        
+
         # Module name context (from ImportError)
         mod_match = re.search(r"(?:No module named|ModuleNotFoundError).*'(\w+)'", error_message)
         if mod_match:
@@ -572,9 +571,9 @@ class ErrorFixEngine:
                 confidence=FixConfidence.HIGH,
                 category=ErrorCategory.IMPORT_ERROR,
             ))
-        
+
         return suggestions
-    
+
     def get_error_summary(self, analysis: ErrorAnalysis) -> str:
         """Generate human-readable error summary"""
         lines = [
@@ -582,23 +581,23 @@ class ErrorFixEngine:
             f"[dim]{analysis.message}[/dim]",
             f"\n[bold]Category:[/bold] {analysis.category.value}",
         ]
-        
+
         if analysis.suggestions:
             lines.append(f"\n[bold green]Suggested Fixes ({len(analysis.suggestions)}):[/bold green]")
-            
-            for i, suggestion in enumerate(analysis.suggestions[:3], 1):  # Show top 3
+
+            for _i, suggestion in enumerate(analysis.suggestions[:3], 1):  # Show top 3
                 confidence_icon = {
                     FixConfidence.HIGH: "✓",
                     FixConfidence.MEDIUM: "~",
                     FixConfidence.LOW: "?",
                 }.get(suggestion.confidence, "?")
-                
+
                 lines.append(f"\n  {confidence_icon}. [bold]{suggestion.title}[/bold]")
                 lines.append(f"     {suggestion.description}")
-                
+
                 if suggestion.explanation:
                     lines.append(f"     [dim]{suggestion.explanation}[/dim]")
-        
+
         return "\n".join(lines)
 
 
@@ -621,12 +620,12 @@ def analyze_error(
 ) -> ErrorAnalysis:
     """
     Convenience function to analyze error
-    
+
     Args:
         error_message: Error message string
         traceback: Optional traceback
         context: Optional context
-        
+
     Returns:
         ErrorAnalysis with suggestions
     """
@@ -639,11 +638,11 @@ def suggest_fix(
 ) -> Optional[FixSuggestion]:
     """
     Get best fix suggestion for an error
-    
+
     Args:
         error_message: Error message string
         context: Optional context
-        
+
     Returns:
         Best FixSuggestion or None
     """
@@ -654,9 +653,9 @@ def suggest_fix(
 if __name__ == "__main__":
     # Demo
     console.print("[bold blue]Error Auto-Fix Suggestion Engine Demo[/bold blue]\n")
-    
+
     engine = ErrorFixEngine()
-    
+
     # Test cases
     test_errors = [
         "NameError: name 'undefined_var' is not defined",
@@ -667,11 +666,11 @@ if __name__ == "__main__":
         "IndexError: list index out of range",
         "KeyError: 'missing_key'",
     ]
-    
+
     for error in test_errors:
         console.print(f"\n[bold]Error:[/bold] {error}")
         console.print("-" * 50)
-        
+
         analysis = engine.analyze_error(error)
         console.print(engine.get_error_summary(analysis))
         console.print()

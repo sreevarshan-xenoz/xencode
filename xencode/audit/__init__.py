@@ -7,20 +7,20 @@ and compliance reporting for enterprise users.
 """
 
 from .audit_logger import (
-    AuditLogger,
-    AuditEvent,
-    AuditEventType,
-    AuditSeverity,
     AuditChain,
     AuditEncryption,
+    AuditEvent,
+    AuditEventType,
+    AuditLogger,
+    AuditSeverity,
     AuditStorage,
 )
+from .compliance_reporter import ComplianceReport, ComplianceReporter
 from .security_correlator import SecurityEventCorrelator, SecurityIncident
-from .compliance_reporter import ComplianceReporter, ComplianceReport
 
 __all__ = [
     'AuditLogger',
-    'AuditEvent', 
+    'AuditEvent',
     'AuditEventType',
     'AuditSeverity',
     'AuditChain',

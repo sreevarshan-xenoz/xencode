@@ -4,17 +4,16 @@ Performance Monitoring Dashboard for Xencode TUI
 Real-time performance metrics and system monitoring.
 """
 
-from typing import Dict, List, Optional, Any
 import time
-import asyncio
 from datetime import datetime
-from rich.text import Text
-from rich.table import Table
-from textual.widgets import Static, DataTable, Label, Sparkline
-from textual.containers import Container, Vertical, Horizontal, Grid
+from typing import List, Optional
+
+import psutil
+from textual.containers import Container, Grid, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.timer import Timer
-import psutil
+from textual.widgets import DataTable, Label, Sparkline, Static
+
 try:
     import GPUtil
 except ImportError:
@@ -120,7 +119,7 @@ class PerformanceDashboard(Container):
     def compose(self):
         """Compose the performance dashboard"""
         yield Label("Xencode Performance Dashboard", classes="dashboard-header")
-        
+
         # System metrics grid
         with Grid(id="system-metrics-grid", classes="metrics-grid"):
             self.cpu_card = Static(id="cpu-card", classes="metric-card")
@@ -129,7 +128,7 @@ class PerformanceDashboard(Container):
             self.gpu_card = Static(id="gpu-card", classes="metric-card")
             self.network_card = Static(id="network-card", classes="metric-card")
             self.response_card = Static(id="response-card", classes="metric-card")
-            
+
             yield self.cpu_card
             yield self.memory_card
             yield self.disk_card
@@ -139,7 +138,7 @@ class PerformanceDashboard(Container):
 
         # Charts
         yield Label("Performance Charts", classes="section-title")
-        
+
         with Horizontal():
             with Vertical():
                 yield Label("CPU Usage (%)", classes="chart-title")
@@ -178,26 +177,26 @@ class PerformanceDashboard(Container):
         """Called when widget is mounted"""
         self.update_timer = self.set_interval(self.update_interval, self.collect_metrics)
         self.update_display()
-        
+
     def collect_metrics(self):
         """Collect current system metrics"""
         try:
             # CPU metrics
             cpu_percent = psutil.cpu_percent(interval=1)
-            
+
             # Memory metrics
             memory = psutil.virtual_memory()
             memory_percent = memory.percent
-            
+
             # Disk metrics
             disk = psutil.disk_usage('/')
             disk_percent = (disk.used / disk.total) * 100
-            
+
             # Network metrics
             net_io = psutil.net_io_counters()
             network_sent = net_io.bytes_sent
             network_recv = net_io.bytes_recv
-            
+
             # GPU metrics (if available)
             gpu_percent = 0.0
             gpu_memory_percent = 0.0
@@ -214,10 +213,10 @@ class PerformanceDashboard(Container):
             # In a real implementation, these would come from the AI model requests
             response_time = round(0.5 + (hash(time.time()) % 1000) / 1000, 3)  # Simulated response time
             throughput = round(5 + (hash(time.time()) % 20), 2)  # Simulated throughput
-            
+
             # Get active models (simulated)
             active_models = ["qwen3:4b", "llama3.1:8b"]  # Simulated active models
-            
+
             # Create metric object
             metric = PerformanceMetric(
                 timestamp=datetime.now(),
@@ -232,15 +231,15 @@ class PerformanceDashboard(Container):
                 throughput=throughput,
                 active_models=active_models
             )
-            
+
             # Store in history (keep last 50 measurements)
             self.metric_history.append(metric)
             if len(self.metric_history) > 50:
                 self.metric_history = self.metric_history[-50:]
-            
+
             self.current_metrics = metric
             self.update_display()
-            
+
         except Exception as e:
             # Log error but don't crash the dashboard
             print(f"Error collecting metrics: {e}")
@@ -268,7 +267,7 @@ class PerformanceDashboard(Container):
         """Update CPU metric card"""
         metric = self.current_metrics
         status_class = self._get_status_class(metric.cpu_percent, 50, 80)
-        
+
         card_content = (
             f"[b]CPU[/b]\n"
             f"[{status_class}]{metric.cpu_percent:.1f}%[/]\n"
@@ -281,11 +280,11 @@ class PerformanceDashboard(Container):
         """Update Memory metric card"""
         metric = self.current_metrics
         status_class = self._get_status_class(metric.memory_percent, 60, 85)
-        
+
         memory = psutil.virtual_memory()
         used_gb = memory.used / (1024**3)
         total_gb = memory.total / (1024**3)
-        
+
         card_content = (
             f"[b]Memory[/b]\n"
             f"[{status_class}]{metric.memory_percent:.1f}%[/]\n"
@@ -298,11 +297,11 @@ class PerformanceDashboard(Container):
         """Update Disk metric card"""
         metric = self.current_metrics
         status_class = self._get_status_class(metric.disk_percent, 70, 90)
-        
+
         disk = psutil.disk_usage('/')
         used_gb = disk.used / (1024**3)
         total_gb = disk.total / (1024**3)
-        
+
         card_content = (
             f"[b]Disk[/b]\n"
             f"[{status_class}]{metric.disk_percent:.1f}%[/]\n"
@@ -324,21 +323,21 @@ class PerformanceDashboard(Container):
             )
         else:
             card_content = (
-                f"[b]GPU[/b]\n"
-                f"N/A\n"
-                f"No GPU detected\n"
-                f"Using CPU"
+                "[b]GPU[/b]\n"
+                "N/A\n"
+                "No GPU detected\n"
+                "Using CPU"
             )
         self.gpu_card.update(card_content)
 
     def update_network_card(self):
         """Update Network metric card"""
         metric = self.current_metrics
-        
+
         # Convert bytes to MB for display
         sent_mb = metric.network_sent / (1024 * 1024)
         recv_mb = metric.network_recv / (1024 * 1024)
-        
+
         card_content = (
             f"[b]Network[/b]\n"
             f"↑ {sent_mb:.1f} MB\n"
@@ -351,7 +350,7 @@ class PerformanceDashboard(Container):
         """Update Response metric card"""
         metric = self.current_metrics
         status_class = self._get_status_class(metric.response_time * 1000, 1000, 3000)  # Convert to ms
-        
+
         card_content = (
             f"[b]Response[/b]\n"
             f"[{status_class}]{metric.response_time:.3f}s[/]\n"
@@ -388,14 +387,14 @@ class PerformanceDashboard(Container):
         """Update the detailed metrics table"""
         # Clear existing table
         self.metrics_table.clear()
-        
+
         if not self.metric_history:
             return
 
         # Add headers
         headers = ["Time", "CPU %", "Mem %", "Disk %", "GPU %", "Resp. Time (s)", "Throughput", "Active Models"]
         self.metrics_table.add_columns(*headers)
-        
+
         # Add recent metrics (last 10)
         recent_metrics = self.metric_history[-10:]
         for metric in reversed(recent_metrics):  # Show newest first

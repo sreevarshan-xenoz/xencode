@@ -10,8 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional
 
 
 class WorkspaceType(str, Enum):
@@ -58,29 +57,29 @@ class WorkspaceConfig:
     backup_enabled: bool = True
     backup_interval_hours: int = 24
     max_backup_count: int = 10
-    
+
     # Collaboration settings
     real_time_sync: bool = True
     conflict_resolution_strategy: str = "last_writer_wins"  # or "merge", "manual"
     max_collaborators: int = 10
     session_timeout_minutes: int = 60
-    
+
     # Storage settings
     max_file_size_mb: int = 100
     max_workspace_size_mb: int = 1000
     compression_enabled: bool = True
     encryption_enabled: bool = False
-    
+
     # Analysis settings
     auto_analysis_enabled: bool = True
     analysis_on_save: bool = True
     security_scanning_enabled: bool = True
-    
+
     # Performance settings
     cache_enabled: bool = True
     cache_size_mb: int = 100
     index_enabled: bool = True
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -104,7 +103,7 @@ class WorkspaceConfig:
             'cache_size_mb': self.cache_size_mb,
             'index_enabled': self.index_enabled
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'WorkspaceConfig':
         """Create WorkspaceConfig from dictionary"""
@@ -140,22 +139,22 @@ class WorkspaceFile:
     content: str = ""
     content_hash: str = ""
     size_bytes: int = 0
-    
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     created_by: Optional[str] = None  # User ID
     updated_by: Optional[str] = None  # User ID
-    
+
     # File type and analysis
     file_type: str = ""
     language: Optional[str] = None
     encoding: str = "utf-8"
-    
+
     # CRDT metadata
     version: int = 1
     vector_clock: Dict[str, int] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -175,7 +174,7 @@ class WorkspaceFile:
             'version': self.version,
             'vector_clock': self.vector_clock
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'WorkspaceFile':
         """Create WorkspaceFile from dictionary"""
@@ -205,16 +204,16 @@ class WorkspaceCollaborator:
     username: str = ""
     role: str = "viewer"  # owner, editor, viewer
     permissions: List[str] = field(default_factory=list)
-    
+
     # Session info
     is_active: bool = False
     last_seen: Optional[datetime] = None
     session_id: Optional[str] = None
-    
+
     # Collaboration metadata
     joined_at: datetime = field(default_factory=datetime.now)
     invited_by: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -228,14 +227,14 @@ class WorkspaceCollaborator:
             'joined_at': self.joined_at.isoformat(),
             'invited_by': self.invited_by
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'WorkspaceCollaborator':
         """Create WorkspaceCollaborator from dictionary"""
         last_seen = None
         if data.get('last_seen'):
             last_seen = datetime.fromisoformat(data['last_seen'])
-        
+
         return cls(
             user_id=data.get('user_id', ''),
             username=data.get('username', ''),
@@ -255,23 +254,23 @@ class Change:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     workspace_id: str = ""
     file_id: str = ""
-    
+
     # Change details
     change_type: ChangeType = ChangeType.UPDATE
     position: int = 0  # Position in document for insert/delete
     length: int = 0    # Length for delete operations
     content: str = ""  # Content for insert/update operations
-    
+
     # CRDT metadata
     author_id: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
     vector_clock: Dict[str, int] = field(default_factory=dict)
     parent_changes: List[str] = field(default_factory=list)  # Parent change IDs
-    
+
     # Conflict resolution
     is_conflicted: bool = False
     conflict_resolution: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -289,7 +288,7 @@ class Change:
             'is_conflicted': self.is_conflicted,
             'conflict_resolution': self.conflict_resolution
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Change':
         """Create Change from dictionary"""
@@ -316,11 +315,11 @@ class Conflict:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     workspace_id: str = ""
     file_id: str = ""
-    
+
     # Conflicting changes
     change_a: Change = field(default_factory=lambda: Change())
     change_b: Change = field(default_factory=lambda: Change())
-    
+
     # Conflict metadata
     detected_at: datetime = field(default_factory=datetime.now)
     resolution_strategy: str = "manual"  # manual, last_writer_wins, merge
@@ -328,7 +327,7 @@ class Conflict:
     resolved_at: Optional[datetime] = None
     resolved_by: Optional[str] = None
     resolution_change: Optional[Change] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -354,86 +353,86 @@ class Workspace:
     description: str = ""
     workspace_type: WorkspaceType = WorkspaceType.PROJECT
     status: WorkspaceStatus = WorkspaceStatus.ACTIVE
-    
+
     # Ownership and collaboration
     owner_id: str = ""
     collaboration_mode: CollaborationMode = CollaborationMode.PRIVATE
     collaborators: List[WorkspaceCollaborator] = field(default_factory=list)
-    
+
     # Files and content
     files: Dict[str, WorkspaceFile] = field(default_factory=dict)  # file_id -> WorkspaceFile
     root_path: str = ""
-    
+
     # Configuration
     config: WorkspaceConfig = field(default_factory=WorkspaceConfig)
-    
+
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     last_accessed: Optional[datetime] = None
-    
+
     # CRDT and collaboration
     changes: List[Change] = field(default_factory=list)
     conflicts: List[Conflict] = field(default_factory=list)
     vector_clock: Dict[str, int] = field(default_factory=dict)
-    
+
     # Statistics
     total_size_bytes: int = 0
     file_count: int = 0
     active_collaborators: int = 0
-    
+
     def add_file(self, file: WorkspaceFile) -> bool:
         """Add file to workspace"""
         if file.id in self.files:
             return False
-        
+
         self.files[file.id] = file
         self.file_count = len(self.files)
         self.total_size_bytes += file.size_bytes
         self.updated_at = datetime.now()
-        
+
         return True
-    
+
     def remove_file(self, file_id: str) -> bool:
         """Remove file from workspace"""
         if file_id not in self.files:
             return False
-        
+
         file = self.files[file_id]
         self.total_size_bytes -= file.size_bytes
         del self.files[file_id]
         self.file_count = len(self.files)
         self.updated_at = datetime.now()
-        
+
         return True
-    
+
     def get_file(self, file_id: str) -> Optional[WorkspaceFile]:
         """Get file by ID"""
         return self.files.get(file_id)
-    
+
     def get_file_by_path(self, path: str) -> Optional[WorkspaceFile]:
         """Get file by path"""
         for file in self.files.values():
             if file.path == path:
                 return file
         return None
-    
+
     def add_collaborator(self, collaborator: WorkspaceCollaborator) -> bool:
         """Add collaborator to workspace"""
         # Check if user is already a collaborator
         for existing in self.collaborators:
             if existing.user_id == collaborator.user_id:
                 return False
-        
+
         # Check max collaborators limit
         if len(self.collaborators) >= self.config.max_collaborators:
             return False
-        
+
         self.collaborators.append(collaborator)
         self.updated_at = datetime.now()
-        
+
         return True
-    
+
     def remove_collaborator(self, user_id: str) -> bool:
         """Remove collaborator from workspace"""
         for i, collaborator in enumerate(self.collaborators):
@@ -442,79 +441,79 @@ class Workspace:
                 self.updated_at = datetime.now()
                 return True
         return False
-    
+
     def get_collaborator(self, user_id: str) -> Optional[WorkspaceCollaborator]:
         """Get collaborator by user ID"""
         for collaborator in self.collaborators:
             if collaborator.user_id == user_id:
                 return collaborator
         return None
-    
+
     def update_collaborator_activity(self, user_id: str, session_id: Optional[str] = None) -> bool:
         """Update collaborator activity"""
         collaborator = self.get_collaborator(user_id)
         if not collaborator:
             return False
-        
+
         collaborator.is_active = True
         collaborator.last_seen = datetime.now()
         collaborator.session_id = session_id
-        
+
         # Update active collaborators count
         self.active_collaborators = sum(1 for c in self.collaborators if c.is_active)
-        
+
         return True
-    
+
     def add_change(self, change: Change) -> None:
         """Add change to workspace"""
         self.changes.append(change)
         self.updated_at = datetime.now()
-        
+
         # Update vector clock
         author_id = change.author_id
         if author_id not in self.vector_clock:
             self.vector_clock[author_id] = 0
         self.vector_clock[author_id] += 1
-    
+
     def add_conflict(self, conflict: Conflict) -> None:
         """Add conflict to workspace"""
         self.conflicts.append(conflict)
         self.updated_at = datetime.now()
-    
+
     def get_unresolved_conflicts(self) -> List[Conflict]:
         """Get unresolved conflicts"""
         return [conflict for conflict in self.conflicts if not conflict.resolved]
-    
+
     def can_user_access(self, user_id: str) -> bool:
         """Check if user can access workspace"""
         # Owner can always access
         if self.owner_id == user_id:
             return True
-        
+
         # Check if user is a collaborator
         collaborator = self.get_collaborator(user_id)
         if collaborator:
             return True
-        
+
         # Check collaboration mode
         if self.collaboration_mode == CollaborationMode.PUBLIC:
             return True
-        
+
         return False
-    
+
     def can_user_edit(self, user_id: str) -> bool:
         """Check if user can edit workspace"""
         # Owner can always edit
         if self.owner_id == user_id:
             return True
-        
+
         # Check collaborator role
         collaborator = self.get_collaborator(user_id)
         if collaborator and collaborator.role in ['owner', 'editor']:
             return True
-        
+
         return False
-    
+
     def to_dict(self, include_content: bool = False) -> Dict[str, Any]:
         """Convert to dictionary"""
         data = {
@@ -536,35 +535,35 @@ class Workspace:
             'file_count': self.file_count,
             'active_collaborators': self.active_collaborators
         }
-        
+
         if include_content:
             data.update({
                 'files': {file_id: file.to_dict() for file_id, file in self.files.items()},
                 'changes': [change.to_dict() for change in self.changes],
                 'conflicts': [conflict.to_dict() for conflict in self.conflicts]
             })
-        
+
         return data
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Workspace':
         """Create Workspace from dictionary"""
-        
+
         # Parse collaborators
         collaborators = []
         for collab_data in data.get('collaborators', []):
             collaborators.append(WorkspaceCollaborator.from_dict(collab_data))
-        
+
         # Parse files
         files = {}
         for file_id, file_data in data.get('files', {}).items():
             files[file_id] = WorkspaceFile.from_dict(file_data)
-        
+
         # Parse changes
         changes = []
         for change_data in data.get('changes', []):
             changes.append(Change.from_dict(change_data))
-        
+
         # Parse conflicts
         conflicts = []
         for conflict_data in data.get('conflicts', []):
@@ -583,17 +582,17 @@ class Workspace:
             if conflict_data.get('resolution_change'):
                 conflict.resolution_change = Change.from_dict(conflict_data['resolution_change'])
             conflicts.append(conflict)
-        
+
         # Parse config
         config = WorkspaceConfig.from_dict(data.get('config', {}))
-        
+
         # Parse datetime fields
         created_at = datetime.fromisoformat(data.get('created_at', datetime.now().isoformat()))
         updated_at = datetime.fromisoformat(data.get('updated_at', datetime.now().isoformat()))
         last_accessed = None
         if data.get('last_accessed'):
             last_accessed = datetime.fromisoformat(data['last_accessed'])
-        
+
         return cls(
             id=data.get('id', str(uuid.uuid4())),
             name=data.get('name', ''),
@@ -627,7 +626,7 @@ def create_default_workspace(owner_id: str, name: str, workspace_type: Workspace
         owner_id=owner_id,
         collaboration_mode=CollaborationMode.PRIVATE
     )
-    
+
     # Add owner as collaborator
     owner_collaborator = WorkspaceCollaborator(
         user_id=owner_id,
@@ -636,5 +635,5 @@ def create_default_workspace(owner_id: str, name: str, workspace_type: Workspace
         is_active=True
     )
     workspace.add_collaborator(owner_collaborator)
-    
+
     return workspace

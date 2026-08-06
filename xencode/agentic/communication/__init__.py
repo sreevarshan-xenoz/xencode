@@ -1,9 +1,9 @@
 """
 Communication protocols for inter-agent communication in Xencode
 """
-from .message import Message, MessageType, MessageStatus, MessageTemplates
-from .protocol import CommunicationProtocol, MessageBroker, InMemoryProtocol
-from .channels import SecureChannel, ChannelManager
+from .channels import ChannelManager, SecureChannel
+from .message import Message, MessageStatus, MessageTemplates, MessageType
+from .protocol import CommunicationProtocol, InMemoryProtocol, MessageBroker
 
 __all__ = [
     'Message',

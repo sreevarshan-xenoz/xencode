@@ -1,214 +1,406 @@
-//! Hybrid memory + disk cache with compression, TTL, and LRU eviction.
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use xencode_core_rs::CacheStats;
+use std::fmt;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, thiserror::Error)]
-pub enum CacheError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Serialization error: {0}")]
-    Serde(#[from] serde_json::Error),
-    #[error("Key not found: {0}")]
-    KeyNotFound(String),
-    #[error("Compression error: {0}")]
-    Compression(String),
-}
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-/// A cached entry with metadata.
+/// A cached response entry with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
-    key: String,
-    value: Vec<u8>,
-    created_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    access_count: u64,
-    size_bytes: u64,
+    response: String,
+    model: String,
+    prompt_hash: String,
+    timestamp: f64,
+    hit_count: u64,
 }
 
-/// Hybrid cache with memory and disk tiers.
-pub struct HybridCache {
-    memory_cache: Mutex<HashMap<String, CacheEntry>>,
-    disk_cache_dir: PathBuf,
-    max_memory_entries: usize,
-    max_disk_size_bytes: u64,
-    stats: Mutex<CacheStats>,
+/// Statistics about cache usage.
+#[derive(Debug, Clone, Default)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub entries: usize,
+    pub evictions: u64,
 }
 
-impl HybridCache {
-    /// Create a new hybrid cache.
-    pub fn new(cache_dir: PathBuf, max_memory_entries: usize, max_disk_mb: u64) -> Self {
-        std::fs::create_dir_all(&cache_dir).ok();
+impl fmt::Display for CacheStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hit_rate = if self.hits + self.misses > 0 {
+            (self.hits as f64 / (self.hits + self.misses) as f64) * 100.0
+        } else {
+            0.0
+        };
+        write!(
+            f,
+            "entries: {}, hits: {}, misses: {}, hit_rate: {:.1}%, evictions: {}",
+            self.entries, self.hits, self.misses, hit_rate, self.evictions
+        )
+    }
+}
+
+/// Errors from cache operations.
+#[derive(Debug)]
+pub enum CacheError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    NoHomeDir,
+}
+
+impl fmt::Display for CacheError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CacheError::Io(source) => write!(f, "cache I/O error: {source}"),
+            CacheError::Json(source) => write!(f, "cache parse error: {source}"),
+            CacheError::NoHomeDir => write!(f, "could not determine home directory"),
+        }
+    }
+}
+
+impl std::error::Error for CacheError {}
+
+/// LRU response cache with TTL expiry and optional disk persistence.
+///
+/// Mirrors the Python `ResponseCache` from `xencode/core/cache.py`.
+pub struct ResponseCache {
+    entries: HashMap<String, CacheEntry>,
+    max_size: usize,
+    ttl_seconds: f64,
+    cache_dir: Option<PathBuf>,
+    stats: CacheStats,
+}
+
+impl ResponseCache {
+    /// Create a new in-memory cache with the given capacity and TTL.
+    pub fn new(max_size: usize, ttl_seconds: f64) -> Self {
         Self {
-            memory_cache: Mutex::new(HashMap::new()),
-            disk_cache_dir: cache_dir,
-            max_memory_entries,
-            max_disk_size_bytes: max_disk_mb * 1024 * 1024,
-            stats: Mutex::new(CacheStats::default()),
+            entries: HashMap::new(),
+            max_size,
+            ttl_seconds,
+            cache_dir: None,
+            stats: CacheStats::default(),
         }
     }
 
-    /// Get a value from cache (memory first, then disk).
-    pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError> {
-        // Check memory cache
-        {
-            let mut cache = self.memory_cache.lock().unwrap();
-            if let Some(entry) = cache.get_mut(key) {
-                if let Some(expires) = entry.expires_at {
-                    if Utc::now() > expires {
-                        cache.remove(key);
-                        self.stats.lock().unwrap().misses += 1;
-                        return Ok(None);
-                    }
-                }
-                entry.access_count += 1;
-                self.stats.lock().unwrap().hits += 1;
-                return Ok(Some(entry.value.clone()));
-            }
-        }
+    /// Create a cache with disk persistence in `~/.xencode/cache/`.
+    pub fn with_persistence(max_size: usize, ttl_seconds: f64) -> Result<Self, CacheError> {
+        let cache_dir = dirs::home_dir()
+            .ok_or(CacheError::NoHomeDir)?
+            .join(".xencode")
+            .join("cache");
+        std::fs::create_dir_all(&cache_dir).map_err(CacheError::Io)?;
 
-        // Check disk cache
-        let disk_path = self.disk_path(key);
-        if disk_path.exists() {
-            let data = std::fs::read(&disk_path)?;
-            if let Ok(entry) = serde_json::from_slice::<CacheEntry>(&data) {
-                if let Some(expires) = entry.expires_at {
-                    if Utc::now() > expires {
-                        std::fs::remove_file(&disk_path).ok();
-                        self.stats.lock().unwrap().misses += 1;
-                        return Ok(None);
-                    }
-                }
-                // Promote to memory
-                let entry_clone = entry.clone();
-                self.memory_cache.lock().unwrap().insert(key.to_string(), entry);
-                self.stats.lock().unwrap().hits += 1;
-                return Ok(Some(entry_clone.value));
-            }
-        }
-
-        self.stats.lock().unwrap().misses += 1;
-        Ok(None)
+        let mut cache = Self {
+            entries: HashMap::new(),
+            max_size,
+            ttl_seconds,
+            cache_dir: Some(cache_dir),
+            stats: CacheStats::default(),
+        };
+        cache.load_from_disk()?;
+        Ok(cache)
     }
 
-    /// Set a value in cache.
-    pub fn set(&self, key: &str, value: Vec<u8>, ttl_seconds: Option<u64>) -> Result<(), CacheError> {
-        let expires_at = ttl_seconds.map(|ttl| Utc::now() + chrono::Duration::seconds(ttl as i64));
-        let entry = CacheEntry {
-            key: key.to_string(),
-            value: value.clone(),
-            created_at: Utc::now(),
-            expires_at,
-            access_count: 0,
-            size_bytes: value.len() as u64,
+    /// Look up a cached response by prompt and model.
+    pub fn get(&mut self, prompt: &str, model: &str) -> Option<String> {
+        let key = Self::cache_key(prompt, model);
+        let now = current_timestamp();
+
+        let expired = if let Some(entry) = self.entries.get(&key) {
+            now - entry.timestamp > self.ttl_seconds
+        } else {
+            false
         };
 
-        // Store in memory
+        if expired {
+            self.entries.remove(&key);
+            self.stats.misses += 1;
+            self.stats.entries = self.entries.len();
+            return None;
+        }
+
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.hit_count += 1;
+            self.stats.hits += 1;
+            return Some(entry.response.clone());
+        }
+
+        self.stats.misses += 1;
+        None
+    }
+
+    /// Store a response in the cache.
+    pub fn set(&mut self, prompt: &str, model: &str, response: &str) {
+        // Evict if at capacity (remove least-recently-used)
+        if self.entries.len() >= self.max_size {
+            self.evict_lru();
+        }
+
+        let key = Self::cache_key(prompt, model);
+        let entry = CacheEntry {
+            response: response.to_string(),
+            model: model.to_string(),
+            prompt_hash: key.clone(),
+            timestamp: current_timestamp(),
+            hit_count: 0,
+        };
+
+        self.entries.insert(key.clone(), entry);
+        self.stats.entries = self.entries.len();
+
+        // Persist to disk if enabled
+        if self.cache_dir.is_some() {
+            let _ = self.persist_entry(&key);
+        }
+    }
+
+    /// Clear all cached entries.
+    pub fn clear(&mut self) -> Result<(), CacheError> {
+        self.entries.clear();
+        self.stats.entries = 0;
+
+        if let Some(ref cache_dir) = self.cache_dir {
+            if cache_dir.exists() {
+                for entry in std::fs::read_dir(cache_dir).map_err(CacheError::Io)? {
+                    let entry = entry.map_err(CacheError::Io)?;
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "json") {
+                        std::fs::remove_file(&path).map_err(CacheError::Io)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get current cache statistics.
+    pub fn stats(&self) -> &CacheStats {
+        &self.stats
+    }
+
+    /// Generate a deterministic cache key from prompt + model.
+    fn cache_key(prompt: &str, model: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(prompt.as_bytes());
+        hasher.update(b"|");
+        hasher.update(model.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Evict the least-recently-used entry (oldest timestamp with lowest hit_count).
+    fn evict_lru(&mut self) {
+        if let Some(key) = self
+            .entries
+            .iter()
+            .min_by(|a, b| {
+                a.1.timestamp
+                    .partial_cmp(&b.1.timestamp)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(k, _)| k.clone())
         {
-            let mut cache = self.memory_cache.lock().unwrap();
-            if cache.len() >= self.max_memory_entries {
-                // LRU eviction: remove least accessed entry
-                if let Some(lru_key) = cache.iter()
-                    .min_by_key(|(_, e)| e.access_count)
-                    .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&lru_key);
-                }
+            self.entries.remove(&key);
+            self.stats.evictions += 1;
+
+            // Remove from disk too
+            if let Some(ref cache_dir) = self.cache_dir {
+                let path = cache_dir.join(format!("{key}.json"));
+                let _ = std::fs::remove_file(path);
             }
-            cache.insert(key.to_string(), entry.clone());
         }
-
-        // Store on disk
-        {
-            let disk_path = self.disk_path(key);
-            let data = serde_json::to_vec(&entry)?;
-            std::fs::write(&disk_path, data)?;
-            self.enforce_disk_limit()?;
-        }
-
-        Ok(())
     }
 
-    /// Remove a key from cache.
-    pub fn remove(&self, key: &str) -> Result<(), CacheError> {
-        self.memory_cache.lock().unwrap().remove(key);
-        let disk_path = self.disk_path(key);
-        if disk_path.exists() {
-            std::fs::remove_file(&disk_path)?;
-        }
-        Ok(())
-    }
-
-    /// Clear all cached data.
-    pub fn clear(&self) -> Result<(), CacheError> {
-        self.memory_cache.lock().unwrap().clear();
-        if self.disk_cache_dir.exists() {
-            for entry in std::fs::read_dir(&self.disk_cache_dir)? {
-                let entry = entry?;
-                if entry.path().is_file() {
-                    std::fs::remove_file(&entry.path())?;
-                }
+    /// Persist a single entry to disk.
+    fn persist_entry(&self, key: &str) -> Result<(), CacheError> {
+        if let Some(ref cache_dir) = self.cache_dir {
+            if let Some(entry) = self.entries.get(key) {
+                let path = cache_dir.join(format!("{key}.json"));
+                let json = serde_json::to_string(entry).map_err(CacheError::Json)?;
+                std::fs::write(path, json).map_err(CacheError::Io)?;
             }
         }
         Ok(())
     }
 
-    /// Get cache statistics.
-    pub fn stats(&self) -> CacheStats {
-        let stats = self.stats.lock().unwrap().clone();
-        let disk_size = self.calculate_disk_size();
-        CacheStats {
-            size_bytes: disk_size,
-            entry_count: self.memory_cache.lock().unwrap().len(),
-            ..stats
-        }
-    }
-
-    fn disk_path(&self, key: &str) -> PathBuf {
-        let hashed_key = sha2::Sha256::digest(key.as_bytes());
-        let filename = hex::encode(&hashed_key[..8]);
-        self.disk_cache_dir.join(filename)
-    }
-
-    fn calculate_disk_size(&self) -> u64 {
-        let mut total = 0u64;
-        if let Ok(entries) = std::fs::read_dir(&self.disk_cache_dir) {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    total += meta.len();
+    /// Load all cached entries from disk.
+    fn load_from_disk(&mut self) -> Result<(), CacheError> {
+        if let Some(ref cache_dir) = self.cache_dir {
+            if !cache_dir.exists() {
+                return Ok(());
+            }
+            let now = current_timestamp();
+            for entry in std::fs::read_dir(cache_dir).map_err(CacheError::Io)? {
+                let entry = entry.map_err(CacheError::Io)?;
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            if let Ok(cached) = serde_json::from_str::<CacheEntry>(&content) {
+                                // Skip expired entries
+                                if now - cached.timestamp <= self.ttl_seconds {
+                                    let key = path
+                                        .file_stem()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_string();
+                                    self.entries.insert(key, cached);
+                                } else {
+                                    // Clean up expired files
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                            }
+                        }
+                        Err(_) => continue,
+                    }
                 }
             }
+            self.stats.entries = self.entries.len();
         }
-        total
+        Ok(())
+    }
+}
+
+fn current_timestamp() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("xencode-cache-test-{stamp}"))
     }
 
-    fn enforce_disk_limit(&self) -> Result<(), CacheError> {
-        let current_size = self.calculate_disk_size();
-        if current_size <= self.max_disk_size_bytes {
-            return Ok(());
-        }
+    #[test]
+    fn basic_set_and_get() {
+        let mut cache = ResponseCache::new(10, 3600.0);
+        cache.set("hello", "qwen:7b", "world");
+        assert_eq!(cache.get("hello", "qwen:7b"), Some("world".to_string()));
+    }
 
-        // Remove oldest files first
-        let mut files: Vec<_> = std::fs::read_dir(&self.disk_cache_dir)?
+    #[test]
+    fn miss_returns_none() {
+        let mut cache = ResponseCache::new(10, 3600.0);
+        assert_eq!(cache.get("missing", "model"), None);
+    }
+
+    #[test]
+    fn different_models_are_separate_keys() {
+        let mut cache = ResponseCache::new(10, 3600.0);
+        cache.set("prompt", "model-a", "response-a");
+        cache.set("prompt", "model-b", "response-b");
+        assert_eq!(
+            cache.get("prompt", "model-a"),
+            Some("response-a".to_string())
+        );
+        assert_eq!(
+            cache.get("prompt", "model-b"),
+            Some("response-b".to_string())
+        );
+    }
+
+    #[test]
+    fn lru_eviction_when_full() {
+        let mut cache = ResponseCache::new(2, 3600.0);
+        cache.set("p1", "m", "r1");
+        // Add a small delay to ensure different timestamps
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cache.set("p2", "m", "r2");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        // This should evict p1 (oldest)
+        cache.set("p3", "m", "r3");
+
+        assert_eq!(cache.get("p1", "m"), None);
+        assert_eq!(cache.get("p2", "m"), Some("r2".to_string()));
+        assert_eq!(cache.get("p3", "m"), Some("r3".to_string()));
+        assert_eq!(cache.stats().evictions, 1);
+    }
+
+    #[test]
+    fn ttl_expiry() {
+        // Use 0 second TTL so everything expires immediately
+        let mut cache = ResponseCache::new(10, 0.0);
+        cache.set("prompt", "model", "response");
+        // Should be expired
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert_eq!(cache.get("prompt", "model"), None);
+    }
+
+    #[test]
+    fn stats_tracking() {
+        let mut cache = ResponseCache::new(10, 3600.0);
+        cache.set("p", "m", "r");
+        cache.get("p", "m"); // hit
+        cache.get("missing", "m"); // miss
+
+        let stats = cache.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.entries, 1);
+    }
+
+    #[test]
+    fn clear_removes_all_entries() {
+        let mut cache = ResponseCache::new(10, 3600.0);
+        cache.set("p1", "m", "r1");
+        cache.set("p2", "m", "r2");
+        cache.clear().unwrap();
+        assert_eq!(cache.get("p1", "m"), None);
+        assert_eq!(cache.get("p2", "m"), None);
+        assert_eq!(cache.stats().entries, 0);
+    }
+
+    #[test]
+    fn disk_persistence_roundtrip() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        // Create cache with manual cache_dir
+        let mut cache = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 10,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(cache_dir.clone()),
+            stats: CacheStats::default(),
+        };
+
+        cache.set("prompt", "model", "response");
+
+        // Verify file was written
+        let files: Vec<_> = fs::read_dir(&cache_dir)
+            .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_file())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .collect();
-        files.sort_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()));
+        assert_eq!(files.len(), 1);
 
-        let mut size = current_size;
-        for file in files {
-            if size <= self.max_disk_size_bytes {
-                break;
-            }
-            if let Ok(meta) = file.metadata() {
-                size = size.saturating_sub(meta.len());
-                std::fs::remove_file(&file.path()).ok();
-            }
-        }
-        Ok(())
+        // Create a new cache and load from disk
+        let mut cache2 = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 10,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(cache_dir),
+            stats: CacheStats::default(),
+        };
+        cache2.load_from_disk().unwrap();
+        assert_eq!(
+            cache2.get("prompt", "model"),
+            Some("response".to_string())
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

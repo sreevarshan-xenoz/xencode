@@ -6,9 +6,9 @@ FastAPI router for code analysis endpoints including syntax analysis, security s
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from xencode.api.auth import verify_jwt_token
@@ -67,7 +67,7 @@ async def analyze_code(request: CodeAnalysisRequest):
     """Analyze source code"""
     try:
         import uuid
-        
+
         # Mock analysis results
         return CodeAnalysisResponse(
             analysis_id=str(uuid.uuid4()),
@@ -87,9 +87,9 @@ async def analyze_code(request: CodeAnalysisRequest):
             analysis_time_ms=85,
             created_at=datetime.now()
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze code: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze code: {e}")  from e
 
 
 @router.get("/", response_model=List[CodeAnalysisResponse])

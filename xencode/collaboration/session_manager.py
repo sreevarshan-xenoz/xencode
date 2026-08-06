@@ -1,12 +1,11 @@
 """Session management and sharing."""
 
-import uuid
 import json
-from typing import Optional, List, Dict, Any
-from pathlib import Path
+import uuid
+from typing import Any, Dict, Optional
 
 from .database import CollaborationDatabase
-from .models import Session, Role, Permission, has_permission
+from .models import Permission, Session, has_permission
 
 
 class SessionManager:

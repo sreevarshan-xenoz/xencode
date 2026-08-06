@@ -372,12 +372,12 @@ class ModelStabilityManager:
         """Check ollama logs for OOM or crash indicators (cross-platform)"""
         try:
             import platform
-            
+
             # Common ollama log locations (cross-platform)
             log_paths = [
                 Path.home() / ".ollama" / "logs" / "server.log",
             ]
-            
+
             # Add platform-specific paths
             if platform.system() == "Linux":
                 log_paths.extend([

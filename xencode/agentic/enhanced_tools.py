@@ -1,17 +1,15 @@
 """Enhanced tools for the agentic system with additional capabilities."""
 
-import json
 import os
-import subprocess
 import sys
-from pathlib import Path
-from typing import Optional, Type, List, Dict, Any
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Type
 
+from duckduckgo_search import DDGS
+from git import InvalidGitRepositoryError, Repo
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
-from git import Repo, InvalidGitRepositoryError
-from duckduckgo_search import DDGS
 
 # Import existing code analyzer
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -44,7 +42,7 @@ class GitBranchTool(BaseTool):
     def _run(self, repo_path: str = ".", branch_name: Optional[str] = None) -> str:
         try:
             repo = Repo(repo_path)
-            
+
             if branch_name:
                 # Create or switch to branch
                 if branch_name in [branch.name for branch in repo.branches]:
@@ -62,8 +60,8 @@ class GitBranchTool(BaseTool):
                 for branch in branches:
                     marker = "*" if branch == current_branch else " "
                     branch_list.append(f"{marker} {branch}")
-                
-                return f"Branches:\n" + "\n".join(branch_list)
+
+                return "Branches:\n" + "\n".join(branch_list)
         except InvalidGitRepositoryError:
             return f"Error: {repo_path} is not a git repository"
         except Exception as e:
@@ -84,12 +82,12 @@ class GitPushTool(BaseTool):
     def _run(self, repo_path: str = ".", remote: str = "origin", branch: Optional[str] = None) -> str:
         try:
             repo = Repo(repo_path)
-            
+
             if not branch:
                 branch = repo.active_branch.name
-            
+
             result = repo.remotes[remote].push(refspec=f'{branch}:{branch}')
-            
+
             if result:
                 return f"Push result: {result[0].summary if result else 'Success'}"
             else:
@@ -112,12 +110,12 @@ class GitPullTool(BaseTool):
     def _run(self, repo_path: str = ".", remote: str = "origin", branch: Optional[str] = None) -> str:
         try:
             repo = Repo(repo_path)
-            
+
             if not branch:
                 branch = repo.active_branch.name
-            
+
             result = repo.remotes[remote].pull(refspec=f'{branch}:{branch}')
-            
+
             return f"Successfully pulled {branch} from {remote}. Updates: {len(result)}"
         except Exception as e:
             return f"Error pulling from remote: {str(e)}"
@@ -142,15 +140,15 @@ class FindFileTool(BaseTool):
             dir_path = Path(directory)
             if not dir_path.exists():
                 return f"Error: Directory {directory} does not exist"
-            
+
             # Use glob to find matching files
             matches = list(dir_path.glob(pattern))
-            
+
             if not matches:
                 return f"No files found matching pattern '{pattern}' in {directory}"
-            
+
             result = [str(match) for match in matches[:50]]  # Limit to 50 results
-            
+
             return f"Found {len(result)} files:\n" + "\n".join(result)
         except Exception as e:
             return f"Error finding files: {str(e)}"
@@ -170,9 +168,9 @@ class FileStatTool(BaseTool):
             path = Path(file_path)
             if not path.exists():
                 return f"Error: File {file_path} does not exist"
-            
+
             stat = path.stat()
-            
+
             info = [
                 f"File: {file_path}",
                 f"Size: {stat.st_size} bytes",
@@ -180,7 +178,7 @@ class FileStatTool(BaseTool):
                 f"Modified: {datetime.fromtimestamp(stat.st_mtime)}",
                 f"Permissions: {oct(stat.st_mode)[-3:]}"
             ]
-            
+
             return "\n".join(info)
         except Exception as e:
             return f"Error getting file stats: {str(e)}"
@@ -202,24 +200,24 @@ class DependencyAnalysisTool(BaseTool):
     def _run(self, path: str) -> str:
         try:
             project_path = Path(path)
-            
+
             # Look for common dependency files
             deps_info = []
-            
+
             # Python requirements
             req_files = list(project_path.glob("*requirements*.txt")) + list(project_path.glob("Pipfile*")) + list(project_path.glob("pyproject.toml"))
             if req_files:
                 deps_info.append("Python dependencies found:")
                 for req_file in req_files:
                     deps_info.append(f"- {req_file.name}")
-            
+
             # Package managers for other languages
             js_files = list(project_path.glob("package.json"))
             if js_files:
                 deps_info.append("JavaScript dependencies found:")
                 for js_file in js_files:
                     deps_info.append(f"- {js_file.name}")
-            
+
             # Look for import statements in Python files
             python_files = list(project_path.glob("**/*.py"))
             imports = set()
@@ -239,13 +237,13 @@ class DependencyAnalysisTool(BaseTool):
                                     imports.add(module)
                 except Exception:
                     continue
-            
+
             if imports:
                 deps_info.append(f"Potential third-party imports found: {', '.join(list(imports)[:10])}")
-            
+
             if not deps_info:
                 return f"No dependency information found in {path}"
-            
+
             return "\n".join(deps_info)
         except Exception as e:
             return f"Error analyzing dependencies: {str(e)}"
@@ -267,8 +265,9 @@ class SystemInfoTool(BaseTool):
     def _run(self, info_type: str = "os") -> str:
         try:
             import platform
+
             import psutil
-            
+
             if info_type == "os":
                 info = [
                     f"System: {platform.system()}",
@@ -313,7 +312,7 @@ class SystemInfoTool(BaseTool):
                             info.append(f"  MAC: {addr.address}")
             else:
                 return f"Unknown info type: {info_type}. Use: os, cpu, memory, disk, or network"
-            
+
             return "\n".join(info)
         except Exception as e:
             return f"Error getting system info: {str(e)}"
@@ -331,7 +330,7 @@ class ProcessInfoTool(BaseTool):
     def _run(self, filter_term: Optional[str] = None) -> str:
         try:
             import psutil
-            
+
             processes = []
             for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent']):
                 try:
@@ -340,10 +339,10 @@ class ProcessInfoTool(BaseTool):
                         processes.append(f"PID: {pinfo['pid']}, Name: {pinfo['name']}, CPU: {pinfo['cpu_percent']}%, Mem: {pinfo['memory_percent']:.1f}%")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
-            
+
             if not processes:
                 return f"No processes found matching filter: {filter_term}" if filter_term else "No processes found"
-            
+
             return f"Found {len(processes)} processes:\n" + "\n".join(processes[:20])  # Limit to 20
         except Exception as e:
             return f"Error getting process info: {str(e)}"
@@ -369,7 +368,7 @@ class WebSearchDetailedTool(BaseTool):
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(
-                    query, 
+                    query,
                     max_results=max_results,
                     region=region,
                     safesearch=safesearch
@@ -406,11 +405,15 @@ class EnhancedToolRegistry:
     def _register_default_tools(self):
         """Register all default tools."""
         # Import base tools
-        from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
         from .advanced_tools import (
-            GitStatusTool, GitDiffTool, GitLogTool, GitCommitTool,
-            WebSearchTool, CodeAnalysisTool
+            CodeAnalysisTool,
+            GitCommitTool,
+            GitDiffTool,
+            GitLogTool,
+            GitStatusTool,
+            WebSearchTool,
         )
+        from .tools import ExecuteCommandTool, ReadFileTool, WriteFileTool
 
         default_tools = [
             # Base tools
@@ -445,7 +448,7 @@ class EnhancedToolRegistry:
     def register_tool(self, tool: BaseTool, category: str = "general"):
         """Register a new tool with category."""
         self._tools[tool.name] = tool
-        
+
         if category not in self._categories:
             self._categories[category] = []
         if tool.name not in self._categories[category]:
@@ -466,7 +469,7 @@ class EnhancedToolRegistry:
         else:
             # Fallback to keyword matching
             category_lower = category.lower()
-            return [tool for tool in self._tools.values() 
+            return [tool for tool in self._tools.values()
                    if category_lower in tool.name.lower() or category_lower in tool.description.lower()]
 
     def get_categories(self) -> List[str]:
@@ -485,7 +488,7 @@ class EnhancedToolRegistry:
         """Suggest relevant tools based on task description."""
         task_lower = task_description.lower()
         suggestions = []
-        
+
         # Map common terms to relevant tools
         term_to_tool = {
             'git': ['git_status', 'git_diff', 'git_log', 'git_commit', 'git_branch', 'git_push', 'git_pull'],
@@ -499,11 +502,11 @@ class EnhancedToolRegistry:
             'dependency': ['dependency_analysis'],
             'requirement': ['dependency_analysis']
         }
-        
+
         for term, tools in term_to_tool.items():
             if term in task_lower:
                 suggestions.extend(tools)
-        
+
         # Remove duplicates while preserving order
         seen = set()
         unique_suggestions = []
@@ -511,5 +514,5 @@ class EnhancedToolRegistry:
             if s not in seen:
                 seen.add(s)
                 unique_suggestions.append(s)
-        
+
         return unique_suggestions

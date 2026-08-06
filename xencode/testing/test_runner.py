@@ -13,22 +13,19 @@ Features:
 - Parallel test execution
 """
 
-import asyncio
-import json
 import os
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from queue import Queue, Empty
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from queue import Empty, Queue
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     import coverage
@@ -198,7 +195,7 @@ class CoverageCollector:
                 excluded_lines=[],
                 percent_covered=0.0
             )
-            
+
         report = CoverageReport(
             total_lines=0,
             covered_lines=0,
@@ -451,7 +448,7 @@ class TestRunner:
 
         # Capture output
         import io
-        from contextlib import redirect_stdout, redirect_stderr
+        from contextlib import redirect_stderr, redirect_stdout
 
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()

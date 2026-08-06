@@ -4,12 +4,11 @@ Response caching module for Xencode
 import hashlib
 import json
 import lzma
-import pickle
 import time
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional
 
 # Performance and caching configuration
 CACHE_ENABLED: bool = True
@@ -176,7 +175,8 @@ class ResponseCache:
             MD5 hash of the prompt:model combination
         """
         content = f"{prompt}:{model}".encode('utf-8')
-        return hashlib.md5(content).hexdigest()
+        # blake2b is faster than sha256 and cryptographically secure — ideal for cache keys
+        return hashlib.blake2b(content, digest_size=16).hexdigest()
 
     def _compress_data(self, data: str) -> bytes:
         """Compress data using LZMA if enabled

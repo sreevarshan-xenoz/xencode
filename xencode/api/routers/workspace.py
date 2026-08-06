@@ -6,29 +6,30 @@ FastAPI router for workspace management endpoints including CRDT-based collabora
 real-time synchronization, and WebSocket support for live updates.
 """
 
-import asyncio
 import json
-import time
-from datetime import datetime
-from typing import List, Optional, Dict, Any, Set
 import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set
 
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Import workspace components
 try:
-    from ...workspace.workspace_manager import WorkspaceManager
-    from ...workspace.crdt_engine import CRDTEngine, Change, Conflict
+    from ...models.workspace import CollaborationMode, WorkspaceStatus, WorkspaceType
+    from ...models.workspace import Workspace as WorkspaceModel
+    from ...models.workspace import WorkspaceConfig as WorkspaceConfigModel
+    from ...workspace.crdt_engine import Change, Conflict, CRDTEngine
     from ...workspace.sync_coordinator import SyncCoordinator
-    from ...models.workspace import (
-        Workspace as WorkspaceModel,
-        WorkspaceConfig as WorkspaceConfigModel,
-        WorkspaceType,
-        WorkspaceStatus,
-        CollaborationMode
-    )
+    from ...workspace.workspace_manager import WorkspaceManager
     WORKSPACE_COMPONENTS_AVAILABLE = True
 except ImportError:
     # Define stub types for when workspace components are not available
@@ -115,18 +116,18 @@ class CollaborationStatus(BaseModel):
 # WebSocket connection manager
 class ConnectionManager:
     """Manages WebSocket connections for real-time collaboration"""
-    
+
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         self.session_info: Dict[WebSocket, Dict[str, Any]] = {}
-    
+
     async def connect(self, websocket: WebSocket, workspace_id: str, user_id: str, session_id: str):
         """Connect a WebSocket to a workspace"""
         await websocket.accept()
-        
+
         if workspace_id not in self.active_connections:
             self.active_connections[workspace_id] = set()
-        
+
         self.active_connections[workspace_id].add(websocket)
         self.session_info[websocket] = {
             "workspace_id": workspace_id,
@@ -134,55 +135,55 @@ class ConnectionManager:
             "session_id": session_id,
             "connected_at": datetime.now()
         }
-    
+
     def disconnect(self, websocket: WebSocket):
         """Disconnect a WebSocket"""
         if websocket in self.session_info:
             workspace_id = self.session_info[websocket]["workspace_id"]
-            
+
             if workspace_id in self.active_connections:
                 self.active_connections[workspace_id].discard(websocket)
-                
+
                 if not self.active_connections[workspace_id]:
                     del self.active_connections[workspace_id]
-            
+
             del self.session_info[websocket]
-    
-    async def broadcast_to_workspace(self, workspace_id: str, message: Dict[str, Any], 
+
+    async def broadcast_to_workspace(self, workspace_id: str, message: Dict[str, Any],
                                    exclude_session: Optional[str] = None):
         """Broadcast message to all connections in a workspace"""
         if workspace_id not in self.active_connections:
             return
-        
+
         message_json = json.dumps(message)
         disconnected = []
-        
+
         for websocket in self.active_connections[workspace_id].copy():
             session_info = self.session_info.get(websocket, {})
-            
+
             # Skip excluded session
             if exclude_session and session_info.get("session_id") == exclude_session:
                 continue
-            
+
             try:
                 await websocket.send_text(message_json)
             except Exception:
                 disconnected.append(websocket)
-        
+
         # Clean up disconnected sockets
         for websocket in disconnected:
             self.disconnect(websocket)
-    
+
     def get_workspace_sessions(self, workspace_id: str) -> List[Dict[str, Any]]:
         """Get active sessions for a workspace"""
         if workspace_id not in self.active_connections:
             return []
-        
+
         sessions = []
         for websocket in self.active_connections[workspace_id]:
             if websocket in self.session_info:
                 sessions.append(self.session_info[websocket])
-        
+
         return sessions
 
 
@@ -195,12 +196,12 @@ async def get_workspace_manager():
     """Dependency to get workspace manager"""
     if not WORKSPACE_COMPONENTS_AVAILABLE:
         raise HTTPException(status_code=503, detail="Workspace components not available")
-    
+
     try:
         # For now, return a mock manager - in production this would be a singleton
         return WorkspaceManager()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get workspace manager: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get workspace manager: {e}")  from e
 
 
 @router.post("/", response_model=Workspace)
@@ -211,16 +212,16 @@ async def create_workspace(
     """Create a new workspace with CRDT support"""
     try:
         workspace_id = str(uuid.uuid4())
-        
+
         # Create workspace configuration using the actual model structure
         config = WorkspaceConfigModel()  # Use defaults
-        
+
         # Override with request settings if provided
         if request.settings:
             for key, value in request.settings.items():
                 if hasattr(config, key):
                     setattr(config, key, value)
-        
+
         # Create workspace through manager
         if WORKSPACE_COMPONENTS_AVAILABLE:
             try:
@@ -253,7 +254,7 @@ async def create_workspace(
                 total_size_bytes=0,
                 active_collaborators=0
             )
-        
+
         return Workspace(
             id=workspace.id,
             config=WorkspaceConfig(
@@ -269,9 +270,9 @@ async def create_workspace(
             storage_size_bytes=workspace.storage_size_bytes,
             active_sessions=len(connection_manager.get_workspace_sessions(workspace.id))
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create workspace: {e}")  from e
 
 
 @router.get("/", response_model=List[Workspace])
@@ -285,7 +286,7 @@ async def list_workspaces(
         else:
             # Mock implementation
             workspaces = []
-        
+
         result = []
         for ws in workspaces:
             result.append(Workspace(
@@ -303,11 +304,11 @@ async def list_workspaces(
                 storage_size_bytes=ws.storage_size_bytes,
                 active_sessions=len(connection_manager.get_workspace_sessions(ws.id))
             ))
-        
+
         return result
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list workspaces: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list workspaces: {e}")  from e
 
 
 @router.get("/{workspace_id}", response_model=Workspace)
@@ -322,10 +323,10 @@ async def get_workspace(
         else:
             # Mock implementation
             workspace = None
-        
+
         if not workspace:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         return Workspace(
             id=workspace.id,
             config=WorkspaceConfig(
@@ -341,16 +342,16 @@ async def get_workspace(
             storage_size_bytes=workspace.storage_size_bytes,
             active_sessions=len(connection_manager.get_workspace_sessions(workspace.id))
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get workspace: {e}")  from e
 
 
 @router.put("/{workspace_id}", response_model=Workspace)
 async def update_workspace(
-    workspace_id: str, 
+    workspace_id: str,
     request: WorkspaceUpdateRequest,
     workspace_manager = Depends(get_workspace_manager)
 ):
@@ -360,7 +361,7 @@ async def update_workspace(
             workspace = await workspace_manager.get_workspace(workspace_id)
             if not workspace:
                 raise HTTPException(status_code=404, detail="Workspace not found")
-            
+
             # Update configuration
             if request.name is not None:
                 workspace.config.name = request.name
@@ -370,11 +371,11 @@ async def update_workspace(
                 workspace.config.settings.update(request.settings)
             if request.collaborators is not None:
                 workspace.config.collaborators = request.collaborators
-            
+
             workspace = await workspace_manager.update_workspace(workspace)
         else:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         # Broadcast update to connected clients
         await connection_manager.broadcast_to_workspace(
             workspace_id,
@@ -390,7 +391,7 @@ async def update_workspace(
                 "timestamp": datetime.now().isoformat()
             }
         )
-        
+
         return Workspace(
             id=workspace.id,
             config=WorkspaceConfig(
@@ -406,11 +407,11 @@ async def update_workspace(
             storage_size_bytes=workspace.storage_size_bytes,
             active_sessions=len(connection_manager.get_workspace_sessions(workspace.id))
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update workspace: {e}")  from e
 
 
 @router.delete("/{workspace_id}")
@@ -426,7 +427,7 @@ async def delete_workspace(
                 raise HTTPException(status_code=404, detail="Workspace not found")
         else:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         # Notify connected clients
         await connection_manager.broadcast_to_workspace(
             workspace_id,
@@ -436,7 +437,7 @@ async def delete_workspace(
                 "timestamp": datetime.now().isoformat()
             }
         )
-        
+
         # Disconnect all clients from this workspace
         if workspace_id in connection_manager.active_connections:
             for websocket in connection_manager.active_connections[workspace_id].copy():
@@ -445,13 +446,13 @@ async def delete_workspace(
                 except Exception:
                     pass
             del connection_manager.active_connections[workspace_id]
-        
+
         return {"message": "Workspace deleted successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete workspace: {e}")  from e
 
 
 @router.post("/{workspace_id}/sync", response_model=SyncResponse)
@@ -465,12 +466,12 @@ async def sync_workspace_changes(
     try:
         if not WORKSPACE_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="CRDT synchronization not available")
-        
+
         # Verify workspace exists
         workspace = await workspace_manager.get_workspace(workspace_id)
         if not workspace:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         # Convert changes to CRDT format
         changes = []
         for change_data in request.changes:
@@ -484,10 +485,10 @@ async def sync_workspace_changes(
                 vector_clock=change_data.get("vector_clock", {})
             )
             changes.append(change)
-        
+
         # Apply changes through CRDT engine
         sync_result = await workspace_manager.sync_changes(workspace_id, changes, request.crdt_vector)
-        
+
         # Broadcast changes to other connected clients
         background_tasks.add_task(
             broadcast_changes_to_workspace,
@@ -496,7 +497,7 @@ async def sync_workspace_changes(
             request.session_id,
             sync_result.conflicts_resolved
         )
-        
+
         return SyncResponse(
             success=True,
             conflicts_resolved=sync_result.conflicts_resolved,
@@ -504,11 +505,11 @@ async def sync_workspace_changes(
             applied_changes=len(changes),
             timestamp=datetime.now()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync changes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync changes: {e}")  from e
 
 
 @router.get("/{workspace_id}/collaboration", response_model=CollaborationStatus)
@@ -516,7 +517,7 @@ async def get_collaboration_status(workspace_id: str):
     """Get real-time collaboration status"""
     try:
         sessions = connection_manager.get_workspace_sessions(workspace_id)
-        
+
         collaborators = []
         for session in sessions:
             collaborators.append({
@@ -525,7 +526,7 @@ async def get_collaboration_status(workspace_id: str):
                 "connected_at": session.get("connected_at", datetime.now()).isoformat(),
                 "status": "active"
             })
-        
+
         # For now, return empty list but in a real implementation this would track recent changes
         recent_changes_list = []  # This would come from workspace manager in a full implementation
 
@@ -536,9 +537,9 @@ async def get_collaboration_status(workspace_id: str):
             recent_changes=recent_changes_list,
             sync_status="active" if sessions else "idle"
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get collaboration status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get collaboration status: {e}")  from e
 
 
 @router.websocket("/{workspace_id}/ws")
@@ -551,9 +552,9 @@ async def websocket_endpoint(
     """WebSocket endpoint for real-time collaboration"""
     if not session_id:
         session_id = str(uuid.uuid4())
-    
+
     await connection_manager.connect(websocket, workspace_id, user_id, session_id)
-    
+
     try:
         # Send initial connection confirmation
         await websocket.send_text(json.dumps({
@@ -562,7 +563,7 @@ async def websocket_endpoint(
             "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         }))
-        
+
         # Notify other clients about new connection
         await connection_manager.broadcast_to_workspace(
             workspace_id,
@@ -574,12 +575,12 @@ async def websocket_endpoint(
             },
             exclude_session=session_id
         )
-        
+
         while True:
             # Receive messages from client
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             # Handle different message types
             if message.get("type") == "change":
                 # Process and broadcast changes
@@ -603,14 +604,14 @@ async def websocket_endpoint(
                     "type": "pong",
                     "timestamp": datetime.now().isoformat()
                 }))
-    
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
         print(f"WebSocket error: {e}")
     finally:
         connection_manager.disconnect(websocket)
-        
+
         # Notify other clients about disconnection
         await connection_manager.broadcast_to_workspace(
             workspace_id,
@@ -638,21 +639,21 @@ async def export_workspace(workspace_id: str):
             yield '"metadata": {"export_format": "json", "version": "1.0"}'
 
             yield '}}'
-        
+
         return StreamingResponse(
             generate_export(),
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename=workspace_{workspace_id}.json"}
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to export workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to export workspace: {e}")  from e
 
 
 # Helper functions
 async def broadcast_changes_to_workspace(
-    workspace_id: str, 
-    changes: List[Change], 
+    workspace_id: str,
+    changes: List[Change],
     exclude_session: str,
     conflicts_resolved: int
 ):
@@ -669,7 +670,7 @@ async def broadcast_changes_to_workspace(
                 "author": change.author,
                 "vector_clock": change.vector_clock
             })
-        
+
         await connection_manager.broadcast_to_workspace(
             workspace_id,
             {
@@ -689,7 +690,7 @@ async def handle_realtime_change(workspace_id: str, message: Dict[str, Any], ses
     try:
         # Extract change data
         change_data = message.get("change", {})
-        
+
         # Create change object
         change = Change(
             id=change_data.get("id", str(uuid.uuid4())),
@@ -700,16 +701,13 @@ async def handle_realtime_change(workspace_id: str, message: Dict[str, Any], ses
             author=change_data.get("author", "unknown"),
             vector_clock=change_data.get("vector_clock", {})
         )
-        
+
         # Apply change if workspace components are available
         if WORKSPACE_COMPONENTS_AVAILABLE:
-            try:
-                # Apply change through workspace manager
-                if 'workspace_manager' in locals():
-                    await workspace_manager.apply_change(workspace_id, change)
-            except Exception as e:
-                print(f"Warning: Could not apply change through workspace manager: {e}")
-        
+            # Workspace manager not available in WebSocket handler context
+            # Changes are broadcast to other clients regardless
+            pass
+
         # Broadcast to other clients
         await connection_manager.broadcast_to_workspace(
             workspace_id,
@@ -727,7 +725,7 @@ async def handle_realtime_change(workspace_id: str, message: Dict[str, Any], ses
             },
             exclude_session=session_id
         )
-        
+
     except Exception as e:
         print(f"Failed to handle realtime change: {e}")
 

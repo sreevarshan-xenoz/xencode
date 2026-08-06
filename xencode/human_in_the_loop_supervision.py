@@ -8,24 +8,20 @@ in AI decision-making processes, with approval workflows and feedback mechanisms
 
 import asyncio
 import json
+import logging
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Dict, List, Optional, Any, Callable, Union, Tuple
+from enum import Enum, IntEnum
 from pathlib import Path
-import sqlite3
-import logging
-from enum import IntEnum
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
-from rich.text import Text
-from rich.layout import Layout
-from rich.live import Live
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
 
 console = Console()
 
@@ -129,21 +125,21 @@ class DecisionApprovalSystem:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or Path.home() / ".xencode" / "supervision.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize database
         self._init_database()
-        
+
         # Active decision requests
         self.active_requests: Dict[str, DecisionRequest] = {}
-        
+
         # Callbacks for decision events
         self.approval_callbacks: List[Callable] = []
         self.rejection_callbacks: List[Callable] = []
         self.feedback_callbacks: List[Callable] = []
-        
+
         # Supervisors
         self.supervisors: Dict[str, SupervisorProfile] = {}
-        
+
         # Running state
         self.running = False
         self.decision_processor: Optional[asyncio.Task] = None
@@ -169,7 +165,7 @@ class DecisionApprovalSystem:
                     expires_at REAL
                 )
             """)
-            
+
             # Create decision responses table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS decision_responses (
@@ -184,7 +180,7 @@ class DecisionApprovalSystem:
                     FOREIGN KEY (request_id) REFERENCES decision_requests(id)
                 )
             """)
-            
+
             # Create feedback records table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS feedback_records (
@@ -198,7 +194,7 @@ class DecisionApprovalSystem:
                     FOREIGN KEY (decision_request_id) REFERENCES decision_requests(id)
                 )
             """)
-            
+
             # Create supervisor profiles table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS supervisor_profiles (
@@ -213,7 +209,7 @@ class DecisionApprovalSystem:
                     metadata TEXT
                 )
             """)
-            
+
             # Create indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON decision_requests(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_requests_urgency ON decision_requests(urgency)")
@@ -238,7 +234,7 @@ class DecisionApprovalSystem:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT INTO decision_requests
-                (id, request_type, description, context, requested_supervision, 
+                (id, request_type, description, context, requested_supervision,
                  urgency, created_at, requested_by, metadata, timeout_seconds, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -254,10 +250,10 @@ class DecisionApprovalSystem:
                 request.timeout_seconds,
                 request.created_at + request.timeout_seconds
             ))
-        
+
         # Add to active requests
         self.active_requests[request.id] = request
-        
+
         logger.info(f"Submitted decision request {request.id} for {request.requested_by}")
         return request.id
 
@@ -265,22 +261,22 @@ class DecisionApprovalSystem:
         """Get pending decision requests"""
         with sqlite3.connect(self.db_path) as conn:
             query = """
-                SELECT id, request_type, description, context, requested_supervision, 
+                SELECT id, request_type, description, context, requested_supervision,
                        urgency, created_at, requested_by, metadata, timeout_seconds
-                FROM decision_requests 
+                FROM decision_requests
                 WHERE status = 'pending' AND expires_at > ?
                 ORDER BY urgency DESC, created_at ASC
             """
             params = [time.time()]
-            
+
             if supervisor_id:
                 # Filter by supervisor permissions
                 query += " AND requested_supervision IN (SELECT unnest(permissions) FROM supervisor_profiles WHERE id = ?)"
                 params.append(supervisor_id)
-            
+
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
-        
+
         requests = []
         for row in rows:
             request = DecisionRequest(
@@ -296,7 +292,7 @@ class DecisionApprovalSystem:
                 timeout_seconds=row[9]
             )
             requests.append(request)
-        
+
         return requests
 
     def approve_request(self, request_id: str, approver_id: str, feedback: str = "") -> bool:
@@ -315,18 +311,18 @@ class DecisionApprovalSystem:
         """Escalate a decision request"""
         return self._process_decision(request_id, DecisionOutcome.ESCALATED, approver_id, feedback)
 
-    def _process_decision(self, request_id: str, outcome: DecisionOutcome, 
+    def _process_decision(self, request_id: str, outcome: DecisionOutcome,
                          approver_id: str, feedback: str = "") -> bool:
         """Process a decision response"""
         try:
             # Update request status
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    UPDATE decision_requests 
+                    UPDATE decision_requests
                     SET status = ?, assigned_supervisor = ?
                     WHERE id = ?
                 """, (outcome.value, approver_id, request_id))
-                
+
                 # Insert response record
                 response_id = f"resp_{uuid.uuid4()}"
                 conn.execute("""
@@ -341,11 +337,11 @@ class DecisionApprovalSystem:
                     time.time(),
                     feedback
                 ))
-            
+
             # Remove from active requests
             if request_id in self.active_requests:
                 del self.active_requests[request_id]
-            
+
             # Trigger callbacks
             if outcome == DecisionOutcome.APPROVED:
                 for callback in self.approval_callbacks:
@@ -359,20 +355,20 @@ class DecisionApprovalSystem:
                         callback(request_id, approver_id, feedback)
                     except Exception as e:
                         logger.error(f"Rejection callback error: {e}")
-            
+
             logger.info(f"Decision {outcome.value} for request {request_id} by {approver_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error processing decision {request_id}: {e}")
             return False
 
-    def provide_feedback(self, request_id: str, feedback_type: FeedbackType, 
-                        rating: Optional[float] = None, comment: str = "", 
+    def provide_feedback(self, request_id: str, feedback_type: FeedbackType,
+                        rating: Optional[float] = None, comment: str = "",
                         provided_by: str = "human") -> str:
         """Provide feedback on a decision request"""
         feedback_id = f"feedback_{uuid.uuid4()}"
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT INTO feedback_records
@@ -387,14 +383,14 @@ class DecisionApprovalSystem:
                 time.time(),
                 provided_by
             ))
-        
+
         # Trigger feedback callbacks
         for callback in self.feedback_callbacks:
             try:
                 callback(request_id, feedback_type, rating, comment, provided_by)
             except Exception as e:
                 logger.error(f"Feedback callback error: {e}")
-        
+
         logger.info(f"Feedback provided for request {request_id}")
         return feedback_id
 
@@ -403,7 +399,7 @@ class DecisionApprovalSystem:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT INTO supervisor_profiles
-                (id, name, expertise_areas, permissions, availability, 
+                (id, name, expertise_areas, permissions, availability,
                  current_assignments, total_decisions, approval_rate, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -417,7 +413,7 @@ class DecisionApprovalSystem:
                 profile.approval_rate,
                 json.dumps(profile.metadata)
             ))
-        
+
         self.supervisors[profile.id] = profile
         logger.info(f"Registered supervisor: {profile.name} ({profile.id})")
         return profile.id
@@ -427,26 +423,26 @@ class DecisionApprovalSystem:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT current_assignments, total_decisions, approval_rate
-                FROM supervisor_profiles 
+                FROM supervisor_profiles
                 WHERE id = ?
             """, (supervisor_id,))
             row = cursor.fetchone()
-            
+
             if row:
                 # Count pending requests assigned to this supervisor
                 cursor = conn.execute("""
-                    SELECT COUNT(*) FROM decision_requests 
+                    SELECT COUNT(*) FROM decision_requests
                     WHERE assigned_supervisor = ? AND status = 'pending'
                 """, (supervisor_id,))
                 pending_count = cursor.fetchone()[0]
-                
+
                 return {
                     "current_assignments": row[0],
                     "total_decisions": row[1],
                     "approval_rate": row[2],
                     "pending_requests": pending_count
                 }
-        
+
         return {}
 
     def get_decision_analytics(self) -> Dict[str, Any]:
@@ -454,20 +450,20 @@ class DecisionApprovalSystem:
         with sqlite3.connect(self.db_path) as conn:
             # Count decisions by outcome
             cursor = conn.execute("""
-                SELECT outcome, COUNT(*) 
-                FROM decision_responses 
+                SELECT outcome, COUNT(*)
+                FROM decision_responses
                 GROUP BY outcome
             """)
             outcome_counts = {row[0]: row[1] for row in cursor.fetchall()}
-            
+
             # Count requests by supervision level
             cursor = conn.execute("""
-                SELECT requested_supervision, COUNT(*) 
-                FROM decision_requests 
+                SELECT requested_supervision, COUNT(*)
+                FROM decision_requests
                 GROUP BY requested_supervision
             """)
             supervision_counts = {row[0]: row[1] for row in cursor.fetchall()}
-            
+
             # Average response time
             cursor = conn.execute("""
                 SELECT AVG(timestamp - (SELECT created_at FROM decision_requests dr WHERE dr.id = dr.id))
@@ -475,11 +471,11 @@ class DecisionApprovalSystem:
                 JOIN decision_requests r ON dr.request_id = r.id
             """)
             avg_response_time = cursor.fetchone()[0] or 0.0
-            
+
             # Feedback distribution
             cursor = conn.execute("""
-                SELECT feedback_type, COUNT(*) 
-                FROM feedback_records 
+                SELECT feedback_type, COUNT(*)
+                FROM feedback_records
                 GROUP BY feedback_type
             """)
             feedback_counts = {row[0]: row[1] for row in cursor.fetchall()}
@@ -539,20 +535,20 @@ class InteractiveSupervisor:
         console.print("2. Reject")
         console.print("3. Defer (need more time/information)")
         console.print("4. Escalate (to higher authority)")
-        
+
         choice = Prompt.ask("Enter choice (1-4)", choices=["1", "2", "3", "4"], default="1")
-        
+
         outcomes = {
             "1": DecisionOutcome.APPROVED,
             "2": DecisionOutcome.REJECTED,
             "3": DecisionOutcome.DEFERRED,
             "4": DecisionOutcome.ESCALATED
         }
-        
+
         outcome = outcomes[choice]
-        
+
         feedback = Prompt.ask("Enter feedback/comment (optional)", default="")
-        
+
         return outcome, feedback
 
     async def process_pending_requests(self):
@@ -562,18 +558,18 @@ class InteractiveSupervisor:
             return
 
         pending_requests = self.decision_system.get_pending_requests(self.current_supervisor_id)
-        
+
         if not pending_requests:
             console.print("[green]✅ No pending requests to review[/green]")
             return
 
         console.print(f"[blue]📋 Found {len(pending_requests)} pending requests[/blue]")
-        
+
         for request in pending_requests:
             self.display_decision_request(request)
-            
+
             outcome, feedback = self.get_decision_input()
-            
+
             # Process the decision
             success = False
             if outcome == DecisionOutcome.APPROVED:
@@ -584,12 +580,12 @@ class InteractiveSupervisor:
                 success = self.decision_system.defer_request(request.id, self.current_supervisor_id, feedback)
             elif outcome == DecisionOutcome.ESCALATED:
                 success = self.decision_system.escalate_request(request.id, self.current_supervisor_id, feedback)
-            
+
             if success:
                 console.print(f"[green]✅ Decision recorded for request {request.id}[/green]")
             else:
                 console.print(f"[red]❌ Failed to record decision for request {request.id}[/red]")
-            
+
             # Ask if user wants to continue
             if len(pending_requests) > 1:
                 continue_review = Confirm.ask("Process next request?", default=True)
@@ -603,7 +599,7 @@ class InteractiveSupervisor:
             return
 
         stats = self.decision_system.get_supervisor_stats(self.current_supervisor_id)
-        
+
         console.print(Panel(
             f"[bold blue]Supervisor Dashboard[/bold blue]\n"
             f"Supervisor: {self.current_supervisor_id}\n"
@@ -689,35 +685,35 @@ class SupervisionPolicyEngine:
                     UrgencyLevel(policy["urgency"]),
                     policy["name"]
                 )
-        
+
         # Default: automatic for most actions
         return SupervisionLevel.AUTOMATIC, UrgencyLevel.LOW, "default_policy"
 
     def _policy_matches(self, policy: Dict[str, Any], context: Dict[str, Any]) -> bool:
         """Check if a policy applies to the given context"""
         conditions = policy["conditions"]
-        
+
         for key, expected_values in conditions.items():
             actual_value = context.get(key)
-            
+
             if isinstance(expected_values, list):
                 if actual_value not in expected_values:
                     return False
             else:
                 if actual_value != expected_values:
                     return False
-        
+
         return True
 
-    def submit_for_supervision(self, action_type: str, description: str, 
+    def submit_for_supervision(self, action_type: str, description: str,
                               context: Dict[str, Any], requested_by: str) -> Optional[str]:
         """Submit an action for supervision based on policies"""
         level, urgency, policy_name = self.evaluate_supervision_needed(context)
-        
+
         if level == SupervisionLevel.AUTOMATIC:
             # No supervision needed
             return None
-        
+
         request = DecisionRequest(
             id=f"req_{uuid.uuid4()}",
             request_type=action_type,
@@ -729,14 +725,14 @@ class SupervisionPolicyEngine:
             requested_by=requested_by,
             metadata={"policy_applied": policy_name}
         )
-        
+
         return self.decision_system.submit_decision_request(request)
 
 
 class SupervisionDashboard:
     """Management dashboard for supervision system"""
 
-    def __init__(self, decision_system: DecisionApprovalSystem, 
+    def __init__(self, decision_system: DecisionApprovalSystem,
                  policy_engine: SupervisionPolicyEngine):
         self.decision_system = decision_system
         self.policy_engine = policy_engine
@@ -744,7 +740,7 @@ class SupervisionDashboard:
     def display_system_dashboard(self):
         """Display overall supervision system dashboard"""
         analytics = self.decision_system.get_decision_analytics()
-        
+
         console.print(Panel(
             f"[bold blue]Supervision System Dashboard[/bold blue]\n"
             f"Total Decisions: {analytics['total_decisions']}\n"
@@ -793,13 +789,13 @@ class SupervisionDashboard:
 async def demo_supervision_system():
     """Demonstrate the human-in-the-loop supervision system"""
     console.print("[bold green]👨‍💼 Initializing Human-in-the-Loop Supervision System[/bold green]")
-    
+
     # Initialize components
     decision_system = DecisionApprovalSystem()
     policy_engine = SupervisionPolicyEngine(decision_system)
     supervisor_interface = InteractiveSupervisor(decision_system)
     dashboard = SupervisionDashboard(decision_system, policy_engine)
-    
+
     # Register a sample supervisor
     supervisor = SupervisorProfile(
         id="supervisor_001",
@@ -809,10 +805,10 @@ async def demo_supervision_system():
         availability=True
     )
     decision_system.register_supervisor(supervisor)
-    
+
     # Simulate some decision requests
     console.print("[blue]📋 Submitting sample decision requests...[/blue]")
-    
+
     # Request 1: Code generation in production
     request1 = DecisionRequest(
         id="req_001",
@@ -830,7 +826,7 @@ async def demo_supervision_system():
         requested_by="ai_assistant_001"
     )
     decision_system.submit_decision_request(request1)
-    
+
     # Request 2: Data access request
     request2 = DecisionRequest(
         id="req_002",
@@ -848,21 +844,21 @@ async def demo_supervision_system():
         requested_by="data_analyst_001"
     )
     decision_system.submit_decision_request(request2)
-    
+
     # Display dashboard
     console.print("\n[bold]📊 Supervision System Dashboard:[/bold]")
     dashboard.display_system_dashboard()
-    
+
     # Authenticate supervisor
     supervisor_interface.authenticate_supervisor("supervisor_001")
-    
+
     # Display supervisor dashboard
     console.print("\n[bold]👤 Supervisor Dashboard:[/bold]")
     supervisor_interface.display_supervisor_dashboard()
-    
+
     # Note: In a real system, we would have interactive decision making
     # For this demo, we'll just show what would happen
-    
+
     console.print("\n[green]✅ Supervision System Demo Completed[/green]")
     console.print("[yellow]💡 In a real implementation, supervisors would interactively review and approve requests[/yellow]")
 

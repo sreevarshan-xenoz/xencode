@@ -13,27 +13,26 @@ Features:
 import asyncio
 import hashlib
 import json
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Any
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from rich.console import Console
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TimeElapsedColumn,
     TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
 )
 
 from .graph_extractor import CodeGraphExtractor
-from .vector_store import VectorStore, OptimizedVectorStore, BatchProcessingConfig
 from .graph_store import GraphStore
+from .vector_store import OptimizedVectorStore, VectorStore
 
 console = Console()
 
@@ -160,7 +159,7 @@ class IndexManifest:
 class ContextIndexerV2:
     """
     Advanced context indexer with incremental updates and symbol tracking.
-    
+
     Features:
     - Incremental indexing: Only re-index changed files
     - Symbol extraction: Track classes, functions, imports
@@ -193,7 +192,7 @@ class ContextIndexerV2:
     ):
         """
         Initialize the context indexer.
-        
+
         Args:
             vector_store: Optional VectorStore instance (created if not provided)
             graph_store: Optional GraphStore instance (created if not provided)
@@ -201,7 +200,7 @@ class ContextIndexerV2:
             embedding_model: Ollama model for embeddings
         """
         self.graph_extractor = CodeGraphExtractor()
-        
+
         # Initialize stores
         if vector_store is None:
             vector_store = VectorStore(
@@ -210,20 +209,20 @@ class ContextIndexerV2:
                 embedding_model=embedding_model,
             )
         self.vector_store = vector_store
-        
+
         if graph_store is None:
             graph_store = GraphStore()
         self.graph_store = graph_store
-        
+
         # Manifest tracking
         self.manifest: Optional[IndexManifest] = None
         self.project_root: Optional[Path] = None
-        
+
         # Configuration
         self.chunk_size = 1000
         self.chunk_overlap = 200
         self.stale_threshold_hours = 24
-        
+
         # Try to import langchain text splitter
         try:
             from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -248,13 +247,13 @@ class ContextIndexerV2:
         """Check if a file is stale compared to its metadata"""
         if not file_path.exists():
             return True
-        
+
         stat = file_path.stat()
-        
+
         # Check if file was modified after indexing
         if stat.st_mtime > metadata.modified_time:
             return True
-        
+
         # Check if content hash changed
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -264,12 +263,12 @@ class ContextIndexerV2:
                 return True
         except Exception:
             return True
-        
+
         # Check time-based staleness
         age = datetime.now() - metadata.indexed_time
         if age.total_seconds() > self.stale_threshold_hours * 3600:
             return True
-        
+
         return False
 
     def _detect_changes(
@@ -280,33 +279,33 @@ class ContextIndexerV2:
     ) -> Tuple[List[Path], List[str], List[str]]:
         """
         Detect files that need indexing.
-        
+
         Returns:
             Tuple of (new_files, stale_files, removed_files)
         """
         new_files = []
         stale_files = []
         removed_files = []
-        
+
         # Track seen files
         seen_paths: Set[str] = set()
-        
+
         # Scan directory
         for path in root_path.rglob('*'):
             if not path.is_file():
                 continue
-            
+
             # Check excludes
             if any(p in path.parts for p in excludes):
                 continue
-            
+
             # Check extension
             if path.suffix not in extensions:
                 continue
-            
+
             rel_path = str(path.relative_to(root_path))
             seen_paths.add(rel_path)
-            
+
             # Check if file is in manifest
             if rel_path not in self.manifest.files:
                 new_files.append(path)
@@ -315,25 +314,25 @@ class ContextIndexerV2:
                 metadata = self.manifest.files[rel_path]
                 if self._is_stale(path, metadata):
                     stale_files.append(rel_path)
-        
+
         # Check for removed files
         for rel_path in self.manifest.files:
             if rel_path not in seen_paths:
                 removed_files.append(rel_path)
-        
+
         return new_files, stale_files, removed_files
 
     def _extract_symbols(self, file_path: Path, content: str) -> List[Symbol]:
         """Extract symbols from file content using AST"""
         symbols = []
-        
+
         if file_path.suffix != '.py':
             return symbols
-        
+
         try:
             tree = ast.parse(content)
             rel_path = str(file_path)
-            
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     symbols.append(Symbol(
@@ -349,7 +348,7 @@ class ContextIndexerV2:
                             'decorators': [self._get_name(d) for d in node.decorator_list],
                         }
                     ))
-                
+
                 elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     symbols.append(Symbol(
                         name=node.name,
@@ -365,7 +364,7 @@ class ContextIndexerV2:
                             'is_async': isinstance(node, ast.AsyncFunctionDef),
                         }
                     ))
-                
+
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
                         symbols.append(Symbol(
@@ -376,7 +375,7 @@ class ContextIndexerV2:
                             signature=f"import {alias.name}",
                             metadata={'asname': alias.asname},
                         ))
-                
+
                 elif isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     for alias in node.names:
@@ -388,7 +387,7 @@ class ContextIndexerV2:
                             signature=f"from {module} import {alias.name}",
                             metadata={'module': module, 'asname': alias.asname},
                         ))
-                
+
                 elif isinstance(node, ast.Assign):
                     # Extract constants (simple heuristic)
                     for target in node.targets:
@@ -400,10 +399,10 @@ class ContextIndexerV2:
                                 line=node.lineno,
                                 signature=f"{target.id} = ...",
                             ))
-        
+
         except Exception as e:
             console.print(f"[yellow]⚠️ Symbol extraction failed for {file_path}: {e}[/yellow]")
-        
+
         return symbols
 
     def _get_name(self, node) -> str:
@@ -430,12 +429,12 @@ class ContextIndexerV2:
             if arg.annotation:
                 arg_str += f": {self._get_name(arg.annotation)}"
             args.append(arg_str)
-        
+
         if node.args.vararg:
             args.append(f"*{node.args.vararg.arg}")
         if node.args.kwarg:
             args.append(f"**{node.args.kwarg.arg}")
-        
+
         return ", ".join(args)
 
     async def _process_file_async(
@@ -446,21 +445,21 @@ class ContextIndexerV2:
         """Process a single file asynchronously"""
         try:
             loop = asyncio.get_event_loop()
-            
+
             def read_and_process():
                 # Read file
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
+
                 # Calculate metadata
                 stat = file_path.stat()
                 content_hash = self._calculate_content_hash(content)
                 line_count = content.count('\n') + 1
                 token_estimate = self._estimate_tokens(content)
-                
+
                 # Extract symbols
                 symbols = self._extract_symbols(file_path, content)
-                
+
                 # Split into chunks
                 if self.text_splitter:
                     docs = self.text_splitter.create_documents(
@@ -478,7 +477,7 @@ class ContextIndexerV2:
                         Document(page_content=chunk, metadata={"source": rel_path, "filename": file_path.name})
                         for chunk in chunks
                     ]
-                
+
                 return {
                     'content': content,
                     'docs': docs,
@@ -488,9 +487,9 @@ class ContextIndexerV2:
                     'line_count': line_count,
                     'token_estimate': token_estimate,
                 }
-            
+
             result = await loop.run_in_executor(None, read_and_process)
-            
+
             # Create metadata
             metadata = FileMetadata(
                 path=rel_path,
@@ -503,24 +502,24 @@ class ContextIndexerV2:
                 token_estimate=result['token_estimate'],
                 status=IndexStatus.COMPLETED,
             )
-            
+
             # Store symbols in manifest
             for symbol in result['symbols']:
                 symbol_key = f"{rel_path}::{symbol.name}"
                 self.manifest.symbols[symbol_key] = symbol
-            
+
             # Add to vector store
             if result['docs']:
                 if isinstance(self.vector_store, OptimizedVectorStore):
                     await self.vector_store.add_documents_batch(result['docs'])
                 else:
                     self.vector_store.add_documents(result['docs'])
-            
+
             # Extract graph relationships
             self.graph_extractor.extract_from_file(str(file_path))
-            
+
             return metadata
-        
+
         except Exception as e:
             console.print(f"[red]❌ Failed to process {file_path}: {e}[/red]")
             return None
@@ -533,19 +532,19 @@ class ContextIndexerV2:
     ) -> Dict[str, Any]:
         """
         Index a directory with incremental support.
-        
+
         Args:
             root_path: Root directory to index
             incremental: If True, only index new/changed files
             verbose: Show progress indicators
-        
+
         Returns:
             Indexing statistics
         """
         start_time = time.time()
         root = Path(root_path).resolve()
         self.project_root = root
-        
+
         # Load or create manifest
         manifest_path = root / ".xencode" / "index_manifest.json"
         if incremental and manifest_path.exists():
@@ -559,7 +558,7 @@ class ContextIndexerV2:
                 if verbose:
                     console.print(f"[yellow]⚠️ Could not load manifest: {e}, creating new[/yellow]")
                 self.manifest = None
-        
+
         if self.manifest is None:
             self.manifest = IndexManifest(
                 project_root=str(root),
@@ -567,26 +566,26 @@ class ContextIndexerV2:
                 updated_at=datetime.now(),
             )
             incremental = False  # Force full index
-        
+
         # Detect changes
         if verbose:
             console.print(f"[blue]🔍 Scanning {root_path}...[/blue]")
-        
+
         new_files, stale_files, removed_files = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: self._detect_changes(root, self.DEFAULT_EXTENSIONS, self.DEFAULT_EXCLUDES)
         )
-        
+
         if verbose:
             console.print(f"[green]✓ Found {len(new_files)} new, {len(stale_files)} stale, {len(removed_files)} removed files[/green]")
-        
+
         # Remove deleted files from manifest
         for rel_path in removed_files:
             del self.manifest.files[rel_path]
-        
+
         # Prepare files to index
         files_to_index = new_files + [Path(root) / f for f in stale_files]
-        
+
         if not files_to_index:
             if verbose:
                 console.print("[green]✓ All files up to date, no indexing needed[/green]")
@@ -598,14 +597,14 @@ class ContextIndexerV2:
                 'total_files': len(self.manifest.files),
                 'time_taken': time.time() - start_time,
             }
-        
+
         # Index files
         if verbose:
             console.print(f"[blue]📝 Indexing {len(files_to_index)} files...[/blue]")
-        
+
         indexed_count = 0
         failed_count = 0
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -615,7 +614,7 @@ class ContextIndexerV2:
             console=console,
         ) as progress:
             task = progress.add_task("Indexing...", total=len(files_to_index))
-            
+
             # Process in batches
             batch_size = 10
             for i in range(0, len(files_to_index), batch_size):
@@ -627,12 +626,12 @@ class ContextIndexerV2:
                     )
                     for file_path in batch
                 ]
-                
+
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                
+
                 for file_path, result in zip(batch, results):
                     rel_path = str(file_path.relative_to(root)) if file_path.is_relative_to(root) else str(file_path)
-                    
+
                     if isinstance(result, Exception):
                         console.print(f"[red]❌ {rel_path}: {result}[/red]")
                         failed_count += 1
@@ -641,15 +640,15 @@ class ContextIndexerV2:
                         indexed_count += 1
                     else:
                         failed_count += 1
-                    
+
                     progress.advance(task)
-        
+
         # Update manifest
         self.manifest.updated_at = datetime.now()
         self.manifest.total_tokens = sum(
             m.token_estimate for m in self.manifest.files.values()
         )
-        
+
         # Store graph data
         nodes, rels = self.graph_extractor.get_data()
         for node_id, node_type, metadata in nodes:
@@ -657,14 +656,14 @@ class ContextIndexerV2:
         for src, target, rel_type, metadata in rels:
             self.graph_store.add_relationship(src, target, rel_type, metadata)
         self.graph_store.persist()
-        
+
         # Save manifest
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         with open(manifest_path, 'w') as f:
             json.dump(self.manifest.to_dict(), f, indent=2)
-        
+
         elapsed = time.time() - start_time
-        
+
         if verbose:
             console.print(f"[green]✓ Indexed {indexed_count} files in {elapsed:.2f}s[/green]")
             console.print(f"   📊 Total files: {len(self.manifest.files)}")
@@ -672,7 +671,7 @@ class ContextIndexerV2:
             console.print(f"   📊 Total tokens: {self.manifest.total_tokens:,}")
             if failed_count > 0:
                 console.print(f"[yellow]⚠️ Failed: {failed_count}[/yellow]")
-        
+
         return {
             'indexed': indexed_count,
             'new': len(new_files),
@@ -703,13 +702,13 @@ class ContextIndexerV2:
     ) -> List[Dict[str, Any]]:
         """
         Search indexed content.
-        
+
         Args:
             query: Search query
             k: Number of results
             use_graph: Use graph-enhanced retrieval
             filter_by_type: Filter results by symbol type (class, function, etc.)
-        
+
         Returns:
             List of search results with metadata
         """
@@ -717,30 +716,30 @@ class ContextIndexerV2:
             docs = self.vector_store.enhanced_similarity_search(query, k=k)
         else:
             docs = self.vector_store.similarity_search(query, k=k)
-        
+
         results = []
         for doc in docs:
             source = doc.metadata.get('source', '')
-            
+
             # Filter by symbol type if requested
             if filter_by_type and source in self.manifest.symbols:
                 symbol = self.manifest.symbols[source]
                 if symbol.type != filter_by_type:
                     continue
-            
+
             result = {
                 'content': doc.page_content,
                 'source': source,
                 'filename': doc.metadata.get('filename', ''),
                 'metadata': doc.metadata,
             }
-            
+
             # Add symbol info if available
             if source in self.manifest.symbols:
                 result['symbol'] = self.manifest.symbols[source].to_dict()
-            
+
             results.append(result)
-        
+
         return results
 
     def get_symbol(self, name: str, file_path: Optional[str] = None) -> Optional[Symbol]:
@@ -748,12 +747,12 @@ class ContextIndexerV2:
         if file_path:
             key = f"{file_path}::{name}"
             return self.manifest.symbols.get(key)
-        
+
         # Search all symbols
         for key, symbol in self.manifest.symbols.items():
             if symbol.name == name:
                 return symbol
-        
+
         return None
 
     def get_file_info(self, file_path: str) -> Optional[FileMetadata]:
@@ -764,18 +763,18 @@ class ContextIndexerV2:
         """Get index statistics"""
         if not self.manifest:
             return {'status': 'not_indexed'}
-        
+
         # Count by symbol type
         symbol_counts = {}
         for symbol in self.manifest.symbols.values():
             symbol_counts[symbol.type] = symbol_counts.get(symbol.type, 0) + 1
-        
+
         # Count by file extension
         ext_counts = {}
         for metadata in self.manifest.files.values():
             ext = Path(metadata.path).suffix
             ext_counts[ext] = ext_counts.get(ext, 0) + 1
-        
+
         return {
             'total_files': len(self.manifest.files),
             'total_symbols': len(self.manifest.symbols),

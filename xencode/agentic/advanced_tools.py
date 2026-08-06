@@ -1,17 +1,16 @@
 """Advanced tools for the agentic system."""
 
-import json
-from pathlib import Path
-from typing import Optional, Type, List, Dict, Any
-
-from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
-from git import Repo, InvalidGitRepositoryError
-from duckduckgo_search import DDGS
+import os
 
 # Import existing code analyzer
 import sys
-import os
+from typing import Dict, List, Optional, Type
+
+from duckduckgo_search import DDGS
+from git import InvalidGitRepositoryError, Repo
+from langchain.tools import BaseTool
+from pydantic import BaseModel, Field
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 try:
     from multimodal.code_analyzer import CodeAnalyzer
@@ -41,28 +40,28 @@ class GitStatusTool(BaseTool):
     def _run(self, repo_path: str = ".") -> str:
         try:
             repo = Repo(repo_path)
-            
+
             status_info = []
             status_info.append(f"Branch: {repo.active_branch.name}")
-            
+
             # Changed files
             changed_files = [item.a_path for item in repo.index.diff(None)]
             if changed_files:
                 status_info.append(f"\nModified files: {', '.join(changed_files)}")
-            
+
             # Untracked files
             untracked = repo.untracked_files
             if untracked:
                 status_info.append(f"\nUntracked files: {', '.join(untracked)}")
-            
+
             # Staged files
             staged = [item.a_path for item in repo.index.diff("HEAD")]
             if staged:
                 status_info.append(f"\nStaged files: {', '.join(staged)}")
-            
+
             if not changed_files and not untracked and not staged:
                 status_info.append("\nWorking tree clean")
-            
+
             return "\n".join(status_info)
         except InvalidGitRepositoryError:
             return f"Error: {repo_path} is not a git repository"
@@ -83,15 +82,15 @@ class GitDiffTool(BaseTool):
     def _run(self, repo_path: str = ".", file_path: Optional[str] = None) -> str:
         try:
             repo = Repo(repo_path)
-            
+
             if file_path:
                 diff = repo.git.diff(file_path)
             else:
                 diff = repo.git.diff()
-            
+
             if not diff:
                 return "No changes to show"
-            
+
             return diff
         except Exception as e:
             return f"Error getting git diff: {str(e)}"
@@ -111,7 +110,7 @@ class GitLogTool(BaseTool):
         try:
             repo = Repo(repo_path)
             commits = list(repo.iter_commits(max_count=max_count))
-            
+
             log_entries = []
             for commit in commits:
                 log_entries.append(
@@ -120,7 +119,7 @@ class GitLogTool(BaseTool):
                     f"Date: {commit.committed_datetime}\n"
                     f"Message: {commit.message.strip()}\n"
                 )
-            
+
             return "\n".join(log_entries)
         except Exception as e:
             return f"Error getting git log: {str(e)}"
@@ -140,16 +139,16 @@ class GitCommitTool(BaseTool):
     def _run(self, repo_path: str = ".", message: str = "", files: Optional[List[str]] = None) -> str:
         try:
             repo = Repo(repo_path)
-            
+
             # Stage files
             if files:
                 repo.index.add(files)
             else:
                 repo.git.add(A=True)
-            
+
             # Commit
             commit = repo.index.commit(message)
-            
+
             return f"Successfully committed: {commit.hexsha[:8]} - {message}"
         except Exception as e:
             return f"Error committing changes: {str(e)}"
@@ -173,10 +172,10 @@ class WebSearchTool(BaseTool):
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_results))
-            
+
             if not results:
                 return "No results found"
-            
+
             formatted_results = []
             for i, result in enumerate(results, 1):
                 formatted_results.append(
@@ -184,7 +183,7 @@ class WebSearchTool(BaseTool):
                     f"   URL: {result.get('href', 'No URL')}\n"
                     f"   {result.get('body', 'No description')}\n"
                 )
-            
+
             return "\n".join(formatted_results)
         except Exception as e:
             return f"Error performing web search: {str(e)}"
@@ -210,16 +209,16 @@ class CodeAnalysisTool(BaseTool):
     def _run(self, path: str, analysis_type: str = "directory") -> str:
         try:
             analyzer = CodeAnalyzer()
-            
+
             if analysis_type == "python":
                 result = analyzer.analyze_python_file(path)
             else:
                 result = analyzer.analyze_directory(path)
-            
+
             # Format the result as readable text
             if result.get("error"):
                 return f"Error: {result['error']}"
-            
+
             if analysis_type == "python":
                 output = [
                     f"File: {result['filename']}",
@@ -233,11 +232,11 @@ class CodeAnalysisTool(BaseTool):
                     f"Directory: {result['path']}",
                     f"Total files: {result['total_files']}",
                     f"Total lines: {result['total_lines']}",
-                    f"\nLanguages:"
+                    "\nLanguages:"
                 ]
                 for lang, count in result['languages'].items():
                     output.append(f"  {lang}: {count} files")
-            
+
             return "\n".join(output)
         except Exception as e:
             return f"Error analyzing code: {str(e)}"
@@ -249,16 +248,16 @@ class CodeAnalysisTool(BaseTool):
 
 class ToolRegistry:
     """Registry for managing available tools."""
-    
+
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
         self._register_default_tools()
-    
+
     def _register_default_tools(self):
         """Register all default tools."""
         # Import base tools
-        from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
-        
+        from .tools import ExecuteCommandTool, ReadFileTool, WriteFileTool
+
         default_tools = [
             # Base tools
             ReadFileTool(),
@@ -274,22 +273,22 @@ class ToolRegistry:
             # Analysis tool
             CodeAnalysisTool(),
         ]
-        
+
         for tool in default_tools:
             self.register_tool(tool)
-    
+
     def register_tool(self, tool: BaseTool):
         """Register a new tool."""
         self._tools[tool.name] = tool
-    
+
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get a tool by name."""
         return self._tools.get(name)
-    
+
     def get_all_tools(self) -> List[BaseTool]:
         """Get all registered tools."""
         return list(self._tools.values())
-    
+
     def get_tools_by_category(self, category: str) -> List[BaseTool]:
         """Get tools by category (git, file, web, etc.)."""
         if category == "git":

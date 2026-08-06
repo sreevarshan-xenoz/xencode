@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import subprocess
 from typing import Optional
 
@@ -113,8 +114,8 @@ class EnvironmentResolver:
             command = match.group(1)
             try:
                 result = subprocess.run(
-                    command,
-                    shell=True,
+                    shlex.split(command, posix=False),
+                    shell=False,
                     capture_output=True,
                     text=True,
                     timeout=5,
@@ -125,17 +126,17 @@ class EnvironmentResolver:
             except subprocess.TimeoutExpired:
                 raise ResolverError(
                     f"Command timed out: {command}"
-                )
+                )  from None
             except subprocess.CalledProcessError as e:
                 raise ResolverError(
                     f"Command failed with exit code {e.returncode}: {command}\n"
                     f"stderr: {e.stderr}"
-                )
+                )  from e
             except Exception as e:
                 raise ResolverError(
                     f"Failed to execute command: {command}\n"
                     f"Error: {e}"
-                )
+                )  from e
         
         return self.COMMAND_PATTERN.sub(replace_command, value)
     

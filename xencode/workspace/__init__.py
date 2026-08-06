@@ -56,7 +56,10 @@ except ImportError as e:
 
 try:
     from .workspace_security import (
-        WorkspaceSecurityManager, WorkspacePermission, IsolationLevel, WorkspaceContext
+        IsolationLevel,
+        WorkspaceContext,
+        WorkspacePermission,
+        WorkspaceSecurityManager,
     )
     WORKSPACE_SECURITY_AVAILABLE = True
 except ImportError as e:

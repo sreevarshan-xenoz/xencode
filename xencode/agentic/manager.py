@@ -1,11 +1,8 @@
-from typing import List, Optional
+from typing import List
 
-from langchain_ollama import ChatOllama
 from langchain.tools import BaseTool
-from langchain_core.tools import BaseTool as BaseToolNew
 from langchain_core.prompts import ChatPromptTemplate
-
-from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
+from langchain_ollama import ChatOllama
 
 # Import AgentExecutor with fallback
 try:
@@ -14,20 +11,20 @@ except ImportError:
     # If AgentExecutor is not available, define a minimal placeholder
     class AgentExecutor:
         def __init__(self, *args, **kwargs):
-            raise NotImplementedError("AgentExecutor not available in this LangChain version")
+            raise NotImplementedError("AgentExecutor not available in this LangChain version")  from None
 
 
 class LangChainManager:
     """Manages the LangChain agent and tools."""
 
-    def __init__(self, model_name: str = "qwen3:4b", base_url: str = "http://localhost:11434", 
-                 use_memory: bool = True, db_path: str = "agentic_memory.db", 
+    def __init__(self, model_name: str = "qwen3:4b", base_url: str = "http://localhost:11434",
+                 use_memory: bool = True, db_path: str = "agentic_memory.db",
                  smart_model_selection: bool = False, use_rag: bool = False):
         self.model_name = model_name
         self.base_url = base_url
         self.smart_model_selection = smart_model_selection
         self.use_rag = use_rag
-        
+
         # Initialize RAG if enabled
         self.vector_store = None
         if use_rag:
@@ -38,20 +35,20 @@ class LangChainManager:
                 print("Warning: RAG dependencies not found.")
             except Exception as e:
                 print(f"Warning: RAG initialization failed: {e}")
-        
+
         # Initialize model selector if enabled
         if smart_model_selection:
             from ..multi_model_system import MultiModelManager
             self.model_selector = MultiModelManager()
-        
+
         self.llm = ChatOllama(model=model_name, base_url=base_url, temperature=0)
         self.tools = self._setup_tools()
         self.agent_executor = self._setup_agent()
-        
+
         # Memory system
         self.use_memory = use_memory
         if use_memory:
-            from .memory import ConversationMemory, ContextManager
+            from .memory import ContextManager, ConversationMemory
             self.memory = ConversationMemory(db_path)
             self.context_manager = ContextManager()
             self.memory.start_session(model_name=model_name)
@@ -59,14 +56,14 @@ class LangChainManager:
     def _setup_tools(self) -> List[BaseTool]:
         """Initialize the tools available to the agent."""
         from .advanced_tools import ToolRegistry
-        
+
         registry = ToolRegistry()
         return registry.get_all_tools()
 
     def _setup_agent(self) -> AgentExecutor:
         """Set up the tool-calling agent."""
         # Create a basic agent that works with the current LangChain version
-        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+        from langchain_core.prompts import MessagesPlaceholder
 
         # Create a simple prompt that works with most LangChain versions
         prompt = ChatPromptTemplate.from_messages([
@@ -191,7 +188,6 @@ After receiving the tool result, respond with your final answer."""),
             # Add agent_scratchpad if needed by the agent
             if hasattr(self.agent_executor, 'agent') and hasattr(self.agent_executor.agent, 'input_keys'):
                 if 'agent_scratchpad' in self.agent_executor.agent.input_keys:
-                    from langchain_core.messages import AIMessage, HumanMessage
                     inputs["agent_scratchpad"] = []
 
             # Run agent with context
@@ -219,15 +215,15 @@ After receiving the tool result, respond with your final answer."""),
                 except Exception as mem_e:
                     print(f"Failed to store error message in memory: {mem_e}")
             return error_msg
-    
+
     def suggest_model_for_task(self, task: str) -> str:
         """Suggest the best model for a given task using MultiModelManager."""
         if not self.smart_model_selection:
             return self.model_name
-        
+
         suggested_model, reason = self.model_selector.suggest_best_model(task)
         return suggested_model
-    
+
     def switch_model(self, new_model: str) -> bool:
         """Switch to a different model."""
         try:
@@ -238,12 +234,12 @@ After receiving the tool result, respond with your final answer."""),
             return True
         except Exception:
             return False
-    
+
     def run_agent_with_smart_model(self, user_input: str) -> str:
         """Run agent with automatic model selection based on task."""
         if self.smart_model_selection:
             suggested_model = self.suggest_model_for_task(user_input)
             if suggested_model != self.model_name:
                 self.switch_model(suggested_model)
-        
+
         return self.run_agent(user_input)

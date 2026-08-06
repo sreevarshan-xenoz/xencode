@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class Role(str, Enum):
@@ -30,7 +30,7 @@ class User:
     username: str
     email: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -48,7 +48,7 @@ class Workspace:
     created_by: str
     created_at: datetime = field(default_factory=datetime.now)
     settings: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -66,7 +66,7 @@ class WorkspaceMember:
     user_id: str
     role: Role
     joined_at: datetime = field(default_factory=datetime.now)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "workspace_id": self.workspace_id,
@@ -86,7 +86,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     shared: bool = False
     messages: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -110,7 +110,7 @@ class KnowledgeItem:
     created_by: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: Optional[datetime] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,

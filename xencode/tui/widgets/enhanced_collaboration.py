@@ -4,18 +4,23 @@ Enhanced Collaboration Panel for Xencode TUI
 Advanced real-time collaboration features with shared editing, presence indicators, and more.
 """
 
-from typing import Dict, List, Optional, Any
-import asyncio
-import json
 from datetime import datetime
-from rich.text import Text
-from textual.widgets import Static, Button, Input, Label, ListView, ListItem, TextArea, TabbedContent, TabPane
-from textual.containers import Container, Vertical, Horizontal, Grid
+from typing import Any, Dict
+
+from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
-from textual.binding import Binding
 from textual.reactive import reactive
-from textual.css.query import DOMQuery
-import websockets
+from textual.widgets import (
+    Button,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+    TextArea,
+)
 
 
 class EnhancedCollaborationPanel(Container):
@@ -169,7 +174,7 @@ class EnhancedCollaborationPanel(Container):
         with Vertical(id="session-info", classes="hidden"):
             self.session_info_label = Label("", classes="subsection-title")
             yield self.session_info_label
-            
+
             # User presence indicators
             with Horizontal():
                 self.user_count_label = Label("Users: 0", classes="user-count")
@@ -186,7 +191,7 @@ class EnhancedCollaborationPanel(Container):
                     self.session_desc_input = Input(placeholder="Description (optional)", id="session-desc")
                     yield self.session_desc_input
                     yield Button("Host New Session", id="btn-host", variant="primary")
-                
+
                 with TabPane("Join Session", id="join-tab"):
                     self.invite_code_input = Input(placeholder="Invite Code", id="invite-code")
                     yield self.invite_code_input
@@ -206,7 +211,7 @@ class EnhancedCollaborationPanel(Container):
                         # Activity feed
                         self.activity_feed = Static(id="activity-feed", classes="activity-feed")
                         yield self.activity_feed
-                        
+
                         # Message input
                         with Horizontal():
                             self.message_input = Input(placeholder="Type your message...", id="message-input")
@@ -217,13 +222,13 @@ class EnhancedCollaborationPanel(Container):
                 with TabPane("📝 Shared Editor", id="editor-tab"):
                     with Vertical(classes="tab-content"):
                         self.shared_editor = TextArea(
-                            code="", 
-                            language="python", 
+                            code="",
+                            language="python",
                             id="shared-editor",
                             classes="shared-editor"
                         )
                         yield self.shared_editor
-                        
+
                         with Horizontal():
                             yield Button("Sync Code", id="sync-code", variant="success")
                             yield Button("Reset Buffer", id="reset-buffer", variant="warning")
@@ -233,7 +238,7 @@ class EnhancedCollaborationPanel(Container):
                     with Vertical(classes="tab-content"):
                         self.file_sync_status = Static("No files synced", id="file-sync-status")
                         yield self.file_sync_status
-                        
+
                         with Horizontal():
                             self.file_path_input = Input(placeholder="File path to sync", id="file-path")
                             yield self.file_path_input
@@ -245,7 +250,7 @@ class EnhancedCollaborationPanel(Container):
                     with Vertical(classes="tab-content"):
                         self.presence_list = ListView(id="user-list")
                         yield self.presence_list
-                        
+
                         self.presence_status = Static("Presence indicators for all collaborators", id="presence-status")
                         yield self.presence_status
 
@@ -339,10 +344,10 @@ class EnhancedCollaborationPanel(Container):
             "last_seen": datetime.now(),
             "cursor_position": (0, 0)  # For shared editor
         }
-        
+
         # Update user count
         self.user_count = len(self.users)
-        
+
         # Add to list view
         user_item = ListItem(
             Label(f"{avatar} {username} - {status.title()}", classes=f"status-{status}")
@@ -355,7 +360,7 @@ class EnhancedCollaborationPanel(Container):
         if username in self.users:
             del self.users[username]
             self.user_count = len(self.users)
-            
+
             # Remove from list view (simplified)
             for item in self.presence_list.children:
                 if hasattr(item, 'data') and item.data.get('username') == username:
@@ -368,7 +373,7 @@ class EnhancedCollaborationPanel(Container):
         activity_text = f"[{timestamp}] {user} {action}"
         if details:
             activity_text += f": {details}"
-        
+
         # Add to activity log
         self.activity_log.append({
             "timestamp": timestamp,
@@ -376,16 +381,16 @@ class EnhancedCollaborationPanel(Container):
             "action": action,
             "details": details
         })
-        
+
         # Update display (show last 10 activities)
         recent_activities = self.activity_log[-10:]
         activity_display = "\\n".join([
-            f"[{item['timestamp']}] {item['user']} {item['action']}: {item['details']}" 
+            f"[{item['timestamp']}] {item['user']} {item['action']}: {item['details']}"
             for item in recent_activities
         ])
-        
+
         self.activity_feed.update(activity_display)
-        
+
         # Update unread counter if not focused
         self.unread_messages += 1
         if self.unread_messages > 0:
@@ -418,7 +423,7 @@ class EnhancedCollaborationPanel(Container):
         if self.websocket:
             # In a real implementation, we would close the connection
             pass
-        
+
         # Reset state
         self.is_connected = False
         self.current_role = None
@@ -427,17 +432,17 @@ class EnhancedCollaborationPanel(Container):
         self.users.clear()
         self.activity_log.clear()
         self.unread_messages = 0
-        
+
         # Update UI
         self.status_label.update("Status: Offline")
         self.status_label.classes = "status-offline"
-        
+
         self.query_one("#session-info").add_class("hidden")
         self.query_one("#connection-controls").remove_class("hidden")
         self.query_one("#collaboration-features").add_class("hidden")
         self.disconnect_btn.visible = False
         self.unread_badge.visible = False
-        
+
         # Clear lists
         self.presence_list.clear()
         self.activity_feed.update("")

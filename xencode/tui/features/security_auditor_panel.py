@@ -1,16 +1,18 @@
 """Security Auditor TUI panel."""
 
-from textual.containers import Container, Vertical, Horizontal, ScrollableContainer
-from textual.widgets import Button, Label, Static, DataTable
+from datetime import datetime
+from typing import Any, Dict, List
+
+from textual.containers import Horizontal, ScrollableContainer
 from textual.reactive import reactive
-from typing import List, Dict, Any
+from textual.widgets import Button, Label, Static
 
 from .base_feature_panel import BaseFeaturePanel
 
 
 class VulnerabilityCard(Static):
     """Card for a security vulnerability."""
-    
+
     DEFAULT_CSS = """
     VulnerabilityCard {
         height: auto;
@@ -19,33 +21,33 @@ class VulnerabilityCard(Static):
         border: solid $error;
         background: $panel;
     }
-    
+
     VulnerabilityCard.critical {
         border: solid $error;
         background: $error-darken-2;
     }
-    
+
     VulnerabilityCard.high {
         border: solid $warning;
         background: $warning-darken-2;
     }
-    
+
     VulnerabilityCard.medium {
         border: solid $accent;
     }
-    
+
     VulnerabilityCard.low {
         border: solid $primary;
     }
     """
-    
+
     def __init__(self, title: str, severity: str, file: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.vuln_title = title
         self.severity = severity
         self.file = file
         self.add_class(severity.lower())
-    
+
     def render(self) -> str:
         severity_icons = {
             "critical": "🔴",
@@ -62,23 +64,23 @@ class VulnerabilityCard(Static):
 
 class SecurityAuditorPanel(BaseFeaturePanel):
     """Panel for security auditing and vulnerability scanning."""
-    
+
     DEFAULT_CSS = """
     SecurityAuditorPanel {
         height: 100%;
     }
-    
+
     .security-controls {
         height: auto;
         padding: 1;
         background: $panel;
     }
-    
+
     .security-content {
         height: 1fr;
         padding: 1;
     }
-    
+
     .security-summary {
         height: auto;
         padding: 1;
@@ -87,9 +89,9 @@ class SecurityAuditorPanel(BaseFeaturePanel):
         background: $panel;
     }
     """
-    
+
     scanning = reactive(False)
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(
             feature_name="security_auditor",
@@ -98,30 +100,30 @@ class SecurityAuditorPanel(BaseFeaturePanel):
             **kwargs
         )
         self.vulnerabilities: List[Dict[str, Any]] = []
-    
+
     def compose(self):
         """Compose the security auditor panel."""
         yield from super().compose()
-    
+
     def on_mount(self) -> None:
         """Initialize panel on mount."""
         self.set_status("enabled")
         self._build_content()
-    
+
     def _build_content(self) -> None:
         """Build the panel content."""
         if not self.content_container:
             return
-        
+
         self.content_container.remove_children()
-        
+
         with self.content_container:
             # Controls
             with Horizontal(classes="security-controls"):
                 yield Button("Scan Code", id="btn-scan", variant="primary")
                 yield Button("Check Dependencies", id="btn-deps")
                 yield Button("Generate Report", id="btn-report")
-            
+
             # Content area
             with ScrollableContainer(classes="security-content"):
                 if self.vulnerabilities:
@@ -131,7 +133,7 @@ class SecurityAuditorPanel(BaseFeaturePanel):
                         "Click 'Scan Code' to check for security vulnerabilities.",
                         classes="feature-empty"
                     )
-    
+
     def _render_vulnerabilities(self) -> None:
         """Render vulnerabilities list."""
         # Summary
@@ -139,28 +141,28 @@ class SecurityAuditorPanel(BaseFeaturePanel):
         high = sum(1 for v in self.vulnerabilities if v["severity"] == "high")
         medium = sum(1 for v in self.vulnerabilities if v["severity"] == "medium")
         low = sum(1 for v in self.vulnerabilities if v["severity"] == "low")
-        
+
         yield Static(
             f"Found {len(self.vulnerabilities)} issues: "
             f"🔴 {critical} Critical | 🟠 {high} High | 🟡 {medium} Medium | 🟢 {low} Low",
             classes="security-summary"
         )
-        
+
         # Vulnerabilities
         for vuln in self.vulnerabilities:
             yield VulnerabilityCard(vuln["title"], vuln["severity"], vuln["file"])
-    
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
-        
+
         if button_id == "btn-scan":
             await self._scan_code()
         elif button_id == "btn-deps":
             await self._check_dependencies()
         elif button_id == "btn-report":
             await self._generate_report()
-    
+
     async def _scan_code(self) -> None:
         """Scan code for vulnerabilities."""
         self.set_status("loading")
@@ -169,13 +171,13 @@ class SecurityAuditorPanel(BaseFeaturePanel):
         try:
             # Integrate with actual security auditor
             from xencode.features.security_auditor import SecurityAuditor
-            
+
             auditor = SecurityAuditor()
             await auditor.initialize()
-            
+
             # Scan current directory
             scan_result = await auditor.scan_directory(".")
-            
+
             # Convert to UI format
             self.vulnerabilities = [
                 {
@@ -185,7 +187,7 @@ class SecurityAuditorPanel(BaseFeaturePanel):
                 }
                 for vuln in scan_result.get("vulnerabilities", [])
             ]
-            
+
             await auditor.shutdown()
             self._build_content()
             self.set_status("enabled")
@@ -206,7 +208,7 @@ class SecurityAuditorPanel(BaseFeaturePanel):
         try:
             # Implement dependency check using safety or pip-audit
             import subprocess
-            result = subprocess.run(
+            subprocess.run(
                 ["pip", "check"],
                 capture_output=True,
                 text=True,

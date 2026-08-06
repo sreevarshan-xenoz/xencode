@@ -13,22 +13,92 @@ Executes Python and shell code snippets with:
 import asyncio
 import io
 import os
-import subprocess
 import sys
-import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
-from contextlib import contextmanager
+from typing import Any, Callable, Dict, List, Optional
 
-from rich.console import Console, Capture
+from rich.console import Console
 from rich.syntax import Syntax
-from rich.panel import Panel
-from rich.text import Text
 
 console = Console()
+
+
+# ---------------------------------------------------------------------------
+# Restricted builtins for safe code execution
+# ---------------------------------------------------------------------------
+# Whitelist of safe built-in functions. Dangerous functions like __import__,
+# open, eval, exec, compile, globals, locals, breakpoint are EXCLUDED to
+# prevent arbitrary code execution, file system access, and sandbox escape.
+SAFE_BUILTINS: Dict[str, Any] = {
+    # Constants
+    "True": True,
+    "False": False,
+    "None": None,
+    # Type conversion
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "complex": complex,
+    "str": str,
+    "bytes": bytes,
+    "list": list,
+    "tuple": tuple,
+    "set": set,
+    "frozenset": frozenset,
+    "dict": dict,
+    "chr": chr,
+    "ord": ord,
+    "repr": repr,
+    "ascii": ascii,
+    "bin": bin,
+    "hex": hex,
+    "oct": oct,
+    # Math & comparison
+    "abs": abs,
+    "divmod": divmod,
+    "max": max,
+    "min": min,
+    "pow": pow,
+    "round": round,
+    "sum": sum,
+    "hash": hash,
+    "id": id,
+    "len": len,
+    # Iteration & collections
+    "range": range,
+    "slice": slice,
+    "sorted": sorted,
+    "reversed": reversed,
+    "enumerate": enumerate,
+    "zip": zip,
+    "map": map,
+    "filter": filter,
+    "iter": iter,
+    "next": next,
+    "all": all,
+    "any": any,
+    # Type introspection
+    "isinstance": isinstance,
+    "issubclass": issubclass,
+    "type": type,
+    "callable": callable,
+    # Attribute access (safe without __import__)
+    "hasattr": hasattr,
+    "getattr": getattr,
+    "setattr": setattr,
+    "delattr": delattr,
+    # Formatting & I/O
+    "format": format,
+    "print": print,
+    # Object utilities
+    "object": object,
+    "property": property,
+    "staticmethod": staticmethod,
+    "classmethod": classmethod,
+    "super": super,
+}
 
 
 class LanguageType(Enum):
@@ -60,12 +130,12 @@ class ExecutionResult:
     execution_time: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     @property
     def is_success(self) -> bool:
         """Check if execution succeeded"""
         return self.status == ExecutionStatus.COMPLETED and self.exit_code == 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -86,18 +156,18 @@ class ExecutionHistory:
     """History of code executions"""
     results: List[ExecutionResult] = field(default_factory=list)
     max_history: int = 100
-    
+
     def add(self, result: ExecutionResult):
         """Add execution result to history"""
         self.results.append(result)
         # Trim if exceeds max
         if len(self.results) > self.max_history:
             self.results = self.results[-self.max_history:]
-    
+
     def get_recent(self, count: int = 10) -> List[ExecutionResult]:
         """Get recent execution results"""
         return self.results[-count:]
-    
+
     def clear(self):
         """Clear execution history"""
         self.results = []
@@ -106,12 +176,12 @@ class ExecutionHistory:
 class CodeExecutor:
     """
     Executes code snippets safely with output capture
-    
+
     Usage:
         executor = CodeExecutor()
         result = await executor.execute("print('hello')", LanguageType.PYTHON)
     """
-    
+
     def __init__(
         self,
         timeout: float = 30.0,
@@ -120,7 +190,7 @@ class CodeExecutor:
     ):
         """
         Initialize code executor
-        
+
         Args:
             timeout: Maximum execution time in seconds
             working_directory: Working directory for execution
@@ -130,7 +200,7 @@ class CodeExecutor:
         self.working_directory = working_directory or os.getcwd()
         self.environment = environment or os.environ.copy()
         self._history = ExecutionHistory()
-    
+
     async def execute(
         self,
         code: str,
@@ -138,16 +208,16 @@ class CodeExecutor:
     ) -> ExecutionResult:
         """
         Execute code snippet
-        
+
         Args:
             code: Code to execute
             language: Programming language
-            
+
         Returns:
             ExecutionResult with output and status
         """
         start_time = asyncio.get_event_loop().time()
-        
+
         try:
             if language == LanguageType.PYTHON:
                 result = await self._execute_python(code)
@@ -162,11 +232,11 @@ class CodeExecutor:
                     status=ExecutionStatus.ERROR,
                     error=f"Unsupported language: {language.value}",
                 )
-            
+
             result.execution_time = asyncio.get_event_loop().time() - start_time
             self._history.add(result)
             return result
-            
+
         except asyncio.TimeoutError:
             return ExecutionResult(
                 code=code,
@@ -183,34 +253,42 @@ class CodeExecutor:
                 error=f"Execution failed: {str(e)}",
                 execution_time=asyncio.get_event_loop().time() - start_time,
             )
-    
+
     async def _execute_python(self, code: str) -> ExecutionResult:
-        """Execute Python code"""
+        """Execute Python code with restricted builtins"""
         # Create output buffers
         stdout_buffer = io.StringIO()
         stderr_buffer = io.StringIO()
-        
+
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+
+        # Restricted execution namespace (copy to allow mutations per run)
+        safe_globals: Dict[str, Any] = {"__builtins__": dict(SAFE_BUILTINS)}
+
         try:
             # Redirect stdout and stderr
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            
             sys.stdout = stdout_buffer
             sys.stderr = stderr_buffer
-            
+
             # Execute code
             try:
-                # Try as expression first
-                result = eval(code)
+                # Try as expression first using exec with safe namespace.
+                # We wrap the expression in _result = (...) to capture its
+                # return value, since exec() does not return one.
+                safe_globals["_result"] = None
+                exec(f"_result = {code}", safe_globals)
+                result = safe_globals.get("_result")
                 if result is not None:
                     stdout_buffer.write(f"{result}\n")
             except SyntaxError:
-                # Not an expression, execute as statement
-                exec(code, {"__builtins__": __builtins__})
-            
+                # Not an expression (e.g. assignment, loop, import), execute
+                # as a statement instead.
+                exec(code, safe_globals)
+
             output = stdout_buffer.getvalue()
             error = stderr_buffer.getvalue()
-            
+
             return ExecutionResult(
                 code=code,
                 language=LanguageType.PYTHON,
@@ -219,29 +297,35 @@ class CodeExecutor:
                 error=error,
                 exit_code=0 if not error else 1,
             )
-            
+
         finally:
             # Restore stdout/stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
-            
+
     async def _execute_shell(self, code: str) -> ExecutionResult:
-        """Execute shell command"""
+        """Execute shell command via system shell (safe exec, not shell=True)"""
         try:
-            process = await asyncio.create_subprocess_shell(
-                code,
+            # Use explicit shell interpreter invocation (safe equivalent of shell=True)
+            if sys.platform.startswith("win"):
+                shell_cmd = ["cmd.exe", "/c", code]
+            else:
+                shell_cmd = ["/bin/sh", "-c", code]
+
+            process = await asyncio.create_subprocess_exec(
+                *shell_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_directory,
                 env=self.environment,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=self.timeout,
                 )
-                
+
                 return ExecutionResult(
                     code=code,
                     language=LanguageType.SHELL,
@@ -250,12 +334,12 @@ class CodeExecutor:
                     error=stderr.decode('utf-8', errors='replace'),
                     exit_code=process.returncode or 0,
                 )
-                
+
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()
                 raise
-                
+
         except Exception as e:
             return ExecutionResult(
                 code=code,
@@ -263,27 +347,27 @@ class CodeExecutor:
                 status=ExecutionStatus.ERROR,
                 error=str(e),
             )
-    
+
     async def _execute_powershell(self, code: str) -> ExecutionResult:
         """Execute PowerShell command"""
         try:
-            # Wrap PowerShell command
-            ps_command = f"powershell -Command \"{code}\""
-            
-            process = await asyncio.create_subprocess_shell(
-                ps_command,
+            # Execute PowerShell with -Command flag directly (no shell wrapper)
+            process = await asyncio.create_subprocess_exec(
+                "powershell",
+                "-Command",
+                code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_directory,
                 env=self.environment,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=self.timeout,
                 )
-                
+
                 return ExecutionResult(
                     code=code,
                     language=LanguageType.POWERSHELL,
@@ -292,12 +376,12 @@ class CodeExecutor:
                     error=stderr.decode('utf-8', errors='replace'),
                     exit_code=process.returncode or 0,
                 )
-                
+
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()
                 raise
-                
+
         except Exception as e:
             return ExecutionResult(
                 code=code,
@@ -305,11 +389,11 @@ class CodeExecutor:
                 status=ExecutionStatus.ERROR,
                 error=str(e),
             )
-    
+
     def get_history(self, count: int = 10) -> List[ExecutionResult]:
         """Get recent execution history"""
         return self._history.get_recent(count)
-    
+
     def clear_history(self):
         """Clear execution history"""
         self._history.clear()
@@ -318,10 +402,10 @@ class CodeExecutor:
 class CodeExecutionPanel:
     """
     TUI panel for code execution with live output streaming
-    
+
     Integrates with Textual TUI framework
     """
-    
+
     def __init__(
         self,
         executor: Optional[CodeExecutor] = None,
@@ -329,7 +413,7 @@ class CodeExecutionPanel:
     ):
         """
         Initialize code execution panel
-        
+
         Args:
             executor: CodeExecutor instance
             output_callback: Callback for streaming output to chat panel
@@ -337,7 +421,7 @@ class CodeExecutionPanel:
         self.executor = executor or CodeExecutor()
         self.output_callback = output_callback
         self._current_result: Optional[ExecutionResult] = None
-    
+
     async def execute_and_stream(
         self,
         code: str,
@@ -346,50 +430,50 @@ class CodeExecutionPanel:
     ) -> ExecutionResult:
         """
         Execute code and stream output
-        
+
         Args:
             code: Code to execute
             language: Programming language
             show_code: Whether to display the code before execution
-            
+
         Returns:
             ExecutionResult
         """
         # Display code if requested
         if show_code and self.output_callback:
-            syntax = Syntax(code, language.value, theme="monokai", line_numbers=True)
+            Syntax(code, language.value, theme="monokai", line_numbers=True)
             self.output_callback(f"[dim]Executing {language.value} code:[/dim]")
             # In real TUI, would render syntax widget
             self.output_callback(code)
             self.output_callback("")
-        
+
         # Execute and stream output
         result = await self.executor.execute(code, language)
         self._current_result = result
-        
+
         # Stream output
         if self.output_callback:
             if result.output:
                 self.output_callback(result.output)
             if result.error:
                 self.output_callback(f"[red]{result.error}[/red]")
-            
+
             status_icon = "✓" if result.is_success else "✗"
             self.output_callback(
                 f"\n[dim]{status_icon} {result.status.value} "
                 f"({result.execution_time:.2f}s)[/dim]"
             )
-        
+
         return result
-    
+
     def get_current_result(self) -> Optional[ExecutionResult]:
         """Get current execution result"""
         return self._current_result
-    
+
     def get_history(self, count: int = 10) -> List[ExecutionResult]:
         """Get execution history"""
         return self.executor.get_history(count)
-    
+
     def clear_history(self):
         """Clear execution history"""
         self.executor.clear_history()
@@ -415,17 +499,17 @@ async def execute_code(
 ) -> ExecutionResult:
     """
     Execute code via global panel
-    
+
     Args:
         code: Code to execute
         language: Programming language
         stream: Whether to stream output
-        
+
     Returns:
         ExecutionResult
     """
     panel = get_execution_panel()
-    
+
     if stream:
         return await panel.execute_and_stream(code, language)
     else:
@@ -451,13 +535,13 @@ if __name__ == "__main__":
     # Demo execution
     async def demo():
         console.print("[bold blue]Code Execution Panel Demo[/bold blue]\n")
-        
+
         # Create panel with console output
         def console_output(text: str):
             console.print(text)
-        
+
         panel = CodeExecutionPanel(output_callback=console_output)
-        
+
         # Demo 1: Python expression
         console.print("\n[bold]1. Python Expression[/bold]")
         result = await panel.execute_and_stream(
@@ -465,33 +549,33 @@ if __name__ == "__main__":
             LanguageType.PYTHON,
         )
         console.print(f"[dim]Result: {result.to_dict()}[/dim]")
-        
+
         # Demo 2: Python statements
         console.print("\n[bold]2. Python Statements[/bold]")
         result = await panel.execute_and_stream(
             "for i in range(3):\n    print(f'Count: {i}')",
             LanguageType.PYTHON,
         )
-        
+
         # Demo 3: Shell command
         console.print("\n[bold]3. Shell Command[/bold]")
         result = await panel.execute_and_stream(
             "echo Hello from shell",
             LanguageType.SHELL,
         )
-        
+
         # Demo 4: Error handling
         console.print("\n[bold]4. Error Handling[/bold]")
         result = await panel.execute_and_stream(
             "1 / 0",
             LanguageType.PYTHON,
         )
-        
+
         # Show history
         console.print("\n[bold]Execution History[/bold]")
         history = panel.get_history()
         for i, hist in enumerate(history, 1):
             icon = "✓" if hist.is_success else "✗"
             console.print(f"  {icon} {i}: {hist.language.value} - {hist.status.value}")
-    
+
     asyncio.run(demo())

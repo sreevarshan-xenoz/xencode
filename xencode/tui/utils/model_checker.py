@@ -5,10 +5,10 @@ Model Checker Utility
 Checks for available Ollama models and manages model availability.
 """
 
-import subprocess
-import shutil
-from typing import List, Dict, Optional
 import logging
+import shutil
+import subprocess
+from typing import List
 
 try:
     import ollama
@@ -27,7 +27,7 @@ class ModelChecker:
         if ModelChecker.is_gemini_cli_installed() and "gemini-cli" not in models:
             models.append("gemini-cli")
         return models
-    
+
     @staticmethod
     def is_ollama_installed() -> bool:
         """Check if Ollama is installed and accessible"""
@@ -37,12 +37,12 @@ class ModelChecker:
     def is_gemini_cli_installed() -> bool:
         """Check if the Gemini CLI is installed and accessible."""
         return shutil.which("gemini") is not None
-    
+
     @staticmethod
     def get_available_models() -> List[str]:
         """Get list of available Ollama models"""
         models = []
-        
+
         # Try using library first
         if OLLAMA_LIB_AVAILABLE:
             try:
@@ -61,14 +61,14 @@ class ModelChecker:
                         return ModelChecker._with_external_cli_models(models_list)
             except Exception as e:
                 logger.warning(f"Failed to list models via library: {e}")
-        
+
         # Fallback to CLI
         if ModelChecker.is_ollama_installed():
             try:
                 result = subprocess.run(
-                    ["ollama", "list"], 
-                    capture_output=True, 
-                    text=True, 
+                    ["ollama", "list"],
+                    capture_output=True,
+                    text=True,
                     check=True
                 )
                 lines = result.stdout.strip().split('\n')
@@ -85,8 +85,8 @@ class ModelChecker:
 
         # Fallback to REST API (localhost)
         try:
-            import urllib.request
             import json
+            import urllib.request
             with urllib.request.urlopen("http://localhost:11434/api/tags") as url:
                 data = json.loads(url.read().decode())
                 if 'models' in data:
@@ -95,34 +95,34 @@ class ModelChecker:
             logger.warning(f"Failed to list models via REST API: {e}")
 
         return ModelChecker._with_external_cli_models(models)
-    
+
     @staticmethod
     def check_model_availability(model_name: str) -> bool:
         """Check if a specific model is available"""
         # Handle tags (e.g., 'llama3:latest' matches 'llama3')
         available = ModelChecker.get_available_models()
-        
+
         # Exact match
         if model_name in available:
             return True
 
         if model_name.startswith("gemini-cli"):
             return ModelChecker.is_gemini_cli_installed()
-            
+
         # Check without tag if input has no tag
         if ":" not in model_name:
             for m in available:
                 if m.split(":")[0] == model_name:
                     return True
-                    
+
         return False
-    
+
     @staticmethod
     def pull_model(model_name: str) -> bool:
         """Pull a model (blocking) - use with caution or in thread"""
         if not ModelChecker.is_ollama_installed():
             return False
-            
+
         try:
             subprocess.run(
                 ["ollama", "pull", model_name],

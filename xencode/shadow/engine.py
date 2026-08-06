@@ -1,13 +1,14 @@
-import time
 import logging
-from typing import Optional
+import time
 from pathlib import Path
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+from typing import Optional
+
+from langchain_core.prompts import PromptTemplate
+from langchain_ollama import ChatOllama
 from rich.console import Console
 from rich.panel import Panel
-from langchain_ollama import ChatOllama
-from langchain_core.prompts import PromptTemplate
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 # Lazy import for RAG to avoid circular deps if needed
 try:
@@ -21,7 +22,7 @@ logger = logging.getLogger("ShadowMode")
 
 class ShadowMind:
     """
-    The intelligence behind Shadow Mode. 
+    The intelligence behind Shadow Mode.
     Analyzes code context and proposes 'next steps' or completions.
     """
     def __init__(self, model_name: str = "qwen2.5:14b", base_url: str = "http://localhost:11434"):
@@ -62,9 +63,9 @@ If the code looks complete and correct, return NOTHING (empty string).
 Do NOT be chatty. output ONLY the code or specific comment suggestion.
 
 Suggestion:"""
-        
+
         prompt = PromptTemplate.from_template(template)
-        
+
         try:
             response = self.llm.invoke(prompt.format(
                 filename=Path(file_path).name,
@@ -85,17 +86,17 @@ class ShadowWatcher(FileSystemEventHandler):
         self.mind = mind
         self.debounce_seconds = debounce_seconds
         self.last_trigger = 0.0
-        
+
     def on_modified(self, event):
         if event.is_directory:
             return
-        
+
         # Simple debounce
         now = time.time()
         if now - self.last_trigger < self.debounce_seconds:
             return
         self.last_trigger = now
-        
+
         # Determine if text file
         path = Path(event.src_path)
         if path.suffix not in ['.py', '.js', '.ts', '.md', '.txt']:
@@ -104,10 +105,10 @@ class ShadowWatcher(FileSystemEventHandler):
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
             console.print(f"[dim]👁️ Shadow saw change in {path.name}... thinking...[/dim]")
             suggestion = self.mind.think(str(path), content)
-            
+
             if suggestion:
                 console.print(Panel(
                     suggestion,
@@ -125,14 +126,14 @@ def start_shadow_mode(path: str = ".", model: str = "qwen2.5:14b"):
     observer = Observer()
     observer.schedule(event_handler, path, recursive=True)
     observer.start()
-    
+
     console.print(Panel(
         f"[bold purple]👻 Shadow Mode Active[/bold purple]\n"
         f"Watching {path} for changes...\n"
         "I will suggest completions when I see patterns.",
         border_style="purple"
     ))
-    
+
     try:
         while True:
             time.sleep(1)

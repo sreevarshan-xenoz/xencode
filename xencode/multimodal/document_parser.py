@@ -1,8 +1,8 @@
 """Document parser for PDF and DOCX files."""
 
-from pathlib import Path
-from typing import Dict, Any, List
 import re
+from pathlib import Path
+from typing import Any, Dict
 
 try:
     from pypdf import PdfReader
@@ -23,10 +23,10 @@ class DocumentParser:
     def parse(self, file_path: str) -> Dict[str, Any]:
         """
         Parse a document file to extract text and metadata.
-        
+
         Args:
             file_path: Path to the document file.
-            
+
         Returns:
             Dictionary containing text content and metadata.
         """
@@ -61,16 +61,16 @@ class DocumentParser:
             return {"error": "pypdf is not installed. Run: pip install pypdf"}
 
         reader = PdfReader(str(path))
-        
+
         text_parts = []
         for page in reader.pages:
             text_parts.append(page.extract_text())
-        
+
         metadata = {
             "num_pages": len(reader.pages),
             "pdf_metadata": {}
         }
-        
+
         if reader.metadata:
             metadata["pdf_metadata"] = {
                 k: str(v) for k, v in reader.metadata.items() if v
@@ -87,18 +87,18 @@ class DocumentParser:
             return {"error": "python-docx is not installed. Run: pip install python-docx"}
 
         doc = Document(str(path))
-        
+
         text_parts = []
         for paragraph in doc.paragraphs:
             if paragraph.text.strip():
                 text_parts.append(paragraph.text)
-        
+
         metadata = {
             "num_paragraphs": len(doc.paragraphs),
             "num_tables": len(doc.tables),
             "num_sections": len(doc.sections)
         }
-        
+
         # Extract core properties if available
         if hasattr(doc, 'core_properties'):
             props = doc.core_properties
