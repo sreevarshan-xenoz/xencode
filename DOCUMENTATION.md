@@ -4,6 +4,11 @@
 1. [Overview](#overview)
 2. [Installation](#installation)
 3. [Core Features](#core-features)
+    - [Credential Vault](#credential-vault)
+    - [Real-Time Health Monitoring (WebSocket)](#real-time-health-monitoring-websocket)
+    - [AI Ensemble Reasoning](#ai-ensemble-reasoning)
+    - [Caching System](#caching-system)
+    - [Vector Store](#vector-store)
 4. [Performance Optimizations](#performance-optimizations)
 5. [Visual Workflow Builder](#visual-workflow-builder)
 6. [Multi-Agent Collaboration](#multi-agent-collaboration)
@@ -14,26 +19,431 @@
 
 Xencode is an AI-powered development assistant platform that combines multiple AI models for superior reasoning through ensemble methods. It features advanced multi-agent collaboration, visual workflow building, and comprehensive monitoring capabilities.
 
+The project is a **dual-stack architecture** — Python feature system + Rust core runtime. The Rust workspace (**12 crates, 65 tests, zero warnings**) handles workspace scanning, config management, caching, conversation memory, model health, provider streaming, code analysis, security scanning, HTTP/WebSocket server, collaboration sync, plugin lifecycle, and a ratatui-based TUI with 14 interactive feature panels. The Python stack (~180+ files) covers the full feature system, Textual-based TUI widget library, agentic workflows, analytics, security, and the FastAPI server.
+
+The **Rust migration is complete** — all 8 phases implemented across 5 execution batches. The Rust binary (`xencode`) is the primary entry point with `server`, `analyze`, and `plugin` subcommands, and a rich TUI with 14 panels.
+
 ## Installation
 
-### Prerequisites
-- Python 3.8+
-- Ollama (for local AI models)
-- Git
+### Option A: Rust binary (recommended)
+```bash
+cd rust && cargo build --release -p xencode-cli
+./target/release/xencode --help
+```
 
-### Quick Start
+### Option B: Python package
 ```bash
 pip install xencode
 ```
+
+### Prerequisites
+- Rust 1.75+ (for building from source)
+- Python 3.8+ (for Python stack)
+- Ollama (for local AI models)
+- Git
 
 ### Development Setup
 ```bash
 git clone <repository-url>
 cd xencode
 pip install -e .
+cd rust && cargo build --release -p xencode-cli
 ```
 
 ## Core Features
+
+### Credential Vault
+Xencode includes an encrypted credential vault (`JsonFileCredentialVault`) that securely stores API keys and secrets in a local JSON file using Fernet encryption (AES-128-CBC with HMAC SHA256).
+
+#### CLI Commands
+
+```bash
+# Initialize a new vault (creates ~/.xencode/vault.json)
+xencode vault init
+
+# Initialize with a custom path
+xencode vault init --vault-path /custom/path/vault.json
+
+# Check vault status
+xencode vault status
+```
+
+#### Migration from Plaintext Config
+
+```bash
+# Scan config and migrate plaintext API keys into the vault
+xencode vault migrate --config-path ~/.xencode/config.json
+
+# Migrate and replace migrated keys with env-var references
+xencode vault migrate --delete-after
+```
+
+#### First-Time Setup Integration
+During first-time setup (`xencode health` or `xencode status` on a fresh install), Xencode automatically prompts you to migrate plaintext API keys into the vault.
+
+#### Vault Encryption
+- **Algorithm**: Fernet (AES-128-CBC with HMAC SHA256)
+- **Key derivation**: PBKDF2 with machine-specific seed
+- **Fallback**: Base64 obfuscation when the `cryptography` package is not installed
+- **Storage**: Single JSON file at `~/.xencode/vault.json` (permissions: `0600`)
+
+#### Programmatic Usage
+
+```python
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+# Create or open vault
+vault = JsonFileCredentialVault()
+
+# Store a credential
+vault.set(Credential(
+    service="openai",
+    username="api_key",
+    secret="sk-...",
+    description="OpenAI API key",
+))
+
+# Retrieve a credential
+cred = vault.get("openai", "api_key")
+print(cred.secret)  # 'sk-...'
+
+# Bulk operations
+info = vault.get_storage_info()       # vault metadata
+vault.clear_vault()                    # remove all credentials
+export = vault.export_vault()          # export (secrets still encrypted)
+vault.import_vault(Path("backup.json"))  # import from another vault
+```
+
+#### Migration Tutorial: Plaintext Config to Vault
+
+This tutorial walks through migrating API keys from a plaintext config file into the encrypted credential vault.
+
+---
+
+##### Before You Start
+
+Your config file likely looks like this:
+
+```json
+{
+  "features": {
+    "code_review": {
+      "openai_api_key": "sk-your-openai-key-here",
+      "model": "gpt-4"
+    },
+    "learning_mode": {
+      "anthropic_api_key": "sk-ant-your-anthropic-key-here",
+      "model": "claude-3"
+    }
+  }
+}
+```
+
+Keys are stored as **plaintext** — any process that can read the file can steal them.
+
+---
+
+##### Step 1: Initialize the Vault
+
+```bash
+xencode vault init
+```
+
+This creates an encrypted vault at `~/.xencode/vault.json`.
+
+* Vault directory created
+* Empty vault file written with `0600` permissions
+* Safe to run multiple times -- won't overwrite an existing vault
+
+To check it exists:
+
+```bash
+ls -la ~/.xencode/vault.json
+```
+
+---
+
+##### Step 2: Check Vault Status
+
+```bash
+xencode vault status
+```
+
+Expected output (before migration):
+
+```
+Vault Path:    C:\Users\you\.xencode\vault.json
+Credential Count:  0
+Encryption:    Fernet (AES-128-CBC)
+```
+
+---
+
+##### Step 3: Migrate Plaintext Keys into the Vault
+
+```bash
+xencode vault migrate --config-path ~/.xencode/config.json
+```
+
+The migrator scans your config for known API key field names (`openai_api_key`, `anthropic_api_key`, `google_gemini_api_key`, etc.), encrypts each value, and stores it in the vault.
+
+Expected output:
+
+```
+OK: Stored credential for openai (encrypted)
+OK: Stored credential for anthropic (encrypted)
+Migrated 2 credentials from config
+```
+
+---
+
+##### Step 4: Verify the Migration
+
+```bash
+xencode vault status
+```
+
+Expected output (after migration):
+
+```
+Vault Path:    C:\Users\you\.xencode\vault.json
+Credential Count:  2
+Encryption:    Fernet (AES-128-CBC)
+```
+
+You can also check via the REST API:
+
+```bash
+curl http://localhost:8000/api/v1/vault/health
+```
+
+---
+
+##### Step 5 (Optional): Delete Plaintext Keys
+
+Pass `--delete-after` to replace plaintext keys with environment-variable references:
+
+```bash
+xencode vault migrate --config-path ~/.xencode/config.json --delete-after
+```
+
+After this, your config file is marked as migrated:
+
+```json
+{
+  "_migrated_to_vault": true,
+  "_vault_migrated_at": "2026-05-27T14:30:00+00:00",
+  "features": {
+    "code_review": {
+      "openai_api_key": "${OPENAI_API_KEY}",
+      "model": "gpt-4"
+    }
+  }
+}
+```
+
+Original plaintext values are removed from the config they exist only in the encrypted vault.
+
+---
+
+##### Step 6: Use the Vault in Code
+
+```python
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+vault = JsonFileCredentialVault()
+
+# Retrieve the key at runtime
+cred = vault.get("openai", "api_key")
+api_key = cred.secret  # "sk-your-openai-key-here"
+
+# Pass it to your AI client
+client = OpenAI(api_key=api_key)
+```
+
+---
+
+##### One-Command Migration (If Eligible)
+
+If both `~/.xencode/config.json` and default paths apply, you can combine init + migrate:
+
+```bash
+xencode vault init
+xencode vault migrate --delete-after
+```
+
+---
+
+##### Machine-to-Machine Migration
+
+To move credentials to another machine, use export/import:
+
+```bash
+# On source machine
+python -c "
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+from pathlib import Path
+vault = JsonFileCredentialVault()
+vault.export_vault(Path('vault-export.json'))
+"
+
+# Copy vault-export.json to the target machine
+
+# On target machine
+python -c "
+from xencode.auth.json_file_vault import JsonFileCredentialVault
+from pathlib import Path
+vault = JsonFileCredentialVault()
+count = vault.import_vault(Path('vault-export.json'))
+print(f'Imported {count} credentials')
+"
+```
+
+> **Note:** Encrypted credentials from another machine cannot be decrypted without the original machine's key. Use a shared master key (`--master-key`) when initializing vaults on machines that need to share credentials.
+
+---
+
+##### What the Vault Protects Against
+
+| Threat | Protection |
+|---|---|
+| Config file leaked to git | Plaintext keys never reach tracked config after `--delete-after` |
+| Backup file exposed | Vault JSON is encrypted with Fernet |
+| File read by unauthorized process | Vault file permissions are `0600` (owner only) |
+| Credential rollover | Single vault path to audit and update |
+
+#### Real-Time Health Monitoring (WebSocket)
+
+Xencode exposes a WebSocket endpoint for streaming live vault health updates.
+
+**Endpoint:** `ws://localhost:8000/api/v1/vault/health/ws`
+
+##### Query Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `token` | string | *required* | JWT access token for authentication |
+| `interval` | float | `5.0` | Polling interval in seconds (1–300) |
+| `vault_path` | string | *optional* | Custom path to the vault file |
+
+##### Authentication
+
+All WebSocket connections require a valid JWT token passed as a query parameter:
+
+```
+ws://localhost:8000/api/v1/vault/health/ws?token=<JWT>
+```
+
+If the token is missing or invalid, the server closes the connection with code **4001**. The secret key is resolved using the same chain as REST endpoints (vault → `XENCODE_JWT_SECRET_KEY` env var → dev default).
+
+##### Server → Client Messages
+
+On connect the server immediately sends an initial `health_update` snapshot, then repeats every *interval* seconds.
+
+```json
+{
+  "type": "health_update",
+  "available": true,
+  "vault_exists": true,
+  "vault_path": "/home/user/.xencode/vault.json",
+  "is_readable": true,
+  "is_valid_json": true,
+  "credential_count": 3,
+  "encryption_available": true,
+  "timestamp": "2026-06-01T12:00:00.000000"
+}
+```
+
+##### Client → Server Messages
+
+| Message | Response |
+|---|---|
+| `{"type": "ping"}` | `{"type": "pong", "timestamp": "..."}` |
+| `{"type": "check_now"}` | Immediate `health_update` payload |
+| `{"type": "set_interval", "interval": 10}` | `{"type": "interval_updated", "interval": 10, "timestamp": "..."}` |
+
+##### CLI Monitor Command
+
+The quickest way to watch vault health from a terminal:
+
+```bash
+# Connect with defaults (localhost:8000, 5 s interval)
+xencode vault monitor
+
+# Custom server and interval
+xencode vault monitor --server-url http://my-host:8000 --interval 10
+
+# Watch a non-default vault file
+xencode vault monitor --vault-path /custom/path/vault.json
+
+# Provide a token manually
+xencode vault monitor --token eyJhbGci...
+```
+
+The command renders a live Rich table that refreshes on every update.
+
+> **Requirements:** `websockets` and `PyJWT` must be installed (`pip install websockets PyJWT`).
+
+##### Programmatic WebSocket Client
+
+```python
+import asyncio
+import json
+from datetime import datetime, timedelta
+from websockets.asyncio.client import connect
+
+import jwt
+from xencode.api.auth import resolve_jwt_secret
+
+# Generate a token
+secret = resolve_jwt_secret()
+now = datetime.utcnow()
+token = jwt.encode(
+    {
+        "user_id": "monitor-client",
+        "role": "admin",
+        "type": "access",
+        "iat": now,
+        "exp": now + timedelta(hours=1),
+    },
+    secret,
+    algorithm="HS256",
+)
+
+async def monitor():
+    uri = f"ws://localhost:8000/api/v1/vault/health/ws?token={token}&interval=5"
+    async with connect(uri) as ws:
+        # Receive initial snapshot
+        data = json.loads(await ws.recv())
+        print(f"Vault exists: {data['vault_exists']}, credentials: {data['credential_count']}")
+
+        # Request an on-demand check
+        await ws.send(json.dumps({"type": "check_now"}))
+        data = json.loads(await ws.recv())
+        print(f"Updated credential count: {data['credential_count']}")
+
+        # Change interval to 10 s
+        await ws.send(json.dumps({"type": "set_interval", "interval": 10}))
+        ack = json.loads(await ws.recv())  # interval_updated
+        print(f"Server acknowledged: interval={ack['interval']}")
+
+        # Listen for a few updates
+        for _ in range(3):
+            data = json.loads(await ws.recv())
+            if data["type"] == "health_update":
+                print(f"[{data['timestamp']}] credentials={data['credential_count']}")
+
+asyncio.run(monitor())
+```
+
+##### REST Endpoints Summary
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/vault/health` | Bearer JWT | One-shot vault health check |
+| `POST` | `/api/v1/vault/init` | Bearer JWT | Initialize a new vault |
+| `POST` | `/api/v1/vault/migrate` | Bearer JWT | Migrate plaintext keys into vault |
+| `WS` | `/api/v1/vault/health/ws` | `?token=` | Real-time health monitoring stream |
 
 ### AI Ensemble Reasoning
 The core of Xencode is its multi-model ensemble system that combines responses from multiple AI models for better accuracy and reliability.

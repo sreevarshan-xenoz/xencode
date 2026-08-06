@@ -545,11 +545,14 @@ class RecommendationsEngine:
             "days": days,
             "current_metrics": stats,
             "trend": "stable",  # Would calculate from time-series
-        }
+        }# Aliases for backward compatibility with monitoring/__init__.py
+BenchmarkRecommendations = RecommendationsEngine
+ModelRecommendation = Recommendation
 
 
 # Global instance
 _recommendations_instance: Optional[RecommendationsEngine] = None
+
 
 
 def get_recommendations_engine(store: Optional[BenchmarkStore] = None) -> RecommendationsEngine:
@@ -558,3 +561,24 @@ def get_recommendations_engine(store: Optional[BenchmarkStore] = None) -> Recomm
     if _recommendations_instance is None:
         _recommendations_instance = RecommendationsEngine(store)
     return _recommendations_instance
+
+
+def generate_recommendations(
+    store: Optional[BenchmarkStore] = None,
+    task_type: str = "general",
+    use_case: str = "production",
+) -> Dict[str, Any]:
+    """
+    Convenience function to generate model recommendations from benchmark data.
+
+    Args:
+        store: Optional BenchmarkStore with benchmark data.
+        task_type: Type of task to recommend for.
+        use_case: Use case profile (production, development, etc.).
+
+    Returns:
+        Recommendation dictionary.
+    """
+    engine = get_recommendations_engine(store=store)
+    rec = engine.get_recommendations(task_type=task_type, use_case=use_case)
+    return rec.to_dict()

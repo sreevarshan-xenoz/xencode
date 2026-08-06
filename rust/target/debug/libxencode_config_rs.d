@@ -1,0 +1,1 @@
+E:\xencode\rust\target\debug\libxencode_config_rs.rlib: E:\xencode\rust\crates\xencode-config-rs\src\config.rs E:\xencode\rust\crates\xencode-config-rs\src\files.rs E:\xencode\rust\crates\xencode-config-rs\src\lib.rs

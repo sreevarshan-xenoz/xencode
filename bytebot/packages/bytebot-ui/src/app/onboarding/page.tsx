@@ -26,7 +26,7 @@ export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-  const [copilotModels] = useState<CopilotModel[]>([
+  const [copilotModels, setCopilotModels] = useState<CopilotModel[]>([
     {
       id: "gpt-4o",
       name: "GitHub Copilot (Claude Sonnet 4.5)",
@@ -72,11 +72,12 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleModelSelect = (modelId: string) => {
-    setCopilotModels(copilotModels.map((m) => ({
+  const handleModelSelect = async (modelId: string) => {
+    const updatedModels = copilotModels.map((m) => ({
       ...m,
       isActive: m.id === modelId,
-    })));
+    }));
+    setCopilotModels(updatedModels);
   };
 
   const handleContinue = () => {

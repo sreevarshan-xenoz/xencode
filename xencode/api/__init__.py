@@ -11,13 +11,17 @@ FastAPI-based REST API for exposing all Xencode functionality including:
 - Resource management
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 # Import API components with graceful fallback
 try:
     from .main import app, get_app_status
     FASTAPI_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import app: %s", e)
     app = None
     get_app_status = None
     FASTAPI_AVAILABLE = False
@@ -33,7 +37,8 @@ try:
         workspace_router,
     )
     ROUTERS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import document_router: %s", e)
     document_router = None
     code_analysis_router = None
     workspace_router = None
@@ -46,7 +51,8 @@ except ImportError:
 try:
     from .middleware import setup_middleware
     MIDDLEWARE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import setup_middleware: %s", e)
     setup_middleware = None
     MIDDLEWARE_AVAILABLE = False
 
