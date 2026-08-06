@@ -85,6 +85,7 @@ bandit_*.txt
 
 # Runtime / tooling
 .freebuff/
+.agents/
 nul
 
 # Editor backup files
