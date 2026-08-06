@@ -12,10 +12,8 @@ Implements autonomous Plan → Edit → Test → Fix loop with:
 import asyncio
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any, Callable
-from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
@@ -58,7 +56,7 @@ class FailureType(Enum):
 class TaskContext:
     """
     Context object for tracking task execution state
-    
+
     Attributes:
         task_id: Unique identifier for this task
         original_prompt: The original user request
@@ -89,7 +87,7 @@ class TaskContext:
     start_time: Optional[float] = None
     end_time: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     @property
     def elapsed_time(self) -> float:
         """Get elapsed execution time"""
@@ -97,7 +95,7 @@ class TaskContext:
             return 0.0
         end = self.end_time or time.time()
         return end - self.start_time
-    
+
     @property
     def is_running(self) -> bool:
         """Check if workflow is still running"""
@@ -106,7 +104,7 @@ class TaskContext:
             WorkflowState.FAILED,
             WorkflowState.STOPPED
         ]
-    
+
     @property
     def can_continue(self) -> bool:
         """Check if workflow can continue iterating"""
@@ -115,7 +113,7 @@ class TaskContext:
         if self.iteration_count >= self.max_iterations:
             return False
         return True
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert context to dictionary"""
         return {
@@ -141,10 +139,10 @@ class TaskContext:
 class WorkflowOrchestrator:
     """
     Main workflow orchestrator for autonomous agent tasks
-    
+
     Implements Plan → Edit → Test → Fix loop with bounded iterations
     and comprehensive failure handling.
-    
+
     Usage:
         orchestrator = WorkflowOrchestrator()
         result = await orchestrator.execute_task(
@@ -153,7 +151,7 @@ class WorkflowOrchestrator:
             workspace_path="/path/to/project"
         )
     """
-    
+
     def __init__(
         self,
         max_iterations: int = 5,
@@ -164,7 +162,7 @@ class WorkflowOrchestrator:
     ):
         """
         Initialize workflow orchestrator
-        
+
         Args:
             max_iterations: Maximum Plan→Edit→Test→Fix cycles
             timeout_seconds: Maximum execution time
@@ -177,10 +175,10 @@ class WorkflowOrchestrator:
         self.model_callback = model_callback
         self.edit_callback = edit_callback
         self.test_callback = test_callback
-        
+
         # Active tasks
         self._active_tasks: Dict[str, TaskContext] = {}
-    
+
     async def execute_task(
         self,
         task_id: str,
@@ -190,13 +188,13 @@ class WorkflowOrchestrator:
     ) -> TaskContext:
         """
         Execute a complete workflow task
-        
+
         Args:
             task_id: Unique identifier for this task
             prompt: User's task description
             workspace_path: Path to project workspace
             context: Additional context/metadata
-            
+
         Returns:
             TaskContext with execution results
         """
@@ -208,15 +206,15 @@ class WorkflowOrchestrator:
             start_time=time.time(),
             metadata=context or {},
         )
-        
+
         if workspace_path:
             task_context.metadata["workspace_path"] = workspace_path
-        
+
         self._active_tasks[task_id] = task_context
-        
+
         console.print(f"\n[bold blue]Starting Task: {task_id}[/bold blue]")
         console.print(f"[dim]Prompt: {prompt}[/dim]\n")
-        
+
         try:
             # Execute workflow loop
             await self._workflow_loop(task_context)
@@ -229,19 +227,19 @@ class WorkflowOrchestrator:
         finally:
             task_context.end_time = time.time()
             self._log_completion(task_context)
-        
+
         return task_context
-    
+
     async def _workflow_loop(self, context: TaskContext) -> None:
         """
         Main workflow loop: Plan → Edit → Test → Fix
-        
+
         Continues until task passes, fails, or hits iteration cap
         """
         while context.can_continue:
             context.iteration_count += 1
             console.print(f"\n[bold cyan]=== Iteration {context.iteration_count}/{context.max_iterations} ===[/bold cyan]\n")
-            
+
             # Check timeout
             if context.elapsed_time > self.timeout_seconds:
                 context.current_state = WorkflowState.FAILED
@@ -249,22 +247,22 @@ class WorkflowOrchestrator:
                 context.failure_type = FailureType.TIMEOUT
                 context.error_log.append(f"Timeout after {context.elapsed_time:.1f}s")
                 return
-            
+
             # Phase 1: Planning
             console.print("[bold]Phase 1: Planning[/bold]")
             context.current_state = WorkflowState.PLANNING
             plan_success = await self._plan_phase(context)
-            
+
             if not plan_success:
                 context.current_state = WorkflowState.FAILED
                 context.stop_reason = StopReason.UNRECOVERABLE
                 return
-            
+
             # Phase 2: Editing
             console.print("\n[bold]Phase 2: Editing[/bold]")
             context.current_state = WorkflowState.EDITING
             edit_success = await self._edit_phase(context)
-            
+
             if not edit_success:
                 # Check if it's a risky operation
                 if context.failure_type == FailureType.RISKY_OPERATION:
@@ -274,49 +272,49 @@ class WorkflowOrchestrator:
                 context.current_state = WorkflowState.FAILED
                 context.stop_reason = StopReason.UNRECOVERABLE
                 return
-            
+
             # Phase 3: Testing
             console.print("\n[bold]Phase 3: Testing[/bold]")
             context.current_state = WorkflowState.TESTING
             test_result = await self._test_phase(context)
-            
+
             if test_result == "pass":
                 context.current_state = WorkflowState.COMPLETED
                 context.stop_reason = StopReason.PASS
                 console.print("\n[green]✓ Task completed successfully![/green]")
                 return
-            
+
             # Phase 4: Fixing (if tests failed)
             console.print("\n[bold]Phase 4: Fixing[/bold]")
             context.current_state = WorkflowState.FIXING
             fix_success = await self._fix_phase(context)
-            
+
             if not fix_success:
                 context.current_state = WorkflowState.FAILED
                 context.stop_reason = StopReason.UNRECOVERABLE
                 return
-        
+
         # If we exit the loop, we hit the iteration cap
         context.current_state = WorkflowState.STOPPED
         context.stop_reason = StopReason.CAP
         console.print(f"\n[yellow]⚠ Stopped: Reached maximum iterations ({context.max_iterations})[/yellow]")
-    
+
     async def _plan_phase(self, context: TaskContext) -> bool:
         """
         Planning phase: Generate execution plan
-        
+
         Returns:
             True if planning succeeded
         """
         console.print("Generating execution plan...")
-        
+
         if self.model_callback:
             try:
                 # Call LLM to generate plan
                 plan_prompt = self._build_plan_prompt(context)
                 plan = await self.model_callback(plan_prompt)
                 context.plan = plan
-                console.print(f"[green]✓ Plan generated[/green]")
+                console.print("[green]✓ Plan generated[/green]")
                 console.print(f"[dim]{plan}[/dim]")
                 return True
             except Exception as e:
@@ -328,38 +326,38 @@ class WorkflowOrchestrator:
             context.plan = f"Iteration {context.iteration_count}: Analyze task and implement solution"
             console.print(f"[green]✓ Plan: {context.plan}[/green]")
             return True
-    
+
     async def _edit_phase(self, context: TaskContext) -> bool:
         """
         Editing phase: Apply code changes
-        
+
         Returns:
             True if editing succeeded
         """
         console.print("Applying code edits...")
-        
+
         if self.edit_callback:
             try:
                 # Call LLM to generate edits
                 edit_prompt = self._build_edit_prompt(context)
                 edits = await self.edit_callback(edit_prompt)
-                
+
                 # Apply edits (callback should handle actual file modification)
                 if isinstance(edits, list):
                     context.edits_made.extend(edits)
                 else:
                     context.edits_made.append(edits)
-                
+
                 console.print(f"[green]✓ Edits applied ({len(edits) if isinstance(edits, list) else 1} changes)[/green]")
                 return True
             except Exception as e:
                 error_msg = str(e)
                 context.error_log.append(f"Editing failed: {error_msg}")
-                
+
                 # Check for risky operations
                 if any(term in error_msg.lower() for term in ["risky", "dangerous", "unsafe"]):
                     context.failure_type = FailureType.RISKY_OPERATION
-                    console.print(f"[red]✗ Risky operation detected[/red]")
+                    console.print("[red]✗ Risky operation detected[/red]")
                 else:
                     console.print(f"[red]✗ Editing failed: {e}[/red]")
                 return False
@@ -372,22 +370,22 @@ class WorkflowOrchestrator:
             })
             console.print("[yellow]⚠ No edit callback configured - simulating edit[/yellow]")
             return True
-    
+
     async def _test_phase(self, context: TaskContext) -> str:
         """
         Testing phase: Run tests and validate changes
-        
+
         Returns:
             "pass" if tests pass, "fail" otherwise
         """
         console.print("Running tests...")
-        
+
         if self.test_callback:
             try:
                 # Run tests via callback
                 test_results = await self.test_callback()
                 context.test_results.append(test_results)
-                
+
                 if test_results.get("success", False):
                     console.print("[green]✓ All tests passed[/green]")
                     return "pass"
@@ -413,22 +411,22 @@ class WorkflowOrchestrator:
             else:
                 console.print("[green]✓ Simulated test pass[/green]")
                 return "pass"
-    
+
     async def _fix_phase(self, context: TaskContext) -> bool:
         """
         Fixing phase: Generate and apply fixes for test failures
-        
+
         Returns:
             True if fixing succeeded
         """
         console.print("Generating fixes...")
-        
+
         if self.model_callback:
             try:
                 # Call LLM to generate fix
                 fix_prompt = self._build_fix_prompt(context)
-                fix = await self.model_callback(fix_prompt)
-                
+                await self.model_callback(fix_prompt)
+
                 # Apply fix via edit callback
                 if self.edit_callback:
                     edits = await self.edit_callback(fix_prompt)
@@ -436,7 +434,7 @@ class WorkflowOrchestrator:
                         context.edits_made.extend(edits)
                     else:
                         context.edits_made.append(edits)
-                
+
                 console.print("[green]✓ Fix applied[/green]")
                 return True
             except Exception as e:
@@ -450,7 +448,7 @@ class WorkflowOrchestrator:
                 "description": "Simulated fix (no callback configured)",
             })
             return True
-    
+
     def _build_plan_prompt(self, context: TaskContext) -> str:
         """Build prompt for planning phase"""
         return f"""Task: {context.original_prompt}
@@ -465,7 +463,7 @@ Include:
 4. Potential risks to consider
 
 Be specific and actionable."""
-    
+
     def _build_edit_prompt(self, context: TaskContext) -> str:
         """Build prompt for edit phase"""
         return f"""Task: {context.original_prompt}
@@ -479,11 +477,11 @@ For each file:
 3. Explain the changes made
 
 Be precise and ensure the code is syntactically correct."""
-    
+
     def _build_fix_prompt(self, context: TaskContext) -> str:
         """Build prompt for fix phase"""
         errors = "\n".join(context.error_log[-3:])  # Last 3 errors
-        
+
         return f"""Task: {context.original_prompt}
 
 Previous attempts failed with these errors:
@@ -496,11 +494,11 @@ Include:
 3. Updated file content
 
 Be thorough in addressing all error conditions."""
-    
+
     def _log_completion(self, context: TaskContext) -> None:
         """Log task completion summary"""
         console.print(f"\n{'='*60}")
-        console.print(f"[bold]Task Completion Summary[/bold]")
+        console.print("[bold]Task Completion Summary[/bold]")
         console.print(f"{'='*60}")
         console.print(f"Task ID: {context.task_id}")
         console.print(f"Status: {context.current_state.value}")
@@ -509,32 +507,32 @@ Be thorough in addressing all error conditions."""
         console.print(f"Elapsed Time: {context.elapsed_time:.2f}s")
         console.print(f"Edits Made: {len(context.edits_made)}")
         console.print(f"Tests Run: {len(context.test_results)}")
-        
+
         if context.error_log:
             console.print(f"\n[red]Errors ({len(context.error_log)}):[/red]")
             for error in context.error_log[-5:]:  # Show last 5 errors
                 console.print(f"  • {error}")
-        
+
         console.print(f"{'='*60}\n")
-    
+
     def get_task(self, task_id: str) -> Optional[TaskContext]:
         """Get task context by ID"""
         return self._active_tasks.get(task_id)
-    
+
     def get_all_tasks(self) -> List[TaskContext]:
         """Get all task contexts"""
         return list(self._active_tasks.values())
-    
+
     async def stop_task(self, task_id: str) -> bool:
         """Manually stop a running task"""
         context = self.get_task(task_id)
         if not context or not context.is_running:
             return False
-        
+
         context.current_state = WorkflowState.STOPPED
         context.stop_reason = StopReason.USER_STOP
         context.end_time = time.time()
-        
+
         console.print(f"[yellow]Task {task_id} stopped by user[/yellow]")
         return True
 
@@ -567,7 +565,7 @@ async def execute_workflow(
 ) -> TaskContext:
     """
     Convenience function to execute a workflow task
-    
+
     Args:
         task_id: Unique task identifier
         prompt: Task description
@@ -575,7 +573,7 @@ async def execute_workflow(
         model_callback: LLM callback
         edit_callback: Edit application callback
         test_callback: Test execution callback
-        
+
     Returns:
         TaskContext with results
     """
@@ -584,7 +582,7 @@ async def execute_workflow(
         edit_callback=edit_callback,
         test_callback=test_callback,
     )
-    
+
     return await orchestrator.execute_task(
         task_id=task_id,
         prompt=prompt,
@@ -596,19 +594,19 @@ if __name__ == "__main__":
     # Demo execution
     async def demo():
         console.print("[bold blue]Agent Workflow Orchestrator Demo[/bold blue]\n")
-        
+
         # Demo without callbacks (simulated execution)
         orchestrator = WorkflowOrchestrator(max_iterations=3)
-        
+
         result = await orchestrator.execute_task(
             task_id="demo-001",
             prompt="Add a hello world function",
             workspace_path="/tmp/demo",
         )
-        
+
         console.print("\n[bold]Result:[/bold]")
         console.print(f"Status: {result.current_state.value}")
         console.print(f"Stop Reason: {result.stop_reason.value if result.stop_reason else 'N/A'}")
         console.print(f"Iterations: {result.iteration_count}")
-    
+
     asyncio.run(demo())

@@ -1,16 +1,15 @@
 """
 Human-in-the-Loop supervision system for multi-agent systems in Xencode
 """
-from typing import Dict, List, Optional, Any, Set, Tuple
-from enum import Enum
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import uuid
 import json
 import sqlite3
 import threading
-from pathlib import Path
+import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set
 
 
 class SupervisionLevel(Enum):
@@ -101,25 +100,25 @@ class ApprovalRule:
 
 class SupervisionEngine:
     """Main engine for managing human-in-the-loop supervision."""
-    
+
     def __init__(self, db_path: str = "supervision.db"):
         self.db_path = db_path
         self.approval_rules: List[ApprovalRule] = []
         self.pending_requests: Dict[str, SupervisionRequest] = {}
         self.feedback_records: List[HumanFeedback] = []
         self.access_lock = threading.RLock()
-        
+
         # Initialize database
         self._init_db()
-        
+
         # Initialize default rules
         self._init_default_rules()
-    
+
     def _init_db(self):
         """Initialize the supervision database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Create supervision_requests table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS supervision_requests (
@@ -140,7 +139,7 @@ class SupervisionEngine:
                 metadata TEXT
             )
         ''')
-        
+
         # Create human_feedback table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS human_feedback (
@@ -155,7 +154,7 @@ class SupervisionEngine:
                 metadata TEXT
             )
         ''')
-        
+
         # Create approval_rules table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS approval_rules (
@@ -171,7 +170,7 @@ class SupervisionEngine:
                 created_at TEXT
             )
         ''')
-        
+
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_request_status ON supervision_requests(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_request_agent ON supervision_requests(agent_id)')
@@ -180,10 +179,10 @@ class SupervisionEngine:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_agent ON human_feedback(agent_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_supervisor ON human_feedback(supervisor_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_feedback_type ON human_feedback(feedback_type)')
-        
+
         conn.commit()
         conn.close()
-    
+
     def _init_default_rules(self):
         """Initialize default approval rules."""
         default_rules = [
@@ -224,19 +223,19 @@ class SupervisionEngine:
                 created_by="system"
             )
         ]
-        
+
         for rule in default_rules:
             self.add_approval_rule(rule)
-    
+
     def add_approval_rule(self, rule: ApprovalRule):
         """Add a new approval rule."""
         with self.access_lock:
             self.approval_rules.append(rule)
-            
+
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 INSERT INTO approval_rules
                 (rule_id, name, description, decision_categories, supervision_level, conditions, priority, enabled, created_by, created_at)
@@ -253,26 +252,25 @@ class SupervisionEngine:
                 rule.created_by,
                 rule.created_at.isoformat()
             ))
-            
+
             conn.commit()
             conn.close()
-    
-    def evaluate_supervision_needed(self, agent_id: str, task_description: str, 
-                                  decision_category: DecisionCategory, 
+
+    def evaluate_supervision_needed(self, agent_id: str, task_description: str,
+                                  decision_category: DecisionCategory,
                                   context: Dict[str, Any] = None) -> SupervisionLevel:
         """Evaluate if human supervision is needed for a task."""
         context = context or {}
-        
+
         # Check all rules to see if any apply
         applicable_rules = []
         for rule in self.approval_rules:
             if not rule.enabled:
                 continue
-                
+
             # Check if decision category matches
             if decision_category in rule.decision_categories:
                 # Check conditions
-                conditions_met = True
                 for key, value in rule.conditions.items():
                     if key in context:
                         if isinstance(value, (int, float)) and isinstance(context[key], (int, float)):
@@ -291,17 +289,17 @@ class SupervisionEngine:
                                 pii_indicators = ["social security", "credit card", "ssn", "card number"]
                                 if any(indicator in text_context.lower() for indicator in pii_indicators):
                                     applicable_rules.append(rule)
-        
+
         # Return the highest priority supervision level from applicable rules
         if applicable_rules:
             highest_priority_rule = max(applicable_rules, key=lambda r: r.priority)
             return highest_priority_rule.supervision_level
-        
+
         # Default: no supervision needed for routine tasks
         return SupervisionLevel.AUTONOMOUS
-    
-    def create_supervision_request(self, agent_id: str, task_description: str, 
-                                 decision_category: DecisionCategory, 
+
+    def create_supervision_request(self, agent_id: str, task_description: str,
+                                 decision_category: DecisionCategory,
                                  supervision_level: SupervisionLevel,
                                  context: Dict[str, Any] = None,
                                  required_action: str = "Review and approve",
@@ -309,7 +307,7 @@ class SupervisionEngine:
                                  due_date: Optional[datetime] = None) -> str:
         """Create a request for human supervision."""
         context = context or {}
-        
+
         request = SupervisionRequest(
             agent_id=agent_id,
             task_description=task_description,
@@ -320,15 +318,15 @@ class SupervisionEngine:
             priority=priority,
             due_date=due_date
         )
-        
+
         with self.access_lock:
             # Store in memory
             self.pending_requests[request.request_id] = request
-            
+
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 INSERT INTO supervision_requests
                 (request_id, agent_id, task_description, decision_category, supervision_level,
@@ -348,37 +346,37 @@ class SupervisionEngine:
                 request.status.value,
                 json.dumps(request.metadata)
             ))
-            
+
             conn.commit()
             conn.close()
-        
+
         return request.request_id
-    
-    def get_pending_requests(self, supervisor_id: Optional[str] = None, 
+
+    def get_pending_requests(self, supervisor_id: Optional[str] = None,
                            decision_category: Optional[DecisionCategory] = None,
                            priority_threshold: int = 0) -> List[SupervisionRequest]:
         """Get pending supervision requests."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         query = "SELECT * FROM supervision_requests WHERE status = ?"
         params = [ApprovalStatus.PENDING.value]
-        
+
         if supervisor_id:
             # In a real system, we'd have logic to assign requests to supervisors
             pass
-        
+
         if decision_category:
             query += " AND decision_category = ?"
             params.append(decision_category.value)
-        
+
         query += " AND priority >= ? ORDER BY priority DESC, request_timestamp ASC"
         params.append(priority_threshold)
-        
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
-        
+
         requests = []
         for row in rows:
             request = SupervisionRequest(
@@ -399,16 +397,16 @@ class SupervisionEngine:
                 metadata=json.loads(row[14]) if row[14] else {}
             )
             requests.append(request)
-        
+
         return requests
-    
+
     def approve_request(self, request_id: str, approver_id: str, feedback: str = "") -> bool:
         """Approve a supervision request."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            UPDATE supervision_requests 
+            UPDATE supervision_requests
             SET status = ?, approver_id = ?, approval_timestamp = ?, feedback = ?
             WHERE request_id = ?
         ''', (
@@ -418,11 +416,11 @@ class SupervisionEngine:
             feedback,
             request_id
         ))
-        
+
         rows_affected = cursor.rowcount
         conn.commit()
         conn.close()
-        
+
         if rows_affected > 0:
             # Update in-memory cache
             if request_id in self.pending_requests:
@@ -432,18 +430,18 @@ class SupervisionEngine:
                 request.approval_timestamp = datetime.now()
                 request.feedback = feedback
                 del self.pending_requests[request_id]  # Remove from pending
-            
+
             return True
-        
+
         return False
-    
+
     def reject_request(self, request_id: str, approver_id: str, reason: str = "") -> bool:
         """Reject a supervision request."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            UPDATE supervision_requests 
+            UPDATE supervision_requests
             SET status = ?, approver_id = ?, approval_timestamp = ?, feedback = ?
             WHERE request_id = ?
         ''', (
@@ -453,11 +451,11 @@ class SupervisionEngine:
             reason,
             request_id
         ))
-        
+
         rows_affected = cursor.rowcount
         conn.commit()
         conn.close()
-        
+
         if rows_affected > 0:
             # Update in-memory cache
             if request_id in self.pending_requests:
@@ -467,18 +465,18 @@ class SupervisionEngine:
                 request.approval_timestamp = datetime.now()
                 request.feedback = reason
                 del self.pending_requests[request_id]  # Remove from pending
-            
+
             return True
-        
+
         return False
-    
+
     def submit_feedback(self, supervisor_id: str, agent_id: str, task_id: str,
                        feedback_type: FeedbackType, content: str,
                        rating: Optional[int] = None,
                        metadata: Dict[str, Any] = None) -> str:
         """Submit feedback from a human supervisor."""
         metadata = metadata or {}
-        
+
         feedback = HumanFeedback(
             supervisor_id=supervisor_id,
             agent_id=agent_id,
@@ -488,11 +486,11 @@ class SupervisionEngine:
             rating=rating,
             metadata=metadata
         )
-        
+
         # Store in database
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             INSERT INTO human_feedback
             (feedback_id, supervisor_id, agent_id, task_id, feedback_type, content, timestamp, rating, metadata)
@@ -508,35 +506,35 @@ class SupervisionEngine:
             feedback.rating,
             json.dumps(feedback.metadata)
         ))
-        
+
         conn.commit()
         conn.close()
-        
+
         # Store in memory
         self.feedback_records.append(feedback)
-        
+
         return feedback.feedback_id
-    
+
     def get_feedback_for_agent(self, agent_id: str, feedback_type: Optional[FeedbackType] = None,
                               limit: int = 50) -> List[HumanFeedback]:
         """Get feedback for a specific agent."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         query = "SELECT * FROM human_feedback WHERE agent_id = ?"
         params = [agent_id]
-        
+
         if feedback_type:
             query += " AND feedback_type = ?"
             params.append(feedback_type.value)
-        
+
         query += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
-        
+
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
-        
+
         feedback_list = []
         for row in rows:
             feedback = HumanFeedback(
@@ -551,23 +549,23 @@ class SupervisionEngine:
                 metadata=json.loads(row[8]) if row[8] else {}
             )
             feedback_list.append(feedback)
-        
+
         return feedback_list
-    
+
     def get_agent_performance_score(self, agent_id: str) -> float:
         """Calculate an agent's performance score based on human feedback."""
         feedback_list = self.get_feedback_for_agent(agent_id)
-        
+
         if not feedback_list:
             return 0.5  # Neutral score if no feedback
-        
+
         # Calculate weighted score based on feedback type and ratings
         total_score = 0.0
         total_weight = 0.0
-        
+
         for feedback in feedback_list:
             weight = 1.0  # Base weight
-            
+
             # Adjust weight based on feedback type
             if feedback.feedback_type == FeedbackType.CORRECTION:
                 weight = 0.8  # Corrections have moderate impact
@@ -579,7 +577,7 @@ class SupervisionEngine:
                 weight = 0.9  # Guidance has moderate impact
             elif feedback.feedback_type == FeedbackType.SUGGESTION:
                 weight = 0.7  # Suggestions have lower impact
-            
+
             # Use rating if available, otherwise infer from content
             score = 0.5  # Default neutral
             if feedback.rating is not None:
@@ -588,21 +586,21 @@ class SupervisionEngine:
                 # Infer score from content sentiment (simplified)
                 positive_indicators = ["good", "well", "excellent", "great", "perfect", "correct"]
                 negative_indicators = ["bad", "poor", "incorrect", "wrong", "needs improvement", "error"]
-                
+
                 content_lower = feedback.content.lower()
                 pos_count = sum(1 for indicator in positive_indicators if indicator in content_lower)
                 neg_count = sum(1 for indicator in negative_indicators if indicator in content_lower)
-                
+
                 if pos_count > neg_count:
                     score = 0.7
                 elif neg_count > pos_count:
                     score = 0.3
                 else:
                     score = 0.5
-            
+
             total_score += score * weight
             total_weight += weight
-        
+
         if total_weight > 0:
             return total_score / total_weight
         else:
@@ -611,17 +609,17 @@ class SupervisionEngine:
 
 class HumanSupervisionInterface:
     """Interface for human supervisors to interact with the system."""
-    
+
     def __init__(self, supervision_engine: SupervisionEngine):
         self.supervision_engine = supervision_engine
         self.current_user_id = "default_supervisor"
         self.access_lock = threading.RLock()
-    
+
     def set_current_user(self, user_id: str):
         """Set the current supervisor user ID."""
         with self.access_lock:
             self.current_user_id = user_id
-    
+
     def get_dashboard_data(self) -> Dict[str, Any]:
         """Get dashboard data for the supervisor."""
         with self.access_lock:
@@ -629,17 +627,17 @@ class HumanSupervisionInterface:
             pending_requests = self.supervision_engine.get_pending_requests(
                 priority_threshold=1
             )
-            
+
             # Get recent feedback
             recent_feedback = self.supervision_engine.get_feedback_for_agent(
                 agent_id="any",  # This would be filtered by the actual agent in a real system
                 limit=10
             )
-            
+
             # Get statistics
-            total_requests = len(pending_requests)
+            len(pending_requests)
             high_priority_requests = sum(1 for req in pending_requests if req.priority >= 3)
-            
+
             return {
                 'pending_requests': len(pending_requests),
                 'high_priority_requests': high_priority_requests,
@@ -668,33 +666,33 @@ class HumanSupervisionInterface:
                     } for fb in recent_feedback[:5]
                 ]
             }
-    
+
     def approve_task(self, request_id: str, feedback: str = "") -> bool:
         """Approve a task request."""
         return self.supervision_engine.approve_request(request_id, self.current_user_id, feedback)
-    
+
     def reject_task(self, request_id: str, reason: str = "") -> bool:
         """Reject a task request."""
         return self.supervision_engine.reject_request(request_id, self.current_user_id, reason)
-    
+
     def submit_agent_feedback(self, agent_id: str, task_id: str, feedback_type: FeedbackType,
                            content: str, rating: Optional[int] = None) -> str:
         """Submit feedback about an agent's performance."""
         return self.supervision_engine.submit_feedback(
             self.current_user_id, agent_id, task_id, feedback_type, content, rating
         )
-    
+
     def get_agent_performance(self, agent_id: str) -> Dict[str, Any]:
         """Get performance metrics for a specific agent."""
         performance_score = self.supervision_engine.get_agent_performance_score(agent_id)
-        
+
         feedback_list = self.supervision_engine.get_feedback_for_agent(agent_id)
-        
+
         # Categorize feedback
         feedback_by_type = defaultdict(list)
         for fb in feedback_list:
             feedback_by_type[fb.feedback_type.value].append(fb)
-        
+
         return {
             'agent_id': agent_id,
             'performance_score': performance_score,
@@ -713,48 +711,48 @@ class HumanSupervisionInterface:
 
 class FeedbackIntegrationSystem:
     """System for integrating human feedback into agent learning."""
-    
+
     def __init__(self, supervision_engine: SupervisionEngine):
         self.supervision_engine = supervision_engine
         self.feedback_handlers: Dict[str, callable] = {}
         self.access_lock = threading.RLock()
-    
+
     def register_feedback_handler(self, agent_type: str, handler_func: callable):
         """Register a function to handle feedback for a specific agent type."""
         with self.access_lock:
             self.feedback_handlers[agent_type] = handler_func
-    
+
     def process_feedback_for_agent(self, agent_id: str, feedback: HumanFeedback):
         """Process feedback for a specific agent."""
         # Determine agent type from ID (simplified)
         agent_type = agent_id.split('_')[0] if '_' in agent_id else 'general'
-        
+
         with self.access_lock:
             if agent_type in self.feedback_handlers:
                 handler = self.feedback_handlers[agent_type]
                 handler(agent_id, feedback)
-    
+
     def get_feedback_summary(self, agent_id: str = None) -> Dict[str, Any]:
         """Get a summary of feedback across the system."""
         conn = sqlite3.connect(self.supervision_engine.db_path)
         cursor = conn.cursor()
-        
+
         # Get feedback counts by type
         cursor.execute('SELECT feedback_type, COUNT(*) FROM human_feedback GROUP BY feedback_type')
         type_counts = dict(cursor.fetchall())
-        
+
         # Get average ratings
         cursor.execute('SELECT AVG(rating) FROM human_feedback WHERE rating IS NOT NULL')
         avg_rating_row = cursor.fetchone()
         avg_rating = avg_rating_row[0] if avg_rating_row[0] is not None else None
-        
+
         # Get feedback volume over time (last 30 days)
         thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
         cursor.execute('SELECT DATE(timestamp), COUNT(*) FROM human_feedback WHERE timestamp > ? GROUP BY DATE(timestamp)', (thirty_days_ago,))
         daily_counts = dict(cursor.fetchall())
-        
+
         conn.close()
-        
+
         return {
             'total_feedback': sum(type_counts.values()),
             'feedback_by_type': type_counts,
@@ -765,7 +763,7 @@ class FeedbackIntegrationSystem:
 
 
 # Helper functions for common operations
-def create_supervision_request_for_task(agent_id: str, task_description: str, 
+def create_supervision_request_for_task(agent_id: str, task_description: str,
                                       decision_category: DecisionCategory,
                                       context: Dict[str, Any] = None) -> SupervisionRequest:
     """Create a supervision request for a specific task."""
@@ -773,18 +771,18 @@ def create_supervision_request_for_task(agent_id: str, task_description: str,
     supervision_level = engine.evaluate_supervision_needed(
         agent_id, task_description, decision_category, context
     )
-    
+
     request_id = engine.create_supervision_request(
         agent_id, task_description, decision_category, supervision_level, context
     )
-    
+
     # Retrieve the created request
     conn = sqlite3.connect(engine.db_path)
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM supervision_requests WHERE request_id = ?', (request_id,))
     row = cursor.fetchone()
     conn.close()
-    
+
     if row:
         return SupervisionRequest(
             request_id=row[0],
@@ -803,7 +801,7 @@ def create_supervision_request_for_task(agent_id: str, task_description: str,
             feedback=row[13],
             metadata=json.loads(row[14]) if row[14] else {}
         )
-    
+
     return None
 
 

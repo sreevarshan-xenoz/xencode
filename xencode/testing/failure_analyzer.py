@@ -13,15 +13,13 @@ Features:
 """
 
 import re
-import ast
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .test_runner import TestResult, TestStatus, TestExecutionResult
+from .test_runner import TestExecutionResult, TestResult, TestStatus
 
 
 class FailureType(Enum):
@@ -681,7 +679,7 @@ class FailureAnalyzer:
             "severity_distribution": severity_counts,
             "total_suggestions": len(suggestions),
             "auto_fixable_count": auto_fixable,
-            "patterns_detected": len(set(p.pattern_id for p in self.pattern_recognizer.patterns if p.occurrence_count > 0)),
+            "patterns_detected": len({p.pattern_id for p in self.pattern_recognizer.patterns if p.occurrence_count > 0}),
             "critical_failures": severity_counts.get("critical", 0),
             "high_severity_failures": severity_counts.get("high", 0)
         }

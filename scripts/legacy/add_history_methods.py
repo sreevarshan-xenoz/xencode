@@ -19,7 +19,7 @@ if insert_index is None:
 # Methods to insert
 indent = ' ' * 4
 methods = [
-    f'\n',
+    '\n',
     f'{indent}async def get_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:\n',
     f'{indent}    """Get edit history for a session"""\n',
     f'{indent}    if session_id not in self.edit_history:\n',
@@ -36,7 +36,7 @@ methods = [
     f'{indent}        \'history\': history,\n',
     f'{indent}        \'count\': len(history)\n',
     f'{indent}    }}\n',
-    f'\n',
+    '\n',
     f'{indent}async def rollback(self, session_id: str, steps: int = 1) -> Dict[str, Any]:\n',
     f'{indent}    """\n',
     f'{indent}    Rollback edit history by specified steps\n',
@@ -74,7 +74,7 @@ methods = [
     f'{indent}        \'steps\': steps,\n',
     f'{indent}        \'remaining_history\': len(self.edit_history[session_id])\n',
     f'{indent}    }}\n',
-    f'\n',
+    '\n',
 ]
 
 # Insert the methods

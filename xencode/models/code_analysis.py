@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 class AnalysisType(str, Enum):
@@ -61,7 +61,7 @@ class CodeLocation:
     column: int
     end_line: Optional[int] = None
     end_column: Optional[int] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -81,20 +81,20 @@ class AnalysisIssue:
     message: str = ""
     description: str = ""
     location: Optional[CodeLocation] = None
-    
+
     # Code context
     code_snippet: Optional[str] = None
     affected_code: Optional[str] = None
-    
+
     # Suggestions
     suggested_fix: Optional[str] = None
     refactoring_suggestion: Optional[str] = None
-    
+
     # Metadata
     rule_id: Optional[str] = None
     rule_name: Optional[str] = None
     confidence: float = 1.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -123,17 +123,17 @@ class ComplexityMetrics:
     logical_lines_of_code: int = 0
     comment_lines: int = 0
     blank_lines: int = 0
-    
+
     # Function/method metrics
     function_count: int = 0
     class_count: int = 0
     max_function_complexity: int = 0
     avg_function_complexity: float = 0.0
-    
+
     # Nesting and depth
     max_nesting_depth: int = 0
     avg_nesting_depth: float = 0.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -161,7 +161,7 @@ class SecurityIssue:
     risk_level: SeverityLevel = SeverityLevel.INFO
     exploit_scenario: Optional[str] = None
     mitigation: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -182,7 +182,7 @@ class PerformanceIssue:
     estimated_impact: Optional[str] = None
     optimization_suggestion: Optional[str] = None
     benchmark_data: Optional[Dict[str, Any]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -204,7 +204,7 @@ class RefactoringSuggestion:
     benefits: List[str] = field(default_factory=list)
     effort_level: str = "medium"  # "low", "medium", "high"
     confidence: float = 1.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -229,7 +229,7 @@ class DependencyInfo:
     is_deprecated: bool = False
     security_issues: List[str] = field(default_factory=list)
     license: Optional[str] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -252,7 +252,7 @@ class CodeAnalysisResult:
     language: Language = Language.UNKNOWN
     analyzed_at: datetime = field(default_factory=datetime.now)
     analysis_duration_ms: int = 0
-    
+
     # Analysis results
     issues: List[AnalysisIssue] = field(default_factory=list)
     complexity_metrics: Optional[ComplexityMetrics] = None
@@ -260,47 +260,47 @@ class CodeAnalysisResult:
     performance_issues: List[PerformanceIssue] = field(default_factory=list)
     refactoring_suggestions: List[RefactoringSuggestion] = field(default_factory=list)
     dependencies: List[DependencyInfo] = field(default_factory=list)
-    
+
     # Summary statistics
     total_issues: int = 0
     critical_issues: int = 0
     error_issues: int = 0
     warning_issues: int = 0
     info_issues: int = 0
-    
+
     # Quality score (0-100)
     quality_score: float = 0.0
     maintainability_score: float = 0.0
     security_score: float = 0.0
     performance_score: float = 0.0
-    
+
     def __post_init__(self):
         """Calculate summary statistics after initialization"""
         self._calculate_summary_stats()
-    
+
     def add_issue(self, issue: AnalysisIssue) -> None:
         """Add an analysis issue"""
         self.issues.append(issue)
         self._calculate_summary_stats()
-    
+
     def add_security_issue(self, security_issue: SecurityIssue, base_issue: AnalysisIssue) -> None:
         """Add a security issue with base analysis issue"""
         base_issue.analysis_type = AnalysisType.SECURITY
         self.issues.append(base_issue)
         self.security_issues.append(security_issue)
         self._calculate_summary_stats()
-    
+
     def add_performance_issue(self, perf_issue: PerformanceIssue, base_issue: AnalysisIssue) -> None:
         """Add a performance issue with base analysis issue"""
         base_issue.analysis_type = AnalysisType.PERFORMANCE
         self.issues.append(base_issue)
         self.performance_issues.append(perf_issue)
         self._calculate_summary_stats()
-    
+
     def add_refactoring_suggestion(self, suggestion: RefactoringSuggestion) -> None:
         """Add a refactoring suggestion"""
         self.refactoring_suggestions.append(suggestion)
-    
+
     def _calculate_summary_stats(self) -> None:
         """Calculate summary statistics"""
         self.total_issues = len(self.issues)
@@ -308,41 +308,41 @@ class CodeAnalysisResult:
         self.error_issues = sum(1 for issue in self.issues if issue.severity == SeverityLevel.ERROR)
         self.warning_issues = sum(1 for issue in self.issues if issue.severity == SeverityLevel.WARNING)
         self.info_issues = sum(1 for issue in self.issues if issue.severity == SeverityLevel.INFO)
-        
+
         # Calculate quality scores
         self._calculate_quality_scores()
-    
+
     def _calculate_quality_scores(self) -> None:
         """Calculate quality scores based on issues and metrics"""
         base_score = 100.0
-        
+
         # Deduct points for issues
         base_score -= self.critical_issues * 20
         base_score -= self.error_issues * 10
         base_score -= self.warning_issues * 5
         base_score -= self.info_issues * 1
-        
+
         self.quality_score = max(0.0, base_score)
-        
+
         # Calculate specific scores
         self.security_score = max(0.0, 100.0 - len(self.security_issues) * 15)
         self.performance_score = max(0.0, 100.0 - len(self.performance_issues) * 10)
-        
+
         # Maintainability based on complexity
         if self.complexity_metrics:
             complexity_penalty = min(self.complexity_metrics.cyclomatic_complexity * 2, 50)
             self.maintainability_score = max(0.0, 100.0 - complexity_penalty)
         else:
             self.maintainability_score = self.quality_score
-    
+
     def get_issues_by_severity(self, severity: SeverityLevel) -> List[AnalysisIssue]:
         """Get issues filtered by severity"""
         return [issue for issue in self.issues if issue.severity == severity]
-    
+
     def get_issues_by_type(self, analysis_type: AnalysisType) -> List[AnalysisIssue]:
         """Get issues filtered by analysis type"""
         return [issue for issue in self.issues if issue.analysis_type == analysis_type]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -367,18 +367,18 @@ class CodeAnalysisResult:
             'security_score': self.security_score,
             'performance_score': self.performance_score
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CodeAnalysisResult':
         """Create CodeAnalysisResult from dictionary"""
-        
+
         # Parse issues
         issues = []
         for issue_data in data.get('issues', []):
             location = None
             if issue_data.get('location'):
                 location = CodeLocation(**issue_data['location'])
-            
+
             issue = AnalysisIssue(
                 id=issue_data.get('id', str(uuid.uuid4())),
                 analysis_type=AnalysisType(issue_data.get('analysis_type', AnalysisType.SYNTAX)),
@@ -395,24 +395,24 @@ class CodeAnalysisResult:
                 confidence=issue_data.get('confidence', 1.0)
             )
             issues.append(issue)
-        
+
         # Parse complexity metrics
         complexity_metrics = None
         if data.get('complexity_metrics'):
             complexity_metrics = ComplexityMetrics(**data['complexity_metrics'])
-        
+
         # Parse security issues
         security_issues = [SecurityIssue(**issue_data) for issue_data in data.get('security_issues', [])]
-        
+
         # Parse performance issues
         performance_issues = [PerformanceIssue(**issue_data) for issue_data in data.get('performance_issues', [])]
-        
+
         # Parse refactoring suggestions
         refactoring_suggestions = [RefactoringSuggestion(**suggestion_data) for suggestion_data in data.get('refactoring_suggestions', [])]
-        
+
         # Parse dependencies
         dependencies = [DependencyInfo(**dep_data) for dep_data in data.get('dependencies', [])]
-        
+
         return cls(
             id=data.get('id', str(uuid.uuid4())),
             file_path=data.get('file_path', ''),
@@ -442,9 +442,9 @@ def detect_language_from_extension(file_path: Union[str, Path]) -> Language:
     """Detect programming language from file extension"""
     if isinstance(file_path, str):
         file_path = Path(file_path)
-    
+
     extension = file_path.suffix.lower()
-    
+
     language_mapping = {
         '.py': Language.PYTHON,
         '.js': Language.JAVASCRIPT,
@@ -467,7 +467,7 @@ def detect_language_from_extension(file_path: Union[str, Path]) -> Language:
         '.bash': Language.BASH,
         '.ps1': Language.POWERSHELL,
     }
-    
+
     return language_mapping.get(extension, Language.UNKNOWN)
 
 
@@ -489,5 +489,5 @@ def get_tree_sitter_language_name(language: Language) -> Optional[str]:
         Language.CSS: 'css',
         Language.BASH: 'bash',
     }
-    
+
     return mapping.get(language)

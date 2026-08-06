@@ -1,6 +1,7 @@
 import os
+import shlex
 import subprocess
-from typing import Optional, Type
+from typing import Type
 
 from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -58,8 +59,8 @@ class ExecuteCommandTool(BaseTool):
     def _run(self, command: str) -> str:
         try:
             result = subprocess.run(
-                command,
-                shell=True,
+                shlex.split(command, posix=False),
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=60  # Safety timeout

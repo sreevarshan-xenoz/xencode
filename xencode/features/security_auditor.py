@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from xencode.features.base import FeatureBase, FeatureConfig
 
@@ -62,7 +62,7 @@ class SecurityAuditorConfig:
         "*/node_modules/*"
     ])
     max_severity: str = "info"  # Report all severities by default
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SecurityAuditorConfig':
         """Create config from dictionary"""
@@ -90,7 +90,7 @@ class Vulnerability:
     cwe_id: Optional[str] = None
     cvss_score: Optional[float] = None
     references: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -121,7 +121,7 @@ class DependencyVulnerability:
     description: str
     cvss_score: float
     references: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -146,7 +146,7 @@ class SecurityReport:
     dependency_vulnerabilities: List[DependencyVulnerability]
     summary: Dict[str, int]
     recommendations: List[str]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -161,11 +161,11 @@ class SecurityReport:
 
 class VulnerabilityScanner:
     """Scans code for OWASP Top 10 vulnerabilities"""
-    
+
     def __init__(self, exclude_patterns: List[str] = None):
         self.exclude_patterns = exclude_patterns or []
         self._init_patterns()
-    
+
     def _init_patterns(self):
         """Initialize vulnerability detection patterns"""
         self.patterns = {
@@ -204,16 +204,16 @@ class VulnerabilityScanner:
                 (r'yaml\.load\s*\([^,)]*\)', 'Insecure YAML deserialization'),
             ],
             VulnerabilityType.BROKEN_ACCESS: [
-                (r'@app\.route\s*\([^)]*\)\s*\n\s*def\s+\w+\s*\([^)]*\):\s*\n(?!\s*@)', 
+                (r'@app\.route\s*\([^)]*\)\s*\n\s*def\s+\w+\s*\([^)]*\):\s*\n(?!\s*@)',
                  'Missing authentication decorator'),
             ],
         }
-    
+
     async def scan(self, path: str) -> List[Vulnerability]:
         """Scan path for vulnerabilities"""
         vulnerabilities = []
         scan_path = Path(path)
-        
+
         if scan_path.is_file():
             vulnerabilities.extend(await self._scan_file(scan_path))
         elif scan_path.is_dir():
@@ -221,9 +221,9 @@ class VulnerabilityScanner:
                 if self._should_exclude(file_path):
                     continue
                 vulnerabilities.extend(await self._scan_file(file_path))
-        
+
         return vulnerabilities
-    
+
     def _should_exclude(self, file_path: Path) -> bool:
         """Check if file should be excluded"""
         file_str = str(file_path).replace('\\', '/')  # Normalize path separators
@@ -232,15 +232,15 @@ class VulnerabilityScanner:
             if re.search(pattern_regex, file_str):
                 return True
         return False
-    
+
     async def _scan_file(self, file_path: Path) -> List[Vulnerability]:
         """Scan a single file for vulnerabilities"""
         vulnerabilities = []
-        
+
         try:
             content = file_path.read_text(encoding='utf-8')
             lines = content.split('\n')
-            
+
             for vuln_type, patterns in self.patterns.items():
                 for pattern, description in patterns:
                     for line_num, line in enumerate(lines, 1):
@@ -253,13 +253,13 @@ class VulnerabilityScanner:
                                 description=description
                             )
                             vulnerabilities.append(vuln)
-        except Exception as e:
+        except Exception:
             # Skip files that can't be read
             pass
-        
+
         return vulnerabilities
-    
-    def _create_vulnerability(self, vuln_type: VulnerabilityType, 
+
+    def _create_vulnerability(self, vuln_type: VulnerabilityType,
                             file_path: str, line_number: int,
                             code_snippet: str, description: str) -> Vulnerability:
         """Create a vulnerability object"""
@@ -273,14 +273,14 @@ class VulnerabilityScanner:
             VulnerabilityType.PATH_TRAVERSAL: RiskLevel.HIGH,
             VulnerabilityType.BROKEN_ACCESS: RiskLevel.HIGH,
         }
-        
+
         risk_level = risk_map.get(vuln_type, RiskLevel.MEDIUM)
-        
+
         # Generate fix suggestion
         fix_suggestion = self._generate_fix_suggestion(vuln_type, code_snippet)
-        
+
         vuln_id = f"{vuln_type.value}_{hash(f'{file_path}:{line_number}')}"
-        
+
         return Vulnerability(
             id=vuln_id,
             type=vuln_type,
@@ -292,8 +292,8 @@ class VulnerabilityScanner:
             code_snippet=code_snippet,
             fix_suggestion=fix_suggestion
         )
-    
-    def _generate_fix_suggestion(self, vuln_type: VulnerabilityType, 
+
+    def _generate_fix_suggestion(self, vuln_type: VulnerabilityType,
                                  code_snippet: str) -> str:
         """Generate fix suggestion for vulnerability"""
         suggestions = {
@@ -325,17 +325,17 @@ class VulnerabilityScanner:
                 "Example: @login_required decorator"
             ),
         }
-        
+
         return suggestions.get(vuln_type, "Review and fix this security issue.")
 
 
 
 class DependencyAnalyzer:
     """Analyzes dependencies for known CVEs and security issues"""
-    
+
     def __init__(self):
         self.known_vulnerabilities = self._load_vulnerability_database()
-    
+
     def _load_vulnerability_database(self) -> Dict[str, List[Dict[str, Any]]]:
         """Load known vulnerability database (simplified for demo)"""
         # In production, this would load from a real CVE database
@@ -381,12 +381,12 @@ class DependencyAnalyzer:
                 }
             ],
         }
-    
+
     async def analyze(self, path: str) -> List[DependencyVulnerability]:
         """Analyze dependencies for vulnerabilities"""
         vulnerabilities = []
         scan_path = Path(path)
-        
+
         # Find dependency files
         dep_files = []
         if scan_path.is_file():
@@ -396,42 +396,42 @@ class DependencyAnalyzer:
             dep_files.extend(scan_path.glob('**/requirements.txt'))
             dep_files.extend(scan_path.glob('**/Pipfile'))
             dep_files.extend(scan_path.glob('**/package.json'))
-        
+
         for dep_file in dep_files:
             vulnerabilities.extend(await self._analyze_file(dep_file))
-        
+
         return vulnerabilities
-    
+
     async def _analyze_file(self, file_path: Path) -> List[DependencyVulnerability]:
         """Analyze a dependency file"""
         vulnerabilities = []
-        
+
         try:
             if file_path.name == 'requirements.txt':
                 vulnerabilities.extend(await self._analyze_requirements(file_path))
             elif file_path.name == 'package.json':
                 vulnerabilities.extend(await self._analyze_package_json(file_path))
-        except Exception as e:
+        except Exception:
             pass
-        
+
         return vulnerabilities
-    
+
     async def _analyze_requirements(self, file_path: Path) -> List[DependencyVulnerability]:
         """Analyze Python requirements.txt"""
         vulnerabilities = []
         content = file_path.read_text(encoding='utf-8')
-        
+
         for line in content.split('\n'):
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            
+
             # Parse package name and version
             match = re.match(r'([a-zA-Z0-9_-]+)([=<>!]+)?([\d.]+)?', line)
             if match:
                 package_name = match.group(1).lower()
                 version = match.group(3) if match.group(3) else 'unknown'
-                
+
                 # Check against vulnerability database
                 if package_name in self.known_vulnerabilities:
                     for vuln_data in self.known_vulnerabilities[package_name]:
@@ -448,21 +448,21 @@ class DependencyAnalyzer:
                                 references=[f"https://nvd.nist.gov/vuln/detail/{vuln_data['cve_id']}"]
                             )
                             vulnerabilities.append(vuln)
-        
+
         return vulnerabilities
-    
+
     async def _analyze_package_json(self, file_path: Path) -> List[DependencyVulnerability]:
         """Analyze Node.js package.json"""
         vulnerabilities = []
-        
+
         try:
             content = json.loads(file_path.read_text(encoding='utf-8'))
             dependencies = content.get('dependencies', {})
-            
+
             for package_name, version in dependencies.items():
                 # Clean version string
                 version = version.lstrip('^~')
-                
+
                 # Check against vulnerability database
                 if package_name in self.known_vulnerabilities:
                     for vuln_data in self.known_vulnerabilities[package_name]:
@@ -479,16 +479,16 @@ class DependencyAnalyzer:
                                 references=[f"https://nvd.nist.gov/vuln/detail/{vuln_data['cve_id']}"]
                             )
                             vulnerabilities.append(vuln)
-        except Exception as e:
+        except Exception:
             pass
-        
+
         return vulnerabilities
-    
+
     def _is_vulnerable(self, current_version: str, vulnerable_range: str) -> bool:
         """Check if current version is in vulnerable range"""
         if current_version == 'unknown':
             return True  # Assume vulnerable if version unknown
-        
+
         # Simple version comparison (simplified for demo)
         try:
             if vulnerable_range.startswith('<'):
@@ -499,47 +499,47 @@ class DependencyAnalyzer:
                 return self._compare_versions(current_version, threshold) <= 0
         except Exception:
             return False
-        
+
         return False
-    
+
     def _compare_versions(self, v1: str, v2: str) -> int:
         """Compare two version strings"""
         parts1 = [int(x) for x in v1.split('.')]
         parts2 = [int(x) for x in v2.split('.')]
-        
+
         # Pad to same length
         max_len = max(len(parts1), len(parts2))
         parts1.extend([0] * (max_len - len(parts1)))
         parts2.extend([0] * (max_len - len(parts2)))
-        
+
         for p1, p2 in zip(parts1, parts2):
             if p1 < p2:
                 return -1
             elif p1 > p2:
                 return 1
-        
+
         return 0
 
 
 
 class SecurityReportGenerator:
     """Generates security audit reports"""
-    
+
     def __init__(self):
         pass
-    
+
     async def generate(self, scan_path: str,
                       vulnerabilities: List[Vulnerability],
                       dependency_vulnerabilities: List[DependencyVulnerability]) -> SecurityReport:
         """Generate comprehensive security report"""
         timestamp = datetime.now().isoformat()
-        
+
         # Calculate summary statistics
         summary = self._calculate_summary(vulnerabilities, dependency_vulnerabilities)
-        
+
         # Generate recommendations
         recommendations = self._generate_recommendations(vulnerabilities, dependency_vulnerabilities)
-        
+
         return SecurityReport(
             timestamp=timestamp,
             scan_path=scan_path,
@@ -548,7 +548,7 @@ class SecurityReportGenerator:
             summary=summary,
             recommendations=recommendations
         )
-    
+
     def _calculate_summary(self, vulnerabilities: List[Vulnerability],
                           dependency_vulnerabilities: List[DependencyVulnerability]) -> Dict[str, int]:
         """Calculate summary statistics"""
@@ -562,31 +562,31 @@ class SecurityReportGenerator:
             'low': 0,
             'info': 0
         }
-        
+
         # Count by risk level
         for vuln in vulnerabilities:
             summary[vuln.risk_level.value] += 1
-        
+
         for dep_vuln in dependency_vulnerabilities:
             summary[dep_vuln.risk_level.value] += 1
-        
+
         return summary
-    
+
     def _generate_recommendations(self, vulnerabilities: List[Vulnerability],
                                  dependency_vulnerabilities: List[DependencyVulnerability]) -> List[str]:
         """Generate security recommendations"""
         recommendations = []
-        
+
         # Check for critical issues
         critical_count = sum(1 for v in vulnerabilities if v.risk_level == RiskLevel.CRITICAL)
         critical_count += sum(1 for d in dependency_vulnerabilities if d.risk_level == RiskLevel.CRITICAL)
-        
+
         if critical_count > 0:
             recommendations.append(
                 f"⚠️  URGENT: {critical_count} critical vulnerabilities found. "
                 "Address these immediately before deploying to production."
             )
-        
+
         # Check for injection vulnerabilities
         injection_vulns = [v for v in vulnerabilities if v.type == VulnerabilityType.INJECTION]
         if injection_vulns:
@@ -594,7 +594,7 @@ class SecurityReportGenerator:
                 f"🔒 Found {len(injection_vulns)} injection vulnerabilities. "
                 "Always use parameterized queries and input validation."
             )
-        
+
         # Check for hardcoded secrets
         secret_vulns = [v for v in vulnerabilities if v.type == VulnerabilityType.HARDCODED_SECRETS]
         if secret_vulns:
@@ -602,14 +602,14 @@ class SecurityReportGenerator:
                 f"🔑 Found {len(secret_vulns)} hardcoded secrets. "
                 "Move all secrets to environment variables or a secure vault."
             )
-        
+
         # Check for outdated dependencies
         if dependency_vulnerabilities:
             recommendations.append(
                 f"📦 {len(dependency_vulnerabilities)} vulnerable dependencies found. "
                 "Update to the latest secure versions."
             )
-        
+
         # General recommendations
         if not recommendations:
             recommendations.append("✅ No critical security issues found. Continue following security best practices.")
@@ -620,9 +620,9 @@ class SecurityReportGenerator:
             recommendations.append(
                 "🔍 Consider implementing automated security testing in your CI/CD pipeline."
             )
-        
+
         return recommendations
-    
+
     async def generate_markdown(self, report: SecurityReport) -> str:
         """Generate markdown format report"""
         md = []
@@ -633,13 +633,13 @@ class SecurityReportGenerator:
         md.append(f"- **Total Vulnerabilities:** {report.summary['total_vulnerabilities']}")
         md.append(f"- **Code Vulnerabilities:** {report.summary['code_vulnerabilities']}")
         md.append(f"- **Dependency Vulnerabilities:** {report.summary['dependency_vulnerabilities']}")
-        md.append(f"\n### By Risk Level\n")
+        md.append("\n### By Risk Level\n")
         md.append(f"- 🔴 **Critical:** {report.summary['critical']}")
         md.append(f"- 🟠 **High:** {report.summary['high']}")
         md.append(f"- 🟡 **Medium:** {report.summary['medium']}")
         md.append(f"- 🟢 **Low:** {report.summary['low']}")
         md.append(f"- ℹ️  **Info:** {report.summary['info']}")
-        
+
         # Code vulnerabilities
         if report.vulnerabilities:
             md.append("\n## Code Vulnerabilities\n")
@@ -650,11 +650,11 @@ class SecurityReportGenerator:
                 md.append(f"- **Location:** {vuln.file_path}:{vuln.line_number}")
                 md.append(f"- **Code:** `{vuln.code_snippet}`")
                 md.append(f"- **Fix:** {vuln.fix_suggestion}")
-        
+
         # Dependency vulnerabilities
         if report.dependency_vulnerabilities:
             md.append("\n## Dependency Vulnerabilities\n")
-            for dep_vuln in sorted(report.dependency_vulnerabilities, 
+            for dep_vuln in sorted(report.dependency_vulnerabilities,
                                   key=lambda d: d.risk_level.value):
                 md.append(f"\n### {dep_vuln.package_name} - {dep_vuln.cve_id}")
                 md.append(f"- **Risk Level:** {dep_vuln.risk_level.value.upper()}")
@@ -665,14 +665,14 @@ class SecurityReportGenerator:
                 md.append(f"- **Description:** {dep_vuln.description}")
                 if dep_vuln.references:
                     md.append(f"- **References:** {', '.join(dep_vuln.references)}")
-        
+
         # Recommendations
         md.append("\n## Recommendations\n")
         for rec in report.recommendations:
             md.append(f"- {rec}")
-        
+
         return '\n'.join(md)
-    
+
     async def generate_html(self, report: SecurityReport) -> str:
         """Generate HTML format report"""
         html = []
@@ -691,14 +691,14 @@ class SecurityReportGenerator:
         html.append("<h1>Security Audit Report</h1>")
         html.append(f"<p><strong>Generated:</strong> {report.timestamp}</p>")
         html.append(f"<p><strong>Scan Path:</strong> {report.scan_path}</p>")
-        
+
         html.append("<h2>Summary</h2>")
         html.append(f"<p>Total Vulnerabilities: {report.summary['total_vulnerabilities']}</p>")
         html.append(f"<p class='critical'>Critical: {report.summary['critical']}</p>")
         html.append(f"<p class='high'>High: {report.summary['high']}</p>")
         html.append(f"<p class='medium'>Medium: {report.summary['medium']}</p>")
         html.append(f"<p class='low'>Low: {report.summary['low']}</p>")
-        
+
         if report.vulnerabilities:
             html.append("<h2>Code Vulnerabilities</h2>")
             for vuln in report.vulnerabilities:
@@ -708,7 +708,7 @@ class SecurityReportGenerator:
                 html.append(f"<p><strong>Code:</strong> <code>{vuln.code_snippet}</code></p>")
                 html.append(f"<p><strong>Fix:</strong> {vuln.fix_suggestion}</p>")
                 html.append("</div>")
-        
+
         html.append("</body></html>")
         return '\n'.join(html)
 
@@ -716,39 +716,39 @@ class SecurityReportGenerator:
 
 class SecurityToolIntegration:
     """Integrates with external security tools like Bandit and Snyk"""
-    
+
     def __init__(self):
         self.tools_available = self._check_tools()
-    
+
     def _check_tools(self) -> Dict[str, bool]:
         """Check which security tools are available"""
         tools = {}
-        
+
         # Check for Bandit
         try:
-            result = subprocess.run(['bandit', '--version'], 
+            result = subprocess.run(['bandit', '--version'],
                                   capture_output=True, text=True, timeout=5)
             tools['bandit'] = result.returncode == 0
         except Exception:
             tools['bandit'] = False
-        
+
         # Check for Snyk
         try:
-            result = subprocess.run(['snyk', '--version'], 
+            result = subprocess.run(['snyk', '--version'],
                                   capture_output=True, text=True, timeout=5)
             tools['snyk'] = result.returncode == 0
         except Exception:
             tools['snyk'] = False
-        
+
         return tools
-    
+
     async def run_bandit(self, path: str) -> List[Vulnerability]:
         """Run Bandit security scanner for Python"""
         if not self.tools_available.get('bandit', False):
             return []
-        
+
         vulnerabilities = []
-        
+
         try:
             # Run Bandit with JSON output
             result = subprocess.run(
@@ -757,10 +757,10 @@ class SecurityToolIntegration:
                 text=True,
                 timeout=60
             )
-            
+
             if result.stdout:
                 data = json.loads(result.stdout)
-                
+
                 for issue in data.get('results', []):
                     # Map Bandit severity to our risk levels
                     severity_map = {
@@ -768,13 +768,13 @@ class SecurityToolIntegration:
                         'MEDIUM': RiskLevel.MEDIUM,
                         'LOW': RiskLevel.LOW
                     }
-                    
-                    risk_level = severity_map.get(issue.get('issue_severity', 'MEDIUM'), 
+
+                    risk_level = severity_map.get(issue.get('issue_severity', 'MEDIUM'),
                                                   RiskLevel.MEDIUM)
-                    
+
                     # Map Bandit issue types to our vulnerability types
                     vuln_type = self._map_bandit_issue_type(issue.get('test_id', ''))
-                    
+
                     vuln = Vulnerability(
                         id=f"bandit_{issue.get('test_id', '')}_{hash(issue.get('filename', ''))}",
                         type=vuln_type,
@@ -789,13 +789,13 @@ class SecurityToolIntegration:
                         references=[issue.get('more_info', '')]
                     )
                     vulnerabilities.append(vuln)
-        
-        except Exception as e:
+
+        except Exception:
             # Tool execution failed, return empty list
             pass
-        
+
         return vulnerabilities
-    
+
     def _map_bandit_issue_type(self, test_id: str) -> VulnerabilityType:
         """Map Bandit test ID to vulnerability type"""
         mapping = {
@@ -840,16 +840,16 @@ class SecurityToolIntegration:
             'B608': VulnerabilityType.INJECTION,  # hardcoded_sql_expressions
             'B609': VulnerabilityType.INJECTION,  # linux_commands_wildcard_injection
         }
-        
+
         return mapping.get(test_id, VulnerabilityType.SECURITY_MISCONFIG)
-    
+
     async def run_snyk(self, path: str) -> List[DependencyVulnerability]:
         """Run Snyk dependency scanner"""
         if not self.tools_available.get('snyk', False):
             return []
-        
+
         vulnerabilities = []
-        
+
         try:
             # Run Snyk with JSON output
             result = subprocess.run(
@@ -858,10 +858,10 @@ class SecurityToolIntegration:
                 text=True,
                 timeout=120
             )
-            
+
             if result.stdout:
                 data = json.loads(result.stdout)
-                
+
                 for vuln in data.get('vulnerabilities', []):
                     # Map Snyk severity to our risk levels
                     severity_map = {
@@ -870,10 +870,10 @@ class SecurityToolIntegration:
                         'medium': RiskLevel.MEDIUM,
                         'low': RiskLevel.LOW
                     }
-                    
-                    risk_level = severity_map.get(vuln.get('severity', 'medium').lower(), 
+
+                    risk_level = severity_map.get(vuln.get('severity', 'medium').lower(),
                                                   RiskLevel.MEDIUM)
-                    
+
                     dep_vuln = DependencyVulnerability(
                         package_name=vuln.get('packageName', ''),
                         current_version=vuln.get('version', ''),
@@ -886,18 +886,18 @@ class SecurityToolIntegration:
                         references=[vuln.get('url', '')]
                     )
                     vulnerabilities.append(dep_vuln)
-        
-        except Exception as e:
+
+        except Exception:
             # Tool execution failed, return empty list
             pass
-        
+
         return vulnerabilities
 
 
 
 class SecurityAuditor(FeatureBase):
     """Main security auditor feature class"""
-    
+
     def __init__(self, config: FeatureConfig):
         super().__init__(config)
         self.auditor_config = SecurityAuditorConfig.from_dict(config.config)
@@ -905,105 +905,105 @@ class SecurityAuditor(FeatureBase):
         self.dependency_analyzer = DependencyAnalyzer()
         self.report_generator = SecurityReportGenerator()
         self.tool_integration = SecurityToolIntegration()
-    
+
     @property
     def name(self) -> str:
         """Feature name"""
         return "security_auditor"
-    
+
     @property
     def description(self) -> str:
         """Feature description"""
         return "Proactive vulnerability scanning and security auditing"
-    
+
     async def _initialize(self) -> None:
         """Initialize the security auditor"""
         pass
-    
+
     async def _shutdown(self) -> None:
         """Shutdown the security auditor"""
         pass
-    
+
     async def scan(self, path: str, use_external_tools: bool = True) -> Dict[str, Any]:
         """
         Scan code for security vulnerabilities
-        
+
         Args:
             path: Path to scan (file or directory)
             use_external_tools: Whether to use external tools like Bandit/Snyk
-        
+
         Returns:
             Dictionary with scan results
         """
         # Run internal vulnerability scanner
         vulnerabilities = await self.scanner.scan(path)
-        
+
         # Run external tools if enabled
         if use_external_tools and 'bandit' in self.auditor_config.tools:
             bandit_vulns = await self.tool_integration.run_bandit(path)
             vulnerabilities.extend(bandit_vulns)
-        
+
         # Analyze dependencies
         dependency_vulnerabilities = await self.dependency_analyzer.analyze(path)
-        
+
         # Run Snyk if enabled
         if use_external_tools and 'snyk' in self.auditor_config.tools:
             snyk_vulns = await self.tool_integration.run_snyk(path)
             dependency_vulnerabilities.extend(snyk_vulns)
-        
+
         # Generate report
         report = await self.report_generator.generate(
             scan_path=path,
             vulnerabilities=vulnerabilities,
             dependency_vulnerabilities=dependency_vulnerabilities
         )
-        
+
         return {
             'success': True,
             'report': report.to_dict(),
             'summary': report.summary,
             'recommendations': report.recommendations
         }
-    
+
     async def analyze(self, path: str) -> Dict[str, Any]:
         """
         Analyze dependencies for security issues
-        
+
         Args:
             path: Path to analyze
-        
+
         Returns:
             Dictionary with analysis results
         """
         dependency_vulnerabilities = await self.dependency_analyzer.analyze(path)
-        
+
         return {
             'success': True,
             'vulnerabilities': [v.to_dict() for v in dependency_vulnerabilities],
             'count': len(dependency_vulnerabilities)
         }
-    
+
     async def report(self, path: str, format: str = 'markdown') -> Dict[str, Any]:
         """
         Generate security report
-        
+
         Args:
             path: Path to scan
             format: Report format ('markdown' or 'html')
-        
+
         Returns:
             Dictionary with report content
         """
         # Run full scan
         scan_result = await self.scan(path)
         report_data = scan_result['report']
-        
+
         # Reconstruct report object
         report = SecurityReport(
             timestamp=report_data['timestamp'],
             scan_path=report_data['scan_path'],
             vulnerabilities=[
-                Vulnerability(**{**v, 'type': VulnerabilityType(v['type']), 
+                Vulnerability(**{**v, 'type': VulnerabilityType(v['type']),
                                'risk_level': RiskLevel(v['risk_level'])})
                 for v in report_data['vulnerabilities']
             ],
@@ -1014,7 +1014,7 @@ class SecurityAuditor(FeatureBase):
             summary=report_data['summary'],
             recommendations=report_data['recommendations']
         )
-        
+
         # Generate formatted report
         if format == 'markdown':
             content = await self.report_generator.generate_markdown(report)
@@ -1025,20 +1025,20 @@ class SecurityAuditor(FeatureBase):
                 'success': False,
                 'error': f"Unsupported format: {format}"
             }
-        
+
         return {
             'success': True,
             'format': format,
             'content': content
         }
-    
+
     async def fix_suggestions(self, vulnerability_id: str) -> Dict[str, Any]:
         """
         Get detailed fix suggestions for a vulnerability
-        
+
         Args:
             vulnerability_id: ID of the vulnerability
-        
+
         Returns:
             Dictionary with fix suggestions
         """
@@ -1054,80 +1054,78 @@ class SecurityAuditor(FeatureBase):
             ]
         }
 
-    
+
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for security auditor"""
         import click
-        
+
         @click.group(name='security')
         def security_group():
             """Security auditing and vulnerability scanning"""
             pass
-        
+
         @security_group.command(name='scan')
         @click.argument('path', type=click.Path(exists=True))
-        @click.option('--no-external-tools', is_flag=True, 
+        @click.option('--no-external-tools', is_flag=True,
                      help='Disable external tools (Bandit, Snyk)')
-        @click.option('--format', type=click.Choice(['json', 'text']), 
+        @click.option('--format', type=click.Choice(['json', 'text']),
                      default='text', help='Output format')
         def scan_cmd(path: str, no_external_tools: bool, format: str):
             """Scan code for security vulnerabilities"""
-            import asyncio
-            
+
             async def run_scan():
                 result = await self.scan(path, use_external_tools=not no_external_tools)
-                
+
                 if format == 'json':
                     click.echo(json.dumps(result, indent=2))
                 else:
                     report = result['report']
-                    click.echo(f"\n🔒 Security Scan Results")
+                    click.echo("\n🔒 Security Scan Results")
                     click.echo(f"{'=' * 50}")
                     click.echo(f"Path: {report['scan_path']}")
                     click.echo(f"Timestamp: {report['timestamp']}")
-                    click.echo(f"\n📊 Summary:")
+                    click.echo("\n📊 Summary:")
                     click.echo(f"  Total Vulnerabilities: {report['summary']['total_vulnerabilities']}")
                     click.echo(f"  🔴 Critical: {report['summary']['critical']}")
                     click.echo(f"  🟠 High: {report['summary']['high']}")
                     click.echo(f"  🟡 Medium: {report['summary']['medium']}")
                     click.echo(f"  🟢 Low: {report['summary']['low']}")
-                    
+
                     if report['vulnerabilities']:
-                        click.echo(f"\n🐛 Code Vulnerabilities:")
+                        click.echo("\n🐛 Code Vulnerabilities:")
                         for vuln in report['vulnerabilities'][:5]:  # Show first 5
                             click.echo(f"  - [{vuln['risk_level'].upper()}] {vuln['title']}")
                             click.echo(f"    Location: {vuln['file_path']}:{vuln['line_number']}")
-                    
+
                     if report['dependency_vulnerabilities']:
-                        click.echo(f"\n📦 Dependency Vulnerabilities:")
+                        click.echo("\n📦 Dependency Vulnerabilities:")
                         for dep in report['dependency_vulnerabilities'][:5]:  # Show first 5
                             click.echo(f"  - [{dep['risk_level'].upper()}] {dep['package_name']} {dep['cve_id']}")
                             click.echo(f"    Current: {dep['current_version']}, Fixed: {dep['fixed_version']}")
-                    
-                    click.echo(f"\n💡 Recommendations:")
+
+                    click.echo("\n💡 Recommendations:")
                     for rec in report['recommendations']:
                         click.echo(f"  {rec}")
-            
+
             asyncio.run(run_scan())
-        
+
         @security_group.command(name='dependencies')
         @click.argument('path', type=click.Path(exists=True))
-        @click.option('--format', type=click.Choice(['json', 'text']), 
+        @click.option('--format', type=click.Choice(['json', 'text']),
                      default='text', help='Output format')
         def dependencies_cmd(path: str, format: str):
             """Analyze dependencies for vulnerabilities"""
-            import asyncio
-            
+
             async def run_analysis():
                 result = await self.analyze(path)
-                
+
                 if format == 'json':
                     click.echo(json.dumps(result, indent=2))
                 else:
-                    click.echo(f"\n📦 Dependency Analysis")
+                    click.echo("\n📦 Dependency Analysis")
                     click.echo(f"{'=' * 50}")
                     click.echo(f"Found {result['count']} vulnerable dependencies\n")
-                    
+
                     for vuln in result['vulnerabilities']:
                         click.echo(f"Package: {vuln['package_name']}")
                         click.echo(f"  Risk: {vuln['risk_level'].upper()}")
@@ -1135,21 +1133,20 @@ class SecurityAuditor(FeatureBase):
                         click.echo(f"  Fixed: {vuln['fixed_version']}")
                         click.echo(f"  CVE: {vuln['cve_id']}")
                         click.echo(f"  Description: {vuln['description']}\n")
-            
+
             asyncio.run(run_analysis())
-        
+
         @security_group.command(name='report')
         @click.argument('path', type=click.Path(exists=True))
-        @click.option('--format', type=click.Choice(['markdown', 'html']), 
+        @click.option('--format', type=click.Choice(['markdown', 'html']),
                      default='markdown', help='Report format')
         @click.option('--output', type=click.Path(), help='Output file path')
         def report_cmd(path: str, format: str, output: str):
             """Generate security audit report"""
-            import asyncio
-            
+
             async def run_report():
                 result = await self.report(path, format=format)
-                
+
                 if result['success']:
                     if output:
                         Path(output).write_text(result['content'])
@@ -1158,43 +1155,42 @@ class SecurityAuditor(FeatureBase):
                         click.echo(result['content'])
                 else:
                     click.echo(f"❌ Error: {result.get('error', 'Unknown error')}")
-            
+
             asyncio.run(run_report())
-        
+
         @security_group.command(name='audit')
         @click.argument('path', type=click.Path(exists=True))
         def audit_cmd(path: str):
             """Run full security audit"""
-            import asyncio
-            
+
             async def run_audit():
                 click.echo("🔍 Running full security audit...")
                 click.echo("This may take a few minutes...\n")
-                
+
                 result = await self.scan(path, use_external_tools=True)
                 report = result['report']
-                
-                click.echo(f"✅ Audit complete!")
-                click.echo(f"\n📊 Results:")
+
+                click.echo("✅ Audit complete!")
+                click.echo("\n📊 Results:")
                 click.echo(f"  Total Issues: {report['summary']['total_vulnerabilities']}")
                 click.echo(f"  Critical: {report['summary']['critical']}")
                 click.echo(f"  High: {report['summary']['high']}")
                 click.echo(f"  Medium: {report['summary']['medium']}")
                 click.echo(f"  Low: {report['summary']['low']}")
-                
+
                 if report['summary']['critical'] > 0:
                     click.echo(f"\n⚠️  WARNING: {report['summary']['critical']} critical vulnerabilities found!")
                     click.echo("Address these immediately before deploying to production.")
-            
+
             asyncio.run(run_audit())
-        
+
         return [security_group]
-    
+
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for security auditor"""
         # TUI components would be implemented here
         return []
-    
+
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for security auditor"""
         return [

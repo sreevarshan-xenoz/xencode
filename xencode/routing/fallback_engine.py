@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
@@ -57,7 +57,7 @@ class FallbackAttempt:
     error: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.now)
     result: Optional[Any] = None  # Store successful result
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'provider': self.provider,
@@ -83,7 +83,7 @@ class FallbackResult:
     final_status: ExecutionStatus
     request_id: str
     policy_name: str
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'success': self.success,
@@ -102,7 +102,7 @@ class FallbackResult:
 class FallbackEngine:
     """
     Smart fallback execution engine
-    
+
     Features:
     - Policy-based fallback chain execution
     - Retry budget management
@@ -110,7 +110,7 @@ class FallbackEngine:
     - Health-aware routing
     - Execution history tracking
     """
-    
+
     def __init__(
         self,
         policy_config: Optional[FallbackPolicyConfig] = None,
@@ -118,7 +118,7 @@ class FallbackEngine:
     ):
         """
         Initialize fallback engine
-        
+
         Args:
             policy_config: Fallback policy configuration
             health_monitor: Optional provider health monitor
@@ -128,11 +128,11 @@ class FallbackEngine:
         self.retry_manager = RetryBudgetManager()
         self.execution_history: List[FallbackResult] = []
         self.max_history_size = 1000
-    
+
     def get_policy(self, policy_name: str) -> Optional[FallbackPolicy]:
         """Get policy by name"""
         return self.policy_config.get_policy(policy_name)
-    
+
     def get_effective_fallback_chain(
         self,
         policy: FallbackPolicy,
@@ -140,11 +140,11 @@ class FallbackEngine:
     ) -> List[str]:
         """
         Get effective fallback chain considering health and exclusions
-        
+
         Args:
             policy: Fallback policy
             unhealthy_providers: Set of unhealthy provider names
-            
+
         Returns:
             Filtered fallback chain
         """
@@ -154,9 +154,9 @@ class FallbackEngine:
                 unhealthy_providers = set()
                 # Query health monitor for unhealthy providers
                 # (Integration with provider_health.py)
-        
+
         return policy.get_active_fallback_chain(unhealthy_providers)
-    
+
     async def execute_with_fallback(
         self,
         policy: FallbackPolicy,
@@ -166,25 +166,25 @@ class FallbackEngine:
     ) -> FallbackResult:
         """
         Execute function with fallback chain
-        
+
         Args:
             policy: Fallback policy to apply
             execute_fn: Async function to execute (takes provider name)
             request_id: Optional request identifier
             context: Optional execution context
-            
+
         Returns:
             FallbackResult with execution details
         """
         request_id = request_id or str(uuid.uuid4())
         start_time = time.time()
-        
+
         # Initialize retry budget
         self.retry_manager.initialize_budget(request_id, policy.retry_policy)
-        
+
         # Get effective fallback chain
         fallback_chain = self.get_effective_fallback_chain(policy)
-        
+
         if not fallback_chain:
             return FallbackResult(
                 success=False,
@@ -198,23 +198,23 @@ class FallbackEngine:
                 request_id=request_id,
                 policy_name=policy.name,
             )
-        
+
         attempts: List[FallbackAttempt] = []
         total_cost = 0.0
         successful_result = None
         successful_provider = None
-        
+
         for attempt_idx, provider in enumerate(fallback_chain):
             # Check retry budget
             if not self.retry_manager.can_retry(request_id):
                 console.print(f"[red]✗ Retry budget exhausted for {request_id}[/red]")
                 break
-            
+
             # Check cost cap
             if total_cost >= policy.cost_cap.max_per_request:
-                console.print(f"[yellow]⚠ Cost cap reached, stopping fallback[/yellow]")
+                console.print("[yellow]⚠ Cost cap reached, stopping fallback[/yellow]")
                 break
-            
+
             # Execute with this provider
             attempt_result = await self._execute_provider(
                 provider=provider,
@@ -223,26 +223,26 @@ class FallbackEngine:
                 request_id=request_id,
                 policy=policy,
             )
-            
+
             attempts.append(attempt_result)
             total_cost += attempt_result.cost
-            
+
             # Check if successful
             if attempt_result.status == ExecutionStatus.SUCCESS:
                 successful_result = attempt_result
                 successful_provider = provider
                 break
-            
+
             # Apply backoff before next attempt
             if attempt_idx < len(fallback_chain) - 1:
                 delay = self.retry_manager.get_retry_delay(request_id, attempt_idx)
                 if delay > 0:
                     await asyncio.sleep(delay)
-        
+
         # Calculate totals
         total_latency_ms = sum(a.latency_ms for a in attempts)
-        total_time_ms = (time.time() - start_time) * 1000
-        
+        (time.time() - start_time) * 1000
+
         # Determine final status
         if successful_result:
             final_status = ExecutionStatus.SUCCESS
@@ -250,7 +250,7 @@ class FallbackEngine:
             final_status = ExecutionStatus.BUDGET_EXHAUSTED
         else:
             final_status = ExecutionStatus.FAILED
-        
+
         # Create result
         result = FallbackResult(
             success=successful_result is not None,
@@ -264,15 +264,15 @@ class FallbackEngine:
             request_id=request_id,
             policy_name=policy.name,
         )
-        
+
         # Store in history
         self._store_result(result)
-        
+
         # Cleanup retry budget
         self.retry_manager.cleanup_budget(request_id)
-        
+
         return result
-    
+
     async def _execute_provider(
         self,
         provider: str,
@@ -328,15 +328,15 @@ class FallbackEngine:
             error=error,
             result=result,
         )
-    
+
     def _store_result(self, result: FallbackResult):
         """Store result in history"""
         self.execution_history.append(result)
-        
+
         # Trim history if too large
         if len(self.execution_history) > self.max_history_size:
             self.execution_history = self.execution_history[-self.max_history_size:]
-    
+
     def get_execution_history(
         self,
         request_id: Optional[str] = None,
@@ -347,14 +347,14 @@ class FallbackEngine:
             results = [r for r in self.execution_history if r.request_id == request_id]
         else:
             results = self.execution_history
-        
+
         return results[-limit:]
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get engine statistics"""
         total_executions = len(self.execution_history)
         successful = sum(1 for r in self.execution_history if r.success)
-        
+
         return {
             'total_executions': total_executions,
             'successful': successful,

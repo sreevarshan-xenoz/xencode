@@ -5,7 +5,6 @@ import argparse
 import os
 import sys
 
-
 REQUIRED_ENV_VARS = [
     "DATABASE_URL",
     "REDIS_URL",

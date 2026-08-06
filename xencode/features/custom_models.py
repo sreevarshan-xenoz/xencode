@@ -221,7 +221,7 @@ class CustomModelManager(FeatureBase):
         try:
             task_enum = TaskType(task_type)
         except ValueError:
-            raise FeatureError(f"Invalid task type: {task_type}")
+            raise FeatureError(f"Invalid task type: {task_type}")  from None
         
         # Analyze codebase first
         analysis = await self.analyze(codebase_path)
@@ -467,151 +467,114 @@ class CustomModelManager(FeatureBase):
         except Exception:
             pass
     
-    def get_cli_commands(self) -> List[Any]:
+    @staticmethod
+    def _run_async_cli_coro(coro):
+        """Run an async coroutine from a CLI command with error handling."""
+        try:
+            return asyncio.run(coro)
+        except Exception as e:
+            from rich.console import Console
+            Console().print(f"[red]❌ {e}[/red]")
+            return None
+
+    def get_cli_commands(self) -> List[Any]:  # noqa: C901 - click group definition with many subcommands
         """Get CLI commands for Custom Models"""
         import click
         from rich.console import Console
         from rich.table import Table
         from rich.panel import Panel
-        
+
         console = Console()
-        
+
         @click.group(name='models')
         def models_group():
             """Custom AI Models - Fine-tune models on your codebase"""
             pass
-        
+
         @models_group.group(name='custom')
         def custom_group():
             """Custom model management commands"""
             pass
-        
+
         @custom_group.command(name='analyze')
         @click.argument('codebase_path', type=click.Path(exists=True))
         def analyze_cmd(codebase_path):
-            """Analyze codebase to identify patterns
-            
-            Examples:
-                xencode models custom analyze ./my-project
-                xencode models custom analyze /path/to/codebase
-            """
+            """Analyze codebase to identify patterns"""
             console.print(f"[blue]🔍 Analyzing codebase: {codebase_path}[/blue]")
-            
+
             async def _analyze():
-                try:
-                    result = await self.analyze(codebase_path)
-                    
-                    console.print(f"\n[green]✅ Analysis complete![/green]")
-                    console.print(f"[cyan]Total patterns found: {result['total_patterns']}[/cyan]")
-                    
-                    # Display patterns table
-                    if result['patterns']:
-                        table = Table(title="Codebase Patterns")
-                        table.add_column("Pattern Type", style="cyan")
-                        table.add_column("Frequency", style="yellow")
-                        table.add_column("Confidence", style="green")
-                        table.add_column("Examples", style="white")
-                        
-                        for pattern in result['patterns'][:20]:  # Show top 20
-                            examples = ', '.join(pattern['examples'][:2])
-                            table.add_row(
-                                pattern['pattern_type'],
-                                str(pattern['frequency']),
-                                f"{pattern['confidence']:.0%}",
-                                examples
-                            )
-                        
-                        console.print(table)
-                    
-                except Exception as e:
-                    console.print(f"[red]❌ Analysis failed: {e}[/red]")
-            
-            asyncio.run(_analyze())
-        
+                result = await self.analyze(codebase_path)
+                console.print(f"\n[green]✅ Analysis complete![/green]")
+                console.print(f"[cyan]Total patterns found: {result['total_patterns']}[/cyan]")
+                if result['patterns']:
+                    table = Table(title="Codebase Patterns")
+                    table.add_column("Pattern Type", style="cyan")
+                    table.add_column("Frequency", style="yellow")
+                    table.add_column("Confidence", style="green")
+                    table.add_column("Examples", style="white")
+                    for pattern in result['patterns'][:20]:
+                        examples = ', '.join(pattern['examples'][:2])
+                        table.add_row(pattern['pattern_type'], str(pattern['frequency']),
+                                      f"{pattern['confidence']:.0%}", examples)
+                    console.print(table)
+
+            self._run_async_cli_coro(_analyze(), success_msg=None)
+
         @custom_group.command(name='train')
         @click.argument('model_name')
         @click.argument('codebase_path', type=click.Path(exists=True))
-        @click.option('--task-type', type=click.Choice(['code_completion', 'code_review', 'refactoring', 'documentation', 'bug_detection']),
-                     default='code_completion', help='Type of task for the model')
+        @click.option('--task-type', type=click.Choice(
+            ['code_completion', 'code_review', 'refactoring', 'documentation', 'bug_detection']),
+            default='code_completion', help='Type of task for the model')
         def train_cmd(model_name, codebase_path, task_type):
-            """Train a custom model on your codebase
-            
-            Examples:
-                xencode models custom train my-model ./my-project
-                xencode models custom train review-model ./src --task-type code_review
-            """
+            """Train a custom model on your codebase"""
             console.print(f"[blue]🎯 Training model: {model_name}[/blue]")
             console.print(f"[cyan]Codebase: {codebase_path}[/cyan]")
             console.print(f"[cyan]Task type: {task_type}[/cyan]")
-            
+
             async def _train():
-                try:
-                    with console.status("[bold blue]🤖 Training in progress..."):
-                        result = await self.train(model_name, codebase_path, task_type)
-                    
-                    console.print(f"\n[green]✅ Training complete![/green]")
-                    console.print(f"[cyan]Model: {result['model_name']}[/cyan]")
-                    console.print(f"[cyan]Version: {result['version']}[/cyan]")
-                    console.print(f"[cyan]Status: {result['status']}[/cyan]")
-                    console.print(f"[cyan]Accuracy: {result['accuracy']:.1%}[/cyan]")
-                    console.print(f"[cyan]Training samples: {result['training_samples']}[/cyan]")
-                    
-                    if result['accuracy'] >= 0.9:
-                        console.print("[bold green]🏆 Excellent accuracy achieved![/bold green]")
-                    elif result['accuracy'] >= 0.85:
-                        console.print("[yellow]✓ Good accuracy achieved[/yellow]")
-                    else:
-                        console.print("[yellow]⚠️  Consider retraining with more data[/yellow]")
-                    
-                except Exception as e:
-                    console.print(f"[red]❌ Training failed: {e}[/red]")
-            
-            asyncio.run(_train())
-        
+                with console.status("[bold blue]🤖 Training in progress..."):
+                    result = await self.train(model_name, codebase_path, task_type)
+                console.print(f"\n[green]✅ Training complete![/green]")
+                console.print(f"[cyan]Model: {result['model_name']}[/cyan]")
+                console.print(f"[cyan]Version: {result['version']}[/cyan]")
+                console.print(f"[cyan]Accuracy: {result['accuracy']:.1%}[/cyan]")
+                if result['accuracy'] >= 0.9:
+                    console.print("[bold green]🏆 Excellent accuracy![/bold green]")
+                elif result['accuracy'] >= 0.85:
+                    console.print("[yellow]✓ Good accuracy[/yellow]")
+                else:
+                    console.print("[yellow]⚠️  Consider retraining with more data[/yellow]")
+
+            self._run_async_cli_coro(_train())
+
         @custom_group.command(name='list')
         def list_cmd():
-            """List all custom models
-            
-            Examples:
-                xencode models custom list
-            """
+            """List all custom models"""
             console.print("[blue]📋 Listing custom models...[/blue]")
-            
+
             async def _list():
-                try:
-                    models = await self.list_models()
-                    
-                    if not models:
-                        console.print("[yellow]No custom models found[/yellow]")
-                        console.print("[dim]Create a model with: xencode models custom train <name> <path>[/dim]")
-                        return
-                    
-                    table = Table(title="Custom Models")
-                    table.add_column("Model Name", style="cyan")
-                    table.add_column("Current Version", style="yellow")
-                    table.add_column("Total Versions", style="green")
-                    table.add_column("Latest Status", style="white")
-                    table.add_column("Latest Accuracy", style="magenta")
-                    
-                    for model in models:
-                        versions = model['versions']
-                        latest = versions[-1] if versions else {}
-                        
-                        table.add_row(
-                            model['name'],
-                            model['current_version'],
-                            str(len(versions)),
-                            latest.get('status', 'unknown'),
-                            f"{latest.get('accuracy', 0):.1%}" if latest.get('accuracy') else 'N/A'
-                        )
-                    
-                    console.print(table)
-                    console.print(f"\n[green]Found {len(models)} custom models[/green]")
-                    
-                except Exception as e:
-                    console.print(f"[red]❌ Failed to list models: {e}[/red]")
-            
-            asyncio.run(_list())
+                models = await self.list_models()
+                if not models:
+                    console.print("[yellow]No custom models found[/yellow]")
+                    console.print("[dim]Create a model with: xencode models custom train <name> <path>[/dim]")
+                    return
+                table = Table(title="Custom Models")
+                table.add_column("Model Name", style="cyan")
+                table.add_column("Current Version", style="yellow")
+                table.add_column("Total Versions", style="green")
+                table.add_column("Latest Status", style="white")
+                table.add_column("Latest Accuracy", style="magenta")
+                for model in models:
+                    versions = model['versions']
+                    latest = versions[-1] if versions else {}
+                    table.add_row(model['name'], model['current_version'], str(len(versions)),
+                                  latest.get('status', 'unknown'),
+                                  f"{latest.get('accuracy', 0):.1%}" if latest.get('accuracy') else 'N/A')
+                console.print(table)
+                console.print(f"\n[green]Found {len(models)} custom models[/green]")
+
+            self._run_async_cli_coro(_list())
         
         @custom_group.command(name='performance')
         @click.argument('model_name')
@@ -1167,47 +1130,54 @@ class PerformanceMonitor:
             'recommendations': self._generate_recommendations(metrics)
         }
     
+    @staticmethod
+    def _score_speed(speed_ms: float) -> int:
+        """Score based on inference speed."""
+        if speed_ms < 100:
+            return 30
+        if speed_ms < 200:
+            return 20
+        if speed_ms < 500:
+            return 10
+        return 0
+
+    @staticmethod
+    def _score_accuracy(accuracy: float) -> int:
+        """Score based on accuracy."""
+        if accuracy >= 0.95:
+            return 40
+        if accuracy >= 0.90:
+            return 30
+        if accuracy >= 0.85:
+            return 20
+        if accuracy >= 0.80:
+            return 10
+        return 0
+
+    @staticmethod
+    def _score_memory(memory_mb: float) -> int:
+        """Score based on memory usage."""
+        if memory_mb < 500:
+            return 30
+        if memory_mb < 1000:
+            return 20
+        if memory_mb < 2000:
+            return 10
+        return 0
+
+    _GRADE_TABLE = [(90, 'A'), (80, 'B'), (70, 'C'), (60, 'D')]
+
     def _calculate_grade(self, metrics: PerformanceMetrics) -> str:
-        """Calculate performance grade"""
-        score = 0
-        
-        # Speed score (faster is better)
-        if metrics.speed_ms < 100:
-            score += 30
-        elif metrics.speed_ms < 200:
-            score += 20
-        elif metrics.speed_ms < 500:
-            score += 10
-        
-        # Accuracy score
-        if metrics.accuracy >= 0.95:
-            score += 40
-        elif metrics.accuracy >= 0.90:
-            score += 30
-        elif metrics.accuracy >= 0.85:
-            score += 20
-        elif metrics.accuracy >= 0.80:
-            score += 10
-        
-        # Memory score (lower is better)
-        if metrics.memory_mb < 500:
-            score += 30
-        elif metrics.memory_mb < 1000:
-            score += 20
-        elif metrics.memory_mb < 2000:
-            score += 10
-        
-        # Assign grade
-        if score >= 90:
-            return 'A'
-        elif score >= 80:
-            return 'B'
-        elif score >= 70:
-            return 'C'
-        elif score >= 60:
-            return 'D'
-        else:
-            return 'F'
+        """Calculate performance grade using score thresholds."""
+        score = (
+            self._score_speed(metrics.speed_ms)
+            + self._score_accuracy(metrics.accuracy)
+            + self._score_memory(metrics.memory_mb)
+        )
+        for threshold, grade in self._GRADE_TABLE:
+            if score >= threshold:
+                return grade
+        return 'F'
     
     def _generate_recommendations(self, metrics: PerformanceMetrics) -> List[str]:
         """Generate performance recommendations"""

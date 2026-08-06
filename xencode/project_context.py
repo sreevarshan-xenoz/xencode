@@ -8,7 +8,7 @@ Automatically detects project type and gathers relevant context.
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 class ProjectContextManager:
@@ -32,22 +32,19 @@ class ProjectContextManager:
 
     def _detect_type(self) -> str:
         """Detect project type from files"""
-        if (self.cwd / "package.json").exists():
-            return "javascript"
-        elif (self.cwd / "requirements.txt").exists() or (
-            self.cwd / "pyproject.toml"
-        ).exists():
-            return "python"
-        elif (self.cwd / "Cargo.toml").exists():
-            return "rust"
-        elif (self.cwd / "go.mod").exists():
-            return "go"
-        elif (self.cwd / "pom.xml").exists():
-            return "java"
-        elif (self.cwd / "Gemfile").exists():
-            return "ruby"
-        elif (self.cwd / "composer.json").exists():
-            return "php"
+        type_map = {
+            "package.json": "javascript",
+            "requirements.txt": "python",
+            "pyproject.toml": "python",
+            "Cargo.toml": "rust",
+            "go.mod": "go",
+            "pom.xml": "java",
+            "Gemfile": "ruby",
+            "composer.json": "php",
+        }
+        for filename, project_type in type_map.items():
+            if (self.cwd / filename).exists():
+                return project_type
         return "unknown"
 
     def _get_relevant_files(self) -> List[str]:

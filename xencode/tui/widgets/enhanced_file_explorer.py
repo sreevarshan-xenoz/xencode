@@ -4,20 +4,19 @@ Enhanced File Explorer for Xencode TUI
 Advanced file explorer with Git integration, file previews, and enhanced navigation.
 """
 
-from typing import Dict, List, Optional, Any
-import os
-import subprocess
-from pathlib import Path
-from datetime import datetime
 import mimetypes
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from git import InvalidGitRepositoryError, Repo
 from rich.text import Text
-from textual.widgets import Static, Tree, DirectoryTree, Button, Input, Label, DataTable
-from textual.containers import Container, Vertical, Horizontal, ScrollableContainer
+from textual.containers import Container, Horizontal, Vertical
+from textual.events import Click
 from textual.message import Message
 from textual.reactive import reactive
-from textual.events import Click
-from git import Repo, InvalidGitRepositoryError
-import asyncio
+from textual.widgets import Button, DirectoryTree, Input, Label, Static
 
 
 class GitStatus:
@@ -197,16 +196,16 @@ class EnhancedFileExplorer(Container):
         """Handle file selection in the tree"""
         file_path = event.path
         file_info = self._get_file_info(file_path)
-        
+
         # Update preview
         self.update_preview(file_path)
-        
+
         # Update file info
         self.update_file_info(file_path, file_info)
-        
+
         # Update Git status if applicable
         self.update_git_status_for_file(file_path)
-        
+
         # Post message
         self.post_message(self.FileSelected(file_path, file_info))
 
@@ -254,7 +253,7 @@ class EnhancedFileExplorer(Container):
 
         # Create breadcrumb text
         breadcrumb_items = []
-        for i, (name, path_str) in enumerate(parts):
+        for i, (name, _path_str) in enumerate(parts):
             if i > 0:
                 breadcrumb_items.append(Text(" / ", classes="breadcrumb-separator"))
             breadcrumb_items.append(

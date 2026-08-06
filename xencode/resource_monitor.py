@@ -304,7 +304,7 @@ class HardwareProfiler:
         try:
             # Check for SSD indicators (cross-platform)
             import platform
-            
+
             if platform.system() == "Linux":
                 # Linux-specific SSD detection
                 if os.path.exists('/sys/block'):
@@ -325,7 +325,7 @@ class HardwareProfiler:
                 try:
                     import subprocess
                     result = subprocess.run(
-                        ['powershell', '-Command', 
+                        ['powershell', '-Command',
                          'Get-PhysicalDisk | Select-Object MediaType'],
                         capture_output=True, text=True, timeout=2
                     )

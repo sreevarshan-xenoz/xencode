@@ -6,22 +6,17 @@ Intelligent model selection system that chooses the optimal AI models
 based on current hardware capabilities and system resources.
 """
 
-import asyncio
-import json
-import os
 import platform
 import subprocess
-import time
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-import psutil
+from typing import Dict, List, Optional
+
 import ollama
+import psutil
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -45,7 +40,7 @@ class HardwareTier(Enum):
 class ModelSize(Enum):
     """Model size categories"""
     SMALL = "small"      # < 2GB
-    MEDIUM = "medium"    # 2-8GB  
+    MEDIUM = "medium"    # 2-8GB
     LARGE = "large"      # 8-20GB
     XLARGE = "xlarge"    # >20GB
 
@@ -102,7 +97,7 @@ class HardwareAnalyzer:
         """Analyze current hardware and return specifications"""
         # CPU Information
         cpu_count = psutil.cpu_count(logical=False) or psutil.cpu_count()
-        
+
         # Get max CPU frequency if available
         cpu_freq_max = 0.0
         try:
@@ -172,8 +167,8 @@ class HardwareAnalyzer:
         self.specs = specs
         return specs
 
-    def _determine_hardware_tier(self, memory_gb: float, cpu_count: int, 
-                               cpu_freq: float, gpu_available: bool, 
+    def _determine_hardware_tier(self, memory_gb: float, cpu_count: int,
+                               cpu_freq: float, gpu_available: bool,
                                gpu_memory_gb: float) -> HardwareTier:
         """Determine hardware tier based on specifications"""
         # Calculate a composite score
@@ -209,7 +204,7 @@ class HardwareAnalyzer:
 
             # Check for common VM vendor strings
             try:
-                result = subprocess.run(['dmidecode', '-s', 'system-product-name'], 
+                result = subprocess.run(['dmidecode', '-s', 'system-product-name'],
                                       capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     output = result.stdout.lower()
@@ -266,7 +261,7 @@ class ModelDatabase:
                 size_category=ModelSize.SMALL,
                 quantization_support=["q4_0", "q4_1", "q5_0"]
             ),
-            
+
             # Medium models (2-8GB)
             ModelSpecs(
                 name="mistral:7b",
@@ -290,7 +285,7 @@ class ModelDatabase:
                 size_category=ModelSize.MEDIUM,
                 quantization_support=["q4_0", "q4_1", "q5_0", "q5_1", "q8_0"]
             ),
-            
+
             # Large models (8-20GB)
             ModelSpecs(
                 name="qwen2.5:14b",
@@ -303,7 +298,7 @@ class ModelDatabase:
                 size_category=ModelSize.LARGE,
                 quantization_support=["q4_0", "q4_1", "q5_0"]
             ),
-            
+
             # XLarge models (>20GB)
             ModelSpecs(
                 name="llama3.1:70b",
@@ -373,22 +368,22 @@ class HardwareAwareModelSelector:
         """Recommend optimal models for current hardware and task type"""
         hardware = await self.get_hardware_specs()
         available_models = await self.get_available_models()
-        
+
         # Get models appropriate for hardware tier
         tier_models = self.model_database.get_models_by_tier(hardware.tier)
-        
+
         # Filter to only available models
         available_tier_models = [m for m in tier_models if m.name in available_models]
-        
+
         recommendations = []
-        
+
         for model in available_tier_models:
             # Calculate confidence score based on multiple factors
             confidence = self._calculate_model_confidence(model, hardware, task_type)
-            
+
             if confidence > 0.1:  # Only include models with reasonable confidence
                 estimated_performance = self._estimate_performance(model, hardware)
-                
+
                 # Determine reason for recommendation
                 if model.size_category == ModelSize.SMALL and hardware.tier in [HardwareTier.LOW_END, HardwareTier.MID_RANGE]:
                     reason = "Small model suitable for limited hardware"
@@ -398,10 +393,10 @@ class HardwareAwareModelSelector:
                     reason = "High capability model for powerful hardware"
                 else:
                     reason = "Good fit for your hardware specifications"
-                
+
                 # Find alternatives of similar capability
                 alternatives = self._find_alternatives(model, available_tier_models, hardware)
-                
+
                 recommendation = ModelRecommendation(
                     model_name=model.name,
                     confidence_score=round(confidence, 3),
@@ -409,28 +404,28 @@ class HardwareAwareModelSelector:
                     reason=reason,
                     alternatives=alternatives[:3]  # Top 3 alternatives
                 )
-                
+
                 recommendations.append(recommendation)
-        
+
         # Sort by confidence score
         recommendations.sort(key=lambda x: x.confidence_score, reverse=True)
-        
+
         return recommendations
 
     def _calculate_model_confidence(self, model: ModelSpecs, hardware: HardwareSpecs, task_type: str) -> float:
         """Calculate confidence score for model on current hardware"""
         # Memory adequacy (0-1)
         memory_adequacy = min(1.0, hardware.available_memory_gb / model.required_memory_gb)
-        
+
         # Tier compatibility (0-1)
         tier_match = self._calculate_tier_match(model.size_category, hardware.tier)
-        
+
         # Task suitability (0-1)
         task_suitability = self._calculate_task_suitability(model, task_type)
-        
+
         # Accuracy preference (0-1) - normalize accuracy score
         accuracy_factor = model.accuracy_score
-        
+
         # Combine factors with weights
         confidence = (
             memory_adequacy * 0.4 +
@@ -438,7 +433,7 @@ class HardwareAwareModelSelector:
             task_suitability * 0.2 +
             accuracy_factor * 0.1
         )
-        
+
         return min(1.0, confidence)
 
     def _calculate_tier_match(self, model_size: ModelSize, hardware_tier: HardwareTier) -> float:
@@ -481,35 +476,35 @@ class HardwareAwareModelSelector:
             HardwareTier.HIGH_END: 0.8,   # Faster
             HardwareTier.SERVER: 0.6      # Fastest
         }
-        
+
         estimated_time = model.inference_time_ms * tier_multiplier[hardware.tier]
-        
+
         # Memory usage estimate
         memory_usage_gb = min(hardware.total_memory_gb, model.recommended_memory_gb)
-        
+
         return {
             "inference_time_ms": round(estimated_time, 2),
             "estimated_memory_usage_gb": round(memory_usage_gb, 2),
             "power_consumption_estimate": round(model.power_consumption, 2)
         }
 
-    def _find_alternatives(self, current_model: ModelSpecs, all_models: List[ModelSpecs], 
+    def _find_alternatives(self, current_model: ModelSpecs, all_models: List[ModelSpecs],
                           hardware: HardwareSpecs) -> List[str]:
         """Find alternative models with similar capabilities"""
         alternatives = []
-        
+
         for model in all_models:
             if model.name != current_model.name:
                 # Similar size category or adjacent categories
-                size_diff = abs(list(ModelSize).index(model.size_category) - 
+                size_diff = abs(list(ModelSize).index(model.size_category) -
                               list(ModelSize).index(current_model.size_category))
-                
+
                 # Similar accuracy range
                 accuracy_diff = abs(model.accuracy_score - current_model.accuracy_score)
-                
+
                 if size_diff <= 1 and accuracy_diff <= 0.1:
                     alternatives.append(model.name)
-        
+
         return alternatives
 
     async def get_top_recommendation(self, task_type: str = "general") -> Optional[ModelRecommendation]:
@@ -548,7 +543,7 @@ class HardwareAwareModelSelector:
         # Tier
         tier_colors = {
             HardwareTier.LOW_END: "🔴 Low-End",
-            HardwareTier.MID_RANGE: "🟡 Mid-Range", 
+            HardwareTier.MID_RANGE: "🟡 Mid-Range",
             HardwareTier.HIGH_END: "🟢 High-End",
             HardwareTier.SERVER: "🔵 Server"
         }
@@ -563,12 +558,12 @@ class HardwareAwareModelSelector:
             return
 
         console.print(f"\n[bold green]🎯 Top Model Recommendations ({len(recommendations)} available):[/bold green]")
-        
+
         for i, rec in enumerate(recommendations[:5], 1):  # Show top 5
             console.print(f"\n{i}. [bold]{rec.model_name}[/bold] (Confidence: {rec.confidence_score:.2f})")
             console.print(f"   Reason: {rec.reason}")
             console.print(f"   Est. Performance: {rec.estimated_performance['inference_time_ms']}ms response")
-            
+
             if rec.alternatives:
                 console.print(f"   💡 Alternatives: {', '.join(rec.alternatives[:3])}")
 

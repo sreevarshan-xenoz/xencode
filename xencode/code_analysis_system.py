@@ -452,10 +452,10 @@ class CodeAnalyzer:
     def get_diff_from_ref(self, ref: str) -> str:
         """
         Get diff against a specific reference
-        
+
         Args:
             ref: Git reference (branch, commit, tag)
-            
+
         Returns:
             Raw diff string or empty string if no changes
         """
@@ -482,7 +482,7 @@ class CodeAnalyzer:
             if not diff_content:
                 # Try unstaged changes
                 diff_content = self.get_raw_git_diff(staged=False)
-                
+
                 if not diff_content:
                     return "No changes detected for commit message generation"
 
@@ -597,14 +597,14 @@ class CodeAnalyzer:
     def parse_diff_changes(self, diff_content: str) -> Dict[str, set]:
         """
         Parse diff to find changed lines per file
-        
+
         Returns:
             Dictionary mapping file paths to sets of changed line numbers (1-based)
         """
         changes = {}
         current_file = None
         current_line = 0
-        
+
         for line in diff_content.split('\n'):
             if line.startswith('diff --git'):
                 parts = line.split()
@@ -616,52 +616,52 @@ class CodeAnalyzer:
                         changes[current_file] = set()
                     else:
                         current_file = None
-            
+
             elif line.startswith('@@'):
                 # @@ -1,5 +10,5 @@
                 # Parse +start,len
                 match = re.search(r'\+(\d+)(?:,(\d+))?', line)
                 if match:
                     current_line = int(match.group(1))
-            
+
             elif line.startswith('+') and not line.startswith('+++'):
                 if current_file:
                     changes[current_file].add(current_line)
                 current_line += 1
-            
+
             elif line.startswith(' ') and current_file:
                 current_line += 1
-                
+
         return changes
 
     def analyze_diff_context(self, diff_content: str) -> List[CodeIssue]:
         """
         Analyze changes in a git diff, filtering issues to changed lines
-        
+
         Args:
             diff_content: Raw git diff output
-            
+
         Returns:
             List of CodeIssues found in the changed lines
         """
         changed_lines = self.parse_diff_changes(diff_content)
         all_issues = []
-        
+
         for file_path, lines in changed_lines.items():
              path_obj = Path(file_path)
              if not path_obj.exists():
                  continue
-                 
+
              # Run full analysis on file
              file_issues = self.analyze_file(path_obj)
-             
+
              # Filter based on changed lines
              relevant_issues = [
-                 issue for issue in file_issues 
+                 issue for issue in file_issues
                  if issue.line_number in lines
              ]
              all_issues.extend(relevant_issues)
-             
+
         return all_issues
 
     def _generate_commit_message_from_analysis(self, analysis: Dict[str, Any]) -> str:
@@ -752,13 +752,13 @@ class CodeAnalyzer:
         Suggest branch names based on diff content using heuristics or LLM.
         """
         suggestions = []
-        
+
         # 1. Analyze diff for scope and type
         analysis = self.analyze_git_diff(diff_content)
         prefix = "feature"
         if "fix" in self._generate_commit_message_from_analysis(analysis).lower():
             prefix = "fix"
-            
+
         # 2. Heuristic fallback suggestions
         # File based
         if analysis['files_changed']:
@@ -766,23 +766,23 @@ class CodeAnalyzer:
             # Let's just take the first one for now
             main_file = Path(analysis['files_changed'][0]).stem
             suggestions.append(f"{prefix}/{main_file}-update")
-            
+
         # Content based
         if analysis['change_types']:
-            changes = "-".join(sorted(list(analysis['change_types']))[:2])
+            changes = "-".join(sorted(analysis['change_types'])[:2])
             suggestions.append(f"{prefix}/{changes}-changes")
-            
+
         suggestions.append(f"{prefix}/update-{int(time.time())}")
 
         # 3. LLM Enhancement (if not just using heuristics)
         # Note: In a real integration, we would call the LLM here.
         # Since CodeAnalyzer is somewhat isolated, we might need to rely on the caller
         # to pass the LLM or handle the LLM part.
-        # However, for this implementation, we will perform a 'Smart Enhancement' 
+        # However, for this implementation, we will perform a 'Smart Enhancement'
         # if the diff is descriptive enough.
-        
+
         # In the enhanced_cli_system, we will add the LLM call.
-        
+
         return suggestions
 
     def analyze_code_quality(self, path: str) -> str:
@@ -796,7 +796,7 @@ class CodeAnalyzer:
             results = {str(path_obj): issues} if issues else {}
         else:
             results = self.analyze_directory(path_obj, recursive=True)
-            
+
         return self.generate_report(results)
 
 

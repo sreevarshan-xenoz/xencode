@@ -6,13 +6,13 @@ Provides modular feature implementations for AI code review, terminal assistant,
 project analyzer, learning mode, and more.
 """
 
-from .base import FeatureBase, FeatureConfig, FeatureStatus, FeatureError
+from .base import FeatureBase, FeatureConfig, FeatureError, FeatureStatus
+from .core.config import FeatureConfigManager, FeatureSystemConfig
 from .manager import FeatureManager
-from .core.config import FeatureSystemConfig, FeatureConfigManager
 
 __all__ = [
     "FeatureBase",
-    "FeatureConfig", 
+    "FeatureConfig",
     "FeatureStatus",
     "FeatureError",
     "FeatureManager",

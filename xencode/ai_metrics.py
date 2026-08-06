@@ -7,8 +7,9 @@ RLHF tuning progress, and Ollama optimization performance.
 """
 
 import time
-from typing import Dict, Any, Optional
-from prometheus_client import Counter, Histogram, Gauge, Info
+from typing import Any, Dict
+
+from prometheus_client import Counter, Gauge, Histogram
 from rich.console import Console
 
 console = Console()
@@ -97,59 +98,59 @@ smape_improvement = Gauge(
 
 class AIMetricsCollector:
     """Collects and reports AI/ML performance metrics"""
-    
+
     def __init__(self):
         self.start_time = time.time()
         self.total_requests = 0
         self.sub_50ms_requests = 0
-        
-    def record_ensemble_request(self, method: str, model_count: int, 
+
+    def record_ensemble_request(self, method: str, model_count: int,
                               inference_time_ms: float, consensus_score: float,
                               success: bool, cache_hit: bool = False):
         """Record ensemble reasoning metrics"""
         status = "success" if success else "error"
-        
+
         # Record request
         ensemble_requests_total.labels(
-            method=method, 
-            model_count=str(model_count), 
+            method=method,
+            model_count=str(model_count),
             status=status
         ).inc()
-        
+
         if success:
             # Record inference time
             ensemble_inference_time.labels(
                 method=method,
                 model_count=str(model_count)
             ).observe(inference_time_ms / 1000.0)
-            
+
             # Record consensus score
             ensemble_consensus_score.labels(method=method).observe(consensus_score)
-            
+
             # Track sub-50ms achievement
             self.total_requests += 1
             if inference_time_ms < 50:
                 self.sub_50ms_requests += 1
-            
+
             # Update achievement rate
             achievement_rate = (self.sub_50ms_requests / self.total_requests) * 100
             sub_50ms_achievement_rate.set(achievement_rate)
-        
+
         # Record cache hits
         if cache_hit:
             ensemble_cache_hits.labels(cache_type="hit").inc()
         else:
             ensemble_cache_hits.labels(cache_type="miss").inc()
-    
+
     def record_rlhf_training(self, loss: float, perplexity: float):
         """Record RLHF training metrics"""
         rlhf_training_loss.set(loss)
         rlhf_perplexity.set(perplexity)
-    
+
     def record_rlhf_quality(self, task_type: str, quality_score: float):
         """Record RLHF code quality metrics"""
         rlhf_code_quality_score.labels(task_type=task_type).observe(quality_score)
-    
+
     def record_ollama_pull(self, model: str, quantization: str, success: bool):
         """Record Ollama model pull metrics"""
         status = "success" if success else "error"
@@ -158,25 +159,25 @@ class AIMetricsCollector:
             quantization=quantization,
             status=status
         ).inc()
-    
-    def record_ollama_benchmark(self, model: str, benchmark_time_ms: float, 
+
+    def record_ollama_benchmark(self, model: str, benchmark_time_ms: float,
                                memory_usage_mb: float):
         """Record Ollama benchmark metrics"""
         ollama_benchmark_time.labels(model=model).observe(benchmark_time_ms / 1000.0)
         ollama_memory_usage.labels(model=model).set(memory_usage_mb)
-    
+
     def update_system_performance(self, score: float):
         """Update overall system performance score"""
         system_performance_score.set(score)
-    
+
     def update_smape_improvement(self, improvement_percent: float):
         """Update SMAPE improvement metric"""
         smape_improvement.set(improvement_percent)
-    
+
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get comprehensive performance summary"""
         uptime_hours = (time.time() - self.start_time) / 3600
-        
+
         return {
             "uptime_hours": uptime_hours,
             "total_requests": self.total_requests,
@@ -185,18 +186,18 @@ class AIMetricsCollector:
             "current_performance_score": system_performance_score._value._value if hasattr(system_performance_score._value, '_value') else 0,
             "smape_improvement": smape_improvement._value._value if hasattr(smape_improvement._value, '_value') else 0
         }
-    
+
     def display_metrics_summary(self):
         """Display metrics summary in console"""
         summary = self.get_performance_summary()
-        
+
         console.print("\n[bold blue]📊 AI/ML Performance Metrics[/bold blue]")
         console.print(f"• Uptime: {summary['uptime_hours']:.1f} hours")
         console.print(f"• Total Requests: {summary['total_requests']}")
         console.print(f"• Sub-50ms Achievement: {summary['sub_50ms_rate']:.1f}%")
         console.print(f"• System Performance: {summary['current_performance_score']:.1f}/100")
         console.print(f"• SMAPE Improvement: {summary['smape_improvement']:.1f}%")
-        
+
         # Status indicators
         if summary['sub_50ms_rate'] >= 90:
             console.print("🎯 [green]LEVIATHAN STATUS: DOMINATING[/green]")
@@ -240,24 +241,24 @@ def record_sub_50ms_achievement():
 if __name__ == "__main__":
     # Demo metrics collection
     console.print("[bold green]🤖 AI/ML Metrics Demo[/bold green]\n")
-    
+
     collector = get_metrics_collector()
-    
+
     # Simulate some metrics
     collector.record_ensemble_request("vote", 2, 35.5, 0.87, True, False)
     collector.record_ensemble_request("weighted", 3, 42.1, 0.92, True, True)
     collector.record_ensemble_request("consensus", 2, 28.3, 0.95, True, False)
-    
+
     collector.record_rlhf_training(1.25, 3.48)
     collector.record_rlhf_quality("refactor", 0.85)
-    
+
     collector.record_ollama_pull("llama3.1:8b", "q4_0", True)
     collector.record_ollama_benchmark("llama3.1:8b", 38.2, 4096.5)
-    
+
     collector.update_system_performance(94.3)
     collector.update_smape_improvement(10.2)
-    
+
     # Display summary
     collector.display_metrics_summary()
-    
+
     console.print("\n[bold blue]🐉 The leviathan's metrics are being tracked![/bold blue]")

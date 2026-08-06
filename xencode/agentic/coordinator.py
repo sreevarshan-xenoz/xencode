@@ -1,8 +1,8 @@
 """Multi-agent coordination system."""
 
-from typing import Dict, List, Optional, Any
-from enum import Enum
 import time
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from .manager import LangChainManager
 
@@ -18,7 +18,7 @@ class AgentType(Enum):
 
 class Agent:
     """Individual agent with specialized capabilities."""
-    
+
     def __init__(self, agent_type: AgentType, model_name: str, base_url: str = "http://localhost:11434", use_rag: bool = False):
         self.agent_type = agent_type
         self.manager = LangChainManager(
@@ -28,13 +28,13 @@ class Agent:
             db_path=f"agent_{agent_type.value}_memory.db",
             use_rag=use_rag
         )
-    
+
     def execute(self, task: str) -> Dict[str, Any]:
         """Execute a task and return result."""
         start_time = time.time()
-        
+
         result = self.manager.run_agent(task)
-        
+
         return {
             "agent_type": self.agent_type.value,
             "task": task,
@@ -99,79 +99,79 @@ class AgentCoordinator:
             base_url=self.base_url,
             use_rag=use_rag
         )
-    
+
     def classify_task(self, task: str) -> AgentType:
         """Classify task to determine which agent should handle it."""
         task_lower = task.lower()
-        
+
         # Code-related keywords
-        code_keywords = ["code", "function", "class", "debug", "program", "script", 
+        code_keywords = ["code", "function", "class", "debug", "program", "script",
                         "python", "javascript", "refactor", "algorithm"]
         if any(keyword in task_lower for keyword in code_keywords):
             return AgentType.CODE
-        
+
         # Research keywords
         research_keywords = ["search", "find", "research", "look up", "information",
                             "web", "google", "learn about"]
         if any(keyword in task_lower for keyword in research_keywords):
             return AgentType.RESEARCH
-        
+
         # Execution keywords
         execution_keywords = ["run", "execute", "command", "terminal", "shell",
                              "file", "create", "delete", "write"]
         if any(keyword in task_lower for keyword in execution_keywords):
             return AgentType.EXECUTION
-        
+
         return AgentType.GENERAL
-    
+
     def delegate_task(self, task: str, agent_type: Optional[AgentType] = None) -> Dict[str, Any]:
         """Delegate a task to the appropriate agent."""
         if agent_type is None:
             agent_type = self.classify_task(task)
-        
+
         agent = self.agents.get(agent_type)
         if not agent:
             # Fallback to general agent
             agent = self.agents[AgentType.GENERAL]
-        
+
         result = agent.execute(task)
         result["selected_agent"] = agent_type.value
-        
+
         return result
-    
+
     def multi_agent_task(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Execute multiple tasks with different agents."""
         results = []
-        
+
         for task_spec in tasks:
             task = task_spec.get("task", "")
             agent_type_str = task_spec.get("agent_type")
-            
+
             agent_type = None
             if agent_type_str:
                 try:
                     agent_type = AgentType(agent_type_str)
                 except ValueError:
                     pass
-            
+
             result = self.delegate_task(task, agent_type)
             results.append(result)
-        
+
         return results
-    
+
     def collaborative_task(self, task: str, subtasks: List[str]) -> Dict[str, Any]:
         """Break down a complex task into subtasks and coordinate agents."""
         print(f"Main task: {task}")
         print(f"Breaking into {len(subtasks)} subtasks...")
-        
+
         subtask_results = []
-        
+
         for i, subtask in enumerate(subtasks, 1):
             print(f"\nSubtask {i}/{len(subtasks)}: {subtask}")
             result = self.delegate_task(subtask)
             subtask_results.append(result)
             print(f"Completed by {result['selected_agent']} agent")
-        
+
         # Aggregate results
         final_result = {
             "main_task": task,
@@ -179,9 +179,9 @@ class AgentCoordinator:
             "subtask_results": subtask_results,
             "summary": self._generate_summary(subtask_results)
         }
-        
+
         return final_result
-    
+
     def _generate_summary(self, subtask_results: List[Dict[str, Any]]) -> str:
         """Generate a summary of subtask results."""
         summary_parts = []
@@ -269,7 +269,7 @@ class AgentCoordinator:
 
         # Join all results with agent labels
         synthesis_parts = [f"Original Task: {original_task}", "Results from participating agents:"]
-        for i, result in enumerate(results):
+        for _i, result in enumerate(results):
             agent_type = result.get('selected_agent', 'unknown')
             result_text = result.get('result', 'No result returned')
             synthesis_parts.append(f"\n{agent_type.upper()} AGENT:\n{result_text}")

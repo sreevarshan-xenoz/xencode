@@ -32,7 +32,7 @@ except ImportError:
     ConfigurationManager = XencodeConfig = None
 
 try:
-    from .advanced_error_handler import ErrorHandler, ErrorCategory
+    from .advanced_error_handler import ErrorCategory, ErrorHandler
 except ImportError:
     ErrorHandler = ErrorCategory = None
 
@@ -44,8 +44,14 @@ except ImportError:
 # AI/ML Phase 6 systems - with optional imports
 try:
     from .ai_ensembles import (
-        EnsembleReasoner, QueryRequest, QueryResponse, ModelResponse,
-        EnsembleMethod, ModelTier, TokenVoter, create_ensemble_reasoner
+        EnsembleMethod,
+        EnsembleReasoner,
+        ModelResponse,
+        ModelTier,
+        QueryRequest,
+        QueryResponse,
+        TokenVoter,
+        create_ensemble_reasoner,
     )
 except ImportError:
     EnsembleReasoner = QueryRequest = QueryResponse = ModelResponse = None
@@ -53,8 +59,12 @@ except ImportError:
 
 try:
     from .ollama_optimizer import (
-        OllamaOptimizer, ModelInfo, BenchmarkResult, QuantizationLevel,
-        ModelStatus, create_ollama_optimizer
+        BenchmarkResult,
+        ModelInfo,
+        ModelStatus,
+        OllamaOptimizer,
+        QuantizationLevel,
+        create_ollama_optimizer,
     )
 except ImportError:
     OllamaOptimizer = ModelInfo = BenchmarkResult = QuantizationLevel = None
@@ -68,8 +78,12 @@ except ImportError:
 
 try:
     from .rlhf_tuner import (
-        RLHFTuner, RLHFConfig, CodePair, TrainingMetrics,
-        SyntheticDataGenerator, create_rlhf_tuner
+        CodePair,
+        RLHFConfig,
+        RLHFTuner,
+        SyntheticDataGenerator,
+        TrainingMetrics,
+        create_rlhf_tuner,
     )
 except ImportError:
     RLHFTuner = RLHFConfig = CodePair = TrainingMetrics = None
@@ -78,8 +92,12 @@ except ImportError:
 # Enhancement systems (Phase 3+) - with optional imports
 try:
     from .user_feedback_system import (
-        UserFeedbackManager, FeedbackType, UserJourneyEvent,
-        get_feedback_manager, collect_user_feedback, track_user_event
+        FeedbackType,
+        UserFeedbackManager,
+        UserJourneyEvent,
+        collect_user_feedback,
+        get_feedback_manager,
+        track_user_event,
     )
 except ImportError:
     UserFeedbackManager = FeedbackType = UserJourneyEvent = None
@@ -87,15 +105,21 @@ except ImportError:
 
 try:
     from .technical_debt_manager import (
-        TechnicalDebtManager, DebtType, DebtSeverity, get_debt_manager
+        DebtSeverity,
+        DebtType,
+        TechnicalDebtManager,
+        get_debt_manager,
     )
 except ImportError:
     TechnicalDebtManager = DebtType = DebtSeverity = get_debt_manager = None
 
 try:
     from .ai_ethics_framework import (
-        EthicsFramework, BiasType, EthicsViolationType,
-        get_ethics_framework, analyze_ai_interaction
+        BiasType,
+        EthicsFramework,
+        EthicsViolationType,
+        analyze_ai_interaction,
+        get_ethics_framework,
     )
 except ImportError:
     EthicsFramework = BiasType = EthicsViolationType = None
@@ -103,9 +127,13 @@ except ImportError:
 
 try:
     from .enhancement_integration import (
-        EnhancementSystemsIntegration, get_enhancement_integration,
-        track_model_selection, track_query_response, collect_response_feedback,
-        report_system_error, get_system_insights
+        EnhancementSystemsIntegration,
+        collect_response_feedback,
+        get_enhancement_integration,
+        get_system_insights,
+        report_system_error,
+        track_model_selection,
+        track_query_response,
     )
 except ImportError:
     EnhancementSystemsIntegration = get_enhancement_integration = None
@@ -115,8 +143,12 @@ except ImportError:
 # Warp Terminal (Phase 3.5+) - with optional imports
 try:
     from .warp_terminal import (
-        WarpTerminal, CommandBlock, StreamingOutputParser, 
-        LazyCommandBlock, GPUAcceleratedRenderer, example_ai_suggester
+        CommandBlock,
+        GPUAcceleratedRenderer,
+        LazyCommandBlock,
+        StreamingOutputParser,
+        WarpTerminal,
+        example_ai_suggester,
     )
 except ImportError:
     WarpTerminal = CommandBlock = StreamingOutputParser = None
@@ -124,31 +156,37 @@ except ImportError:
 
 try:
     from .enhanced_command_palette import (
-        EnhancedCommandPalette, WarpTerminalWithPalette, 
-        CommandSuggestion, FuzzyMatcher
+        CommandSuggestion,
+        EnhancedCommandPalette,
+        FuzzyMatcher,
+        WarpTerminalWithPalette,
     )
 except ImportError:
     EnhancedCommandPalette = WarpTerminalWithPalette = None
     CommandSuggestion = FuzzyMatcher = None
 
 try:
-    from .warp_ui_components import (
-        OutputRenderer, WarpLayoutManager
-    )
+    from .warp_ui_components import OutputRenderer, WarpLayoutManager
 except ImportError:
     OutputRenderer = WarpLayoutManager = None
 
 try:
     from .warp_testing_harness import (
-        CommandTestingHarness, TestResult, run_comprehensive_test
+        CommandTestingHarness,
+        TestResult,
+        run_comprehensive_test,
     )
 except ImportError:
     CommandTestingHarness = TestResult = run_comprehensive_test = None
 
 try:
     from .warp_ai_integration import (
-        WarpAIIntegration, ProjectAnalyzer, AdvancedAISuggester,
-        ProjectContext, CommandSuggestionContext, get_warp_ai_integration
+        AdvancedAISuggester,
+        CommandSuggestionContext,
+        ProjectAnalyzer,
+        ProjectContext,
+        WarpAIIntegration,
+        get_warp_ai_integration,
     )
 except ImportError:
     WarpAIIntegration = ProjectAnalyzer = AdvancedAISuggester = None
@@ -157,8 +195,13 @@ except ImportError:
 # Feature system
 try:
     from .features import (
-        FeatureBase, FeatureConfig, FeatureStatus, FeatureError,
-        FeatureManager, FeatureSystemConfig, FeatureConfigManager
+        FeatureBase,
+        FeatureConfig,
+        FeatureConfigManager,
+        FeatureError,
+        FeatureManager,
+        FeatureStatus,
+        FeatureSystemConfig,
     )
 except ImportError:
     FeatureBase = FeatureConfig = FeatureStatus = FeatureError = None
@@ -167,14 +210,14 @@ except ImportError:
 __all__ = [
     # Core systems
     "ContextCacheManager", "ModelStabilityManager", "SmartContextManager",
-    
+
     # Phase 2 systems
     "HardwareDetector", "ModelRecommendationEngine",
     "HybridCacheManager", "get_cache_manager",
     "ConfigurationManager", "XencodeConfig",
     "ErrorHandler", "ErrorCategory",
     "Phase2Coordinator",
-    
+
     # AI/ML Phase 6 systems
     "EnsembleReasoner", "QueryRequest", "QueryResponse", "ModelResponse",
     "EnsembleMethod", "ModelTier", "TokenVoter", "create_ensemble_reasoner",
@@ -183,7 +226,7 @@ __all__ = [
     "OllamaFallbackManager", "ensure_ollama",
     "RLHFTuner", "RLHFConfig", "CodePair", "TrainingMetrics",
     "SyntheticDataGenerator", "create_rlhf_tuner",
-    
+
     # Enhancement systems
     "UserFeedbackManager", "FeedbackType", "UserJourneyEvent",
     "get_feedback_manager", "collect_user_feedback", "track_user_event",
@@ -193,7 +236,7 @@ __all__ = [
     "EnhancementSystemsIntegration", "get_enhancement_integration",
     "track_model_selection", "track_query_response", "collect_response_feedback",
     "report_system_error", "get_system_insights",
-    
+
     # Warp Terminal systems
     "WarpTerminal", "CommandBlock", "StreamingOutputParser",
     "LazyCommandBlock", "GPUAcceleratedRenderer", "example_ai_suggester",
@@ -203,7 +246,7 @@ __all__ = [
     "CommandTestingHarness", "TestResult", "run_comprehensive_test",
     "WarpAIIntegration", "ProjectAnalyzer", "AdvancedAISuggester",
     "ProjectContext", "CommandSuggestionContext", "get_warp_ai_integration",
-    
+
     # Feature system
     "FeatureBase", "FeatureConfig", "FeatureStatus", "FeatureError",
     "FeatureManager", "FeatureSystemConfig", "FeatureConfigManager"

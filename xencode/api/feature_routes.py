@@ -3,7 +3,7 @@
 
 import inspect
 import logging
-from typing import Any, Dict, Optional, get_args, get_origin, Union
+from typing import Any, Dict, Union, get_args, get_origin
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
@@ -154,7 +154,7 @@ def register_dynamic_feature_routes(app: FastAPI) -> int:
                         raise HTTPException(
                             status_code=500,
                             detail=f"Feature endpoint execution failed: {exc}",
-                        )
+                        )  from exc
 
                 route_name = f"feature_{feature.name}_{method.lower()}_{path.strip('/').replace('/', '_').replace('{', '').replace('}', '')}"
                 app.add_api_route(

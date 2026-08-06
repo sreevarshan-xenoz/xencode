@@ -14,8 +14,6 @@ Features:
 """
 
 import ast
-import inspect
-import re
 import sys
 import uuid
 from abc import ABC, abstractmethod
@@ -23,12 +21,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 try:
     from typing import get_args, get_origin, get_type_hints
 except ImportError:
-    from typing_extensions import get_args, get_origin, get_type_hints
+    pass
 
 
 class TestFramework(Enum):
@@ -540,7 +538,7 @@ def {fixture_name}():
 def {async_prefix}test_{test_case.name}(self):
     """
     {test_case.description}
-    
+
     Test Type: {test_case.test_type.value}
     Function: {test_case.function_name}
     Priority: {test_case.priority}
@@ -548,9 +546,9 @@ def {async_prefix}test_{test_case.name}(self):
     """
     {mock_setup}
     {test_case.setup_code}
-    
+
     {assertions}
-    
+
     {test_case.teardown_code}
 '''
         return test_func
@@ -655,16 +653,16 @@ class {class_name}(unittest.TestCase):
     def test_{test_case.name}(self):
         """
         {test_case.description}
-        
+
         Test Type: {test_case.test_type.value}
         Function: {test_case.function_name}
         Priority: {test_case.priority}
         """
         {mock_setup}
         {test_case.setup_code}
-        
+
         {assertions}
-        
+
         {test_case.teardown_code}
 '''
         return test_method
@@ -1004,7 +1002,7 @@ class TestGenerator:
             raise ValueError(f"Unsupported framework: {framework}")
 
         # Generate file content
-        content = template_generator.generate_test_file(test_cases, self.config)
+        template_generator.generate_test_file(test_cases, self.config)
 
         # Generate file path
         source_name = Path(source_file).stem

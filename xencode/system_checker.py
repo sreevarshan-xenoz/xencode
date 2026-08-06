@@ -1,8 +1,8 @@
 import platform
-import subprocess
-import sys
 import shutil
-from typing import Dict, Any, Optional, Tuple
+import sys
+from typing import Any, Dict, Tuple
+
 
 class SystemChecker:
     """
@@ -60,7 +60,7 @@ class SystemChecker:
 
         # Check for Ollama
         info["ollama_installed"] = shutil.which("ollama") is not None
-        
+
         if info["ollama_installed"]:
             try:
                 # Check if ollama is actually running by trying to list models or hit the API
@@ -73,20 +73,20 @@ class SystemChecker:
                 except requests.RequestException:
                     info["ollama_running"] = False
             except ImportError:
-                # If requests is not installed, we can't easily check API, 
+                # If requests is not installed, we can't easily check API,
                 # but we can try subprocess if we wanted to be very thorough.
                 # For now, assume if installed it might be running, or let the app handle connection errors.
                 pass
 
         return info
-    
+
     def ensure_ollama_available(self, auto_start: bool = True) -> Tuple[bool, str]:
         """
         Ensure Ollama is available, optionally starting it if not running.
-        
+
         Args:
             auto_start: If True, attempt to start Ollama if not running
-            
+
         Returns:
             Tuple of (success, message)
         """
@@ -118,16 +118,16 @@ class SystemChecker:
                  print(f"Distro: {d.get('name', 'Unknown')} ({d.get('version', '')})")
             else:
                  print(f"Distro: {d}")
-        
+
         print(f"Python: {platform.python_version()}")
-        
+
         ollama_status = "✅ Installed" if self.system_info['ollama_installed'] else "❌ Not Found"
         print(f"Ollama CLI: {ollama_status}")
-        
+
         if self.system_info['ollama_installed']:
             running_status = "✅ Running" if self.system_info['ollama_running'] else "❌ Not Running (or not accessible)"
             print(f"Ollama Service: {running_status}")
-        
+
         print("=" * 40)
 
 if __name__ == "__main__":

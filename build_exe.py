@@ -1,8 +1,8 @@
-import os
-import sys
-import subprocess
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+
 
 def main():
     print("🚀 Xencode Standalone Builder")
@@ -12,7 +12,7 @@ def main():
     project_root = Path(__file__).parent.absolute()
     dist_dir = project_root / "dist"
     build_dir = project_root / "build"
-    
+
     # 1. Check/Install PyInstaller
     try:
         import PyInstaller
@@ -27,7 +27,7 @@ def main():
         shutil.rmtree(dist_dir)
     if build_dir.exists():
         shutil.rmtree(build_dir)
-    
+
     print("🧹 Cleaned previous build artifacts.")
 
     # 3. Build Command construction
@@ -38,7 +38,7 @@ def main():
     # Let's check xencode_core.py's __main__ block. It runs `main()`.
     # Let's check enhanced_cli_system.py's __main__ block. It runs `main()` which prints a demo message?
     # Ah, enhanced_cli_system.py's main is a demo. We need a proper entry point script that mimics the shell shim.
-    
+
     # Let's create a temporary entry point script for the standalone exe
     entry_script = project_root / "xencode_entry.py"
     with open(entry_script, "w", encoding="utf-8") as f:
@@ -63,7 +63,7 @@ def main():
         "--collect-all", "xencode",
         str(entry_script)
     ]
-    
+
     # Run PyInstaller
     print(f"🔨 Building executable with command: {' '.join(pyinstaller_args)}")
     try:

@@ -4,20 +4,14 @@ Implements FineTunedModelManager for specialized models, automatic domain detect
 model performance monitoring, and model versioning/update mechanisms.
 """
 
-import asyncio
-import logging
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Callable, Union
-from enum import Enum
 import json
+import logging
 import os
-import hashlib
+from dataclasses import dataclass
 from datetime import datetime
-import aiohttp
-import requests
+from enum import Enum
 from pathlib import Path
-
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +66,11 @@ class ModelPerformanceReport:
 
 class DomainDetector:
     """Detects the domain of input text to select appropriate models."""
-    
+
     def __init__(self):
         self.domain_keywords = {
             ModelDomain.TECHNICAL_CODING: [
-                'function', 'class', 'variable', 'algorithm', 'code', 'programming', 
+                'function', 'class', 'variable', 'algorithm', 'code', 'programming',
                 'debug', 'refactor', 'library', 'framework', 'api', 'database',
                 'javascript', 'python', 'java', 'c++', 'html', 'css', 'sql'
             ],
@@ -116,71 +110,71 @@ class DomainDetector:
                 'assignment', 'homework', 'exam', 'grade', 'feedback', 'pedagogy'
             ]
         }
-        
+
     def detect_domain(self, text: str) -> ModelDomain:
         """Detect the domain of the input text."""
         text_lower = text.lower()
         scores = {}
-        
+
         for domain, keywords in self.domain_keywords.items():
             score = sum(1 for keyword in keywords if keyword in text_lower)
             scores[domain] = score
-            
+
         # Return the domain with the highest score, or default to technical coding
         return max(scores, key=scores.get) if scores else ModelDomain.TECHNICAL_CODING
 
 
 class ModelVersionManager:
     """Manages versioning and updates for fine-tuned models."""
-    
+
     def __init__(self, storage_path: str = "./model_versions"):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(exist_ok=True)
         self.version_registry: Dict[str, List[ModelSpecification]] = {}
-        
+
     def register_model_version(self, model_spec: ModelSpecification):
         """Register a new version of a model."""
         if model_spec.model_id not in self.version_registry:
             self.version_registry[model_spec.model_id] = []
-            
+
         # Add the new version to the registry
         self.version_registry[model_spec.model_id].append(model_spec)
-        
+
         # Sort versions by creation date (newest first)
         self.version_registry[model_spec.model_id].sort(
             key=lambda x: x.created_at, reverse=True
         )
-        
+
     def get_latest_version(self, model_id: str) -> Optional[ModelSpecification]:
         """Get the latest version of a model."""
         if model_id not in self.version_registry or not self.version_registry[model_id]:
             return None
         return self.version_registry[model_id][0]
-        
+
     def get_all_versions(self, model_id: str) -> List[ModelSpecification]:
         """Get all versions of a model."""
         return self.version_registry.get(model_id, [])
-        
+
     def update_model_endpoint(self, model_id: str, new_endpoint: str, version: str):
         """Update the endpoint for a specific version of a model."""
         if model_id not in self.version_registry:
             return False
-            
+
         for model_spec in self.version_registry[model_id]:
             if model_spec.version == version:
                 model_spec.endpoint_url = new_endpoint
                 return True
-                
+
         return False
 
 
 class ModelPerformanceMonitor:
     """Monitors and tracks performance of fine-tuned models."""
-    
+
     def __init__(self):
         self.performance_reports: Dict[str, List[ModelPerformanceReport]] = {}
         self.current_sessions: Dict[str, Dict[str, Any]] = {}  # model_id -> session_data
-        
+
     def start_session(self, model_id: str, session_id: str):
         """Start a monitoring session for a model."""
         self.current_sessions[f"{model_id}_{session_id}"] = {
@@ -189,34 +183,34 @@ class ModelPerformanceMonitor:
             'response_times': [],
             'error_count': 0
         }
-        
+
     def record_request(self, model_id: str, session_id: str, response_time: float, success: bool = True):
         """Record a request to the model."""
         session_key = f"{model_id}_{session_id}"
         if session_key not in self.current_sessions:
             self.start_session(model_id, session_id)
-            
+
         session = self.current_sessions[session_key]
         session['request_count'] += 1
         session['response_times'].append(response_time)
-        
+
         if not success:
             session['error_count'] += 1
-            
+
     def end_session(self, model_id: str, session_id: str) -> ModelPerformanceReport:
         """End a monitoring session and generate a performance report."""
         session_key = f"{model_id}_{session_id}"
         if session_key not in self.current_sessions:
             raise ValueError(f"No active session for {model_id} with id {session_id}")
-            
+
         session = self.current_sessions[session_key]
         duration = (datetime.now() - session['start_time']).total_seconds()
-        
+
         # Calculate metrics
         avg_response_time = sum(session['response_times']) / len(session['response_times']) if session['response_times'] else 0
         throughput = session['request_count'] / duration if duration > 0 else 0
         error_rate = session['error_count'] / session['request_count'] if session['request_count'] > 0 else 0
-        
+
         report = ModelPerformanceReport(
             model_id=model_id,
             timestamp=datetime.now(),
@@ -230,33 +224,33 @@ class ModelPerformanceMonitor:
                 'gpu_util_percent': 60.0  # Placeholder
             }
         )
-        
+
         # Store the report
         if model_id not in self.performance_reports:
             self.performance_reports[model_id] = []
         self.performance_reports[model_id].append(report)
-        
+
         # Clean up session
         del self.current_sessions[session_key]
-        
+
         return report
-        
+
     def get_model_performance_history(self, model_id: str) -> List[ModelPerformanceReport]:
         """Get performance history for a model."""
         return self.performance_reports.get(model_id, [])
-        
+
     def get_average_performance(self, model_id: str) -> Optional[ModelPerformanceReport]:
         """Get average performance metrics for a model."""
         reports = self.performance_reports.get(model_id, [])
         if not reports:
             return None
-            
+
         # Calculate averages
         avg_accuracy = sum(r.accuracy for r in reports) / len(reports)
         avg_response_time = sum(r.response_time for r in reports) / len(reports)
         avg_throughput = sum(r.throughput for r in reports) / len(reports)
         avg_error_rate = sum(r.error_rate for r in reports) / len(reports)
-        
+
         # Average resource utilization
         total_resources = {}
         for report in reports:
@@ -264,11 +258,11 @@ class ModelPerformanceMonitor:
                 if key not in total_resources:
                     total_resources[key] = []
                 total_resources[key].append(value)
-                
+
         avg_resource_utilization = {
             key: sum(values) / len(values) for key, values in total_resources.items()
         }
-        
+
         return ModelPerformanceReport(
             model_id=model_id,
             timestamp=datetime.now(),
@@ -285,7 +279,7 @@ class FineTunedModelManager:
     Manages domain-specific fine-tuned models, including automatic domain detection,
     model selection, performance monitoring, and versioning/update mechanisms.
     """
-    
+
     def __init__(self, config_path: Optional[str] = None):
         self.domain_detector = DomainDetector()
         self.version_manager = ModelVersionManager()
@@ -297,21 +291,21 @@ class FineTunedModelManager:
             ModelProvider.HUGGINGFACE: self._load_huggingface_model,
             ModelProvider.CUSTOM: self._load_custom_model
         }
-        
+
         # Load configuration if provided
         if config_path and os.path.exists(config_path):
             self.load_configuration(config_path)
-            
+
     def register_model(self, model_spec: ModelSpecification):
         """Register a new fine-tuned model."""
         self.available_models[model_spec.model_id] = model_spec
         self.version_manager.register_model_version(model_spec)
-        
+
     def load_configuration(self, config_path: str):
         """Load model configurations from a JSON file."""
         with open(config_path, 'r') as f:
             config_data = json.load(f)
-            
+
         for model_data in config_data.get('models', []):
             model_spec = ModelSpecification(
                 model_id=model_data['model_id'],
@@ -326,78 +320,78 @@ class FineTunedModelManager:
                 is_active=model_data.get('is_active', True)
             )
             self.register_model(model_spec)
-            
+
     def detect_appropriate_model(self, input_text: str) -> Optional[ModelSpecification]:
         """Detect the appropriate model for the input text based on domain."""
         domain = self.domain_detector.detect_domain(input_text)
-        
+
         # Find models that match the detected domain
         matching_models = [
             spec for spec in self.available_models.values()
             if spec.domain == domain and spec.is_active
         ]
-        
+
         if not matching_models:
             logger.warning(f"No active models found for domain: {domain}")
             return None
-            
+
         # Select the best model based on performance metrics
         # For simplicity, we'll select the one with the highest accuracy
         best_model = max(
             matching_models,
             key=lambda m: m.performance_metrics.get('accuracy', 0)
         )
-        
+
         return best_model
-        
+
     async def load_model(self, model_spec: ModelSpecification):
         """Load a model based on its specification."""
         loader = self.model_loaders.get(model_spec.provider)
         if not loader:
             raise ValueError(f"Unsupported model provider: {model_spec.provider}")
-            
+
         return await loader(model_spec)
-        
+
     async def _load_openai_model(self, model_spec: ModelSpecification):
         """Load an OpenAI model."""
         # In a real implementation, this would connect to OpenAI API
         # For now, we'll simulate the connection
         logger.info(f"Loading OpenAI model: {model_spec.model_id}")
         return {"provider": "openai", "model_id": model_spec.model_id, "loaded": True}
-        
+
     async def _load_anthropic_model(self, model_spec: ModelSpecification):
         """Load an Anthropic model."""
         # In a real implementation, this would connect to Anthropic API
         # For now, we'll simulate the connection
         logger.info(f"Loading Anthropic model: {model_spec.model_id}")
         return {"provider": "anthropic", "model_id": model_spec.model_id, "loaded": True}
-        
+
     async def _load_huggingface_model(self, model_spec: ModelSpecification):
         """Load a Hugging Face model."""
         # In a real implementation, this would load from Hugging Face Hub
         # For now, we'll simulate the loading
         logger.info(f"Loading Hugging Face model: {model_spec.model_id}")
         return {"provider": "huggingface", "model_id": model_spec.model_id, "loaded": True}
-        
+
     async def _load_custom_model(self, model_spec: ModelSpecification):
         """Load a custom model."""
         # In a real implementation, this would load a locally stored model
         # For now, we'll simulate the loading
         logger.info(f"Loading custom model: {model_spec.model_id}")
         return {"provider": "custom", "model_id": model_spec.model_id, "loaded": True}
-        
+
     async def process_with_optimal_model(
-        self, 
-        input_text: str, 
+        self,
+        input_text: str,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process input text with the optimal model for its domain.
-        
+
         Args:
             input_text: The input text to process
             session_id: Optional session ID for monitoring
-            
+
         Returns:
             Dictionary containing the result and metadata
         """
@@ -405,17 +399,17 @@ class FineTunedModelManager:
         model_spec = self.detect_appropriate_model(input_text)
         if not model_spec:
             raise ValueError("No suitable model found for the input text")
-            
+
         # Start monitoring if session ID provided
         if session_id:
             self.performance_monitor.start_session(model_spec.model_id, session_id)
-            
+
         start_time = datetime.now()
-        
+
         try:
             # Load and use the model
-            loaded_model = await self.load_model(model_spec)
-            
+            await self.load_model(model_spec)
+
             # Simulate model processing
             # In a real implementation, this would call the actual model
             result = {
@@ -424,7 +418,7 @@ class FineTunedModelManager:
                 "domain_detected": model_spec.domain.value,
                 "processing_time": (datetime.now() - start_time).total_seconds()
             }
-            
+
             success = True
         except Exception as e:
             logger.error(f"Error processing with model {model_spec.model_id}: {str(e)}")
@@ -434,24 +428,24 @@ class FineTunedModelManager:
                 "domain_detected": model_spec.domain.value
             }
             success = False
-            
+
         # Record performance metrics
         if session_id:
             response_time = (datetime.now() - start_time).total_seconds()
             self.performance_monitor.record_request(
                 model_spec.model_id, session_id, response_time, success
             )
-            
+
         return result
-        
+
     def get_model_performance(self, model_id: str) -> Optional[ModelPerformanceReport]:
         """Get performance metrics for a specific model."""
         return self.performance_monitor.get_average_performance(model_id)
-        
+
     def update_model_version(self, model_id: str, new_version: str, new_endpoint: str):
         """Update a model to a new version."""
         return self.version_manager.update_model_endpoint(model_id, new_endpoint, new_version)
-        
+
     def get_available_models_by_domain(self, domain: ModelDomain) -> List[ModelSpecification]:
         """Get all available models for a specific domain."""
         return [
@@ -468,16 +462,16 @@ async def process_with_domain_specific_model(
 ) -> Dict[str, Any]:
     """
     Convenience function to process text with the optimal domain-specific model.
-    
+
     Args:
         input_text: The input text to process
         manager: Optional model manager instance (will create one if not provided)
         session_id: Optional session ID for monitoring
-        
+
     Returns:
         Dictionary containing the result and metadata
     """
     if manager is None:
         manager = FineTunedModelManager()
-        
+
     return await manager.process_with_optimal_model(input_text, session_id)

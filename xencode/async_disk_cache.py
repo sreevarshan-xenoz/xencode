@@ -12,9 +12,14 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Optional, Set
+
 import aiofiles
-from .advanced_cache_system import CacheEntry, CacheStats, CompressionManager, COMPRESSION_THRESHOLD_BYTES
+
+from .advanced_cache_system import (
+    CacheStats,
+    CompressionManager,
+)
 
 
 @dataclass
@@ -78,8 +83,7 @@ class AsyncDiskCache:
 
         # Run the synchronous database operation in a thread pool
         loop = asyncio.get_event_loop()
-        import concurrent.futures
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute(
@@ -173,7 +177,7 @@ class AsyncDiskCache:
 
         # Run database operation in thread pool
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 db.execute("""
@@ -199,7 +203,7 @@ class AsyncDiskCache:
         if current_size + new_entry_size > self.max_size_bytes:
             # Remove oldest entries until we have space
             loop = asyncio.get_event_loop()
-            
+
             def db_operation():
                 nonlocal current_size  # Declare that we're modifying the outer current_size variable
                 with sqlite3.connect(self.db_path) as db:
@@ -232,7 +236,7 @@ class AsyncDiskCache:
     async def _get_current_size_async(self) -> int:
         """Get current cache size in bytes - async version"""
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute("SELECT SUM(size_bytes) FROM cache_entries")
@@ -256,7 +260,7 @@ class AsyncDiskCache:
     async def clear_by_tags(self, tags: Set[str]):
         """Clear entries matching any of the given tags - async version"""
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute("SELECT key, data_file, tags FROM cache_entries")
@@ -293,7 +297,7 @@ class AsyncDiskCache:
         self.stats.disk_usage_mb = await self._get_current_size_async() / (1024 * 1024)
 
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute("SELECT COUNT(*) FROM cache_entries")
@@ -306,7 +310,7 @@ class AsyncDiskCache:
     async def get_entry(self, key: str) -> Optional[AsyncCacheEntry]:
         """Get cache entry with metadata - async version"""
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute("""
@@ -361,7 +365,7 @@ class AsyncDiskCache:
     async def delete(self, key: str) -> bool:
         """Delete a specific cache entry"""
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             with sqlite3.connect(self.db_path) as db:
                 cursor = db.execute("SELECT data_file FROM cache_entries WHERE key = ?", (key,))
@@ -384,7 +388,7 @@ class AsyncDiskCache:
     async def delete_pattern(self, pattern: str) -> int:
         """Delete cache entries matching pattern - async version"""
         loop = asyncio.get_event_loop()
-        
+
         def db_operation():
             deleted = 0
             with sqlite3.connect(self.db_path) as db:
@@ -392,12 +396,12 @@ class AsyncDiskCache:
                     SELECT key, data_file FROM cache_entries
                     WHERE key LIKE ?
                 """, (f"%{pattern}%",))
-                
+
                 rows = cursor.fetchall()
                 for row in rows:
                     key, data_file = row
                     data_path = self.data_dir / data_file
-                    
+
                     if data_path.exists():
                         data_path.unlink()
 

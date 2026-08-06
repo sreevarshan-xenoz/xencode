@@ -8,10 +8,10 @@ This module provides internationalization (i18n) capabilities including:
 - RTL language support
 """
 
-from .translation_engine import TranslationEngine
+from .context_adapter import ContextAdapter
 from .language_manager import LanguageManager
 from .translation_dict import TranslationDictionary
-from .context_adapter import ContextAdapter
+from .translation_engine import TranslationEngine
 
 __all__ = [
     "TranslationEngine",

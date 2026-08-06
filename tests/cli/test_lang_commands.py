@@ -4,6 +4,7 @@ Tests for multi-language CLI commands.
 
 import pytest
 from click.testing import CliRunner
+
 from xencode.cli import cli
 
 

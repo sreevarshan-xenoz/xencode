@@ -6,10 +6,9 @@ FastAPI router for document processing endpoints including PDF, DOCX, and web co
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from pathlib import Path
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from xencode.api.auth import verify_jwt_token
@@ -47,7 +46,7 @@ async def upload_and_process_document(
     try:
         # Mock processing
         import uuid
-        
+
         return ProcessedDocumentResponse(
             id=str(uuid.uuid4()),
             original_filename=file.filename,
@@ -58,9 +57,9 @@ async def upload_and_process_document(
             confidence_score=0.95,
             created_at=datetime.now()
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process document: {e}")  from e
 
 
 @router.get("/", response_model=List[ProcessedDocumentResponse])

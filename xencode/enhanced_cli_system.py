@@ -12,8 +12,8 @@ import argparse
 import os
 import threading
 import time
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 # Import Phase 1 systems with graceful fallback
@@ -649,29 +649,29 @@ Examples:
                 return "❌ Code analyzer failed to initialize"
 
             print(f"🔍 Reviewing changes against {ref}...")
-            
+
             # Get diff content
             diff_content = self.code_analyzer.get_diff_from_ref(ref)
-            
+
             if not diff_content:
                 return "ℹ️ No changes found to review."
 
             # Static Analysis on changes
             diff_issues = self.code_analyzer.analyze_diff_context(diff_content)
-            
+
             # Get general stats
             analysis = self.code_analyzer.analyze_git_diff(diff_content)
-            
+
             # Construct a human-readable review
             review = ["📋 Git Review Report", "=" * 30]
-            
+
             review.append(f"\n📊 Scope: {analysis['scope']}")
             review.append(f"📁 Files Changed: {len(analysis['files_changed'])}")
             review.append(f"➕ Additions: {analysis['additions']} | ➖ Deletions: {analysis['deletions']}")
-            
+
             if analysis['languages']:
                 review.append(f"💻 Languages: {', '.join(analysis['languages'])}")
-                
+
             review.append("\n⚠️ Static Analysis Issues (in changed lines):")
             if diff_issues:
                 for issue in diff_issues:
@@ -685,38 +685,38 @@ Examples:
                      review.append(f"  {emoji} {Path(issue.file_path).name}:{issue.line_number} - {issue.message}")
             else:
                 review.append("  ✅ No static analysis issues found in changes.")
-            
+
             # AI Review if available
             if self.features.multi_model and self.multi_model:
                 try:
-                    from xencode_core import run_query, extract_thinking_and_answer
-                    
+                    from xencode_core import extract_thinking_and_answer, run_query
+
                     print("🤖 requesting AI Code Review...")
-                    
+
                     # Construct prompt
                     # Truncate diff to avoid context limits (conservative 6000 chars)
                     truncated_diff = diff_content[:6000]
                     if len(diff_content) > 6000:
                         truncated_diff += "\n... (diff truncated)"
-                        
+
                     prompt = (
                         "You are an expert code reviewer. Review the following git diff for bugs, "
                         "security vulnerabilities, and code style issues. "
                         "Focus ONLY on the changes. Be concise and constructive.\n\n"
                         f"```diff\n{truncated_diff}\n```"
                     )
-                    
+
                     # Use a coding capable model
-                    model = "codellama:7b" 
-                    # Ideally we check available models, but this is a safe default for now 
+                    model = "codellama:7b"
+                    # Ideally we check available models, but this is a safe default for now
                     # given the roadmap mentions it.
-                    
+
                     response = run_query(model, prompt)
                     _, answer = extract_thinking_and_answer(response)
-                    
+
                     if answer.strip():
                         review.append(f"\n🧠 AI Review:\n{answer.strip()}")
-                        
+
                 except Exception as e:
                     review.append(f"\n⚠️ AI Review unavailable: {str(e)}")
             else:
@@ -733,7 +733,7 @@ Examples:
         """
         if not self.features.code_analysis:
             return "❌ Diff analysis requires Code Analysis System"
-            
+
         try:
              # Wait for background initialization if needed
             if hasattr(self, '_init_thread'):
@@ -745,15 +745,15 @@ Examples:
             print("🔍 Analyzing current diff...")
             diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
             staged_diff = self.code_analyzer.get_raw_git_diff(staged=True)
-            
+
             if not diff_content and not staged_diff:
                 return "✅ No changes to analyze."
-            
+
             full_diff = (staged_diff or "") + "\n" + (diff_content or "")
-            
+
             # Use robust analysis on changed lines
             issues = self.code_analyzer.analyze_diff_context(full_diff)
-            
+
             # Also do regex checks for things AST might miss (like TODOs in comments not docstrings)
             regex_issues = []
             for line in full_diff.splitlines():
@@ -764,9 +764,9 @@ Examples:
 
             if not issues and not regex_issues:
                 return "✅ Diff looks clean! (No static analysis issues found)"
-            
+
             report = ["⚠️ Issues found in diff:", "=" * 25]
-            
+
             for issue in issues:
                 severity_emoji = {
                     "critical": "🔴",
@@ -776,10 +776,10 @@ Examples:
                 }
                 emoji = severity_emoji.get(issue.severity.value, "⚪")
                 report.append(f"{emoji} {Path(issue.file_path).name}:{issue.line_number} - {issue.message}")
-                
+
             for regex_issue in regex_issues:
                 report.append(regex_issue)
-                
+
             return "\n".join(report)
 
         except Exception as e:
@@ -791,10 +791,10 @@ Examples:
         """
         if not self.features.code_analysis:
              return "❌ Git branch assistant requires Code Analysis System"
-        
+
         if action != 'suggest':
              return "❌ Valid actions: 'suggest'"
-             
+
         try:
             # Wait for background initialization if needed
             if hasattr(self, '_init_thread'):
@@ -802,42 +802,42 @@ Examples:
 
             if self.code_analyzer is None:
                 return "❌ Code analyzer failed to initialize"
-            
+
             print("🔍 Pondering branch names based on changes...")
-            
+
             diff_content = self.code_analyzer.get_raw_git_diff(staged=True)
             if not diff_content:
                 diff_content = self.code_analyzer.get_raw_git_diff(staged=False)
-                
+
             if not diff_content:
                 return "ℹ️ No changes found to base a branch name on."
-                
-            # Use the new helper method  
+
+            # Use the new helper method
             suggestions = self.code_analyzer.suggest_branch_names(diff_content)
-            
+
             # Try LLM enhancement if available
             if self.features.multi_model:
                 try:
-                    from xencode_core import run_query, extract_thinking_and_answer
-                    
+                    from xencode_core import extract_thinking_and_answer, run_query
+
                     prompt = f"""Based on this git diff, suggest 3 concise, descriptive branch names following git conventions (e.g., feature/short-name, fix/issue-description).
-                    
+
 Diff:
 {diff_content[:3000]}
 
 Respond with ONLY the 3 branch names, one per line."""
-                    
+
                     response = run_query(prompt, model="codellama:7b")
                     _, answer = extract_thinking_and_answer(response)
-                    
+
                     if answer:
                         llm_suggestions = [line.strip() for line in answer.strip().split('\n') if line.strip() and '/' in line]
                         if llm_suggestions:
                             suggestions = llm_suggestions[:3] + suggestions  # Prepend LLM suggestions
-                            
+
                 except Exception:
                     pass  # Silently fall back to heuristics
-            
+
             output = ["🌱 Suggested Branch Names:", "=" * 25]
             seen = set()
             for name in suggestions:
@@ -846,9 +846,9 @@ Respond with ONLY the 3 branch names, one per line."""
                     output.append(f"  • {name}")
                     if len(seen) >= 5:
                         break
-                
+
             output.append("\n💡 To switch: git checkout -b <name>")
-            
+
             return "\n".join(output)
 
         except Exception as e:

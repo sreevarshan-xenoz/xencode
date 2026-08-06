@@ -7,16 +7,14 @@ Provides REST API access to all Xencode features with authentication support.
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Body, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from xencode.api.auth import (
-    verify_jwt_token,
-    get_current_user,
     verify_collaboration_auth,
-    verify_token_optional
+    verify_jwt_token,
 )
 
 router = APIRouter()
@@ -101,11 +99,11 @@ async def get_feature_manager():
             except Exception:
                 continue
         return _feature_manager
-    except ImportError:
+    except ImportError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Feature manager not available"
-        )
+        ) from e
 
 
 @router.get("/", response_model=FeatureListResponse)
@@ -115,15 +113,15 @@ async def list_features(
 ):
     """
     List all available features
-    
+
     - **enabled_only**: If true, only return enabled features
     """
     try:
         features = manager.get_all_features()
-        
+
         if enabled_only:
             features = manager.get_enabled_features()
-        
+
         feature_list = [
             FeatureStatusModel(
                 name=feature.name,
@@ -135,18 +133,18 @@ async def list_features(
             )
             for feature in features.values()
         ]
-        
+
         return FeatureListResponse(
             features=feature_list,
             total=len(feature_list),
             timestamp=datetime.now()
         )
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list features: {str(e)}"
-        )
+        )  from e
 
 
 @router.get("/{feature_name}", response_model=FeatureDetailResponse)
@@ -156,18 +154,18 @@ async def get_feature(
 ):
     """
     Get detailed information about a specific feature
-    
+
     - **feature_name**: Name of the feature to retrieve
     """
     try:
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found"
             )
-        
+
         # Get CLI commands (simplified)
         cli_commands = []
         try:
@@ -198,14 +196,14 @@ async def get_feature(
             cli_commands=cli_commands,
             api_endpoints=api_endpoints
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get feature: {str(e)}"
-        )
+        )  from e
 
 
 @router.post("/{feature_name}/enable", response_model=FeatureOperationResponse)
@@ -216,17 +214,17 @@ async def enable_feature(
 ):
     """
     Enable a feature
-    
+
     - **feature_name**: Name of the feature to enable
     - **config**: Optional configuration for the feature
     """
     try:
         # Load feature if not already loaded
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             from xencode.features.base import FeatureConfig
-            
+
             feature_config = FeatureConfig(
                 name=feature_name,
                 enabled=True,
@@ -234,19 +232,19 @@ async def enable_feature(
                 config=config.config if config else {},
                 dependencies=config.dependencies if config else []
             )
-            
+
             success = await manager.initialize_feature(feature_name, feature_config)
         else:
             # Update config if provided
             if config:
                 feature.update_config(config.config)
-            
+
             # Initialize if not already initialized
             if not feature.is_initialized:
                 success = await feature.initialize()
             else:
                 success = True
-        
+
         if success:
             return FeatureOperationResponse(
                 success=True,
@@ -259,14 +257,14 @@ async def enable_feature(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to enable feature '{feature_name}'"
             )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to enable feature: {str(e)}"
-        )
+        )  from e
 
 
 @router.post("/{feature_name}/disable", response_model=FeatureOperationResponse)
@@ -276,12 +274,12 @@ async def disable_feature(
 ):
     """
     Disable a feature
-    
+
     - **feature_name**: Name of the feature to disable
     """
     try:
         success = await manager.shutdown_feature(feature_name)
-        
+
         if success:
             return FeatureOperationResponse(
                 success=True,
@@ -294,14 +292,14 @@ async def disable_feature(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found or already disabled"
             )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to disable feature: {str(e)}"
-        )
+        )  from e
 
 
 @router.put("/{feature_name}/config", response_model=FeatureOperationResponse)
@@ -312,35 +310,35 @@ async def update_feature_config(
 ):
     """
     Update feature configuration
-    
+
     - **feature_name**: Name of the feature to configure
     - **config**: New configuration values
     """
     try:
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found"
             )
-        
+
         feature.update_config(config)
-        
+
         return FeatureOperationResponse(
             success=True,
             message=f"Configuration for '{feature_name}' updated successfully",
             feature_name=feature_name,
             timestamp=datetime.now()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update configuration: {str(e)}"
-        )
+        )  from e
 
 
 @router.get("/{feature_name}/status", response_model=FeatureStatusModel)
@@ -350,18 +348,18 @@ async def get_feature_status(
 ):
     """
     Get current status of a feature
-    
+
     - **feature_name**: Name of the feature
     """
     try:
         feature = manager.get_feature(feature_name)
-        
+
         if not feature:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Feature '{feature_name}' not found"
             )
-        
+
         return FeatureStatusModel(
             name=feature.name,
             status=feature.get_status().value,
@@ -370,14 +368,14 @@ async def get_feature_status(
             version=feature.version,
             description=feature.description
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get feature status: {str(e)}"
-        )
+        )  from e
 
 
 # Collaborative features endpoints (require authentication)
@@ -430,14 +428,14 @@ async def start_collaboration(
             feature_name=feature_name,
             timestamp=datetime.now()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start collaboration: {str(e)}"
-        )
+        )  from e
 
 
 @router.get("/{feature_name}/analytics", response_model=FeatureAnalyticsModel, dependencies=[Depends(verify_jwt_token)])
@@ -461,8 +459,8 @@ async def get_feature_analytics(
 
         # Get analytics from feature if available
         # For now, return basic metrics from feature state
-        feature_status = feature.get_status()
-        
+        feature.get_status()
+
         return FeatureAnalyticsModel(
             feature_name=feature_name,
             usage_count=getattr(feature, 'usage_count', 0),
@@ -477,7 +475,7 @@ async def get_feature_analytics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get analytics: {str(e)}"
-        )
+        )  from e
 
 
 router.tags = ["Features"]

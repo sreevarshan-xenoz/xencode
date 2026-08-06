@@ -7,7 +7,6 @@ heavy ML dependencies (transformers, sentence-transformers).
 These are pragmatic fixes that improve accuracy while remaining lightweight.
 """
 
-import time
 from collections import defaultdict
 from typing import List, Optional, Tuple
 
@@ -392,7 +391,7 @@ if __name__ == "__main__":
     )
     print(f"   Response: {test_response}")
     print(f"   Confidence: {conf:.3f}")
-    print(f"   Confidence components:")
+    print("   Confidence components:")
     print(f"      Coherence: {EnhancedQualityMetrics._calculate_coherence(test_response):.3f}")
     print(f"      Length score: {EnhancedQualityMetrics._calculate_length_score(len(test_response.split())):.3f}")
     print(f"      Speed score: {EnhancedQualityMetrics._calculate_speed_score(200):.3f}")

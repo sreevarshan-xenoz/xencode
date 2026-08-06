@@ -7,7 +7,7 @@ Provides automated suggestions for common code quality improvements.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 from xencode.models.code_analysis import (
     AnalysisIssue,
@@ -15,13 +15,13 @@ from xencode.models.code_analysis import (
     CodeLocation,
     Language,
     RefactoringSuggestion,
-    SeverityLevel
+    SeverityLevel,
 )
 
 
 class RefactoringEngine:
     """Generates refactoring suggestions for code improvements"""
-    
+
     def __init__(self):
         # Refactoring patterns for different languages
         self.refactoring_patterns = {
@@ -69,22 +69,22 @@ class RefactoringEngine:
                 ]
             }
         }
-    
-    async def generate_refactoring_suggestions(self, 
-                                             code: str, 
+
+    async def generate_refactoring_suggestions(self,
+                                             code: str,
                                              language: Language,
                                              file_path: str = "") -> Tuple[List[AnalysisIssue], List[RefactoringSuggestion]]:
         """Generate refactoring suggestions for code"""
-        
+
         analysis_issues = []
         refactoring_suggestions = []
-        
+
         if language not in self.refactoring_patterns:
             return analysis_issues, refactoring_suggestions
-        
+
         lines = code.split('\n')
         patterns = self.refactoring_patterns[language]
-        
+
         for category, pattern_list in patterns.items():
             for pattern, description in pattern_list:
                 suggestions = await self._find_refactoring_opportunities(
@@ -92,33 +92,33 @@ class RefactoringEngine:
                 )
                 analysis_issues.extend([s[0] for s in suggestions])
                 refactoring_suggestions.extend([s[1] for s in suggestions])
-        
+
         return analysis_issues, refactoring_suggestions
-    
-    async def _find_refactoring_opportunities(self, 
+
+    async def _find_refactoring_opportunities(self,
                                             code: str,
-                                            lines: List[str], 
-                                            pattern: str, 
+                                            lines: List[str],
+                                            pattern: str,
                                             description: str,
                                             category: str,
                                             language: Language,
                                             file_path: str) -> List[Tuple[AnalysisIssue, RefactoringSuggestion]]:
         """Find refactoring opportunities in code"""
-        
+
         suggestions = []
         regex = re.compile(pattern, re.MULTILINE | re.DOTALL)
-        
+
         matches = regex.finditer(code)
         for match in matches:
             # Calculate line number
             line_num = code[:match.start()].count('\n') + 1
-            
+
             # Generate refactoring suggestion
             before_code = match.group(0)
             after_code = await self._generate_refactored_code(
                 before_code, category, language, match
             )
-            
+
             if after_code and after_code != before_code:
                 # Create analysis issue
                 issue = AnalysisIssue(
@@ -136,7 +136,7 @@ class RefactoringEngine:
                     rule_name=category.replace('_', ' ').title(),
                     confidence=0.7
                 )
-                
+
                 # Create refactoring suggestion
                 refactoring = RefactoringSuggestion(
                     refactoring_type=category,
@@ -147,55 +147,55 @@ class RefactoringEngine:
                     effort_level=self._get_effort_level(category),
                     confidence=0.7
                 )
-                
+
                 suggestions.append((issue, refactoring))
-        
+
         return suggestions
-    
-    async def _generate_refactored_code(self, 
-                                       original_code: str, 
+
+    async def _generate_refactored_code(self,
+                                       original_code: str,
                                        category: str,
                                        language: Language,
                                        match: re.Match) -> str:
         """Generate refactored code based on category and language"""
-        
+
         if language == Language.PYTHON:
             return await self._generate_python_refactoring(original_code, category, match)
         elif language == Language.JAVASCRIPT:
             return await self._generate_javascript_refactoring(original_code, category, match)
-        
+
         return original_code
-    
-    async def _generate_python_refactoring(self, 
-                                         original_code: str, 
+
+    async def _generate_python_refactoring(self,
+                                         original_code: str,
                                          category: str,
                                          match: re.Match) -> str:
         """Generate Python-specific refactoring"""
-        
+
         if category == 'simplify_conditionals':
             # if condition: return True else: return False -> return condition
             if 'return True' in original_code and 'return False' in original_code:
                 condition = match.group(1) if match.groups() else 'condition'
                 return f"return {condition}"
-        
+
         elif category == 'improve_loops':
             if 'range(len(' in original_code:
                 # for i in range(len(items)): -> for i, item in enumerate(items):
                 list_name = match.group(1) if match.groups() else 'items'
                 return f"for i, item in enumerate({list_name}):"
-        
+
         elif category == 'modernize_syntax':
             if 'var ' in original_code:
                 return original_code.replace('var ', 'let ')
-        
+
         return original_code
-    
-    async def _generate_javascript_refactoring(self, 
-                                             original_code: str, 
+
+    async def _generate_javascript_refactoring(self,
+                                             original_code: str,
                                              category: str,
                                              match: re.Match) -> str:
         """Generate JavaScript-specific refactoring"""
-        
+
         if category == 'modernize_syntax':
             if original_code.startswith('var '):
                 # Determine if it should be let or const
@@ -203,31 +203,31 @@ class RefactoringEngine:
                     return original_code.replace('var ', 'const ', 1)
                 else:
                     return original_code.replace('var ', 'let ', 1)
-            
+
             elif original_code.startswith('function'):
                 # function(params) { -> (params) => {
                 params = match.group(1) if match.groups() else ''
                 return f"({params}) => {{"
-        
+
         elif category == 'simplify_conditionals':
             if 'return true' in original_code.lower() and 'return false' in original_code.lower():
                 condition = match.group(1) if match.groups() else 'condition'
                 return f"return {condition};"
-            
+
             elif '? true : false' in original_code:
                 # condition ? true : false -> condition
                 condition = match.group(1) if match.groups() else 'condition'
                 return condition
-        
+
         elif category == 'improve_async':
             if '.then(' in original_code and '.catch(' in original_code:
                 return "// Consider refactoring to async/await:\n// try {\n//   const result = await promise;\n// } catch (error) {\n//   // handle error\n// }"
-        
+
         return original_code
-    
+
     def _get_refactoring_benefits(self, category: str) -> List[str]:
         """Get benefits of refactoring for category"""
-        
+
         benefits_map = {
             'extract_method': [
                 'Improves code readability',
@@ -266,39 +266,37 @@ class RefactoringEngine:
                 'Improves maintainability'
             ]
         }
-        
+
         return benefits_map.get(category, ['Improves code quality'])
-    
+
     def _get_effort_level(self, category: str) -> str:
         """Get effort level for refactoring category"""
-        
+
         high_effort = ['extract_method', 'improve_async']
         medium_effort = ['improve_loops', 'optimize_performance']
-        low_effort = ['simplify_conditionals', 'modernize_syntax', 'remove_dead_code']
-        
+
         if category in high_effort:
             return 'high'
         elif category in medium_effort:
             return 'medium'
         else:
             return 'low'
-    
-    async def suggest_method_extraction(self, 
-                                      code: str, 
+
+    async def suggest_method_extraction(self,
+                                      code: str,
                                       language: Language,
                                       min_lines: int = 10) -> List[RefactoringSuggestion]:
         """Suggest method extraction for long methods"""
-        
+
         suggestions = []
         lines = code.split('\n')
-        
+
         if language == Language.PYTHON:
             # Find long methods
             in_method = False
-            method_start = 0
             method_lines = []
-            
-            for i, line in enumerate(lines):
+
+            for _i, line in enumerate(lines):
                 if line.strip().startswith('def '):
                     if in_method and len(method_lines) >= min_lines:
                         # Suggest extraction for previous method
@@ -313,12 +311,11 @@ class RefactoringEngine:
                             confidence=0.8
                         )
                         suggestions.append(suggestion)
-                    
+
                     # Start new method
                     in_method = True
-                    method_start = i
                     method_lines = [line]
-                
+
                 elif in_method:
                     if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
                         # End of method
@@ -334,21 +331,21 @@ class RefactoringEngine:
                                 confidence=0.8
                             )
                             suggestions.append(suggestion)
-                        
+
                         in_method = False
                         method_lines = []
                     else:
                         method_lines.append(line)
-        
+
         return suggestions
-    
+
     def get_refactoring_categories(self) -> List[str]:
         """Get list of refactoring categories"""
         categories = set()
         for lang_patterns in self.refactoring_patterns.values():
             categories.update(lang_patterns.keys())
-        return sorted(list(categories))
-    
+        return sorted(categories)
+
     def is_language_supported(self, language: Language) -> bool:
         """Check if language is supported for refactoring suggestions"""
         return language in self.refactoring_patterns

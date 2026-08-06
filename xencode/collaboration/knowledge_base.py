@@ -1,10 +1,10 @@
 """Shared knowledge base for teams."""
 
 import uuid
-from typing import Optional, List
+from typing import List, Optional
 
 from .database import CollaborationDatabase
-from .models import KnowledgeItem, Role, Permission, has_permission
+from .models import KnowledgeItem, Permission, has_permission
 
 
 class KnowledgeBase:
@@ -49,12 +49,12 @@ class KnowledgeBase:
         # This would need a more sophisticated query in the database
         # For now, we'll search each tag and combine results
         all_items = self.db.search_knowledge(workspace_id, "")
-        
+
         matching_items = []
         for item in all_items:
             if any(tag in item.tags for tag in tags):
                 matching_items.append(item)
-        
+
         return matching_items
 
     def can_edit(

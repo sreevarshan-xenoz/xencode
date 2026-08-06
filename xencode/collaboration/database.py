@@ -1,12 +1,12 @@
 """Database management for collaboration features."""
 
-import sqlite3
 import json
-from pathlib import Path
-from typing import Optional, List, Dict, Any
+import sqlite3
 from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
 
-from .models import User, Workspace, WorkspaceMember, Session, KnowledgeItem, Role
+from .models import KnowledgeItem, Role, Session, User, Workspace, WorkspaceMember
 
 
 class CollaborationDatabase:
@@ -15,17 +15,17 @@ class CollaborationDatabase:
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
             db_path = Path.home() / ".xencode" / "collaboration.db"
-        
+
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self._init_database()
 
     def _init_database(self):
         """Initialize database schema."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
+
             # Users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -35,7 +35,7 @@ class CollaborationDatabase:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Workspaces table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS workspaces (
@@ -46,7 +46,7 @@ class CollaborationDatabase:
                     settings TEXT DEFAULT '{}'
                 )
             """)
-            
+
             # Workspace members table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS workspace_members (
@@ -57,7 +57,7 @@ class CollaborationDatabase:
                     PRIMARY KEY (workspace_id, user_id)
                 )
             """)
-            
+
             # Sessions table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -70,7 +70,7 @@ class CollaborationDatabase:
                     messages TEXT DEFAULT '[]'
                 )
             """)
-            
+
             # Knowledge base table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS knowledge_items (
@@ -84,12 +84,12 @@ class CollaborationDatabase:
                     updated_at TIMESTAMP
                 )
             """)
-            
+
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_workspace ON knowledge_items(workspace_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_tags ON knowledge_items(tags)")
-            
+
             conn.commit()
 
     # User operations
@@ -110,7 +110,7 @@ class CollaborationDatabase:
             cursor = conn.cursor()
             cursor.execute("SELECT id, username, email, created_at FROM users WHERE id = ?", (user_id,))
             row = cursor.fetchone()
-            
+
             if row:
                 return User(
                     id=row[0],
@@ -138,7 +138,7 @@ class CollaborationDatabase:
             cursor = conn.cursor()
             cursor.execute("SELECT id, name, created_by, created_at, settings FROM workspaces WHERE id = ?", (workspace_id,))
             row = cursor.fetchone()
-            
+
             if row:
                 return Workspace(
                     id=row[0],
@@ -159,7 +159,7 @@ class CollaborationDatabase:
                 JOIN workspace_members wm ON w.id = wm.workspace_id
                 WHERE wm.user_id = ?
             """, (user_id,))
-            
+
             workspaces = []
             for row in cursor.fetchall():
                 workspaces.append(Workspace(
@@ -213,7 +213,7 @@ class CollaborationDatabase:
             cursor = conn.cursor()
             cursor.execute("SELECT id, workspace_id, title, created_by, created_at, shared, messages FROM sessions WHERE id = ?", (session_id,))
             row = cursor.fetchone()
-            
+
             if row:
                 return Session(
                     id=row[0],
@@ -247,7 +247,7 @@ class CollaborationDatabase:
                 FROM knowledge_items
                 WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?)
             """, (workspace_id, f"%{query}%", f"%{query}%"))
-            
+
             items = []
             for row in cursor.fetchall():
                 items.append(KnowledgeItem(

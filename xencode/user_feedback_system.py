@@ -6,16 +6,15 @@ Implements user-centric development framework with feedback collection,
 user journey tracking, and satisfaction metrics.
 """
 
-import asyncio
 import json
+import logging
 import sqlite3
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
 from enum import Enum
-import logging
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +82,12 @@ class UserSatisfactionMetrics:
 
 class UserFeedbackManager:
     """Manages user feedback collection and analysis"""
-    
+
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or Path.home() / ".xencode" / "user_feedback.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_database()
-        
+
     def _init_database(self):
         """Initialize the feedback database"""
         with sqlite3.connect(self.db_path) as conn:
@@ -105,7 +104,7 @@ class UserFeedbackManager:
                     resolution_notes TEXT
                 )
             """)
-            
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_journey (
                     id TEXT PRIMARY KEY,
@@ -117,7 +116,7 @@ class UserFeedbackManager:
                     duration_ms INTEGER
                 )
             """)
-            
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_metrics (
                     user_id TEXT PRIMARY KEY,
@@ -130,9 +129,9 @@ class UserFeedbackManager:
                     total_sessions INTEGER
                 )
             """)
-            
+
             conn.commit()
-    
+
     async def collect_feedback(
         self,
         user_id: str,
@@ -151,10 +150,10 @@ class UserFeedbackManager:
             context=context or {},
             timestamp=datetime.now()
         )
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                INSERT INTO feedback 
+                INSERT INTO feedback
                 (id, user_id, feedback_type, rating, message, context, timestamp, resolved)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -168,10 +167,10 @@ class UserFeedbackManager:
                 feedback.resolved
             ))
             conn.commit()
-        
+
         logger.info(f"Collected feedback: {feedback.feedback_type.value} from user {user_id}")
         return feedback.id
-    
+
     async def track_user_journey(
         self,
         user_id: str,
@@ -190,10 +189,10 @@ class UserFeedbackManager:
             session_id=session_id,
             duration_ms=duration_ms
         )
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                INSERT INTO user_journey 
+                INSERT INTO user_journey
                 (id, user_id, event, context, timestamp, session_id, duration_ms)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -206,55 +205,55 @@ class UserFeedbackManager:
                 journey_step.duration_ms
             ))
             conn.commit()
-        
+
         return journey_step.id
-    
+
     async def calculate_user_satisfaction(self, user_id: str) -> UserSatisfactionMetrics:
         """Calculate comprehensive user satisfaction metrics"""
         with sqlite3.connect(self.db_path) as conn:
             # Get satisfaction ratings
             satisfaction_data = conn.execute("""
-                SELECT AVG(rating), COUNT(*) FROM feedback 
+                SELECT AVG(rating), COUNT(*) FROM feedback
                 WHERE user_id = ? AND feedback_type = ? AND rating IS NOT NULL
             """, (user_id, FeedbackType.SATISFACTION.value)).fetchone()
-            
+
             # Get NPS score (latest)
             nps_data = conn.execute("""
-                SELECT rating FROM feedback 
+                SELECT rating FROM feedback
                 WHERE user_id = ? AND feedback_type = ? AND rating IS NOT NULL
                 ORDER BY timestamp DESC LIMIT 1
             """, (user_id, FeedbackType.SATISFACTION.value)).fetchone()
-            
+
             # Calculate session metrics
             session_data = conn.execute("""
-                SELECT COUNT(DISTINCT session_id), 
+                SELECT COUNT(DISTINCT session_id),
                        AVG(duration_ms),
                        MAX(timestamp),
                        COUNT(*)
-                FROM user_journey 
+                FROM user_journey
                 WHERE user_id = ?
             """, (user_id,)).fetchone()
-            
+
             # Calculate feature adoption rate
             total_features = len(UserJourneyEvent)
             used_features = conn.execute("""
                 SELECT COUNT(DISTINCT event) FROM user_journey WHERE user_id = ?
             """, (user_id,)).fetchone()[0]
-            
+
             feature_adoption_rate = used_features / total_features if total_features > 0 else 0
-            
+
             # Calculate session frequency (sessions per week)
             first_session = conn.execute("""
                 SELECT MIN(timestamp) FROM user_journey WHERE user_id = ?
             """, (user_id,)).fetchone()[0]
-            
+
             if first_session:
                 first_date = datetime.fromisoformat(first_session)
                 weeks_active = max(1, (datetime.now() - first_date).days / 7)
                 session_frequency = (session_data[0] or 0) / weeks_active
             else:
                 session_frequency = 0
-            
+
             # Convert NPS rating (1-5) to NPS score (-100 to 100)
             nps_score = None
             if nps_data and nps_data[0]:
@@ -266,7 +265,7 @@ class UserFeedbackManager:
                     nps_score = 0
                 else:
                     nps_score = 100
-            
+
             return UserSatisfactionMetrics(
                 user_id=user_id,
                 nps_score=nps_score,
@@ -277,39 +276,39 @@ class UserFeedbackManager:
                 last_active=datetime.fromisoformat(session_data[2]) if session_data[2] else datetime.now(),
                 total_sessions=session_data[0] or 0
             )
-    
+
     async def get_feedback_summary(self, days: int = 30) -> Dict[str, Any]:
         """Get feedback summary for the last N days"""
         cutoff_date = datetime.now() - timedelta(days=days)
-        
+
         with sqlite3.connect(self.db_path) as conn:
             # Feedback by type
             feedback_by_type = {}
             for feedback_type in FeedbackType:
                 count = conn.execute("""
-                    SELECT COUNT(*) FROM feedback 
+                    SELECT COUNT(*) FROM feedback
                     WHERE feedback_type = ? AND timestamp > ?
                 """, (feedback_type.value, cutoff_date.isoformat())).fetchone()[0]
                 feedback_by_type[feedback_type.value] = count
-            
+
             # Average ratings
             avg_ratings = {}
             for feedback_type in FeedbackType:
                 avg_rating = conn.execute("""
-                    SELECT AVG(rating) FROM feedback 
+                    SELECT AVG(rating) FROM feedback
                     WHERE feedback_type = ? AND rating IS NOT NULL AND timestamp > ?
                 """, (feedback_type.value, cutoff_date.isoformat())).fetchone()[0]
                 avg_ratings[feedback_type.value] = avg_rating
-            
+
             # Top issues (unresolved feedback)
             top_issues = conn.execute("""
-                SELECT message, COUNT(*) as count FROM feedback 
+                SELECT message, COUNT(*) as count FROM feedback
                 WHERE resolved = FALSE AND timestamp > ?
-                GROUP BY message 
-                ORDER BY count DESC 
+                GROUP BY message
+                ORDER BY count DESC
                 LIMIT 10
             """, (cutoff_date.isoformat(),)).fetchall()
-            
+
             return {
                 "period_days": days,
                 "feedback_by_type": feedback_by_type,
@@ -321,14 +320,14 @@ class UserFeedbackManager:
 
 class UserPersonaManager:
     """Manages user personas and segmentation"""
-    
+
     def __init__(self, feedback_manager: UserFeedbackManager):
         self.feedback_manager = feedback_manager
-    
+
     async def identify_user_persona(self, user_id: str) -> str:
         """Identify user persona based on behavior patterns"""
         metrics = await self.feedback_manager.calculate_user_satisfaction(user_id)
-        
+
         # Simple persona classification based on usage patterns
         if metrics.session_frequency > 5 and metrics.feature_adoption_rate > 0.7:
             return "power_user"
@@ -340,7 +339,7 @@ class UserPersonaManager:
             return "inactive_user"
         else:
             return "casual_user"
-    
+
     async def get_persona_insights(self) -> Dict[str, Any]:
         """Get insights about user personas"""
         # This would be implemented with more sophisticated analysis

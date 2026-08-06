@@ -6,33 +6,31 @@ FastAPI router for analytics, reporting, and data insights endpoints including
 metrics collection, dashboard data, and comprehensive reporting capabilities.
 """
 
-import asyncio
-import io
 import json
 import os
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Import analytics components
 try:
-    from ...analytics_reporting_system import (
-        AnalyticsReportingSystem, 
-        ReportConfig, 
-        ReportFormat, 
-        ReportType,
-        DeliveryConfig,
-        DeliveryMethod
-    )
     from ...advanced_analytics_engine import AdvancedAnalyticsEngine
-    from ...analytics_integration import IntegratedAnalyticsOrchestrator
-    from ...analytics.metrics_collector import MetricsCollector
     from ...analytics.event_tracker import EventTracker
+    from ...analytics.metrics_collector import MetricsCollector
+    from ...analytics_integration import IntegratedAnalyticsOrchestrator
+    from ...analytics_reporting_system import (
+        AnalyticsReportingSystem,
+        DeliveryConfig,
+        DeliveryMethod,
+        ReportConfig,
+        ReportFormat,
+        ReportType,
+    )
     ANALYTICS_AVAILABLE = bool(os.environ.get("XENCODE_ENABLE_ANALYTICS"))
 except ImportError:
     ANALYTICS_AVAILABLE = False
@@ -243,12 +241,12 @@ async def get_analytics_system():
     """Dependency to get analytics system"""
     if not ANALYTICS_AVAILABLE:
         return _StubAnalyticsSystem()
-    
+
     try:
         # For now, return a mock system - in production this would be a singleton
         return AnalyticsReportingSystem()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get analytics system: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics system: {e}")  from e
 
 
 # Dependency to get metrics collector
@@ -256,11 +254,11 @@ async def get_metrics_collector():
     """Dependency to get metrics collector"""
     if not ANALYTICS_AVAILABLE:
         return _StubMetricsCollector()
-    
+
     try:
         return MetricsCollector()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get metrics collector: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics collector: {e}")  from e
 
 
 # Dependency to get event tracker
@@ -268,11 +266,11 @@ async def get_event_tracker():
     """Dependency to get event tracker"""
     if not ANALYTICS_AVAILABLE:
         return _StubEventTracker()
-    
+
     try:
         return EventTracker()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get event tracker: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get event tracker: {e}")  from e
 
 
 @router.get("/overview", response_model=AnalyticsOverview)
@@ -320,9 +318,9 @@ async def get_analytics_overview(
                 alerts=[],
                 last_updated=datetime.now()
             )
-            
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get analytics overview: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics overview: {e}")  from e
 
 
 @router.post("/metrics", response_model=MetricResponse)
@@ -333,7 +331,7 @@ async def record_metric(
     """Record a metric value"""
     try:
         timestamp = request.timestamp or datetime.now()
-        
+
         if ANALYTICS_AVAILABLE:
             await metrics_collector.record_metric(
                 name=request.name,
@@ -342,7 +340,7 @@ async def record_metric(
                 labels=request.labels,
                 timestamp=timestamp
             )
-        
+
         return MetricResponse(
             name=request.name,
             value=request.value,
@@ -350,9 +348,9 @@ async def record_metric(
             labels=request.labels,
             timestamp=timestamp
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to record metric: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record metric: {e}")  from e
 
 
 @router.get("/metrics")
@@ -373,7 +371,7 @@ async def get_metrics(
                 if '=' in label_pair:
                     key, value = label_pair.split('=', 1)
                     label_filters[key.strip()] = value.strip()
-        
+
         if ANALYTICS_AVAILABLE:
             metrics = await metrics_collector.get_metrics(
                 name=name,
@@ -400,16 +398,16 @@ async def get_metrics(
                     "timestamp": datetime.now().isoformat()
                 }
             ]
-        
+
         return {
             "metrics": metrics,
             "total_count": len(metrics),
             "time_range": time_range.value,
             "filters": {"name": name, "labels": label_filters}
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {e}")  from e
 
 
 @router.post("/events", response_model=EventResponse)
@@ -421,7 +419,7 @@ async def record_event(
     try:
         event_id = str(uuid.uuid4())
         timestamp = request.timestamp or datetime.now()
-        
+
         if ANALYTICS_AVAILABLE:
             await event_tracker.record_event(
                 event_id=event_id,
@@ -431,7 +429,7 @@ async def record_event(
                 session_id=request.session_id,
                 timestamp=timestamp
             )
-        
+
         return EventResponse(
             id=event_id,
             event_type=request.event_type,
@@ -440,9 +438,9 @@ async def record_event(
             session_id=request.session_id,
             timestamp=timestamp
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to record event: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record event: {e}")  from e
 
 
 @router.get("/events")
@@ -490,7 +488,7 @@ async def get_events(
                     "timestamp": datetime.now().isoformat()
                 }
             ]
-        
+
         return {
             "events": events,
             "total_count": len(events),
@@ -503,9 +501,9 @@ async def get_events(
                 "time_range": time_range.value
             }
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get events: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get events: {e}")  from e
 
 
 @router.post("/reports", response_model=ReportResponse)
@@ -517,7 +515,7 @@ async def generate_report(
     """Generate an analytics report"""
     try:
         report_id = str(uuid.uuid4())
-        
+
         # Start report generation in background
         background_tasks.add_task(
             generate_report_background,
@@ -525,7 +523,7 @@ async def generate_report(
             report_id,
             request
         )
-        
+
         return ReportResponse(
             report_id=report_id,
             report_type=request.report_type.value,
@@ -534,9 +532,9 @@ async def generate_report(
             created_at=datetime.now(),
             estimated_completion=datetime.now() + timedelta(minutes=5)
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate report: {e}")  from e
 
 
 @router.get("/reports/{report_id}")
@@ -557,11 +555,11 @@ async def get_report_status(
                 "created_at": datetime.now().isoformat(),
                 "completed_at": datetime.now().isoformat()
             }
-        
+
         return status
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get report status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get report status: {e}")  from e
 
 
 @router.get("/reports/{report_id}/download")
@@ -573,11 +571,11 @@ async def download_report(
     try:
         if ANALYTICS_AVAILABLE:
             report_data = await analytics_system.get_report_data(report_id)
-            
+
             # Create streaming response
             def generate_report_stream():
                 yield report_data
-            
+
             return StreamingResponse(
                 generate_report_stream(),
                 media_type="application/octet-stream",
@@ -593,18 +591,18 @@ async def download_report(
                     "metrics": {"total_events": 1000, "active_users": 50}
                 }
             }
-            
+
             def generate_mock_stream():
                 yield json.dumps(mock_report, indent=2)
-            
+
             return StreamingResponse(
                 generate_mock_stream(),
                 media_type="application/json",
                 headers={"Content-Disposition": f"attachment; filename=report_{report_id}.json"}
             )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to download report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download report: {e}")  from e
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
@@ -643,7 +641,7 @@ async def get_dashboard_data(
                     ]
                 }
             }
-        
+
         return DashboardResponse(
             dashboard_type=request.dashboard_type,
             data=dashboard_data,
@@ -651,9 +649,9 @@ async def get_dashboard_data(
             refresh_interval=request.refresh_interval,
             next_refresh=datetime.now() + timedelta(seconds=request.refresh_interval)
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get dashboard data: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get dashboard data: {e}")  from e
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -666,9 +664,9 @@ async def health_check():
             "event_tracker": "healthy" if ANALYTICS_AVAILABLE else "unavailable",
             "report_generator": "healthy" if ANALYTICS_AVAILABLE else "unavailable"
         }
-        
+
         overall_status = "healthy" if all(status == "healthy" for status in components.values()) else "degraded"
-        
+
         return HealthCheckResponse(
             status=overall_status,
             timestamp=datetime.now(),
@@ -677,9 +675,9 @@ async def health_check():
             version="3.0.0",
             environment="development"
         )
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {e}")  from e
 
 
 @router.get("/insights")
@@ -717,11 +715,11 @@ async def get_insights(
                 },
                 "generated_at": datetime.now().isoformat()
             }
-        
+
         return insights
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get insights: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get insights: {e}")  from e
 
 
 # Background tasks
@@ -743,11 +741,11 @@ async def generate_report_background(
                 filters=request.filters,
                 include_raw_data=request.include_raw_data
             )
-            
+
             # Send email if requested
             if request.email_delivery:
                 await analytics_system.send_report_email(report_id, request.email_delivery)
-        
+
         # Update report status in database/cache
         try:
             # In a real implementation, this would update the database

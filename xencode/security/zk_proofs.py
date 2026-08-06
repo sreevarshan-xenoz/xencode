@@ -13,7 +13,7 @@ from enum import Enum
 import json
 import secrets
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
@@ -667,7 +667,7 @@ class ZKProofManager:
         try:
             witness_index = set_elements.index(element_to_prove)
         except ValueError:
-            raise ValueError(f"Element {element_to_prove} not found in set")
+            raise ValueError(f"Element {element_to_prove} not found in set")  from None
             
         # Create statement
         statement_id = self.create_statement(

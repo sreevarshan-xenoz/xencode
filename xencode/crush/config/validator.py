@@ -88,7 +88,7 @@ class ConfigValidator:
                 raise ValidationError(
                     str(e),
                     field=f"models.{model_type}"
-                )
+                )  from e
             
             # Check that provider exists
             if selected_model.provider not in config.providers:
@@ -109,7 +109,7 @@ class ConfigValidator:
                 raise ValidationError(
                     str(e),
                     field=f"providers.{provider_name}"
-                )
+                )  from e
         
         # Validate LSP clients
         for language, lsp_config in config.lsp.items():
@@ -119,7 +119,7 @@ class ConfigValidator:
                 raise ValidationError(
                     str(e),
                     field=f"lsp.{language}"
-                )
+                )  from e
         
         # Validate MCP servers
         for server_name, mcp_config in config.mcp.items():
@@ -129,7 +129,7 @@ class ConfigValidator:
                 raise ValidationError(
                     str(e),
                     field=f"mcp.{server_name}"
-                )
+                )  from e
         
         # Validate options
         try:
@@ -138,7 +138,7 @@ class ConfigValidator:
             raise ValidationError(
                 str(e),
                 field="options"
-            )
+            )  from e
         
         # Validate permissions
         try:
@@ -147,7 +147,7 @@ class ConfigValidator:
             raise ValidationError(
                 str(e),
                 field="permissions"
-            )
+            )  from e
         
         # Validate agents
         for agent_name, agent_config in config.agents.items():
@@ -157,7 +157,7 @@ class ConfigValidator:
                 raise ValidationError(
                     str(e),
                     field=f"agents.{agent_name}"
-                )
+                )  from e
         
         return warnings
     

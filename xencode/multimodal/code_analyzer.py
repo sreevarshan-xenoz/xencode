@@ -1,9 +1,8 @@
 """Code repository analyzer."""
 
-from pathlib import Path
-from typing import Dict, Any, List
 import ast
-import re
+from pathlib import Path
+from typing import Any, Dict
 
 
 class CodeAnalyzer:
@@ -28,11 +27,11 @@ class CodeAnalyzer:
     def analyze_directory(self, directory_path: str, max_depth: int = 3) -> Dict[str, Any]:
         """
         Analyze a code directory/repository.
-        
+
         Args:
             directory_path: Path to the directory to analyze.
             max_depth: Maximum depth to traverse.
-            
+
         Returns:
             Dictionary containing analysis results.
         """
@@ -53,17 +52,17 @@ class CodeAnalyzer:
             for file_path in path.rglob('*'):
                 if file_path.is_file() and self._should_analyze(file_path):
                     result["total_files"] += 1
-                    
+
                     ext = file_path.suffix.lower()
                     language = self.LANGUAGE_EXTENSIONS.get(ext, 'Unknown')
-                    
+
                     if language not in result["languages"]:
                         result["languages"][language] = 0
                         result["files_by_language"][language] = []
-                    
+
                     result["languages"][language] += 1
                     result["files_by_language"][language].append(str(file_path.relative_to(path)))
-                    
+
                     # Count lines
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -80,10 +79,10 @@ class CodeAnalyzer:
     def analyze_python_file(self, file_path: str) -> Dict[str, Any]:
         """
         Analyze a Python file using AST.
-        
+
         Args:
             file_path: Path to the Python file.
-            
+
         Returns:
             Dictionary containing Python-specific analysis.
         """
@@ -107,7 +106,7 @@ class CodeAnalyzer:
                 result["lines_of_code"] = len(content.splitlines())
 
             tree = ast.parse(content)
-            
+
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     result["classes"].append(node.name)
@@ -132,9 +131,9 @@ class CodeAnalyzer:
         # Skip hidden files and common directories to ignore
         if any(part.startswith('.') for part in path.parts):
             return False
-        
+
         ignore_dirs = {'__pycache__', 'node_modules', 'venv', 'env', 'dist', 'build'}
         if any(ignore_dir in path.parts for ignore_dir in ignore_dirs):
             return False
-        
+
         return path.suffix.lower() in self.LANGUAGE_EXTENSIONS
