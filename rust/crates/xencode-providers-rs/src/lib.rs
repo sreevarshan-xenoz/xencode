@@ -1,11 +1,16 @@
 use std::fmt;
-use futures_util::StreamExt;
+use std::sync::Mutex;
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use xencode_models_rs::OllamaClient;
 
+pub mod anthropic;
 pub mod gemini;
 pub mod qwen;
+pub mod retry;
+
+use retry::RetryConfig;
 
 #[derive(Debug)]
 pub enum ProviderError {
@@ -40,12 +45,20 @@ struct OllamaResponse {
 
 /// ProviderManager abstracts over local and cloud models.
 ///
-/// Supports Ollama (local), OpenRouter (cloud), Qwen (cloud), and Gemini (cloud).
+/// Supports Ollama (local), OpenRouter (cloud), Qwen (cloud), Gemini (cloud),
+/// and Anthropic (cloud).
+///
+/// Features:
+/// - Automatic provider routing based on model prefix
+/// - Retry with exponential backoff on transient failures
+/// - Health tracking across all providers
 pub struct ProviderManager {
     ollama_client: OllamaClient,
     openrouter_api_key: Option<String>,
     qwen_api_key: Option<String>,
     gemini_api_key: Option<String>,
+    anthropic_api_key: Option<String>,
+    retry_config: RetryConfig,
     client: reqwest::Client,
 }
 
@@ -55,6 +68,7 @@ impl ProviderManager {
         openrouter_api_key: Option<String>,
         qwen_api_key: Option<String>,
         gemini_api_key: Option<String>,
+        anthropic_api_key: Option<String>,
     ) -> Self {
         let client = reqwest::Client::new();
         Self {
@@ -62,19 +76,53 @@ impl ProviderManager {
             openrouter_api_key,
             qwen_api_key,
             gemini_api_key,
+            anthropic_api_key,
+            retry_config: RetryConfig::default(),
             client,
         }
+    }
+
+    /// Set a custom retry configuration.
+    pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
+        self.retry_config = config;
+        self
+    }
+
+    /// Get the current retry configuration.
+    pub fn retry_config(&self) -> &RetryConfig {
+        &self.retry_config
     }
 
     /// Generate a response asynchronously (resolves when the full response is ready).
     ///
     /// Routes to the appropriate provider based on the model prefix:
+    /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
+    ///
+    /// Retries on transient errors (network failures, 5xx, 429) using exponential backoff.
     pub async fn generate(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+        let model_owned = model.to_string();
+        let messages_owned = messages.to_vec();
+
+        retry::retry_async(&self.retry_config, || async {
+            self.generate_inner(&model_owned, &messages_owned).await
+        }).await
+    }
+
+    /// Inner generate without retry wrapping (used by retry logic).
+    async fn generate_inner(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
         // Route based on model prefix
+        if let Some(inner_model) = model.strip_prefix("anthropic:") {
+            if let Some(ref key) = self.anthropic_api_key {
+                let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
+                return provider.generate(inner_model, messages, None).await;
+            }
+            return Err(ProviderError::Api("Anthropic API key not configured".to_string()));
+        }
+
         if let Some(inner_model) = model.strip_prefix("qwen:") {
             if let Some(ref key) = self.qwen_api_key {
                 let provider = qwen::QwenProvider::new(key.clone(), None);
@@ -91,14 +139,14 @@ impl ProviderManager {
             return Err(ProviderError::Api("Google Gemini API key not configured".to_string()));
         }
 
-        // OpenRouter route
+        // OpenRouter route (models with a slash, e.g. "openai/gpt-4")
         if model.contains('/') && self.openrouter_api_key.is_some() {
             return self.generate_nonstream_openrouter(model, messages).await;
         }
 
         // Default: local Ollama
         let url = format!("{}/api/chat", self.ollama_client.base_url());
-        
+
         let payload = serde_json::json!({
             "model": model,
             "messages": messages,
@@ -122,10 +170,13 @@ impl ProviderManager {
     /// Generate a response and stream it token-by-token.
     ///
     /// Routes to the appropriate provider based on the model prefix:
+    /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
+    ///
+    /// Retries on transient errors (network failures, 5xx, 429) using exponential backoff.
     pub async fn generate_stream<F>(
         &self,
         model: &str,
@@ -135,7 +186,42 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
+        let model_owned = model.to_string();
+        let messages_owned = messages.to_vec();
+
+        // Use Mutex for interior mutability so the callback can be shared across retry attempts.
+        // The mutex is locked only during the synchronous callback invocation (per token),
+        // not across await points, so it remains Send-compatible.
+        let cb = Mutex::new(callback);
+
+        retry::retry_async(&self.retry_config, || async {
+            let cb_ref = &cb;
+            self.generate_stream_inner(&model_owned, &messages_owned, |token| {
+                let mut guard = cb_ref.lock().unwrap();
+                guard(token);
+            }).await
+        }).await
+    }
+
+    /// Inner stream generate without retry wrapping.
+    async fn generate_stream_inner<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        callback: F,
+    ) -> Result<String, ProviderError>
+    where
+        F: FnMut(&str),
+    {
         // Route based on model prefix
+        if let Some(inner_model) = model.strip_prefix("anthropic:") {
+            if let Some(ref key) = self.anthropic_api_key {
+                let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
+                return provider.generate_stream(inner_model, messages, None, callback).await;
+            }
+            return Err(ProviderError::Api("Anthropic API key not configured".to_string()));
+        }
+
         if let Some(inner_model) = model.strip_prefix("qwen:") {
             if let Some(ref key) = self.qwen_api_key {
                 let provider = qwen::QwenProvider::new(key.clone(), None);
@@ -159,6 +245,8 @@ impl ProviderManager {
             self.generate_stream_ollama(model, messages, callback).await
         }
     }
+
+
 
     async fn generate_stream_ollama<F>(
         &self,

@@ -9,7 +9,6 @@ This module implements the three execution modes as specified in the plan:
 
 import uuid
 from datetime import datetime
-from enum import Enum
 from typing import Any, Dict, List
 
 from .context_engine import ContextEngine
@@ -18,13 +17,6 @@ from .planner import Planner
 from .risk_scorer import RiskScorer
 from .safety_gate import ExecutionMode, SafetyGate
 from .terminal_cognition_layer import TerminalCognitionLayer
-
-
-class ExecutionMode(Enum):
-    """Execution modes for ByteBot operations"""
-    ASSIST = "assist"      # Suggest only, no execution
-    EXECUTE = "execute"    # Auto-run safe steps, confirm risky ones
-    AUTONOMOUS = "autonomous"  # Run everything except vetoed operations
 
 
 class ExecutionModeHandler:

@@ -43,6 +43,9 @@ tenacity>=8.0.0
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-ollama>=0.2.0
+watchdog>=4.0.0
+# executing is pulled in by stack_data/ipython tooling; pinned for ByteBot context engine
+
 duckduckgo-search>=4.0.0
 
 # Ensemble improvements - Semantic voting and tokenization
