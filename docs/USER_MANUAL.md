@@ -4,67 +4,163 @@
 1. [Introduction](#introduction)
 2. [Installation](#installation)
 3. [Getting Started](#getting-started)
-4. [Basic Usage](#basic-usage)
-5. [Advanced Features](#advanced-features)
-6. [Command Reference](#command-reference)
-7. [Troubleshooting](#troubleshooting)
-8. [Examples](#examples)
+4. [Rust CLI](#rust-cli)
+5. [Rust TUI](#rust-tui)
+6. [Python CLI (Legacy)](#python-cli-legacy)
+7. [Command Reference](#command-reference)
+8. [Troubleshooting](#troubleshooting)
+9. [Examples](#examples)
 
 ## Introduction
 
-Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, and workspace collaboration features with a focus on privacy and offline operation.
+Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, workspace collaboration, and plugin management with a focus on privacy and offline operation.
+
+### Architecture
+Xencode uses a **dual-stack architecture**:
+- **Rust core** (12 crates, 65 tests) — Primary CLI/TUI, server, code analysis, security scanning, plugin system, collaboration sync
+- **Python stack** (~180+ files) — Legacy entry points, Textual TUI widgets, agentic workflows, analytics, FastAPI server
+
+The Rust binary (`xencode`) is the recommended entry point.
+
+> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Full codebase reference with architecture diagrams, crate details, test coverage, and remaining work items.
 
 ### Key Features
-- **LangChain Agentic System**: Production-ready agent with 9 specialized tools
-- **Multi-Agent Collaboration**: 4 specialized agents with intelligent task delegation
-- **Ensemble Learning**: Multiple models working together for better results
-- **Conversation Memory**: Persistent conversation history
-- **Smart Model Selection**: Automatic model switching based on task type
+- **Rust TUI**: Ratatui-based terminal interface with 14 interactive feature panels
+- **Code Analysis**: Language-aware AST analysis (Python, JS/TS, Rust) + OWASP vulnerability scanning
+- **HTTP/WebSocket Server**: Axum-based collaboration server with session management
+- **Plugin System**: Plugin trait, host, registry with lifecycle management
+- **Multi-Model Support**: Ollama local + OpenRouter cloud providers
+- **Conversation Memory**: Persistent session history with caching
 
 ## Installation
 
-### Prerequisites
-- Python 3.8 or higher
-- Ollama installed and running
-- 4GB+ RAM recommended
+### Rust Binary (Recommended)
 
-### Quick Install
+```bash
+# Build from source (requires Rust 1.75+)
+cd rust && cargo build --release -p xencode-cli
+./target/release/xencode --help
+```
 
-**Linux / macOS**
+> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Lists all 12 Rust crates with test counts, status, and migration phase tracking.
+
+### Python Stack (Legacy)
+
 ```bash
 git clone https://github.com/sreevarshan-xenoz/xencode.git
 cd xencode
-chmod +x install.sh && ./install.sh
+pip install -e .
+pip install -r requirements.txt
 ```
 
-**Windows**
-```powershell
-git clone https://github.com/sreevarshan-xenoz/xencode.git
-cd xencode
-.\install.ps1
-```
-
-### Manual Setup
-
-1. Install Ollama from https://ollama.ai
-2. Start Ollama service: `ollama serve`
-3. Install a model: `ollama pull qwen3:4b`
-4. Clone Xencode: `git clone https://github.com/sreevarshan-xenoz/xencode.git`
-5. Navigate to directory: `cd xencode`
-6. Install dependencies: `pip install -e .`
+### Prerequisites
+- **Rust 1.75+** (for building from source)
+- **Python 3.8+** (for Python stack)
+- **Ollama** installed and running (`ollama serve`)
+- **A model** installed: `ollama pull qwen3:4b`
+- **4GB+ RAM** recommended
 
 ## Getting Started
 
-### Starting Xencode
+### Rust CLI
 
-**Interactive Mode:**
+The Rust binary is the primary entry point:
+
 ```bash
-./xencode.sh
+# Verify installation
+xencode --help
+
+# Launch TUI (default experience)
+xencode tui
+
+# Scan workspace
+xencode scan . --max-depth 2
+
+# List models
+xencode models list
+
+# Analyze code for issues and vulnerabilities
+xencode analyze src/
+xencode analyze src/main.rs --format json
+
+# Start the collaboration server
+xencode server --port 8765
+
+# Manage plugins
+xencode plugin list
+xencode plugin install ./my-plugin/
+xencode plugin remove my-plugin
+
+# Run a quick query
+xencode query "Explain clean architecture"
+
+# View conversation memory
+xencode memory list
+
+# Check cache stats
+xencode cache stats
+
+# Show config
+xencode config show
 ```
 
-**Inline Query:**
+### Rust TUI
+
+Launch the interactive TUI with `xencode tui`:
+
+```
+┌─────────────────┬──────────────────────────────────────┬──────────────────┐
+│  File Explorer   │          Code Editor                  │    Chat Panel    │
+│  (Ctrl+Tab)     │                                       │   (Ctrl+Tab)    │
+│                 │                                       │                  │
+│ src/            │   // Edit your code here             │  You > Hello!    │
+│   main.rs      │                                        │                  │
+│   lib.rs       │                                        │  AI > Hi there!  │
+│ tests/          │                                       │                  │
+└─────────────────┴──────────────────────────────────────┴──────────────────┘
+
+```
+
+**TUI keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle focus between panels |
+| `Esc` | Close overlay / go back |
+| `Ctrl+F` | Open Feature Navigator (14 panels) |
+| `Ctrl+H` | Open Provider Health Dashboard |
+| `Enter` | Activate / select |
+| `i` | Enter insert mode (editor) |
+| `e` | Enter normal mode (editor) |
+| `Up/Down` | Navigate lists |
+| Mouse scroll | Scroll panels |
+
+**Feature Navigator panels (Ctrl+F → select → Enter):**
+
+| Panel | Description |
+|-------|-------------|
+| Performance Dashboard | Session stats, file breakdown |
+| Provider Health | Health checks with status icons |
+| Project Analyzer | Workspace file type analysis |
+| Git Commit | Commit message input with cursor |
+| ByteBot Agent | Step-through autonomous task execution |
+| Collaboration Hub | Session sharing, member status, sync |
+| Voice Interface | Audio level meter, commands, transcript |
+| Terminal Assistant | Shell command suggestions, risk badges |
+| Security Auditor | Vulnerability findings, severity bars |
+| Performance Profiler | Gauges, function timing, hot paths |
+| Custom Models | Profile list, parameter sliders |
+| Learning Mode | Lesson viewer, code examples |
+| Multi-Language | Language detection, translation |
+
+> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — See the **Rust TUI** section for the full feature panel table with status indicators and implementation details.
+
+### Python CLI (Legacy)
+
 ```bash
+./xencode.sh
 ./xencode.sh "Explain how to reverse a linked list in Python"
+./xencode.sh -m llama3.1:8b "Write a Python function to calculate factorial"
 ```
 
 ### First-Time Setup
@@ -75,204 +171,194 @@ On first run, Xencode will guide you through:
 3. Installing a recommended model if none found
 4. Configuring default settings
 
-## Basic Usage
-
-### Chat Mode
-Enter chat mode by running `./xencode.sh` without arguments. You can then have a conversation with the AI:
-
-```
-$ ./xencode.sh
-[Immersive banner appears]
-
-You › Hello, can you help me with Python?
-
-Xencode › [Thinking...]
-
-Xencode › Of course! I'd be happy to help you with Python. What specifically would you like assistance with?
-```
-
-### Inline Queries
-For quick questions, use inline mode:
-
-```bash
-$ ./xencode.sh "How do I sort a list in Python?"
-You can sort a list in Python using the `sort()` method or the `sorted()` function...
-
-$ ./xencode.sh "Debug this code: my_list = [3, 1, 4]; print(my_list.sort())"
-The issue is that the `sort()` method sorts the list in-place and returns `None`...
-```
-
-### Model Selection
-Specify a model with the `-m` flag:
-
-```bash
-./xencode.sh -m llama3.1:8b "Write a Python function to calculate factorial"
-```
-
 ## Advanced Features
 
+### Code Analysis
+
+Analyze source code for style issues, bugs, and security vulnerabilities:
+
+```bash
+# Analyze a directory (recursive)
+xencode analyze src/
+
+# Analyze a single file with JSON output
+xencode analyze src/main.rs --format json
+
+# Results show: issue type, severity (Low/Medium/High/Critical),
+# file location, description, and suggestion
+```
+
+### Security Scanning
+
+The Rust analyzer includes OWASP-focused vulnerability scanning:
+- Hardcoded secrets (passwords, API keys, tokens)
+- SQL injection patterns
+- Command injection risks
+- Weak cryptography (MD5, SHA1, weak RNG)
+- Path traversal vulnerabilities
+- SSRF patterns
+
+### Collaboration Server
+
+Start a real-time collaboration session:
+
+```bash
+# Start server on default port
+xencode server
+
+# Start on a specific port
+xencode server --port 8765
+
+# Server provides:
+# - WebSocket peer broadcast
+# - Session management
+# - Health and status endpoints
+# - Model listing
+```
+
+### Plugin System
+
+Extend functionality with plugins:
+
+```bash
+# List installed plugins
+xencode plugin list
+
+# Install a plugin from a directory
+xencode plugin install ./my-plugin/
+
+# Remove a plugin
+xencode plugin remove my-plugin
+```
+
+Plugins implement the `XencodePlugin` trait with lifecycle methods:
+- `initialize` — Called when plugin is loaded
+- `handle_event` — Process an event and return a response
+- `shutdown` — Clean up resources
+
 ### Conversation Memory
-Xencode remembers context from previous exchanges in the same session:
 
-```
-You › I'm working on a web scraping project in Python
-Xencode › Great! What specific aspect of web scraping are you working on?
+```bash
+# List all conversation sessions
+xencode memory list
 
-You › I need to extract product prices from an e-commerce site
-Xencode › For extracting product prices, you can use libraries like BeautifulSoup...
-```
-
-### File Operations
-Xencode can read, write, and modify files:
-
-**Reading a file:**
-```
-You › /file read my_script.py
+# Show specific session
+xencode memory show <session-id>
 ```
 
-**Creating a file:**
-```
-You › /file create new_feature.py
-[AI generates code and creates the file]
-```
+### Cache Management
 
-### Multi-Agent Collaboration
-Xencode uses specialized agents for different tasks:
-- **CodeAgent**: Programming tasks
-- **ResearchAgent**: Web search and analysis  
-- **ExecutionAgent**: File/command operations
-- **GeneralAgent**: General queries
+```bash
+# Show cache stats (hits, misses, evictions)
+xencode cache stats
+
+# Clear all cached responses
+xencode cache clear
+```
 
 ## Command Reference
 
-### Chat Commands
-- `/help` - Show help information
-- `/clear` - Clear current conversation
-- `/memory` - Show memory usage
-- `/sessions` - List all sessions
-- `/switch <id>` - Switch to a different session
-- `/cache` - Show cache information
-- `/status` - Show system status
-- `/export` - Export conversation to file
-- `/project` - Show project context
-- `/theme <name>` - Change UI theme
-- `/model <name>` - Switch to a different model
-- `/models` - List available models with health status
+### Rust CLI Commands
 
-### File Operations
-- `/file create <path> <content>` - Create a file
-- `/file read <path>` - Read a file
-- `/file write <path> <content>` - Write to a file
-- `/file delete <path>` - Delete a file
+```
+Usage: xencode <COMMAND>
 
-### Model Management
-- `--list-models` - List installed models
-- `--update <model>` - Update a model (use with -m)
-- `-m <model>` - Specify a model for the query
+Commands:
+  scan      Scan a workspace and list all entries
+  config    Manage configuration
+  models    List and check models
+  cache     Manage response cache
+  query     Run a query
+  memory    Manage conversation memory
+  tui       Launch the TUI
+  server    Start the collaboration server
+  analyze   Analyze code for issues and vulnerabilities
+  plugin    Manage plugins
+  help      Print this message or the help of the given subcommand
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### Python CLI Commands (Legacy)
+- `./xencode.sh` — Launch interactive chat
+- `./xencode.sh "query"` — Inline query
+- `./xencode.sh -m <model>` — Specify model
+- `./xencode.sh --list-models` — List installed models
+- `/help` — Show help
+- `/clear` — Clear conversation
+- `/sessions` — List sessions
+- `/model <name>` — Switch model
 
 ## Examples
 
-### Example 1: Code Review
-```
-$ ./xencode.sh
-You › I wrote this Python function to calculate Fibonacci numbers. Can you review it?
+### Example 1: Code Analysis
+```bash
+# Analyze a Python project for issues
+$ xencode analyze src/
+📊 Analysis Report for src/
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def fibonacci(n):
-    if n <= 1:
-        return n
-    else:
-        return fibonacci(n-1) + fibonacci(n-2)
+📄 main.py
+  ⚠️ [MEDIUM] Unused variable: 'result' on line 42
+     Suggestion: Remove or use the variable
+  ⚠️ [LOW] Line too long (120 chars) on line 15
+     Suggestion: Break into multiple lines
 
-Xencode › [Thinking...]
+📄 utils.py
+  🔴 [CRITICAL] Hardcoded API key on line 5
+     Suggestion: Use environment variable instead
+  ⚠️ [MEDIUM] Bare except clause on line 23
+     Suggestion: Catch specific exceptions
 
-Xencode › Your function correctly implements the Fibonacci sequence using recursion. However, there are some performance considerations...
-
-You › Can you suggest a more efficient version?
-
-Xencode › Certainly! Here's an iterative version that's much more efficient...
-```
-
-### Example 2: File Operations
-```
-You › /file create fibonacci.py
-def fibonacci(n):
-    if n <= 1:
-        return n
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
-
-You › Thanks! Now can you add a test function to this file?
-
-Xencode › [Thinking...]
-
-Xencode › I'll add a test function to your fibonacci.py file...
-[file is updated with test function]
-
-You › /file read fibonacci.py
-[Shows the updated file with both functions]
+📊 Summary: 4 issues found (1 critical, 2 medium, 1 low)
 ```
 
-### Example 3: Complex Problem Solving
-```
-$ ./xencode.sh
-You › I need to build a simple web scraper that extracts product names and prices from an e-commerce site. Can you help me design it?
+### Example 2: Collaboration Server
+```bash
+# Start the server
+$ xencode server --port 8765
+🚀 Xencode server starting on http://0.0.0.0:8765
 
-Xencode › [Thinking...]
+# In another terminal, check health
+$ curl http://localhost:8765/
+{"status":"online","service":"Xencode Server","version":"0.1.0"}
 
-Xencode › I'll help you design a web scraper. Here's an approach using Python with requests and BeautifulSoup...
-
-You › That looks good. Can you also add error handling and rate limiting?
-
-Xencode › Absolutely! Here's the enhanced version with error handling and rate limiting...
-```
-
-### Example 4: Model Comparison
-```
-$ ./xencode.sh --list-models
-📦 Installed Models
-┌─────────────────────┬──────────┬───────────────┬────────────┐
-│ Model               │ Status   │ Response Time │ Last Check │
-├─────────────────────┼──────────┼───────────────┼────────────┤
-│ llama3.1:8b         │ ✅ Healthy│ 1.234s       │ 14:30:22   │
-│ mistral:7b          │ ✅ Healthy│ 0.987s       │ 14:30:21   │
-│ qwen3:4b            │ ✅ Healthy│ 1.456s       │ 14:30:20   │
-└─────────────────────┴──────────┴───────────────┴────────────┘
-
-$ ./xencode.sh -m mistral:7b "Compare Python and JavaScript for backend development"
-[Response from mistral:7b model]
-
-$ /model qwen3:4b
-✅ Model switched to qwen3:4b
-
-$ "Same question but from your perspective?"
-[Response from qwen3:4b model with different insights]
+# List available models via API
+$ curl http://localhost:8765/api/models
+{"models":{"qwen3:4b":{"name":"qwen3:4b","status":"healthy","response_time":"1.2s"}}}
 ```
 
-### Example 5: Session Management
+### Example 3: Running the TUI
+```bash
+$ xencode tui
+
+# The TUI opens with 3 panels: File Explorer | Code Editor | Chat
+# Press Ctrl+F to open the Feature Navigator
+# Select any panel with arrow keys + Enter
+# Press Esc to close an overlay
+# Press Tab to cycle focus between main panels
 ```
-$ ./xencode.sh
-You › Let's start a new session about database design
 
-Xencode › Sure! What specific aspect of database design are you interested in?
+### Example 4: Plugin Management
+```bash
+$ xencode plugin list
+🔌 Installed Plugins
+  No plugins installed.
 
-[After several exchanges...]
+$ xencode plugin install ./my-custom-plugin/
+✅ Plugin 'my-custom-plugin' installed successfully
 
-You › /sessions
-💬 Conversation Sessions
-┌────────────────────────────┬─────────┬────────┬────────────┬──────────────┐
-│ Session ID                 │ Messages│ Model  │ Created    │ Last Updated │
-├────────────────────────────┼─────────┼────────┼────────────┼──────────────┤
-│ 🎯 session_1634567890     │ 5       │ qwen3:4b│ 2023-10-19 │ 14:35:42     │
-│ session_1634567880        │ 12      │ llama3.1:8b│ 2023-10-19 │ 14:30:15     │
-└────────────────────────────┴─────────┴────────┴────────────┴──────────────┘
+$ xencode plugin list
+🔌 Installed Plugins
+  my-custom-plugin v1.0.0 — Custom analysis plugin
+```
 
-You › /switch session_1634567880
-✅ Switched to session: session_1634567880
-
-You › What were we discussing in this session?
-Xencode › In the previous session, we were discussing...
+### Example 5: Short Query
+```bash
+$ xencode query "What does this Rust code do?"
+[Query runs against configured model...]
 ```
 
 ## Troubleshooting

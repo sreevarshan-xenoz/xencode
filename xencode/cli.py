@@ -1524,7 +1524,7 @@ def history(ctx, pattern, limit):
                 timestamp = cmd_data.get('timestamp', '')
                 if timestamp:
                     try:
-                        from datetime import datetime
+                        from datetime import datetime, timedelta
                         dt = datetime.fromisoformat(timestamp)
                         timestamp = dt.strftime("%Y-%m-%d %H:%M")
                     except Exception:
@@ -3061,6 +3061,369 @@ def version():
         title="Version Info",
         border_style="green"
     ))
+
+
+
+
+
+@cli.group()
+def vault():
+    """Credential Vault commands - Manage encrypted API keys and secrets
+
+    Xencode's credential vault stores API keys and secrets in an encrypted
+    JSON file using Fernet (AES-128-CBC + HMAC SHA256). Commands allow you
+    to initialize, inspect, and migrate secrets into the vault.
+
+    Available commands:
+        init      - Initialize (create) a new credential vault
+        migrate   - Migrate plaintext API keys from config file into the vault
+        status    - Show vault status and storage information
+
+    Examples:
+        xencode vault init
+        xencode vault migrate --config-path ~/.xencode/config.json
+        xencode vault migrate --delete-after
+        xencode vault status
+    """
+    pass
+
+
+@vault.command()
+@click.option('--vault-path', type=click.Path(), help='Path for vault file (default: ~/.xencode/vault.json)')
+@click.option('--master-key', help='Master key for encryption (auto-derived if not provided)')
+def init(vault_path, master_key):
+    """Initialize (create) a new credential vault
+
+    Creates the vault directory and an empty vault file. Safe to run
+    multiple times — won't overwrite an existing vault.
+
+    Examples:
+        xencode vault init
+        xencode vault init --vault-path /custom/path/vault.json
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        result = JsonFileCredentialVault.init_vault(
+            vault_path=Path(vault_path) if vault_path else None,
+            master_key=master_key,
+        )
+
+        if result.get("error"):
+            console.print(f"[red]❌ {result['error']}[/red]")
+            return
+
+        if result.get("already_exists"):
+            console.print(f"[yellow]⏳ Vault already exists at: {result['vault_path']}[/yellow]")
+        else:
+            console.print(f"[green]✅ Vault initialized at: {result['vault_path']}[/green]")
+            console.print("[green]✅ Encryption available: Yes (Fernet AES-128-CBC)[/green]")
+            console.print("[yellow]💡 Use 'xencode vault migrate' to migrate existing keys[/yellow]")
+
+    except ImportError:
+        console.print("[red]❌ JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]❌ Vault init failed: {e}[/red]")
+
+
+@vault.command()
+@click.option('--config-path', type=click.Path(), help='Path to config file to scan for plaintext API keys')
+@click.option('--vault-path', type=click.Path(), help='Path to vault file (default: ~/.xencode/vault.json)')
+@click.option('--master-key', help='Master key for encryption (auto-derived if not provided)')
+@click.option('--delete-after', is_flag=True, help='Replace migrated keys in config with env-var references')
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompt')
+def migrate(config_path, vault_path, master_key, delete_after, yes):
+    """Migrate plaintext API keys from config file into the vault
+
+    Scans your config file for known API key fields (openai_api_key,
+    anthropic_api_key, etc.) and stores any plaintext values into
+    the encrypted vault. Environment variable references (${VAR})
+    are skipped automatically.
+
+    Examples:
+        xencode vault migrate
+        xencode vault migrate --config-path ~/.xencode/config.json
+        xencode vault migrate --delete-after
+        xencode vault migrate --vault-path ./vault.json -y
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        config_path_obj = Path(config_path) if config_path else None
+        vault_path_obj = Path(vault_path) if vault_path else None
+
+        if not yes:
+            msg = "Scan config file for plaintext API keys and migrate to encrypted vault?"
+            if not Confirm.ask(msg, default=True):
+                console.print("[yellow]Migration cancelled[/yellow]")
+                return
+
+        with console.status("[bold blue]\U0001f50d Scanning config and migrating keys..."):
+            result = JsonFileCredentialVault.migrate_from_config(
+                config_path=config_path_obj,
+                vault_path=vault_path_obj,
+                master_key=master_key,
+                delete_after=delete_after,
+            )
+
+        vault_path_display = result.get("vault_path", "")
+        if vault_path_display:
+            console.print(f"\n[cyan]Vault:[/cyan] {vault_path_display}")
+
+        if result.get("config_path"):
+            console.print(f"[cyan]Config:[/cyan] {result['config_path']}")
+
+        migrated = result.get("migrated", 0)
+        skipped = result.get("skipped", 0)
+        errors = result.get("errors", [])
+
+        if migrated > 0:
+            console.print(f"\n[green]\u2705 Migrated {migrated} credential(s) to encrypted vault[/green]")
+
+        if skipped > 0:
+            console.print(f"[yellow]\u23e9 Skipped {skipped} env-var references (already secure)[/yellow]")
+
+        if errors:
+            console.print(f"\n[yellow]\u26a0\ufe0f  Notes:[/yellow]")
+            for err in errors:
+                console.print(f"  \u2022 {err}")
+
+        if migrated > 0 and delete_after:
+            console.print("[green]\u2705 Config updated: plaintext keys replaced with env-var references[/green]")
+
+        if migrated == 0 and not errors:
+            console.print("[yellow]No plaintext API keys found to migrate[/yellow]")
+
+    except ImportError:
+        console.print("[red]\u274c JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]\u274c Migration failed: {e}[/red]")
+
+
+@vault.command()
+def status():
+    """Show vault status and storage information
+
+    Displays the vault path, credential count, encryption status,
+    file size, and registered services.
+
+    Examples:
+        xencode vault status
+    """
+    try:
+        from xencode.auth.json_file_vault import JsonFileCredentialVault
+
+        # Quick health check first
+        health = JsonFileCredentialVault.health_check()
+
+        if not health.get("vault_exists"):
+            console.print("[yellow]\u23f3 No vault file found at: " + health.get("vault_path", "") + "[/yellow]")
+            console.print("[yellow]\U0001f4a1 Initialize one with: xencode vault init[/yellow]")
+            return
+
+        if not health.get("is_valid_json"):
+            console.print("[red]\u274c Vault file exists but is corrupted (invalid JSON)[/red]")
+            console.print(f"[red]   Path: {health.get('vault_path', '')}[/red]")
+            return
+
+        # Full status via vault instance
+        vault = JsonFileCredentialVault()
+        info = vault.get_status()
+
+        table = Table(title="\U0001f510 Credential Vault Status")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+
+        table.add_row("Type", info.get("type", ""))
+        table.add_row("Vault Path", info.get("vault_path", ""))
+        table.add_row("Has Credentials", "\u2705 Yes" if info.get("has_credentials") else "\u274c No")
+        table.add_row("Credential Count", str(info.get("credential_count", 0)))
+        table.add_row("Encrypted", "\u2705 Yes (Fernet)" if info.get("encrypted") else "\u274c No (base64)")
+
+        file_size = info.get("file_size_bytes")
+        if file_size is not None:
+            size_str = f"{file_size:,} bytes"
+            if file_size > 1024:
+                size_str += f" ({file_size / 1024:.1f} KB)"
+            table.add_row("File Size", size_str)
+
+        services = info.get("services", [])
+        if services:
+            table.add_row("Services", ", ".join(services))
+
+        console.print(table)
+
+        if info.get("encrypted"):
+            console.print("\n[green]\U0001f512 Vault is properly encrypted[/green]")
+        else:
+            console.print("\n[yellow]\u26a0\ufe0f  Vault uses base64 encoding (install 'cryptography' for Fernet encryption)[/yellow]")
+
+    except ImportError:
+        console.print("[red]\u274c JsonFileCredentialVault module not available[/red]")
+    except Exception as e:
+        console.print(f"[red]\u274c Status check failed: {e}[/red]")
+
+
+@vault.command()
+@click.option('--server-url', default='http://localhost:8000',
+              help='FastAPI server base URL (default: http://localhost:8000)')
+@click.option('--interval', type=float, default=5.0,
+              help='Polling interval in seconds, 1-300 (default: 5)')
+@click.option('--vault-path', type=click.Path(),
+              help='Custom vault file path')
+@click.option('--token',
+              help='JWT access token (auto-generated if not provided)')
+def monitor(server_url, interval, vault_path, token):
+    """Monitor vault health in real-time via WebSocket
+
+    Connects to the vault health WebSocket endpoint and displays
+    live health updates including vault status, credential count,
+    and encryption status. Updates are shown live in the terminal.
+
+    Examples:
+
+        xencode vault monitor
+
+        xencode vault monitor --server-url http://localhost:8000
+
+        xencode vault monitor --interval 10
+
+        xencode vault monitor --vault-path /custom/path/vault.json
+    """
+    console.print("[blue]\U0001f50c Connecting to vault health WebSocket...[/blue]")
+    try:
+        asyncio.run(_run_vault_monitor(server_url, interval, vault_path, token))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]\U0001f44b Disconnected[/yellow]")
+
+
+async def _run_vault_monitor(
+    server_url: str,
+    interval: float,
+    vault_path: Optional[str],
+    token: Optional[str],
+) -> None:
+    """Async coroutine that connects to the vault health WS and displays live updates."""
+    import json
+    from datetime import datetime, timedelta
+
+    # ---- dependency checks ---------------------------------------------------
+    try:
+        import websockets
+    except ImportError:
+        console.print(
+            "[red]\u274c 'websockets' library is required. "
+            "Install with: pip install websockets[/red]"
+        )
+        return
+
+    try:
+        import jwt as pyjwt
+    except ImportError:
+        console.print(
+            "[red]\u274c 'PyJWT' library is required. "
+            "Install with: pip install PyJWT[/red]"
+        )
+        return
+
+    # ---- token generation (if not provided) ----------------------------------
+    if not token:
+        try:
+            from xencode.api.auth import resolve_jwt_secret
+            secret = resolve_jwt_secret()
+            now = datetime.utcnow()
+            payload = {
+                "user_id": "cli-monitor",
+                "username": "cli-user",
+                "role": "admin",
+                "session_id": "cli-monitor-session",
+                "type": "access",
+                "iat": now,
+                "exp": now + timedelta(hours=1),
+            }
+            token = pyjwt.encode(payload, secret, algorithm="HS256")
+        except Exception as e:
+            console.print(f"[red]\u274c Failed to generate auth token: {e}[/red]")
+            return
+
+    # ---- build WebSocket URL -------------------------------------------------
+    ws_base = server_url.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_base}/api/v1/vault/health/ws?token={token}&interval={interval}"
+    if vault_path:
+        ws_url += f"&vault_path={vault_path}"
+
+    # ---- connect & display live updates --------------------------------------
+    try:
+        async with websockets.connect(ws_url) as ws:
+            console.print("[green]\u2705 Connected! Receiving health updates...[/green]")
+            console.print("[dim]Press Ctrl+C to disconnect[/dim]\n")
+
+            from rich.live import Live
+            from rich.table import Table
+
+            def _build_table(data: dict) -> Table:
+                table = Table(title="\U0001f510 Vault Health Monitor", title_style="bold blue")
+                table.add_column("Status", style="cyan", width=16)
+                table.add_column("Value", style="green")
+
+                available = data.get("available", False)
+                vault_exists = data.get("vault_exists", False)
+
+                table.add_row("Available", f"{'\u2705' if available else '\u274c'} {available}")
+                table.add_row("Vault Exists", f"{'\u2705' if vault_exists else '\u274c'} {vault_exists}")
+                table.add_row("Vault Path", data.get("vault_path", "N/A"))
+                table.add_row("Readable", f"{'\u2705' if data.get('is_readable') else '\u274c'} {data.get('is_readable', False)}")
+                table.add_row("Valid JSON", f"{'\u2705' if data.get('is_valid_json') else '\u274c'} {data.get('is_valid_json', False)}")
+                table.add_row("Credentials", str(data.get("credential_count", 0)))
+                table.add_row("Encryption", "\u2705 Enabled" if data.get("encryption_available") else "\u274c Not available")
+
+                ts = data.get("timestamp", "")
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts)
+                        ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
+                table.add_row("Last Updated", ts)
+                return table
+
+            with Live(refresh_per_second=4, screen=False) as live:
+                while True:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=max(interval * 2, 10))
+                        data = json.loads(raw)
+                        kind = data.get("type", "")
+
+                        if kind == "health_update":
+                            live.update(_build_table(data))
+                        elif kind == "pong":
+                            continue
+                        elif kind == "interval_updated":
+                            console.print(
+                                f"[yellow]\u23f1\ufe0f  Interval updated to "
+                                f"{data.get('interval', 'N/A')}s[/yellow]"
+                            )
+                        elif kind == "error":
+                            console.print(
+                                f"[red]\u26a0\ufe0f  Server error: "
+                                f"{data.get('message', 'Unknown')}[/red]"
+                            )
+                        else:
+                            console.print(f"[dim]Received: {json.dumps(data, indent=2)}[/dim]")
+
+                    except asyncio.TimeoutError:
+                        console.print("[yellow]\u26a0\ufe0f  No update received \u2014 reconnecting...[/yellow]")
+                        break
+                    except websockets.exceptions.ConnectionClosed:
+                        console.print("[red]\u274c Connection closed by server[/red]")
+                        break
+
+    except websockets.exceptions.InvalidURI:
+        console.print(f"[red]\u274c Invalid server URL: {server_url}[/red]")
+    except websockets.exceptions.WebSocketException as e:
+        console.print(f"[red]\u274c WebSocket error: {e}[/red]")
+    except asyncio.CancelledError:
+        pass
 
 
 if __name__ == '__main__':

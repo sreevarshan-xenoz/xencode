@@ -1,0 +1,357 @@
+{
+  "project": {
+    "name": "Xencode",
+    "version": "2.1.0",
+    "description": "AI-powered coding assistant platform with CLI/TUI/API interfaces, multi-model support, agentic system, and plugin architecture",
+    "languages": ["Python", "TypeScript", "Rust", "JavaScript"],
+    "python_version": "3.10+",
+    "entry_points": {
+      "primary": {
+        "file": "xencode_core.py",
+        "function": "main()",
+        "line": 1807,
+        "description": "Main entry point - initializes all systems (model providers, TUI, features)"
+      },
+      "cli": {
+        "file": "xencode_cli.py",
+        "function": "main()",
+        "line": 17,
+        "description": "CLI wrapper - imports and runs xencode.cli.cli"
+      },
+      "tui": {
+        "file": "xencode/tui/__main__.py",
+        "function": "main()",
+        "line": 13,
+        "description": "TUI application entry point (Textual framework)"
+      },
+      "api": {
+        "file": "xencode/api/main.py",
+        "description": "FastAPI server with dynamic feature route registration"
+      },
+      "agentic_cli": {
+        "file": "xencode/agentic_cli.py",
+        "function": "main()",
+        "line": 6,
+        "description": "Standalone agentic CLI"
+      }
+    }
+  },
+
+  "package_structure": {
+    "xencode": {
+      "description": "Main Python package",
+      "subpackages": {
+        "features": {
+          "path": "xencode/features/",
+          "description": "Feature management system with modular capabilities",
+          "core_files": ["base.py", "manager.py", "__init__.py", "core/"],
+          "features": [
+            {"name": "code_review", "file": "code_review.py", "lines": 1500, "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "terminal_assistant", "file": "terminal_assistant.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "project_analyzer", "file": "project_analyzer.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "learning_mode", "file": "learning_mode.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "custom_models", "file": "custom_models.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "voice_interface", "file": "voice_interface.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "collaborative_coding", "file": "collaborative_coding.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "security_auditor", "file": "security_auditor.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true},
+            {"name": "performance_profiler", "file": "performance_profiler.py", "status": "complete", "has_cli": true, "has_tui": true, "has_api": true}
+          ]
+        },
+        "tui": {
+          "path": "xencode/tui/",
+          "description": "Textual-based TUI application",
+          "subdirs": {
+            "widgets": {"file_count": 31, "description": "Widget panels including chat, editor, file_explorer, model_selector, etc."},
+            "features": {"description": "Feature-specific TUI panels (project_analyzer_panel, learning_mode_panel, multi_language_panel)"},
+            "utils": {"description": "Utility modules (note: __init__.py MISSING, model_checker.py referenced)"}
+          }
+        },
+        "agentic": {
+          "path": "xencode/agentic/",
+          "description": "Autonomous AI agent system",
+          "subdirs": {
+            "communication": {"files": ["message.py", "protocol.py", "channels.py"]},
+            "specialized": {"agents": ["DataScienceAgent", "WebDevelopmentAgent", "SecurityAnalysisAgent", "DevOpsAgent", "TestingAgent", "DocumentationAgent"]}
+          },
+          "key_files": ["manager.py", "coordinator.py", "workflow_orchestrator.py", "tools.py", "advanced_tools.py", "enhanced_tools.py", "team_formation.py", "human_supervision.py", "security_governance.py"]
+        },
+        "model_providers": {
+          "path": "xencode/model_providers/",
+          "description": "Multi-model provider management",
+          "files": ["__init__.py", "resolver.py", "transport.py", "diagnostics.py"],
+          "providers_supported": ["Ollama", "OpenAI", "Anthropic", "Cohere", "HuggingFace", "Local", "Custom"]
+        },
+        "routing": {
+          "path": "xencode/routing/",
+          "description": "Prompt routing layer with task classification",
+          "files": ["prompt_router.py", "fallback_config.py", "fallback_engine.py", "retry_budget.py"],
+          "task_types": ["CODING", "DEBUGGING", "CODE_REVIEW", "ANALYSIS", "REFACTORING", "TEST_GENERATION", "REASONING", "CODE_EXPLANATION", "DOCUMENTATION", "GENERIC"]
+        },
+        "auth": {
+          "path": "xencode/auth/",
+          "description": "Authentication, authorization, and permissions",
+          "files": ["jwt_handler.py", "auth_manager.py", "permission_engine.py", "audit_logger.py", "credential_vault.py", "json_file_vault.py", "qwen_auth.py"]
+        },
+        "security": {
+          "path": "xencode/security/",
+          "description": "Input sanitization and security utilities (not auth - that's xencode/auth/)",
+          "files": ["__init__.py", "adversarial_defense.py", "api_validation.py", "authentication.py", "compliance.py", "data_encryption.py", "homomorphic_encryption.py", "privacy_analytics.py", "rate_limiting.py", "validation.py", "zk_proofs.py"]
+        },
+        "analytics": {
+          "path": "xencode/analytics/",
+          "description": "Analytics engine, metrics collection, event tracking",
+          "files": ["analytics_engine.py", "analytics_infrastructure.py", "event_tracker.py", "metrics_collector.py"]
+        },
+        "monitoring": {
+          "path": "xencode/monitoring/",
+          "description": "System monitoring, health checks, benchmarks",
+          "files": ["metrics_collector.py", "provider_health.py", "resource_manager.py", "performance_optimizer.py", "benchmark_engine.py", "benchmark_store.py", "benchmark_suites.py", "benchmark_recommendations.py"]
+        },
+        "cache": {
+          "path": "xencode/cache/",
+          "description": "Multi-modal caching system",
+          "files": ["multimodal_cache.py", "advanced_memory_manager.py"]
+        },
+        "rag": {
+          "path": "xencode/rag/",
+          "description": "RAG and vector store (ChromaDB-based)",
+          "files": ["vector_store.py", "indexer.py", "context_indexer_v2.py", "graph_extractor.py", "graph_store.py"]
+        },
+        "plugins": {
+          "path": "xencode/plugins/",
+          "description": "Plugin system with manager and registry",
+          "files": ["__init__.py", "config.py", "integration.py", "file_operations.py", "marketplace_client.py"],
+          "plugin_types": ["PluginInterface", "ToolPlugin", "AgentPlugin", "ModelProviderPlugin"]
+        },
+        "i18n": {
+          "path": "xencode/i18n/",
+          "description": "Internationalization and translation",
+          "files": ["translation_engine.py", "language_manager.py", "translation_dict.py", "context_adapter.py"]
+        },
+        "core": {
+          "path": "xencode/core/",
+          "description": "Core utilities and base classes",
+          "files": ["cache.py", "connection_pool.py", "files.py", "lazy_loader.py", "memory.py", "models.py", "resource_cleanup.py", "resource_monitor.py"]
+        }
+      },
+      "top_level_modules": [
+        "xencode_core.py", "xencode_cli.py", "cli.py", "agentic_cli.py",
+        "advanced_analytics_dashboard.py", "advanced_analytics_engine.py", "advanced_analytics_monitoring.py",
+        "advanced_cache_system.py", "advanced_error_handler.py", "advanced_plugin_management.py",
+        "advanced_workflow_management.py", "ai_ensembles.py", "ai_ensembles_improved.py",
+        "ai_ethics_framework.py", "ai_metrics.py", "analytics_api.py", "analytics_integration.py",
+        "analytics_reporting_system.py", "async_disk_cache.py", "async_vector_store.py",
+        "code_analysis_system.py", "code_analyzer.py", "context_cache_manager.py",
+        "document_processor.py", "dynamic_cache_sizing.py", "enhanced_chat_commands.py",
+        "enhanced_cli_system.py", "enhanced_command_palette.py", "enhancement_integration.py",
+        "ensemble_improvements.py", "ensemble_lightweight.py", "ethics_document_integration.py",
+        "hardware_aware_model_selection.py", "human_in_the_loop_supervision.py",
+        "improved_cache_system.py", "intelligent_model_selector.py", "model_stability_manager.py",
+        "multi_agent_collaboration.py", "multi_model_system.py", "ollama_connection_pool.py",
+        "ollama_fallback.py", "ollama_optimizer.py", "optimized_batch_vector_store.py",
+        "optimized_token_voter.py", "performance_monitoring_dashboard.py", "phase2_coordinator.py",
+        "plugin_ecosystem.py", "plugin_system.py", "project_context.py", "resource_monitor.py",
+        "rlhf_tuner.py", "security_manager.py", "security_scanner.py", "smart_config_manager.py",
+        "smart_context_system.py", "standalone_performance_dashboard.py", "system_checker.py",
+        "technical_debt_manager.py", "user_feedback_system.py", "visual_workflow_builder.py",
+        "warp_ai_integration.py", "warp_integrated.py", "warp_terminal.py", "warp_testing_harness.py",
+        "warp_ui_components.py"
+      ]
+    },
+    "bytebot": {
+      "packages": {
+        "bytebot-agent": {"framework": "NestJS", "language": "TypeScript", "description": "Backend service for Bytebot container agent"},
+        "bytebot-ui": {"framework": "Next.js", "language": "TypeScript", "description": "Frontend UI with GitHub Copilot integration, auth, onboarding"}
+      }
+    },
+    "rust": {
+      "path": "rust/",
+      "files": ["Cargo.toml", "Cargo.lock"],
+      "description": "Rust workspace for performance-critical operations"
+    }
+  },
+
+  "verified_findings": {
+    "rag_init_empty": {"status": "confirmed", "file": "xencode/rag/__init__.py", "detail": "File is empty - no imports or exports"},
+    "tui_utils_init_missing": {"status": "confirmed", "file": "xencode/tui/utils/", "detail": "__init__.py does not exist on disk"},
+    "credential_vault_no_impl": {"status": "resolved", "file": "xencode/auth/credential_vault.py", "detail": "FileBasedCredentialBackend added with Fernet encryption and PBKDF2 key derivation"},
+    "json_file_vault_impl": {"status": "resolved", "file": "xencode/auth/json_file_vault.py", "detail": "JsonFileCredentialVault — concrete CredentialVault subclass using only FileBasedCredentialBackend with Fernet encryption, async-safe operations, bulk export/import, static health_check(), and 39 tests"},
+    "vault_api_router": {"status": "resolved", "file": "xencode/api/routers/vault.py", "detail": "Vault API router with 3 FastAPI endpoints (health, init, migrate), Pydantic request/response models, graceful 503 fallback on missing vault module, 18 API tests, registered at /api/v1/vault in xencode/api/main.py"},
+    "advanced_memory_no_impl": {"status": "confirmed", "file": "xencode/cache/advanced_memory_manager.py", "detail": "Abstract class with no concrete implementation"},
+    "monitoring_broken_imports": {"status": "confirmed", "file": "xencode/monitoring/__init__.py", "detail": "Imports HealthMonitor, AlertManager from nonexistent files"},
+    "security_no_all": {"status": "confirmed", "file": "xencode/security/__init__.py", "detail": "No __all__ defined despite exporting 10+ functions"},
+    "feature_base_abstract_pass": {"status": "confirmed", "file": "xencode/features/base.py", "detail": "Abstract methods use 'pass' body instead of raise NotImplementedError"},
+    "flat_package_structure": {"status": "design_observation", "detail": "40+ top-level files in xencode/ - may benefit from restructuring"},
+    "demo_in_features": {"status": "confirmed", "file": "xencode/features/demo.py", "detail": "demo.py is in features/ but is not a real feature module"}
+  },
+
+  "issues": {
+    "critical": [
+      {
+        "id": "RAG_INIT_EMPTY",
+        "severity": "critical",
+        "file": "xencode/rag/__init__.py",
+        "description": "__init__.py is completely empty - no imports or exports",
+        "impact": "from xencode.rag import VectorStore will fail with ImportError",
+        "fix": "Add from .vector_store import VectorStore; from .indexer import Indexer; etc.",
+        "workaround": "Use direct import: from xencode.rag.vector_store import VectorStore"
+      },
+      {
+        "id": "TUI_UTILS_INIT_MISSING",
+        "severity": "critical",
+        "file": "xencode/tui/utils/",
+        "description": "utils/ directory is missing __init__.py",
+        "impact": "Imports from xencode.tui.utils may fail depending on Python version",
+        "fix": "Create xencode/tui/utils/__init__.py"
+      }
+    ],
+    "high": [
+      {
+        "id": "CREDENTIAL_VAULT_NO_IMPL",
+        "severity": "resolved",
+        "file": "xencode/auth/credential_vault.py",
+        "description": "RESOLVED: FileBasedCredentialBackend added with Fernet encryption, PBKDF2 key derivation, ~/.xencode/vault.json storage",
+        "fix": "Done — 52/52 tests passing"
+      },
+      {
+        "id": "JSON_FILE_VAULT_IMPL",
+        "severity": "resolved",
+        "file": "xencode/auth/json_file_vault.py",
+        "description": "RESOLVED: JsonFileCredentialVault — concrete CredentialVault subclass using only FileBasedCredentialBackend with Fernet encryption, async-safe operations, bulk export/import, and static health_check()",
+        "fix": "Done — 39/39 tests passing"
+      },
+      {
+        "id": "ADVANCED_MEMORY_NO_IMPL",
+        "severity": "high",
+        "file": "xencode/cache/advanced_memory_manager.py",
+        "description": "Abstract base class with no concrete implementation",
+        "impact": "Advanced memory features non-functional",
+        "fix": "Implement concrete memory manager (SQLite, in-memory)"
+      },
+      {
+        "id": "MONITORING_BROKEN_IMPORTS",
+        "severity": "high",
+        "file": "xencode/monitoring/__init__.py",
+        "description": "Imports missing modules HealthMonitor, AlertManager with silent fallback",
+        "impact": "Features depending on these silently fail",
+        "fix": "Create missing files or remove broken imports"
+      }
+    ],
+    "medium": [
+      {
+        "id": "SPECIALIZED_AGENTS_SYNC_IN_ASYNC",
+        "severity": "medium",
+        "file": "xencode/agentic/specialized/__init__.py",
+        "description": "Async process_request methods call sync run_agent() - may block event loop",
+        "fix": "Wrap in await asyncio.to_thread()"
+      },
+      {
+        "id": "SPECIALIZED_AGENTS_HARDCODED_MODELS",
+        "severity": "medium",
+        "file": "xencode/agentic/specialized/__init__.py",
+        "description": "Hardcoded Ollama model names (codellama:7b, llama3.1:8b)",
+        "fix": "Use configurable model names or provider-agnostic selection"
+      },
+      {
+        "id": "ANALYTICS_REPORTING_NOT_IMPLEMENTED",
+        "severity": "medium",
+        "file": "xencode/analytics_reporting_system.py",
+        "description": "3 methods raise NotImplementedError with no implementation",
+        "fix": "Implement the reporting methods"
+      },
+      {
+        "id": "FEATURE_BASE_ABSTRACT_BODY_PASS",
+        "severity": "low",
+        "file": "xencode/features/base.py",
+        "description": "Abstract methods use 'pass' body instead of raising NotImplementedError",
+        "fix": "Change 'pass' to 'raise NotImplementedError'"
+      },
+      {
+        "id": "DEMO_IN_FEATURES",
+        "severity": "low",
+        "file": "xencode/features/demo.py",
+        "description": "Demo script lives in features/ directory - not a real feature",
+        "fix": "Move to examples/ directory"
+      },
+      {
+        "id": "FLAT_PACKAGE_STRUCTURE",
+        "severity": "low",
+        "description": "40+ top-level .py files in xencode/ - monolithic",
+        "fix": "Consider organizing into sub-packages"
+      }
+    ]
+  },
+
+  "wiring_map": {
+    "entry_to_features": {
+      "description": "Features are wired into CLI/TUI/API via abstract methods on FeatureBase",
+      "cli_integration": "xencode/cli.py:register_feature_commands() - dynamically discovers and registers Click command groups from features",
+      "tui_integration": "xencode/tui/app.py - loads TUI components from features via get_tui_components()",
+      "api_integration": "xencode/api/feature_routes.py - dynamically registers FastAPI routes from features"
+    },
+    "model_provider_wiring": {
+      "description": "Model providers wired into CLI/TUI via xencode_core.py initialization",
+      "init_chain": "xencode_core.py:main() -> ModelProviderManager -> Resolver -> Transport -> Provider APIs"
+    },
+    "agentic_wiring": {
+      "description": "Agent system wired independently with its own entry points",
+      "entry": "xencode/agentic_cli.py or xencode/agentic/coordinator.py",
+      "tool_integration": "xencode/agentic/tools.py + advanced_tools.py + enhanced_tools.py"
+    }
+  },
+
+  "generated_at": "2026-05-27",
+  "generated_by": "Codebuff codebase audit",
+
+  "utility_scripts": {
+    "build_exe.py": "Builds executable with PyInstaller",
+    "cleanup_duplicates.py": "Duplicate file cleanup utility",
+    "debug_chroma.py": "ChromaDB debugging utility",
+    "debug_ollama.py": "Ollama debugging utility",
+    "diagnose_tui.py": "TUI diagnostics tool",
+    "patch_ensemble.py": "Ensemble patching utility",
+    "add_api_endpoints.py": "Script to add API endpoints to features",
+    "add_feature_methods.py": "Script to add methods to features",
+    "add_history_methods.py": "Script to add history methods",
+    "install.ps1": "Windows installer script",
+    "install.sh": "Unix installer script",
+    "xencode.sh": "Xencode shell launcher"
+  },
+
+  "dependencies": {
+    "python_major": ["click", "textual", "fastapi", "httpx", "chromadb", "langchain"],
+    "python_optional": ["ollama", "openai", "anthropic", "cohere"],
+    "node": ["next", "react", "nest", "hugeicons"],
+    "devops": ["docker", "prometheus"]
+  },    "testing": {
+    "framework": "pytest",
+    "config": "pytest.ini",
+    "directories": ["tests/agentic", "tests/api", "tests/auth", "tests/bytebot", "tests/cli", "tests/features", "tests/i18n", "tests/integration", "tests/model_providers", "tests/phase3", "tests/phase5", "tests/rust", "tests/tui"],
+    "coverage_gaps": {
+      "tui_widgets": "31 widgets, only code_action_hotkeys has tests",
+      "features": "Only infrastructure and voice interface have tests",
+      "auth": "CredentialVault has 39 tests (FileBasedCredentialBackend 25 + JsonFileCredentialVault 39); Vault API has 18 TestClient tests; no tests for AuditLogger",
+      "specialized_agents": "No tests for any specialized agent type"
+    }
+  },
+
+  "agent_guidance": {
+    "code_editing_rules": [
+      "Use function-level lazy imports for heavy dependencies to maintain fast startup time",
+      "Follow FeatureBase abstract class pattern when adding new features",
+      "Use try/except ImportError for optional dependencies with graceful fallback",
+      "All __init__.py files should have __all__ defined for explicit public API",
+      "Abstract methods should raise NotImplementedError, not pass",
+      "Keep TUI widgets in xencode/tui/widgets/ following existing patterns",
+      "Add type hints consistently (the codebase uses typing module extensively)",
+      "Use async/await for I/O-bound operations"
+    ],
+    "common_patterns": [
+      "Lazy singleton managers (FeatureManager, PluginRegistry)",
+      "Abstract base classes with concrete subclasses",
+      "Dynamic registration pattern (register_feature_commands, register_dynamic_feature_routes)",
+      "Graceful degradation via try/except imports",
+      "Feature interface with CLI/TUI/API integration points"
+    ]
+  }
+}

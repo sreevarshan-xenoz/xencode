@@ -7,7 +7,11 @@ members = [
     "crates/xencode-memory-rs",
     "crates/xencode-providers-rs",
     "crates/xencode-tui-rs",
+    "crates/xencode-analysis-rs",
     "crates/xencode-cli",
+    "crates/xencode-server-rs",
+    "crates/xencode-collaboration-rs",
+    "crates/xencode-plugin-rs",
 ]
 resolver = "2"
 

@@ -6,41 +6,33 @@ Provides system monitoring, health checks, and observability features
 for comprehensive system monitoring and alerting.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Optional
 
 # Import monitoring components with graceful fallback
 try:
     from .metrics_collector import PrometheusMetricsCollector
     PROMETHEUS_METRICS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import PrometheusMetricsCollector: %s", e)
     PrometheusMetricsCollector = None
     PROMETHEUS_METRICS_AVAILABLE = False
 
 try:
-    from .health_monitor import HealthMonitor
-    HEALTH_MONITOR_AVAILABLE = True
-except ImportError:
-    HealthMonitor = None
-    HEALTH_MONITOR_AVAILABLE = False
-
-try:
-    from .alert_manager import AlertManager
-    ALERT_MANAGER_AVAILABLE = True
-except ImportError:
-    AlertManager = None
-    ALERT_MANAGER_AVAILABLE = False
-
-try:
     from .performance_optimizer import PerformanceOptimizer
     PERFORMANCE_OPTIMIZER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import PerformanceOptimizer: %s", e)
     PerformanceOptimizer = None
     PERFORMANCE_OPTIMIZER_AVAILABLE = False
 
 try:
     from .resource_manager import ResourceManager, get_resource_manager
     RESOURCE_MANAGER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import ResourceManager: %s", e)
     ResourceManager = None
     get_resource_manager = None
     RESOURCE_MANAGER_AVAILABLE = False
@@ -57,7 +49,8 @@ try:
         run_benchmark,
     )
     BENCHMARK_ENGINE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import BenchmarkEngine: %s", e)
     BenchmarkEngine = None
     BenchmarkTask = None
     BenchmarkResult = None
@@ -75,7 +68,8 @@ try:
         create_benchmark_store,
     )
     BENCHMARK_STORE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import BenchmarkStore: %s", e)
     BenchmarkStore = None
     BenchmarkRecord = None
     BenchmarkQuery = None
@@ -89,7 +83,8 @@ try:
         create_benchmark_suites,
     )
     BENCHMARK_SUITES_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import BenchmarkSuites: %s", e)
     BenchmarkSuites = None
     BenchmarkDataset = None
     create_benchmark_suites = None
@@ -102,7 +97,8 @@ try:
         generate_recommendations,
     )
     BENCHMARK_RECOMMENDATIONS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import BenchmarkRecommendations: %s", e)
     BenchmarkRecommendations = None
     ModelRecommendation = None
     generate_recommendations = None
@@ -113,8 +109,6 @@ def get_monitoring_status() -> dict:
     """Get status of monitoring components"""
     return {
         "prometheus_metrics_available": PROMETHEUS_METRICS_AVAILABLE,
-        "health_monitor_available": HEALTH_MONITOR_AVAILABLE,
-        "alert_manager_available": ALERT_MANAGER_AVAILABLE,
         "performance_optimizer_available": PERFORMANCE_OPTIMIZER_AVAILABLE,
         "resource_manager_available": RESOURCE_MANAGER_AVAILABLE,
         "benchmark_engine_available": BENCHMARK_ENGINE_AVAILABLE,
@@ -127,8 +121,6 @@ def get_monitoring_status() -> dict:
 __all__ = [
     # Core Monitoring
     'PrometheusMetricsCollector',
-    'HealthMonitor',
-    'AlertManager',
     'PerformanceOptimizer',
     'ResourceManager',
     'get_resource_manager',
@@ -157,8 +149,6 @@ __all__ = [
     'get_monitoring_status',
     # Availability Flags
     'PROMETHEUS_METRICS_AVAILABLE',
-    'HEALTH_MONITOR_AVAILABLE',
-    'ALERT_MANAGER_AVAILABLE',
     'PERFORMANCE_OPTIMIZER_AVAILABLE',
     'RESOURCE_MANAGER_AVAILABLE',
     'BENCHMARK_ENGINE_AVAILABLE',

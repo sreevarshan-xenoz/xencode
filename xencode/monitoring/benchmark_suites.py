@@ -436,3 +436,13 @@ def get_benchmark_suites() -> BenchmarkSuites:
     if _suites_instance is None:
         _suites_instance = BenchmarkSuites()
     return _suites_instance
+
+
+def create_benchmark_suites() -> BenchmarkSuites:
+    """
+    Create a fresh BenchmarkSuites instance.
+
+    Unlike get_benchmark_suites(), this always returns a new instance
+    instead of the global singleton.
+    """
+    return BenchmarkSuites()

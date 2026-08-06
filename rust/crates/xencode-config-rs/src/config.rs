@@ -14,6 +14,8 @@ pub struct ApiKeys {
     pub google_gemini_api_key: Option<String>,
     #[serde(default)]
     pub qwen_client_id: Option<String>,
+    #[serde(default)]
+    pub qwen_api_key: Option<String>,
 }
 
 /// Top-level Xencode configuration.

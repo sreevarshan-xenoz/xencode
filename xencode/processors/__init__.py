@@ -8,34 +8,41 @@ Contains specialized processors for different document types:
 - WebContentExtractor: HTML/web content processing with BeautifulSoup4
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional
 
 # Import processors with graceful fallback
 try:
     from .pdf_processor import PDFProcessor
     PDF_PROCESSOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import PDFProcessor: %s", e)
     PDFProcessor = None
     PDF_PROCESSOR_AVAILABLE = False
 
 try:
     from .docx_processor import DOCXProcessor
     DOCX_PROCESSOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import DOCXProcessor: %s", e)
     DOCXProcessor = None
     DOCX_PROCESSOR_AVAILABLE = False
 
 try:
     from .web_extractor import WebContentExtractor
     WEB_PROCESSOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import WebContentExtractor: %s", e)
     WebContentExtractor = None
     WEB_PROCESSOR_AVAILABLE = False
 
 try:
     from .text_processor import TextProcessor
     TEXT_PROCESSOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import TextProcessor: %s", e)
     TextProcessor = None
     TEXT_PROCESSOR_AVAILABLE = False
 

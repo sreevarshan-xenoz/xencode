@@ -236,3 +236,7 @@ se 1 Implementation Details
 Phase 1 has established a solid foundation with enterprise-grade features. The next phase will integrate everything into a seamless developer experience that revolutionizes how we work with AI in development workflows.
 
 **Let's continue building the future of AI development tools!** 🔥✨
+
+---
+
+> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Complete codebase reference with Rust crate details, TUI panel status, test coverage, architecture diagrams, backlog items, and phase-by-phase migration tracking.

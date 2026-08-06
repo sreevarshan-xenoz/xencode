@@ -9,27 +9,33 @@ Contains specialized analyzers for different aspects of code analysis:
 - RefactoringEngine: Refactoring suggestions
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Optional
 
 # Import analyzers with graceful fallback
 try:
     from .security_analyzer import SecurityAnalyzer
     SECURITY_ANALYZER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import SecurityAnalyzer: %s", e)
     SecurityAnalyzer = None
     SECURITY_ANALYZER_AVAILABLE = False
 
 try:
     from .error_detector import ErrorDetector
     ERROR_DETECTOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import ErrorDetector: %s", e)
     ErrorDetector = None
     ERROR_DETECTOR_AVAILABLE = False
 
 try:
     from .refactoring_engine import RefactoringEngine
     REFACTORING_ENGINE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning("Failed to import RefactoringEngine: %s", e)
     RefactoringEngine = None
     REFACTORING_ENGINE_AVAILABLE = False
 

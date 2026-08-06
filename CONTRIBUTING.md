@@ -155,7 +155,20 @@ refactor: extract CLI commands into submodules
 ### Security Best Practices
 
 - **Never commit secrets** (API keys, passwords, tokens)
-- Use environment variables or the credential vault
+- Use environment variables or the credential vault:
+  ```bash
+  # Initialize the vault (creates ~/.xencode/vault.json)
+  xencode vault init
+
+  # Migrate plaintext keys from config into the encrypted vault
+  xencode vault migrate --config-path ~/.xencode/config.json
+
+  # Check vault status
+  xencode vault status
+
+  # Migrate and replace keys with env-var references
+  xencode vault migrate --delete-after
+  ```
 - Run `bandit` security scanner:
   ```bash
   bandit -r xencode/
