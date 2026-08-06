@@ -11,6 +11,7 @@ from typing import Optional
 try:
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
+
     from .api.routers.analytics import router as analytics_router
     FASTAPI_AVAILABLE = True
 except ImportError:

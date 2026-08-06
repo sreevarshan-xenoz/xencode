@@ -27,18 +27,13 @@ Test cases:
 15. Test agentic workflow integration
 """
 
-import asyncio
-import pytest
-import tempfile
 import os
+import tempfile
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import MagicMock, patch, Mock
-from typing import Dict, List, Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 # =============================================================================
 # Test Generation Engine Tests
@@ -158,7 +153,9 @@ class TestTestGenerator:
     def test_generate_pytest_tests(self):
         """Test that test generator creates pytest tests"""
         from xencode.testing.test_generator import (
-            TestGenerator, TestGenerationConfig, TestFramework
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
         )
 
         code = '''
@@ -181,7 +178,9 @@ def add(a: int, b: int) -> int:
     def test_generate_unittest_tests(self):
         """Test that test generator creates unittest tests"""
         from xencode.testing.test_generator import (
-            TestGenerator, TestGenerationConfig, TestFramework
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
         )
 
         code = '''
@@ -203,7 +202,9 @@ def multiply(a: int, b: int) -> int:
     def test_generate_edge_case_tests(self):
         """Test that edge case tests are generated for various types"""
         from xencode.testing.test_generator import (
-            TestGenerator, TestGenerationConfig, TestFramework, EdgeCaseType
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
         )
 
         code = '''
@@ -233,7 +234,9 @@ def process_number(value: int) -> int:
     def test_generate_mock_tests(self):
         """Test that mocks are generated for dependencies"""
         from xencode.testing.test_generator import (
-            TestGenerator, TestGenerationConfig, TestFramework
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
         )
 
         code = '''
@@ -262,7 +265,11 @@ def send_email(to: str, message: str) -> bool:
 
     def test_save_test_files(self):
         """Test that generated test files can be saved"""
-        from xencode.testing.test_generator import TestGenerator, TestGenerationConfig, TestFramework
+        from xencode.testing.test_generator import (
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
+        )
 
         code = '''
 def divide(a: float, b: float) -> float:
@@ -370,7 +377,7 @@ class TestTestRunner:
 
     def test_create_runner(self):
         """Test test runner creation"""
-        from xencode.testing.test_runner import TestRunner, ExecutionConfig
+        from xencode.testing.test_runner import ExecutionConfig, TestRunner
 
         config = ExecutionConfig(
             max_workers=2,
@@ -384,7 +391,7 @@ class TestTestRunner:
 
     def test_execute_empty_test_list(self):
         """Test executing empty test list"""
-        from xencode.testing.test_runner import TestRunner, ExecutionConfig
+        from xencode.testing.test_runner import ExecutionConfig, TestRunner
 
         config = ExecutionConfig(collect_coverage=False)  # Disable coverage for this test
         runner = TestRunner(config)
@@ -397,7 +404,9 @@ class TestTestRunner:
     def test_execution_result_structure(self):
         """Test execution result structure"""
         from xencode.testing.test_runner import (
-            TestRunner, ExecutionConfig, TestExecutionResult
+            ExecutionConfig,
+            TestExecutionResult,
+            TestRunner,
         )
 
         config = ExecutionConfig(collect_coverage=False)  # Disable coverage for this test
@@ -437,7 +446,7 @@ class TestTestExecutionLoop:
 
     def test_execution_loop_creation(self):
         """Test execution loop creation"""
-        from xencode.testing.test_runner import TestExecutionLoop, TestRunner
+        from xencode.testing.test_runner import TestExecutionLoop
 
         loop = TestExecutionLoop(max_iterations=3)
         assert loop.max_iterations == 3
@@ -445,8 +454,11 @@ class TestTestExecutionLoop:
 
     def test_execution_loop_run_empty(self):
         """Test execution loop with empty test list"""
-        from xencode.testing.test_runner import TestExecutionLoop, ExecutionConfig
-        from xencode.testing.test_runner import TestRunner
+        from xencode.testing.test_runner import (
+            ExecutionConfig,
+            TestExecutionLoop,
+            TestRunner,
+        )
 
         # Create runner with coverage disabled
         runner = TestRunner(ExecutionConfig(collect_coverage=False))
@@ -478,7 +490,11 @@ class TestFailureClassifier:
 
     def test_classify_assertion_error(self):
         """Test assertion error classification"""
-        from xencode.testing.failure_analyzer import FailureClassifier, FailureType, FailureSeverity
+        from xencode.testing.failure_analyzer import (
+            FailureClassifier,
+            FailureSeverity,
+            FailureType,
+        )
 
         classifier = FailureClassifier()
         failure_type, severity = classifier.classify("AssertionError: assert 1 == 2")
@@ -488,7 +504,11 @@ class TestFailureClassifier:
 
     def test_classify_type_error(self):
         """Test type error classification"""
-        from xencode.testing.failure_analyzer import FailureClassifier, FailureType, FailureSeverity
+        from xencode.testing.failure_analyzer import (
+            FailureClassifier,
+            FailureSeverity,
+            FailureType,
+        )
 
         classifier = FailureClassifier()
         failure_type, severity = classifier.classify("TypeError: expected str, got int")
@@ -498,7 +518,11 @@ class TestFailureClassifier:
 
     def test_classify_import_error(self):
         """Test import error classification"""
-        from xencode.testing.failure_analyzer import FailureClassifier, FailureType, FailureSeverity
+        from xencode.testing.failure_analyzer import (
+            FailureClassifier,
+            FailureSeverity,
+            FailureType,
+        )
 
         classifier = FailureClassifier()
         failure_type, severity = classifier.classify("ModuleNotFoundError: No module named 'requests'")
@@ -508,7 +532,11 @@ class TestFailureClassifier:
 
     def test_classify_timeout_error(self):
         """Test timeout error classification"""
-        from xencode.testing.failure_analyzer import FailureClassifier, FailureType, FailureSeverity
+        from xencode.testing.failure_analyzer import (
+            FailureClassifier,
+            FailureSeverity,
+            FailureType,
+        )
 
         classifier = FailureClassifier()
         failure_type, severity = classifier.classify("TimeoutError: test timed out after 30s")
@@ -543,7 +571,12 @@ class TestFixSuggester:
     def test_suggest_assertion_fixes(self):
         """Test assertion error fix suggestions"""
         from xencode.testing.failure_analyzer import (
-            FixSuggester, FailureInfo, FailureType, FailureSeverity, TestResult, TestStatus
+            FailureInfo,
+            FailureSeverity,
+            FailureType,
+            FixSuggester,
+            TestResult,
+            TestStatus,
         )
 
         suggester = FixSuggester()
@@ -573,7 +606,13 @@ class TestFixSuggester:
     def test_suggest_import_fixes(self):
         """Test import error fix suggestions"""
         from xencode.testing.failure_analyzer import (
-            FixSuggester, FailureInfo, FailureType, FailureSeverity, TestResult, TestStatus, FixStrategy
+            FailureInfo,
+            FailureSeverity,
+            FailureType,
+            FixStrategy,
+            FixSuggester,
+            TestResult,
+            TestStatus,
         )
 
         suggester = FixSuggester()
@@ -607,7 +646,12 @@ class TestFailurePatternRecognizer:
     def test_recognize_flaky_test_pattern(self):
         """Test flaky test pattern recognition"""
         from xencode.testing.failure_analyzer import (
-            FailurePatternRecognizer, FailureInfo, FailureType, FailureSeverity, TestResult, TestStatus
+            FailureInfo,
+            FailurePatternRecognizer,
+            FailureSeverity,
+            FailureType,
+            TestResult,
+            TestStatus,
         )
 
         recognizer = FailurePatternRecognizer()
@@ -628,7 +672,7 @@ class TestFailurePatternRecognizer:
             traceback=""
         )
 
-        patterns = recognizer.recognize(failure)
+        recognizer.recognize(failure)
         # May or may not match depending on error message
 
     def test_get_pattern_stats(self):
@@ -649,7 +693,9 @@ class TestFailureAnalyzer:
         """Test failure analysis"""
         from xencode.testing.failure_analyzer import FailureAnalyzer
         from xencode.testing.test_runner import (
-            TestExecutionResult, TestResult, TestStatus
+            TestExecutionResult,
+            TestResult,
+            TestStatus,
         )
 
         analyzer = FailureAnalyzer()
@@ -694,18 +740,21 @@ class TestAutoRetryEngine:
 
     def test_auto_retry_engine_creation(self):
         """Test auto-retry engine creation"""
-        from xencode.testing.failure_analyzer import AutoRetryEngine, FailureAnalyzer
+        from xencode.testing.failure_analyzer import AutoRetryEngine
 
         engine = AutoRetryEngine(max_retries=3)
         assert engine.max_retries == 3
 
     def test_retry_with_fixes_no_fixes(self):
         """Test retry when no fixes are available"""
-        from xencode.testing.failure_analyzer import AutoRetryEngine
-        from xencode.testing.test_runner import (
-            TestExecutionResult, TestResult, TestStatus
+        from xencode.testing.failure_analyzer import (
+            AutoRetryEngine,
         )
-        from xencode.testing.failure_analyzer import FixSuggestion, FixStrategy
+        from xencode.testing.test_runner import (
+            TestExecutionResult,
+            TestResult,
+            TestStatus,
+        )
 
         engine = AutoRetryEngine(max_retries=2)
 
@@ -756,14 +805,13 @@ class TestTestingAPIEndpoints:
     def test_generate_tests_endpoint(self):
         """Test POST /tests/generate endpoint"""
         # Import directly to avoid circular imports
-        from xencode.testing.test_generator import TestFramework, TestType
-        
+
         app = FastAPI()
-        
+
         # Create router inline to avoid circular import issues
         from fastapi import APIRouter
         router = APIRouter()
-        
+
         @router.post("/generate")
         async def generate_tests(request: dict):
             return {
@@ -774,7 +822,7 @@ class TestTestingAPIEndpoints:
                 "coverage_estimate": 80.0,
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -793,10 +841,10 @@ class TestTestingAPIEndpoints:
     def test_run_tests_endpoint_empty(self):
         """Test POST /tests/run endpoint with empty list"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.post("/run")
         async def run_tests(request: dict):
             return {
@@ -811,7 +859,7 @@ class TestTestingAPIEndpoints:
                 "coverage_percent": None,
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -829,14 +877,14 @@ class TestTestingAPIEndpoints:
     def test_get_results_not_found(self):
         """Test GET /tests/results/{id} with non-existent ID"""
         from fastapi import APIRouter, HTTPException
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.get("/results/{execution_id}")
         async def get_results(execution_id: str):
             raise HTTPException(status_code=404, detail="Not found")
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -847,10 +895,10 @@ class TestTestingAPIEndpoints:
     def test_get_coverage_endpoint(self):
         """Test GET /tests/coverage endpoint"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.get("/coverage")
         async def get_coverage():
             return {
@@ -861,7 +909,7 @@ class TestTestingAPIEndpoints:
                 "files": {},
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -875,10 +923,10 @@ class TestTestingAPIEndpoints:
     def test_analyze_failures_endpoint(self):
         """Test POST /tests/analyze endpoint"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.post("/analyze")
         async def analyze(request: dict):
             return {
@@ -890,11 +938,11 @@ class TestTestingAPIEndpoints:
                 "summary": {"total_failures": 0},
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         @router.post("/run")
         async def run_tests(request: dict):
             return {"execution_id": "exec-123"}
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -915,10 +963,10 @@ class TestTestingAPIEndpoints:
     def test_get_status_endpoint(self):
         """Test GET /tests/status endpoint"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.get("/status")
         async def get_status():
             return {
@@ -928,7 +976,7 @@ class TestTestingAPIEndpoints:
                 "analysis_results_count": 0,
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -942,17 +990,17 @@ class TestTestingAPIEndpoints:
     def test_list_generated_tests_endpoint(self):
         """Test GET /tests/generated endpoint"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.get("/generated")
         async def list_generated():
             return {
                 "total": 0,
                 "tests": []
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -966,10 +1014,10 @@ class TestTestingAPIEndpoints:
     def test_agentic_generate_endpoint(self):
         """Test POST /tests/agentic/generate endpoint"""
         from fastapi import APIRouter
-        
+
         app = FastAPI()
         router = APIRouter()
-        
+
         @router.post("/agentic/generate")
         async def agentic_generate(request: dict):
             return {
@@ -980,7 +1028,7 @@ class TestTestingAPIEndpoints:
                 "coverage_estimate": 0.0,
                 "timestamp": datetime.now().isoformat()
             }
-        
+
         app.include_router(router, prefix="/tests")
         client = TestClient(app)
 
@@ -1007,9 +1055,14 @@ class TestIntegration:
 
     def test_full_generation_and_execution_flow(self):
         """Test full flow from generation to execution"""
-        from xencode.testing.test_generator import TestGenerator, TestGenerationConfig, TestFramework
-        from xencode.testing.test_runner import TestRunner, ExecutionConfig
         import tempfile
+
+        from xencode.testing.test_generator import (
+            TestFramework,
+            TestGenerationConfig,
+            TestGenerator,
+        )
+        from xencode.testing.test_runner import ExecutionConfig, TestRunner
 
         # Generate tests
         code = '''
@@ -1045,8 +1098,12 @@ def add(a: int, b: int) -> int:
 
     def test_failure_analysis_integration(self):
         """Test failure analysis integration with test runner"""
-        from xencode.testing.test_runner import TestExecutionResult, TestResult, TestStatus
         from xencode.testing.failure_analyzer import FailureAnalyzer
+        from xencode.testing.test_runner import (
+            TestExecutionResult,
+            TestResult,
+            TestStatus,
+        )
 
         # Create execution result with failures
         execution_result = TestExecutionResult(
@@ -1092,7 +1149,7 @@ def add(a: int, b: int) -> int:
         assert analysis.summary["total_failures"] == 2
 
         # Check that different failure types were detected
-        failure_types = set(f.failure_type.value for f in analysis.failures)
+        failure_types = {f.failure_type.value for f in analysis.failures}
         assert "assertion_error" in failure_types or "type_error" in failure_types
 
 

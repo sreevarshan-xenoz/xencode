@@ -9,26 +9,26 @@ Implements the ByteBotEngine as specified in the integration plan:
 - Context-aware command execution
 """
 
-from typing import Dict, Any, List, Optional, Tuple
-from enum import Enum
 import json
-import subprocess
 import platform
-from datetime import datetime
+import subprocess
 import uuid
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..core import ModelManager
 from ..shell_genie.genie import ShellGenie
 
 # Import the new components
 from .context_engine import ContextEngine
-from .planner import Planner
-from .executor import Executor
-from .safety_gate import SafetyGate, ExecutionMode
-from .risk_scorer import RiskScorer
 from .execution_modes import ModeAwareByteBot
+from .executor import Executor
 from .plan_graph_storage import PlanGraphManager
+from .planner import Planner
 from .replay_debug import ReplayAndDebugManager
+from .risk_scorer import RiskScorer
+from .safety_gate import ExecutionMode, SafetyGate
 
 
 class ByteBotEngine:

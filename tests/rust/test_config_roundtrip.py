@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 
+
 def test_rust_config_show(tmp_path: Path) -> None:
     if shutil.which("cargo") is None:
         pytest.skip("cargo is not installed")
 
     workspace_root = Path(__file__).resolve().parents[2] / "rust"
-    
+
     # Run config show
     completed = subprocess.run(
         [
@@ -28,7 +29,7 @@ def test_rust_config_show(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    
+
     config = json.loads(completed.stdout)
     assert "default_model" in config
     assert "ollama_url" in config

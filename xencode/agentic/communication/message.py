@@ -1,11 +1,11 @@
 """
 Message structure for inter-agent communication in Xencode
 """
-from enum import Enum
-from typing import Any, Dict, Optional, List
-from datetime import datetime
-from dataclasses import dataclass, field
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, Optional
 
 
 class MessageType(Enum):
@@ -34,25 +34,25 @@ class MessageStatus(Enum):
 @dataclass
 class Message:
     """Represents a message in the inter-agent communication system."""
-    
+
     # Core message fields
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     message_type: MessageType = MessageType.REQUEST
     sender_id: str = ""
     receiver_id: str = ""
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
     # Content fields
     content: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
     payload: Optional[Dict[str, Any]] = None
-    
+
     # Status and tracking
     status: MessageStatus = MessageStatus.PENDING
     correlation_id: Optional[str] = None  # For tracking related messages
     reply_to: Optional[str] = None  # For request-response patterns
     priority: int = 0  # Higher number means higher priority
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert message to dictionary representation."""
         return {
@@ -69,7 +69,7 @@ class Message:
             'reply_to': self.reply_to,
             'priority': self.priority
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Message':
         """Create a message from dictionary representation."""
@@ -87,12 +87,12 @@ class Message:
             reply_to=data.get('reply_to'),
             priority=data.get('priority', 0)
         )
-    
+
     def is_request_reply_pair(self, other: 'Message') -> bool:
         """Check if this message and another form a request-reply pair."""
-        return (self.message_id == other.reply_to or 
+        return (self.message_id == other.reply_to or
                 self.correlation_id == other.correlation_id)
-    
+
     def clone(self) -> 'Message':
         """Create a copy of this message."""
         return Message(
@@ -114,9 +114,9 @@ class Message:
 # Predefined message templates for common interactions
 class MessageTemplates:
     """Common message templates for standard agent interactions."""
-    
+
     @staticmethod
-    def create_task_request(sender_id: str, receiver_id: str, task: str, 
+    def create_task_request(sender_id: str, receiver_id: str, task: str,
                           task_id: Optional[str] = None) -> Message:
         """Create a task assignment message."""
         return Message(
@@ -127,9 +127,9 @@ class MessageTemplates:
             payload={'task_id': task_id or str(uuid.uuid4())},
             priority=1
         )
-    
+
     @staticmethod
-    def create_task_result(sender_id: str, receiver_id: str, 
+    def create_task_result(sender_id: str, receiver_id: str,
                           task_id: str, result: Any) -> Message:
         """Create a task result message."""
         return Message(
@@ -140,7 +140,7 @@ class MessageTemplates:
             payload={'task_id': task_id, 'result': result},
             priority=1
         )
-    
+
     @staticmethod
     def create_heartbeat(sender_id: str) -> Message:
         """Create a heartbeat message to signal agent availability."""
@@ -152,9 +152,9 @@ class MessageTemplates:
             payload={'timestamp': datetime.now().isoformat()},
             priority=-1  # Low priority
         )
-    
+
     @staticmethod
-    def create_error(sender_id: str, receiver_id: str, 
+    def create_error(sender_id: str, receiver_id: str,
                     error_msg: str, original_message_id: Optional[str] = None) -> Message:
         """Create an error message."""
         return Message(

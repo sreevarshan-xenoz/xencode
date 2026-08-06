@@ -14,7 +14,6 @@ Features:
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from enum import Enum
 
 from .benchmark_engine import BenchmarkTask, TaskType
 
@@ -33,7 +32,7 @@ class BenchmarkDataset:
 class BenchmarkSuites:
     """
     Pre-defined benchmark suites and task definitions
-    
+
     Suites:
     - Code Generation: Programming tasks
     - Chat: Conversational quality
@@ -42,12 +41,12 @@ class BenchmarkSuites:
     - Translation: Language translation
     - Question Answering: Knowledge retrieval
     """
-    
+
     def __init__(self):
         """Initialize benchmark suites"""
         self._suites = self._initialize_suites()
         self._datasets: Dict[str, BenchmarkDataset] = {}
-    
+
     def _initialize_suites(self) -> Dict[str, List[BenchmarkTask]]:
         """Initialize pre-defined benchmark suites"""
         return {
@@ -58,7 +57,7 @@ class BenchmarkSuites:
             "translation": self._translation_suite(),
             "question_answering": self._qa_suite(),
         }
-    
+
     def _code_generation_suite(self) -> List[BenchmarkTask]:
         """Code generation benchmark tasks"""
         return [
@@ -108,7 +107,7 @@ class BenchmarkSuites:
                 weight=2.0,
             ),
         ]
-    
+
     def _chat_suite(self) -> List[BenchmarkTask]:
         """Chat/conversational benchmark tasks"""
         return [
@@ -145,7 +144,7 @@ class BenchmarkSuites:
                 weight=2.0,
             ),
         ]
-    
+
     def _reasoning_suite(self) -> List[BenchmarkTask]:
         """Logical reasoning benchmark tasks"""
         return [
@@ -186,20 +185,20 @@ class BenchmarkSuites:
                 weight=2.0,
             ),
         ]
-    
+
     def _summarization_suite(self) -> List[BenchmarkTask]:
         """Text summarization benchmark tasks"""
         long_text = """
-        Artificial intelligence (AI) is intelligence demonstrated by machines, 
-        in contrast to the natural intelligence displayed by humans and animals. 
-        Leading AI textbooks define the field as the study of "intelligent agents": 
-        any device that perceives its environment and takes actions that maximize 
-        its chance of successfully achieving its goals. Colloquially, the term 
-        "artificial intelligence" is often used to describe machines that mimic 
-        "cognitive" functions that humans associate with the human mind, such as 
+        Artificial intelligence (AI) is intelligence demonstrated by machines,
+        in contrast to the natural intelligence displayed by humans and animals.
+        Leading AI textbooks define the field as the study of "intelligent agents":
+        any device that perceives its environment and takes actions that maximize
+        its chance of successfully achieving its goals. Colloquially, the term
+        "artificial intelligence" is often used to describe machines that mimic
+        "cognitive" functions that humans associate with the human mind, such as
         "learning" and "problem solving".
         """
-        
+
         return [
             BenchmarkTask(
                 name="short_summary",
@@ -218,7 +217,7 @@ class BenchmarkSuites:
                 weight=1.5,
             ),
         ]
-    
+
     def _translation_suite(self) -> List[BenchmarkTask]:
         """Translation benchmark tasks"""
         return [
@@ -239,7 +238,7 @@ class BenchmarkSuites:
                 weight=1.0,
             ),
         ]
-    
+
     def _qa_suite(self) -> List[BenchmarkTask]:
         """Question answering benchmark tasks"""
         return [
@@ -271,40 +270,40 @@ class BenchmarkSuites:
                 weight=1.5,
             ),
         ]
-    
+
     def get_suite(self, suite_name: str) -> Optional[List[BenchmarkTask]]:
         """
         Get a pre-defined benchmark suite
-        
+
         Args:
             suite_name: Name of the suite
-            
+
         Returns:
             List of BenchmarkTask or None
         """
         return self._suites.get(suite_name)
-    
+
     def get_all_suites(self) -> Dict[str, List[BenchmarkTask]]:
         """Get all pre-defined suites"""
         return self._suites.copy()
-    
+
     def get_task_types(self) -> List[str]:
         """Get all available task types"""
         return list(self._suites.keys())
-    
+
     def get_task_by_type(self, task_type: str) -> List[BenchmarkTask]:
         """
         Get tasks for a specific type
-        
+
         Args:
             task_type: Task type name
-            
+
         Returns:
             List of BenchmarkTask
         """
         suite = self._suites.get(task_type, [])
         return suite
-    
+
     def create_custom_task(
         self,
         name: str,
@@ -319,7 +318,7 @@ class BenchmarkSuites:
     ) -> BenchmarkTask:
         """
         Create a custom benchmark task
-        
+
         Args:
             name: Task name
             task_type: Type of task
@@ -330,7 +329,7 @@ class BenchmarkSuites:
             timeout_seconds: Request timeout
             weight: Task weight for scoring
             metadata: Additional metadata
-            
+
         Returns:
             BenchmarkTask instance
         """
@@ -345,7 +344,7 @@ class BenchmarkSuites:
             weight=weight,
             metadata=metadata or {},
         )
-    
+
     def create_custom_suite(
         self,
         name: str,
@@ -353,30 +352,30 @@ class BenchmarkSuites:
     ) -> None:
         """
         Create a custom benchmark suite
-        
+
         Args:
             name: Suite name
             tasks: List of BenchmarkTask
         """
         self._suites[name] = tasks
-    
+
     def load_dataset(self, dataset: BenchmarkDataset) -> None:
         """
         Load a benchmark dataset
-        
+
         Args:
             dataset: BenchmarkDataset to load
         """
         self._datasets[dataset.name] = dataset
-    
+
     def get_dataset(self, name: str) -> Optional[BenchmarkDataset]:
         """Get a loaded dataset"""
         return self._datasets.get(name)
-    
+
     def get_all_datasets(self) -> Dict[str, BenchmarkDataset]:
         """Get all loaded datasets"""
         return self._datasets.copy()
-    
+
     def calculate_suite_score(
         self,
         results: List[Dict[str, Any]],
@@ -384,40 +383,40 @@ class BenchmarkSuites:
     ) -> Dict[str, Any]:
         """
         Calculate overall score for a benchmark suite
-        
+
         Args:
             results: List of benchmark results
             suite_name: Name of the suite
-            
+
         Returns:
             Score breakdown
         """
         suite = self._suites.get(suite_name, [])
         if not suite:
             return {"error": f"Unknown suite: {suite_name}"}
-        
+
         # Create task weight map
         task_weights = {task.name: task.weight for task in suite}
-        
+
         # Filter results for this suite
         suite_results = [r for r in results if r.get("task_name") in task_weights]
-        
+
         if not suite_results:
             return {"error": "No results found for suite"}
-        
+
         # Calculate weighted scores
         total_weight = 0
         weighted_accuracy = 0
         weighted_latency = 0
-        
+
         for result in suite_results:
             task_name = result.get("task_name")
             weight = task_weights.get(task_name, 1.0)
-            
+
             total_weight += weight
             weighted_accuracy += result.get("accuracy_score", 0) * weight
             weighted_latency += result.get("latency_ms", 0) * weight
-        
+
         return {
             "suite_name": suite_name,
             "total_tasks": len(suite_results),

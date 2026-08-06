@@ -3,7 +3,8 @@
 from typing import Optional
 
 from .database import CollaborationDatabase
-from .models import Role, Permission, has_permission as check_permission
+from .models import Permission, Role
+from .models import has_permission as check_permission
 
 
 class RBAC:

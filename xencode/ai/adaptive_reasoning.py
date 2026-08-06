@@ -4,17 +4,12 @@ Implements AdaptiveReasoningEngine for complex problems, dynamic reasoning pathw
 reasoning complexity analysis, and fallback reasoning strategies.
 """
 
-import asyncio
 import logging
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Any, Callable, Union
-from enum import Enum
-import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
-import random
-
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +73,7 @@ class ReasoningMetrics:
 
 class ReasoningComplexityAnalyzer:
     """Analyzes the complexity of reasoning problems."""
-    
+
     def __init__(self):
         self.complexity_indicators = {
             ComplexityLevel.SIMPLE: [
@@ -105,19 +100,19 @@ class ReasoningComplexityAnalyzer:
                 r'\b(uncertain information|incomplete data|ambiguous terms)\b'
             ]
         }
-        
+
     def analyze_complexity(self, problem_statement: str) -> ComplexityLevel:
         """Analyze the complexity level of a problem statement."""
         problem_lower = problem_statement.lower()
-        
+
         # Check for indicators of each complexity level
-        scores = {level: 0 for level in ComplexityLevel}
-        
+        scores = dict.fromkeys(ComplexityLevel, 0)
+
         for level, patterns in self.complexity_indicators.items():
             for pattern in patterns:
                 if re.search(pattern, problem_lower, re.IGNORECASE):
                     scores[level] += 1
-                    
+
         # Return the level with the highest score, or default to moderate
         max_level = max(scores, key=scores.get)
         return max_level if scores[max_level] > 0 else ComplexityLevel.MODERATE
@@ -125,7 +120,7 @@ class ReasoningComplexityAnalyzer:
 
 class ReasoningPathwaySelector:
     """Selects the optimal reasoning pathway based on problem characteristics."""
-    
+
     def __init__(self):
         self.reasoning_mappings = {
             ComplexityLevel.SIMPLE: [ReasoningType.LOGICAL, ReasoningType.MATHEMATICAL],
@@ -133,7 +128,7 @@ class ReasoningPathwaySelector:
             ComplexityLevel.COMPLEX: [ReasoningType.ANALOGICAL, ReasoningType.ABDUCTIVE, ReasoningType.TEMPORAL],
             ComplexityLevel.HIGHLY_COMPLEX: [ReasoningType.ANALOGICAL, ReasoningType.ABDUCTIVE, ReasoningType.SPATIAL]
         }
-        
+
         # Specialized mappings for specific problem types
         self.specialized_mappings = {
             'mathematical': [ReasoningType.MATHEMATICAL, ReasoningType.LOGICAL],
@@ -141,23 +136,23 @@ class ReasoningPathwaySelector:
             'ethical': [ReasoningType.ABDUCTIVE, ReasoningType.ANALOGICAL],
             'strategic': [ReasoningType.CAUSAL, ReasoningType.TEMPORAL, ReasoningType.ANALOGICAL]
         }
-        
+
     def select_pathways(self, problem_statement: str, complexity: ComplexityLevel) -> List[ReasoningType]:
         """Select appropriate reasoning pathways for a problem."""
         problem_lower = problem_statement.lower()
-        
+
         # Check for specialized problem types
         for problem_type, pathways in self.specialized_mappings.items():
             if problem_type in problem_lower:
                 return pathways
-                
+
         # Use general complexity-based mapping
         return self.reasoning_mappings.get(complexity, [ReasoningType.LOGICAL])
 
 
 class FallbackReasoningSystem:
     """Provides fallback reasoning strategies when primary approaches fail."""
-    
+
     def __init__(self):
         self.fallback_strategies = {
             ReasoningType.DEDUCTIVE: [ReasoningType.LOGICAL, ReasoningType.INDUCTIVE],
@@ -170,15 +165,15 @@ class FallbackReasoningSystem:
             ReasoningType.MATHEMATICAL: [ReasoningType.LOGICAL, ReasoningType.DEDUCTIVE],
             ReasoningType.LOGICAL: [ReasoningType.INDUCTIVE, ReasoningType.DEDUCTIVE]
         }
-        
+
     def get_alternatives(self, failed_reasoning_type: ReasoningType) -> List[ReasoningType]:
         """Get alternative reasoning types when a specific type fails."""
         return self.fallback_strategies.get(failed_reasoning_type, [ReasoningType.LOGICAL])
-        
+
     def apply_fallback(self, problem_statement: str, failed_step: ReasoningStep) -> Optional[ReasoningStep]:
         """Apply a fallback reasoning strategy."""
         fallback_types = self.get_alternatives(failed_step.reasoning_type)
-        
+
         for fallback_type in fallback_types:
             try:
                 # Create a new step with the fallback reasoning type
@@ -195,9 +190,9 @@ class FallbackReasoningSystem:
                 return fallback_step
             except Exception:
                 continue  # Try the next fallback option
-                
+
         return None
-        
+
     def _execute_fallback_logic(self, problem_statement: str, reasoning_type: ReasoningType) -> Any:
         """Execute fallback reasoning logic."""
         # This would contain actual implementation for each reasoning type
@@ -207,7 +202,7 @@ class FallbackReasoningSystem:
 
 class ReasoningStepExecutor:
     """Executes individual reasoning steps."""
-    
+
     def __init__(self):
         self.reasoning_implementations = {
             ReasoningType.DEDUCTIVE: self._execute_deductive,
@@ -220,25 +215,25 @@ class ReasoningStepExecutor:
             ReasoningType.MATHEMATICAL: self._execute_mathematical,
             ReasoningType.LOGICAL: self._execute_logical
         }
-        
+
     async def execute_step(self, step: ReasoningStep, problem_context: Dict[str, Any]) -> ReasoningStep:
         """Execute a reasoning step."""
         start_time = datetime.now()
-        
+
         try:
             executor = self.reasoning_implementations.get(step.reasoning_type)
             if not executor:
                 raise ValueError(f"No executor found for reasoning type: {step.reasoning_type}")
-                
+
             result = await executor(step.input_data, problem_context)
-            
+
             execution_time = (datetime.now() - start_time).total_seconds()
-            
+
             # Update the step with results
             step.output_data = result
             step.execution_time = execution_time
             step.confidence = min(step.confidence + 0.1, 1.0)  # Boost confidence slightly on success
-            
+
             return step
         except Exception as e:
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -246,55 +241,55 @@ class ReasoningStepExecutor:
             step.confidence = 0.0  # Set to 0 on failure
             logger.error(f"Error executing reasoning step {step.step_id}: {str(e)}")
             raise
-            
+
     async def _execute_deductive(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute deductive reasoning."""
         # Simulate deductive reasoning process
         # In a real implementation, this would apply formal logic rules
         return f"Deductive reasoning applied to: {input_data}"
-        
+
     async def _execute_inductive(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute inductive reasoning."""
         # Simulate inductive reasoning process
         # In a real implementation, this would generalize from specific observations
         return f"Inductive reasoning applied to: {input_data}"
-        
+
     async def _execute_abductive(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute abductive reasoning."""
         # Simulate abductive reasoning process
         # In a real implementation, this would form the best explanation
         return f"Abductive reasoning applied to: {input_data}"
-        
+
     async def _execute_analogical(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute analogical reasoning."""
         # Simulate analogical reasoning process
         # In a real implementation, this would draw parallels between situations
         return f"Analogical reasoning applied to: {input_data}"
-        
+
     async def _execute_causal(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute causal reasoning."""
         # Simulate causal reasoning process
         # In a real implementation, this would determine cause-effect relationships
         return f"Causal reasoning applied to: {input_data}"
-        
+
     async def _execute_temporal(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute temporal reasoning."""
         # Simulate temporal reasoning process
         # In a real implementation, this would reason about time sequences
         return f"Temporal reasoning applied to: {input_data}"
-        
+
     async def _execute_spatial(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute spatial reasoning."""
         # Simulate spatial reasoning process
         # In a real implementation, this would reason about space and location
         return f"Spatial reasoning applied to: {input_data}"
-        
+
     async def _execute_mathematical(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute mathematical reasoning."""
         # Simulate mathematical reasoning process
         # In a real implementation, this would perform mathematical operations
         return f"Mathematical reasoning applied to: {input_data}"
-        
+
     async def _execute_logical(self, input_data: Any, context: Dict[str, Any]) -> Any:
         """Execute logical reasoning."""
         # Simulate logical reasoning process
@@ -307,43 +302,43 @@ class AdaptiveReasoningEngine:
     Adaptive reasoning engine for complex problems with dynamic pathway selection,
     complexity analysis, and fallback strategies.
     """
-    
+
     def __init__(self):
         self.complexity_analyzer = ReasoningComplexityAnalyzer()
         self.pathway_selector = ReasoningPathwaySelector()
         self.fallback_system = FallbackReasoningSystem()
         self.step_executor = ReasoningStepExecutor()
         self.reasoning_history: List[ReasoningChain] = []
-        
+
     async def solve_problem(
-        self, 
-        problem_statement: str, 
+        self,
+        problem_statement: str,
         context: Optional[Dict[str, Any]] = None
     ) -> ReasoningChain:
         """
         Solve a problem using adaptive reasoning.
-        
+
         Args:
             problem_statement: The problem to solve
             context: Additional context for the problem
-            
+
         Returns:
             ReasoningChain containing the solution process and results
         """
         start_time = datetime.now()
-        
+
         # Analyze problem complexity
         complexity = self.complexity_analyzer.analyze_complexity(problem_statement)
-        
+
         # Select appropriate reasoning pathways
         reasoning_types = self.pathway_selector.select_pathways(problem_statement, complexity)
-        
+
         # Build reasoning chain
         chain_id = f"chain_{hash(problem_statement) % 10000}"
         reasoning_steps = await self._build_reasoning_chain(
             problem_statement, reasoning_types, context or {}
         )
-        
+
         # Execute the reasoning chain
         success = True
         try:
@@ -352,15 +347,15 @@ class AdaptiveReasoningEngine:
             logger.error(f"Error executing reasoning chain {chain_id}: {str(e)}")
             success = False
             executed_steps = reasoning_steps  # Return original steps if execution failed
-            
+
         execution_time = (datetime.now() - start_time).total_seconds()
-        
+
         # Calculate overall confidence score
         if executed_steps:
             avg_confidence = sum(s.confidence for s in executed_steps) / len(executed_steps)
         else:
             avg_confidence = 0.0
-            
+
         # Create reasoning chain result
         chain = ReasoningChain(
             chain_id=chain_id,
@@ -372,24 +367,24 @@ class AdaptiveReasoningEngine:
             success=success,
             confidence_score=avg_confidence
         )
-        
+
         # Store in history
         self.reasoning_history.append(chain)
-        
+
         return chain
-        
+
     async def _build_reasoning_chain(
-        self, 
-        problem_statement: str, 
-        reasoning_types: List[ReasoningType], 
+        self,
+        problem_statement: str,
+        reasoning_types: List[ReasoningType],
         context: Dict[str, Any]
     ) -> List[ReasoningStep]:
         """Build a reasoning chain based on selected reasoning types."""
         steps = []
-        
+
         for i, reasoning_type in enumerate(reasoning_types):
             step_id = f"step_{i}_{reasoning_type.value}"
-            
+
             step = ReasoningStep(
                 step_id=step_id,
                 reasoning_type=reasoning_type,
@@ -400,20 +395,20 @@ class AdaptiveReasoningEngine:
                 execution_time=0.0,  # Will be filled during execution
                 dependencies=[steps[-1].step_id] if steps else []  # Depends on previous step
             )
-            
+
             steps.append(step)
-            
+
         return steps
-        
+
     async def _execute_reasoning_chain(
-        self, 
-        steps: List[ReasoningStep], 
-        problem_statement: str, 
+        self,
+        steps: List[ReasoningStep],
+        problem_statement: str,
         context: Dict[str, Any]
     ) -> List[ReasoningStep]:
         """Execute a reasoning chain with fallback capabilities."""
         executed_steps = []
-        
+
         for step in steps:
             try:
                 # Execute the step
@@ -421,7 +416,7 @@ class AdaptiveReasoningEngine:
                 executed_steps.append(executed_step)
             except Exception as e:
                 logger.warning(f"Step {step.step_id} failed: {str(e)}. Attempting fallback...")
-                
+
                 # Try fallback reasoning
                 fallback_step = self.fallback_system.apply_fallback(problem_statement, step)
                 if fallback_step:
@@ -437,9 +432,9 @@ class AdaptiveReasoningEngine:
                     # If no fallback worked, add the original step with zero confidence
                     step.confidence = 0.0
                     executed_steps.append(step)
-                    
+
         return executed_steps
-        
+
     def get_reasoning_metrics(self, chain_id: Optional[str] = None) -> List[ReasoningMetrics]:
         """Get performance metrics for reasoning chains."""
         if chain_id:
@@ -451,27 +446,27 @@ class AdaptiveReasoningEngine:
         else:
             # Return metrics for all chains
             return [self._calculate_chain_metrics(c) for c in self.reasoning_history]
-            
+
     def _calculate_chain_metrics(self, chain: ReasoningChain) -> ReasoningMetrics:
         """Calculate metrics for a reasoning chain."""
         # Calculate accuracy based on success and confidence
         accuracy = chain.confidence_score if chain.success else 0.0
-        
+
         # Calculate efficiency based on execution time and number of steps
         efficiency = len(chain.reasoning_steps) / chain.execution_time if chain.execution_time > 0 else 0.0
-        
+
         # Calculate logical consistency based on step dependencies and confidence
         if chain.reasoning_steps:
             consistency = sum(s.confidence for s in chain.reasoning_steps) / len(chain.reasoning_steps)
         else:
             consistency = 0.0
-            
+
         # Completeness based on number of steps relative to complexity
         completeness = min(len(chain.reasoning_steps) / max(len(chain.selected_reasoning_types), 1), 1.0)
-        
+
         # Computational cost based on execution time
         computational_cost = chain.execution_time
-        
+
         return ReasoningMetrics(
             accuracy=accuracy,
             efficiency=efficiency,
@@ -479,19 +474,19 @@ class AdaptiveReasoningEngine:
             completeness=completeness,
             computational_cost=computational_cost
         )
-        
+
     async def adapt_for_new_problem(
-        self, 
-        new_problem: str, 
+        self,
+        new_problem: str,
         similar_problem_threshold: float = 0.7
     ) -> List[ReasoningType]:
         """
         Adapt reasoning approach based on similar past problems.
-        
+
         Args:
             new_problem: The new problem to solve
             similar_problem_threshold: Threshold for considering problems similar
-            
+
         Returns:
             List of recommended reasoning types for the new problem
         """
@@ -501,32 +496,32 @@ class AdaptiveReasoningEngine:
             similarity = self._calculate_problem_similarity(new_problem, chain.problem_statement)
             if similarity >= similar_problem_threshold:
                 similar_chains.append((chain, similarity))
-                
+
         if not similar_chains:
             # If no similar problems, use complexity analysis
             complexity = self.complexity_analyzer.analyze_complexity(new_problem)
             return self.pathway_selector.select_pathways(new_problem, complexity)
-            
+
         # Rank similar chains by success and confidence
         ranked_chains = sorted(
-            similar_chains, 
-            key=lambda x: (x[0].success, x[0].confidence_score, x[1]), 
+            similar_chains,
+            key=lambda x: (x[0].success, x[0].confidence_score, x[1]),
             reverse=True
         )
-        
+
         # Take the reasoning types from the most successful similar chain
         best_chain = ranked_chains[0][0]
         return best_chain.selected_reasoning_types
-        
+
     def _calculate_problem_similarity(self, problem1: str, problem2: str) -> float:
         """Calculate similarity between two problems."""
         # Simple word overlap similarity
         words1 = set(problem1.lower().split())
         words2 = set(problem2.lower().split())
-        
+
         intersection = words1.intersection(words2)
         union = words1.union(words2)
-        
+
         return len(intersection) / len(union) if union else 0.0
 
 
@@ -537,11 +532,11 @@ async def solve_with_adaptive_reasoning(
 ) -> ReasoningChain:
     """
     Convenience function to solve a problem using adaptive reasoning.
-    
+
     Args:
         problem_statement: The problem to solve
         context: Additional context for the problem
-        
+
     Returns:
         ReasoningChain containing the solution process and results
     """

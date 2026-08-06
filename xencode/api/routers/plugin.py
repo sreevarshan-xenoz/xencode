@@ -6,22 +6,33 @@ FastAPI router for plugin management endpoints including marketplace integration
 plugin execution, monitoring, and comprehensive plugin lifecycle management.
 """
 
-import asyncio
-import json
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, UploadFile, File, Form, Body, Query
-from fastapi.responses import StreamingResponse
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
 # Import plugin system components
 try:
     from ...plugin_system import (
-        PluginManager, PluginMetadata, PluginStatus, PluginError,
-        SecurityLevel, PluginPermission
+        PluginError,
+        PluginManager,
+        PluginMetadata,
+        PluginPermission,
+        PluginStatus,
+        SecurityLevel,
     )
     from ...plugins.marketplace_client import MarketplaceClient
     PLUGIN_COMPONENTS_AVAILABLE = True
@@ -44,20 +55,20 @@ class PluginInfo(BaseModel):
     tags: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
     dependencies: List[str] = Field(default_factory=list)
-    
+
     # Status information
     status: str = "available"  # available, installed, enabled, disabled, error
     installed: bool = False
     enabled: bool = False
     installed_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
-    
+
     # Marketplace information
     downloads: int = 0
     rating: float = 0.0
     reviews_count: int = 0
     marketplace_url: Optional[str] = None
-    
+
     # Runtime information
     memory_usage_mb: Optional[float] = None
     cpu_usage_percent: Optional[float] = None
@@ -145,12 +156,12 @@ async def get_plugin_manager():
     """Dependency to get plugin manager"""
     if not PLUGIN_COMPONENTS_AVAILABLE:
         raise HTTPException(status_code=503, detail="Plugin system not available")
-    
+
     try:
         # For now, return a mock manager - in production this would be a singleton
         return PluginManager()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin manager: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin manager: {e}")  from e
 
 
 # Dependency to get marketplace client
@@ -158,11 +169,11 @@ async def get_marketplace_client():
     """Dependency to get marketplace client"""
     if not PLUGIN_COMPONENTS_AVAILABLE:
         raise HTTPException(status_code=503, detail="Marketplace client not available")
-    
+
     try:
         return MarketplaceClient()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get marketplace client: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get marketplace client: {e}")  from e
 
 
 @router.get("/", response_model=List[PluginInfo])
@@ -175,7 +186,7 @@ async def list_plugins(
     try:
         if PLUGIN_COMPONENTS_AVAILABLE:
             plugins = await plugin_manager.list_plugins()
-            
+
             # Convert to API format
             plugin_list = []
             for plugin in plugins:
@@ -194,15 +205,15 @@ async def list_plugins(
                     installed_at=plugin.installed_at,
                     last_updated=plugin.last_updated
                 )
-                
+
                 # Apply filters
                 if status and plugin_info.status != status:
                     continue
                 if category and plugin_info.category != category:
                     continue
-                
+
                 plugin_list.append(plugin_info)
-            
+
             return plugin_list
         else:
             # Mock implementation for testing
@@ -218,9 +229,9 @@ async def list_plugins(
                     enabled=True
                 )
             ]
-            
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list plugins: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list plugins: {e}")  from e
 
 
 @router.get("/{plugin_id}", response_model=PluginInfo)
@@ -234,7 +245,7 @@ async def get_plugin(
             plugin = await plugin_manager.get_plugin(plugin_id)
             if not plugin:
                 raise HTTPException(status_code=404, detail="Plugin not found")
-            
+
             return PluginInfo(
                 id=plugin.metadata.name,
                 name=plugin.metadata.name,
@@ -268,11 +279,11 @@ async def get_plugin(
                 )
             else:
                 raise HTTPException(status_code=404, detail="Plugin not found")
-                
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin: {e}")  from e
 
 
 @router.post("/install")
@@ -285,25 +296,25 @@ async def install_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin installation not available")
-        
+
         # Start installation in background
         installation_id = str(uuid.uuid4())
-        
+
         background_tasks.add_task(
             install_plugin_background,
             plugin_manager,
             request,
             installation_id
         )
-        
+
         return {
             "message": f"Plugin {request.plugin_id} installation started",
             "installation_id": installation_id,
             "status": "installing"
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start plugin installation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start plugin installation: {e}")  from e
 
 
 @router.post("/upload")
@@ -317,36 +328,36 @@ async def upload_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin upload not available")
-        
+
         # Validate file type
         if not file.filename.endswith(('.zip', '.tar.gz', '.xencode')):
             raise HTTPException(status_code=400, detail="Invalid plugin file format")
-        
+
         # Save uploaded file temporarily
         temp_path = Path(f"/tmp/{file.filename}")
         with open(temp_path, "wb") as f:
             content = await file.read()
             f.write(content)
-        
+
         # Install plugin
         result = await plugin_manager.install_from_file(
             temp_path,
             verify_signature=verify_signature,
             auto_enable=auto_enable
         )
-        
+
         # Clean up temp file
         temp_path.unlink(missing_ok=True)
-        
+
         return {
             "message": f"Plugin {result.name} installed successfully",
             "plugin_id": result.name,
             "version": result.version,
             "status": "installed"
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload plugin: {e}")  from e
 
 
 @router.put("/{plugin_id}")
@@ -360,14 +371,14 @@ async def update_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin update not available")
-        
+
         plugin = await plugin_manager.get_plugin(plugin_id)
         if not plugin:
             raise HTTPException(status_code=404, detail="Plugin not found")
-        
+
         # Start update in background
         update_id = str(uuid.uuid4())
-        
+
         background_tasks.add_task(
             update_plugin_background,
             plugin_manager,
@@ -375,18 +386,18 @@ async def update_plugin(
             request,
             update_id
         )
-        
+
         return {
             "message": f"Plugin {plugin_id} update started",
             "update_id": update_id,
             "current_version": plugin.metadata.version,
             "target_version": request.version or "latest"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update plugin: {e}")  from e
 
 
 @router.post("/{plugin_id}/enable")
@@ -398,21 +409,21 @@ async def enable_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin management not available")
-        
+
         success = await plugin_manager.enable_plugin(plugin_id)
         if not success:
             raise HTTPException(status_code=404, detail="Plugin not found or cannot be enabled")
-        
+
         return {
             "message": f"Plugin {plugin_id} enabled successfully",
             "plugin_id": plugin_id,
             "status": "enabled"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to enable plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to enable plugin: {e}")  from e
 
 
 @router.post("/{plugin_id}/disable")
@@ -424,21 +435,21 @@ async def disable_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin management not available")
-        
+
         success = await plugin_manager.disable_plugin(plugin_id)
         if not success:
             raise HTTPException(status_code=404, detail="Plugin not found or cannot be disabled")
-        
+
         return {
             "message": f"Plugin {plugin_id} disabled successfully",
             "plugin_id": plugin_id,
             "status": "disabled"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to disable plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to disable plugin: {e}")  from e
 
 
 @router.delete("/{plugin_id}")
@@ -451,21 +462,21 @@ async def uninstall_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin management not available")
-        
+
         success = await plugin_manager.uninstall_plugin(plugin_id, force=force)
         if not success:
             raise HTTPException(status_code=404, detail="Plugin not found or cannot be uninstalled")
-        
+
         return {
             "message": f"Plugin {plugin_id} uninstalled successfully",
             "plugin_id": plugin_id,
             "status": "uninstalled"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to uninstall plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to uninstall plugin: {e}")  from e
 
 
 @router.post("/{plugin_id}/execute", response_model=PluginExecutionResult)
@@ -478,9 +489,9 @@ async def execute_plugin(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin execution not available")
-        
+
         start_time = datetime.now()
-        
+
         # Execute plugin method
         result = await plugin_manager.execute_plugin(
             plugin_id,
@@ -489,9 +500,9 @@ async def execute_plugin(
             timeout=request.timeout_seconds,
             **request.kwargs
         )
-        
+
         execution_time = (datetime.now() - start_time).total_seconds() * 1000
-        
+
         # Get approximate memory usage (this is a simplified approach)
         import psutil
         current_process = psutil.Process()
@@ -504,10 +515,10 @@ async def execute_plugin(
             memory_used_mb=memory_used_mb,
             timestamp=datetime.now()
         )
-        
+
     except Exception as e:
         execution_time = (datetime.now() - start_time).total_seconds() * 1000
-        
+
         return PluginExecutionResult(
             success=False,
             error=str(e),
@@ -526,21 +537,21 @@ async def get_plugin_config(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin management not available")
-        
+
         config = await plugin_manager.get_plugin_config(plugin_id)
         if config is None:
             raise HTTPException(status_code=404, detail="Plugin not found")
-        
+
         return {
             "plugin_id": plugin_id,
             "config": config,
             "last_updated": datetime.now().isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin config: {e}")  from e
 
 
 @router.put("/{plugin_id}/config")
@@ -572,7 +583,7 @@ async def update_plugin_config(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update plugin config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update plugin config: {e}")  from e
 
 
 @router.get("/{plugin_id}/stats", response_model=PluginStats)
@@ -604,7 +615,7 @@ async def get_plugin_stats(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin stats: {e}")  from e
 
 
 # Enhanced plugin management endpoints
@@ -629,7 +640,7 @@ async def validate_plugin(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to validate plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to validate plugin: {e}")  from e
 
 
 @router.post("/{plugin_id}/health-check")
@@ -653,7 +664,7 @@ async def plugin_health_check(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to check plugin health: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check plugin health: {e}")  from e
 
 
 @router.get("/{plugin_id}/dependencies")
@@ -678,7 +689,7 @@ async def get_plugin_dependencies(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin dependencies: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin dependencies: {e}")  from e
 
 
 @router.post("/{plugin_id}/permissions/update")
@@ -704,7 +715,7 @@ async def update_plugin_permissions(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update plugin permissions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update plugin permissions: {e}")  from e
 
 
 @router.get("/{plugin_id}/versions")
@@ -727,7 +738,7 @@ async def get_plugin_versions(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin versions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin versions: {e}")  from e
 
 
 @router.post("/{plugin_id}/rollback")
@@ -753,7 +764,7 @@ async def rollback_plugin(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to rollback plugin: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rollback plugin: {e}")  from e
 
 
 @router.get("/{plugin_id}/security-scan")
@@ -779,7 +790,7 @@ async def security_scan_plugin(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to perform security scan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to perform security scan: {e}")  from e
 
 
 @router.post("/bulk/install")
@@ -819,7 +830,7 @@ async def bulk_install_plugins(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to bulk install plugins: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to bulk install plugins: {e}")  from e
 
 
 @router.post("/bulk/enable")
@@ -858,7 +869,7 @@ async def bulk_enable_plugins(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to bulk enable plugins: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to bulk enable plugins: {e}")  from e
 
 
 @router.post("/bulk/disable")
@@ -897,7 +908,7 @@ async def bulk_disable_plugins(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to bulk disable plugins: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to bulk disable plugins: {e}")  from e
 
 
 @router.get("/{plugin_id}/logs")
@@ -911,18 +922,18 @@ async def get_plugin_logs(
     try:
         if not PLUGIN_COMPONENTS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Plugin management not available")
-        
+
         logs = await plugin_manager.get_plugin_logs(plugin_id, lines=lines, level=level)
-        
+
         return {
             "plugin_id": plugin_id,
             "logs": logs,
             "lines_returned": len(logs),
             "level": level
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get plugin logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get plugin logs: {e}")  from e
 
 
 # Marketplace endpoints
@@ -934,7 +945,7 @@ async def get_marketplace_info(
     try:
         async with marketplace_client as client:
             info = await client.get_marketplace_info()
-            
+
             return MarketplaceInfo(
                 total_plugins=info.get('total_plugins', 0),
                 categories=info.get('categories', []),
@@ -942,9 +953,9 @@ async def get_marketplace_info(
                 recent_updates=info.get('recent_updates', []),
                 marketplace_status=info.get('status', 'online')
             )
-            
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get marketplace info: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get marketplace info: {e}")  from e
 
 
 @router.post("/marketplace/search")
@@ -963,7 +974,7 @@ async def search_marketplace(
                 limit=request.limit,
                 offset=request.offset
             )
-            
+
             # Convert to API format
             plugins = []
             for result in results:
@@ -982,16 +993,16 @@ async def search_marketplace(
                     status="available"
                 )
                 plugins.append(plugin_info)
-            
+
             return {
                 "plugins": plugins,
                 "total_results": len(plugins),
                 "query": request.query,
                 "has_more": len(plugins) == request.limit
             }
-            
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search marketplace: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to search marketplace: {e}")  from e
 
 
 @router.get("/marketplace/categories")
@@ -1002,14 +1013,14 @@ async def get_marketplace_categories(
     try:
         async with marketplace_client as client:
             categories = await client.get_categories()
-            
+
             return {
                 "categories": categories,
                 "total_count": len(categories)
             }
-            
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get categories: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get categories: {e}")  from e
 
 
 @router.get("/system/status")
@@ -1023,9 +1034,9 @@ async def get_plugin_system_status(
                 "status": "unavailable",
                 "message": "Plugin system components not available"
             }
-        
+
         status = await plugin_manager.get_system_status()
-        
+
         return {
             "status": "healthy",
             "total_plugins": status.get('total_plugins', 0),
@@ -1036,9 +1047,9 @@ async def get_plugin_system_status(
             "uptime_hours": status.get('uptime_hours', 0.0),
             "last_updated": datetime.now().isoformat()
         }
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get system status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get system status: {e}")  from e
 
 
 # Background tasks

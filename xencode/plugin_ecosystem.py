@@ -12,31 +12,24 @@ import importlib
 import importlib.util
 import inspect
 import json
-import os
 import shutil
 import subprocess
 import sys
-import tempfile
-import time
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union, Callable, Tuple
-from urllib.parse import urlparse
-import zipfile
+from typing import Any, Dict, List, Optional, Tuple
+
 import aiohttp
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.prompt import Prompt, Confirm
-import yaml
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import padding
 from packaging import version
-from packaging.specifiers import SpecifierSet
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -80,7 +73,7 @@ class PluginMetadata:
     homepage: Optional[str] = None
     repository: Optional[str] = None
     categories: List[PluginCategory] = field(default_factory=list)
-    
+
     # Marketplace fields
     marketplace_id: Optional[str] = None
     signature: Optional[str] = None
@@ -182,7 +175,7 @@ class PluginSecurityManager:
         try:
             public_key = serialization.load_pem_public_key(public_key_pem.encode())
             signature_bytes = bytes.fromhex(signature)
-            
+
             public_key.verify(
                 signature_bytes,
                 plugin_data,
@@ -266,7 +259,7 @@ class PluginValidator:
     def _check_file_types(self, package_path: Path) -> bool:
         """Check that package only contains allowed file types"""
         allowed_extensions = {'.py', '.json', '.yaml', '.yml', '.txt', '.md', '.cfg', '.ini'}
-        
+
         for file_path in package_path.rglob('*'):
             if file_path.is_file():
                 if file_path.suffix.lower() not in allowed_extensions:
@@ -277,7 +270,7 @@ class PluginValidator:
     def _scan_for_malicious_content(self, package_path: Path) -> List[str]:
         """Scan plugin files for malicious content"""
         issues = []
-        
+
         for py_file in package_path.rglob('*.py'):
             try:
                 content = py_file.read_text(encoding='utf-8')
@@ -287,7 +280,7 @@ class PluginValidator:
             except Exception:
                 # Skip files that can't be read
                 continue
-        
+
         return issues
 
     def _validate_metadata(self, metadata: PluginMetadata) -> bool:
@@ -343,7 +336,7 @@ class PluginDownloader:
 
             # Create temporary file
             temp_file = target_dir / f"plugin_download_{uuid.uuid4()}.zip"
-            
+
             with open(temp_file, 'wb') as f:
                 async for chunk in response.content.iter_chunked(8192):
                     f.write(chunk)
@@ -428,16 +421,16 @@ class PluginManager:
     def __init__(self, plugins_dir: Path):
         self.plugins_dir = Path(plugins_dir)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.security_manager = PluginSecurityManager()
         self.installer = PluginInstaller(self.plugins_dir, self.security_manager)
         self.loaded_plugins: Dict[str, PluginInterface] = {}
         self.plugin_configs: Dict[str, PluginConfig] = {}
-        
+
         # Marketplace integration
         self.marketplace_url = "https://marketplace.xencode.ai"
         self.downloader = PluginDownloader()
-        
+
         # Initialize
         self._discover_installed_plugins()
 
@@ -450,21 +443,21 @@ class PluginManager:
                     try:
                         with open(metadata_file, 'r') as f:
                             metadata_dict = json.load(f)
-                        
+
                         metadata = PluginMetadata(**{
-                            k: v for k, v in metadata_dict.items() 
+                            k: v for k, v in metadata_dict.items()
                             if k in PluginMetadata.__annotations__
                         })
-                        
+
                         # Set categories from string values
                         if 'categories' in metadata_dict:
                             metadata.categories = [
                                 PluginCategory(cat) for cat in metadata_dict['categories']
                                 if cat in PluginCategory.__members__
                             ]
-                        
+
                         self.installed_plugins[plugin_dir.name] = metadata
-                        
+
                     except Exception as e:
                         console.print(f"[red]❌ Error loading metadata for {plugin_dir.name}: {e}[/red]")
 
@@ -497,7 +490,7 @@ class PluginManager:
             # Find plugin class
             plugin_class = None
             for name, obj in inspect.getmembers(plugin_module, inspect.isclass):
-                if (issubclass(obj, PluginInterface) and 
+                if (issubclass(obj, PluginInterface) and
                     obj is not PluginInterface and
                     name != 'PluginInterface'):
                     plugin_class = obj
@@ -549,7 +542,7 @@ class PluginManager:
             # Download plugin
             async with self.downloader as downloader:
                 download_path = await downloader.download_plugin(
-                    plugin_info['download_url'], 
+                    plugin_info['download_url'],
                     self.plugins_dir
                 )
 
@@ -562,11 +555,11 @@ class PluginManager:
 
             if success:
                 console.print(f"[green]✅ Plugin {plugin_info['name']} installed from marketplace[/green]")
-                
+
                 # Auto-load if enabled
                 config = PluginConfig(enabled=True)
                 self.plugin_configs[plugin_info['name']] = config
-                
+
                 if config.enabled:
                     await self.load_plugin(plugin_info['name'])
 
@@ -582,10 +575,10 @@ class PluginManager:
             # In a real implementation, this would call the marketplace API
             # For demo purposes, we'll simulate a response
             console.print(f"[blue]🌐 Fetching plugin info for {plugin_id}[/blue]")
-            
+
             # Simulate API call delay
             await asyncio.sleep(1)
-            
+
             # Return mock data for demonstration
             return {
                 "name": plugin_id,
@@ -614,11 +607,11 @@ class PluginManager:
     def list_installed_plugins(self) -> List[Tuple[str, PluginMetadata, PluginStatus]]:
         """List all installed plugins with their status"""
         plugins = []
-        
+
         for plugin_name, metadata in self.installed_plugins.items():
             status = PluginStatus.ENABLED if plugin_name in self.loaded_plugins else PluginStatus.DISABLED
             plugins.append((plugin_name, metadata, status))
-        
+
         return plugins
 
     def list_available_plugins(self) -> List[Dict[str, Any]]:
@@ -683,14 +676,14 @@ class PluginManager:
             # Uninstall current version
             if plugin_name in self.loaded_plugins:
                 await self.unload_plugin(plugin_name)
-            
+
             self.installer.uninstall_plugin(plugin_name)
 
             # Install new version
             metadata = PluginMetadata(**plugin_info)
             async with self.downloader as downloader:
                 download_path = await downloader.download_plugin(
-                    plugin_info['download_url'], 
+                    plugin_info['download_url'],
                     self.plugins_dir
                 )
 
@@ -699,7 +692,7 @@ class PluginManager:
 
             if success:
                 console.print(f"[green]✅ Plugin {plugin_name} updated successfully[/green]")
-                
+
                 # Reload if it was previously loaded
                 if plugin_name in self.plugin_configs:
                     if self.plugin_configs[plugin_name].enabled:
@@ -723,7 +716,7 @@ class PluginManager:
     def display_plugin_dashboard(self):
         """Display plugin management dashboard"""
         stats = self.get_plugin_stats()
-        
+
         console.print(Panel(
             f"[bold blue]Plugin Management Dashboard[/bold blue]\n"
             f"Installed Plugins: {stats['total_installed']}\n"
@@ -757,7 +750,7 @@ class PluginManager:
         # Display available marketplace plugins
         console.print("\n[bold]Available Marketplace Plugins:[/bold]")
         available = self.list_available_plugins()
-        
+
         for plugin in available[:5]:  # Show first 5
             console.print(f"  • [cyan]{plugin['name']}[/cyan] v{plugin['version']} "
                          f"by {plugin['author']} "
@@ -777,13 +770,13 @@ class PluginMarketplace:
         # In a real implementation, this would call the marketplace API
         # For demo, return filtered sample data
         all_plugins = self.plugin_manager.list_available_plugins()
-        
+
         results = []
         for plugin in all_plugins:
             if query.lower() in plugin['name'].lower() or query.lower() in plugin['description'].lower():
                 if category is None or category.value in plugin.get('categories', []):
                     results.append(plugin)
-        
+
         return results
 
     async def get_featured_plugins(self) -> List[Dict[str, Any]]:
@@ -807,33 +800,33 @@ class PluginMarketplace:
 async def demo_plugin_system():
     """Demonstrate the plugin system capabilities"""
     console.print("[bold green]🔌 Initializing Plugin Ecosystem[/bold green]")
-    
+
     # Create plugins directory
     plugins_dir = Path.home() / ".xencode" / "plugins"
-    
+
     # Initialize plugin manager
     plugin_manager = PluginManager(plugins_dir)
-    
+
     # Display dashboard
     plugin_manager.display_plugin_dashboard()
-    
+
     # Simulate installing a plugin
     console.print("\n[blue]📦 Installing sample plugin...[/blue]")
     success = await plugin_manager.install_plugin_from_marketplace("code_formatter")
-    
+
     if success:
         console.print("[green]✅ Sample plugin installed successfully[/green]")
-        
+
         # Show updated dashboard
         plugin_manager.display_plugin_dashboard()
-        
+
         # Simulate updating the plugin
         console.print("\n[blue]🔄 Checking for updates...[/blue]")
         update_success = await plugin_manager.update_plugin("code_formatter")
-        
+
         if update_success:
             console.print("[green]✅ Plugin updated successfully[/green]")
-    
+
     console.print("\n[green]✅ Plugin Ecosystem Demo Completed[/green]")
 
 

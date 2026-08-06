@@ -8,16 +8,15 @@ to maintain code quality while scaling rapidly.
 
 import ast
 import json
-import sqlite3
-import subprocess
-import time
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Set
-from dataclasses import dataclass, asdict
-from enum import Enum
 import logging
 import re
+import sqlite3
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -78,26 +77,26 @@ class DebtMetrics:
 
 class TechnicalDebtDetector:
     """Detects various types of technical debt"""
-    
+
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        
+
     async def detect_code_complexity(self) -> List[TechnicalDebtItem]:
         """Detect overly complex code using cyclomatic complexity"""
         debt_items = []
-        
+
         for py_file in self.project_root.rglob("*.py"):
             if self._should_skip_file(py_file):
                 continue
-                
+
             try:
                 with open(py_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
+
                 tree = ast.parse(content)
                 complexity_analyzer = ComplexityAnalyzer()
                 complexity_analyzer.visit(tree)
-                
+
                 for func_name, complexity, line_no in complexity_analyzer.complexities:
                     if complexity > 10:  # McCabe complexity threshold
                         severity = self._get_complexity_severity(complexity)
@@ -116,28 +115,28 @@ class TechnicalDebtDetector:
                         ))
             except Exception as e:
                 logger.warning(f"Failed to analyze complexity for {py_file}: {e}")
-        
+
         return debt_items
-    
+
     async def detect_code_duplication(self) -> List[TechnicalDebtItem]:
         """Detect code duplication"""
         debt_items = []
-        
+
         # Simple duplication detection based on similar function signatures
         functions = {}
-        
+
         for py_file in self.project_root.rglob("*.py"):
             if self._should_skip_file(py_file):
                 continue
-                
+
             try:
                 with open(py_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
+
                 tree = ast.parse(content)
                 duplication_analyzer = DuplicationAnalyzer()
                 duplication_analyzer.visit(tree)
-                
+
                 for func_signature, line_no in duplication_analyzer.functions:
                     if func_signature in functions:
                         # Found potential duplication
@@ -157,12 +156,12 @@ class TechnicalDebtDetector:
                         ))
                     else:
                         functions[func_signature] = (str(py_file.relative_to(self.project_root)), line_no)
-                        
+
             except Exception as e:
                 logger.warning(f"Failed to analyze duplication for {py_file}: {e}")
-        
+
         return debt_items
-    
+
     async def detect_todo_comments(self) -> List[TechnicalDebtItem]:
         """Detect TODO, FIXME, and HACK comments"""
         debt_items = []
@@ -172,15 +171,15 @@ class TechnicalDebtDetector:
             (r'#\s*HACK[:\s]*(.*)', DebtSeverity.HIGH),
             (r'#\s*XXX[:\s]*(.*)', DebtSeverity.MEDIUM),
         ]
-        
+
         for py_file in self.project_root.rglob("*.py"):
             if self._should_skip_file(py_file):
                 continue
-                
+
             try:
                 with open(py_file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
-                
+
                 for line_no, line in enumerate(lines, 1):
                     for pattern, severity in todo_patterns:
                         match = re.search(pattern, line, re.IGNORECASE)
@@ -199,30 +198,30 @@ class TechnicalDebtDetector:
                                 last_updated=datetime.now(),
                                 metadata={"comment_text": line.strip()}
                             ))
-                            
+
             except Exception as e:
                 logger.warning(f"Failed to analyze TODOs for {py_file}: {e}")
-        
+
         return debt_items
-    
+
     async def detect_missing_tests(self) -> List[TechnicalDebtItem]:
         """Detect files without corresponding test files"""
         debt_items = []
-        
+
         source_files = set()
         test_files = set()
-        
+
         # Collect source files
         for py_file in self.project_root.rglob("*.py"):
             if self._should_skip_file(py_file):
                 continue
             if not py_file.name.startswith("test_"):
                 source_files.add(py_file)
-        
+
         # Collect test files
         for py_file in self.project_root.rglob("test_*.py"):
             test_files.add(py_file.name[5:])  # Remove "test_" prefix
-        
+
         # Find source files without tests
         for source_file in source_files:
             expected_test = f"test_{source_file.name}"
@@ -240,9 +239,9 @@ class TechnicalDebtDetector:
                     last_updated=datetime.now(),
                     metadata={"expected_test_file": expected_test}
                 ))
-        
+
         return debt_items
-    
+
     def _should_skip_file(self, file_path: Path) -> bool:
         """Check if file should be skipped during analysis"""
         skip_patterns = [
@@ -254,9 +253,9 @@ class TechnicalDebtDetector:
             ".pytest_cache",
             "htmlcov"
         ]
-        
+
         return any(pattern in str(file_path) for pattern in skip_patterns)
-    
+
     def _get_complexity_severity(self, complexity: int) -> DebtSeverity:
         """Get severity based on complexity score"""
         if complexity > 20:
@@ -271,42 +270,42 @@ class TechnicalDebtDetector:
 
 class ComplexityAnalyzer(ast.NodeVisitor):
     """AST visitor to calculate cyclomatic complexity"""
-    
+
     def __init__(self):
         self.complexities = []
         self.current_complexity = 0
         self.current_function = None
         self.current_line = None
-    
+
     def visit_FunctionDef(self, node):
         old_complexity = self.current_complexity
         old_function = self.current_function
         old_line = self.current_line
-        
+
         self.current_complexity = 1  # Base complexity
         self.current_function = node.name
         self.current_line = node.lineno
-        
+
         self.generic_visit(node)
-        
+
         self.complexities.append((self.current_function, self.current_complexity, self.current_line))
-        
+
         self.current_complexity = old_complexity
         self.current_function = old_function
         self.current_line = old_line
-    
+
     def visit_If(self, node):
         self.current_complexity += 1
         self.generic_visit(node)
-    
+
     def visit_While(self, node):
         self.current_complexity += 1
         self.generic_visit(node)
-    
+
     def visit_For(self, node):
         self.current_complexity += 1
         self.generic_visit(node)
-    
+
     def visit_ExceptHandler(self, node):
         self.current_complexity += 1
         self.generic_visit(node)
@@ -314,16 +313,16 @@ class ComplexityAnalyzer(ast.NodeVisitor):
 
 class DuplicationAnalyzer(ast.NodeVisitor):
     """AST visitor to detect potential code duplication"""
-    
+
     def __init__(self):
         self.functions = []
-    
+
     def visit_FunctionDef(self, node):
         # Create a simple signature based on function structure
         signature = self._create_signature(node)
         self.functions.append((signature, node.lineno))
         self.generic_visit(node)
-    
+
     def _create_signature(self, node):
         """Create a simple signature for duplication detection"""
         # This is a simplified approach - in practice, you'd want more sophisticated analysis
@@ -334,14 +333,14 @@ class DuplicationAnalyzer(ast.NodeVisitor):
 
 class TechnicalDebtManager:
     """Manages technical debt tracking and reporting"""
-    
+
     def __init__(self, project_root: Path, db_path: Optional[Path] = None):
         self.project_root = project_root
         self.db_path = db_path or project_root / ".xencode" / "technical_debt.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.detector = TechnicalDebtDetector(project_root)
         self._init_database()
-    
+
     def _init_database(self):
         """Initialize the technical debt database"""
         with sqlite3.connect(self.db_path) as conn:
@@ -363,7 +362,7 @@ class TechnicalDebtManager:
                     metadata TEXT
                 )
             """)
-            
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS debt_scans (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -373,16 +372,16 @@ class TechnicalDebtManager:
                     scan_duration_seconds REAL NOT NULL
                 )
             """)
-            
+
             conn.commit()
-    
+
     async def run_full_scan(self) -> DebtMetrics:
         """Run a comprehensive technical debt scan"""
         start_time = time.time()
         logger.info("Starting technical debt scan...")
-        
+
         all_debt_items = []
-        
+
         # Run all detectors
         detectors = [
             self.detector.detect_code_complexity(),
@@ -390,20 +389,20 @@ class TechnicalDebtManager:
             self.detector.detect_todo_comments(),
             self.detector.detect_missing_tests(),
         ]
-        
+
         for detector_coro in detectors:
             try:
                 items = await detector_coro
                 all_debt_items.extend(items)
             except Exception as e:
                 logger.error(f"Detector failed: {e}")
-        
+
         # Store results
         await self._store_debt_items(all_debt_items)
-        
+
         # Calculate metrics
         metrics = await self.get_debt_metrics()
-        
+
         # Record scan
         scan_duration = time.time() - start_time
         with sqlite3.connect(self.db_path) as conn:
@@ -412,21 +411,21 @@ class TechnicalDebtManager:
                 VALUES (?, ?, ?, ?)
             """, (datetime.now().isoformat(), metrics.total_items, metrics.total_effort_hours, scan_duration))
             conn.commit()
-        
+
         logger.info(f"Technical debt scan completed in {scan_duration:.2f}s. Found {metrics.total_items} items.")
         return metrics
-    
+
     async def _store_debt_items(self, debt_items: List[TechnicalDebtItem]):
         """Store debt items in database"""
         with sqlite3.connect(self.db_path) as conn:
             # Clear existing unresolved items (they'll be re-detected if still present)
             conn.execute("DELETE FROM debt_items WHERE resolved = FALSE")
-            
+
             for item in debt_items:
                 conn.execute("""
-                    INSERT OR REPLACE INTO debt_items 
-                    (id, debt_type, severity, file_path, line_number, description, 
-                     estimated_effort_hours, business_impact, created_date, last_updated, 
+                    INSERT OR REPLACE INTO debt_items
+                    (id, debt_type, severity, file_path, line_number, description,
+                     estimated_effort_hours, business_impact, created_date, last_updated,
                      resolved, resolution_date, resolution_notes, metadata)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
@@ -445,54 +444,54 @@ class TechnicalDebtManager:
                     item.resolution_notes,
                     json.dumps(item.metadata) if item.metadata else None
                 ))
-            
+
             conn.commit()
-    
+
     async def get_debt_metrics(self) -> DebtMetrics:
         """Calculate current technical debt metrics"""
         with sqlite3.connect(self.db_path) as conn:
             # Total items and effort
             total_data = conn.execute("""
-                SELECT COUNT(*), SUM(estimated_effort_hours) 
+                SELECT COUNT(*), SUM(estimated_effort_hours)
                 FROM debt_items WHERE resolved = FALSE
             """).fetchone()
-            
+
             total_items = total_data[0] or 0
             total_effort = total_data[1] or 0.0
-            
+
             # Items by severity
             severity_data = conn.execute("""
-                SELECT severity, COUNT(*) FROM debt_items 
+                SELECT severity, COUNT(*) FROM debt_items
                 WHERE resolved = FALSE GROUP BY severity
             """).fetchall()
             items_by_severity = {row[0]: row[1] for row in severity_data}
-            
+
             # Items by type
             type_data = conn.execute("""
-                SELECT debt_type, COUNT(*) FROM debt_items 
+                SELECT debt_type, COUNT(*) FROM debt_items
                 WHERE resolved = FALSE GROUP BY debt_type
             """).fetchall()
             items_by_type = {row[0]: row[1] for row in type_data}
-            
+
             # 7-day trend
             week_ago = (datetime.now() - timedelta(days=7)).isoformat()
             trend_data = conn.execute("""
-                SELECT COUNT(*) FROM debt_items 
+                SELECT COUNT(*) FROM debt_items
                 WHERE created_date > ? AND resolved = FALSE
             """, (week_ago,)).fetchone()
             trend_7_days = trend_data[0] or 0
-            
+
             # Resolution rate (items resolved per week)
             resolved_data = conn.execute("""
-                SELECT COUNT(*) FROM debt_items 
+                SELECT COUNT(*) FROM debt_items
                 WHERE resolved = TRUE AND resolution_date > ?
             """, (week_ago,)).fetchone()
             resolution_rate = resolved_data[0] or 0
-            
+
             # Debt ratio (simplified - debt effort per 1000 lines of code)
             total_lines = await self._count_total_lines()
             debt_ratio = (total_effort / max(total_lines / 1000, 1)) if total_lines > 0 else 0
-            
+
             return DebtMetrics(
                 total_items=total_items,
                 total_effort_hours=total_effort,
@@ -502,7 +501,7 @@ class TechnicalDebtManager:
                 debt_ratio=debt_ratio,
                 resolution_rate=resolution_rate
             )
-    
+
     async def _count_total_lines(self) -> int:
         """Count total lines of code in the project"""
         total_lines = 0
@@ -515,33 +514,26 @@ class TechnicalDebtManager:
             except Exception:
                 continue
         return total_lines
-    
+
     async def resolve_debt_item(self, item_id: str, resolution_notes: str):
         """Mark a debt item as resolved"""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                UPDATE debt_items 
+                UPDATE debt_items
                 SET resolved = TRUE, resolution_date = ?, resolution_notes = ?
                 WHERE id = ?
             """, (datetime.now().isoformat(), resolution_notes, item_id))
             conn.commit()
-    
+
     async def get_prioritized_debt_items(self, limit: int = 20) -> List[TechnicalDebtItem]:
         """Get prioritized list of debt items for resolution"""
         with sqlite3.connect(self.db_path) as conn:
             # Priority scoring: Critical=4, High=3, Medium=2, Low=1
-            priority_scores = {
-                DebtSeverity.CRITICAL.value: 4,
-                DebtSeverity.HIGH.value: 3,
-                DebtSeverity.MEDIUM.value: 2,
-                DebtSeverity.LOW.value: 1,
-                DebtSeverity.INFO.value: 0
-            }
-            
+
             rows = conn.execute("""
-                SELECT * FROM debt_items 
-                WHERE resolved = FALSE 
-                ORDER BY 
+                SELECT * FROM debt_items
+                WHERE resolved = FALSE
+                ORDER BY
                     CASE severity
                         WHEN 'critical' THEN 4
                         WHEN 'high' THEN 3
@@ -552,7 +544,7 @@ class TechnicalDebtManager:
                     estimated_effort_hours ASC
                 LIMIT ?
             """, (limit,)).fetchall()
-            
+
             items = []
             for row in rows:
                 items.append(TechnicalDebtItem(
@@ -571,7 +563,7 @@ class TechnicalDebtManager:
                     resolution_notes=row[12],
                     metadata=json.loads(row[13]) if row[13] else None
                 ))
-            
+
             return items
 
 

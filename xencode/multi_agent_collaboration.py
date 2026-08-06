@@ -7,20 +7,17 @@ mechanisms for complex development tasks.
 """
 
 import asyncio
-import json
+import logging
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Callable, Set
-from datetime import datetime
-import logging
-from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.tree import Tree
+from rich.table import Table
 
 console = Console()
 
@@ -118,7 +115,7 @@ class CommunicationProtocol:
         """Send a message to the communication bus"""
         await self.message_queue.put(message)
         self.message_history.append(message)
-        
+
         # Notify subscribers
         if message.receiver_id in self.subscribers:
             for callback in self.subscribers[message.receiver_id]:
@@ -152,7 +149,7 @@ class CommunicationProtocol:
                     break
         except asyncio.TimeoutError:
             pass
-        
+
         return messages
 
     def get_message_stats(self) -> Dict[str, Any]:
@@ -225,7 +222,7 @@ class AgentMemory:
             "shared_keys": len(self.shared_memory),
             "agent_memories": len(self.agent_memories),
             "total_accesses": len(self.access_logs),
-            "recent_accesses": len([log for log in self.access_logs 
+            "recent_accesses": len([log for log in self.access_logs
                                   if time.time() - log["timestamp"] < 300])  # Last 5 minutes
         }
 
@@ -262,7 +259,7 @@ class Agent:
         # Route message to appropriate handler
         handler_name = f"handle_{message.message_type.value.replace('-', '_')}"
         handler = getattr(self, handler_name, self.handle_generic_message)
-        
+
         try:
             if asyncio.iscoroutinefunction(handler):
                 await handler(message)
@@ -283,11 +280,11 @@ class Agent:
             priority=task_data.get("priority", 5),
             metadata=task_data.get("metadata", {})
         )
-        
+
         self.assigned_tasks.append(task)
         task.assigned_at = time.time()
         self.status = "working"
-        
+
         # Start processing the task
         await self.process_task(task)
 
@@ -296,12 +293,12 @@ class Agent:
         try:
             # Simulate task processing
             await asyncio.sleep(0.1)  # Simulated processing time
-            
+
             # Complete the task
             task.status = TaskStatus.COMPLETED
             task.completed_at = time.time()
             task.result = f"Task {task.id} completed by {self.id}"
-            
+
             # Send completion message
             completion_message = Message(
                 id=f"completion_{uuid.uuid4()}",
@@ -317,7 +314,7 @@ class Agent:
                 correlation_id=task.id
             )
             await self.communication_protocol.send_message(completion_message)
-            
+
         except Exception as e:
             task.status = TaskStatus.FAILED
             task.error = str(e)
@@ -760,12 +757,12 @@ class CollaborationOrchestrator:
             "formation_time": time.time(),
             "status": "active"
         }
-        
+
         # Store team information in shared memory
         asyncio.create_task(
             self.memory.write_shared(f"team_{team_id}", team, "orchestrator")
         )
-        
+
         self.active_teams.append(agent_ids)
         logger.info(f"Created team {team_id} with agents: {agent_ids}")
         return team_id
@@ -799,7 +796,7 @@ class CollaborationOrchestrator:
             },
             timestamp=time.time()
         )
-        
+
         await self.communication_protocol.send_message(assignment_message)
         logger.info(f"Assigned task {task.id} to agent {primary_agent}")
 
@@ -808,15 +805,15 @@ class CollaborationOrchestrator:
     def find_suitable_agents(self, task: Task) -> List[str]:
         """Find agents suitable for a given task"""
         suitable_agents = []
-        
+
         for agent_id, agent in self.agents.items():
             # Check if agent has required skills
             required_skills = task.metadata.get("required_skills", [])
             if all(skill in agent.capabilities.skills for skill in required_skills):
                 # Check if agent has available capacity
-                active_tasks = len([t for t in agent.assigned_tasks 
+                active_tasks = len([t for t in agent.assigned_tasks
                                   if t.status in [TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]])
-                
+
                 if active_tasks < agent.capabilities.max_concurrent_tasks:
                     suitable_agents.append(agent_id)
 
@@ -825,7 +822,7 @@ class CollaborationOrchestrator:
             key=lambda aid: self.agents[aid].capabilities.processing_power,
             reverse=True
         )
-        
+
         return suitable_agents
 
     async def coordinate_agents(self):
@@ -837,21 +834,21 @@ class CollaborationOrchestrator:
             try:
                 # Process any pending messages
                 await asyncio.sleep(0.1)  # Yield to other coroutines
-                
+
                 # Check for agent heartbeats and task status
                 current_time = time.time()
                 for agent_id, agent in self.agents.items():
                     # Update heartbeat
                     agent.last_heartbeat = current_time
-                    
+
                     # Check for stuck tasks
                     for task in agent.assigned_tasks:
-                        if (task.status == TaskStatus.IN_PROGRESS and 
+                        if (task.status == TaskStatus.IN_PROGRESS and
                             current_time - task.assigned_at > 300):  # 5 minutes timeout
                             logger.warning(f"Task {task.id} timeout for agent {agent_id}")
                             task.status = TaskStatus.FAILED
                             task.error = "Task timeout"
-                            
+
                             # Reassign if possible
                             new_agents = self.find_suitable_agents(task)
                             if new_agents and new_agents[0] != agent_id:
@@ -869,7 +866,7 @@ class CollaborationOrchestrator:
         """Get overall collaboration statistics"""
         completed_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED])
         failed_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.FAILED])
-        
+
         return {
             "total_agents": len(self.agents),
             "total_tasks": len(self.tasks),
@@ -884,7 +881,7 @@ class CollaborationOrchestrator:
     def display_collaboration_dashboard(self):
         """Display collaboration dashboard"""
         stats = self.get_collaboration_stats()
-        
+
         console.print(Panel(
             f"[bold blue]Multi-Agent Collaboration Dashboard[/bold blue]\n"
             f"Total Agents: {stats['total_agents']}\n"
@@ -985,7 +982,7 @@ async def demo_collaboration():
     await create_sample_agents(orchestrator)
 
     # Create a team
-    team_id = orchestrator.create_team(
+    orchestrator.create_team(
         ["coder_001", "generalist_001", "validator_001"],
         "Software Development Team"
     )

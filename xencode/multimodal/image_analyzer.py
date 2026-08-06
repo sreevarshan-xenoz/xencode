@@ -1,10 +1,10 @@
-import os
-from pathlib import Path
-from typing import Dict, Any, Optional
-from PIL import Image
-import requests
-import json
 import base64
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import requests
+from PIL import Image
+
 
 class ImageAnalyzer:
     """Analyzer for image files using PIL and Vision Models."""
@@ -16,10 +16,10 @@ class ImageAnalyzer:
     def analyze(self, image_path: str) -> Dict[str, Any]:
         """
         Analyze an image to extract metadata and description.
-        
+
         Args:
             image_path: Path to the image file.
-            
+
         Returns:
             Dictionary containing metadata and description.
         """
@@ -45,7 +45,7 @@ class ImageAnalyzer:
                     "height": img.height,
                     "info": {k: str(v) for k, v in img.info.items()}
                 }
-                
+
                 # Attempt to get description from Vision Model
                 description = self._get_image_description(path)
                 if description:

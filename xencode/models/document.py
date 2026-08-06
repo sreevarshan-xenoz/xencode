@@ -59,21 +59,21 @@ class DocumentMetadata:
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
     encoding: Optional[str] = None
-    
+
     # PDF-specific metadata
     pdf_version: Optional[str] = None
     is_encrypted: bool = False
     has_forms: bool = False
-    
+
     # DOCX-specific metadata
     docx_version: Optional[str] = None
     has_macros: bool = False
-    
+
     # HTML-specific metadata
     html_title: Optional[str] = None
     meta_description: Optional[str] = None
     meta_keywords: Optional[List[str]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         result = {}
@@ -95,7 +95,7 @@ class StructuredContent:
     formatting: Optional[Dict[str, Any]] = None  # Font, size, style, etc.
     attributes: Optional[Dict[str, Any]] = None  # Additional attributes
     confidence: float = 1.0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -115,26 +115,26 @@ class ProcessedDocument:
     original_filename: str = ""
     file_path: Optional[str] = None
     document_type: DocumentType = DocumentType.UNKNOWN
-    
+
     # Processing information
     processing_status: ProcessingStatus = ProcessingStatus.PENDING
     processing_time_ms: int = 0
     processed_at: datetime = field(default_factory=datetime.now)
-    
+
     # Extracted content
     extracted_text: str = ""
     structured_content: List[StructuredContent] = field(default_factory=list)
     metadata: DocumentMetadata = field(default_factory=DocumentMetadata)
-    
+
     # Quality metrics
     confidence_score: float = 0.0
     extraction_quality: Optional[str] = None  # 'high', 'medium', 'low'
-    
+
     # Error information
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    
-    def add_structured_content(self, 
+
+    def add_structured_content(self,
                              content_type: ContentType,
                              text: str,
                              **kwargs) -> None:
@@ -145,35 +145,35 @@ class ProcessedDocument:
             **kwargs
         )
         self.structured_content.append(content)
-    
+
     def get_content_by_type(self, content_type: ContentType) -> List[StructuredContent]:
         """Get all content of a specific type"""
         return [
-            content for content in self.structured_content 
+            content for content in self.structured_content
             if content.content_type == content_type
         ]
-    
+
     def get_text_content(self) -> str:
         """Get all text content concatenated"""
         if self.extracted_text:
             return self.extracted_text
-        
+
         # Fallback to structured content
         text_parts = []
         for content in self.structured_content:
             if content.content_type in [ContentType.TEXT, ContentType.HEADING]:
                 text_parts.append(content.text)
-        
+
         return '\n'.join(text_parts)
-    
+
     def calculate_confidence_score(self) -> float:
         """Calculate overall confidence score"""
         if not self.structured_content:
             return 0.0
-        
+
         total_confidence = sum(content.confidence for content in self.structured_content)
         return total_confidence / len(self.structured_content)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -192,7 +192,7 @@ class ProcessedDocument:
             'errors': self.errors,
             'warnings': self.warnings
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ProcessedDocument':
         """Create ProcessedDocument from dictionary"""
@@ -208,11 +208,11 @@ class ProcessedDocument:
                 confidence=content_data.get('confidence', 1.0)
             )
             structured_content.append(content)
-        
+
         # Parse metadata
         metadata_data = data.get('metadata', {})
         metadata = DocumentMetadata(**metadata_data)
-        
+
         return cls(
             id=data.get('id', str(uuid.uuid4())),
             original_filename=data.get('original_filename', ''),
@@ -238,26 +238,26 @@ class ProcessingOptions:
     extract_text: bool = True
     extract_metadata: bool = True
     extract_structured_content: bool = True
-    
+
     # Quality options
     ocr_enabled: bool = False  # For scanned documents
     language_detection: bool = True
     content_filtering: bool = True
-    
+
     # Performance options
     timeout_seconds: int = 30
     max_file_size_mb: int = 100
     parallel_processing: bool = False
-    
+
     # Output options
     preserve_formatting: bool = True
     include_images: bool = False
     include_tables: bool = True
-    
+
     # Security options
     validate_content: bool = True
     sanitize_output: bool = True
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return self.__dict__.copy()
@@ -270,7 +270,7 @@ class ProcessingResult:
     document: Optional[ProcessedDocument] = None
     error_message: Optional[str] = None
     processing_time_ms: int = 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         return {
@@ -286,9 +286,9 @@ def detect_document_type(file_path: Union[str, Path]) -> DocumentType:
     """Detect document type from file extension"""
     if isinstance(file_path, str):
         file_path = Path(file_path)
-    
+
     extension = file_path.suffix.lower()
-    
+
     type_mapping = {
         '.pdf': DocumentType.PDF,
         '.docx': DocumentType.DOCX,
@@ -310,7 +310,7 @@ def detect_document_type(file_path: Union[str, Path]) -> DocumentType:
         '.go': DocumentType.CODE,
         '.rs': DocumentType.CODE,
     }
-    
+
     return type_mapping.get(extension, DocumentType.UNKNOWN)
 
 
@@ -338,8 +338,8 @@ def estimate_processing_time(file_size_bytes: int, document_type: DocumentType) 
         DocumentType.TEXT: 100,      # 0.1 seconds per MB
         DocumentType.CODE: 150,      # 0.15 seconds per MB
     }
-    
+
     file_size_mb = max(file_size_bytes / (1024 * 1024), 0.001)  # Minimum 0.001 MB
     base_time = base_times.get(document_type, 1000)
-    
+
     return max(int(file_size_mb * base_time), 1)  # Minimum 1ms

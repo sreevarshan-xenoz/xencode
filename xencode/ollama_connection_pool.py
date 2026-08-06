@@ -8,9 +8,10 @@ and reduce connection overhead.
 
 import asyncio
 import time
-from typing import Optional, Dict, Any
-from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
 import ollama
 from rich.console import Console
 
@@ -28,7 +29,7 @@ class ConnectionInfo:
 
 class OllamaConnectionPool:
     """Connection pool for Ollama clients to reduce overhead"""
-    
+
     def __init__(self, max_connections: int = 10, timeout: int = 30):
         self.max_connections = max_connections
         self.timeout = timeout
@@ -41,13 +42,13 @@ class OllamaConnectionPool:
         """Initialize the connection pool with clients"""
         if self._initialized:
             return
-            
+
         async with self._lock:
             if self._initialized:  # Double-check locking
                 return
-                
+
             # Create initial connections
-            for i in range(min(3, self.max_connections)):  # Start with 3 connections
+            for _i in range(min(3, self.max_connections)):  # Start with 3 connections
                 client = ollama.AsyncClient()
                 conn_info = ConnectionInfo(
                     client=client,
@@ -56,7 +57,7 @@ class OllamaConnectionPool:
                     generation_count=0
                 )
                 await self.connections.put(conn_info)
-            
+
             self._initialized = True
             console.print(f"[green]✅ Ollama connection pool initialized with {min(3, self.max_connections)} connections[/green]")
 
@@ -65,10 +66,10 @@ class OllamaConnectionPool:
         """Get a connection from the pool"""
         if not self._initialized:
             await self.initialize()
-            
+
         conn_info: Optional[ConnectionInfo] = None
         start_time = time.time()
-        
+
         # Try to get an available connection
         while time.time() - start_time < self.timeout:
             try:
@@ -97,22 +98,22 @@ class OllamaConnectionPool:
                     # Wait a bit before trying again
                     await asyncio.sleep(0.01)
                     continue
-        
+
         if conn_info is None:
             raise TimeoutError(f"Could not acquire Ollama connection within {self.timeout} seconds")
-        
+
         # Mark as busy
         conn_info.is_busy = True
         conn_info.last_used = time.time()
         conn_info.generation_count += 1
-        
+
         try:
             yield conn_info.client
         finally:
             # Release the connection back to the pool
             conn_info.is_busy = False
             conn_info.last_used = time.time()
-            
+
             # If we created this connection dynamically, keep track of it
             if hasattr(conn_info, 'dynamic') and conn_info.dynamic:
                 # For now, just keep it in the active connections
@@ -158,16 +159,16 @@ class OllamaConnectionPool:
         # Close all connections in the queue
         while not self.connections.empty():
             try:
-                conn_info = self.connections.get_nowait()
+                self.connections.get_nowait()
                 # No direct way to close ollama client, so just let it go out of scope
             except asyncio.QueueEmpty:
                 break
-        
+
         # Close all active connections
-        for conn_info in self.active_connections.values():
+        for _conn_info in self.active_connections.values():
             # No direct way to close ollama client, so just clear the dict
             pass
-        
+
         self.active_connections.clear()
         self._initialized = False
 
@@ -201,7 +202,7 @@ async def pooled_embed(model: str, input_text: str) -> Dict[str, Any]:
 if __name__ == "__main__":
     async def demo():
         console.print("[bold blue]🚀 Ollama Connection Pool Demo[/bold blue]")
-        
+
         # Test the connection pool
         try:
             response = await pooled_generate(

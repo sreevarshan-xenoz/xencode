@@ -4,34 +4,34 @@ Provides security validation and sanitization for user inputs
 """
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 
 def validate_file_path(file_path: str, allowed_base_paths: Optional[List[Path]] = None) -> bool:
     """
     Validate file path to prevent directory traversal attacks.
-    
+
     Args:
         file_path: Path to validate
         allowed_base_paths: List of allowed base paths for file access
-        
+
     Returns:
         True if the path is valid, False otherwise
     """
     try:
         # Convert to Path object
         path = Path(file_path)
-        
+
         # Resolve the path to its absolute form
         resolved_path = path.resolve()
-        
+
         # Check for directory traversal
         if ".." in path.parts or str(resolved_path) != str(path.resolve()):
             # Double-check by comparing with original path
             if ".." in str(path) or "../" in str(path):
                 return False
-        
+
         # If allowed base paths are specified, check if the resolved path is within them
         if allowed_base_paths:
             for base_path in allowed_base_paths:
@@ -41,7 +41,7 @@ def validate_file_path(file_path: str, allowed_base_paths: Optional[List[Path]] 
                 except ValueError:
                     continue  # Path is not within this base path
             return False  # Path is not within any allowed base path
-        
+
         return True
     except Exception:
         return False
@@ -50,33 +50,33 @@ def validate_file_path(file_path: str, allowed_base_paths: Optional[List[Path]] 
 def sanitize_filename(filename: str) -> str:
     """
     Sanitize filename to prevent malicious file operations.
-    
+
     Args:
         filename: Filename to sanitize
-        
+
     Returns:
         Sanitized filename
     """
     # Remove dangerous characters and sequences
     sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    
+
     # Prevent directory traversal
     sanitized = sanitized.replace('../', '').replace('..\\', '')
-    
+
     # Limit length to prevent buffer overflow attempts
     if len(sanitized) > 255:
         sanitized = sanitized[:255]
-    
+
     return sanitized
 
 
 def validate_model_name(model_name: str) -> bool:
     """
     Validate model name to prevent injection attacks.
-    
+
     Args:
         model_name: Model name to validate
-        
+
     Returns:
         True if the model name is valid, False otherwise
     """
@@ -252,23 +252,23 @@ def validate_api_request(data: Dict[str, Any], allowed_fields: List[str],
 def sanitize_prompt(prompt: str) -> str:
     """
     Sanitize prompt to remove potentially harmful content.
-    
+
     Args:
         prompt: Prompt to sanitize
-        
+
     Returns:
         Sanitized prompt
     """
     # Remove potential command injection patterns
     sanitized = re.sub(r'\$\([^)]*\)', '', prompt)  # Remove $(...)
     sanitized = re.sub(r'`[^`]*`', '', sanitized)    # Remove `...`
-    
+
     # Remove potential script tags
     sanitized = re.sub(r'<script[^>]*>.*?</script>', '', sanitized, flags=re.IGNORECASE)
-    
+
     # Remove potential HTML tags (basic sanitization)
     sanitized = re.sub(r'<[^>]+>', '', sanitized)
-    
+
     return sanitized.strip()
 
 
@@ -289,10 +289,10 @@ def sanitize_user_input(input_str: str) -> str:
 def validate_url(url: str) -> bool:
     """
     Validate URL to ensure it's properly formatted and safe.
-    
+
     Args:
         url: URL to validate
-        
+
     Returns:
         True if the URL is valid, False otherwise
     """
@@ -307,22 +307,22 @@ def validate_url(url: str) -> bool:
 def validate_json_payload(payload: Union[str, Dict], max_depth: int = 10) -> bool:
     """
     Validate JSON payload to prevent deep nesting and oversized payloads.
-    
+
     Args:
         payload: JSON payload to validate (as string or dict)
         max_depth: Maximum allowed nesting depth
-        
+
     Returns:
         True if the payload is valid, False otherwise
     """
     import json
-    
+
     try:
         if isinstance(payload, str):
             data = json.loads(payload)
         else:
             data = payload
-        
+
         def check_depth(obj, current_depth=0):
             if current_depth > max_depth:
                 return False
@@ -331,7 +331,7 @@ def validate_json_payload(payload: Union[str, Dict], max_depth: int = 10) -> boo
             elif isinstance(obj, list):
                 return all(check_depth(item, current_depth + 1) for item in obj)
             return True
-        
+
         return check_depth(data)
     except (json.JSONDecodeError, TypeError, RecursionError):
         return False
@@ -340,20 +340,20 @@ def validate_json_payload(payload: Union[str, Dict], max_depth: int = 10) -> boo
 def validate_api_key(api_key: str) -> bool:
     """
     Validate API key format (basic validation).
-    
+
     Args:
         api_key: API key to validate
-        
+
     Returns:
         True if the API key format is valid, False otherwise
     """
     if not api_key or not isinstance(api_key, str):
         return False
-    
+
     # Basic format check - most API keys are longer than 10 characters
     if len(api_key) < 10:
         return False
-    
+
     # Check for common API key patterns (alphanumeric with possible special chars)
     pattern = r'^[a-zA-Z0-9_\-+=]+$'
     return bool(re.match(pattern, api_key))
@@ -362,30 +362,30 @@ def validate_api_key(api_key: str) -> bool:
 def is_safe_string(input_str: str, allowed_chars: Optional[str] = None) -> bool:
     """
     Check if a string contains only safe characters.
-    
+
     Args:
         input_str: String to validate
         allowed_chars: Regex pattern of allowed characters (defaults to alphanumeric + common punctuation)
-        
+
     Returns:
         True if the string is safe, False otherwise
     """
     if allowed_chars is None:
         # Default: alphanumeric, spaces, common punctuation
         allowed_chars = r'^[a-zA-Z0-9\s\-\_\.\,\!\?\;\:\(\)\[\]\{\}\<\>\=\+\*\/\&\|\@\$]+$'
-    
+
     return bool(re.match(allowed_chars, input_str))
 
 
 def validate_integer(value: Any, min_val: Optional[int] = None, max_val: Optional[int] = None) -> bool:
     """
     Validate integer value with optional bounds.
-    
+
     Args:
         value: Value to validate
         min_val: Minimum allowed value
         max_val: Maximum allowed value
-        
+
     Returns:
         True if the value is a valid integer within bounds, False otherwise
     """
@@ -403,12 +403,12 @@ def validate_integer(value: Any, min_val: Optional[int] = None, max_val: Optiona
 def validate_float(value: Any, min_val: Optional[float] = None, max_val: Optional[float] = None) -> bool:
     """
     Validate float value with optional bounds.
-    
+
     Args:
         value: Value to validate
         min_val: Minimum allowed value
         max_val: Maximum allowed value
-        
+
     Returns:
         True if the value is a valid float within bounds, False otherwise
     """
@@ -426,10 +426,10 @@ def validate_float(value: Any, min_val: Optional[float] = None, max_val: Optiona
 def validate_email(email: str) -> bool:
     """
     Validate email address format.
-    
+
     Args:
         email: Email address to validate
-        
+
     Returns:
         True if the email format is valid, False otherwise
     """
@@ -440,10 +440,10 @@ def validate_email(email: str) -> bool:
 def validate_ip_address(ip: str) -> bool:
     """
     Validate IP address format (both IPv4 and IPv6).
-    
+
     Args:
         ip: IP address to validate
-        
+
     Returns:
         True if the IP address format is valid, False otherwise
     """
@@ -459,73 +459,73 @@ class InputValidator:
     """
     A comprehensive input validator class that combines multiple validation methods.
     """
-    
+
     def __init__(self, allowed_base_paths: Optional[List[Path]] = None):
         """
         Initialize the validator.
-        
+
         Args:
             allowed_base_paths: List of allowed base paths for file operations
         """
         self.allowed_base_paths = allowed_base_paths or []
-    
+
     def validate_file_operation(self, file_path: str) -> bool:
         """
         Validate file operation parameters.
-        
+
         Args:
             file_path: Path for file operation
-            
+
         Returns:
             True if valid, False otherwise
         """
         return validate_file_path(file_path, self.allowed_base_paths)
-    
+
     def validate_model(self, model_name: str) -> bool:
         """
         Validate model name.
-        
+
         Args:
             model_name: Model name to validate
-            
+
         Returns:
             True if valid, False otherwise
         """
         return validate_model_name(model_name)
-    
+
     def validate_user_prompt(self, prompt: str) -> bool:
         """
         Validate user prompt with comprehensive checks.
-        
+
         Args:
             prompt: User prompt to validate
-            
+
         Returns:
             True if valid, False otherwise
         """
         return validate_prompt(prompt)
-    
+
     def sanitize_user_input(self, input_str: str) -> str:
         """
         Apply comprehensive sanitization to user input.
-        
+
         Args:
             input_str: Input string to sanitize
-            
+
         Returns:
             Sanitized string
         """
         # Apply multiple sanitization steps
         sanitized = sanitize_prompt(input_str)
         return sanitized
-    
+
     def validate_json_safe(self, payload: Union[str, Dict]) -> bool:
         """
         Validate JSON payload for safety.
-        
+
         Args:
             payload: JSON payload to validate
-            
+
         Returns:
             True if safe, False otherwise
         """

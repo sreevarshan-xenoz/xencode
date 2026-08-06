@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Optional
 
 from rich.text import Text
+from textual import events
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
-from textual import events
 
-from xencode.tui.widgets.git_status import GitStatusManager, GitStatus
+from xencode.tui.widgets.git_status import GitStatus, GitStatusManager
 
 
 class FileExplorer(Tree):
@@ -26,48 +26,48 @@ class FileExplorer(Tree):
         **kwargs
     ):
         """Initialize file explorer
-        
+
         Args:
             root_path: Root directory to explore (defaults to current directory)
         """
         self.root_path = root_path or Path.cwd()
-        
+
         # Initialize Git status manager
         self.git_manager = GitStatusManager(self.root_path)
-        
+
         # Create root node
         root_label = Text("📁 " + self.root_path.name, style="bold cyan")
         super().__init__(root_label, *args, **kwargs)
-        
+
         self.root.data = self.root_path
         self._populate_node(self.root)
-    
+
     def _populate_node(self, node: TreeNode) -> None:
         """Populate a tree node with its children
-        
+
         Args:
             node: The tree node to populate
         """
         path: Path = node.data
-        
+
         if not path.is_dir():
             return
-        
+
         # Depth limit for performance (max 5 levels deep)
         current_depth = 0
         temp_node = node
         while temp_node.parent is not None:
             current_depth += 1
             temp_node = temp_node.parent
-        
+
         if current_depth > 5:
             node.add_leaf("⚠️ Max depth reached", data=None)
             return
-        
+
         try:
             # Get all items in directory (limit to first 100 for performance)
             items = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-            
+
             # Limit items shown
             MAX_ITEMS = 100
             if len(items) > MAX_ITEMS:
@@ -75,12 +75,12 @@ class FileExplorer(Tree):
                 show_truncated = True
             else:
                 show_truncated = False
-            
+
             for item in items:
                 # Skip hidden files and common ignore patterns
                 if item.name.startswith(".") or item.name in ["__pycache__", "node_modules", ".git", "venv", ".venv"]:
                     continue
-                
+
                 # Create label with icon
                 if item.is_dir():
                     icon = "📁"
@@ -88,43 +88,43 @@ class FileExplorer(Tree):
                     label = Text(f"{icon} {item.name}", style=style)
                 else:
                     icon = self._get_file_icon(item.suffix)
-                    
+
                     # Get Git status
                     git_status = self.git_manager.get_status(item)
                     git_icon = self.git_manager.get_status_icon(git_status)
                     git_color = self.git_manager.get_status_color(git_status)
-                    
+
                     # Build label with Git status
                     label = Text()
                     label.append(f"{icon} ", style="white")
-                    
+
                     # Add Git status badge if not clean
                     if git_status != GitStatus.CLEAN:
                         label.append(f"[{git_icon}] ", style=git_color)
-                    
+
                     label.append(item.name, style="white")
-                
+
                 # Add child node
                 child = node.add(label, data=item)
-                
+
                 # If it's a directory, mark it as expandable
                 if item.is_dir():
                     # Add a placeholder to make it expandable
                     child.allow_expand = True
-            
+
             if show_truncated:
                 node.add_leaf(f"⚠️ {len(list(path.iterdir())) - MAX_ITEMS} more items...", data=None)
-        
+
         except PermissionError:
             # Can't read this directory
             node.add_leaf("🔒 Permission Denied", data=None)
-    
+
     def _get_file_icon(self, suffix: str) -> str:
         """Get icon for file type
-        
+
         Args:
             suffix: File extension (e.g., '.py')
-            
+
         Returns:
             Icon character
         """
@@ -149,37 +149,37 @@ class FileExplorer(Tree):
             ".pdf": "📕",
         }
         return icon_map.get(suffix.lower(), "📄")
-    
+
     def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
         """Called when a node is expanded
-        
+
         Args:
             event: The expand event
         """
         node = event.node
-        
+
         # Remove placeholder children and populate with real content
         if node.children:
             for child in list(node.children):
                 child.remove()
-        
+
         self._populate_node(node)
-    
+
     async def refresh_git_status(self) -> None:
         """Refresh Git status for all visible files"""
         await self.git_manager.refresh_status()
         # Refresh the tree to update labels
         self.refresh()
-    
+
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         """Called when a node is selected
-        
+
         Args:
             event: The selection event
         """
         node = event.node
         path: Optional[Path] = node.data
-        
+
         if path and path.is_file():
             # Post a custom message to the app
             self.post_message(FileSelected(path))
@@ -187,10 +187,10 @@ class FileExplorer(Tree):
 
 class FileSelected(events.Message):
     """Message sent when a file is selected in the explorer"""
-    
+
     def __init__(self, path: Path) -> None:
         """Initialize message
-        
+
         Args:
             path: The selected file path
         """

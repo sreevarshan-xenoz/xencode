@@ -5,9 +5,7 @@ Provides efficient connection management for API calls
 import asyncio
 import threading
 from collections import deque
-from contextlib import contextmanager
 from typing import Dict, Optional, Union
-from urllib.parse import urlparse
 
 import aiohttp
 import requests

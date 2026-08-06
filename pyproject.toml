@@ -74,6 +74,7 @@ select = [
     "I",  # isort
     "C",  # flake8-comprehensions
     "B",  # flake8-bugbear
+    "S604",  # subprocess-shell-true — prevent shell=True regressions
 ]
 ignore = [
     "E501",  # Line too long (handled by black)

@@ -1,11 +1,12 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+import logging
+import uuid
+
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List, Dict
-import uuid
-import logging
 
-from .database import get_db, init_db, Session as SessionModel, User
+from .database import Session as SessionModel
+from .database import User, get_db, init_db
 from .socket_manager import manager
 
 # Configure logging
@@ -41,16 +42,16 @@ def create_session(username: str, db: Session = Depends(get_db)):
         db.add(host)
         db.commit()
         db.refresh(host)
-    
+
     # Generate invite code
     invite_code = str(uuid.uuid4())[:8]
-    
+
     # Create session
     session = SessionModel(host_id=host.id, invite_code=invite_code)
     db.add(session)
     db.commit()
     db.refresh(session)
-    
+
     return {"session_id": session.id, "invite_code": invite_code}
 
 @app.get("/sessions/{invite_code}")
@@ -70,15 +71,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, username: st
             {"type": "system", "content": f"{username} joined the session"},
             session_id
         )
-        
+
         while True:
             data = await websocket.receive_json()
             # Add sender info
             data["sender"] = username
-            
+
             # Broadcast to others
             await manager.broadcast(data, session_id, exclude=websocket)
-            
+
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id)
         await manager.broadcast(

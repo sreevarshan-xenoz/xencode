@@ -13,18 +13,15 @@ Features:
 - Memory consolidation with importance scoring
 """
 
-import asyncio
 import json
-import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
-from collections import deque
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 console = Console()
 
@@ -683,6 +680,6 @@ if __name__ == "__main__":
 
     # Get stats
     stats = summarizer.get_stats()
-    console.print(f"\n[bold]Session Stats:[/bold]")
+    console.print("\n[bold]Session Stats:[/bold]")
     for key, value in stats.items():
         console.print(f"  {key}: {value}")

@@ -12,43 +12,35 @@ Endpoints:
 - GET /tests/coverage - Get coverage report
 """
 
-import asyncio
-import os
-import tempfile
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Body, status, BackgroundTasks
-from pydantic import BaseModel, Field, ConfigDict
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 
+from xencode.testing.failure_analyzer import (
+    AnalysisResult,
+    FailureAnalyzer,
+    FixSuggestion,
+    create_auto_retry_engine,
+    create_failure_analyzer,
+)
 from xencode.testing.test_generator import (
-    TestGenerator,
-    TestGenerationConfig,
-    TestFramework,
-    TestType,
-    GeneratedTestFile,
-    create_test_generator,
     AgenticTestGenerator,
+    GeneratedTestFile,
+    TestFramework,
+    TestGenerationConfig,
+    TestGenerator,
+    TestType,
+    create_test_generator,
 )
 from xencode.testing.test_runner import (
-    TestRunner,
-    TestExecutionResult,
     ExecutionConfig,
     ExecutionMode,
-    TestExecutionLoop,
-    run_tests,
+    TestExecutionResult,
+    TestRunner,
     create_test_runner,
-    create_execution_loop,
-)
-from xencode.testing.failure_analyzer import (
-    FailureAnalyzer,
-    AnalysisResult,
-    FixSuggestion,
-    FailureType,
-    create_failure_analyzer,
-    create_auto_retry_engine,
 )
 
 router = APIRouter()
@@ -63,7 +55,7 @@ _analysis_results: Dict[str, AnalysisResult] = {}
 class TestGenerationRequest(BaseModel):
     """Request for test generation"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+
     code: str = Field(..., description="Source code to generate tests for")
     source_file: str = Field("unknown.py", description="Source file name")
     frameworks: List[str] = Field(
@@ -224,7 +216,7 @@ async def generate_tests(
             "error_handling": TestType.ERROR_HANDLING,
             "boundary": TestType.BOUNDARY
         }
-        
+
         frameworks = [framework_map.get(fw, TestFramework.PYTEST) for fw in request.frameworks]
         test_types = [test_type_map.get(tt, TestType.UNIT) for tt in request.test_types]
 
@@ -285,7 +277,7 @@ async def generate_tests(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate tests: {str(e)}"
-        )
+        )  from e
 
 
 @router.post("/run", response_model=TestExecutionResponse)
@@ -351,7 +343,7 @@ async def run_tests_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to execute tests: {str(e)}"
-        )
+        )  from e
 
 
 @router.get("/results/{execution_id}", response_model=TestResultsResponse)
@@ -578,7 +570,7 @@ async def list_generated_tests():
     Returns metadata about all generated test files.
     """
     tests = []
-    for file_id, tf in _generated_tests.items():
+    for _file_id, tf in _generated_tests.items():
         tests.append({
             "file_id": tf.file_id,
             "file_path": tf.file_path,
@@ -738,7 +730,7 @@ async def agentic_test_generation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Agentic test generation failed: {str(e)}"
-        )
+        )  from e
 
 
 router.tags = ["Testing"]

@@ -17,7 +17,8 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, AsyncIterator, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+
 import aiohttp
 from rich.console import Console
 
@@ -48,7 +49,7 @@ class TransportEventType(Enum):
 class ProviderTransportPolicy:
     """
     Configuration for provider transport behavior
-    
+
     Attributes:
         timeout: Request timeout in seconds
         max_retries: Maximum number of retry attempts
@@ -69,15 +70,15 @@ class ProviderTransportPolicy:
         aiohttp.ClientTimeout,
         asyncio.TimeoutError,
     ])
-    
+
     def is_retryable_status(self, status_code: int) -> bool:
         """Check if HTTP status code is retryable"""
         return status_code in self.retryable_status_codes
-    
+
     def is_retryable_exception(self, exception: Exception) -> bool:
         """Check if exception type is retryable"""
         return any(isinstance(exception, exc_type) for exc_type in self.retryable_exceptions)
-    
+
     def get_delay(self, attempt: int) -> float:
         """Calculate delay for retry attempt using exponential backoff"""
         delay = self.backoff_base * (2 ** (attempt - 1))
@@ -96,7 +97,7 @@ class TransportEvent:
     error_message: Optional[str] = None
     latency_ms: Optional[float] = None
     details: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert event to dictionary for logging/telemetry"""
         return {
@@ -116,7 +117,7 @@ class TransportEvent:
 class UnifiedErrorEnvelope:
     """
     Unified error response envelope for all provider errors
-    
+
     Provides consistent error structure across all providers
     """
     success: bool = False
@@ -130,7 +131,7 @@ class UnifiedErrorEnvelope:
     provider: str = ""
     endpoint: str = ""
     raw_error: Optional[Any] = None
-    
+
     def to_exception(self) -> "TransportError":
         """Convert error envelope to exception"""
         return TransportError(
@@ -150,7 +151,7 @@ class UnifiedErrorEnvelope:
 class TransportError(Exception):
     """
     Unified transport exception
-    
+
     Attributes can be used to implement smart fallback and retry logic
     """
     def __init__(
@@ -177,7 +178,7 @@ class TransportError(Exception):
         self.endpoint = endpoint
         self.raw_error = raw_error
         super().__init__(message)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert exception to dictionary for logging"""
         return {
@@ -196,7 +197,7 @@ class TransportError(Exception):
 class ProviderTransport:
     """
     Resilient provider transport with retry and timeout handling
-    
+
     Usage:
         transport = ProviderTransport("openai", policy=ProviderTransportPolicy())
         async with transport.session() as session:
@@ -207,7 +208,7 @@ class ProviderTransport:
                 json={"model": "gpt-4", "messages": [...]}
             )
     """
-    
+
     def __init__(
         self,
         provider: str,
@@ -218,7 +219,7 @@ class ProviderTransport:
     ):
         """
         Initialize provider transport
-        
+
         Args:
             provider: Provider name (e.g., "openai", "qwen", "ollama")
             base_url: Base URL for API requests
@@ -232,7 +233,7 @@ class ProviderTransport:
         self.default_headers = default_headers or {}
         self.event_callback = event_callback
         self._session: Optional[aiohttp.ClientSession] = None
-    
+
     def _emit_event(self, event: TransportEvent) -> None:
         """Emit telemetry event"""
         if self.event_callback:
@@ -253,24 +254,24 @@ class ProviderTransport:
                     f"[green]✓ [{self.provider}] Request successful "
                     f"({event.latency_ms:.0f}ms)[/green]"
                 )
-    
+
     @asynccontextmanager
     async def session(self):
         """Async context manager for aiohttp session"""
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=self.policy.timeout)
             self._session = aiohttp.ClientSession(timeout=timeout)
-        
+
         try:
             yield self._session
         finally:
             pass  # Don't close session here, allow reuse
-    
+
     async def close(self):
         """Close the underlying session"""
         if self._session and not self._session.closed:
             await self._session.close()
-    
+
     async def request(
         self,
         session: aiohttp.ClientSession,
@@ -281,29 +282,29 @@ class ProviderTransport:
     ) -> Any:
         """
         Make HTTP request with retry logic
-        
+
         Args:
             session: aiohttp session to use
             method: HTTP method
             path: API path (will be joined with base_url)
             event_name: Name for telemetry events
             **kwargs: Additional arguments for aiohttp request
-            
+
         Returns:
             Response data (parsed JSON or text)
-            
+
         Raises:
             TransportError: If request fails after all retries
         """
         url = f"{self.base_url}/{path.lstrip('/')}"
         headers = {**self.default_headers, **kwargs.pop("headers", {})}
-        
+
         last_error: Optional[Exception] = None
         last_envelope: Optional[UnifiedErrorEnvelope] = None
-        
+
         for attempt in range(1, self.policy.max_retries + 1):
             start_time = time.time()
-            
+
             # Emit request start event
             self._emit_event(TransportEvent(
                 event_type=TransportEventType.REQUEST_START,
@@ -313,15 +314,15 @@ class ProviderTransport:
                 attempt=attempt,
                 details={"method": method, "event_name": event_name},
             ))
-            
+
             try:
                 async with session.request(method, url, headers=headers, **kwargs) as response:
                     latency_ms = (time.time() - start_time) * 1000
-                    
+
                     # Check for retryable status codes
                     if response.status in self.policy.retryable_status_codes:
                         error_data = await response.text()
-                        
+
                         # Emit retry event
                         self._emit_event(TransportEvent(
                             event_type=TransportEventType.REQUEST_RETRY,
@@ -333,7 +334,7 @@ class ProviderTransport:
                             error_message=f"Retryable status: {response.status}",
                             latency_ms=latency_ms,
                         ))
-                        
+
                         if attempt < self.policy.max_retries:
                             delay = self.policy.get_delay(attempt)
                             console.print(
@@ -356,7 +357,7 @@ class ProviderTransport:
                                 raw_error=error_data,
                             )
                             break
-                    
+
                     # Success - parse response
                     if response.status == 200:
                         self._emit_event(TransportEvent(
@@ -368,7 +369,7 @@ class ProviderTransport:
                             status_code=response.status,
                             latency_ms=latency_ms,
                         ))
-                        
+
                         # Try to parse as JSON, fallback to text
                         try:
                             return await response.json()
@@ -389,15 +390,15 @@ class ProviderTransport:
                             raw_error=error_data,
                         )
                         break
-                        
+
             except Exception as e:
                 latency_ms = (time.time() - start_time) * 1000
                 last_error = e
-                
+
                 # Check if exception is retryable
                 if self.policy.is_retryable_exception(e) and attempt < self.policy.max_retries:
                     delay = self.policy.get_delay(attempt)
-                    
+
                     self._emit_event(TransportEvent(
                         event_type=TransportEventType.REQUEST_RETRY,
                         timestamp=time.time(),
@@ -408,7 +409,7 @@ class ProviderTransport:
                         latency_ms=latency_ms,
                         details={"exception_type": type(e).__name__},
                     ))
-                    
+
                     console.print(
                         f"[yellow]⏳ [{self.provider}] Retrying in {delay:.1f}s "
                         f"(attempt {attempt}/{self.policy.max_retries})...[/yellow]"
@@ -427,10 +428,10 @@ class ProviderTransport:
                         latency_ms=latency_ms,
                         details={"exception_type": type(e).__name__},
                     ))
-                    
+
                     last_envelope = self._exception_to_envelope(e, url)
                     break
-        
+
         # All retries exhausted or non-retryable error
         if last_envelope:
             raise last_envelope.to_exception()
@@ -449,7 +450,7 @@ class ProviderTransport:
                 provider=self.provider,
                 endpoint=url,
             )
-    
+
     async def stream_request(
         self,
         session: aiohttp.ClientSession,
@@ -461,7 +462,7 @@ class ProviderTransport:
     ) -> AsyncIterator[str]:
         """
         Make streaming HTTP request with reconnection support
-        
+
         Args:
             session: aiohttp session to use
             method: HTTP method
@@ -469,21 +470,21 @@ class ProviderTransport:
             event_name: Name for telemetry events
             reconnect_hook: Optional callback for reconnection events
             **kwargs: Additional arguments for aiohttp request
-            
+
         Yields:
             Response chunks (text or JSON)
-            
+
         Raises:
             TransportError: If stream fails and cannot reconnect
         """
         url = f"{self.base_url}/{path.lstrip('/')}"
         headers = {**self.default_headers, **kwargs.pop("headers", {})}
-        
+
         last_error: Optional[Exception] = None
-        
+
         for attempt in range(1, self.policy.max_retries + 1):
             start_time = time.time()
-            
+
             self._emit_event(TransportEvent(
                 event_type=TransportEventType.REQUEST_START,
                 timestamp=start_time,
@@ -492,7 +493,7 @@ class ProviderTransport:
                 attempt=attempt,
                 details={"method": method, "event_name": event_name, "streaming": True},
             ))
-            
+
             try:
                 async with session.request(method, url, headers=headers, **kwargs) as response:
                     if response.status != 200:
@@ -506,7 +507,7 @@ class ProviderTransport:
                             endpoint=url,
                             raw_error=error_data,
                         )
-                    
+
                     # Stream successful - yield chunks
                     async for line in response.content:
                         if line.strip():
@@ -519,7 +520,7 @@ class ProviderTransport:
                                     yield line_str
                             except UnicodeDecodeError:
                                 yield line.decode('utf-8', errors='replace')
-                    
+
                     # Stream completed successfully
                     self._emit_event(TransportEvent(
                         event_type=TransportEventType.REQUEST_SUCCESS,
@@ -531,10 +532,10 @@ class ProviderTransport:
                         latency_ms=(time.time() - start_time) * 1000,
                     ))
                     return
-                    
+
             except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
                 last_error = e
-                
+
                 # Stream interrupted - attempt reconnect
                 self._emit_event(TransportEvent(
                     event_type=TransportEventType.STREAM_INTERRUPTED,
@@ -545,18 +546,18 @@ class ProviderTransport:
                     error_message=str(e),
                     details={"exception_type": type(e).__name__},
                 ))
-                
+
                 if attempt < self.policy.max_retries:
                     if reconnect_hook:
                         reconnect_hook()
-                    
+
                     delay = self.policy.get_delay(attempt)
                     console.print(
                         f"[yellow]⏳ [{self.provider}] Stream interrupted. "
                         f"Reconnecting in {delay:.1f}s...[/yellow]"
                     )
                     await asyncio.sleep(delay)
-                    
+
                     self._emit_event(TransportEvent(
                         event_type=TransportEventType.STREAM_RECONNECTED,
                         timestamp=time.time(),
@@ -568,7 +569,7 @@ class ProviderTransport:
                 else:
                     # Max retries reached
                     break
-            
+
             except Exception as e:
                 last_error = e
                 self._emit_event(TransportEvent(
@@ -581,7 +582,7 @@ class ProviderTransport:
                     details={"exception_type": type(e).__name__},
                 ))
                 break
-        
+
         # Stream failed
         if last_error:
             raise self._exception_to_envelope(last_error, url).to_exception()
@@ -592,7 +593,7 @@ class ProviderTransport:
                 provider=self.provider,
                 endpoint=url,
             )
-    
+
     def _get_user_message(self, status_code: int) -> str:
         """Generate user-friendly message for HTTP status code"""
         messages = {
@@ -607,7 +608,7 @@ class ProviderTransport:
             504: "Gateway timeout. The service is taking too long to respond.",
         }
         return messages.get(status_code, "An unexpected error occurred. Please try again.")
-    
+
     def _exception_to_envelope(self, exception: Exception, url: str) -> UnifiedErrorEnvelope:
         """Convert exception to unified error envelope"""
         if isinstance(exception, aiohttp.ClientTimeout):

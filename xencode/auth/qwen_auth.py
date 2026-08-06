@@ -7,14 +7,15 @@ including token caching, refreshing, and API call integration.
 """
 
 import asyncio
+import base64
 import json
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
+
 import aiohttp
-import base64
 
 
 @dataclass
@@ -41,7 +42,7 @@ class QwenAuthManager:
     SCOPE = "openid profile email model.completion"
     DEVICE_AUTH_URL = "https://chat.qwen.ai/api/v1/oauth2/device/code"
     TOKEN_URL = "https://chat.qwen.ai/api/v1/oauth2/token"
-    
+
     # Local storage for credentials
     CREDS_FILE = Path.home() / ".xencode_qwen_creds.json"
     REQUEST_TIMEOUT_SECONDS = 20
@@ -54,7 +55,7 @@ class QwenAuthManager:
     async def get_or_authenticate(self, force_reauth: bool = False) -> QwenCredentials:
         """
         Get existing credentials or authenticate via device flow
-        
+
         Returns:
             QwenCredentials: Valid credentials
         """
@@ -137,10 +138,10 @@ class QwenAuthManager:
         try:
             if not self.CREDS_FILE.exists():
                 return None
-            
+
             with open(self.CREDS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             return QwenCredentials(
                 access_token=data['access_token'],
                 refresh_token=data.get('refresh_token'),
@@ -161,27 +162,27 @@ class QwenAuthManager:
                 'token_type': creds.token_type,
                 'created_at': creds.created_at
             }
-            
+
             # Ensure parent directory exists
             self.CREDS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(self.CREDS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
 
             # Best-effort hardening: owner read/write only on POSIX systems.
             if os.name == "posix":
                 os.chmod(self.CREDS_FILE, 0o600)
-                
+
         except IOError as e:
-            raise QwenAuthError(f"Failed to save credentials: {e}")
+            raise QwenAuthError(f"Failed to save credentials: {e}")  from e
 
     def _is_token_valid(self, creds: QwenCredentials) -> bool:
         """
         Check if credentials are still valid (not expired)
-        
+
         Args:
             creds: Credentials to check
-            
+
         Returns:
             bool: True if valid, False if expired
         """
@@ -192,7 +193,7 @@ class QwenAuthManager:
     async def _authenticate_via_device_flow(self) -> QwenCredentials:
         """
         Authenticate using OAuth2 device flow
-        
+
         Returns:
             QwenCredentials: Fresh credentials
         """
@@ -200,14 +201,14 @@ class QwenAuthManager:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             # Step 1: Request device authorization (with PKCE)
             pkce_verifier, pkce_challenge = self._generate_pkce_pair()
-            
+
             device_auth_data = {
                 'client_id': self.CLIENT_ID,
                 'scope': self.SCOPE,
                 'code_challenge': pkce_challenge,
                 'code_challenge_method': 'S256'
             }
-            
+
             status_code, device_auth_resp, raw_text = await self._post_json_with_retry(
                 session,
                 self.DEVICE_AUTH_URL,
@@ -220,26 +221,26 @@ class QwenAuthManager:
 
             if not device_auth_resp:
                 raise QwenAuthError("Device authorization returned an empty response")
-            
+
             # Step 2: Show user the verification details
             verification_uri = device_auth_resp.get('verification_uri_complete') or device_auth_resp['verification_uri']
             user_code = device_auth_resp['user_code']
-            
+
             print("\n🚀 Qwen AI Authentication Required")
             print("=" * 40)
             print(f"Visit: {verification_uri}")
             print(f"Enter code: {user_code}")
             print("=" * 40)
             print("Please complete the authentication in your browser...")
-            
+
             # Step 3: Poll for token (with exponential backoff)
             interval = device_auth_resp.get('interval', 5)  # seconds
             expires_in = device_auth_resp.get('expires_in', 300)  # seconds
-            
+
             start_time = time.time()
             while time.time() - start_time < expires_in:
                 await asyncio.sleep(interval)
-                
+
                 token_data = {
                     'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
                     'device_code': device_auth_resp['device_code'],
@@ -281,36 +282,36 @@ class QwenAuthManager:
                 else:
                     error_desc = token_json.get('error_description') or token_raw[:200] or 'Unknown error'
                     raise QwenAuthError(f"Token request failed: {error_desc}")
-            
+
             raise QwenAuthError("Authentication timed out. Please try again.")
 
     def _generate_pkce_pair(self) -> tuple[str, str]:
         """
         Generate PKCE code verifier and challenge pair
-        
+
         Returns:
             tuple: (verifier, challenge)
         """
         import hashlib
         import secrets
-        
+
         # Generate 32-byte random string
         verifier_bytes = secrets.token_bytes(32)
         code_verifier = base64.urlsafe_b64encode(verifier_bytes).decode('utf-8').rstrip('=')
-        
+
         # Generate SHA256 hash of verifier
         hashed = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         code_challenge = base64.urlsafe_b64encode(hashed).decode('utf-8').rstrip('=')
-        
+
         return code_verifier, code_challenge
 
     async def refresh_access_token(self, refresh_token: str) -> QwenCredentials:
         """
         Refresh access token using refresh token
-        
+
         Args:
             refresh_token: The refresh token to use
-            
+
         Returns:
             QwenCredentials: New credentials with refreshed access token
         """
@@ -331,7 +332,7 @@ class QwenAuthManager:
 
             if not token_json:
                 raise QwenAuthError("Token refresh returned an invalid response")
-                
+
             new_creds = QwenCredentials(
                 access_token=token_json['access_token'],
                 refresh_token=token_json.get('refresh_token', refresh_token),  # May return same refresh token
@@ -349,17 +350,17 @@ class QwenAuthManager:
     async def call_qwen_completion(self, prompt: str, model: str = "qwen-max-coder-7b-instruct") -> str:
         """
         Call Qwen completion API with authenticated credentials
-        
+
         Args:
             prompt: The prompt to send
             model: The model to use (default: qwen-max-coder-7b-instruct)
-            
+
         Returns:
             str: The completion response
         """
         if not self.credentials:
             self.credentials = await self.get_or_authenticate()
-        
+
         # Check if token is still valid, refresh if needed
         if not self._is_token_valid(self.credentials):
             if self.credentials.refresh_token:
@@ -367,49 +368,49 @@ class QwenAuthManager:
             else:
                 # Token expired and no refresh token - re-authenticate
                 await self.get_or_authenticate()
-        
+
         headers = {
             'Authorization': f'Bearer {self.credentials.access_token}',
             'Content-Type': 'application/json'
         }
-        
+
         payload = {
             'model': model,
             'messages': [{'role': 'user', 'content': prompt}]
         }
-        
+
         timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT_SECONDS)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post('https://chat.qwen.ai/v1/chat/completions', 
+            async with session.post('https://chat.qwen.ai/v1/chat/completions',
                                   json=payload, headers=headers, timeout=timeout) as response:
-                
+
                 if response.status == 401:  # Unauthorized - token expired
                     # Try to refresh and retry once
                     if self.credentials.refresh_token:
                         await self.refresh_access_token(self.credentials.refresh_token)
-                        
+
                         # Retry the request with new token
                         headers['Authorization'] = f'Bearer {self.credentials.access_token}'
-                        async with session.post('https://chat.qwen.ai/v1/chat/completions', 
+                        async with session.post('https://chat.qwen.ai/v1/chat/completions',
                                               json=payload, headers=headers, timeout=timeout) as retry_response:
                             if retry_response.status != 200:
                                 raise QwenAuthError(f"Completion API failed after refresh: {retry_response.status}")
-                            
+
                             result = await retry_response.json()
                             return result['choices'][0]['message']['content']
                     else:
                         raise QwenAuthError("Access token expired and no refresh token available")
-                
+
                 elif response.status != 200:
                     raise QwenAuthError(f"Completion API failed: {response.status}")
-                
+
                 result = await response.json()
                 return result['choices'][0]['message']['content']
 
     def clear_credentials(self) -> bool:
         """
         Clear cached credentials
-        
+
         Returns:
             bool: True if successful, False otherwise
         """

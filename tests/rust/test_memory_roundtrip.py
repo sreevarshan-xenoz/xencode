@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pytest
 
+
 def test_rust_memory_operations(tmp_path: Path) -> None:
     if shutil.which("cargo") is None:
         pytest.skip("cargo is not installed")
 
     workspace_root = Path(__file__).resolve().parents[2] / "rust"
-    
+
     # Run memory list
     completed = subprocess.run(
         [
@@ -27,7 +28,7 @@ def test_rust_memory_operations(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    
+
     # Should say "No conversation sessions found." or "Conversation Sessions:"
     assert "conversation" in completed.stdout.lower()
 
@@ -49,6 +50,6 @@ def test_rust_memory_operations(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    
+
     assert "--model" in completed.stdout
     assert "--session" in completed.stdout

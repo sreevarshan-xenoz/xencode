@@ -8,25 +8,24 @@ for the Xencode AI assistant platform.
 
 import asyncio
 import json
+import logging
+import sqlite3
+import statistics
+import threading
 import time
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-import statistics
-import psutil
-import sqlite3
+from datetime import datetime
 from pathlib import Path
-import threading
-from collections import defaultdict, deque
-import logging
+from typing import Any, Dict, List, Optional
 
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
-from rich.live import Live
 import aiofiles
+import psutil
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -84,18 +83,18 @@ class MetricsCollector:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = db_path or Path.home() / ".xencode" / "analytics.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize database
         self._init_database()
-        
+
         # In-memory buffers for recent metrics
         self.metric_buffer: List[PerformanceMetric] = []
         self.event_buffer: List[SystemEvent] = []
-        
+
         # Locks for thread safety
         self.metric_lock = threading.Lock()
         self.event_lock = threading.Lock()
-        
+
         # Background collection tasks
         self.running = False
         self.collection_task: Optional[asyncio.Task] = None
@@ -115,7 +114,7 @@ class MetricsCollector:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Create events table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
@@ -128,7 +127,7 @@ class MetricsCollector:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
             # Create indexes for performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_time ON metrics(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_time ON events(timestamp)")
@@ -138,7 +137,7 @@ class MetricsCollector:
         """Record a performance metric"""
         with self.metric_lock:
             self.metric_buffer.append(metric)
-            
+
             # Insert into database
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
@@ -156,7 +155,7 @@ class MetricsCollector:
         """Record a system event"""
         with self.event_lock:
             self.event_buffer.append(event)
-            
+
             # Insert into database
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
@@ -170,27 +169,27 @@ class MetricsCollector:
                     json.dumps(event.metadata)
                 ))
 
-    def get_metrics_by_type(self, metric_type: str, 
-                           start_time: float = None, 
+    def get_metrics_by_type(self, metric_type: str,
+                           start_time: float = None,
                            end_time: float = None) -> List[PerformanceMetric]:
         """Get metrics of a specific type within time range"""
         query = "SELECT timestamp, metric_type, value, tags, unit FROM metrics WHERE metric_type = ?"
         params = [metric_type]
-        
+
         if start_time is not None:
             query += " AND timestamp >= ?"
             params.append(start_time)
-        
+
         if end_time is not None:
             query += " AND timestamp <= ?"
             params.append(end_time)
-        
+
         query += " ORDER BY timestamp DESC LIMIT 1000"  # Limit to prevent huge result sets
-        
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(query, params)
             results = []
-            
+
             for row in cursor:
                 results.append(PerformanceMetric(
                     timestamp=row[0],
@@ -199,30 +198,30 @@ class MetricsCollector:
                     tags=json.loads(row[3]) if row[3] else {},
                     unit=row[4]
                 ))
-        
+
         return results
 
-    def get_events_by_severity(self, severity: str, 
-                              start_time: float = None, 
+    def get_events_by_severity(self, severity: str,
+                              start_time: float = None,
                               end_time: float = None) -> List[SystemEvent]:
         """Get events of a specific severity within time range"""
         query = "SELECT timestamp, event_type, severity, message, metadata FROM events WHERE severity = ?"
         params = [severity]
-        
+
         if start_time is not None:
             query += " AND timestamp >= ?"
             params.append(start_time)
-        
+
         if end_time is not None:
             query += " AND timestamp <= ?"
             params.append(end_time)
-        
+
         query += " ORDER BY timestamp DESC LIMIT 1000"
-        
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(query, params)
             results = []
-            
+
             for row in cursor:
                 results.append(SystemEvent(
                     timestamp=row[0],
@@ -231,30 +230,30 @@ class MetricsCollector:
                     message=row[3],
                     metadata=json.loads(row[4]) if row[4] else {}
                 ))
-        
+
         return results
 
-    def get_aggregated_metrics(self, metric_type: str, 
+    def get_aggregated_metrics(self, metric_type: str,
                               aggregation_window_minutes: int = 60) -> Dict[str, Any]:
         """Get aggregated metrics for a time window"""
         end_time = time.time()
         start_time = end_time - (aggregation_window_minutes * 60)
-        
+
         query = """
-            SELECT 
+            SELECT
                 AVG(value) as avg_value,
                 MIN(value) as min_value,
                 MAX(value) as max_value,
                 COUNT(*) as count,
                 TOTAL(value) as total_value
-            FROM metrics 
+            FROM metrics
             WHERE metric_type = ? AND timestamp >= ? AND timestamp <= ?
         """
-        
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(query, (metric_type, start_time, end_time))
             row = cursor.fetchone()
-            
+
             if row:
                 return {
                     "average": row[0],
@@ -264,29 +263,29 @@ class MetricsCollector:
                     "total": row[4],
                     "window_minutes": aggregation_window_minutes
                 }
-        
+
         return {}
 
     async def start_background_collection(self):
         """Start background metrics collection"""
         self.running = True
-        
+
         async def collection_loop():
             while self.running:
                 try:
                     # Collect system metrics
                     await self._collect_system_metrics()
-                    
+
                     # Collect application metrics
                     await self._collect_application_metrics()
-                    
+
                     # Sleep before next collection
                     await asyncio.sleep(30)  # Collect every 30 seconds
-                    
+
                 except Exception as e:
                     logger.error(f"Error in metrics collection: {e}")
                     await asyncio.sleep(5)  # Brief pause before retrying
-        
+
         self.collection_task = asyncio.create_task(collection_loop())
 
     async def _collect_system_metrics(self):
@@ -299,7 +298,7 @@ class MetricsCollector:
             value=cpu_percent,
             unit="%"
         ))
-        
+
         # Memory usage
         memory = psutil.virtual_memory()
         self.record_metric(PerformanceMetric(
@@ -308,14 +307,14 @@ class MetricsCollector:
             value=memory.percent,
             unit="%"
         ))
-        
+
         self.record_metric(PerformanceMetric(
             timestamp=time.time(),
             metric_type="system.memory.available_mb",
             value=memory.available / (1024 * 1024),
             unit="MB"
         ))
-        
+
         # Disk usage
         disk = psutil.disk_usage('/')
         self.record_metric(PerformanceMetric(
@@ -324,7 +323,7 @@ class MetricsCollector:
             value=(disk.used / disk.total) * 100,
             unit="%"
         ))
-        
+
         # Process count
         process_count = len(psutil.pids())
         self.record_metric(PerformanceMetric(
@@ -359,18 +358,18 @@ class UsagePatternAnalyzer:
         """Detect usage patterns over the specified time period"""
         end_time = time.time()
         start_time = end_time - (days_back * 24 * 60 * 60)  # Convert days to seconds
-        
+
         # Get metrics for analysis
         response_time_metrics = self.metrics_collector.get_metrics_by_type(
             "response.time.ms", start_time, end_time
         )
-        
+
         usage_frequency_metrics = self.metrics_collector.get_metrics_by_type(
             "usage.frequency", start_time, end_time
         )
-        
+
         patterns = []
-        
+
         # Detect response time patterns
         if response_time_metrics:
             avg_response_time = statistics.mean([m.value for m in response_time_metrics])
@@ -382,7 +381,7 @@ class UsagePatternAnalyzer:
                 confidence=0.8,
                 metadata={"average_response_time_ms": avg_response_time}
             ))
-        
+
         # Detect usage frequency patterns
         if usage_frequency_metrics:
             avg_daily_usage = len(usage_frequency_metrics) / days_back
@@ -394,13 +393,13 @@ class UsagePatternAnalyzer:
                 confidence=0.7,
                 metadata={"average_daily_requests": avg_daily_usage}
             ))
-        
+
         # Detect peak usage times
         hourly_usage = defaultdict(int)
         for metric in usage_frequency_metrics:
             hour = datetime.fromtimestamp(metric.timestamp).hour
             hourly_usage[hour] += 1
-        
+
         if hourly_usage:
             peak_hour = max(hourly_usage, key=hourly_usage.get)
             patterns.append(UsagePattern(
@@ -411,14 +410,14 @@ class UsagePatternAnalyzer:
                 confidence=0.9,
                 metadata={"peak_hour": peak_hour, "peak_requests": hourly_usage[peak_hour]}
             ))
-        
+
         self.patterns = patterns
         return patterns
 
     def get_insights(self) -> Dict[str, Any]:
         """Get analytical insights"""
         patterns = self.detect_usage_patterns(days_back=7)
-        
+
         insights = {
             "total_patterns_detected": len(patterns),
             "performance_patterns": [p for p in patterns if p.pattern_type == "performance"],
@@ -426,7 +425,7 @@ class UsagePatternAnalyzer:
             "timing_patterns": [p for p in patterns if p.pattern_type == "timing"],
             "recommendations": []
         }
-        
+
         # Add recommendations based on patterns
         for pattern in patterns:
             if pattern.pattern_type == "performance" and pattern.confidence > 0.8:
@@ -437,7 +436,7 @@ class UsagePatternAnalyzer:
                         "message": f"High average response time ({avg_response:.2f}ms) detected. Consider optimization.",
                         "priority": "high"
                     })
-        
+
         return insights
 
 
@@ -451,10 +450,10 @@ class TrendAnalyzer:
         """Analyze trend for a specific metric"""
         end_time = time.time()
         start_time = end_time - (days_back * 24 * 60 * 60)
-        
+
         # Get metrics
         metrics = self._get_metrics_for_trend_analysis(metric_type, start_time, end_time)
-        
+
         if len(metrics) < 2:
             return {
                 "metric_type": metric_type,
@@ -464,29 +463,29 @@ class TrendAnalyzer:
                 "r_squared": 0.0,
                 "data_points": len(metrics)
             }
-        
+
         # Calculate trend using linear regression
         timestamps = [m.timestamp for m in metrics]
         values = [m.value for m in metrics]
-        
+
         # Normalize timestamps for calculation
         norm_timestamps = [(t - timestamps[0]) for t in timestamps]
-        
+
         # Calculate slope and R-squared
         n = len(values)
         sum_x = sum(norm_timestamps)
         sum_y = sum(values)
         sum_xy = sum(x * y for x, y in zip(norm_timestamps, values))
         sum_x2 = sum(x * x for x in norm_timestamps)
-        
+
         slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x * sum_x) if (n * sum_x2 - sum_x * sum_x) != 0 else 0
-        
+
         # Calculate R-squared
         mean_y = sum_y / n
         ss_tot = sum((y - mean_y) ** 2 for y in values)
         ss_reg = sum((slope * x + (mean_y - slope * sum_x / n) - mean_y) ** 2 for x in norm_timestamps)
         r_squared = ss_reg / ss_tot if ss_tot != 0 else 0
-        
+
         # Determine trend direction
         if slope > 0.1:
             direction = "increasing"
@@ -494,11 +493,11 @@ class TrendAnalyzer:
             direction = "decreasing"
         else:
             direction = "stable"
-        
+
         # Calculate trend strength (absolute slope normalized)
         max_value = max(values) if values else 1
         strength = min(abs(slope) / (max_value / 10 if max_value > 0 else 1), 1.0)
-        
+
         return {
             "metric_type": metric_type,
             "trend_direction": direction,
@@ -515,13 +514,13 @@ class TrendAnalyzer:
         # This is a simplified version - in production, you'd want to aggregate data
         # to avoid loading too much into memory
         all_metrics = self._get_all_metrics_of_type(metric_type)
-        
+
         # Filter by time range
         filtered_metrics = [m for m in all_metrics if start_time <= m.timestamp <= end_time]
-        
+
         # Sort by timestamp
         filtered_metrics.sort(key=lambda m: m.timestamp)
-        
+
         return filtered_metrics
 
     def _get_all_metrics_of_type(self, metric_type: str):
@@ -540,11 +539,11 @@ class CostOptimizer:
     def analyze_costs(self) -> List[CostOptimization]:
         """Analyze costs and provide optimization recommendations"""
         optimizations = []
-        
+
         # Analyze resource usage patterns
         cpu_metrics = self.metrics_collector.get_metrics_by_type("system.cpu.usage_percent")
         memory_metrics = self.metrics_collector.get_metrics_by_type("system.memory.usage_percent")
-        
+
         # Check for consistently low resource usage (potential for downsizing)
         if cpu_metrics:
             avg_cpu = statistics.mean([m.value for m in cpu_metrics])
@@ -562,7 +561,7 @@ class CostOptimizer:
                         "Schedule downtime for non-critical periods"
                     ]
                 ))
-        
+
         if memory_metrics:
             avg_memory = statistics.mean([m.value for m in memory_metrics])
             if avg_memory < 30:  # Less than 30% memory usage
@@ -579,7 +578,7 @@ class CostOptimizer:
                         "Optimize application memory usage"
                     ]
                 ))
-        
+
         # Check for performance issues that might lead to over-provisioning
         response_time_metrics = self.metrics_collector.get_metrics_by_type("response.time.ms")
         if response_time_metrics:
@@ -599,16 +598,16 @@ class CostOptimizer:
                         "Upgrade to faster storage"
                     ]
                 ))
-        
+
         return optimizations
 
     def get_cost_summary(self) -> Dict[str, Any]:
         """Get cost analysis summary"""
         optimizations = self.analyze_costs()
-        
+
         total_potential_savings = sum(opt.potential_savings for opt in optimizations)
         high_priority_optimizations = [opt for opt in optimizations if opt.impact_score > 0.7]
-        
+
         return {
             "total_optimizations_identified": len(optimizations),
             "high_priority_optimizations": len(high_priority_optimizations),
@@ -625,8 +624,8 @@ class CostOptimizer:
 class AnalyticsDashboard:
     """Real-time analytics dashboard"""
 
-    def __init__(self, metrics_collector: MetricsCollector, 
-                 pattern_analyzer: UsagePatternAnalyzer, 
+    def __init__(self, metrics_collector: MetricsCollector,
+                 pattern_analyzer: UsagePatternAnalyzer,
                  cost_optimizer: CostOptimizer):
         self.metrics_collector = metrics_collector
         self.pattern_analyzer = pattern_analyzer
@@ -641,11 +640,11 @@ class AnalyticsDashboard:
         table.add_column("Status", style="green")
 
         # Get latest metrics
-        cpu_metrics = self.metrics_collector.get_metrics_by_type("system.cpu.usage_percent", 
+        cpu_metrics = self.metrics_collector.get_metrics_by_type("system.cpu.usage_percent",
                                                                time.time() - 300, time.time())  # Last 5 minutes
         memory_metrics = self.metrics_collector.get_metrics_by_type("system.memory.usage_percent",
                                                                   time.time() - 300, time.time())
-        
+
         if cpu_metrics:
             latest_cpu = cpu_metrics[0].value
             cpu_status = "🔴" if latest_cpu > 80 else "🟡" if latest_cpu > 60 else "🟢"
@@ -774,7 +773,7 @@ class AnalyticsReportingSystem:
     def generate_daily_report(self) -> Dict[str, Any]:
         """Generate daily analytics report"""
         yesterday = time.time() - (24 * 60 * 60)
-        
+
         report = {
             "report_date": datetime.now().isoformat(),
             "period": "daily",
@@ -784,13 +783,13 @@ class AnalyticsReportingSystem:
             "events_summary": self._get_events_summary(yesterday, time.time()),
             "performance_summary": self._get_performance_summary(yesterday, time.time())
         }
-        
+
         return report
 
     def generate_weekly_report(self) -> Dict[str, Any]:
         """Generate weekly analytics report"""
         week_ago = time.time() - (7 * 24 * 60 * 60)
-        
+
         report = {
             "report_date": datetime.now().isoformat(),
             "period": "weekly",
@@ -801,20 +800,20 @@ class AnalyticsReportingSystem:
             "performance_summary": self._get_performance_summary(week_ago, time.time()),
             "trends": self._analyze_trends(week_ago, time.time())
         }
-        
+
         return report
 
     def _get_system_summary(self, start_time: float, end_time: float) -> Dict[str, Any]:
         """Get system summary for the time period"""
         cpu_metrics = self.metrics_collector.get_metrics_by_type("system.cpu.usage_percent", start_time, end_time)
         memory_metrics = self.metrics_collector.get_metrics_by_type("system.memory.usage_percent", start_time, end_time)
-        
+
         summary = {
             "total_metrics_collected": len(cpu_metrics) + len(memory_metrics),
             "cpu": {},
             "memory": {}
         }
-        
+
         if cpu_metrics:
             values = [m.value for m in cpu_metrics]
             summary["cpu"] = {
@@ -824,7 +823,7 @@ class AnalyticsReportingSystem:
                 "min": min(values),
                 "std_dev": statistics.stdev(values) if len(values) > 1 else 0
             }
-        
+
         if memory_metrics:
             values = [m.value for m in memory_metrics]
             summary["memory"] = {
@@ -834,7 +833,7 @@ class AnalyticsReportingSystem:
                 "min": min(values),
                 "std_dev": statistics.stdev(values) if len(values) > 1 else 0
             }
-        
+
         return summary
 
     def _get_events_summary(self, start_time: float, end_time: float) -> Dict[str, Any]:
@@ -843,7 +842,7 @@ class AnalyticsReportingSystem:
         for severity in ["info", "warning", "error", "critical"]:
             events = self.metrics_collector.get_events_by_severity(severity, start_time, end_time)
             all_events.extend(events)
-        
+
         summary = {
             "total_events": len(all_events),
             "by_severity": {
@@ -854,17 +853,17 @@ class AnalyticsReportingSystem:
             },
             "recent_events": [e.__dict__ for e in all_events[:10]]  # Last 10 events
         }
-        
+
         return summary
 
     def _get_performance_summary(self, start_time: float, end_time: float) -> Dict[str, Any]:
         """Get performance summary for the time period"""
         response_metrics = self.metrics_collector.get_metrics_by_type("response.time.ms", start_time, end_time)
-        
+
         summary = {
             "response_time": {}
         }
-        
+
         if response_metrics:
             values = [m.value for m in response_metrics]
             summary["response_time"] = {
@@ -875,26 +874,26 @@ class AnalyticsReportingSystem:
                 "percentile_95": self._calculate_percentile(values, 95),
                 "percentile_99": self._calculate_percentile(values, 99)
             }
-        
+
         return summary
 
     def _analyze_trends(self, start_time: float, end_time: float) -> Dict[str, Any]:
         """Analyze trends for the time period"""
         analyzer = TrendAnalyzer()
-        
+
         trends = {
             "cpu_usage": analyzer.analyze_trend("system.cpu.usage_percent", 7),
             "memory_usage": analyzer.analyze_trend("system.memory.usage_percent", 7),
             "response_time": analyzer.analyze_trend("response.time.ms", 7)
         }
-        
+
         return trends
 
     def _calculate_percentile(self, values: List[float], percentile: float) -> float:
         """Calculate percentile of a list of values"""
         if not values:
             return 0
-        
+
         sorted_values = sorted(values)
         index = int(len(sorted_values) * percentile / 100)
         return sorted_values[min(index, len(sorted_values) - 1)]
@@ -908,41 +907,41 @@ class AnalyticsReportingSystem:
 async def main():
     """Main function to demonstrate the analytics system"""
     console.print("[bold green]📊 Initializing Advanced Analytics System[/bold green]")
-    
+
     # Initialize components
     metrics_collector = MetricsCollector()
     pattern_analyzer = UsagePatternAnalyzer(metrics_collector)
     cost_optimizer = CostOptimizer(metrics_collector)
-    dashboard = AnalyticsDashboard(metrics_collector, pattern_analyzer, cost_optimizer)
+    AnalyticsDashboard(metrics_collector, pattern_analyzer, cost_optimizer)
     reporting_system = AnalyticsReportingSystem(metrics_collector, pattern_analyzer, cost_optimizer)
-    
+
     # Start background collection
     await metrics_collector.start_background_collection()
-    
+
     console.print("[blue]✅ Analytics system initialized[/blue]")
     console.print("[yellow]📊 Collecting metrics for 10 seconds...[/yellow]")
-    
+
     # Let it collect some data
     await asyncio.sleep(10)
-    
+
     # Generate reports
     console.print("[blue]📄 Generating reports...[/blue]")
     daily_report = reporting_system.generate_daily_report()
     weekly_report = reporting_system.generate_weekly_report()
-    
+
     console.print(f"[green]✅ Daily report generated: {len(daily_report['system_summary'])} metrics[/green]")
     console.print(f"[green]✅ Weekly report generated: {len(weekly_report['trends'])} trends analyzed[/green]")
-    
+
     # Show some insights
     insights = pattern_analyzer.get_insights()
     console.print(f"[blue]🔍 Detected {insights['total_patterns_detected']} usage patterns[/blue]")
-    
+
     cost_summary = cost_optimizer.get_cost_summary()
     console.print(f"[blue]💰 Identified potential for {cost_summary['total_potential_savings_fraction']*100:.1f}% cost savings[/blue]")
-    
+
     # Stop collection
     metrics_collector.stop_background_collection()
-    
+
     console.print("[green]✅ Advanced Analytics System Demo Completed[/green]")
 
 

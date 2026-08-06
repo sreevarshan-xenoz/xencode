@@ -6,14 +6,12 @@ Provides enhanced token voting, semantic consensus, and quality metrics.
 These components fix critical issues in the original ensemble system.
 """
 
-import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 try:
-    from sentence_transformers import SentenceTransformer
     import torch
+    from sentence_transformers import SentenceTransformer
     SEMANTIC_AVAILABLE = True
 except ImportError:
     SEMANTIC_AVAILABLE = False

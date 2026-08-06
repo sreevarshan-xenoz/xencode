@@ -6,14 +6,12 @@ model preferences, and routing rules.
 """
 
 import json
-import os
-from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from enum import Enum
-import yaml
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from ..smart_config_manager import ConfigurationManager
+import yaml
 
 
 class ModelPreferenceType(Enum):
@@ -54,7 +52,7 @@ class RoutingRule:
     preferred_provider: Optional[str] = None
     preferred_model: Optional[str] = None
     fallback_providers: List[str] = None
-    
+
     def __post_init__(self):
         if self.fallback_providers is None:
             self.fallback_providers = []
@@ -70,23 +68,23 @@ class HybridModelConfig:
     cache_ttl_seconds: int = 3600
     fallback_enabled: bool = True
     max_model_switches: int = 3  # Maximum number of model switches per request
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         result = asdict(self)
-        
+
         # Convert enums to strings
         for pref in result['preferences']:
             pref['preference_type'] = pref['preference_type'].value
-        
+
         for prov in result['providers']:
             prov['name'] = prov['name']
-        
+
         for rule in result['routing_rules']:
             rule['fallback_providers'] = rule['fallback_providers'] or []
-        
+
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'HybridModelConfig':
         """Create from dictionary"""
@@ -99,7 +97,7 @@ class HybridModelConfig:
                 enabled=pref_data.get('enabled', True)
             )
             preferences.append(pref)
-        
+
         providers = []
         for prov_data in data.get('providers', []):
             prov = ProviderConfig(
@@ -113,7 +111,7 @@ class HybridModelConfig:
                 retry_attempts=prov_data.get('retry_attempts', 3)
             )
             providers.append(prov)
-        
+
         routing_rules = []
         for rule_data in data.get('routing_rules', []):
             rule = RoutingRule(
@@ -124,7 +122,7 @@ class HybridModelConfig:
                 fallback_providers=rule_data.get('fallback_providers', [])
             )
             routing_rules.append(rule)
-        
+
         return cls(
             providers=providers,
             preferences=preferences,
@@ -138,20 +136,20 @@ class HybridModelConfig:
 
 class HybridModelConfigManager:
     """Configuration manager for hybrid model architecture"""
-    
+
     def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path or Path.home() / ".xencode" / "hybrid_model_config.yaml"
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize with default configuration
         self.config = self._get_default_config()
-        
+
         # Load existing config if it exists
         if self.config_path.exists():
             self.load_config()
         else:
             self.save_config()
-    
+
     def _get_default_config(self) -> HybridModelConfig:
         """Get default configuration"""
         return HybridModelConfig(
@@ -219,7 +217,7 @@ class HybridModelConfigManager:
             fallback_enabled=True,
             max_model_switches=3
         )
-    
+
     def load_config(self) -> bool:
         """Load configuration from file"""
         try:
@@ -228,36 +226,36 @@ class HybridModelConfigManager:
                     data = yaml.safe_load(f)
                 else:
                     data = json.load(f)
-            
+
             self.config = HybridModelConfig.from_dict(data)
             return True
         except Exception as e:
             print(f"Error loading config: {e}")
             return False
-    
+
     def save_config(self) -> bool:
         """Save configuration to file"""
         try:
             data = self.config.to_dict()
-            
+
             with open(self.config_path, 'w') as f:
                 if self.config_path.suffix.lower() in ['.yaml', '.yml']:
                     yaml.dump(data, f, default_flow_style=False)
                 else:
                     json.dump(data, f, indent=2)
-            
+
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
             return False
-    
+
     def get_provider_config(self, provider_name: str) -> Optional[ProviderConfig]:
         """Get configuration for a specific provider"""
         for provider in self.config.providers:
             if provider.name == provider_name:
                 return provider
         return None
-    
+
     def set_provider_api_key(self, provider_name: str, api_key: str) -> bool:
         """Set API key for a provider"""
         for provider in self.config.providers:
@@ -267,18 +265,18 @@ class HybridModelConfigManager:
                 self.save_config()
                 return True
         return False
-    
+
     def add_routing_rule(self, rule: RoutingRule) -> bool:
         """Add a new routing rule"""
         # Check if rule with same name already exists
         for existing_rule in self.config.routing_rules:
             if existing_rule.name == rule.name:
                 return False  # Rule already exists
-        
+
         self.config.routing_rules.append(rule)
         self.save_config()
         return True
-    
+
     def remove_routing_rule(self, rule_name: str) -> bool:
         """Remove a routing rule"""
         for i, rule in enumerate(self.config.routing_rules):
@@ -287,27 +285,27 @@ class HybridModelConfigManager:
                 self.save_config()
                 return True
         return False
-    
+
     def get_matching_rules(self, task_context: Dict[str, Any]) -> List[RoutingRule]:
         """Get routing rules that match the given task context"""
         matching_rules = []
-        
+
         for rule in self.config.routing_rules:
-            # Simple condition evaluation - in a real implementation, 
+            # Simple condition evaluation - in a real implementation,
             # this would use a more sophisticated rule engine
             try:
                 # Create a safe evaluation context
                 eval_context = task_context.copy()
-                
+
                 # Evaluate the condition
                 if eval(rule.condition, {"__builtins__": {}}, eval_context):
                     matching_rules.append(rule)
             except Exception:
                 # If condition evaluation fails, skip this rule
                 continue
-        
+
         return matching_rules
-    
+
     def update_preference(self, preference_type: ModelPreferenceType, weight: float) -> bool:
         """Update a preference weight"""
         for pref in self.config.preferences:
@@ -316,17 +314,17 @@ class HybridModelConfigManager:
                 self.save_config()
                 return True
         return False
-    
+
     def get_provider_priority(self) -> List[str]:
         """Get list of providers in priority order based on preferences"""
         # This is a simplified implementation
         # In a real system, this would use the preferences to determine priority
         enabled_providers = [p.name for p in self.config.providers if p.enabled]
-        
+
         # Prioritize local providers first (for privacy)
         local_providers = [p for p in enabled_providers if p == "local_ollama"]
         cloud_providers = [p for p in enabled_providers if p != "local_ollama"]
-        
+
         return local_providers + cloud_providers
 
 
@@ -345,24 +343,24 @@ def get_hybrid_config_manager() -> HybridModelConfigManager:
 # Example usage
 if __name__ == "__main__":
     import tempfile
-    
+
     # Create a temporary config file for testing
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         temp_config_path = Path(f.name)
-    
+
     config_manager = HybridModelConfigManager(config_path=temp_config_path)
-    
+
     print("Testing Hybrid Model Configuration Manager...")
-    
+
     # Test getting provider config
     ollama_config = config_manager.get_provider_config("local_ollama")
     print(f"Ollama config enabled: {ollama_config.enabled if ollama_config else 'Not found'}")
-    
+
     # Test setting API key
     config_manager.set_provider_api_key("openai", "test-key-123")
     openai_config = config_manager.get_provider_config("openai")
     print(f"OpenAI config after setting key - enabled: {openai_config.enabled if openai_config else 'Not found'}, has_key: {bool(openai_config.api_key) if openai_config else 'Not found'}")
-    
+
     # Test adding a routing rule
     new_rule = RoutingRule(
         name="test_rule",
@@ -371,16 +369,16 @@ if __name__ == "__main__":
     )
     config_manager.add_routing_rule(new_rule)
     print(f"Added new rule: {new_rule.name}")
-    
+
     # Test getting provider priority
     priority = config_manager.get_provider_priority()
     print(f"Provider priority: {priority}")
-    
+
     # Test updating preference
     config_manager.update_preference(ModelPreferenceType.LATENCY, 0.9)
     print("Updated latency preference")
-    
+
     # Clean up
     temp_config_path.unlink()
-    
+
     print("✅ Configuration manager tests completed!")
