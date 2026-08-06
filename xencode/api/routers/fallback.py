@@ -15,21 +15,19 @@ Endpoints:
 """
 
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ...routing.fallback_config import (
-    FallbackPolicy,
-    FallbackPolicyConfig,
-    RetryPolicy,
-    CostCap,
-    LatencyCap,
     BackoffType,
+    CostCap,
+    FallbackPolicy,
+    LatencyCap,
+    RetryPolicy,
 )
-from ...routing.fallback_engine import FallbackEngine, FallbackResult
+from ...routing.fallback_engine import FallbackEngine
 
 router = APIRouter()
 
@@ -159,7 +157,7 @@ async def list_policies(
         policies = engine.policy_config.get_enabled_policies()
     else:
         policies = engine.policy_config.policies
-    
+
     return {
         "policies": [p.to_dict() for p in policies],
         "default_policy": engine.policy_config.default_policy,
@@ -174,10 +172,10 @@ async def get_policy(
 ):
     """Get specific fallback policy"""
     policy = engine.get_policy(policy_name)
-    
+
     if not policy:
         raise HTTPException(status_code=404, detail=f"Policy '{policy_name}' not found")
-    
+
     return FallbackPolicyResponse(
         name=policy.name,
         description=policy.description,
@@ -213,10 +211,10 @@ async def create_or_update_policy(
         health_aware=policy_data.health_aware,
         enabled=policy_data.enabled,
     )
-    
+
     # Add to engine
     engine.policy_config.add_policy(policy)
-    
+
     return FallbackPolicyResponse(
         name=policy.name,
         description=policy.description,
@@ -240,10 +238,10 @@ async def delete_policy(
 ):
     """Delete a fallback policy"""
     success = engine.policy_config.remove_policy(policy_name)
-    
+
     if not success:
         raise HTTPException(status_code=404, detail=f"Policy '{policy_name}' not found")
-    
+
     return {"message": f"Policy '{policy_name}' deleted successfully"}
 
 
@@ -255,10 +253,10 @@ async def execute_with_fallback(
     """Execute a request with fallback policy"""
     # Get policy
     policy = engine.get_policy(request.policy_name)
-    
+
     if not policy:
         raise HTTPException(status_code=404, detail=f"Policy '{request.policy_name}' not found")
-    
+
     # Mock execution function (in production, this would call actual provider)
     async def mock_execute(provider: str):
         # Simulate provider execution
@@ -269,7 +267,7 @@ async def execute_with_fallback(
             "cost": 0.001,
             "tokens": 100,
         }
-    
+
     # Execute with fallback
     result = await engine.execute_with_fallback(
         policy=policy,
@@ -277,7 +275,7 @@ async def execute_with_fallback(
         request_id=request.request_id or str(uuid.uuid4()),
         context=request.context,
     )
-    
+
     return FallbackExecuteResponse(
         success=result.success,
         provider=result.provider,
@@ -300,7 +298,7 @@ async def get_fallback_history(
 ):
     """Get fallback execution history"""
     results = engine.get_execution_history(request_id=request_id, limit=limit)
-    
+
     return [
         FallbackHistoryResponse(
             request_id=r.request_id,
@@ -323,7 +321,7 @@ async def get_fallback_stats(
 ):
     """Get fallback engine statistics"""
     stats = engine.get_stats()
-    
+
     return FallbackStatsResponse(
         total_executions=stats['total_executions'],
         successful=stats['successful'],

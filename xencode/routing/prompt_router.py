@@ -12,15 +12,13 @@ Features:
 - Context-aware routing decisions
 """
 
-import asyncio
 import json
 import re
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 
@@ -297,7 +295,7 @@ class TaskClassifier:
             TaskClassification result
         """
         # Score each task type
-        task_scores: Dict[TaskType, float] = {t: 0.0 for t in TaskType}
+        task_scores: Dict[TaskType, float] = dict.fromkeys(TaskType, 0.0)
         matched_keywords: Dict[TaskType, List[str]] = {t: [] for t in TaskType}
 
         for task_type, patterns in self.compiled_task_patterns.items():
@@ -390,7 +388,7 @@ class TaskClassifier:
                         return lang
 
         # Check prompt content
-        lang_scores: Dict[str, int] = {lang: 0 for lang in self.LANGUAGE_PATTERNS}
+        lang_scores: Dict[str, int] = dict.fromkeys(self.LANGUAGE_PATTERNS, 0)
 
         for lang, patterns in self.compiled_languages.items():
             for pattern in patterns:
@@ -767,7 +765,7 @@ class PromptRouter:
         """Get list of available models by provider"""
         models = []
 
-        for task_type, provider_models in self.DEFAULT_MODEL_MAP.items():
+        for _task_type, provider_models in self.DEFAULT_MODEL_MAP.items():
             for provider, model in provider_models.items():
                 if model not in [m['model'] for m in models]:
                     models.append({

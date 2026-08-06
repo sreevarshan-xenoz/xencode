@@ -1,6 +1,7 @@
 import os
 import asyncio
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional
@@ -541,7 +542,7 @@ class BatchIndexer:
                 separators=["\n\n", "\n", " ", ""]
             )
         except ImportError:
-            raise ImportError("Please install langchain-text-splitters: pip install langchain-text-splitters")
+            raise ImportError("Please install langchain-text-splitters: pip install langchain-text-splitters")  from None
 
     async def index_directory_batch(self, root_path: str, verbose: bool = True) -> None:
         from pathlib import Path

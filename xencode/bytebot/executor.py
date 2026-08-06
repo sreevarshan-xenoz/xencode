@@ -5,17 +5,14 @@ This component executes individual steps from a plan graph with safety
 validation and proper error handling.
 """
 
-import subprocess
 import threading
 import time
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import uuid
-import os
-import tempfile
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from .terminal_cognition_layer import TerminalCognitionLayer, CommandResult
+from .terminal_cognition_layer import TerminalCognitionLayer
 
 
 @dataclass
@@ -37,44 +34,44 @@ class Executor:
     """
     Executor component that safely executes plan steps
     """
-    
+
     def __init__(self, terminal_layer: TerminalCognitionLayer = None):
         self.terminal_layer = terminal_layer or TerminalCognitionLayer()
         self.execution_history = []
         self.active_executions = {}
         self.max_concurrent_executions = 1  # For now, execute sequentially
-    
+
     def execute_step(self, step: Dict[str, Any], context: Dict[str, Any] = None) -> ExecutionResult:
         """
         Execute a single step from the plan
-        
+
         Args:
             step: The step to execute (with id, command, type, etc.)
             context: Context information for the execution
-            
+
         Returns:
             ExecutionResult with execution details
         """
         step_id = step.get("id", str(uuid.uuid4()))
         command = step.get("command", "")
         step_type = step.get("type", "command")
-        
+
         # Record start of execution
         start_time = time.time()
         execution_id = str(uuid.uuid4())
-        
+
         self.active_executions[execution_id] = {
             "step_id": step_id,
             "command": command,
             "start_time": start_time
         }
-        
+
         try:
             # Update context if provided
             if context:
                 # In a real implementation, we'd update the terminal layer's context
                 pass
-            
+
             # Execute based on step type
             if step_type == "command":
                 result = self._execute_command_step(step, context)
@@ -85,10 +82,10 @@ class Executor:
             else:
                 # Default to command execution for unknown types
                 result = self._execute_command_step(step, context)
-            
+
             # Calculate duration
             duration = time.time() - start_time
-            
+
             # Create execution result
             execution_result = ExecutionResult(
                 step_id=step_id,
@@ -102,15 +99,15 @@ class Executor:
                 stdout=result.get("stdout", None),
                 stderr=result.get("stderr", None)
             )
-            
+
             # Add to history
             self.execution_history.append(execution_result)
-            
+
             # Remove from active executions
             del self.active_executions[execution_id]
-            
+
             return execution_result
-            
+
         except Exception as e:
             duration = time.time() - start_time
             error_result = ExecutionResult(
@@ -122,30 +119,30 @@ class Executor:
                 timestamp=datetime.now(),
                 error_message=str(e)
             )
-            
+
             # Add to history
             self.execution_history.append(error_result)
-            
+
             # Remove from active executions
             if execution_id in self.active_executions:
                 del self.active_executions[execution_id]
-            
+
             return error_result
-    
+
     def _execute_command_step(self, step: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Execute a command-type step"""
         command = step.get("command", "")
-        
+
         if not command or command == "SAFE_GUARD_TRIGGERED":
             return {
                 "status": "blocked",
                 "result": "Command was blocked by safety guard",
                 "error": "Command blocked by safety mechanism"
             }
-        
+
         # Execute the command using the terminal layer
         command_result = self.terminal_layer.execute_command_safe(command)
-        
+
         if command_result.success:
             return {
                 "status": "success",
@@ -163,17 +160,17 @@ class Executor:
                 "stdout": command_result.stdout,
                 "stderr": command_result.stderr
             }
-    
+
     def _execute_validation_step(self, step: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Execute a validation-type step"""
-        command = step.get("command", "")
+        step.get("command", "")
         original_command = step.get("metadata", {}).get("original_command", "")
-        
+
         # For validation steps, we might just check if the original command is safe
         if original_command:
             # Validate the original command using the terminal layer
             validation = self.terminal_layer.validate_command(original_command)
-            
+
             if validation["valid"]:
                 return {
                     "status": "success",
@@ -193,21 +190,21 @@ class Executor:
                 "status": "success",
                 "result": "Validation step completed (no command to validate)"
             }
-    
+
     def _execute_conditional_step(self, step: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Execute a conditional-type step"""
         # For now, just execute the command associated with the conditional
         command = step.get("command", "")
-        
+
         if not command:
             return {
                 "status": "skipped",
                 "result": "No command to execute for conditional step"
             }
-        
+
         # Execute the command
         command_result = self.terminal_layer.execute_command_safe(command)
-        
+
         if command_result.success:
             return {
                 "status": "success",
@@ -225,39 +222,39 @@ class Executor:
                 "stdout": command_result.stdout,
                 "stderr": command_result.stderr
             }
-    
+
     def execute_plan_sequential(self, plan: Dict[str, Any], context: Dict[str, Any] = None) -> List[ExecutionResult]:
         """
         Execute a plan sequentially, respecting dependencies
-        
+
         Args:
             plan: The plan graph to execute
             context: Context information for the execution
-            
+
         Returns:
             List of ExecutionResults for each step
         """
         steps = plan.get("steps", [])
         dependencies = plan.get("dependencies", [])  # List of (from_id, to_id) tuples
-        
+
         # Build dependency graph
         dependency_map = {}
         dependents_map = {}
-        
+
         for step in steps:
             step_id = step["id"]
             dependency_map[step_id] = set()
             dependents_map[step_id] = set()
-        
+
         for from_id, to_id in dependencies:
             dependency_map[to_id].add(from_id)
             dependents_map[from_id].add(to_id)
-        
+
         # Execute steps in order respecting dependencies
         results = []
         completed = set()
-        remaining_steps = set(step["id"] for step in steps)
-        
+        remaining_steps = {step["id"] for step in steps}
+
         while remaining_steps:
             # Find steps whose dependencies are all completed
             ready_steps = []
@@ -267,50 +264,50 @@ class Executor:
                     step_data = next((s for s in steps if s["id"] == step_id), None)
                     if step_data:
                         ready_steps.append(step_data)
-            
+
             if not ready_steps:
                 # Circular dependency or missing dependency
                 raise Exception(f"Unable to execute plan: remaining steps {remaining_steps} have unmet dependencies")
-            
+
             # Execute ready steps (for now, just execute one at a time)
             step_to_execute = ready_steps[0]
             result = self.execute_step(step_to_execute, context)
             results.append(result)
-            
+
             # Mark as completed
             completed.add(step_to_execute["id"])
             remaining_steps.remove(step_to_execute["id"])
-        
+
         return results
-    
-    def execute_plan_with_timeout(self, plan: Dict[str, Any], context: Dict[str, Any] = None, 
+
+    def execute_plan_with_timeout(self, plan: Dict[str, Any], context: Dict[str, Any] = None,
                                  timeout_seconds: int = 300) -> List[ExecutionResult]:
         """
         Execute a plan with a timeout
-        
+
         Args:
             plan: The plan graph to execute
             context: Context information for the execution
             timeout_seconds: Maximum time to spend executing the plan
-            
+
         Returns:
             List of ExecutionResults for completed steps
         """
-        start_time = time.time()
-        
+        time.time()
+
         def execution_worker():
             try:
                 return self.execute_plan_sequential(plan, context)
-            except Exception as e:
+            except Exception:
                 # Return partial results if available
                 return getattr(self, '_partial_results', [])
-        
+
         # Execute in a separate thread with timeout
         execution_thread = threading.Thread(target=lambda: setattr(self, '_thread_result', execution_worker()))
         execution_thread.daemon = True
         execution_thread.start()
         execution_thread.join(timeout=timeout_seconds)
-        
+
         if execution_thread.is_alive():
             # Execution timed out
             return [{
@@ -321,9 +318,9 @@ class Executor:
                 "duration": timeout_seconds,
                 "timestamp": datetime.now()
             }]
-        
+
         return getattr(self, '_thread_result', [])
-    
+
     def get_execution_stats(self) -> Dict[str, Any]:
         """Get statistics about execution history"""
         if not self.execution_history:
@@ -335,14 +332,14 @@ class Executor:
                 "average_duration": 0.0,
                 "total_duration": 0.0
             }
-        
+
         total = len(self.execution_history)
         successful = len([r for r in self.execution_history if r.status == "success"])
         failed = len([r for r in self.execution_history if r.status == "failed"])
         errors = len([r for r in self.execution_history if r.status == "error"])
         total_duration = sum(r.duration for r in self.execution_history)
         avg_duration = total_duration / total if total > 0 else 0.0
-        
+
         return {
             "total_executions": total,
             "successful_executions": successful,
@@ -351,7 +348,7 @@ class Executor:
             "average_duration": avg_duration,
             "total_duration": total_duration
         }
-    
+
     def cancel_execution(self, execution_id: str) -> bool:
         """Cancel an active execution"""
         if execution_id in self.active_executions:
@@ -360,7 +357,7 @@ class Executor:
             del self.active_executions[execution_id]
             return True
         return False
-    
+
     def get_active_executions(self) -> List[Dict[str, Any]]:
         """Get list of currently active executions"""
         active_list = []

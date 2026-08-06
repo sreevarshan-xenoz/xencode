@@ -143,7 +143,7 @@ except ImportError:
 
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        print(f"[green][SUCCESS] ai_ensembles.py updated successfully![/green]")
+        print("[green][SUCCESS] ai_ensembles.py updated successfully![/green]")
 
         # Show summary
         print("\n" + "=" * 70)
@@ -174,7 +174,7 @@ def rollback_patch():
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(backup_content)
 
-        print(f"[green][SUCCESS] Rolled back to backup[/green]")
+        print("[green][SUCCESS] Rolled back to backup[/green]")
         return True
     else:
         print("[ERROR] No backup found to rollback to")

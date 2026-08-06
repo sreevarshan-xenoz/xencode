@@ -7,15 +7,9 @@ CI/CD pipeline setup, and production deployment scripts.
 """
 
 import asyncio
-import json
-import os
-import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-import tempfile
-import shutil
+from typing import Any, Dict, List, Optional
 
 try:
     import docker
@@ -76,8 +70,8 @@ class DeploymentAutomation:
         }
         return configs
 
-    async def build_docker_image(self, 
-                                image_name: Optional[str] = None, 
+    async def build_docker_image(self,
+                                image_name: Optional[str] = None,
                                 tag: Optional[str] = None,
                                 dockerfile: Optional[str] = None) -> bool:
         """Build Docker image for Xencode"""
@@ -114,8 +108,8 @@ class DeploymentAutomation:
             print(f"❌ Docker build failed: {e}")
             return False
 
-    async def push_docker_image(self, 
-                               image_name: Optional[str] = None, 
+    async def push_docker_image(self,
+                               image_name: Optional[str] = None,
                                tag: Optional[str] = None) -> bool:
         """Push Docker image to registry"""
         if not DOCKER_AVAILABLE:
@@ -312,7 +306,7 @@ class DeploymentAutomation:
         print("✅ Azure deployment completed")
         return True
 
-    async def run_deployment_pipeline(self, 
+    async def run_deployment_pipeline(self,
                                      environment: str = "development",
                                      deploy_to_k8s: bool = False,
                                      deploy_to_cloud: Optional[str] = None) -> bool:
@@ -374,7 +368,7 @@ class DeploymentAutomation:
             return False
 
         print("   🧪 Running tests in container...")
-        
+
         # Create a temporary container to run tests
         try:
             # This would run tests in a container based on the built image
@@ -467,7 +461,7 @@ spec:
 
         # ConfigMap YAML
         configmap_yaml = k8s_dir / "configmap.yaml"
-        configmap_content = f"""
+        configmap_content = """
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -496,7 +490,7 @@ services:
     environment:
       - XENCODE_ENV=production
       - LOG_LEVEL=INFO
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-xencode}:${POSTGRES_PASSWORD}@postgres:5432/xencode
+      - DATABASE_URL=postgresql://${{POSTGRES_USER:-xencode}}:${{POSTGRES_PASSWORD}}@postgres:5432/xencode
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
@@ -510,7 +504,7 @@ services:
     environment:
       - POSTGRES_DB=xencode
       - POSTGRES_USER=xencode
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_PASSWORD=${{POSTGRES_PASSWORD}}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -519,7 +513,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass ${{REDIS_PASSWORD}}
     volumes:
       - redis_data:/data
     networks:
@@ -646,26 +640,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-asyncio pytest-cov
-    
+
     - name: Run tests
       run: |
         python -m pytest tests/ -v --cov=xencode
-    
+
     - name: Build Docker image
       run: |
         docker build -t xencode/xencode:${{ github.sha }} .
-    
+
     - name: Run containerized tests
       run: |
         docker run --rm xencode/xencode:${{ github.sha }} python -m pytest tests/ -v
@@ -676,12 +670,12 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Build and push Docker image
       run: |
         docker build -t xencode/xencode:latest .
         # In a real pipeline, you would push to a registry here
-    
+
     - name: Deploy to Kubernetes
       run: |
         # Deploy using kubectl
@@ -744,7 +738,7 @@ deploy:
         # Prometheus config
         prometheus_dir = output_dir / "prometheus"
         prometheus_dir.mkdir(exist_ok=True)
-        
+
         prometheus_config = prometheus_dir / "prometheus.yml"
         prometheus_content = """
 global:
@@ -762,7 +756,7 @@ scrape_configs:
         # Grafana dashboard
         grafana_dir = output_dir / "grafana"
         grafana_dir.mkdir(exist_ok=True)
-        
+
         dashboard_file = grafana_dir / "dashboard.json"
         dashboard_content = """
 {
@@ -1061,9 +1055,9 @@ async def check_system_health():
         }
 
     # Overall status
-    unhealthy_checks = [name for name, check in results["checks"].items() 
+    unhealthy_checks = [name for name, check in results["checks"].items()
                         if check.get("status") == "unhealthy"]
-    
+
     results["overall_status"] = "healthy" if not unhealthy_checks else "unhealthy"
     results["unhealthy_checks"] = unhealthy_checks
 
@@ -1073,29 +1067,29 @@ async def check_system_health():
 def main():
     """Run health checks"""
     print("🏥 Running Xencode health checks...")
-    
+
     try:
         import asyncio
         results = asyncio.run(check_system_health())
-        
+
         print(f"\\n📊 Health Check Results ({results['timestamp']}):")
         print(f"📈 Overall Status: {results['overall_status'].upper()}")
-        
+
         for check_name, check_result in results["checks"].items():
             status = check_result["status"].upper()
             color = "✅" if status == "HEALTHY" else "❌"
             print(f"{color} {check_name}: {status}")
-            
+
             if "error" in check_result:
                 print(f"   Error: {check_result['error']}")
-        
+
         if results["unhealthy_checks"]:
             print(f"\\n⚠️  Unhealthy components: {', '.join(results['unhealthy_checks'])}")
             sys.exit(1)
         else:
             print("\\n🎉 All systems healthy!")
             sys.exit(0)
-            
+
     except Exception as e:
         print(f"❌ Health check failed: {e}")
         sys.exit(1)
@@ -1130,7 +1124,7 @@ class HealthCheckResponse(BaseModel):
 @router.get("/health", response_model=HealthCheckResponse)
 async def health_check():
     """Health check endpoint for the Xencode system"""
-    
+
     # Get system info
     system_info = {
         "cpu_percent": psutil.cpu_percent(),
@@ -1138,7 +1132,7 @@ async def health_check():
         "disk_percent": psutil.disk_usage('/').percent,
         "process_count": len(psutil.pids())
     }
-    
+
     # Check components
     components = {
         "api_server": {"status": "healthy", "response_time_ms": 10},
@@ -1147,10 +1141,10 @@ async def health_check():
         "ai_models": {"status": "healthy", "available": True},
         "file_system": {"status": "healthy", "writable": True}
     }
-    
+
     # Calculate uptime (placeholder)
     uptime = 3600  # Placeholder - would calculate actual uptime
-    
+
     return HealthCheckResponse(
         status="healthy",
         timestamp=datetime.now().isoformat(),
@@ -1189,13 +1183,13 @@ class DeploymentAutomationManager:
         """Deploy to production environment"""
         print("🚀 Starting PRODUCTION deployment...")
         print("=" * 50)
-        
+
         success = await self.automation.run_deployment_pipeline(
             environment="production",
             deploy_to_k8s=True,
             deploy_to_cloud="aws"  # or gcp, azure
         )
-        
+
         if success:
             print("\\n✅ PRODUCTION deployment completed successfully!")
             self.deployment_history.append({
@@ -1210,19 +1204,19 @@ class DeploymentAutomationManager:
                 "environment": "production",
                 "status": "failed"
             })
-        
+
         return success
 
     async def deploy_staging(self) -> bool:
         """Deploy to staging environment"""
         print("🧪 Starting STAGING deployment...")
         print("=" * 50)
-        
+
         success = await self.automation.run_deployment_pipeline(
             environment="staging",
             deploy_to_k8s=True
         )
-        
+
         if success:
             print("\\n✅ STAGING deployment completed successfully!")
             self.deployment_history.append({
@@ -1237,18 +1231,18 @@ class DeploymentAutomationManager:
                 "environment": "staging",
                 "status": "failed"
             })
-        
+
         return success
 
     async def deploy_development(self) -> bool:
         """Deploy to development environment"""
         print("🛠️  Starting DEVELOPMENT deployment...")
         print("=" * 50)
-        
+
         success = await self.automation.run_deployment_pipeline(
             environment="development"
         )
-        
+
         if success:
             print("\\n✅ DEVELOPMENT deployment completed successfully!")
             self.deployment_history.append({
@@ -1263,7 +1257,7 @@ class DeploymentAutomationManager:
                 "environment": "development",
                 "status": "failed"
             })
-        
+
         return success
 
     def get_deployment_history(self) -> List[Dict[str, Any]]:
@@ -1273,13 +1267,13 @@ class DeploymentAutomationManager:
     async def rollback_deployment(self, environment: str) -> bool:
         """Rollback deployment to previous version"""
         print(f"↩️  Rolling back {environment.upper()} deployment...")
-        
+
         # In a real implementation, this would:
         # 1. Identify the previous stable version
         # 2. Deploy the previous version
         # 3. Verify the rollback
         # 4. Update deployment history
-        
+
         print(f"✅ {environment.upper()} deployment rolled back")
         return True
 
@@ -1311,30 +1305,30 @@ async def main():
     """Main function to demonstrate deployment automation"""
     print("🚀 Xencode Deployment Automation System")
     print("=" * 50)
-    
+
     # Create automation instance
     automation = DeploymentAutomation()
-    
+
     # Generate deployment manifests
     print("\\n📄 Generating deployment manifests...")
     automation.generate_deployment_manifests()
-    
+
     # Create CI/CD pipeline
     print("\\n🔄 Creating CI/CD pipeline...")
     automation.create_ci_cd_pipeline()
-    
+
     # Set up monitoring
     print("\\n📊 Setting up monitoring and logging...")
     automation.setup_monitoring_and_logging()
-    
+
     # Create backup procedures
     print("\\n💾 Creating backup and recovery procedures...")
     automation.create_backup_and_recovery()
-    
+
     # Create health checks
     print("\\n🩺 Creating health checks...")
     automation.create_health_checks()
-    
+
     print("\\n🎉 Deployment automation setup complete!")
     print("\\n📋 Available automation features:")
     print("   • Docker image building and pushing")

@@ -4,11 +4,12 @@ Supports multiple AI model providers (OpenAI, Anthropic, Hugging Face, etc.)
 """
 import asyncio
 import json
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncIterator
-from dataclasses import dataclass
-import aiohttp
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+import aiohttp
 
 
 @dataclass
@@ -24,37 +25,37 @@ class ModelInfo:
 
 class ModelProvider(ABC):
     """Abstract base class for all model providers."""
-    
+
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.api_key = api_key
         self.base_url = base_url
         self.session: Optional[aiohttp.ClientSession] = None
-    
+
     async def __aenter__(self):
         """Async context manager entry."""
         self.session = aiohttp.ClientSession()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         if self.session:
             await self.session.close()
-    
+
     @abstractmethod
     async def list_models(self) -> List[ModelInfo]:
         """List available models from this provider."""
         pass
-    
+
     @abstractmethod
-    async def generate(self, 
-                     prompt: str, 
-                     model: str, 
+    async def generate(self,
+                     prompt: str,
+                     model: str,
                      max_tokens: int = 1024,
                      temperature: float = 0.7,
                      stream: bool = False) -> AsyncIterator[str]:
         """Generate text from the model."""
         pass
-    
+
     @abstractmethod
     async def chat(self,
                   messages: List[Dict[str, str]],
@@ -64,7 +65,7 @@ class ModelProvider(ABC):
                   stream: bool = False) -> AsyncIterator[str]:
         """Chat with the model."""
         pass
-    
+
     @abstractmethod
     def get_provider_name(self) -> str:
         """Get the name of this provider."""
@@ -73,21 +74,21 @@ class ModelProvider(ABC):
 
 class OllamaProvider(ModelProvider):
     """Ollama model provider implementation."""
-    
+
     def __init__(self, api_key: str = "", base_url: str = "http://localhost:11434"):
         super().__init__(api_key, base_url)
-    
+
     async def list_models(self) -> List[ModelInfo]:
         """List available models from Ollama."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         try:
             async with self.session.get(f"{self.base_url}/api/tags") as response:
                 if response.status == 200:
                     data = await response.json()
                     models = []
-                    
+
                     for model_data in data.get("models", []):
                         name = model_data.get("name", "")
                         # Extract model info from Ollama response
@@ -98,7 +99,7 @@ class OllamaProvider(ModelProvider):
                             context_window=2048,
                             capabilities=["text", "chat", "instruct"]
                         ))
-                    
+
                     return models
                 else:
                     print(f"Error listing Ollama models: {response.status}")
@@ -106,17 +107,17 @@ class OllamaProvider(ModelProvider):
         except Exception as e:
             print(f"Error connecting to Ollama: {e}")
             return []
-    
-    async def generate(self, 
-                     prompt: str, 
-                     model: str, 
+
+    async def generate(self,
+                     prompt: str,
+                     model: str,
                      max_tokens: int = 1024,
                      temperature: float = 0.7,
                      stream: bool = False) -> AsyncIterator[str]:
         """Generate text from Ollama model."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         payload = {
             "model": model,
             "prompt": prompt,
@@ -126,7 +127,7 @@ class OllamaProvider(ModelProvider):
             },
             "stream": stream
         }
-        
+
         if stream:
             async with self.session.post(f"{self.base_url}/api/generate", json=payload) as response:
                 async for line in response.content:
@@ -146,7 +147,7 @@ class OllamaProvider(ModelProvider):
                     yield data.get("response", "")
                 else:
                     yield f"Error: {response.status}"
-    
+
     async def chat(self,
                   messages: List[Dict[str, str]],
                   model: str,
@@ -156,7 +157,7 @@ class OllamaProvider(ModelProvider):
         """Chat with Ollama model."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         payload = {
             "model": model,
             "messages": messages,
@@ -166,7 +167,7 @@ class OllamaProvider(ModelProvider):
             },
             "stream": stream
         }
-        
+
         if stream:
             async with self.session.post(f"{self.base_url}/api/chat", json=payload) as response:
                 async for line in response.content:
@@ -186,7 +187,7 @@ class OllamaProvider(ModelProvider):
                     yield data.get("message", {}).get("content", "")
                 else:
                     yield f"Error: {response.status}"
-    
+
     def get_provider_name(self) -> str:
         """Get the name of this provider."""
         return "ollama"
@@ -194,26 +195,26 @@ class OllamaProvider(ModelProvider):
 
 class OpenAIProvider(ModelProvider):
     """OpenAI model provider implementation."""
-    
+
     def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
         super().__init__(api_key, base_url)
-    
+
     async def list_models(self) -> List[ModelInfo]:
         """List available models from OpenAI."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
         try:
             async with self.session.get(f"{self.base_url}/models", headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     models = []
-                    
+
                     for model_data in data.get("data", []):
                         id = model_data.get("id", "")
                         # Determine capabilities based on model name
@@ -222,7 +223,7 @@ class OpenAIProvider(ModelProvider):
                             capabilities.extend(["chat", "instruct"])
                         if "instruct" in id.lower():
                             capabilities.append("instruct")
-                        
+
                         models.append(ModelInfo(
                             name=id,
                             provider="openai",
@@ -230,7 +231,7 @@ class OpenAIProvider(ModelProvider):
                             context_window=128000 if "128k" in id else 128000 if "gpt-4" in id else 4096,
                             capabilities=capabilities
                         ))
-                    
+
                     return models
                 else:
                     print(f"Error listing OpenAI models: {response.status}")
@@ -238,10 +239,10 @@ class OpenAIProvider(ModelProvider):
         except Exception as e:
             print(f"Error connecting to OpenAI: {e}")
             return []
-    
-    async def generate(self, 
-                     prompt: str, 
-                     model: str, 
+
+    async def generate(self,
+                     prompt: str,
+                     model: str,
                      max_tokens: int = 1024,
                      temperature: float = 0.7,
                      stream: bool = False) -> AsyncIterator[str]:
@@ -250,7 +251,7 @@ class OpenAIProvider(ModelProvider):
         messages = [{"role": "user", "content": prompt}]
         async for chunk in self.chat(messages, model, max_tokens, temperature, stream):
             yield chunk
-    
+
     async def chat(self,
                   messages: List[Dict[str, str]],
                   model: str,
@@ -260,12 +261,12 @@ class OpenAIProvider(ModelProvider):
         """Chat with OpenAI model."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": model,
             "messages": messages,
@@ -273,7 +274,7 @@ class OpenAIProvider(ModelProvider):
             "temperature": temperature,
             "stream": stream
         }
-        
+
         if stream:
             async with self.session.post(f"{self.base_url}/chat/completions", headers=headers, json=payload) as response:
                 async for line in response.content:
@@ -285,7 +286,7 @@ class OpenAIProvider(ModelProvider):
                                 if data_str.strip() == "[DONE]":
                                     break
                                 data = json.loads(data_str)
-                                
+
                                 choices = data.get("choices", [])
                                 if choices:
                                     delta = choices[0].get("delta", {})
@@ -303,7 +304,7 @@ class OpenAIProvider(ModelProvider):
                 else:
                     error_data = await response.json()
                     yield f"Error: {error_data.get('error', {}).get('message', 'Unknown error')}"
-    
+
     def get_provider_name(self) -> str:
         """Get the name of this provider."""
         return "openai"
@@ -311,11 +312,11 @@ class OpenAIProvider(ModelProvider):
 
 class AnthropicProvider(ModelProvider):
     """Anthropic model provider implementation."""
-    
+
     def __init__(self, api_key: str, base_url: str = "https://api.anthropic.com/v1"):
         super().__init__(api_key, base_url)
         self.api_version = "2023-06-01"  # Anthropic API version
-    
+
     async def list_models(self) -> List[ModelInfo]:
         """List available models from Anthropic."""
         # Anthropic doesn't have a public models endpoint, so we'll return known models
@@ -346,20 +347,19 @@ class AnthropicProvider(ModelProvider):
             )
         ]
         return known_models
-    
-    async def generate(self, 
-                     prompt: str, 
-                     model: str, 
+
+    async def generate(self,
+                     prompt: str,
+                     model: str,
                      max_tokens: int = 1024,
                      temperature: float = 0.7,
                      stream: bool = False) -> AsyncIterator[str]:
         """Generate text from Anthropic model."""
         # For Anthropic, we'll format the prompt as needed
-        formatted_prompt = f"\n\nHuman: {prompt}\n\nAssistant:"
         messages = [{"role": "user", "content": prompt}]
         async for chunk in self.chat(messages, model, max_tokens, temperature, stream):
             yield chunk
-    
+
     async def chat(self,
                   messages: List[Dict[str, str]],
                   model: str,
@@ -369,17 +369,17 @@ class AnthropicProvider(ModelProvider):
         """Chat with Anthropic model."""
         if not self.session:
             self.session = aiohttp.ClientSession()
-        
+
         headers = {
             "x-api-key": self.api_key,
             "Content-Type": "application/json",
             "anthropic-version": self.api_version
         }
-        
+
         # Convert messages to Anthropic format
         system_message = ""
         user_assistant_messages = []
-        
+
         for msg in messages:
             role = msg["role"]
             content = msg["content"]
@@ -387,7 +387,7 @@ class AnthropicProvider(ModelProvider):
                 system_message = content
             else:
                 user_assistant_messages.append(msg)
-        
+
         payload = {
             "model": model,
             "messages": user_assistant_messages,
@@ -395,13 +395,12 @@ class AnthropicProvider(ModelProvider):
             "temperature": temperature,
             "stream": stream
         }
-        
+
         if system_message:
             payload["system"] = system_message
-        
+
         if stream:
             async with self.session.post(f"{self.base_url}/messages", headers=headers, json=payload) as response:
-                buffer = ""
                 async for line in response.content:
                     if line.strip():
                         try:
@@ -411,7 +410,7 @@ class AnthropicProvider(ModelProvider):
                                 if data_str.strip() == "[DONE]":
                                     break
                                 data = json.loads(data_str)
-                                
+
                                 if data.get("type") == "content_block_delta":
                                     text = data.get("delta", {}).get("text", "")
                                     if text:
@@ -431,7 +430,7 @@ class AnthropicProvider(ModelProvider):
                 else:
                     error_data = await response.json()
                     yield f"Error: {error_data.get('error', {}).get('message', 'Unknown error')}"
-    
+
     def get_provider_name(self) -> str:
         """Get the name of this provider."""
         return "anthropic"
@@ -597,7 +596,6 @@ class GoogleGeminiProvider(ModelProvider):
                      stream: bool = False) -> AsyncIterator[str]:
         """Generate text from Google Gemini model."""
         # For Gemini, we'll use the chat endpoint as it's more versatile
-        messages = [{"role": "user", "parts": [{"text": prompt}]}]
         async for chunk in self.chat([{"role": "user", "content": prompt}], model, max_tokens, temperature, stream):
             yield chunk
 
@@ -668,7 +666,6 @@ class GoogleGeminiProvider(ModelProvider):
 
         if stream:
             # For streaming, we need to call the streaming endpoint
-            url = f"{self.base_url}/models/{model}:streamGenerateContent?key={self.api_key}"
             # Note: Streaming with Gemini is more complex, so we'll implement non-streaming for now
             # and yield the full response at once
             async with self.session.post(f"{self.base_url}/models/{model}:generateContent?key={self.api_key}",
@@ -960,26 +957,26 @@ class OpenRouterProvider(ModelProvider):
 
 class ModelProviderManager:
     """Manages multiple model providers."""
-    
+
     def __init__(self):
         self.providers: Dict[str, ModelProvider] = {}
         self.provider_configs: Dict[str, Dict[str, str]] = {}
-    
+
     def register_provider(self, name: str, provider: ModelProvider):
         """Register a model provider."""
         self.providers[name] = provider
-    
+
     def configure_provider(self, name: str, api_key: str, base_url: Optional[str] = None):
         """Configure a model provider."""
         self.provider_configs[name] = {
             "api_key": api_key,
             "base_url": base_url or ""
         }
-    
+
     def get_provider(self, name: str) -> Optional[ModelProvider]:
         """Get a model provider by name."""
         return self.providers.get(name)
-    
+
     async def initialize_providers(self):
         """Initialize all configured providers."""
         for name, config in self.provider_configs.items():
@@ -1005,11 +1002,11 @@ class ModelProviderManager:
                 continue
 
             self.register_provider(name, provider)
-    
+
     async def list_all_models(self) -> Dict[str, List[ModelInfo]]:
         """List models from all providers."""
         all_models = {}
-        
+
         for name, provider in self.providers.items():
             try:
                 models = await provider.list_models()
@@ -1017,25 +1014,25 @@ class ModelProviderManager:
             except Exception as e:
                 print(f"Error listing models for {name}: {e}")
                 all_models[name] = []
-        
+
         return all_models
-    
-    async def generate_with_provider(self, 
-                                   prompt: str, 
-                                   provider_name: str, 
-                                   model: str, 
+
+    async def generate_with_provider(self,
+                                   prompt: str,
+                                   provider_name: str,
+                                   model: str,
                                    **kwargs) -> str:
         """Generate text using a specific provider."""
         provider = self.get_provider(provider_name)
         if not provider:
             return f"Provider {provider_name} not found"
-        
+
         full_response = ""
         async for chunk in provider.generate(prompt, model, **kwargs):
             full_response += chunk
-        
+
         return full_response
-    
+
     async def chat_with_provider(self,
                                 messages: List[Dict[str, str]],
                                 provider_name: str,
@@ -1045,11 +1042,11 @@ class ModelProviderManager:
         provider = self.get_provider(provider_name)
         if not provider:
             return f"Provider {provider_name} not found"
-        
+
         full_response = ""
         async for chunk in provider.chat(messages, model, **kwargs):
             full_response += chunk
-        
+
         return full_response
 
 

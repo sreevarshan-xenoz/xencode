@@ -1,16 +1,19 @@
 """Custom AI Models TUI panel."""
 
-from textual.containers import Container, Vertical, Horizontal, ScrollableContainer
-from textual.widgets import Button, Label, Static, DataTable, ProgressBar
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+
+from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.reactive import reactive
-from typing import Optional, List, Dict, Any
+from textual.widgets import Button, Label, ProgressBar, Static
 
 from .base_feature_panel import BaseFeaturePanel
 
 
 class ModelCard(Static):
     """Card for a custom model."""
-    
+
     DEFAULT_CSS = """
     ModelCard {
         height: auto;
@@ -19,18 +22,18 @@ class ModelCard(Static):
         border: solid $accent;
         background: $panel;
     }
-    
+
     ModelCard:hover {
         background: $primary;
     }
     """
-    
+
     def __init__(self, name: str, accuracy: float, version: str, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_name = name
         self.accuracy = accuracy
         self.version = version
-    
+
     def render(self) -> str:
         return (
             f"[bold]{self.model_name}[/bold]\n"
@@ -40,23 +43,23 @@ class ModelCard(Static):
 
 class CustomModelsPanel(BaseFeaturePanel):
     """Panel for custom AI model management."""
-    
+
     DEFAULT_CSS = """
     CustomModelsPanel {
         height: 100%;
     }
-    
+
     .models-controls {
         height: auto;
         padding: 1;
         background: $panel;
     }
-    
+
     .models-content {
         height: 1fr;
         padding: 1;
     }
-    
+
     .training-progress {
         height: auto;
         padding: 1;
@@ -64,9 +67,9 @@ class CustomModelsPanel(BaseFeaturePanel):
         border: solid $warning;
     }
     """
-    
+
     training = reactive(False)
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(
             feature_name="custom_models",
@@ -75,11 +78,11 @@ class CustomModelsPanel(BaseFeaturePanel):
             **kwargs
         )
         self.models: List[Dict[str, Any]] = []
-    
+
     def compose(self):
         """Compose the custom models panel."""
         yield from super().compose()
-    
+
     def on_mount(self) -> None:
         """Initialize panel on mount."""
         self.set_status("enabled")
@@ -91,10 +94,10 @@ class CustomModelsPanel(BaseFeaturePanel):
         # Load from actual custom models feature
         try:
             from xencode.features.custom_models import CustomModelManager
-            
+
             manager = CustomModelManager()
             models_list = manager.list_models()
-            
+
             self.models = [
                 {
                     "name": model.get("name", "unknown"),
@@ -111,9 +114,9 @@ class CustomModelsPanel(BaseFeaturePanel):
         """Build the panel content."""
         if not self.content_container:
             return
-        
+
         self.content_container.remove_children()
-        
+
         with self.content_container:
             # Controls
             with Horizontal(classes="models-controls"):
@@ -121,7 +124,7 @@ class CustomModelsPanel(BaseFeaturePanel):
                 yield Button("Train Model", id="btn-train")
                 yield Button("List Models", id="btn-list")
                 yield Button("Performance", id="btn-performance")
-            
+
             # Content area
             with ScrollableContainer(classes="models-content"):
                 if self.training:
@@ -133,12 +136,12 @@ class CustomModelsPanel(BaseFeaturePanel):
                         "No custom models yet. Analyze your codebase to create one.",
                         classes="feature-empty"
                     )
-    
+
     def _render_models(self) -> None:
         """Render models list."""
         for model in self.models:
             yield ModelCard(model["name"], model["accuracy"], model["version"])
-    
+
     def _render_training(self) -> None:
         """Render training progress."""
         with Container(classes="training-progress"):
@@ -162,19 +165,18 @@ class CustomModelsPanel(BaseFeaturePanel):
         """Analyze codebase for model training."""
         self.set_status("loading")
         try:
-            from pathlib import Path
             from xencode.analyzers.code_analyzer import CodeAnalyzer
-            
+
             analyzer = CodeAnalyzer()
             analysis = await analyzer.analyze_directory(Path.cwd())
-            
+
             # Show analysis summary
-            summary = f"Codebase Analysis:\n"
+            summary = "Codebase Analysis:\n"
             summary += f"- Files: {analysis.get('total_files', 0)}\n"
             summary += f"- Lines: {analysis.get('total_lines', 0)}\n"
             summary += f"- Complexity: {analysis.get('avg_complexity', 0):.1f}\n"
             summary += f"- Languages: {', '.join(analysis.get('languages', []))}"
-            
+
             self.notify(summary)
         except Exception as e:
             self.notify(f"Analysis error: {e}")
@@ -186,16 +188,16 @@ class CustomModelsPanel(BaseFeaturePanel):
         self.training = True
         self.set_status("loading")
         self._build_content()
-        
+
         try:
             from xencode.features.custom_models import CustomModelTrainer
-            
+
             trainer = CustomModelTrainer()
             await trainer.train_model(
                 name=f"custom-model-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
                 data_path=Path.cwd()
             )
-            
+
             self.notify("Model training completed!")
             self._load_models()
         except ImportError:
@@ -205,19 +207,19 @@ class CustomModelsPanel(BaseFeaturePanel):
         finally:
             self.training = False
             self.set_status("enabled")
-    
+
     async def _show_performance(self) -> None:
         """Show model performance metrics."""
         if not self.models:
             self.notify("No models to show performance for")
             return
-        
+
         # Show performance for first model
         model = self.models[0]
         perf_info = f"Model Performance: {model['name']}\n\n"
         perf_info += f"Accuracy: {model['accuracy']:.1f}%\n"
         perf_info += f"Version: {model['version']}\n"
-        perf_info += f"Inference Time: ~50ms (estimated)\n"
-        perf_info += f"Training Samples: 10,000 (estimated)"
-        
+        perf_info += "Inference Time: ~50ms (estimated)\n"
+        perf_info += "Training Samples: 10,000 (estimated)"
+
         self.notify(perf_info)

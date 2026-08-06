@@ -1,16 +1,17 @@
 """Performance Profiler TUI panel."""
 
-from textual.containers import Container, Vertical, Horizontal, ScrollableContainer
-from textual.widgets import Button, Label, Static, DataTable
+from typing import Any, Dict, List
+
+from textual.containers import Horizontal, ScrollableContainer
 from textual.reactive import reactive
-from typing import List, Dict, Any
+from textual.widgets import Button, Label, Static
 
 from .base_feature_panel import BaseFeaturePanel
 
 
 class BottleneckCard(Static):
     """Card for a performance bottleneck."""
-    
+
     DEFAULT_CSS = """
     BottleneckCard {
         height: auto;
@@ -19,18 +20,18 @@ class BottleneckCard(Static):
         border: solid $warning;
         background: $panel;
     }
-    
+
     BottleneckCard:hover {
         background: $primary;
     }
     """
-    
+
     def __init__(self, function: str, time_ms: float, calls: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.function = function
         self.time_ms = time_ms
         self.calls = calls
-    
+
     def render(self) -> str:
         return (
             f"[bold]{self.function}[/bold]\n"
@@ -40,23 +41,23 @@ class BottleneckCard(Static):
 
 class PerformanceProfilerPanel(BaseFeaturePanel):
     """Panel for performance profiling and optimization."""
-    
+
     DEFAULT_CSS = """
     PerformanceProfilerPanel {
         height: 100%;
     }
-    
+
     .profiler-controls {
         height: auto;
         padding: 1;
         background: $panel;
     }
-    
+
     .profiler-content {
         height: 1fr;
         padding: 1;
     }
-    
+
     .profiler-summary {
         height: auto;
         padding: 1;
@@ -65,9 +66,9 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         background: $panel;
     }
     """
-    
+
     profiling = reactive(False)
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(
             feature_name="performance_profiler",
@@ -77,23 +78,23 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         )
         self.bottlenecks: List[Dict[str, Any]] = []
         self.profile_results: Dict[str, Any] = {}
-    
+
     def compose(self):
         """Compose the performance profiler panel."""
         yield from super().compose()
-    
+
     def on_mount(self) -> None:
         """Initialize panel on mount."""
         self.set_status("enabled")
         self._build_content()
-    
+
     def _build_content(self) -> None:
         """Build the panel content."""
         if not self.content_container:
             return
-        
+
         self.content_container.remove_children()
-        
+
         with self.content_container:
             # Controls
             with Horizontal(classes="profiler-controls"):
@@ -101,7 +102,7 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
                 yield Button("Analyze", id="btn-analyze")
                 yield Button("Optimize", id="btn-optimize")
                 yield Button("Compare", id="btn-compare")
-            
+
             # Content area
             with ScrollableContainer(classes="profiler-content"):
                 if self.bottlenecks:
@@ -111,18 +112,18 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
                         "Click 'Run Profile' to analyze code performance.",
                         classes="feature-empty"
                     )
-    
+
     def _render_results(self) -> None:
         """Render profiling results."""
         # Summary
         total_time = sum(b["time_ms"] for b in self.bottlenecks)
         total_calls = sum(b["calls"] for b in self.bottlenecks)
-        
+
         yield Static(
             f"Total Time: {total_time:.2f}ms | Total Calls: {total_calls}",
             classes="profiler-summary"
         )
-        
+
         # Bottlenecks
         for bottleneck in self.bottlenecks:
             yield BottleneckCard(
@@ -130,11 +131,11 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
                 bottleneck["time_ms"],
                 bottleneck["calls"]
             )
-    
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
-        
+
         if button_id == "btn-profile":
             await self._run_profile()
         elif button_id == "btn-analyze":
@@ -143,7 +144,7 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
             await self._show_optimizations()
         elif button_id == "btn-compare":
             await self._compare_profiles()
-    
+
     async def _run_profile(self) -> None:
         """Run performance profile."""
         self.set_status("loading")
@@ -152,30 +153,33 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         try:
             # Integrate with actual performance profiler
             import cProfile
-            import pstats
             import io
-            from pathlib import Path
-            
+            import pstats
+
             # Profile current project
             profiler = cProfile.Profile()
             profiler.enable()
-            
+
             # Run a simple operation to profile
-            from xencode.performance.profiler import PerformanceProfiler
-            perf_profiler = PerformanceProfiler()
-            await perf_profiler.analyze_path(Path.cwd())
-            
+            from xencode.performance.optimizer import PerformanceOptimizer
+            optimizer = PerformanceOptimizer()
+            # Start monitoring for system-level metrics
+            await optimizer.start_monitoring()
+
             profiler.disable()
-            
+
+            # Stop monitoring to prevent background task leak
+            await optimizer.stop_monitoring()
+
             # Get stats
             stats_stream = io.StringIO()
             stats = pstats.Stats(profiler, stream=stats_stream)
             stats.sort_stats('cumulative')
             stats.print_stats(20)
-            
+
             # Parse stats for UI
             self.bottlenecks = []
-            for func, (cc, nc, tt, ct, callers) in stats.stats.items():
+            for func, (_cc, nc, tt, _ct, _callers) in stats.stats.items():
                 if tt > 0.01:  # Only show functions taking > 10ms
                     self.bottlenecks.append({
                         "function": f"{func[2]}:{func[1]}",
@@ -184,7 +188,7 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
                     })
                 if len(self.bottlenecks) >= 20:
                     break
-            
+
             self._build_content()
             self.set_status("enabled")
         except ImportError:
@@ -203,14 +207,14 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         if not self.bottlenecks:
             self.notify("No profiling results to analyze")
             return
-        
+
         # Analyze top bottlenecks
         top_issues = sorted(self.bottlenecks, key=lambda x: x["time_ms"], reverse=True)[:5]
         analysis = "Top Performance Issues:\n\n"
         for i, bottleneck in enumerate(top_issues, 1):
             analysis += f"{i}. {bottleneck['function']} - {bottleneck['time_ms']:.1f}ms ({bottleneck['calls']} calls)\n"
         analysis += "\nRecommendation: Focus on optimizing the top 3 functions first."
-        
+
         self.notify(analysis)
 
     async def _show_optimizations(self) -> None:
@@ -218,7 +222,7 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         if not self.bottlenecks:
             self.notify("No profiling results available")
             return
-        
+
         # Generate optimization suggestions based on patterns
         suggestions = []
         for bottleneck in self.bottlenecks[:5]:
@@ -229,7 +233,7 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
                 suggestions.append(f"• {func_name}: Add caching or optimize database query")
             elif "validate" in func_name.lower():
                 suggestions.append(f"• {func_name}: Use compiled validation library")
-        
+
         if suggestions:
             self.notify("Optimization Suggestions:\n\n" + "\n".join(suggestions))
         else:
@@ -240,6 +244,6 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
         if not self.bottlenecks:
             self.notify("No current profile to compare")
             return
-        
+
         # Compare with baseline or previous run
         self.notify("Profile comparison: Load a previous profile to compare with current results")

@@ -3,12 +3,13 @@ Example demonstrating the review report generation functionality
 """
 
 import asyncio
+
 from xencode.features.code_review import ReportGenerator
 
 
 async def main():
     """Demonstrate report generation"""
-    
+
     # Sample review data
     review = {
         'summary': {
@@ -97,7 +98,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET")'''
             }
         ]
     }
-    
+
     # Sample PR data
     pr_data = {
         'title': 'Add user authentication',
@@ -106,22 +107,22 @@ JWT_SECRET = os.environ.get("JWT_SECRET")'''
         'head_branch': 'feature/auth',
         'base_branch': 'main'
     }
-    
+
     # Create report generator
     generator = ReportGenerator()
-    
+
     print("=" * 80)
     print("REPORT GENERATION EXAMPLES")
     print("=" * 80)
     print()
-    
+
     # Generate text report
     print("1. TEXT REPORT")
     print("-" * 80)
     text_report = generator.generate_text_report(review, pr_data)
     print(text_report)
     print()
-    
+
     # Generate markdown report
     print("\n" + "=" * 80)
     print("2. MARKDOWN REPORT")
@@ -129,7 +130,7 @@ JWT_SECRET = os.environ.get("JWT_SECRET")'''
     markdown_report = generator.generate_markdown_report(review, pr_data)
     print(markdown_report)
     print()
-    
+
     # Generate JSON report
     print("\n" + "=" * 80)
     print("3. JSON REPORT")
@@ -138,16 +139,16 @@ JWT_SECRET = os.environ.get("JWT_SECRET")'''
     json_report = generator.generate_json_report(review, pr_data)
     print(json.dumps(json_report, indent=2))
     print()
-    
+
     # Save HTML report to file
     print("\n" + "=" * 80)
     print("4. HTML REPORT (saved to file)")
     print("-" * 80)
     html_report = generator.generate_html_report(review, pr_data)
-    
+
     with open('review_report.html', 'w', encoding='utf-8') as f:
         f.write(html_report)
-    
+
     print("HTML report saved to: review_report.html")
     print("Open this file in a web browser to view the formatted report.")
     print()

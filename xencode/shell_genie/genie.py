@@ -1,11 +1,12 @@
-import sys
 import platform
+import shlex
 import subprocess
-from typing import Optional, Tuple
+from typing import Tuple
+
+from langchain_core.prompts import PromptTemplate
+from langchain_ollama import ChatOllama
 from rich.console import Console
 from rich.prompt import Confirm
-from langchain_ollama import ChatOllama
-from langchain_core.prompts import PromptTemplate
 
 console = Console()
 
@@ -13,19 +14,19 @@ class ShellGenie:
     """
     Translates natural language to shell commands.
     """
-    
+
     def __init__(self, model_name: str = "llama3.1:8b", base_url: str = "http://localhost:11434"):
         self.llm = ChatOllama(model=model_name, base_url=base_url, temperature=0.1)
         self.os_info = f"{platform.system()} {platform.release()}"
         self.shell_type = "PowerShell" if platform.system() == "Windows" else "Bash"
-        
+
     def generate_command(self, instruction: str) -> Tuple[str, str]:
         """
         Generates a shell command from instruction.
         Returns (command, explanation)
         """
         template = """You are an expert command line assistant for {os_info} using {shell_type}.
-        
+
 Instruction: {instruction}
 
 Return a JSON object with two keys:
@@ -35,11 +36,11 @@ Return a JSON object with two keys:
 JSON Response:"""
 
         prompt = PromptTemplate.from_template(template)
-        
-        # We need a robust way to get JSON. 
+
+        # We need a robust way to get JSON.
         # For now, let's just ask for raw text and parse, or assume the model is good at JSON.
         # Llama 3 is usually good.
-        
+
         try:
             response = self.llm.invoke(prompt.format(
                 os_info=self.os_info,
@@ -47,7 +48,7 @@ JSON Response:"""
                 instruction=instruction
             ))
             content = response.content.strip()
-            
+
             # Simple parsing (robust enough for specific models, minimal dependency)
             import json
             # Find JSON start/end
@@ -59,7 +60,7 @@ JSON Response:"""
                 return data.get("command", ""), data.get("explanation", "")
             else:
                 return "", "Failed to parse model response"
-                
+
         except Exception as e:
             return "", f"Error generating command: {e}"
 
@@ -70,16 +71,16 @@ JSON Response:"""
             return False
 
         console.print(f"\n[bold blue]Command:[/bold blue] [green]{command}[/green]")
-        
+
         should_run = auto_confirm
         if not should_run:
              should_run = Confirm.ask("Execute this command?")
-             
+
         if should_run:
             console.print("\n[dim]Output:[/dim]")
             try:
-                # Use shell=True for shell commands
-                subprocess.run(command, shell=True, check=True)
+                # Use shell=False with command list for security
+                subprocess.run(shlex.split(command, posix=False), shell=False, check=True)
                 return True
             except subprocess.CalledProcessError as e:
                 console.print(f"[red]Command failed with return code {e.returncode}[/red]")

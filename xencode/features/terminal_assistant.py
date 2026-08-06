@@ -5,18 +5,18 @@ Provides context-aware command suggestions, intelligent error handling,
 and learning capabilities for terminal users.
 """
 
+import asyncio
+import json
 import os
 import re
-import json
-import asyncio
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime
-from collections import defaultdict, Counter
 
-from .base import FeatureBase, FeatureConfig, FeatureError
-from .error_handler_enhanced import EnhancedErrorHandler, ErrorFix
+from .base import FeatureBase, FeatureConfig
+from .error_handler_enhanced import EnhancedErrorHandler
 
 
 @dataclass
@@ -28,7 +28,7 @@ class TerminalAssistantConfig:
     suggestion_limit: int = 5
     error_fix_enabled: bool = True
     shell_type: str = "bash"  # bash, zsh, fish, powershell
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TerminalAssistantConfig':
         """Create config from dictionary"""
@@ -44,7 +44,7 @@ class TerminalAssistantConfig:
 
 class TerminalAssistantFeature(FeatureBase):
     """Terminal Assistant feature implementation"""
-    
+
     def __init__(self, config: FeatureConfig):
         super().__init__(config)
         self.ta_config = TerminalAssistantConfig.from_dict(config.config)
@@ -52,17 +52,17 @@ class TerminalAssistantFeature(FeatureBase):
         self.context_analyzer = None
         self.learning_engine = None
         self.error_handler = None
-    
+
     @property
     def name(self) -> str:
         """Feature name"""
         return "terminal_assistant"
-    
+
     @property
     def description(self) -> str:
         """Feature description"""
         return "Context-aware command suggestions and intelligent error handling"
-    
+
     async def _initialize(self) -> None:
         """Initialize Terminal Assistant components"""
         # Initialize command predictor
@@ -70,76 +70,75 @@ class TerminalAssistantFeature(FeatureBase):
             history_size=self.ta_config.history_size,
             suggestion_limit=self.ta_config.suggestion_limit
         )
-        
+
         # Initialize context analyzer
         self.context_analyzer = ContextAnalyzer(
             enabled=self.ta_config.context_aware
         )
-        
+
         # Initialize learning engine
         self.learning_engine = LearningEngine(
             enabled=self.ta_config.learning_enabled
         )
-        
+
         # Initialize error handler
         self.error_handler = EnhancedErrorHandler(
             enabled=self.ta_config.error_fix_enabled,
             command_history=[]
         )
-        
+
         # Load command history
         await self.command_predictor.load_history()
-        
+
         # Load user preferences
         await self.learning_engine.load_preferences()
-    
+
     async def _shutdown(self) -> None:
         """Shutdown Terminal Assistant"""
         # Save command history
         if self.command_predictor:
             await self.command_predictor.save_history()
-        
+
         # Save user preferences
         if self.learning_engine:
             await self.learning_engine.save_preferences()
-    
+
     async def suggest_commands(self, context: str = None, partial: str = None) -> List[Dict[str, Any]]:
         """
         Suggest commands based on context and partial input
-        
+
         Args:
             context: Current context (directory, project type, etc.)
             partial: Partial command input
-            
+
         Returns:
             List of command suggestions with explanations
         """
-        suggestions = []
-        
+
         # Get context information
         context_info = await self.context_analyzer.analyze(context)
-        
+
         # Get predictions from command predictor
         predictions = await self.command_predictor.predict(
             partial=partial,
             context=context_info
         )
-        
+
         # Enhance predictions with learning engine
         enhanced = await self.learning_engine.enhance_suggestions(
             predictions,
             context_info
         )
-        
+
         return enhanced
-    
+
     async def explain_command(self, command: str) -> Dict[str, Any]:
         """
         Explain what a command does
-        
+
         Args:
             command: Command to explain
-            
+
         Returns:
             Explanation with details
         """
@@ -150,41 +149,41 @@ class TerminalAssistantFeature(FeatureBase):
             'examples': [],
             'warnings': []
         }
-        
+
         # Parse command
         parsed = self._parse_command(command)
-        
+
         # Get explanation from knowledge base
         explanation['description'] = self._get_command_description(parsed['base'])
         explanation['arguments'] = self._explain_arguments(parsed)
         explanation['examples'] = self._get_command_examples(parsed['base'])
         explanation['warnings'] = self._get_command_warnings(parsed)
-        
+
         return explanation
-    
+
     async def fix_error(self, command: str, error: str, context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
         Suggest fixes for command errors
-        
+
         Args:
             command: Command that failed
             error: Error message
             context: Execution context
-            
+
         Returns:
             List of fix suggestions with confidence scores
         """
         # Get context if not provided
         if context is None and self.context_analyzer:
             context = await self.context_analyzer.analyze()
-        
+
         # Update error handler with current command history
         if self.command_predictor:
             self.error_handler.command_history = self.command_predictor.history
-        
+
         # Get fix suggestions
         fixes = await self.error_handler.suggest_fixes(command, error, context)
-        
+
         # Convert ErrorFix objects to dictionaries
         return [
             {
@@ -200,24 +199,24 @@ class TerminalAssistantFeature(FeatureBase):
             }
             for fix in fixes
         ]
-    
+
     async def search_history(self, pattern: str) -> List[Dict[str, Any]]:
         """
         Search command history
-        
+
         Args:
             pattern: Search pattern
-            
+
         Returns:
             Matching commands from history
         """
         return await self.command_predictor.search_history(pattern)
-    
-    async def record_command(self, command: str, success: bool = True, 
+
+    async def record_command(self, command: str, success: bool = True,
                            context: Dict[str, Any] = None) -> None:
         """
         Record a command execution
-        
+
         Args:
             command: Executed command
             success: Whether command succeeded
@@ -225,66 +224,66 @@ class TerminalAssistantFeature(FeatureBase):
         """
         # Record in history
         await self.command_predictor.record(command, success, context)
-        
+
         # Update learning engine
         await self.learning_engine.learn(command, success, context)
-    
-    async def record_successful_fix(self, original_command: str, error: str, 
+
+    async def record_successful_fix(self, original_command: str, error: str,
                                    fix_command: str) -> None:
         """
         Record a successful error fix for learning
-        
+
         Args:
             original_command: The command that failed
             error: The error message
             fix_command: The fix that worked
         """
         await self.error_handler.record_successful_fix(original_command, error, fix_command)
-    
+
     async def get_statistics(self, command: str = None) -> Dict[str, Any]:
         """
         Get command statistics
-        
+
         Args:
             command: Specific command to get stats for (None for overall stats)
-            
+
         Returns:
             Statistics dictionary
         """
         return await self.command_predictor.get_command_statistics(command)
-    
+
     async def analyze_patterns(self) -> Dict[str, Any]:
         """
         Analyze all detected patterns in command history
-        
+
         Returns:
             Pattern analysis results
         """
         return await self.command_predictor.analyze_patterns()
-    
+
     def _parse_command(self, command: str) -> Dict[str, Any]:
         """Parse command into components"""
         parts = command.strip().split()
         if not parts:
             return {'base': '', 'args': [], 'flags': []}
-        
+
         base = parts[0]
         args = []
         flags = []
-        
+
         for part in parts[1:]:
             if part.startswith('-'):
                 flags.append(part)
             else:
                 args.append(part)
-        
+
         return {
             'base': base,
             'args': args,
             'flags': flags,
             'full': command
         }
-    
+
     def _get_command_description(self, command: str) -> str:
         """Get description for a command"""
         # Basic command descriptions
@@ -307,7 +306,7 @@ class TerminalAssistantFeature(FeatureBase):
             'kubectl': 'Kubernetes CLI',
         }
         return descriptions.get(command, f'Execute {command} command')
-    
+
     def _explain_arguments(self, parsed: Dict[str, Any]) -> List[Dict[str, str]]:
         """Explain command arguments"""
         explanations = []
@@ -322,7 +321,7 @@ class TerminalAssistantFeature(FeatureBase):
                 'description': self._explain_flag(parsed['base'], flag)
             })
         return explanations
-    
+
     def _explain_flag(self, command: str, flag: str) -> str:
         """Explain a command flag"""
         # Common flag explanations
@@ -335,7 +334,7 @@ class TerminalAssistantFeature(FeatureBase):
             '-h': 'Human-readable format',
         }
         return flag_map.get(flag, f'Flag: {flag}')
-    
+
     def _get_command_examples(self, command: str) -> List[str]:
         """Get example usage for command"""
         examples = {
@@ -344,23 +343,23 @@ class TerminalAssistantFeature(FeatureBase):
             'docker': ['docker ps', 'docker build -t name .', 'docker run image'],
         }
         return examples.get(command, [])
-    
+
     def _get_command_warnings(self, parsed: Dict[str, Any]) -> List[str]:
         """Get warnings for potentially dangerous commands"""
         warnings = []
         command = parsed['base']
-        
+
         if command == 'rm' and '-rf' in ' '.join(parsed['flags']):
             warnings.append('⚠️  This will permanently delete files without confirmation')
-        
+
         if command in ['sudo', 'su']:
             warnings.append('⚠️  This command requires elevated privileges')
-        
+
         if command == 'chmod' and '777' in parsed['args']:
             warnings.append('⚠️  Setting 777 permissions is a security risk')
-        
+
         return warnings
-    
+
     def get_cli_commands(self) -> List[Any]:
         """Get CLI commands for Terminal Assistant"""
         import click
@@ -406,12 +405,12 @@ class TerminalAssistantFeature(FeatureBase):
             click.echo(json.dumps(stats, indent=2))
 
         return [ta_group]
-    
+
     def get_tui_components(self) -> List[Any]:
         """Get TUI components for Terminal Assistant"""
         from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
         return [TerminalAssistantPanel]
-    
+
     def get_api_endpoints(self) -> List[Any]:
         """Get API endpoints for Terminal Assistant"""
         return [
@@ -450,20 +449,20 @@ class TerminalAssistantFeature(FeatureBase):
 
 class CommandPredictor:
     """Predicts commands based on history and context"""
-    
+
     def __init__(self, history_size: int = 1000, suggestion_limit: int = 5):
         self.history_size = history_size
         self.suggestion_limit = suggestion_limit
         self.history: List[Dict[str, Any]] = []
         self.command_frequency = Counter()
         self.command_sequences = defaultdict(Counter)
-        
+
         # Advanced analysis features
         self.command_patterns: Dict[str, List[str]] = defaultdict(list)
         self.temporal_patterns: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self.context_patterns: Dict[str, Counter] = defaultdict(Counter)
         self.success_rates: Dict[str, Dict[str, int]] = defaultdict(lambda: {'success': 0, 'failure': 0})
-    
+
     async def load_history(self) -> None:
         """Load command history from file"""
         history_file = Path.home() / '.xencode' / 'terminal_history.json'
@@ -490,12 +489,12 @@ class CommandPredictor:
                     )
             except Exception:
                 pass
-    
+
     async def save_history(self) -> None:
         """Save command history to file"""
         history_file = Path.home() / '.xencode' / 'terminal_history.json'
         history_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             with open(history_file, 'w') as f:
                 json.dump({
@@ -509,12 +508,12 @@ class CommandPredictor:
                 }, f, indent=2)
         except Exception:
             pass
-    
-    async def predict(self, partial: str = None, 
+
+    async def predict(self, partial: str = None,
                      context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Predict commands based on partial input and context"""
         suggestions = []
-        
+
         if partial:
             # Find commands matching partial input
             for cmd_data in reversed(self.history):
@@ -528,68 +527,68 @@ class CommandPredictor:
                     })
         else:
             # Suggest based on context and frequency
-            for cmd, freq in self.command_frequency.most_common(self.suggestion_limit * 2):
+            for cmd, _freq in self.command_frequency.most_common(self.suggestion_limit * 2):
                 score = self._calculate_command_score(cmd, context)
                 suggestions.append({
                     'command': cmd,
                     'score': score,
                     'source': 'frequency'
                 })
-        
+
         # Add sequence-based suggestions
         sequence_suggestions = self._get_sequence_suggestions()
         suggestions.extend(sequence_suggestions)
-        
+
         # Add temporal pattern suggestions
         temporal_suggestions = self._get_temporal_suggestions()
         suggestions.extend(temporal_suggestions)
-        
+
         # Add context-based suggestions
         if context:
             context_suggestions = self._get_context_suggestions(context)
             suggestions.extend(context_suggestions)
-        
+
         # Add pattern-based suggestions
         pattern_suggestions = self._get_pattern_suggestions(partial)
         suggestions.extend(pattern_suggestions)
-        
+
         # Sort by score and limit
         suggestions.sort(key=lambda x: x['score'], reverse=True)
         return suggestions[:self.suggestion_limit]
-    
+
     def _calculate_command_score(self, command: str, context: Dict[str, Any] = None) -> float:
         """Calculate comprehensive score for a command"""
         score = 0.0
-        
+
         # Base frequency score
         score += self.command_frequency.get(command, 0) * 1.0
-        
+
         # Success rate bonus
         stats = self.success_rates.get(command, {'success': 0, 'failure': 0})
         total = stats['success'] + stats['failure']
         if total > 0:
             success_rate = stats['success'] / total
             score += success_rate * 5.0
-        
+
         # Context relevance
         if context:
             project_type = context.get('project_type')
             if project_type and command in self.context_patterns.get(project_type, {}):
                 score += self.context_patterns[project_type][command] * 2.0
-        
+
         # Temporal relevance (recent usage)
         current_hour = datetime.now().hour
         hour_key = f"hour_{current_hour}"
         if command in self.temporal_patterns.get(hour_key, {}):
             score += self.temporal_patterns[hour_key][command] * 1.5
-        
+
         return score
-    
+
     def _get_context_suggestions(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get suggestions based on context"""
         suggestions = []
         project_type = context.get('project_type')
-        
+
         if project_type == 'python':
             suggestions.extend([
                 {'command': 'python -m pytest', 'score': 10, 'source': 'context'},
@@ -605,13 +604,13 @@ class CommandPredictor:
                 {'command': 'git status', 'score': 10, 'source': 'context'},
                 {'command': 'git pull', 'score': 9, 'source': 'context'},
             ])
-        
+
         return suggestions
-    
+
     def _get_sequence_suggestions(self) -> List[Dict[str, Any]]:
         """Get suggestions based on command sequences"""
         suggestions = []
-        
+
         if len(self.history) >= 1:
             last_cmd = self.history[-1].get('command')
             if last_cmd in self.command_sequences:
@@ -622,36 +621,36 @@ class CommandPredictor:
                         'source': 'sequence',
                         'reason': f'Often follows "{last_cmd}"'
                     })
-        
+
         return suggestions
-    
+
     def _get_temporal_suggestions(self) -> List[Dict[str, Any]]:
         """Get suggestions based on temporal patterns"""
         suggestions = []
         current_hour = datetime.now().hour
         hour_key = f"hour_{current_hour}"
-        
+
         if hour_key in self.temporal_patterns:
             for cmd, count in Counter(self.temporal_patterns[hour_key]).most_common(3):
                 suggestions.append({
                     'command': cmd,
                     'score': count * 2.0,
                     'source': 'temporal',
-                    'reason': f'Commonly used at this time'
+                    'reason': 'Commonly used at this time'
                 })
-        
+
         return suggestions
-    
+
     def _get_pattern_suggestions(self, partial: str = None) -> List[Dict[str, Any]]:
         """Get suggestions based on detected patterns"""
         suggestions = []
-        
+
         if not partial:
             return suggestions
-        
+
         # Extract pattern (e.g., "git" from "git commit")
         base_cmd = partial.split()[0] if partial else ''
-        
+
         if base_cmd in self.command_patterns:
             for pattern in self.command_patterns[base_cmd][:3]:
                 if pattern.startswith(partial):
@@ -661,125 +660,125 @@ class CommandPredictor:
                         'source': 'pattern',
                         'reason': f'Common {base_cmd} pattern'
                     })
-        
+
         return suggestions
-    
-    def _detect_command_pattern(self, command: str) -> Optional[str]:
+
+    def _detect_command_pattern(self, command: str) -> Optional[str]:  # noqa: C901 - branched pattern detector
         """Detect and categorize command patterns"""
         parts = command.split()
         if len(parts) < 2:
             return None
-        
+
         base = parts[0]
-        
+
         # Git patterns
         if base == 'git':
             if len(parts) >= 2:
                 return f"git_{parts[1]}"
-        
+
         # Docker patterns
         elif base == 'docker':
             if len(parts) >= 2:
                 return f"docker_{parts[1]}"
-        
+
         # Python patterns
         elif base == 'python':
             if '-m' in parts:
                 idx = parts.index('-m')
                 if idx + 1 < len(parts):
                     return f"python_module_{parts[idx + 1]}"
-        
+
         # NPM patterns
         elif base == 'npm':
             if len(parts) >= 2:
                 return f"npm_{parts[1]}"
-        
+
         return None
-    
+
     def _analyze_temporal_pattern(self, command: str, timestamp: str) -> None:
         """Analyze and record temporal patterns"""
         try:
             dt = datetime.fromisoformat(timestamp)
             hour_key = f"hour_{dt.hour}"
             self.temporal_patterns[hour_key][command] += 1
-            
+
             # Day of week pattern
             day_key = f"day_{dt.weekday()}"
             self.temporal_patterns[day_key][command] += 1
         except Exception:
             pass
-    
+
     def _analyze_context_pattern(self, command: str, context: Dict[str, Any]) -> None:
         """Analyze and record context-based patterns"""
         if not context:
             return
-        
+
         project_type = context.get('project_type')
         if project_type:
             self.context_patterns[project_type][command] += 1
-        
+
         # Directory-based patterns
         directory = context.get('directory')
         if directory:
             dir_name = Path(directory).name
             self.context_patterns[f"dir_{dir_name}"][command] += 1
-    
+
     async def record(self, command: str, success: bool = True, context: Dict[str, Any] = None) -> None:
         """Record a command execution"""
         timestamp = datetime.now().isoformat()
-        
+
         self.history.append({
             'command': command,
             'timestamp': timestamp,
             'success': success,
             'context': context
         })
-        
+
         # Update frequency
         if success:
             self.command_frequency[command] += 1
-        
+
         # Update success rates
         if success:
             self.success_rates[command]['success'] += 1
         else:
             self.success_rates[command]['failure'] += 1
-        
+
         # Update sequences
         if len(self.history) >= 2:
             prev_cmd = self.history[-2].get('command')
             self.command_sequences[prev_cmd][command] += 1
-        
+
         # Detect and record patterns
         pattern = self._detect_command_pattern(command)
         if pattern:
             base = command.split()[0]
             if command not in self.command_patterns[base]:
                 self.command_patterns[base].append(command)
-        
+
         # Analyze temporal patterns
         self._analyze_temporal_pattern(command, timestamp)
-        
+
         # Analyze context patterns
         if context:
             self._analyze_context_pattern(command, context)
-        
+
         # Trim history
         if len(self.history) > self.history_size:
             self.history = self.history[-self.history_size:]
-    
+
     async def search_history(self, pattern: str) -> List[Dict[str, Any]]:
         """Search command history"""
         results = []
         regex = re.compile(pattern, re.IGNORECASE)
-        
+
         for cmd_data in reversed(self.history):
             cmd = cmd_data.get('command', '')
             if regex.search(cmd):
                 results.append(cmd_data)
-        
+
         return results
-    
+
     async def get_command_statistics(self, command: str = None) -> Dict[str, Any]:
         """Get statistics for a specific command or all commands"""
         if command:
@@ -799,9 +798,9 @@ class CommandPredictor:
                 'success_rate': self._calculate_overall_success_rate(),
                 'patterns_detected': sum(len(v) for v in self.command_patterns.values())
             }
-        
+
         return stats
-    
+
     def _calculate_success_rate(self, command: str) -> float:
         """Calculate success rate for a command"""
         stats = self.success_rates.get(command, {'success': 0, 'failure': 0})
@@ -809,7 +808,7 @@ class CommandPredictor:
         if total == 0:
             return 0.0
         return stats['success'] / total
-    
+
     def _calculate_overall_success_rate(self) -> float:
         """Calculate overall success rate"""
         total_success = sum(stats['success'] for stats in self.success_rates.values())
@@ -818,20 +817,20 @@ class CommandPredictor:
         if total == 0:
             return 0.0
         return total_success / total
-    
+
     def _get_last_used(self, command: str) -> Optional[str]:
         """Get last usage timestamp for a command"""
         for cmd_data in reversed(self.history):
             if cmd_data.get('command') == command:
                 return cmd_data.get('timestamp')
         return None
-    
+
     def _get_common_sequences(self, command: str) -> List[Tuple[str, int]]:
         """Get common command sequences following this command"""
         if command in self.command_sequences:
             return self.command_sequences[command].most_common(5)
         return []
-    
+
     def _get_temporal_usage(self, command: str) -> Dict[str, int]:
         """Get temporal usage pattern for a command"""
         usage = {}
@@ -839,7 +838,7 @@ class CommandPredictor:
             if command in commands:
                 usage[time_key] = commands[command]
         return usage
-    
+
     async def analyze_patterns(self) -> Dict[str, Any]:
         """Analyze all detected patterns in command history"""
         analysis = {
@@ -848,14 +847,14 @@ class CommandPredictor:
             'temporal_patterns': {},
             'context_patterns': {}
         }
-        
+
         # Analyze command patterns
         for base, patterns in self.command_patterns.items():
             analysis['command_patterns'][base] = {
                 'count': len(patterns),
                 'examples': patterns[:5]
             }
-        
+
         # Analyze sequence patterns
         for cmd, sequences in self.command_sequences.items():
             if sequences:
@@ -865,17 +864,17 @@ class CommandPredictor:
                     'to': top_sequence[0],
                     'frequency': top_sequence[1]
                 })
-        
+
         # Analyze temporal patterns
         for time_key, commands in self.temporal_patterns.items():
             if commands:
                 analysis['temporal_patterns'][time_key] = Counter(commands).most_common(5)
-        
+
         # Analyze context patterns
         for context_key, commands in self.context_patterns.items():
             if commands:
                 analysis['context_patterns'][context_key] = commands.most_common(5)
-        
+
         return analysis
 
 
@@ -920,89 +919,81 @@ class ContextAnalyzer:
 
         return context_info
 
+    _FILE_TYPE_MAP = [
+        ('pyproject.toml', 'python-poetry'),
+        ('setup.py', 'python-setuptools'),
+        ('requirements.txt', 'python'),
+        ('Pipfile', 'python-pipenv'),
+        ('Cargo.toml', 'rust'),
+        ('go.mod', 'go'),
+        ('pom.xml', 'java-maven'),
+        ('Gemfile', 'ruby'),
+        ('composer.json', 'php'),
+        ('CMakeLists.txt', 'cpp-cmake'),
+        ('Makefile', 'c-make'),
+    ]
+
+    _OR_FILE_TYPE_MAP = [
+        (('conda.yaml', 'environment.yml'), 'python-conda'),
+        (('build.gradle', 'build.gradle.kts'), 'java-gradle'),
+        (('Dockerfile', 'docker-compose.yml'), 'docker'),
+    ]
+
+    _NODE_FRAMEWORK_MAP = [
+        ('react', 'node-react'),
+        ('vue', 'node-vue'),
+        ('angular', 'node-angular'),
+        ('@angular/core', 'node-angular'),
+        ('next', 'node-nextjs'),
+        ('express', 'node-express'),
+    ]
+
+    @staticmethod
+    def _detect_node_framework(path: Path) -> Optional[str]:
+        """Detect Node.js framework from package.json dependencies."""
+        try:
+            with open(path / 'package.json', 'r') as f:
+                pkg = json.load(f)
+            deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+            for dep, framework in ContextAnalyzer._NODE_FRAMEWORK_MAP:
+                if dep in deps:
+                    return framework
+            return 'node'
+        except Exception:
+            return 'node'
+
     def _detect_project_type(self, path: Path) -> Optional[str]:
         """
         Detect project type from directory contents with advanced detection
 
-        Supports: Python, Node.js, Rust, Go, Java, Ruby, PHP, C/C++, .NET, Docker, Kubernetes
+        Uses marker-file lookup tables for efficiency.
         """
-        # Python projects
-        if (path / 'pyproject.toml').exists():
-            return 'python-poetry'
-        elif (path / 'setup.py').exists():
-            return 'python-setuptools'
-        elif (path / 'requirements.txt').exists():
-            return 'python'
-        elif (path / 'Pipfile').exists():
-            return 'python-pipenv'
-        elif (path / 'conda.yaml').exists() or (path / 'environment.yml').exists():
-            return 'python-conda'
+        # Simple single-file markers
+        for filename, project_type in self._FILE_TYPE_MAP:
+            if (path / filename).exists():
+                return project_type
 
-        # Node.js projects
-        elif (path / 'package.json').exists():
-            # Check for specific frameworks
-            try:
-                with open(path / 'package.json', 'r') as f:
-                    pkg = json.load(f)
-                    deps = {**pkg.get('dependencies', {}), **pkg.get('devDependencies', {})}
+        # OR-based file markers (any of the listed files)
+        for filenames, project_type in self._OR_FILE_TYPE_MAP:
+            if any((path / fn).exists() for fn in filenames):
+                return project_type
 
-                    if 'react' in deps:
-                        return 'node-react'
-                    elif 'vue' in deps:
-                        return 'node-vue'
-                    elif 'angular' in deps or '@angular/core' in deps:
-                        return 'node-angular'
-                    elif 'next' in deps:
-                        return 'node-nextjs'
-                    elif 'express' in deps:
-                        return 'node-express'
-                    else:
-                        return 'node'
-            except Exception:
-                return 'node'
+        # Node.js with framework detection
+        if (path / 'package.json').exists():
+            return self._detect_node_framework(path)
 
-        # Rust projects
-        elif (path / 'Cargo.toml').exists():
-            return 'rust'
-
-        # Go projects
-        elif (path / 'go.mod').exists():
-            return 'go'
-
-        # Java projects
-        elif (path / 'pom.xml').exists():
-            return 'java-maven'
-        elif (path / 'build.gradle').exists() or (path / 'build.gradle.kts').exists():
-            return 'java-gradle'
-
-        # Ruby projects
-        elif (path / 'Gemfile').exists():
-            return 'ruby'
-
-        # PHP projects
-        elif (path / 'composer.json').exists():
-            return 'php'
-
-        # .NET projects
-        elif list(path.glob('*.csproj')) or list(path.glob('*.fsproj')):
+        # .NET projects (glob pattern)
+        if list(path.glob('*.csproj')) or list(path.glob('*.fsproj')):
             return 'dotnet'
 
-        # C/C++ projects
-        elif (path / 'CMakeLists.txt').exists():
-            return 'cpp-cmake'
-        elif (path / 'Makefile').exists():
-            return 'c-make'
-
-        # Docker projects
-        elif (path / 'Dockerfile').exists() or (path / 'docker-compose.yml').exists():
-            return 'docker'
-
-        # Kubernetes projects
-        elif list(path.glob('*.yaml')) and any('kind:' in f.read_text() for f in path.glob('*.yaml') if f.is_file()):
+        # Kubernetes (glob + content check)
+        if list(path.glob('*.yaml')) and any(
+            'kind:' in f.read_text() for f in path.glob('*.yaml') if f.is_file()
+        ):
             return 'kubernetes'
 
         # Git repository
-        elif (path / '.git').exists():
+        if (path / '.git').exists():
             return 'git'
 
         return None
@@ -1061,7 +1052,7 @@ class ContextAnalyzer:
 
         return git_info
 
-    def _analyze_environment(self) -> Dict[str, Any]:
+    def _analyze_environment(self) -> Dict[str, Any]:  # noqa: C901 - multi-category env var collector
         """
         Analyze relevant environment variables
 

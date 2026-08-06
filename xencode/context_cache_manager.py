@@ -177,19 +177,19 @@ class ContextCacheManager:
         try:
             # Create lock file if it doesn't exist
             lock_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             if sys.platform == 'win32':
                 # Windows file locking using msvcrt
                 # Open file in binary write mode
                 fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT | os.O_BINARY)
-                
+
                 # Write at least one byte for msvcrt.locking to work
                 # Check file size using fstat on the file descriptor
                 file_stat = os.fstat(fd)
                 if file_stat.st_size == 0:
                     os.write(fd, b'\x00')
                 os.lseek(fd, 0, os.SEEK_SET)
-                
+
                 # Try to acquire exclusive lock with timeout
                 start_time = time.time()
                 while time.time() - start_time < timeout:
@@ -201,7 +201,7 @@ class ContextCacheManager:
             else:
                 # Unix file locking using fcntl
                 fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT)
-                
+
                 # Try to acquire exclusive lock with timeout
                 start_time = time.time()
                 while time.time() - start_time < timeout:
@@ -216,7 +216,7 @@ class ContextCacheManager:
                 os.close(fd)
             return None
 
-        except Exception as e:
+        except Exception:
             if fd is not None:
                 try:
                     os.close(fd)
@@ -303,7 +303,7 @@ class ContextCacheManager:
 
             return True
 
-        except Exception as e:
+        except Exception:
             if 'fd' in locals() and fd is not None:
                 self._release_file_lock(fd)
             return False

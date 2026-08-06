@@ -28,13 +28,13 @@ except ImportError as e:
 
 try:
     from .routers import (
-        document_router,
-        code_analysis_router,
-        workspace_router,
         analytics_router,
+        code_analysis_router,
+        document_router,
+        features_router,
         monitoring_router,
         plugin_router,
-        features_router
+        workspace_router,
     )
     ROUTERS_AVAILABLE = True
 except ImportError as e:

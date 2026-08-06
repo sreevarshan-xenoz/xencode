@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 
@@ -584,20 +584,20 @@ if __name__ == "__main__":
 
     # Show config summary
     summary = manager.get_config_summary()
-    console.print(f"[bold]Config Summary:[/bold]")
+    console.print("[bold]Config Summary:[/bold]")
     for key, value in summary.items():
         console.print(f"  {key}: {value}")
 
     # Show available profiles
-    console.print(f"\n[bold]Available Profiles:[/bold]")
+    console.print("\n[bold]Available Profiles:[/bold]")
     for name, profile in ProjectProfileManager.DEFAULT_PROFILES.items():
         console.print(f"  - {name}: {profile.default_model} (local_first={profile.local_first})")
 
     # Validate config
     errors = manager.validate_config()
     if errors:
-        console.print(f"\n[red]Validation Errors:[/red]")
+        console.print("\n[red]Validation Errors:[/red]")
         for error in errors:
             console.print(f"  - {error}")
     else:
-        console.print(f"\n[green]✓ Configuration is valid[/green]")
+        console.print("\n[green]✓ Configuration is valid[/green]")

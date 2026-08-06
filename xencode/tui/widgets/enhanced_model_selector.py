@@ -4,25 +4,32 @@ Enhanced Model Selector Widget for Xencode TUI
 Advanced model selection with comparison, benchmarking, and detailed information.
 """
 
-from typing import List, Optional, Set, Dict, Any
-import time
 import asyncio
-from rich.text import Text
-from textual.widgets import Static, Checkbox, RadioButton, RadioSet, Label, Button, DataTable
-from textual.containers import Container, Vertical, Horizontal, VerticalScroll, Grid
+from typing import Any, Dict, List, Optional
+
 from textual.binding import Binding
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
-from xencode.tui.utils.model_checker import ModelChecker
+from textual.widgets import (
+    Button,
+    DataTable,
+    Label,
+    RadioButton,
+    RadioSet,
+    Static,
+)
+
 from xencode.ai_ensembles import EnsembleMethod
+from xencode.tui.utils.model_checker import ModelChecker
 
 
 class EnhancedModelSelected(Message):
     """Enhanced message sent when model selection changes with additional data"""
 
-    def __init__(self, 
-                 models: List[str], 
-                 is_ensemble: bool, 
+    def __init__(self,
+                 models: List[str],
+                 is_ensemble: bool,
                  method: str = "vote",
                  model_details: Optional[Dict[str, Any]] = None,
                  performance_metrics: Optional[Dict[str, float]] = None) -> None:
@@ -45,26 +52,26 @@ class EnhancedModelSelected(Message):
 
 class ModelCard(Container):
     """Individual model information card"""
-    
+
     def __init__(self, model_info: Dict[str, Any], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_info = model_info
         self.styles.height = "15"
         self.border_title = model_info.get("name", "Unknown Model")
-        
+
     def compose(self):
         """Compose the model card"""
         # Model details
         yield Label(f"Size: {self.model_info.get('size', 'Unknown')}", classes="model-detail")
         yield Label(f"Type: {self.model_info.get('type', 'General')}", classes="model-detail")
         yield Label(f"Parameters: {self.model_info.get('parameters', 'Unknown')}", classes="model-detail")
-        
+
         # Performance metrics if available
         if "response_time" in self.model_info:
             yield Label(f"Response: {self.model_info['response_time']:.2f}s", classes="model-detail")
         if "accuracy" in self.model_info:
             yield Label(f"Accuracy: {self.model_info['accuracy']:.2f}", classes="model-detail")
-        
+
         # Select button
         yield Button("Select", id=f"select-{self.model_info['name']}", variant="primary")
 
@@ -148,12 +155,12 @@ class EnhancedModelSelector(VerticalScroll):
         """Initialize enhanced model selector"""
         super().__init__(*args, **kwargs)
         self.border_title = "⚙️ Enhanced Model Selection"
-        
+
         # Model information storage
         self.model_details: Dict[str, Dict[str, Any]] = {}
         self.performance_data: Dict[str, Dict[str, float]] = {}
         self.comparison_data: List[Dict[str, Any]] = []
-        
+
         # Widgets
         self.model_cards_container = VerticalScroll(id="model-cards-container")
         self.comparison_table = DataTable(id="comparison-table", zebra_stripes=True)
@@ -167,7 +174,7 @@ class EnhancedModelSelector(VerticalScroll):
             yield Button("⏱️ Benchmark", id="benchmark-btn", variant="success")
             yield Button("📋 Compare", id="compare-btn", variant="primary")
             yield Button("📊 Toggle Details", id="toggle-details", variant="warning")
-        
+
         # Title
         yield Label("Select Models:", classes="section-title")
         yield Label("Choose 1 model for single, or 2-4 for ensemble", classes="dim")
@@ -222,16 +229,16 @@ class EnhancedModelSelector(VerticalScroll):
         """Refresh the list of available models with detailed information"""
         try:
             available_models = ModelChecker.get_available_models()
-            
+
             # Get detailed information for each model
             self.model_details = {}
             for model_name in available_models:
                 self.model_details[model_name] = self._get_detailed_model_info(model_name)
-            
+
             # Update comparison data
             self.comparison_data = [self.model_details[name] for name in available_models]
-            
-        except Exception as e:
+
+        except Exception:
             # Fallback with basic information
             available_models = ModelChecker.get_available_models()
             self.model_details = {}
@@ -244,7 +251,7 @@ class EnhancedModelSelector(VerticalScroll):
                     "description": self._get_model_description(model_name),
                     "is_available": True
                 }
-            
+
             self.comparison_data = [self.model_details[name] for name in available_models]
 
     def _get_detailed_model_info(self, model_name: str) -> Dict[str, Any]:
@@ -319,11 +326,11 @@ class EnhancedModelSelector(VerticalScroll):
             "gemma": "Google's Gemma - Lightweight and efficient",
             "codellama": "Specialized for code generation and understanding"
         }
-        
+
         for key, desc in descriptions.items():
             if key in model_name:
                 return desc
-        
+
         return "General purpose language model"
 
     def _get_mock_response_time(self, model_name: str) -> float:
@@ -383,13 +390,13 @@ class EnhancedModelSelector(VerticalScroll):
         """Update the display of models"""
         # Clear existing model cards
         self.model_cards_container.remove_children()
-        
+
         # Add model cards
-        for model_name, details in self.model_details.items():
+        for _model_name, details in self.model_details.items():
             card = ModelCard(details)
             card.styles.margin = ("0.5", "0")
             self.model_cards_container.mount(card)
-        
+
         # Update comparison table
         self.update_comparison_table()
 
@@ -397,14 +404,14 @@ class EnhancedModelSelector(VerticalScroll):
         """Update the model comparison table"""
         # Clear existing table
         self.comparison_table.clear()
-        
+
         if not self.comparison_data:
             return
-            
+
         # Add headers
         headers = ["Model", "Size", "Params", "Type", "Response (s)", "Accuracy", "Memory", "Use Case"]
         self.comparison_table.add_columns(*headers)
-        
+
         # Add rows for each model
         for model_info in self.comparison_data:
             row = [
@@ -421,18 +428,17 @@ class EnhancedModelSelector(VerticalScroll):
 
     async def benchmark_models(self):
         """Benchmark the available models"""
-        from textual.app import App
         app = self.app
-        
+
         app.notify("⏱️ Starting model benchmarking...", timeout=3)
-        
+
         # Simulate benchmarking process
         for model_name in self.model_details.keys():
             app.notify(f"📊 Benchmarking {model_name}...", timeout=2)
-            
+
             # Simulate benchmarking time
             await asyncio.sleep(0.5)
-            
+
             # Update performance data with mock results
             self.performance_data[model_name] = {
                 "response_time": self._get_mock_response_time(model_name),
@@ -440,7 +446,7 @@ class EnhancedModelSelector(VerticalScroll):
                 "accuracy": self._get_mock_accuracy(model_name),
                 "energy_efficiency": round(0.5 + (hash(model_name) % 5) / 10, 2)
             }
-        
+
         app.notify(f"✅ Benchmarking complete for {len(self.model_details)} models", timeout=5)
         self.update_model_display()
 
@@ -449,7 +455,7 @@ class EnhancedModelSelector(VerticalScroll):
         if len(self.selected_models) < 2:
             self.app.notify("⚠️ Please select at least 2 models to compare", severity="warning")
             return
-            
+
         # In a real implementation, this would show detailed comparison
         selected_names = list(self.selected_models)
         self.app.notify(f"📋 Comparing {len(selected_names)} models: {', '.join(selected_names)}", timeout=5)
@@ -458,7 +464,7 @@ class EnhancedModelSelector(VerticalScroll):
         """Toggle detailed view"""
         self.show_details = not self.show_details
         self.details_panel.visible = self.show_details
-        
+
         if self.show_details and self.selected_models:
             # Show details for selected models
             details_text = []
@@ -473,7 +479,7 @@ class EnhancedModelSelector(VerticalScroll):
                     details_text.append(f"  Accuracy: {details.get('accuracy', 'N/A')}")
                     details_text.append(f"  Recommended Use: {details['recommended_use']}")
                     details_text.append("")  # Blank line
-            
+
             self.details_panel.update("\n".join(details_text))
         else:
             self.details_panel.update("Select models and toggle details to see information here.")
@@ -499,7 +505,7 @@ class EnhancedModelSelector(VerticalScroll):
             self.selected_models.discard(model_name)
         else:
             self.selected_models.add(model_name)
-        
+
         # Update ensemble status
         self.ensemble_enabled = len(self.selected_models) >= 2
         self._update_border_title()

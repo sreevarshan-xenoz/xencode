@@ -14,7 +14,8 @@ import asyncio
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 import aiohttp
 from rich.console import Console
 
@@ -41,16 +42,16 @@ class ProviderTestResult:
     error_message: Optional[str] = None
     remediation: Optional[str] = None
     details: Dict[str, Any] = None
-    
+
     def __post_init__(self):
         if self.details is None:
             self.details = {}
-    
+
     @property
     def is_success(self) -> bool:
         """Check if test was successful"""
         return self.status == ProviderStatus.OK
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for display/logging"""
         return {
@@ -69,45 +70,45 @@ class ProviderTestResult:
 class ProviderDiagnostics:
     """
     Diagnostic service for testing provider connectivity
-    
+
     Usage:
         diagnostics = ProviderDiagnostics()
         result = await diagnostics.test_qwen()
         result = await diagnostics.test_openrouter(api_key)
         result = await diagnostics.test_ollama()
     """
-    
+
     # Provider endpoints
     QWEN_BASE_URL = "https://chat.qwen.ai/api/v1"
     QWEN_MODELS_URL = f"{QWEN_BASE_URL}/models"
     QWEN_CREDS_FILE = None  # Will be set dynamically
-    
+
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     OPENROUTER_MODELS_URL = f"{OPENROUTER_BASE_URL}/models"
-    
+
     OLLAMA_BASE_URL = "http://localhost:11434"
     OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
-    
+
     def __init__(self):
         self._qwen_creds_file = None
-    
+
     def set_qwen_creds_file(self, creds_file):
         """Set the path to Qwen credentials file"""
         self._qwen_creds_file = creds_file
-    
+
     async def test_qwen(self) -> ProviderTestResult:
         """
         Test Qwen connectivity and authentication
-        
+
         Returns:
             ProviderTestResult with connection status
         """
         start_time = time.time()
-        
+
         try:
             # Try to load cached credentials
             access_token = self._load_qwen_token()
-            
+
             if not access_token:
                 return ProviderTestResult(
                     provider="Qwen",
@@ -116,22 +117,22 @@ class ProviderDiagnostics:
                     error_message="No Qwen authentication found",
                     remediation="Click 'Login' to authenticate with Qwen",
                 )
-            
+
             # Test the models endpoint
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
             }
-            
+
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(self.QWEN_MODELS_URL, headers=headers) as response:
                     latency_ms = (time.time() - start_time) * 1000
-                    
+
                     if response.status == 200:
                         data = await response.json()
                         models = data.get("data", []) if isinstance(data, dict) else []
-                        
+
                         return ProviderTestResult(
                             provider="Qwen",
                             status=ProviderStatus.OK,
@@ -160,7 +161,7 @@ class ProviderDiagnostics:
                             remediation="Check your internet connection and try again",
                             details={"raw_error": error_text[:200]},
                         )
-                        
+
         except aiohttp.ClientConnectionError as e:
             latency_ms = (time.time() - start_time) * 1000
             return ProviderTestResult(
@@ -191,19 +192,19 @@ class ProviderDiagnostics:
                 error_message=str(e),
                 remediation="An unexpected error occurred",
             )
-    
+
     async def test_openrouter(self, api_key: Optional[str] = None) -> ProviderTestResult:
         """
         Test OpenRouter connectivity and API key
-        
+
         Args:
             api_key: OpenRouter API key (sk-or-v1-...)
-            
+
         Returns:
             ProviderTestResult with connection status
         """
         start_time = time.time()
-        
+
         try:
             # Check if API key is provided
             if not api_key:
@@ -214,7 +215,7 @@ class ProviderDiagnostics:
                     error_message="No API key configured",
                     remediation="Enter your OpenRouter API key and click 'Save'",
                 )
-            
+
             # Validate API key format
             if not api_key.startswith("sk-or-v"):
                 return ProviderTestResult(
@@ -224,22 +225,22 @@ class ProviderDiagnostics:
                     error_message="Invalid API key format",
                     remediation="OpenRouter API keys start with 'sk-or-v'",
                 )
-            
+
             # Test the models endpoint
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            
+
             timeout = aiohttp.ClientTimeout(total=10)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(self.OPENROUTER_MODELS_URL, headers=headers) as response:
                     latency_ms = (time.time() - start_time) * 1000
-                    
+
                     if response.status == 200:
                         data = await response.json()
                         models = data.get("data", []) if isinstance(data, dict) else []
-                        
+
                         return ProviderTestResult(
                             provider="OpenRouter",
                             status=ProviderStatus.OK,
@@ -277,7 +278,7 @@ class ProviderDiagnostics:
                             remediation="Check your internet connection and try again",
                             details={"raw_error": error_text[:200]},
                         )
-                        
+
         except aiohttp.ClientConnectionError as e:
             latency_ms = (time.time() - start_time) * 1000
             return ProviderTestResult(
@@ -308,26 +309,26 @@ class ProviderDiagnostics:
                 error_message=str(e),
                 remediation="An unexpected error occurred",
             )
-    
+
     async def test_ollama(self) -> ProviderTestResult:
         """
         Test Ollama local service connectivity
-        
+
         Returns:
             ProviderTestResult with connection status
         """
         start_time = time.time()
-        
+
         try:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(self.OLLAMA_TAGS_URL) as response:
                     latency_ms = (time.time() - start_time) * 1000
-                    
+
                     if response.status == 200:
                         data = await response.json()
                         models = data.get("models", []) if isinstance(data, dict) else []
-                        
+
                         return ProviderTestResult(
                             provider="Ollama",
                             status=ProviderStatus.OK,
@@ -348,7 +349,7 @@ class ProviderDiagnostics:
                             error_message=f"HTTP {response.status}",
                             remediation="Ollama service may not be running properly",
                         )
-                        
+
         except aiohttp.ClientConnectionError:
             latency_ms = (time.time() - start_time) * 1000
             return ProviderTestResult(
@@ -379,44 +380,44 @@ class ProviderDiagnostics:
                 error_message=str(e),
                 remediation="An unexpected error occurred",
             )
-    
+
     def _load_qwen_token(self) -> Optional[str]:
         """Load Qwen access token from credentials file"""
         import json
         from pathlib import Path
-        
+
         try:
             creds_file = self._qwen_creds_file or Path.home() / ".xencode_qwen_creds.json"
             if not creds_file.exists():
                 return None
-            
+
             with open(creds_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             # Check if token is still valid (with 5-minute buffer)
             import time
             created_at = data.get('created_at', 0)
             expires_in = data.get('expires_in', 0)
             elapsed = time.time() - created_at
-            
+
             if elapsed >= (expires_in - 300):  # 5 minutes buffer
                 return None  # Token expired
-            
+
             return data.get('access_token')
-            
+
         except (json.JSONDecodeError, IOError, KeyError):
             return None
-    
+
     async def test_all_providers(
         self,
         openrouter_api_key: Optional[str] = None,
     ) -> List[ProviderTestResult]:
         """
         Test all providers concurrently
-        
+
         Args:
             openrouter_api_key: Optional OpenRouter API key
-            
+
         Returns:
             List of ProviderTestResult for each provider
         """
@@ -425,9 +426,9 @@ class ProviderDiagnostics:
             self.test_openrouter(openrouter_api_key),
             self.test_ollama(),
         ]
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Convert any exceptions to error results
         processed_results = []
         for i, result in enumerate(results):
@@ -441,7 +442,7 @@ class ProviderDiagnostics:
                 ))
             else:
                 processed_results.append(result)
-        
+
         return processed_results
 
 
@@ -460,7 +461,7 @@ def get_diagnostics() -> ProviderDiagnostics:
 if __name__ == "__main__":
     # Provider Diagnostics - Run with --demo flag for testing
     import sys
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == "--demo":
         async def demo():
             console.print("[bold blue]Provider Diagnostics Test[/bold blue]\n")
@@ -489,7 +490,7 @@ if __name__ == "__main__":
 
                 if result.remediation:
                     console.print(f"   Hint: {result.remediation}")
-        
+
         import asyncio
         asyncio.run(demo())
     else:

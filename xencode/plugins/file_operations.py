@@ -149,7 +149,7 @@ class FileOperationsPlugin:
         try:
             resolved_path.relative_to(workspace_root)
         except ValueError:
-            raise PermissionError(f"Path {path} is outside workspace boundaries")
+            raise PermissionError(f"Path {path} is outside workspace boundaries")  from None
         
         return resolved_path
     

@@ -1,7 +1,7 @@
 """Web content extractor using requests and BeautifulSoup."""
 
-from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict
+
 import requests
 
 try:
@@ -23,10 +23,10 @@ class WebExtractor:
     def extract(self, url: str) -> Dict[str, Any]:
         """
         Extract content from a URL.
-        
+
         Args:
             url: The URL to extract content from.
-            
+
         Returns:
             Dictionary containing extracted content and metadata.
         """
@@ -44,30 +44,30 @@ class WebExtractor:
         try:
             response = requests.get(url, headers=self.headers, timeout=self.timeout)
             response.raise_for_status()
-            
+
             soup = BeautifulSoup(response.content, 'html.parser')
-            
+
             # Extract title
             if soup.title:
                 result["title"] = soup.title.string.strip()
-            
+
             # Extract meta description
             meta_desc = soup.find('meta', attrs={'name': 'description'})
             if meta_desc and meta_desc.get('content'):
                 result["metadata"]["description"] = meta_desc['content']
-            
+
             # Remove script and style elements
             for script in soup(["script", "style", "nav", "footer", "header"]):
                 script.decompose()
-            
+
             # Get text from main content
             main_content = soup.find('main') or soup.find('article') or soup.body
             if main_content:
                 result["text"] = main_content.get_text(separator='\n', strip=True)
-            
+
             result["metadata"]["status_code"] = response.status_code
             result["metadata"]["content_type"] = response.headers.get('content-type', '')
-            
+
         except requests.RequestException as e:
             result["error"] = f"Request failed: {str(e)}"
         except Exception as e:

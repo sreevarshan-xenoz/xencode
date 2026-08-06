@@ -9,9 +9,9 @@ from datetime import datetime
 from typing import Optional
 
 from rich.text import Text
-from textual.widgets import Input, Static, Label, Button
-from textual.containers import Container, VerticalScroll, Horizontal, Vertical
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
+from textual.widgets import Button, Input, Label, Static
 
 
 class ByteBotLog(VerticalScroll):

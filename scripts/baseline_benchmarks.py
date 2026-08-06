@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 from typing import Callable, Iterable
 
-
 DEFAULT_EXCLUDED_DIRS = {
     ".git",
     ".mypy_cache",

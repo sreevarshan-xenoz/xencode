@@ -163,7 +163,7 @@ class ProviderRegistry:
                 provider=name,
                 error_type="configuration",
                 original_error=e
-            )
+            )  from e
     
     def list_providers(self) -> List[str]:
         """

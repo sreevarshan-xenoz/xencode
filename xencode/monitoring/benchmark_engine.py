@@ -445,9 +445,9 @@ class BenchmarkEngine:
                 return "Mock response", 10
                 
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Provider {provider} timed out")
+            raise TimeoutError(f"Provider {provider} timed out")  from None
         except Exception as e:
-            raise RuntimeError(f"Provider {provider} error: {e}")
+            raise RuntimeError(f"Provider {provider} error: {e}")  from e
     
     def _calculate_accuracy(
         self,

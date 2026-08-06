@@ -7,17 +7,14 @@ and current usage patterns for optimal performance.
 """
 
 import asyncio
-import psutil
-import math
-from dataclasses import dataclass
-from typing import Optional, Dict, Any
-from pathlib import Path
-import json
 import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+import psutil
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 
 console = Console()
 
@@ -58,7 +55,7 @@ class DynamicCacheSizer:
         """Get current system memory profile"""
         vm = psutil.virtual_memory()
         sm = psutil.swap_memory()
-        
+
         # Get current process memory usage
         process = psutil.Process()
         process_memory_mb = process.memory_info().rss / (1024 * 1024)
@@ -72,12 +69,12 @@ class DynamicCacheSizer:
             swap_used_gb=sm.used / (1024**3),
             process_memory_mb=process_memory_mb
         )
-        
+
         return profile
 
     def calculate_optimal_sizes(self, profile: MemoryProfile) -> CacheConfiguration:
         """Calculate optimal cache sizes based on memory profile"""
-        
+
         # Base allocation percentages based on system size
         if profile.total_memory_gb >= 32:
             # Large system: allocate more aggressively
@@ -110,7 +107,7 @@ class DynamicCacheSizer:
 
         # Determine other parameters based on system capabilities
         max_item_size_kb = 1024  # 1MB max item size (adjustable based on use case)
-        
+
         # TTL based on system size (larger systems can afford longer TTLs)
         ttl_seconds = 3600 * 24 * 7  # 1 week default
         if profile.total_memory_gb < 8:
@@ -133,9 +130,9 @@ class DynamicCacheSizer:
     def get_current_configuration(self) -> CacheConfiguration:
         """Get current cache configuration, updating if necessary"""
         current_time = time.time()
-        
+
         # Update if needed
-        if (self.configuration is None or 
+        if (self.configuration is None or
             current_time - self.last_update > self.update_interval):
             self.profile = self.get_memory_profile()
             self.configuration = self.calculate_optimal_sizes(self.profile)
@@ -176,11 +173,11 @@ class AdaptiveCacheManager:
     async def initialize(self):
         """Initialize the adaptive cache manager"""
         console.print("[blue]🔄 Initializing adaptive cache manager...[/blue]")
-        
+
         # Get initial configuration
         config = self.sizer.get_current_configuration()
-        
-        console.print(f"[green]✅ Cache configuration loaded:[/green]")
+
+        console.print("[green]✅ Cache configuration loaded:[/green]")
         console.print(f"   Memory: {config.memory_cache_mb}MB")
         console.print(f"   Disk: {config.disk_cache_mb}MB")
         console.print(f"   Compression: {'Yes' if config.compression_enabled else 'No'}")
@@ -188,7 +185,7 @@ class AdaptiveCacheManager:
     async def get_optimal_cache(self, cache_name: str = "default"):
         """Get a cache instance with optimal sizing"""
         config = self.sizer.get_current_configuration()
-        
+
         from .advanced_cache_system import HybridCacheManager
 
         cache = HybridCacheManager(
@@ -205,9 +202,9 @@ class AdaptiveCacheManager:
             return
 
         config = self.sizer.get_current_configuration()
-        
+
         # Update all existing cache instances
-        for name, cache in self.cache_instances.items():
+        for name, _cache in self.cache_instances.items():
             # Note: This would require modifying the cache implementation to support resizing
             # For now, we'll just log the recommendation
             console.print(f"[yellow]💡 Cache '{name}' should be resized to {config.memory_cache_mb}MB memory, {config.disk_cache_mb}MB disk[/yellow]")
@@ -270,7 +267,7 @@ class AdaptiveCacheManager:
     def display_system_report(self):
         """Display system report in a formatted table"""
         report = self.get_system_report()
-        
+
         console.print(Panel(
             f"[bold]System Memory Profile[/bold]\n"
             f"Total Memory: {report['memory_profile']['total_gb']:.1f} GB\n"
@@ -321,28 +318,28 @@ async def get_adaptive_cache(cache_name: str = "default"):
 if __name__ == "__main__":
     async def demo():
         console.print("[bold blue]🚀 Dynamic Cache Sizing Demo[/bold blue]")
-        
+
         # Create adaptive cache manager
         manager = AdaptiveCacheManager()
         await manager.initialize()
-        
+
         # Display system report
         manager.display_system_report()
-        
+
         # Get an optimally sized cache
-        cache = await manager.get_optimal_cache("demo_cache")
-        console.print(f"[green]✅ Got optimally sized cache[/green]")
-        
+        await manager.get_optimal_cache("demo_cache")
+        console.print("[green]✅ Got optimally sized cache[/green]")
+
         # Start monitoring
         await manager.start_monitoring()
-        console.print(f"[blue]✅ Monitoring started[/blue]")
-        
+        console.print("[blue]✅ Monitoring started[/blue]")
+
         # Simulate some work
         await asyncio.sleep(2)
-        
+
         # Stop monitoring
         await manager.stop_monitoring()
-        console.print(f"[yellow]✅ Monitoring stopped[/yellow]")
+        console.print("[yellow]✅ Monitoring stopped[/yellow]")
 
     # Don't run the demo by default
     # asyncio.run(demo())

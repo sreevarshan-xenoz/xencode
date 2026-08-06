@@ -668,7 +668,7 @@ impl<'a> App<'a> {
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
-            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key);
+            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
             let _ = manager.generate_stream(&model, &context_messages, |token| {
                 let _ = tx.send(token.to_string());
             }).await;
@@ -1177,7 +1177,7 @@ impl<'a> App<'a> {
 
                 tokio::spawn(async move {
                     let client = OllamaClient::new(&ollama_url, timeout);
-                    let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key);
+                    let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
                     let _ = manager.generate_stream(&model, &messages, |token| {
                         let _ = tx.send(format!("[REVIEW]{}", token));
                     }).await;

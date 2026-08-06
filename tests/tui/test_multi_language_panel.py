@@ -3,12 +3,12 @@ Tests for multi-language TUI panel.
 """
 
 import pytest
-from textual.widgets import Button, ListView
+
 from xencode.tui.features.multi_language_panel import (
-    MultiLanguagePanel,
+    GlossaryDialog,
     LanguageCard,
+    MultiLanguagePanel,
     TranslationDialog,
-    GlossaryDialog
 )
 
 

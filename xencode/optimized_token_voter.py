@@ -6,12 +6,11 @@ Optimized version of the token voting algorithm with improved performance
 and reduced computational overhead.
 """
 
-import asyncio
-import json
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 from enum import Enum
+from typing import List, Optional
+
 import numpy as np
 
 try:
@@ -86,7 +85,7 @@ class OptimizedTokenVoter:
         # Tokenize responses efficiently
         if self.tokenizer is not None:
             # Use vectorized tokenization for better performance
-            tokenized_responses = self.tokenizer(responses, add_special_tokens=False, 
+            tokenized_responses = self.tokenizer(responses, add_special_tokens=False,
                                                padding=True, return_tensors="np")
             token_ids = tokenized_responses['input_ids']
         else:
@@ -95,7 +94,7 @@ class OptimizedTokenVoter:
             # Pad sequences to same length
             max_len = max(len(tokens) for tokens in tokenized_responses) if tokenized_responses else 0
             tokenized_responses = [tokens + ['<PAD>'] * (max_len - len(tokens)) for tokens in tokenized_responses]
-            token_ids = np.array([[ord(c) if isinstance(c, str) and len(c) == 1 else hash(c) % 10000 
+            token_ids = np.array([[ord(c) if isinstance(c, str) and len(c) == 1 else hash(c) % 10000
                                   for c in tokens] for tokens in tokenized_responses])
 
         # Perform voting based on strategy
@@ -136,10 +135,10 @@ class OptimizedTokenVoter:
         for pos in range(num_positions):
             # Get all tokens at this position
             pos_tokens = token_ids[:, pos]
-            
+
             # Count unique tokens and their frequencies
             unique_tokens, counts = np.unique(pos_tokens, return_counts=True)
-            
+
             # Select the most frequent token
             if len(counts) > 0:
                 max_idx = np.argmax(counts)
@@ -152,7 +151,7 @@ class OptimizedTokenVoter:
     def _weighted_vote(self, token_ids: np.ndarray, weights: List[float]) -> np.ndarray:
         """Weighted voting based on model weights"""
         num_positions = token_ids.shape[1]
-        num_models = token_ids.shape[0]
+        token_ids.shape[0]
         fused_tokens = np.zeros(num_positions, dtype=token_ids.dtype)
 
         # Convert weights to numpy array for vectorized operations
@@ -161,12 +160,12 @@ class OptimizedTokenVoter:
         for pos in range(num_positions):
             # Get tokens at this position
             pos_tokens = token_ids[:, pos]
-            
+
             # Create a weighted vote dictionary
             vote_weights = defaultdict(float)
             for i, token in enumerate(pos_tokens):
                 vote_weights[token] += weights_array[i, 0]
-            
+
             # Select token with highest total weight
             if vote_weights:
                 best_token = max(vote_weights.items(), key=lambda x: x[1])[0]
@@ -181,14 +180,14 @@ class OptimizedTokenVoter:
 
         for pos in range(num_positions):
             pos_tokens = token_ids[:, pos]
-            
+
             # Calculate weighted confidence for each unique token
             token_confidences = defaultdict(float)
             for i, token in enumerate(pos_tokens):
                 # Combine model weight with positional confidence (simplified)
                 confidence = weights[i] * (1.0 / (1.0 + pos * 0.01))  # Position penalty
                 token_confidences[token] += confidence
-            
+
             # Select token with highest confidence
             if token_confidences:
                 best_token = max(token_confidences.items(), key=lambda x: x[1])[0]
@@ -201,13 +200,13 @@ class OptimizedTokenVoter:
         # Calculate global token frequencies
         flat_tokens = token_ids.flatten()
         global_freq = Counter(flat_tokens)
-        
+
         num_positions = token_ids.shape[1]
         fused_tokens = np.zeros(num_positions, dtype=token_ids.dtype)
 
         for pos in range(num_positions):
             pos_tokens = token_ids[:, pos]
-            
+
             # Score tokens based on global frequency and local presence
             token_scores = {}
             for token in set(pos_tokens):
@@ -216,7 +215,7 @@ class OptimizedTokenVoter:
                     local_present = np.sum(pos_tokens == token)
                     score = local_present * global_freq[token] * weights[np.where(pos_tokens == token)[0][0]]
                     token_scores[token] = score
-            
+
             if token_scores:
                 best_token = max(token_scores.items(), key=lambda x: x[1])[0]
                 fused_tokens[pos] = best_token
@@ -259,15 +258,15 @@ class OptimizedTokenVoter:
         union = len(words1 | words2)
         return intersection / union if union > 0 else 0.0
 
-    def batch_vote_tokens(self, response_batches: List[List[str]], 
+    def batch_vote_tokens(self, response_batches: List[List[str]],
                          weights_batch: Optional[List[List[float]]] = None) -> List[str]:
         """
         Batch process multiple sets of responses for efficiency.
-        
+
         Args:
             response_batches: List of response sets to vote on
             weights_batch: Optional list of weight sets corresponding to each response set
-            
+
         Returns:
             List of fused responses
         """
@@ -282,42 +281,42 @@ class OptimizedTokenVoter:
 # Example usage and performance comparison
 if __name__ == "__main__":
     import time
-    
+
     # Sample responses for testing
     sample_responses = [
         "The weather is sunny today and it's perfect for a walk in the park.",
         "Today is a sunny day, ideal for outdoor activities and relaxation.",
         "It's a beautiful sunny day, great for spending time outdoors."
     ]
-    
+
     print("🧪 Testing Optimized Token Voter...")
-    
+
     # Test different strategies
     voter = OptimizedTokenVoter()
-    
+
     strategies = [
         VotingStrategy.MAJORITY,
         VotingStrategy.WEIGHTED,
         VotingStrategy.CONFIDENCE_WEIGHTED,
         VotingStrategy.FREQUENCY_BASED
     ]
-    
+
     for strategy in strategies:
         start_time = time.time()
         result = voter.vote_tokens(sample_responses, strategy=strategy)
         end_time = time.time()
-        
+
         print(f"\n{strategy.value.upper()} Strategy:")
         print(f"Result: {result}")
         print(f"Time: {(end_time - start_time)*1000:.2f}ms")
-    
+
     # Test batch processing
-    print(f"\n📦 Testing batch processing...")
+    print("\n📦 Testing batch processing...")
     start_time = time.time()
     batch_responses = [sample_responses] * 5  # Process 5 identical batches
     batch_weights = [[1.0, 1.2, 0.8]] * 5  # Different weights for each batch
     batch_results = voter.batch_vote_tokens(batch_responses, batch_weights)
     end_time = time.time()
-    
+
     print(f"Processed {len(batch_results)} batches in {(end_time - start_time)*1000:.2f}ms")
     print(f"Average per batch: {(end_time - start_time)*1000/len(batch_results):.2f}ms")

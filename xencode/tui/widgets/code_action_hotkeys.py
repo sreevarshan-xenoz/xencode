@@ -11,8 +11,7 @@ Provides one-key actions for:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any, Callable
-from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
@@ -39,7 +38,7 @@ class CodeAction:
     line_end: Optional[int] = None
     language: str = "python"
     context: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -62,7 +61,7 @@ class CodeActionResult:
     error: str = ""
     suggestions: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -77,7 +76,7 @@ class CodeActionResult:
 
 class CodeActionPrompts:
     """Prompt templates for code actions"""
-    
+
     EXPLAIN_TEMPLATE = """Explain the following {language} code clearly and concisely:
 
 ```{language}
@@ -181,7 +180,7 @@ Be thorough and check for:
             ActionType.DOCUMENT: cls.DOCUMENT_TEMPLATE,
             ActionType.DEBUG: cls.DEBUG_TEMPLATE,
         }
-        
+
         template = templates.get(action_type, cls.EXPLAIN_TEMPLATE)
         return template.format(language=language, code=code)
 
@@ -189,9 +188,9 @@ Be thorough and check for:
 class CodeActionHandler:
     """
     Handles code action requests
-    
+
     Integrates with LLM to execute actions
-    
+
     Usage:
         handler = CodeActionHandler(model_callback=my_llm_callback)
         result = await handler.execute_action(
@@ -199,7 +198,7 @@ class CodeActionHandler:
             "def hello(): print('world')"
         )
     """
-    
+
     def __init__(
         self,
         model_callback: Optional[Callable] = None,
@@ -207,7 +206,7 @@ class CodeActionHandler:
     ):
         """
         Initialize code action handler
-        
+
         Args:
             model_callback: Async callback for LLM calls
             default_language: Default programming language
@@ -215,7 +214,7 @@ class CodeActionHandler:
         self.model_callback = model_callback
         self.default_language = default_language
         self._history: List[CodeActionResult] = []
-    
+
     async def execute_action(
         self,
         action_type: ActionType,
@@ -228,7 +227,7 @@ class CodeActionHandler:
     ) -> CodeActionResult:
         """
         Execute a code action
-        
+
         Args:
             action_type: Type of action to perform
             code: Code snippet to process
@@ -237,14 +236,14 @@ class CodeActionHandler:
             line_end: Optional end line number
             language: Programming language (default: python)
             context: Optional additional context
-            
+
         Returns:
             CodeActionResult with the action result
         """
         lang = language or self.default_language
-        
+
         # Create action object
-        action = CodeAction(
+        CodeAction(
             action_type=action_type,
             code_snippet=code,
             file_path=file_path,
@@ -253,21 +252,21 @@ class CodeActionHandler:
             language=lang,
             context=context or {},
         )
-        
+
         try:
             # Generate prompt
             prompt = CodeActionPrompts.get_prompt(action_type, code, lang)
-            
+
             # Add context to prompt if available
             if context:
                 prompt += "\n\nAdditional context:\n"
                 for key, value in context.items():
                     prompt += f"- {key}: {value}\n"
-            
+
             # Call LLM if callback available
             if self.model_callback:
                 result_text = await self.model_callback(prompt)
-                
+
                 return CodeActionResult(
                     action_type=action_type,
                     success=True,
@@ -276,14 +275,14 @@ class CodeActionHandler:
             else:
                 # No callback - return simulated response
                 return self._simulate_action(action_type, code, lang)
-                
+
         except Exception as e:
             return CodeActionResult(
                 action_type=action_type,
                 success=False,
                 error=str(e),
             )
-    
+
     def _simulate_action(
         self,
         action_type: ActionType,
@@ -299,14 +298,14 @@ class CodeActionHandler:
             ActionType.DOCUMENT: self._simulate_document,
             ActionType.DEBUG: self._simulate_debug,
         }
-        
+
         simulate_func = simulations.get(action_type, self._simulate_explain)
         return simulate_func(code, language)
-    
+
     def _simulate_explain(self, code: str, language: str) -> CodeActionResult:
         """Simulate explain action"""
         lines = code.strip().split('\n')
-        
+
         return CodeActionResult(
             action_type=ActionType.EXPLAIN,
             success=True,
@@ -330,7 +329,7 @@ The code appears to define functionality related to the operations shown.
                 "Break complex logic into smaller functions",
             ],
         )
-    
+
     def _simulate_refactor(self, code: str, language: str) -> CodeActionResult:
         """Simulate refactor action"""
         return CodeActionResult(
@@ -360,7 +359,7 @@ The code appears to define functionality related to the operations shown.
                 "Add input validation",
             ],
         )
-    
+
     def _simulate_test(self, code: str, language: str) -> CodeActionResult:
         """Simulate test generation"""
         return CodeActionResult(
@@ -392,7 +391,7 @@ def test_error_handling():
 
 **Test Coverage Areas:**
 - Normal operation tests
-- Edge case tests  
+- Edge case tests
 - Error handling tests
 - Integration tests
 """,
@@ -402,7 +401,7 @@ def test_error_handling():
                 "Mock external dependencies",
             ],
         )
-    
+
     def _simulate_optimize(self, code: str, language: str) -> CodeActionResult:
         """Simulate optimization"""
         return CodeActionResult(
@@ -432,7 +431,7 @@ def test_error_handling():
                 "Consider async for I/O operations",
             ],
         )
-    
+
     def _simulate_document(self, code: str, language: str) -> CodeActionResult:
         """Simulate documentation"""
         return CodeActionResult(
@@ -474,13 +473,13 @@ def function_name(param1: Type, param2: Type) -> ReturnType:
                 "Add usage examples",
             ],
         )
-    
+
     def _simulate_debug(self, code: str, language: str) -> CodeActionResult:
         """Simulate debug analysis"""
         return CodeActionResult(
             action_type=ActionType.DEBUG,
             success=True,
-            result=f"""**Debug Analysis**
+            result="""**Debug Analysis**
 
 **Potential Issues to Check:**
 
@@ -516,11 +515,11 @@ def function_name(param1: Type, param2: Type) -> ReturnType:
                 "Add logging for debugging",
             ],
         )
-    
+
     def get_history(self, count: int = 10) -> List[CodeActionResult]:
         """Get recent action history"""
         return self._history[-count:]
-    
+
     def clear_history(self):
         """Clear action history"""
         self._history = []
@@ -600,9 +599,9 @@ if __name__ == "__main__":
     # Demo
     async def demo():
         console.print("[bold blue]Code Action Hotkeys Demo[/bold blue]\n")
-        
+
         handler = CodeActionHandler()
-        
+
         test_code = """
 def calculate_sum(numbers):
     total = 0
@@ -610,17 +609,17 @@ def calculate_sum(numbers):
         total += n
     return total
 """
-        
+
         console.print("[bold]Test Code:[/bold]")
         console.print(test_code)
         console.print("\n" + "="*50 + "\n")
-        
+
         # Test each action
         for action_type in ActionType:
             console.print(f"[bold]{action_type.value.upper()}:[/bold]")
             result = await handler.execute_action(action_type, test_code)
             console.print(result.result[:200] + "..." if len(result.result) > 200 else result.result)
             console.print()
-    
+
     import asyncio
     asyncio.run(demo())

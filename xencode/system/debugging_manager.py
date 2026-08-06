@@ -6,21 +6,20 @@ Implements structured logging, debugging tools, and diagnostic capabilities
 for troubleshooting and performance monitoring.
 """
 
+import gzip
+import json
 import logging
 import logging.handlers
 import os
+import shutil
 import sys
 import threading
 import time
-import traceback
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
-import json
-import gzip
-import shutil
+from datetime import datetime
 from functools import wraps
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import psutil
 
@@ -38,7 +37,7 @@ class LogEntry:
 
 class XencodeFormatter(logging.Formatter):
     """Custom formatter for Xencode logs with structured data"""
-    
+
     def format(self, record):
         # Create a structured log entry
         log_entry = {
@@ -51,43 +50,43 @@ class XencodeFormatter(logging.Formatter):
             "thread": record.thread,
             "thread_name": record.threadName
         }
-        
+
         # Add extra fields if present
         if hasattr(record, 'extra_fields'):
             log_entry.update(record.extra_fields)
-        
+
         # Add exception info if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
-        
+
         return json.dumps(log_entry)
 
 
 class XencodeLogger:
     """Enhanced logger for Xencode with multiple output formats"""
-    
+
     def __init__(self, name: str = "xencode", log_dir: Optional[Path] = None):
         self.name = name
         self.logger = logging.getLogger(name)
-        
+
         if log_dir is None:
             log_dir = Path.home() / ".xencode" / "logs"
-        
+
         self.log_dir = log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._setup_handlers()
         self.logger.setLevel(logging.DEBUG)
-        
+
         # Thread-safe log storage for debugging
         self.debug_logs = []
         self._debug_lock = threading.Lock()
-        
+
     def _setup_handlers(self):
         """Setup log handlers for different outputs"""
         # Clear existing handlers
         self.logger.handlers.clear()
-        
+
         # Console handler for real-time debugging
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
@@ -96,7 +95,7 @@ class XencodeLogger:
         )
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
-        
+
         # File handler for persistent logs
         log_file = self.log_dir / f"{self.name}.log"
         file_handler = logging.handlers.RotatingFileHandler(
@@ -108,7 +107,7 @@ class XencodeLogger:
         file_formatter = XencodeFormatter()
         file_handler.setFormatter(file_formatter)
         self.logger.addHandler(file_handler)
-        
+
         # Structured log file for analysis
         structured_log_file = self.log_dir / f"{self.name}_structured.log"
         structured_handler = logging.handlers.RotatingFileHandler(
@@ -120,32 +119,32 @@ class XencodeLogger:
         structured_formatter = XencodeFormatter()
         structured_handler.setFormatter(structured_formatter)
         self.logger.addHandler(structured_handler)
-    
+
     def debug(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Log debug message with extra context"""
         self._log_with_extra(logging.DEBUG, msg, extra, **kwargs)
-    
+
     def info(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Log info message with extra context"""
         self._log_with_extra(logging.INFO, msg, extra, **kwargs)
-    
+
     def warning(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Log warning message with extra context"""
         self._log_with_extra(logging.WARNING, msg, extra, **kwargs)
-    
+
     def error(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Log error message with extra context"""
         self._log_with_extra(logging.ERROR, msg, extra, **kwargs)
-    
+
     def critical(self, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Log critical message with extra context"""
         self._log_with_extra(logging.CRITICAL, msg, extra, **kwargs)
-    
+
     def _log_with_extra(self, level: int, msg: str, extra: Optional[Dict[str, Any]] = None, **kwargs):
         """Internal method to log with extra context"""
         extra_dict = extra or {}
         extra_dict.update(kwargs)
-        
+
         # Add to debug logs if enabled
         if hasattr(self, '_debug_lock'):
             with self._debug_lock:
@@ -157,22 +156,22 @@ class XencodeLogger:
                     message=msg,
                     extra=extra_dict
                 ))
-        
+
         # Create a custom record with extra fields
         if extra_dict:
             self.logger.log(level, msg, extra={'extra_fields': extra_dict})
         else:
             self.logger.log(level, msg)
-    
+
     def get_recent_logs(self, count: int = 100) -> List[LogEntry]:
         """Get recent logs from memory"""
         with self._debug_lock:
             return self.debug_logs[-count:]
-    
+
     def export_logs(self, output_file: Path, compress: bool = True):
         """Export logs to a file"""
         logs = self.get_recent_logs(count=1000)  # Get last 1000 logs
-        
+
         with open(output_file, 'w') as f:
             for log in logs:
                 f.write(json.dumps({
@@ -183,7 +182,7 @@ class XencodeLogger:
                     "message": log.message,
                     "extra": log.extra
                 }) + '\n')
-        
+
         if compress:
             compressed_file = output_file.with_suffix(output_file.suffix + '.gz')
             with open(output_file, 'rb') as f_in:
@@ -191,13 +190,13 @@ class XencodeLogger:
                     shutil.copyfileobj(f_in, f_out)
             output_file.unlink()  # Remove uncompressed file
             return compressed_file
-        
+
         return output_file
 
 
 class DebuggingManager:
     """Centralized debugging and diagnostic manager"""
-    
+
     def __init__(self):
         self.logger = XencodeLogger("debug")
         self.performance_monitors = {}
@@ -205,43 +204,43 @@ class DebuggingManager:
         self.diagnostics = {}
         self._profiling_enabled = False
         self._profile_data = {}
-        
+
     def enable_profiling(self):
         """Enable performance profiling"""
         self._profiling_enabled = True
         self.logger.info("Performance profiling enabled")
-    
+
     def disable_profiling(self):
         """Disable performance profiling"""
         self._profiling_enabled = False
         self.logger.info("Performance profiling disabled")
-    
+
     def profile_function(self, func_name: Optional[str] = None):
         """Decorator to profile function execution"""
         def decorator(func):
             name = func_name or f"{func.__module__}.{func.__qualname__}"
-            
+
             @wraps(func)
             def wrapper(*args, **kwargs):
                 if not self._profiling_enabled:
                     return func(*args, **kwargs)
-                
+
                 start_time = time.time()
                 start_memory = self._get_memory_usage()
-                
+
                 try:
                     result = func(*args, **kwargs)
                     success = True
-                except Exception as e:
+                except Exception:
                     success = False
                     raise
                 finally:
                     end_time = time.time()
                     end_memory = self._get_memory_usage()
-                    
+
                     execution_time = end_time - start_time
                     memory_delta = end_memory - start_memory
-                    
+
                     # Store profile data
                     if name not in self._profile_data:
                         self._profile_data[name] = {
@@ -255,7 +254,7 @@ class DebuggingManager:
                             "success_count": 0,
                             "failure_count": 0
                         }
-                    
+
                     profile = self._profile_data[name]
                     profile["call_count"] += 1
                     profile["total_time"] += execution_time
@@ -264,12 +263,12 @@ class DebuggingManager:
                     profile["max_time"] = max(profile["max_time"], execution_time)
                     profile["total_memory_delta"] += memory_delta
                     profile["avg_memory_delta"] = profile["total_memory_delta"] / profile["call_count"]
-                    
+
                     if success:
                         profile["success_count"] += 1
                     else:
                         profile["failure_count"] += 1
-                    
+
                     # Log performance data
                     self.logger.debug(
                         f"Function {name} executed",
@@ -279,11 +278,11 @@ class DebuggingManager:
                             "success": success
                         }
                     )
-                
+
                 return result
             return wrapper
         return decorator
-    
+
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB"""
         try:
@@ -291,19 +290,19 @@ class DebuggingManager:
             return process.memory_info().rss / 1024 / 1024  # MB
         except Exception:
             return 0.0
-    
+
     def start_performance_monitor(self, name: str, interval: float = 1.0):
         """Start monitoring performance metrics"""
         if name in self.performance_monitors:
             self.stop_performance_monitor(name)
-        
+
         def monitor():
             while name in self.performance_monitors:
                 try:
                     cpu_percent = psutil.cpu_percent(interval=0.1)
                     memory_percent = psutil.virtual_memory().percent
                     disk_percent = psutil.disk_usage('/').percent
-                    
+
                     self.logger.debug(
                         f"Performance metrics for {name}",
                         extra={
@@ -313,26 +312,26 @@ class DebuggingManager:
                             "timestamp": time.time()
                         }
                     )
-                    
+
                     time.sleep(interval)
                 except Exception as e:
                     self.logger.error(f"Performance monitor {name} error: {e}")
                     break
-        
+
         monitor_thread = threading.Thread(target=monitor, daemon=True)
         self.performance_monitors[name] = monitor_thread
         monitor_thread.start()
-    
+
     def stop_performance_monitor(self, name: str):
         """Stop a performance monitor"""
         if name in self.performance_monitors:
             del self.performance_monitors[name]
-    
+
     def start_resource_monitor(self, name: str, interval: float = 5.0):
         """Start monitoring system resources"""
         if name in self.resource_monitors:
             self.stop_resource_monitor(name)
-        
+
         def monitor():
             while name in self.resource_monitors:
                 try:
@@ -340,9 +339,9 @@ class DebuggingManager:
                     cpu_freq = psutil.cpu_freq()
                     memory = psutil.virtual_memory()
                     swap = psutil.swap_memory()
-                    disk_io = psutil.disk_io_counters()
-                    net_io = psutil.net_io_counters()
-                    
+                    psutil.disk_io_counters()
+                    psutil.net_io_counters()
+
                     resource_data = {
                         "cpu_count": psutil.cpu_count(),
                         "cpu_percent": psutil.cpu_percent(percpu=True),
@@ -362,28 +361,28 @@ class DebuggingManager:
                         "boot_time": psutil.boot_time(),
                         "timestamp": time.time()
                     }
-                    
+
                     self.diagnostics[f"resource_{name}"] = resource_data
-                    
+
                     self.logger.debug(
                         f"Resource metrics for {name}",
                         extra=resource_data
                     )
-                    
+
                     time.sleep(interval)
                 except Exception as e:
                     self.logger.error(f"Resource monitor {name} error: {e}")
                     break
-        
+
         monitor_thread = threading.Thread(target=monitor, daemon=True)
         self.resource_monitors[name] = monitor_thread
         monitor_thread.start()
-    
+
     def stop_resource_monitor(self, name: str):
         """Stop a resource monitor"""
         if name in self.resource_monitors:
             del self.resource_monitors[name]
-    
+
     def run_diagnostics(self) -> Dict[str, Any]:
         """Run comprehensive diagnostics"""
         diagnostics = {
@@ -394,10 +393,10 @@ class DebuggingManager:
             "profile_data": self._get_profile_data(),
             "log_stats": self._get_log_stats()
         }
-        
+
         self.diagnostics.update(diagnostics)
         return diagnostics
-    
+
     def _get_system_info(self) -> Dict[str, Any]:
         """Get system information"""
         try:
@@ -417,7 +416,7 @@ class DebuggingManager:
             }
         except Exception:
             return {"error": "Could not get system info"}
-    
+
     def _get_process_info(self) -> Dict[str, Any]:
         """Get process information"""
         try:
@@ -437,7 +436,7 @@ class DebuggingManager:
             }
         except Exception:
             return {"error": "Could not get process info"}
-    
+
     def _get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics"""
         return {
@@ -447,11 +446,11 @@ class DebuggingManager:
             "boot_time": psutil.boot_time(),
             "uptime_seconds": time.time() - psutil.boot_time()
         }
-    
+
     def _get_profile_data(self) -> Dict[str, Any]:
         """Get profiling data"""
         return self._profile_data
-    
+
     def _get_log_stats(self) -> Dict[str, Any]:
         """Get log statistics"""
         return {
@@ -459,32 +458,32 @@ class DebuggingManager:
             "logger_name": self.logger.name,
             "log_directory": str(self.logger.log_dir)
         }
-    
+
     def export_diagnostics(self, output_dir: Path) -> Path:
         """Export diagnostics to a file"""
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Run diagnostics
         diag_data = self.run_diagnostics()
-        
+
         # Write to file
         diag_file = output_dir / f"diagnostics_{int(time.time())}.json"
         with open(diag_file, 'w') as f:
             json.dump(diag_data, f, indent=2, default=str)
-        
+
         # Also export logs
         log_file = output_dir / f"logs_{int(time.time())}.log.gz"
         self.logger.export_logs(log_file.parent / log_file.name.replace('.gz', ''), compress=True)
-        
+
         return diag_file
 
 
 class DiagnosticDecorator:
     """Class for diagnostic decorators"""
-    
+
     def __init__(self, debugging_manager: DebuggingManager):
         self.debugging_manager = debugging_manager
-    
+
     def trace_calls(self, func):
         """Decorator to trace function calls"""
         @wraps(func)
@@ -499,12 +498,12 @@ class DiagnosticDecorator:
                     "kwargs_keys": list(kwargs.keys())
                 }
             )
-            
+
             start_time = time.time()
             try:
                 result = func(*args, **kwargs)
                 duration = time.time() - start_time
-                
+
                 self.debugging_manager.logger.debug(
                     f"Exiting {func_name}",
                     extra={
@@ -512,7 +511,7 @@ class DiagnosticDecorator:
                         "result_type": type(result).__name__ if result is not None else "None"
                     }
                 )
-                
+
                 return result
             except Exception as e:
                 duration = time.time() - start_time
@@ -525,7 +524,7 @@ class DiagnosticDecorator:
                     }
                 )
                 raise
-        
+
         return wrapper
 
 
@@ -557,70 +556,70 @@ def trace_function(func):
 # Example usage and testing
 if __name__ == "__main__":
     import tempfile
-    
+
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = Path(tmpdir)
-        
+
         # Get debugging manager
         dm = get_debugging_manager()
-        
+
         print("Testing Debugging and Logging System...")
-        
+
         # Enable profiling
         dm.enable_profiling()
-        
+
         # Start monitors
         dm.start_performance_monitor("main", interval=2.0)
         dm.start_resource_monitor("system", interval=5.0)
-        
+
         # Test profiling decorator
         @dm.profile_function("test_function")
         def test_function(x, y):
             time.sleep(0.1)  # Simulate work
             return x + y
-        
+
         # Test tracing decorator
         dd = DiagnosticDecorator(dm)
-        
+
         @dd.trace_calls
         def traced_function(a, b):
             return a * b
-        
+
         # Run some tests
         print("\n1. Testing profiled function:")
         for i in range(3):
             result = test_function(i, i+1)
             print(f"  test_function({i}, {i+1}) = {result}")
-        
+
         print("\n2. Testing traced function:")
         for i in range(2):
             result = traced_function(i, i+2)
             print(f"  traced_function({i}, {i+2}) = {result}")
-        
+
         # Wait a bit for monitors to collect data
         time.sleep(3)
-        
+
         # Run diagnostics
         print("\n3. Running diagnostics:")
         diagnostics = dm.run_diagnostics()
         print(f"  System: {diagnostics['system_info']['system']}")
         print(f"  CPU usage: {diagnostics['performance_stats']['cpu_percent']}%")
         print(f"  Memory usage: {diagnostics['performance_stats']['memory_percent']}%")
-        
+
         # Show profile data
         print("\n4. Profile data:")
         for func_name, stats in diagnostics['profile_data'].items():
             print(f"  {func_name}: {stats['call_count']} calls, "
                   f"avg {stats['avg_time']*1000:.2f}ms, "
                   f"{stats['success_count']} successes")
-        
+
         # Export diagnostics
         print("\n5. Exporting diagnostics:")
         export_path = dm.export_diagnostics(temp_path)
         print(f"  Diagnostics exported to: {export_path}")
-        
+
         # Stop monitors
         dm.stop_performance_monitor("main")
         dm.stop_resource_monitor("system")
-        
+
         print("\nDebugging system test completed!")

@@ -12,16 +12,22 @@ Note: Some tests are skipped if heavy ML dependencies (torch, transformers) are 
 to avoid Windows compatibility issues.
 """
 
-import json
 import os
 import sys
 import tempfile
-import pytest
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 # Add xencode to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import all needed classes for tests
+from xencode.rag.context_indexer_v2 import ContextIndexerV2, FileMetadata, IndexManifest, IndexStatus, Symbol  # noqa: E402
+from xencode.routing.prompt_router import TaskClassifier, TaskType, ProviderType, PromptRouter, RoutingPolicy  # noqa: E402
+from xencode.memory.session_summarizer import MemorySummarizer, ImportanceLevel  # noqa: E402
+from xencode.core.project_profiles import ModelProfile, ProjectProfileManager  # noqa: E402
 
 
 class TestContextIndexerV2:
@@ -32,7 +38,13 @@ class TestContextIndexerV2:
         """Setup test fixtures"""
         # Import here to avoid top-level import issues
         try:
-            from xencode.rag.context_indexer_v2 import ContextIndexerV2, IndexStatus, FileMetadata, Symbol, IndexManifest
+            from xencode.rag.context_indexer_v2 import (
+                ContextIndexerV2,
+                FileMetadata,
+                IndexManifest,
+                IndexStatus,
+                Symbol,
+            )
             self.ContextIndexerV2 = ContextIndexerV2
             self.IndexStatus = IndexStatus
             self.FileMetadata = FileMetadata
@@ -47,7 +59,7 @@ class TestContextIndexerV2:
         """Test content hash calculation"""
         if not self.has_deps:
             pytest.skip("Dependencies not available")
-        
+
         indexer = self.ContextIndexerV2()
         content = "test content"
         hash1 = indexer._calculate_content_hash(content)
@@ -305,7 +317,7 @@ class TestSessionSummarizer:
         summarizer = MemorySummarizer(session_id="test_session")
 
         # Regular turn
-        turn_id1 = summarizer.add_turn(
+        summarizer.add_turn(
             user_message="What's 2+2?",
             assistant_message="4",
         )
@@ -313,7 +325,7 @@ class TestSessionSummarizer:
         assert turn1.importance == ImportanceLevel.MEDIUM
 
         # Important turn
-        turn_id2 = summarizer.add_turn(
+        summarizer.add_turn(
             user_message="This is critical for the architecture decision",
             assistant_message="Important decision...",
         )

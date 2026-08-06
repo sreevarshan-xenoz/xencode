@@ -1,19 +1,15 @@
 """
 Resource management and cost optimization system for multi-agent systems in Xencode
 """
-from typing import Dict, List, Optional, Any, Set, Tuple
-from enum import Enum
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import uuid
+import heapq
 import json
 import sqlite3
 import threading
-import time
-import heapq
-from pathlib import Path
-from collections import defaultdict, deque
-import random
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ResourceType(Enum):
@@ -115,7 +111,7 @@ class ResourceAllocation:
 
 class ResourceManager:
     """Manages resources across the multi-agent system."""
-    
+
     def __init__(self, db_path: str = "resource_management.db"):
         self.db_path = db_path
         self.resources: Dict[str, Resource] = {}
@@ -123,18 +119,18 @@ class ResourceManager:
         self.active_allocations: Dict[str, ResourceAllocation] = {}
         self.pending_requests: List[ResourceRequest] = []
         self.access_lock = threading.RLock()
-        
+
         # Initialize database
         self._init_db()
-        
+
         # Initialize default resource pools
         self._init_default_pools()
-    
+
     def _init_db(self):
         """Initialize the resource management database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Create resources table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS resources (
@@ -150,7 +146,7 @@ class ResourceManager:
                 created_at TEXT
             )
         ''')
-        
+
         # Create resource_pools table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS resource_pools (
@@ -166,7 +162,7 @@ class ResourceManager:
                 metadata TEXT
             )
         ''')
-        
+
         # Create resource_requests table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS resource_requests (
@@ -184,7 +180,7 @@ class ResourceManager:
                 metadata TEXT
             )
         ''')
-        
+
         # Create resource_allocations table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS resource_allocations (
@@ -200,7 +196,7 @@ class ResourceManager:
                 metadata TEXT
             )
         ''')
-        
+
         # Create indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(resource_type)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_resources_status ON resources(status)')
@@ -210,10 +206,10 @@ class ResourceManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_requests_priority ON resource_requests(priority)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_allocations_agent ON resource_allocations(agent_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_allocations_status ON resource_allocations(status)')
-        
+
         conn.commit()
         conn.close()
-    
+
     def _init_default_pools(self):
         """Initialize default resource pools."""
         default_pools = [
@@ -248,16 +244,16 @@ class ResourceManager:
                 cost_per_hour=0.01
             )
         ]
-        
+
         for pool in default_pools:
             self.create_resource_pool(pool)
-    
+
     def create_resource_pool(self, pool: ResourcePool) -> str:
         """Create a new resource pool."""
         with self.access_lock:
             pool_id = str(uuid.uuid4())
             pool.pool_id = pool_id
-            
+
             # Create initial resources based on pool size
             for i in range(pool.current_size):
                 resource = Resource(
@@ -269,16 +265,16 @@ class ResourceManager:
                 )
                 pool.resources.append(resource)
                 self.resources[resource.resource_id] = resource
-            
+
             self.resource_pools[pool_id] = pool
-            
+
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 INSERT INTO resource_pools
-                (pool_id, pool_type, resource_type, total_capacity, available_capacity, 
+                (pool_id, pool_type, resource_type, total_capacity, available_capacity,
                  min_size, max_size, current_size, cost_per_hour, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -293,7 +289,7 @@ class ResourceManager:
                 pool.cost_per_hour,
                 json.dumps(pool.metadata)
             ))
-            
+
             # Store resources
             for resource in pool.resources:
                 cursor.execute('''
@@ -311,20 +307,20 @@ class ResourceManager:
                     json.dumps(resource.metadata),
                     resource.created_at.isoformat()
                 ))
-            
+
             conn.commit()
             conn.close()
-        
+
         return pool_id
-    
-    def request_resources(self, agent_id: str, resource_type: ResourceType, 
+
+    def request_resources(self, agent_id: str, resource_type: ResourceType,
                          required_amount: float, priority: TaskPriority = TaskPriority.MEDIUM,
-                         deadline: Optional[datetime] = None, 
+                         deadline: Optional[datetime] = None,
                          estimated_duration: float = 3600.0,
                          metadata: Dict[str, Any] = None) -> str:
         """Request resources for an agent."""
         metadata = metadata or {}
-        
+
         request = ResourceRequest(
             agent_id=agent_id,
             resource_type=resource_type,
@@ -334,18 +330,18 @@ class ResourceManager:
             estimated_duration=estimated_duration,
             metadata=metadata
         )
-        
+
         with self.access_lock:
             # Add to pending requests
             self.pending_requests.append(request)
-            
+
             # Store in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 INSERT INTO resource_requests
-                (request_id, agent_id, resource_type, required_amount, priority, deadline, 
+                (request_id, agent_id, resource_type, required_amount, priority, deadline,
                  estimated_duration, created_at, status, allocated_resources, cost_estimate, metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
@@ -362,12 +358,12 @@ class ResourceManager:
                 request.cost_estimate,
                 json.dumps(request.metadata)
             ))
-            
+
             conn.commit()
             conn.close()
-        
+
         return request.request_id
-    
+
     def allocate_resources(self) -> int:
         """Allocate resources to pending requests based on priority and availability."""
         with self.access_lock:
@@ -377,26 +373,26 @@ class ResourceManager:
                 key=lambda r: (r.priority.value, -r.created_at.timestamp()),
                 reverse=True
             )
-            
+
             allocated_count = 0
-            
+
             for request in sorted_requests:
                 # Find appropriate resource pool
                 pool = self._find_pool_for_request(request)
                 if not pool:
                     continue
-                
+
                 # Try to allocate resources
                 allocated_resources = self._allocate_from_pool(request, pool)
                 if allocated_resources:
                     # Update request status
                     request.status = ResourceAllocationStatus.ALLOCATED
                     request.allocated_resources = [r.resource_id for r in allocated_resources]
-                    
+
                     # Calculate cost estimate
                     cost_per_second = sum(r.cost_per_unit for r in allocated_resources)
                     request.cost_estimate = cost_per_second * request.estimated_duration
-                    
+
                     # Create allocations
                     for resource in allocated_resources:
                         allocation = ResourceAllocation(
@@ -407,70 +403,70 @@ class ResourceManager:
                             cost_incurred=cost_per_second * request.estimated_duration
                         )
                         self.active_allocations[allocation.allocation_id] = allocation
-                        
+
                         # Update resource availability
                         resource.available -= min(resource.available, request.required_amount)
                         resource.agent_id = request.agent_id
                         resource.status = "in_use"
-                        
+
                         # Update pool availability
                         pool.available_capacity -= min(resource.available + resource.capacity - resource.available, request.required_amount)
-                    
+
                     # Remove from pending requests
                     self.pending_requests = [r for r in self.pending_requests if r.request_id != request.request_id]
-                    
+
                     # Update database
                     self._update_request_in_db(request)
                     self._update_resource_in_db(allocated_resources[0])  # Update one resource to trigger pool update
                     self._add_allocation_to_db(allocation)
-                    
+
                     allocated_count += 1
-            
+
             return allocated_count
-    
+
     def _find_pool_for_request(self, request: ResourceRequest) -> Optional[ResourcePool]:
         """Find an appropriate resource pool for a request."""
         for pool in self.resource_pools.values():
-            if (pool.resource_type == request.resource_type and 
+            if (pool.resource_type == request.resource_type and
                 pool.available_capacity >= request.required_amount):
                 return pool
         return None
-    
+
     def _allocate_from_pool(self, request: ResourceRequest, pool: ResourcePool) -> List[Resource]:
         """Allocate resources from a pool."""
         allocated_resources = []
         remaining_amount = request.required_amount
-        
+
         # Sort resources by availability (most available first)
         available_resources = [r for r in pool.resources if r.status == "available"]
         available_resources.sort(key=lambda r: r.available, reverse=True)
-        
+
         for resource in available_resources:
             if remaining_amount <= 0:
                 break
-                
+
             alloc_amount = min(resource.available, remaining_amount)
             if alloc_amount > 0:
                 # Update resource
                 resource.available -= alloc_amount
                 resource.agent_id = request.agent_id
                 resource.status = "in_use"
-                
+
                 allocated_resources.append(resource)
                 remaining_amount -= alloc_amount
-                
+
                 # Update database
                 self._update_resource_in_db(resource)
-        
+
         return allocated_resources if remaining_amount <= 0 else []
-    
+
     def _update_resource_in_db(self, resource: Resource):
         """Update a resource in the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            UPDATE resources 
+            UPDATE resources
             SET available = ?, agent_id = ?, status = ?
             WHERE resource_id = ?
         ''', (
@@ -479,17 +475,17 @@ class ResourceManager:
             resource.status,
             resource.resource_id
         ))
-        
+
         conn.commit()
         conn.close()
-    
+
     def _update_request_in_db(self, request: ResourceRequest):
         """Update a request in the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
-            UPDATE resource_requests 
+            UPDATE resource_requests
             SET status = ?, allocated_resources = ?, cost_estimate = ?
             WHERE request_id = ?
         ''', (
@@ -498,15 +494,15 @@ class ResourceManager:
             request.cost_estimate,
             request.request_id
         ))
-        
+
         conn.commit()
         conn.close()
-    
+
     def _add_allocation_to_db(self, allocation: ResourceAllocation):
         """Add an allocation to the database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute('''
             INSERT INTO resource_allocations
             (allocation_id, request_id, resource_id, agent_id, amount_allocated, start_time, cost_incurred, status, metadata)
@@ -522,36 +518,36 @@ class ResourceManager:
             allocation.status.value,
             json.dumps(allocation.metadata)
         ))
-        
+
         conn.commit()
         conn.close()
-    
+
     def release_resources(self, allocation_id: str) -> bool:
         """Release allocated resources."""
         with self.access_lock:
             if allocation_id not in self.active_allocations:
                 return False
-            
+
             allocation = self.active_allocations[allocation_id]
             allocation.status = ResourceAllocationStatus.RELEASED
             allocation.end_time = datetime.now()
-            
+
             # Find the resource and update it
             resource = self.resources.get(allocation.resource_id)
             if resource:
                 resource.available += allocation.amount_allocated
                 resource.agent_id = None
                 resource.status = "available"
-                
+
                 # Update database
                 self._update_resource_in_db(resource)
-            
+
             # Update allocation in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
-                UPDATE resource_allocations 
+                UPDATE resource_allocations
                 SET status = ?, end_time = ?
                 WHERE allocation_id = ?
             ''', (
@@ -559,34 +555,34 @@ class ResourceManager:
                 allocation.end_time.isoformat(),
                 allocation.allocation_id
             ))
-            
+
             conn.commit()
             conn.close()
-            
+
             # Remove from active allocations
             del self.active_allocations[allocation_id]
-            
+
             return True
-    
+
     def get_resource_utilization(self) -> Dict[str, Any]:
         """Get resource utilization statistics."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Get total resources by type
         cursor.execute('SELECT resource_type, SUM(capacity), SUM(available) FROM resources GROUP BY resource_type')
         resource_stats = cursor.fetchall()
-        
+
         # Get active allocations
         cursor.execute('SELECT COUNT(*), SUM(amount_allocated) FROM resource_allocations WHERE status = ?', ('allocated',))
         active_allocations = cursor.fetchone()
-        
+
         # Get pending requests
         cursor.execute('SELECT COUNT(*), SUM(required_amount) FROM resource_requests WHERE status = ?', ('pending',))
         pending_requests = cursor.fetchone()
-        
+
         conn.close()
-        
+
         utilization = {
             'resource_types': {},
             'active_allocations': active_allocations[0],
@@ -594,36 +590,36 @@ class ResourceManager:
             'pending_requests': pending_requests[0],
             'pending_request_amount': pending_requests[1] or 0.0
         }
-        
+
         for stat in resource_stats:
             resource_type = stat[0]
             total_capacity = stat[1]
             available_capacity = stat[2]
             utilized = total_capacity - available_capacity if total_capacity else 0
-            
+
             utilization['resource_types'][resource_type] = {
                 'total': total_capacity,
                 'available': available_capacity,
                 'utilized': utilized,
                 'utilization_rate': utilized / total_capacity if total_capacity else 0
             }
-        
+
         return utilization
-    
+
     def scale_pool(self, pool_id: str, new_size: int) -> bool:
         """Scale a resource pool up or down."""
         with self.access_lock:
             if pool_id not in self.resource_pools:
                 return False
-            
+
             pool = self.resource_pools[pool_id]
-            
+
             # Check if new size is within bounds
             if new_size < pool.min_size or new_size > pool.max_size:
                 return False
-            
+
             size_difference = new_size - pool.current_size
-            
+
             if size_difference > 0:
                 # Scale up - add resources
                 for i in range(size_difference):
@@ -636,11 +632,11 @@ class ResourceManager:
                     )
                     pool.resources.append(new_resource)
                     self.resources[new_resource.resource_id] = new_resource
-                    
+
                     # Add to database
                     conn = sqlite3.connect(self.db_path)
                     cursor = conn.cursor()
-                    
+
                     cursor.execute('''
                         INSERT INTO resources
                         (resource_id, resource_type, capacity, available, cost_per_unit, location, status, metadata, created_at)
@@ -656,44 +652,44 @@ class ResourceManager:
                         json.dumps(new_resource.metadata),
                         new_resource.created_at.isoformat()
                     ))
-                    
+
                     conn.commit()
                     conn.close()
-                
+
                 pool.current_size = new_size
                 pool.available_capacity = sum(r.available for r in pool.resources)
                 pool.total_capacity = sum(r.capacity for r in pool.resources)
-                
+
             elif size_difference < 0:
                 # Scale down - remove resources (only if not in use)
                 resources_to_remove = []
                 for resource in pool.resources:
                     if resource.status == "available" and len(resources_to_remove) < abs(size_difference):
                         resources_to_remove.append(resource)
-                
+
                 for resource in resources_to_remove:
                     pool.resources.remove(resource)
                     del self.resources[resource.resource_id]
-                    
+
                     # Remove from database
                     conn = sqlite3.connect(self.db_path)
                     cursor = conn.cursor()
-                    
+
                     cursor.execute('DELETE FROM resources WHERE resource_id = ?', (resource.resource_id,))
-                    
+
                     conn.commit()
                     conn.close()
-                
+
                 pool.current_size = new_size
                 pool.available_capacity = sum(r.available for r in pool.resources)
                 pool.total_capacity = sum(r.capacity for r in pool.resources)
-            
+
             # Update pool in database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
-                UPDATE resource_pools 
+                UPDATE resource_pools
                 SET current_size = ?, total_capacity = ?, available_capacity = ?
                 WHERE pool_id = ?
             ''', (
@@ -702,22 +698,22 @@ class ResourceManager:
                 pool.available_capacity,
                 pool_id
             ))
-            
+
             conn.commit()
             conn.close()
-            
+
             return True
 
 
 class CostOptimizer:
     """Optimizes costs for resource allocation."""
-    
+
     def __init__(self, resource_manager: ResourceManager):
         self.resource_manager = resource_manager
         self.cost_history: List[Dict[str, Any]] = []
         self.access_lock = threading.RLock()
-    
-    def calculate_optimal_allocation(self, agent_id: str, resource_type: ResourceType, 
+
+    def calculate_optimal_allocation(self, agent_id: str, resource_type: ResourceType,
                                    required_amount: float, budget_limit: Optional[float] = None) -> Dict[str, Any]:
         """Calculate optimal resource allocation considering cost."""
         with self.access_lock:
@@ -726,35 +722,35 @@ class CostOptimizer:
                 r for r in self.resource_manager.resources.values()
                 if r.resource_type == resource_type and r.status == "available"
             ]
-            
+
             # Sort by cost efficiency (lowest cost per unit first)
             available_resources.sort(key=lambda r: r.cost_per_unit)
-            
+
             total_cost = 0.0
             allocated_resources = []
             remaining_amount = required_amount
-            
+
             for resource in available_resources:
                 if remaining_amount <= 0:
                     break
-                
+
                 alloc_amount = min(resource.available, remaining_amount)
                 cost = alloc_amount * resource.cost_per_unit
-                
+
                 if budget_limit and (total_cost + cost) > budget_limit:
                     # If adding this resource would exceed budget, skip
                     continue
-                
+
                 allocated_resources.append({
                     'resource_id': resource.resource_id,
                     'amount': alloc_amount,
                     'cost': cost,
                     'cost_per_unit': resource.cost_per_unit
                 })
-                
+
                 total_cost += cost
                 remaining_amount -= alloc_amount
-            
+
             result = {
                 'success': remaining_amount <= 0,
                 'allocated_resources': allocated_resources,
@@ -763,7 +759,7 @@ class CostOptimizer:
                 'budget_limit': budget_limit,
                 'cost_efficiency': total_cost / required_amount if required_amount > 0 else 0
             }
-            
+
             # Add to cost history
             self.cost_history.append({
                 'timestamp': datetime.now(),
@@ -774,19 +770,19 @@ class CostOptimizer:
                 'total_cost': total_cost,
                 'budget_limit': budget_limit
             })
-            
+
             return result
-    
+
     def get_cost_optimization_report(self) -> Dict[str, Any]:
         """Get a report on cost optimization."""
         with self.access_lock:
             if not self.cost_history:
                 return {'message': 'No cost history available'}
-            
+
             total_cost = sum(entry['total_cost'] for entry in self.cost_history)
             total_resources = sum(entry['allocated_amount'] for entry in self.cost_history)
             avg_cost_per_unit = total_cost / total_resources if total_resources > 0 else 0
-            
+
             # Calculate savings compared to worst-case scenario (highest cost resources)
             potential_max_cost = 0.0
             for entry in self.cost_history:
@@ -796,7 +792,7 @@ class CostOptimizer:
                     if r.resource_type == ResourceType(entry['resource_type']) and r.status == "available"
                 ]
                 expensive_resources.sort(key=lambda r: r.cost_per_unit, reverse=True)
-                
+
                 remaining = entry['allocated_amount']
                 max_cost = 0.0
                 for resource in expensive_resources:
@@ -805,12 +801,12 @@ class CostOptimizer:
                     alloc_amount = min(resource.available, remaining)
                     max_cost += alloc_amount * resource.cost_per_unit
                     remaining -= alloc_amount
-                
+
                 potential_max_cost += max_cost
-            
+
             actual_cost = total_cost
             potential_savings = potential_max_cost - actual_cost if potential_max_cost > actual_cost else 0
-            
+
             return {
                 'total_cost_incurred': actual_cost,
                 'average_cost_per_unit': avg_cost_per_unit,
@@ -824,28 +820,28 @@ class CostOptimizer:
 
 class PriorityScheduler:
     """Manages priority-based scheduling of resource requests."""
-    
+
     def __init__(self, resource_manager: ResourceManager):
         self.resource_manager = resource_manager
         self.request_queue: List[Tuple[int, datetime, str]] = []  # (priority, timestamp, request_id)
         self.access_lock = threading.RLock()
-    
+
     def submit_request_with_priority(self, request_id: str, priority: TaskPriority):
         """Submit a request to the priority queue."""
         with self.access_lock:
             # Add to heap queue: higher priority value = higher priority
             heapq.heappush(self.request_queue, (-priority.value, datetime.now(), request_id))
-    
+
     def get_next_request(self) -> Optional[str]:
         """Get the next highest priority request."""
         with self.access_lock:
             if not self.request_queue:
                 return None
-            
+
             # Pop the highest priority request
             priority_neg, timestamp, request_id = heapq.heappop(self.request_queue)
             return request_id
-    
+
     def get_queue_status(self) -> Dict[str, Any]:
         """Get the status of the priority queue."""
         with self.access_lock:
@@ -863,16 +859,16 @@ class PriorityScheduler:
 
 class ResourceManagementSystem:
     """Main system for resource management and cost optimization."""
-    
+
     def __init__(self, db_path: str = "resource_management.db"):
         self.resource_manager = ResourceManager(db_path)
         self.cost_optimizer = CostOptimizer(self.resource_manager)
         self.priority_scheduler = PriorityScheduler(self.resource_manager)
         self.access_lock = threading.RLock()
-    
-    def request_resources(self, agent_id: str, resource_type: ResourceType, 
+
+    def request_resources(self, agent_id: str, resource_type: ResourceType,
                          required_amount: float, priority: TaskPriority = TaskPriority.MEDIUM,
-                         deadline: Optional[datetime] = None, 
+                         deadline: Optional[datetime] = None,
                          estimated_duration: float = 3600.0,
                          budget_limit: Optional[float] = None) -> Dict[str, Any]:
         """Request resources with cost optimization."""
@@ -881,69 +877,69 @@ class ResourceManagementSystem:
             agent_id, resource_type, required_amount, priority, deadline, estimated_duration
         )
         self.priority_scheduler.submit_request_with_priority(request_id, priority)
-        
+
         # If budget is specified, use cost optimizer
         if budget_limit:
             optimization_result = self.cost_optimizer.calculate_optimal_allocation(
                 agent_id, resource_type, required_amount, budget_limit
             )
-            
+
             return {
                 'request_id': request_id,
                 'optimization_result': optimization_result,
                 'message': 'Request submitted with cost optimization'
             }
-        
+
         return {
             'request_id': request_id,
             'message': 'Request submitted'
         }
-    
+
     def process_resource_requests(self) -> Dict[str, Any]:
         """Process pending resource requests."""
         with self.access_lock:
             # Process requests based on priority
             processed_count = 0
             results = []
-            
+
             while True:
                 next_request_id = self.priority_scheduler.get_next_request()
                 if not next_request_id:
                     break
-                
+
                 # For now, just allocate resources directly
                 # In a real system, we'd look up the request details
                 allocated = self.resource_manager.allocate_resources()
                 processed_count += allocated
                 results.append(f"Processed {allocated} allocations")
-                
+
                 # Limit to prevent infinite loop
                 if processed_count > 10:
                     break
-        
+
         return {
             'processed_requests': processed_count,
             'results': results,
             'queue_status': self.priority_scheduler.get_queue_status()
         }
-    
+
     def release_resources(self, allocation_id: str) -> bool:
         """Release allocated resources."""
         return self.resource_manager.release_resources(allocation_id)
-    
+
     def get_utilization_report(self) -> Dict[str, Any]:
         """Get resource utilization report."""
         return self.resource_manager.get_resource_utilization()
-    
+
     def get_cost_report(self) -> Dict[str, Any]:
         """Get cost optimization report."""
         return self.cost_optimizer.get_cost_optimization_report()
-    
+
     def scale_resource_pool(self, pool_id: str, new_size: int) -> bool:
         """Scale a resource pool."""
         return self.resource_manager.scale_pool(pool_id, new_size)
-    
-    def get_optimal_allocation(self, agent_id: str, resource_type: ResourceType, 
+
+    def get_optimal_allocation(self, agent_id: str, resource_type: ResourceType,
                               required_amount: float, budget_limit: Optional[float] = None) -> Dict[str, Any]:
         """Get optimal resource allocation considering cost."""
         return self.cost_optimizer.calculate_optimal_allocation(
@@ -980,11 +976,11 @@ def create_memory_resource_pool(initial_size: int = 2, total_capacity: float = 3
     )
 
 
-def request_resources_with_budget(agent_id: str, resource_type: ResourceType, 
+def request_resources_with_budget(agent_id: str, resource_type: ResourceType,
                                 required_amount: float, budget: float) -> Dict[str, Any]:
     """Request resources with a specific budget constraint."""
     system = ResourceManagementSystem()
     return system.request_resources(
-        agent_id, resource_type, required_amount, 
+        agent_id, resource_type, required_amount,
         budget_limit=budget
     )

@@ -9,47 +9,45 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
-from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Label, Button
-from textual.binding import Binding
-from textual.screen import ModalScreen
-import websockets
 import aiohttp
-
-from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
-from xencode.tui.widgets.editor import CodeEditor
-from xencode.tui.widgets.chat import ChatPanel, ChatSubmitted
-from xencode.tui.widgets.model_selector import ModelSelector, ModelSelected
-from xencode.tui.widgets.collaboration import CollaborationPanel
-from xencode.tui.widgets.commit_dialog import CommitDialog
-from xencode.tui.widgets.terminal import TerminalPanel
-from xencode.tui.widgets.agent_panel import AgentPanel, AgentTaskSubmitted
-from xencode.tui.widgets.bytebot_panel import ByteBotPanel, ByteBotTaskSubmitted
-from xencode.tui.widgets.settings_panel import SettingsPanel
-from xencode.tui.widgets.options_panel import OptionsPanel
-from xencode.tui.widgets.code_review_panel import CodeReviewPanel
-from xencode.tui.widgets.performance_dashboard import PerformanceDashboard
-from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
-from xencode.tui.widgets.voice_interface_panel import VoiceInterfacePanel
-from xencode.tui.widgets.provider_health_panel import ProviderHealthDashboard
+import websockets
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Footer, Header, Label
 
 # Import feature panels
 from xencode.tui.features.feature_navigator import FeatureNavigator
-from xencode.tui.features.project_analyzer_panel import ProjectAnalyzerPanel
 from xencode.tui.features.learning_mode_panel import LearningModePanel
 from xencode.tui.features.multi_language_panel import MultiLanguagePanel
-from xencode.tui.widgets.custom_models_panel import CustomModelsPanel
-from xencode.tui.widgets.security_auditor_panel import SecurityAuditorPanel
-from xencode.tui.widgets.performance_profiler_panel import PerformanceProfilerPanel
-
+from xencode.tui.features.project_analyzer_panel import ProjectAnalyzerPanel
 from xencode.tui.utils.model_checker import ModelChecker
+from xencode.tui.widgets.agent_panel import AgentPanel, AgentTaskSubmitted
+from xencode.tui.widgets.bytebot_panel import ByteBotPanel, ByteBotTaskSubmitted
+from xencode.tui.widgets.chat import ChatPanel, ChatSubmitted
+from xencode.tui.widgets.code_review_panel import CodeReviewPanel
+from xencode.tui.widgets.collaboration import CollaborationPanel
+from xencode.tui.widgets.commit_dialog import CommitDialog
+from xencode.tui.widgets.custom_models_panel import CustomModelsPanel
+from xencode.tui.widgets.editor import CodeEditor
+from xencode.tui.widgets.file_explorer import FileExplorer, FileSelected
+from xencode.tui.widgets.model_selector import ModelSelected, ModelSelector
+from xencode.tui.widgets.options_panel import OptionsPanel
+from xencode.tui.widgets.performance_dashboard import PerformanceDashboard
+from xencode.tui.widgets.performance_profiler_panel import PerformanceProfilerPanel
+from xencode.tui.widgets.provider_health_panel import ProviderHealthDashboard
+from xencode.tui.widgets.security_auditor_panel import SecurityAuditorPanel
+from xencode.tui.widgets.settings_panel import SettingsPanel
+from xencode.tui.widgets.terminal import TerminalPanel
+from xencode.tui.widgets.terminal_assistant_panel import TerminalAssistantPanel
+from xencode.tui.widgets.voice_interface_panel import VoiceInterfacePanel
 
 # Import core functionality
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from xencode_core import run_streaming_query, ModelManager, ConversationMemory
-from xencode.auth.qwen_auth import qwen_auth_manager, QwenAuthError
+from xencode.auth.qwen_auth import QwenAuthError, qwen_auth_manager
+from xencode_core import ConversationMemory, ModelManager
 
 
 class OnboardingModal(ModalScreen):
@@ -117,46 +115,46 @@ class OnboardingModal(ModalScreen):
 
 class XencodeApp(App):
     """Xencode TUI Application"""
-    
+
     CSS = """
     Screen {
         background: $surface;
     }
-    
+
     #main-container {
         height: 100%;
     }
-    
+
     #left-panel {
         width: 25%;
         max-width: 50;
     }
-    
+
     #left-panel.hidden {
         display: none;
     }
-    
+
     #center-panel {
         width: 1fr;
     }
-    
+
     #right-panel {
         width: 35%;
         min-width: 40;
     }
-    
+
     #model-selector-panel {
         height: 50%;
     }
-    
+
     #model-selector-panel.hidden {
         display: none;
     }
-    
+
     #collab-panel-container {
         height: 50%;
     }
-    
+
     #collab-panel-container.hidden {
         display: none;
     }
@@ -338,24 +336,24 @@ class XencodeApp(App):
         background: #26151c;
         color: #ffe8f0;
     }
-    
+
     #chat-panel-container {
         height: 1fr;
     }
-    
+
     #chat-panel-container.shrink {
         height: 50%;
     }
-    
+
     FileExplorer {
         height: 100%;
         border: solid $primary;
     }
     """
-    
+
     TITLE = "Xencode - AI-Powered Code Assistant"
     SUB_TITLE = "VS Code in Terminal"
-    
+
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+e", "toggle_explorer", "Toggle Explorer"),
@@ -384,23 +382,23 @@ class XencodeApp(App):
         Binding("ctrl+shift+l", "logout_qwen", "Logout Qwen"),
         Binding("f1", "help", "Help"),
     ]
-    
+
     def __init__(self, root_path: Optional[Path] = None, *args, **kwargs):
         """Initialize Xencode app
-        
+
         Args:
             root_path: Root directory for file explorer
         """
         super().__init__(*args, **kwargs)
         self.root_path = root_path or Path.cwd()
-        
+
         # Core components
         self.model_manager = ModelManager()
         self.memory = ConversationMemory()
-        
+
         # Detect available models
         available_models = ModelChecker.get_available_models()
-        
+
         # Smart default selection
         if available_models:
             # Filter out embedding models for chat
@@ -419,7 +417,7 @@ class XencodeApp(App):
                 self.current_model = available_models[0]
         else:
             self.current_model = "qwen2.5:7b"  # Default fallback
-        
+
         # Widgets (will be set in compose)
         self.file_explorer: Optional[FileExplorer] = None
         self.code_editor: Optional[CodeEditor] = None
@@ -436,7 +434,7 @@ class XencodeApp(App):
         self.feature_navigator: Optional[FeatureNavigator] = None
         self.voice_interface_panel: Optional[VoiceInterfacePanel] = None
         self.provider_health_panel: Optional[ProviderHealthDashboard] = None
-        
+
         # Feature panels
         self.project_analyzer_panel: Optional[ProjectAnalyzerPanel] = None
         self.learning_mode_panel: Optional[LearningModePanel] = None
@@ -444,13 +442,13 @@ class XencodeApp(App):
         self.custom_models_panel: Optional[CustomModelsPanel] = None
         self.security_auditor_panel: Optional[SecurityAuditorPanel] = None
         self.performance_profiler_panel: Optional[PerformanceProfilerPanel] = None
-        
+
         # Collaboration state
         self.server_process: Optional[subprocess.Popen] = None
         self.ws_connection: Optional[websockets.WebSocketClientProtocol] = None
         self.session_id: Optional[str] = None
         self.username: Optional[str] = None
-        
+
         # Ensemble state
         self.use_ensemble = False
         self.ensemble_models = ["qwen2.5:7b"]
@@ -459,32 +457,32 @@ class XencodeApp(App):
         # Persisted TUI settings/state
         self.settings_path = Path.home() / ".xencode_tui_settings.json"
         self.ui_settings = self._load_ui_settings()
-    
+
     def compose(self) -> ComposeResult:
         """Compose the app layout"""
         yield Header()
-        
+
         with Container(id="main-container"):
             with Horizontal():
                 # Left panel: File Explorer
                 with Vertical(id="left-panel"):
                     self.file_explorer = FileExplorer(self.root_path)
                     yield self.file_explorer
-                
+
                 # Center panel: Code Editor + Terminal
                 with Vertical(id="center-panel"):
                     self.code_editor = CodeEditor()
                     self.code_editor.border_title = "Code Viewer"
                     yield self.code_editor
                     yield TerminalPanel()
-                
+
                 # Right panel: Model Selector + Collab + Chat
                 with Vertical(id="right-panel"):
                     # Model selector (initially hidden)
                     with Vertical(id="model-selector-panel", classes="hidden"):
                         self.model_selector = ModelSelector()
                         yield self.model_selector
-                    
+
                     # Collaboration panel (initially hidden)
                     with Vertical(id="collab-panel-container", classes="hidden"):
                         self.collab_panel = CollaborationPanel()
@@ -574,9 +572,9 @@ class XencodeApp(App):
                     with Vertical(id="chat-panel-container"):
                         self.chat_panel = ChatPanel()
                         yield self.chat_panel
-        
+
         yield Footer()
-    
+
     def on_mount(self) -> None:
         """Called when app is mounted"""
         self._apply_ui_settings()
@@ -600,16 +598,16 @@ class XencodeApp(App):
 
         if self._should_show_onboarding():
             self.push_screen(OnboardingModal(), self._handle_onboarding_result)
-    
+
     def on_file_selected(self, event: FileSelected) -> None:
         """Handle file selection from explorer
-        
+
         Args:
             event: File selection event
         """
         if self.code_editor:
             self.code_editor.load_file(event.path)
-        
+
         # Broadcast file open if connected
         if self.ws_connection and self.session_id:
             try:
@@ -625,27 +623,27 @@ class XencodeApp(App):
                     pass
             except Exception as e:
                 self.notify(f"Failed to broadcast file open: {e}", severity="error")
-        
+
         # Optionally notify chat
         if self.chat_panel:
             self.chat_panel.add_system_message(
                 f"Opened: {event.path.name}"
             )
-    
+
     def on_model_selected(self, event: ModelSelected) -> None:
         """Handle model selection changes
-        
+
         Args:
             event: Model selection event
         """
         self.ensemble_models = event.models
         self.use_ensemble = event.is_ensemble
         self.ensemble_method = event.method
-        
+
         # Update current model for single mode
         if not self.use_ensemble and self.ensemble_models:
             self.current_model = self.ensemble_models[0]
-    
+
     async def on_collaboration_panel_host_session(self, event: CollaborationPanel.HostSession) -> None:
         """Handle host session request"""
         try:
@@ -656,7 +654,7 @@ class XencodeApp(App):
             )
             self.notify("Starting collaboration server...", severity="information")
             await asyncio.sleep(2)  # Wait for server to start
-            
+
             # Create session via API (using requests for simplicity, could use aiohttp)
             import requests
             response = requests.post("http://localhost:8000/sessions/create", params={"username": "Host"})
@@ -665,17 +663,17 @@ class XencodeApp(App):
                 self.session_id = str(data["session_id"])
                 invite_code = data["invite_code"]
                 self.username = "Host"
-                
+
                 # Connect WebSocket
                 await self._connect_websocket("localhost:8000", self.session_id, "Host")
-                
+
                 # Update UI
                 if self.collab_panel:
                     self.collab_panel.set_connected("host", invite_code)
                     self.collab_panel.add_user("Host (You)")
             else:
                 self.notify(f"Failed to create session: {response.text}", severity="error")
-                
+
         except Exception as e:
             self.notify(f"Error hosting session: {e}", severity="error")
 
@@ -689,17 +687,17 @@ class XencodeApp(App):
                 data = response.json()
                 self.session_id = str(data["session_id"])
                 self.username = event.username
-                
+
                 # Connect WebSocket
                 await self._connect_websocket("localhost:8000", self.session_id, event.username)
-                
+
                 # Update UI
                 if self.collab_panel:
                     self.collab_panel.set_connected("guest", event.invite_code)
                     self.collab_panel.add_user(f"{event.username} (You)")
             else:
                 self.notify("Invalid invite code or session not found", severity="error")
-                
+
         except Exception as e:
             self.notify(f"Error joining session: {e}", severity="error")
 
@@ -709,10 +707,10 @@ class XencodeApp(App):
         try:
             self.ws_connection = await websockets.connect(uri)
             self.notify(f"Connected to session as {username}", severity="information")
-            
+
             # Start listening loop
             asyncio.create_task(self._listen_websocket())
-            
+
         except Exception as e:
             self.notify(f"WebSocket connection failed: {e}", severity="error")
 
@@ -720,7 +718,7 @@ class XencodeApp(App):
         """Listen for WebSocket messages"""
         if not self.ws_connection:
             return
-            
+
         try:
             async for message in self.ws_connection:
                 data = json.loads(message)
@@ -728,13 +726,13 @@ class XencodeApp(App):
         except websockets.exceptions.ConnectionClosed:
             self.notify("Disconnected from session", severity="warning")
             self.ws_connection = None
-            
+
     async def _handle_collab_message(self, data: dict):
         """Handle incoming collaboration message"""
         msg_type = data.get("type")
         content = data.get("content")
         sender = data.get("sender", "System")
-        
+
         if msg_type == "chat":
             if self.chat_panel:
                 self.chat_panel.add_message("user", content, sender) # Re-using user role for now
@@ -745,7 +743,7 @@ class XencodeApp(App):
                     user = content.split(" ")[0]
                     self.collab_panel.add_user(user)
             self.notify(content, severity="information")
-            
+
         elif msg_type == "file_open":
             # Handle remote file open (Follow Mode)
             try:
@@ -762,12 +760,12 @@ class XencodeApp(App):
 
     async def on_chat_submitted(self, event: ChatSubmitted) -> None:
         """Handle chat submission
-        
+
         Args:
             event: Chat submission event
         """
         user_query = event.content
-        
+
         if not self.chat_panel:
             return
 
@@ -783,14 +781,14 @@ class XencodeApp(App):
                 )
                 return
 
-            thinking_msg = self.chat_panel.add_assistant_message("ByteBot is working...")
+            self.chat_panel.add_assistant_message("ByteBot is working...")
             try:
                 result_text = await self._run_bytebot_intent(intent_text, mode)
                 self.chat_panel.update_streaming_message(result_text)
             except Exception as e:
                 self.chat_panel.update_streaming_message(f"ByteBot error: {e}")
             return
-            
+
         # Broadcast if connected
         if self.ws_connection and self.session_id:
             try:
@@ -800,14 +798,14 @@ class XencodeApp(App):
                 }))
             except Exception as e:
                 self.notify(f"Failed to broadcast message: {e}", severity="error")
-        
+
         # Add thinking indicator
-        thinking_msg = self.chat_panel.add_assistant_message("Thinking...")
-        
+        self.chat_panel.add_assistant_message("Thinking...")
+
         try:
             # Build context from current file if open
             context_parts = []
-            
+
             if self.code_editor and self.code_editor.current_file:
                 file_path = self.code_editor.current_file
                 try:
@@ -828,27 +826,31 @@ class XencodeApp(App):
                 )
             else:
                 enhanced_prompt = user_query
-            
+
             # Stream response (ensemble or single model)
             full_response = ""
             if self.use_ensemble:
                 # Use ensemble
-                from xencode.ai_ensembles import EnsembleReasoner, QueryRequest, EnsembleMethod
-                
+                from xencode.ai_ensembles import (
+                    EnsembleMethod,
+                    EnsembleReasoner,
+                    QueryRequest,
+                )
+
                 method_map = {
                     "vote": EnsembleMethod.VOTE,
                     "weighted": EnsembleMethod.WEIGHTED,
                     "consensus": EnsembleMethod.CONSENSUS,
                     "hybrid": EnsembleMethod.HYBRID,
                 }
-                
+
                 reasoner = EnsembleReasoner()
                 query = QueryRequest(
                     prompt=enhanced_prompt,
                     models=self.ensemble_models,
                     method=method_map.get(self.ensemble_method, EnsembleMethod.VOTE)
                 )
-                
+
                 response = await reasoner.reason(query)
                 full_response = response.fused_response
                 self.chat_panel.update_streaming_message(full_response)
@@ -861,7 +863,7 @@ class XencodeApp(App):
                 async for chunk in self._stream_ai_response(enhanced_prompt):
                     full_response += chunk
                     self.chat_panel.update_streaming_message(full_response)
-        
+
         except Exception as e:
             self.chat_panel.update_streaming_message(
                 f"Error: {str(e)}"
@@ -925,7 +927,7 @@ class XencodeApp(App):
         status = result.get("status", "unknown")
         summary = result.get("summary") or result.get("message") or ""
         output_lines = [
-            f"**ByteBot**",
+            "**ByteBot**",
             f"- Mode: {mode}",
             f"- Status: {status}",
         ]
@@ -945,7 +947,7 @@ class XencodeApp(App):
                 )
 
         return "\n".join(output_lines)
-    
+
     async def on_agent_task_submitted(self, event: "AgentTaskSubmitted") -> None:
         """Handle agent task submission
 
@@ -958,7 +960,7 @@ class XencodeApp(App):
             return
 
         # Add thinking indicator
-        thinking_msg = self.chat_panel.add_assistant_message("Processing with agents...")
+        self.chat_panel.add_assistant_message("Processing with agents...")
 
         try:
             # Build context from current file if open
@@ -988,14 +990,14 @@ class XencodeApp(App):
             # Handle different collaboration types
             if event.collaboration_type == "sequential" and event.agent_sequence:
                 # Sequential collaboration
-                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+                from xencode.agentic.coordinator import AgentCoordinator
 
                 coordinator = AgentCoordinator()
                 result = coordinator.sequential_collaboration(enhanced_prompt, event.agent_sequence)
 
                 # Format the result
                 response_parts = [
-                    f"SEQUENTIAL COLLABORATION RESULT:",
+                    "SEQUENTIAL COLLABORATION RESULT:",
                     f"Original Task: {result['original_task']}",
                     f"Agent Sequence: {' -> '.join(result['agent_sequence'])}",
                     f"Total Steps: {result['total_steps']}",
@@ -1033,7 +1035,7 @@ class XencodeApp(App):
 
             elif event.use_multi_agent:
                 # Multi-agent collaboration
-                from xencode.agentic.coordinator import AgentCoordinator, AgentType
+                from xencode.agentic.coordinator import AgentCoordinator
 
                 coordinator = AgentCoordinator()
                 result = coordinator.multi_agent_task([{
@@ -1081,8 +1083,8 @@ class XencodeApp(App):
 
         if model_lower.startswith("openrouter:"):
             try:
-                from xencode.smart_config_manager import get_config
                 from xencode.model_providers import OpenRouterProvider
+                from xencode.smart_config_manager import get_config
 
                 config = get_config()
                 api_key = (config.api_keys.openrouter_api_key or "").strip()
@@ -1178,8 +1180,8 @@ class XencodeApp(App):
 
         try:
             if sys.platform.startswith("win") and executable.lower().endswith((".cmd", ".bat")):
-                process = await asyncio.create_subprocess_shell(
-                    subprocess.list2cmdline(command),
+                process = await asyncio.create_subprocess_exec(
+                    "cmd.exe", "/c", *command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=str(self.root_path),
@@ -1223,8 +1225,9 @@ class XencodeApp(App):
 
     async def _stream_ollama_response(self, prompt: str, model: str):
         """Stream response from local Ollama generate API for a specific model."""
-        import aiohttp
         import json
+
+        import aiohttp
 
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -1256,10 +1259,10 @@ class XencodeApp(App):
 
     def _get_language(self, suffix: str) -> str:
         """Get language identifier for file
-        
+
         Args:
             suffix: File extension
-            
+
         Returns:
             Language name
         """
@@ -1282,7 +1285,7 @@ class XencodeApp(App):
             left_panel.remove_class("hidden")
         else:
             left_panel.add_class("hidden")
-    
+
     def action_toggle_models(self) -> None:
         """Toggle model selector visibility"""
         self._toggle_feature_panel("model-selector-panel")
@@ -1348,42 +1351,42 @@ class XencodeApp(App):
         action = feature_actions.get(event.feature_id)
         if action:
             action()
-    
+
     def action_clear_chat(self) -> None:
         """Clear chat history"""
         if self.chat_panel and self.chat_panel.history:
             self.chat_panel.history.clear_history()
             self.chat_panel.add_system_message("Chat cleared.")
-    
+
     def action_toggle_project_analyzer(self) -> None:
         """Toggle project analyzer panel visibility."""
         self._toggle_feature_panel("project-analyzer-panel-container")
-    
+
     def action_toggle_learning_mode(self) -> None:
         """Toggle learning mode panel visibility."""
         self._toggle_feature_panel("learning-mode-panel-container")
-    
+
     def action_toggle_multi_language(self) -> None:
         """Toggle multi-language panel visibility."""
         self._toggle_feature_panel("multi-language-panel-container")
-    
+
     def action_toggle_custom_models(self) -> None:
         """Toggle custom models panel visibility."""
         self._toggle_feature_panel("custom-models-panel-container")
-    
+
     def action_toggle_security_auditor(self) -> None:
         """Toggle security auditor panel visibility."""
         self._toggle_feature_panel("security-auditor-panel-container")
-    
+
     def action_toggle_performance_profiler(self) -> None:
         """Toggle performance profiler panel visibility."""
         self._toggle_feature_panel("performance-profiler-panel-container")
-    
+
     def _toggle_feature_panel(self, panel_id: str) -> None:
         """Helper method to toggle feature panels."""
         target_panel = self.query_one(f"#{panel_id}")
         chat_container = self.query_one("#chat-panel-container")
-        
+
         # List of all panels to hide
         panel_ids = [
             "model-selector-panel",
@@ -1405,14 +1408,14 @@ class XencodeApp(App):
             "security-auditor-panel-container",
             "performance-profiler-panel-container",
         ]
-        
+
         # Hide all other panels
         for pid in panel_ids:
             if pid != panel_id:
                 panel = self.query_one(f"#{pid}")
                 if not panel.has_class("hidden"):
                     panel.add_class("hidden")
-        
+
         # Toggle target panel
         if target_panel.has_class("hidden"):
             target_panel.remove_class("hidden")
@@ -1420,7 +1423,7 @@ class XencodeApp(App):
         else:
             target_panel.add_class("hidden")
             chat_container.remove_class("shrink")
-    
+
     def action_help(self) -> None:
         """Show help"""
         if self.chat_panel:
@@ -1434,7 +1437,7 @@ class XencodeApp(App):
             - **Ctrl+A**: Toggle Agent panel
             - **Ctrl+,**: Toggle settings panel
             - **Ctrl+O**: Toggle options panel
-            
+
             ## Feature Panels
             - **Ctrl+R**: Toggle Code Review panel
             - **Ctrl+P**: Toggle Performance panel
@@ -1448,7 +1451,7 @@ class XencodeApp(App):
             - **F7**: Toggle Performance Profiler
             - **F8**: Toggle Voice Interface
             - **F9**: Toggle Provider Health
-            
+
             ## General
             - **Ctrl+L**: Clear chat history
             - **Ctrl+S**: Save current file (in editor)
@@ -1486,25 +1489,25 @@ class XencodeApp(App):
         if not self.file_explorer or not self.file_explorer.git_manager:
             self.notify("Git integration not available", severity="error")
             return
-            
+
         diff = await self.file_explorer.git_manager.get_diff(staged=True)
         if not diff:
             self.notify("No staged changes to commit", severity="warning")
             return
-            
+
         def commit_callback(message: Optional[str]) -> None:
             if message:
                 asyncio.create_task(self._do_commit(message))
-                
+
         await self.push_screen(CommitDialog(diff, self._generate_commit_message), commit_callback)
-        
+
     async def _do_commit(self, message: str) -> None:
         success = await self.file_explorer.git_manager.commit(message)
         if success:
             self.notify("Changes committed successfully", severity="information")
         else:
             self.notify("Failed to commit changes", severity="error")
-            
+
     async def _generate_commit_message(self, diff: str) -> str:
         """Generate commit message from diff"""
         prompt = f"Generate a conventional commit message for the following git diff. Return ONLY the message.\n\n{diff[:2000]}"
@@ -1767,7 +1770,7 @@ class XencodeApp(App):
         if self.server_process:
             self.server_process.terminate()
             self.server_process.wait()
-            
+
         # Close WebSocket
         if self.ws_connection:
             asyncio.create_task(self.ws_connection.close())
@@ -1775,7 +1778,7 @@ class XencodeApp(App):
 
 def run_tui(root_path: Optional[Path] = None):
     """Run the Xencode TUI
-    
+
     Args:
         root_path: Root directory for file explorer
     """

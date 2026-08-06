@@ -5,7 +5,7 @@ Options Panel Widget for Xencode TUI
 Lists all CLI commands and allows triggering them from within TUI.
 """
 
-from textual.containers import Container, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.widgets import Button, Label
 

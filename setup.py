@@ -5,8 +5,9 @@ Xencode Setup Script
 Installation script for the Xencode AI/ML leviathan system.
 """
 
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # Read README
 readme_path = Path(__file__).parent / "README.md"
@@ -18,7 +19,7 @@ requirements = []
 if requirements_path.exists():
     with open(requirements_path, 'r') as f:
         requirements = [
-            line.strip() for line in f 
+            line.strip() for line in f
             if line.strip() and not line.startswith('#')
         ]
 

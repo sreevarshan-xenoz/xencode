@@ -232,7 +232,7 @@ class AnthropicProvider(Provider):
             )
         
         except Exception as e:
-            raise self._handle_anthropic_error(e)
+            raise self._handle_anthropic_error(e)  from e
     
     async def generate_stream(
         self,
@@ -342,7 +342,7 @@ class AnthropicProvider(Provider):
                 yield provider_chunk
         
         except Exception as e:
-            raise self._handle_anthropic_error(e)
+            raise self._handle_anthropic_error(e)  from e
     
     def estimate_tokens(self, messages: List[Message]) -> int:
         """

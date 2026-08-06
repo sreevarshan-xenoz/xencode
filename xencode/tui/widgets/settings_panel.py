@@ -5,12 +5,12 @@ Settings Panel Widget for Xencode TUI
 Includes provider connectivity test buttons for Qwen, OpenRouter, and Ollama.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from rich.text import Text
-from textual.containers import Container, Vertical, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Button, Checkbox, Label, RadioSet, RadioButton, Input
+from textual.widgets import Button, Checkbox, Input, Label, RadioButton, RadioSet
 
 
 class SettingsPanel(Container):
@@ -43,36 +43,36 @@ class SettingsPanel(Container):
         margin-top: 1;
         height: auto;
     }
-    
+
     #provider-diagnostics {
         margin-top: 1;
         height: auto;
     }
-    
+
     .provider-test-row {
         height: auto;
         margin-bottom: 1;
     }
-    
+
     .provider-test-label {
         width: 1fr;
         content-align: left middle;
     }
-    
+
     .provider-test-status {
         width: auto;
         content-align: right middle;
         text-style: italic;
     }
-    
+
     .status-ok {
         color: $success;
     }
-    
+
     .status-error {
         color: $error;
     }
-    
+
     .status-warning {
         color: $warning;
     }
@@ -214,21 +214,21 @@ class SettingsPanel(Container):
         with Vertical(id="provider-diagnostics"):
             yield Label("🔌 Provider Diagnostics", classes="section-title")
             yield Label("Test connectivity to AI providers", classes="dim")
-            
+
             # Qwen test row
             with Horizontal(classes="provider-test-row", id="qwen-test-row"):
                 yield Label("Qwen", classes="provider-test-label")
                 yield Button("Test", id="btn-test-qwen", variant="default", classes="provider-test-btn")
                 self.lbl_qwen_test_status = Label("", id="qwen-test-status", classes="provider-test-status")
                 yield self.lbl_qwen_test_status
-            
+
             # OpenRouter test row
             with Horizontal(classes="provider-test-row", id="openrouter-test-row"):
                 yield Label("OpenRouter", classes="provider-test-label")
                 yield Button("Test", id="btn-test-openrouter", variant="default", classes="provider-test-btn")
                 self.lbl_openrouter_test_status = Label("", id="openrouter-test-status", classes="provider-test-status")
                 yield self.lbl_openrouter_test_status
-            
+
             # Ollama test row
             with Horizontal(classes="provider-test-row", id="ollama-test-row"):
                 yield Label("Ollama (local)", classes="provider-test-label")
@@ -331,7 +331,7 @@ class SettingsPanel(Container):
         elif event.button.id == "btn-test-ollama":
             self.post_message(self.TestProviderRequested("ollama"))
             self._set_test_status("ollama", "testing", "Testing...")
-    
+
     def _set_test_status(
         self,
         provider: str,
@@ -343,7 +343,7 @@ class SettingsPanel(Container):
         label = getattr(self, f"lbl_{provider}_test_status", None)
         if not label:
             return
-        
+
         if status == "testing":
             label.update(f"⏳ {message}")
             label.add_class("status-warning")
@@ -365,7 +365,7 @@ class SettingsPanel(Container):
             label.add_class("status-warning")
             label.remove_class("status-ok")
             label.remove_class("status-error")
-    
+
     def set_test_result(
         self,
         provider: str,
@@ -376,7 +376,7 @@ class SettingsPanel(Container):
     ) -> None:
         """
         Set test result for a provider
-        
+
         Args:
             provider: Provider name (qwen, openrouter, ollama)
             status: Status string (ok, error, auth_error, not_configured, connection_error)

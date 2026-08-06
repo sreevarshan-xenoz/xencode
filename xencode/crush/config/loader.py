@@ -106,11 +106,11 @@ class ConfigLoader:
         except json.JSONDecodeError as e:
             raise ConfigurationError(
                 f"Invalid JSON in user config {user_config_path}: {e}"
-            )
+            )  from e
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to load user config {user_config_path}: {e}"
-            )
+            )  from e
     
     def _load_project_config(self, working_dir: str) -> Dict[str, Any]:
         """Load project-level configuration.
@@ -132,11 +132,11 @@ class ConfigLoader:
         except json.JSONDecodeError as e:
             raise ConfigurationError(
                 f"Invalid JSON in project config {project_config_path}: {e}"
-            )
+            )  from e
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to load project config {project_config_path}: {e}"
-            )
+            )  from e
     
     def _merge_configs(
         self,
@@ -323,9 +323,9 @@ class ConfigLoader:
             return config
             
         except TypeError as e:
-            raise ConfigurationError(f"Invalid configuration structure: {e}")
+            raise ConfigurationError(f"Invalid configuration structure: {e}")  from e
         except ValueError as e:
-            raise ConfigurationError(f"Invalid configuration value: {e}")
+            raise ConfigurationError(f"Invalid configuration value: {e}")  from e
     
     def _validate_config(self, config: Config) -> List[str]:
         """Validate configuration.
@@ -346,4 +346,4 @@ class ConfigLoader:
             warnings = ConfigValidator.validate(config)
             return warnings
         except ValidationError as e:
-            raise ConfigurationError(str(e))
+            raise ConfigurationError(str(e))  from e

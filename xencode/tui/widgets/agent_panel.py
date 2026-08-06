@@ -6,21 +6,18 @@ Interactive agent interface with status display and tool usage tracking.
 """
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import List, Optional
 
 from rich.console import RenderableType
-
 from rich.text import Text
-from rich.table import Table
-from textual import events
-from textual.widgets import Input, Static, Label, Button
-from textual.containers import Container, VerticalScroll, Horizontal
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
+from textual.widgets import Button, Input, Static
 
 
 class AgentStatus(Static):
     """Display current agent status"""
-    
+
     DEFAULT_CSS = """
     AgentStatus {
         height: 5;
@@ -29,31 +26,31 @@ class AgentStatus(Static):
         border: solid $accent;
     }
     """
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.current_model = "qwen3:4b"
         self.agent_type = "general"
         self.is_thinking = False
-        
+
     def render(self) -> RenderableType:
         """Render agent status"""
         status_text = Text()
-        
+
         status_text.append("🤖 Agent: ", style="bold")
         status_text.append(f"{self.agent_type}\n", style="cyan")
-        
+
         status_text.append("📦 Model: ", style="bold")
         status_text.append(f"{self.current_model}\n", style="green")
-        
+
         status_text.append("💭 Status: ", style="bold")
         if self.is_thinking:
             status_text.append("Thinking...", style="yellow blink")
         else:
             status_text.append("Ready", style="green")
-        
+
         return status_text
-    
+
     def update_status(self, model: str = None, agent_type: str = None, is_thinking: bool = None):
         """Update agent status"""
         if model:
@@ -67,7 +64,7 @@ class AgentStatus(Static):
 
 class ToolUsageLog(VerticalScroll):
     """Display tool usage log"""
-    
+
     DEFAULT_CSS = """
     ToolUsageLog {
         height: 1fr;
@@ -76,23 +73,23 @@ class ToolUsageLog(VerticalScroll):
         border: solid $accent;
     }
     """
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.border_title = "🔧 Tool Usage"
-    
+
     def add_tool_call(self, tool_name: str, tool_input: str, result: str = None):
         """Add a tool call to the log"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        
+
         log_entry = Text()
         log_entry.append(f"[{timestamp}] ", style="dim")
         log_entry.append(f"{tool_name}", style="bold cyan")
         log_entry.append(f"({tool_input[:30]}...)\n", style="yellow")
-        
+
         if result:
             log_entry.append(f"  → {result[:100]}...\n", style="green")
-        
+
         entry_widget = Static(log_entry)
         self.mount(entry_widget)
         self.scroll_end(animate=True)
@@ -314,17 +311,17 @@ class AgentPanel(Container):
         if self.tool_log:
             for child in list(self.tool_log.children):
                 child.remove()
-    
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle input submission"""
         self._submit_task()
-    
-    
+
+
     def log_tool_call(self, tool_name: str, tool_input: str, result: str = None):
         """Log a tool call"""
         if self.tool_log:
             self.tool_log.add_tool_call(tool_name, tool_input, result)
-    
+
     def update_agent_status(self, model: str = None, agent_type: str = None, is_thinking: bool = None):
         """Update agent status display"""
         if self.status:

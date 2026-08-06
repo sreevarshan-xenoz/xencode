@@ -9,19 +9,17 @@ dependency resolution, security scanning, and performance monitoring.
 import asyncio
 import hashlib
 import json
-import os
 import zipfile
+from dataclasses import field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
-import aiofiles
 from pydantic import BaseModel
 
-from xencode.plugin_system import PluginManager, PluginMetadata, LoadedPlugin
-from xencode.security_manager import SecurityManager
 from xencode.analyzers.security_analyzer import SecurityAnalyzer
+from xencode.plugin_system import PluginManager
+from xencode.security_manager import SecurityManager
 
 
 class PluginBundle(BaseModel):
@@ -59,7 +57,7 @@ class PluginDependencyGraph(BaseModel):
 
 class AdvancedPluginManager:
     """Advanced plugin management with additional features"""
-    
+
     def __init__(self):
         from pathlib import Path
         self.plugin_manager = PluginManager(Path("./plugins"))  # Use a default plugins directory
@@ -67,13 +65,13 @@ class AdvancedPluginManager:
         self.security_analyzer = SecurityAnalyzer()
         self.bundles: Dict[str, PluginBundle] = {}
         self.dependency_graph: Dict[str, PluginDependencyGraph] = {}
-        
+
     async def create_bundle(self, name: str, description: str,
                           plugin_ids: List[str],
                           author: str = "",
                           license: str = "MIT") -> PluginBundle:
         """Create a bundle of related plugins"""
-        bundle_id = f"bundle_{hashlib.md5(f'{name}_{datetime.now()}'.encode()).hexdigest()[:8]}"
+        bundle_id = f"bundle_{hashlib.sha256(f'{name}_{datetime.now()}'.encode()).hexdigest()[:8]}"
 
         # Verify all plugins exist by checking the loaded plugins
         loaded_plugins = self.plugin_manager.list_plugins()
@@ -106,16 +104,16 @@ class AdvancedPluginManager:
 
         self.bundles[bundle_id] = bundle
         return bundle
-    
-    async def install_bundle(self, bundle_id: str, 
+
+    async def install_bundle(self, bundle_id: str,
                            verify_signature: bool = True,
                            auto_enable: bool = True) -> bool:
         """Install all plugins in a bundle"""
         if bundle_id not in self.bundles:
             raise ValueError(f"Bundle {bundle_id} does not exist")
-        
+
         bundle = self.bundles[bundle_id]
-        
+
         # Install each plugin in the bundle
         for plugin_id in bundle.plugins:
             try:
@@ -137,10 +135,10 @@ class AdvancedPluginManager:
                         # Log rollback error but continue with other rollbacks
                         import logging
                         logging.warning(f"Failed to rollback plugin {installed_plugin}: {rollback_error}")
-                raise e
-        
+                raise e  from e
+
         return True
-    
+
     async def scan_plugin_security(self, plugin_id: str) -> PluginSecurityScanResult:
         """Perform security scan on a plugin"""
         # Check if plugin exists by checking the loaded plugins
@@ -155,7 +153,7 @@ class AdvancedPluginManager:
         # Analyze plugin code for security issues
         try:
             # Get plugin file path (this is a mock implementation)
-            plugin_path = Path(f"/tmp/plugins/{plugin_id}")  # Mock path
+            Path(f"/tmp/plugins/{plugin_id}")  # Mock path
 
             # In a real implementation, we would scan the actual plugin files
             # For now, we'll simulate a basic scan
@@ -199,7 +197,7 @@ class AdvancedPluginManager:
             status=status,
             recommendations=recommendations
         )
-    
+
     async def resolve_dependencies(self, plugin_id: str) -> List[PluginDependencyGraph]:
         """Resolve dependencies for a plugin and create dependency graph"""
         # Check if plugin exists by checking the loaded plugins
@@ -241,24 +239,24 @@ class AdvancedPluginManager:
                     result.append(dep_graph)
 
         return result
-    
-    async def get_performance_metrics(self, plugin_id: str, 
+
+    async def get_performance_metrics(self, plugin_id: str,
                                     time_range: str = "24h") -> Dict[str, Any]:
         """Get performance metrics for a plugin"""
         # This would typically connect to a metrics collection system
         # For now, we'll return mock data
-        
+
         # Get plugin stats from the base manager
         stats = await self.plugin_manager.get_plugin_stats(plugin_id)
-        
+
         # Calculate additional metrics
         total_executions = stats.get('total_executions', 0)
         successful_executions = stats.get('successful_executions', 0)
         failed_executions = stats.get('failed_executions', 0)
-        
+
         success_rate = (successful_executions / total_executions * 100) if total_executions > 0 else 100
         error_rate = (failed_executions / total_executions * 100) if total_executions > 0 else 0
-        
+
         return {
             "plugin_id": plugin_id,
             "time_range": time_range,
@@ -273,19 +271,19 @@ class AdvancedPluginManager:
             "last_activity": stats.get('last_executed', None),
             "uptime_percentage": stats.get('uptime_percent', 100.0)
         }
-    
+
     async def backup_plugin(self, plugin_id: str, backup_path: str = None) -> str:
         """Create a backup of a plugin"""
         if not backup_path:
             backup_path = f"/tmp/plugin_backups/{plugin_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-        
+
         plugin = await self.plugin_manager.get_plugin(plugin_id)
         if not plugin:
             raise ValueError(f"Plugin {plugin_id} does not exist")
-        
+
         # Create backup directory if it doesn't exist
         Path(backup_path).parent.mkdir(parents=True, exist_ok=True)
-        
+
         # In a real implementation, this would zip the actual plugin files
         # For now, we'll create a mock backup with plugin metadata
         backup_data = {
@@ -295,50 +293,50 @@ class AdvancedPluginManager:
             "backup_date": datetime.now().isoformat(),
             "plugin_id": plugin_id
         }
-        
+
         with zipfile.ZipFile(backup_path, 'w') as zip_file:
             zip_file.writestr(f"{plugin_id}_metadata.json", json.dumps(backup_data, default=str))
-        
+
         return backup_path
-    
+
     async def restore_plugin(self, backup_path: str, plugin_id: str = None) -> bool:
         """Restore a plugin from backup"""
         if not Path(backup_path).exists():
             raise FileNotFoundError(f"Backup file {backup_path} does not exist")
-        
+
         # Extract backup data
         with zipfile.ZipFile(backup_path, 'r') as zip_file:
             metadata_content = zip_file.read(f"{plugin_id}_metadata.json").decode()
             backup_data = json.loads(metadata_content)
-        
+
         # Restore plugin (in a real implementation, this would restore files and config)
-        restored_plugin_id = backup_data["plugin_id"]
-        
+        backup_data["plugin_id"]
+
         # In a real implementation, we would:
         # 1. Extract plugin files to the appropriate location
         # 2. Restore configuration
         # 3. Update plugin registry
         # 4. Verify integrity
-        
+
         # For now, we'll just return success
         return True
-    
-    async def get_compatibility_report(self, plugin_id: str, 
+
+    async def get_compatibility_report(self, plugin_id: str,
                                      target_environments: List[str]) -> Dict[str, Any]:
         """Get compatibility report for plugin across different environments"""
         plugin = await self.plugin_manager.get_plugin(plugin_id)
         if not plugin:
             raise ValueError(f"Plugin {plugin_id} does not exist")
-        
+
         report = {
             "plugin_id": plugin_id,
             "target_environments": target_environments,
             "compatibility_results": {}
         }
-        
+
         for env in target_environments:
             # Simulate compatibility check
-            # In a real implementation, this would check system requirements, 
+            # In a real implementation, this would check system requirements,
             # dependencies, and environment compatibility
             compatibility_result = {
                 "environment": env,
@@ -347,7 +345,7 @@ class AdvancedPluginManager:
                 "recommendations": [],
                 "required_changes": []
             }
-            
+
             # Add some mock issues based on environment
             if env == "resource_constrained":
                 compatibility_result["issues"].append({
@@ -358,9 +356,9 @@ class AdvancedPluginManager:
                 compatibility_result["recommendations"].append(
                     "Consider optimizing plugin for low-resource environments"
                 )
-            
+
             report["compatibility_results"][env] = compatibility_result
-        
+
         return report
 
 
@@ -368,10 +366,10 @@ class AdvancedPluginManager:
 async def demo_advanced_plugin_features():
     """Demonstrate advanced plugin management features"""
     print("Demonstrating Advanced Plugin Management Features")
-    
+
     # Create advanced plugin manager
     advanced_manager = AdvancedPluginManager()
-    
+
     # Create a mock plugin bundle
     print("\nCreating plugin bundle...")
     try:
@@ -390,7 +388,7 @@ async def demo_advanced_plugin_features():
     print("\nPerforming security scan...")
     try:
         scan_result = await advanced_manager.scan_plugin_security("code-analyzer")
-        print(f"   SUCCESS: Security scan completed for code-analyzer")
+        print("   SUCCESS: Security scan completed for code-analyzer")
         print(f"   SUCCESS: Security score: {scan_result.security_score}")
         print(f"   SUCCESS: Status: {scan_result.status}")
         print(f"   SUCCESS: Issues found: {scan_result.issues_found}")
@@ -401,7 +399,7 @@ async def demo_advanced_plugin_features():
     print("\nResolving dependencies...")
     try:
         dependency_graphs = await advanced_manager.resolve_dependencies("code-analyzer")
-        print(f"   SUCCESS: Resolved dependencies for code-analyzer")
+        print("   SUCCESS: Resolved dependencies for code-analyzer")
         print(f"   SUCCESS: Found {len(dependency_graphs)} related dependency graphs")
     except Exception as e:
         print(f"   ERROR: Dependency resolution failed: {e}")
@@ -410,7 +408,7 @@ async def demo_advanced_plugin_features():
     print("\nGetting performance metrics...")
     try:
         metrics = await advanced_manager.get_performance_metrics("code-analyzer")
-        print(f"   SUCCESS: Retrieved performance metrics for code-analyzer")
+        print("   SUCCESS: Retrieved performance metrics for code-analyzer")
         print(f"   SUCCESS: Success rate: {metrics['success_rate_percent']}%")
         print(f"   SUCCESS: Error rate: {metrics['error_rate_percent']}%")
         print(f"   SUCCESS: Avg response time: {metrics['average_response_time_ms']}ms")
@@ -432,7 +430,7 @@ async def demo_advanced_plugin_features():
             "code-analyzer",
             ["standard", "resource_constrained", "secure_mode"]
         )
-        print(f"   SUCCESS: Generated compatibility report for code-analyzer")
+        print("   SUCCESS: Generated compatibility report for code-analyzer")
         print(f"   SUCCESS: Checked {len(compat_report['target_environments'])} environments")
     except Exception as e:
         print(f"   ERROR: Compatibility check failed: {e}")
