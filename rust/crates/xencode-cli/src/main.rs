@@ -420,6 +420,7 @@ async fn run_query(
         config.api_keys.openrouter_api_key.clone(),
         config.api_keys.qwen_api_key.clone(),
         config.api_keys.google_gemini_api_key.clone(),
+        None,
     );
 
     let mut response_content = String::new();
