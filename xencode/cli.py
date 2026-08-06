@@ -3369,11 +3369,15 @@ async def _run_vault_monitor(
                 available = data.get("available", False)
                 vault_exists = data.get("vault_exists", False)
 
-                table.add_row("Available", f"{'\u2705' if available else '\u274c'} {available}")
-                table.add_row("Vault Exists", f"{'\u2705' if vault_exists else '\u274c'} {vault_exists}")
+                available_icon = "\u2705" if available else "\u274c"
+                vault_icon = "\u2705" if vault_exists else "\u274c"
+                table.add_row("Available", f"{available_icon} {available}")
+                table.add_row("Vault Exists", f"{vault_icon} {vault_exists}")
                 table.add_row("Vault Path", data.get("vault_path", "N/A"))
-                table.add_row("Readable", f"{'\u2705' if data.get('is_readable') else '\u274c'} {data.get('is_readable', False)}")
-                table.add_row("Valid JSON", f"{'\u2705' if data.get('is_valid_json') else '\u274c'} {data.get('is_valid_json', False)}")
+                readable_icon = "\u2705" if data.get("is_readable") else "\u274c"
+                valid_json_icon = "\u2705" if data.get("is_valid_json") else "\u274c"
+                table.add_row("Readable", f"{readable_icon} {data.get('is_readable', False)}")
+                table.add_row("Valid JSON", f"{valid_json_icon} {data.get('is_valid_json', False)}")
                 table.add_row("Credentials", str(data.get("credential_count", 0)))
                 table.add_row("Encryption", "\u2705 Enabled" if data.get("encryption_available") else "\u274c Not available")
 
