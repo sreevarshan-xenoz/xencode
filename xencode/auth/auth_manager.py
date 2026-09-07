@@ -161,7 +161,9 @@ class AuthManager:
             self.update_user(user)
             self._record_failed_attempt(username_or_email, ip_address)
             raise AuthenticationError("Invalid credentials")
-
+        # Check if email is verified (skip for admin/guest)
+        if not user.is_verified and user.role not in [UserRole.ADMIN, UserRole.GUEST]:
+            raise AuthenticationError("Email not verified. Please verify your email first.")
         # Successful authentication
         user.record_successful_login()
         self.update_user(user)
@@ -232,9 +234,8 @@ class AuthManager:
     def logout_all_sessions(self, user_id: str) -> int:
         """Logout user from all sessions"""
         return self.jwt_handler.revoke_user_sessions(user_id)
-
-    def refresh_token(self, refresh_token: str) -> Optional[Tuple[str, UserSession]]:
-        """Refresh access token"""
+    def refresh_token(self, refresh_token: str) -> Optional[Tuple[str, str, UserSession]]:
+        """Refresh access token. Old refresh token is rotated for security."""
         return self.jwt_handler.refresh_access_token(refresh_token)
 
     def verify_token(self, token: str) -> Optional[User]:
