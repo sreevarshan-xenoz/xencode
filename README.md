@@ -29,36 +29,38 @@ Xencode is an offline-first AI development assistant platform for serious engine
 - **Operational maturity** through analytics, monitoring, API routers, and deployment assets.
 - **Extensible platform** via feature flags and plugin lifecycle management.
 
-## Current Status (June 2026)
+## Current Status (September 2026)
 
-### Rust Migration — All 8 Phases Complete ✅
+### Rust Migration & Multi-Provider Architecture Complete ✅
 
-The full Rust migration is complete — **12 crates, 65 tests, zero warnings.**
+The full Rust migration and multi-provider architecture is complete — **12 crates, 176 tests passing, zero warnings.**
 
 | Phase | What | Status |
 |-------|------|--------|
-| 0–4 | Core lib, CLI, Providers, TUI | ✅ Complete |
-| 5 | Code Analysis, Security Scanner, RAG Indexer | ✅ Complete |
-| 6 | HTTP/WebSocket Server, Collaboration CRDT | ✅ Complete |
-| 7 | Plugin System (trait, host, registry) | ✅ Complete |
+| 0–4 | Core lib, CLI, Multi-Provider Routing (Ollama, Anthropic, Gemini, Qwen, OpenRouter), Ratatui TUI | ✅ Complete |
+| 5 | Code Analysis, Security Scanner, RAG Indexer & Vector Store | ✅ Complete |
+| 6 | HTTP/WebSocket Server, Collaboration CRDT & Sync Coordinator | ✅ Complete |
+| 7 | Plugin System (trait, manifest, host, registry) | ✅ Complete |
 | 8 | Release scripts, smoke tests, parity benchmarks | ✅ Complete |
 
-- ✅ **12 Rust crates** — workspace scan, config, cache, memory, models, providers, TUI, CLI, analysis, server, collaboration, plugin
-- ✅ **Rust binary** as primary entry point (`xencode`) — single-file, no Python dependency
-- ✅ **14 rich TUI feature panels** — ByteBot, Collaboration, Voice, Security, Profiler, Custom Models, Learning Mode, Multi-Language
-- ✅ **Release build scripts** — Windows (`build-release.ps1`) and Linux/macOS (`smoke-test.sh`)
-- ✅ **Python stack** still available for legacy compatibility and plugin development
+- ✅ **12 Rust crates** — workspace scan, config, cache, memory, models, providers (with exponential retry middleware & non-destructive streaming), TUI, CLI, analysis, server, collaboration, plugin
+- ✅ **Rust binary** as primary entry point (`xencode`) — single-file, zero external Python runtime requirement
+- ✅ **17 interactive TUI feature panels & overlays** — ByteBot Agent, Collaboration Hub, Voice Interface, Security Auditor, Performance Profiler, Custom Models, Learning Mode, Multi-Language, Git Commit, Provider Health, Project Analyzer, Model Selector, Settings, and more
+- ✅ **Secure & Verified Authentication** — Encrypted credential vault, SQLite user store, refresh token rotation, email verification flow
+- ✅ **Release build scripts & CI** — Windows (`build-release.ps1`), Linux/macOS (`smoke-test.sh`), and GitHub Actions CI/CD workflows
+- ✅ **Python stack** maintained for backward compatibility, advanced agentic orchestration, and plugin development
 
 ## Core Capabilities
 
 ### AI + Agentic
 - Multi-model ensemble methods: vote, weighted, consensus, hybrid.
-- Agentic orchestrator loop for multi-step coding tasks.
+- Streaming retry middleware with token-delivery tracking (zero duplicate tokens on retry).
+- Agentic orchestrator loop for multi-step coding tasks with bounded retries.
 - Error classification and targeted fix suggestions.
 - Session export/replay for reproducible execution history.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 14 interactive feature panels: ByteBot, Collaboration, Voice, Security, Profiler, etc.
+- **Rust ratatui TUI** (primary) — 17 interactive feature panels and overlays (ByteBot, Collaboration, Voice, Security, Profiler, Git Commit, Provider Health, etc.).
 - **Python Textual TUI** (legacy) — 31 widget panels with settings, options, and theme controls.
 - Command assistance and terminal-safe generation workflows.
 - Side-by-side diff inspection and hunk-level review flows.
@@ -246,8 +248,10 @@ See:
 
 ### Rust (primary)
 ```bash
-cd rust && cargo test           # Run all 65+ Rust tests
+cd rust && cargo test           # Run all 176+ Rust tests across 12 crates
 cargo test -p xencode-analysis-rs  # Single crate
+cargo test -p xencode-tui-rs       # TUI widgets and panels
+cargo test -p xencode-server-rs    # Axum HTTP/WS server & auth
 ```
 
 ### Python (legacy)
@@ -259,7 +263,7 @@ mypy xencode                   # Type check
 ```
 
 Key test areas:
-- Rust: 65 tests across 12 crates (workspace, config, cache, memory, models, analysis, server, collaboration, plugin)
+- Rust: 176+ tests passing across 12 crates (workspace, config, cache, memory, models, providers, TUI, CLI, analysis, server, collaboration, plugin)
 - Python: 60+ test files across agentic, auth, features, model_providers, TUI widgets
 
 ## Deployment

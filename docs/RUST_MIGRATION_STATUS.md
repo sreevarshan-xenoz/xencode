@@ -2,11 +2,26 @@
 
 Branch: `main`
 
-## Current Status: Phases 5-8 Complete
+## Current Status: All Phases Complete & Multi-Provider Architecture Shipped
 
-All planned Rust migration phases are now complete. The Rust workspace contains 12 crates covering the full Xencode feature set.
+All planned Rust migration phases and multi-provider architecture enhancements are now complete. The Rust workspace contains 12 crates covering the full Xencode feature set with 176+ unit and integration tests passing.
 
 ## Migration Summary
+
+### Phases 0–4: Core, Providers & TUI ✅
+| Crate | Files | Tests |
+|-------|-------|-------|
+| `xencode-core-rs` | lib, scan, types | 4 |
+| `xencode-config-rs` | lib, config | 8 |
+| `xencode-cache-rs` | lib, cache | 11 |
+| `xencode-memory-rs` | lib, session | 10 |
+| `xencode-models-rs` | lib, ollama | 2 |
+| `xencode-providers-rs` | lib, manager, anthropic, gemini, qwen, openrouter, retry | 75 |
+| `xencode-tui-rs` | lib, app, ui, widgets, theme, focus, channel, input | 9 |
+| `xencode-cli` | main | 4 |
+
+- `xencode-providers-rs`: Provider trait, ProviderManager, multi-cloud routing (Anthropic, Gemini, Qwen, OpenRouter) and Ollama fallback. Exponential backoff retry middleware with emission guard (avoids duplicate tokens on mid-stream failures).
+- `xencode-tui-rs`: Full Ratatui terminal UI with 17 feature panels and overlay views, Braille spinner and ASCII gauge widgets, and full keyboard navigation.
 
 ### Phase 5: Analysis & RAG ✅
 | Crate | Files | Tests |
@@ -70,7 +85,7 @@ All planned Rust migration phases are now complete. The Rust workspace contains 
 ## Build Status
 
 - **Crates**: 12 workspace members
-- **Total Tests**: 46 passing (0 failing, 3 ignored)
+- **Total Tests**: 176 passing (0 failing, 4 ignored)
 - **Compilation**: Zero errors, zero warnings
 
 ## CLI Usage
