@@ -135,8 +135,7 @@ class AdvancedPluginManager:
                         # Log rollback error but continue with other rollbacks
                         import logging
                         logging.warning(f"Failed to rollback plugin {installed_plugin}: {rollback_error}")
-                raise e  from e
-
+                raise e from e
         return True
 
     async def scan_plugin_security(self, plugin_id: str) -> PluginSecurityScanResult:

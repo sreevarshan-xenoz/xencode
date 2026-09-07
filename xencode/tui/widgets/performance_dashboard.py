@@ -208,8 +208,9 @@ class PerformanceDashboard(Container):
                         gpu_percent = gpu.load * 100
                         gpu_memory_percent = gpu.memoryUtil * 100
             except Exception:
-                    pass  # Silently ignore
-# Simulate response time and throughput metrics
+                pass
+
+            # Simulate response time and throughput metrics
             # In a real implementation, these would come from the AI model requests
             response_time = round(0.5 + (hash(time.time()) % 1000) / 1000, 3)  # Simulated response time
             throughput = round(5 + (hash(time.time()) % 20), 2)  # Simulated throughput

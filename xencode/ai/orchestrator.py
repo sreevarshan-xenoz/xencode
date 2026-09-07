@@ -7,6 +7,10 @@ model health monitoring, failover, and unified AI API interface.
 import asyncio
 import logging
 import random
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor

@@ -183,8 +183,7 @@ class ContextEngine:
                         "dependencies": list(pkg.get("dependencies", {}).keys())
                     }
             except Exception:
-                    pass  # Silently ignore
-
+                pass
         if 'requirements.txt' in files or 'pyproject.toml' in files or 'setup.py' in files:
             project_types.append("python")
             # Get Python project info
@@ -194,8 +193,7 @@ class ContextEngine:
                     with open('requirements.txt', 'r') as f:
                         deps = [line.strip() for line in f if line.strip() and not line.startswith('#')]
                 except Exception:
-                        pass  # Silently ignore
-
+                    pass
             return {
                 "type": "python",
                 "dependencies": deps
@@ -251,8 +249,7 @@ class ContextEngine:
                 if result.returncode == 0:
                     return {"pip_packages": json.loads(result.stdout)}
             except Exception:
-                pass  # Silently ignore
-
+                pass
         elif project_type == "nodejs":
             try:
                 with open('package.json', 'r') as f:
@@ -264,8 +261,7 @@ class ContextEngine:
                         "dev_dependencies": dev_deps
                     }
             except Exception:
-                    pass  # Silently ignore
-
+                pass
         return {}
 
     def _get_system_resources(self) -> Dict[str, Any]:

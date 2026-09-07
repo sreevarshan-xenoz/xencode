@@ -13,10 +13,14 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import ollama
 import psutil
+
+try:
+    import ollama
+except ImportError:
+    ollama = None
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (

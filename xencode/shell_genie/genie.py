@@ -1,14 +1,44 @@
+import json
+import os
 import platform
+import re
 import shlex
 import subprocess
+import sys
 from typing import Tuple
 
-from langchain_core.prompts import PromptTemplate
-from langchain_ollama import ChatOllama
 from rich.console import Console
 from rich.prompt import Confirm
 
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:
+    ChatOllama = None
+try:
+    from langchain_core.prompts import PromptTemplate
+except ImportError:
+    PromptTemplate = None
+
 console = Console()
+
+# Dangerous command patterns — block even if LLM suggests them
+_SHELL_DANGEROUS = [
+    r'\brm\s+-rf?\s+/', r'\bmkfs\b', r'\bdd\s+if=', r'\bchmod\s+777\b',
+    r'\bshutdown\b', r'\breboot\b', r'\bhalt\b', r':\(\)\{',
+    r'`\s*rm\b', r'>\s*/dev/sd', r'wget.*\|\s*(bash|sh)', r'curl.*\|\s*(bash|sh)',
+]
+
+def _shell_command_is_safe(command: str) -> tuple:
+    """Check if a shell command is safe to execute."""
+    for pattern in _SHELL_DANGEROUS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return False, f"Dangerous pattern detected: {pattern}"
+    return True, "OK"
+
+def _safe_execute(command: str) -> subprocess.CompletedProcess:
+    """Execute command with shell=False using shlex splitting."""
+    parts = shlex.split(command, posix=platform.system() != "Windows")
+    return subprocess.run(parts, shell=False, capture_output=True, text=True, check=True, timeout=30)
 
 class ShellGenie:
     """
@@ -65,28 +95,42 @@ JSON Response:"""
             return "", f"Error generating command: {e}"
 
     def execute(self, command: str, auto_confirm: bool = False) -> bool:
-        """Execute the command interactively"""
+        """Execute the command interactively with safety checks"""
         if not command or command == "SAFE_GUARD_TRIGGERED":
             console.print("[red]❌ Command generation safe-guarded or failed.[/red]")
+            return False
+
+        # Double-check: validate the generated command
+        is_safe, reason = _shell_command_is_safe(command)
+        if not is_safe:
+            console.print(f"[red]❌ Command blocked: {reason}[/red]")
             return False
 
         console.print(f"\n[bold blue]Command:[/bold blue] [green]{command}[/green]")
 
         should_run = auto_confirm
         if not should_run:
-             should_run = Confirm.ask("Execute this command?")
+            should_run = Confirm.ask("Execute this command?")
 
         if should_run:
             console.print("\n[dim]Output:[/dim]")
             try:
-                # Use shell=False with command list for security
-                subprocess.run(shlex.split(command, posix=False), shell=False, check=True)
+                result = _safe_execute(command)
+                if result.stdout:
+                    console.print(result.stdout)
+                if result.stderr:
+                    console.print(f"[yellow]{result.stderr}[/yellow]")
                 return True
             except subprocess.CalledProcessError as e:
                 console.print(f"[red]Command failed with return code {e.returncode}[/red]")
+                if e.stderr:
+                    console.print(f"[dim]{e.stderr}[/dim]")
+                return False
+            except subprocess.TimeoutExpired:
+                console.print("[red]Command timed out[/red]")
                 return False
             except Exception as e:
-                console.print(f"[red]Execution failed: {e}[/red]")
+                console.print(f"[red]Execution failed: {type(e).__name__}: {e}[/red]")
                 return False
         else:
             console.print("[yellow]Cancelled.[/yellow]")

@@ -817,8 +817,9 @@ class XencodeApp(App):
                         f"```"
                     )
                 except Exception:
-                        pass  # Silently ignore
-# Build enhanced prompt
+                    pass
+
+            # Build enhanced prompt
             if context_parts:
                 enhanced_prompt = (
                     f"Context:\n{''.join(context_parts)}\n\n"
@@ -977,8 +978,9 @@ class XencodeApp(App):
                         f"```"
                     )
                 except Exception:
-                        pass  # Silently ignore
-# Build enhanced prompt
+                    pass
+
+            # Build enhanced prompt
             if context_parts:
                 enhanced_prompt = (
                     f"Context:\n{''.join(context_parts)}\n\n"

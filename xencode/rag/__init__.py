@@ -5,29 +5,46 @@ Provides vector storage, graph-based code relationships, and context indexing
 for AI-powered code understanding and retrieval.
 """
 
-from .vector_store import (
-    VectorStore,
-    AsyncVectorStore,
-    BatchProcessingConfig,
-    OllamaEmbeddingBatchProcessor,
-    OptimizedVectorStore,
-    BatchIndexer,
-    OllamaChromaWrapper,
-)
+try:
+    from .vector_store import (
+        VectorStore,
+        AsyncVectorStore,
+        BatchProcessingConfig,
+        OllamaEmbeddingBatchProcessor,
+        OptimizedVectorStore,
+        BatchIndexer,
+        OllamaChromaWrapper,
+    )
+except ImportError:
+    VectorStore = AsyncVectorStore = BatchProcessingConfig = None
+    OllamaEmbeddingBatchProcessor = OptimizedVectorStore = None
+    BatchIndexer = OllamaChromaWrapper = None
 
-from .indexer import Indexer
+try:
+    from .indexer import Indexer
+except ImportError:
+    Indexer = None
 
-from .context_indexer_v2 import (
-    ContextIndexerV2,
-    IndexStatus,
-    FileMetadata,
-    Symbol,
-    IndexManifest,
-)
+try:
+    from .context_indexer_v2 import (
+        ContextIndexerV2,
+        IndexStatus,
+        FileMetadata,
+        Symbol,
+        IndexManifest,
+    )
+except ImportError:
+    ContextIndexerV2 = IndexStatus = FileMetadata = Symbol = IndexManifest = None
 
-from .graph_extractor import CodeGraphExtractor
+try:
+    from .graph_extractor import CodeGraphExtractor
+except ImportError:
+    CodeGraphExtractor = None
 
-from .graph_store import GraphStore
+try:
+    from .graph_store import GraphStore
+except ImportError:
+    GraphStore = None
 
 __all__ = [
     # Vector Store
