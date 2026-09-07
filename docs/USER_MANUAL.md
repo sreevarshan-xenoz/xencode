@@ -17,7 +17,7 @@ Xencode is an AI-powered development assistant platform that integrates with loc
 
 ### Architecture
 Xencode uses a **dual-stack architecture**:
-- **Rust core** (12 crates, 65 tests) — Primary CLI/TUI, server, code analysis, security scanning, plugin system, collaboration sync
+- **Rust core** (12 crates, 176+ tests) — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, Anthropic, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
 - **Python stack** (~180+ files) — Legacy entry points, Textual TUI widgets, agentic workflows, analytics, FastAPI server
 
 The Rust binary (`xencode`) is the recommended entry point.
@@ -25,12 +25,13 @@ The Rust binary (`xencode`) is the recommended entry point.
 > 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Full codebase reference with architecture diagrams, crate details, test coverage, and remaining work items.
 
 ### Key Features
-- **Rust TUI**: Ratatui-based terminal interface with 14 interactive feature panels
+- **Rust TUI**: Ratatui-based terminal interface with 17 interactive feature panels and overlays
+- **Multi-Provider AI Routing**: Ollama local + Anthropic, Gemini, Qwen, OpenRouter cloud with token-aware exponential retry middleware
 - **Code Analysis**: Language-aware AST analysis (Python, JS/TS, Rust) + OWASP vulnerability scanning
 - **HTTP/WebSocket Server**: Axum-based collaboration server with session management
 - **Plugin System**: Plugin trait, host, registry with lifecycle management
-- **Multi-Model Support**: Ollama local + OpenRouter cloud providers
-- **Conversation Memory**: Persistent session history with caching
+- **Conversation Memory & Cache**: Persistent session history with compressed hybrid caching
+- **Secure Authentication**: Encrypted credential vault, SQLite store, refresh token rotation, email verification
 
 ## Installation
 
