@@ -10,6 +10,11 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
+import requests
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 

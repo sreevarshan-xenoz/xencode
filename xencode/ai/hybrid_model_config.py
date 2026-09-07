@@ -285,6 +285,42 @@ class HybridModelConfigManager:
                 self.save_config()
                 return True
         return False
+def _safe_eval_condition(condition: str, context: dict) -> bool:
+    """Safely evaluate a simple condition (comparisons, and/or, arithmetic) without eval()."""
+    import ast, operator as op
+    _SAFE = {
+        ast.Eq: op.eq, ast.NotEq: op.ne, ast.Lt: op.lt, ast.LtE: op.le,
+        ast.Gt: op.gt, ast.GtE: op.ge,
+        ast.And: lambda a, b: a and b, ast.Or: lambda a, b: a or b,
+        ast.Not: op.not_,
+        ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv,
+    }
+    def _eval(node, ctx):
+        if isinstance(node, ast.Constant): return node.value
+        if isinstance(node, ast.Name): return ctx.get(node.id, 0)
+        if isinstance(node, ast.Compare):
+            left = _eval(node.left, ctx)
+            for opr, comp in zip(node.ops, node.comparators):
+                right = _eval(comp, ctx)
+                f = _SAFE.get(type(opr))
+                if not f: raise ValueError(f"Unsafe: {type(opr)}")
+                if not f(left, right): return False
+                left = right
+            return True
+        if isinstance(node, ast.BoolOp):
+            f = _SAFE.get(type(node.op))
+            return f(*[_eval(v, ctx) for v in node.values]) if f else False
+        if isinstance(node, ast.BinOp):
+            f = _SAFE.get(type(node.op))
+            return f(_eval(node.left, ctx), _eval(node.right, ctx)) if f else 0
+        if isinstance(node, ast.UnaryOp):
+            f = _SAFE.get(type(node.op))
+            return f(_eval(node.operand, ctx)) if f else 0
+        raise ValueError(f"Unsafe: {type(node)}")
+    try:
+        return bool(_eval(ast.parse(condition, mode="eval").body, context))
+    except Exception:
+        return False
 
     def get_matching_rules(self, task_context: Dict[str, Any]) -> List[RoutingRule]:
         """Get routing rules that match the given task context"""
@@ -298,7 +334,7 @@ class HybridModelConfigManager:
                 eval_context = task_context.copy()
 
                 # Evaluate the condition
-                if eval(rule.condition, {"__builtins__": {}}, eval_context):
+                if _safe_eval_condition(rule.condition, eval_context):
                     matching_rules.append(rule)
             except Exception:
                 # If condition evaluation fails, skip this rule

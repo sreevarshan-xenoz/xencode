@@ -16,7 +16,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 import psutil
 from rich.console import Console
 from rich.panel import Panel

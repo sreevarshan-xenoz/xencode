@@ -1,10 +1,15 @@
 from pathlib import Path
 from typing import Dict
 
-from langchain_core.prompts import PromptTemplate
-from langchain_ollama import ChatOllama
 from rich.console import Console
 from rich.prompt import Confirm
+
+try:
+    from langchain_ollama import ChatOllama
+    from langchain_core.prompts import PromptTemplate
+except ImportError:
+    ChatOllama = None
+    PromptTemplate = None
 
 console = Console()
 
@@ -15,6 +20,11 @@ class DevOpsGenerator:
     """
 
     def __init__(self, model_name: str = "llama3.1:8b", base_url: str = "http://localhost:11434"):
+        if ChatOllama is None:
+            raise ImportError(
+                "langchain_ollama is required for DevOpsGenerator. "
+                "Install with: pip install langchain-ollama"
+            )
         self.llm = ChatOllama(model=model_name, base_url=base_url, temperature=0.2)
 
     def analyze_project(self, root_path: str = ".") -> Dict[str, str]:

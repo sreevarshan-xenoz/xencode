@@ -1132,8 +1132,9 @@ async def get_performance_metrics(
             cache_stats = await cache_system.get_cache_statistics()
             cache_hit_rate = cache_stats.get("base_cache", {}).get("hit_rate", 0.0)
         except Exception:
-                pass  # Silently ignore
-# Get actual CPU usage
+            pass
+
+        # Get actual CPU usage
         cpu_usage = psutil.cpu_percent(interval=1)
 
         # For response time average, we'll use a mock value since we don't have actual request logs

@@ -1,10 +1,76 @@
 import os
+import re
 import shlex
 import subprocess
 from typing import Type
 
-from langchain.tools import BaseTool
-from pydantic import BaseModel, Field
+try:
+    from langchain.tools import BaseTool
+except ImportError:
+    try:
+        from langchain_core.tools import BaseTool
+    except ImportError:
+        BaseTool = object
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    BaseModel = object
+    Field = lambda default=None, **kwargs: default
+
+
+# Allowed safe commands (allowlist approach)
+ALLOWED_COMMANDS = frozenset({
+    'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'find', 'echo',
+    'pwd', 'whoami', 'date', 'uname', 'df', 'du', 'free', 'top',
+    'ps', 'ping', 'curl', 'wget', 'ssh', 'scp', 'rsync',
+    'git', 'python', 'python3', 'pip', 'pip3', 'node', 'npm',
+    'docker', 'make', 'cmake', 'gcc', 'g++', 'rustc', 'cargo',
+    'mkdir', 'rm', 'cp', 'mv', 'chmod', 'chown', 'touch',
+    'sed', 'awk', 'sort', 'uniq', 'cut', 'tr', 'xargs',
+    'tree', 'file', 'stat', 'diff', 'patch',
+})
+
+# Dangerous patterns to block even in allowed commands
+DANGEROUS_PATTERNS = [
+    r'\brm\s+(-rf?|--no-preserve-root)\b',  # rm -rf
+    r'\bmkfs\b',                             # format disk
+    r'\bdd\s+if=',                           # raw disk write
+    r'\bchmod\s+777\b',                      # overly permissive
+    r';\s*(rm|mkfs|dd|shutdown|reboot|halt)\b',  # chained dangerous commands
+    r'\|\s*(rm|mkfs|dd|shutdown|reboot|halt)\b', # piped dangerous commands
+    r'`.*`',                                 # backtick substitution
+    r'\$\(',                                 # command substitution
+]
+
+
+def _is_command_safe(command: str) -> tuple:
+    """
+    Validate a command against the allowlist and dangerous patterns.
+
+    Returns:
+        (is_safe: bool, reason: str)
+    """
+    # Check for dangerous patterns first
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, command, re.IGNORECASE):
+            return False, f"Command contains dangerous pattern: {pattern}"
+
+    # Parse command to get base executable
+    try:
+        parts = shlex.split(command, posix=os.name != 'nt')
+    except ValueError:
+        return False, "Command contains invalid quoting"
+
+    if not parts:
+        return False, "Empty command"
+
+    # Allowlist check: base command must be in allowed set
+    base = os.path.basename(parts[0])
+    if base not in ALLOWED_COMMANDS:
+        return False, f"Command '{base}' is not in the allowed command list"
+
+    return True, "OK"
 
 
 class ReadFileSchema(BaseModel):
@@ -57,13 +123,20 @@ class ExecuteCommandTool(BaseTool):
     args_schema: Type[BaseModel] = ExecuteCommandSchema
 
     def _run(self, command: str) -> str:
+        # Security: validate command against allowlist
+        is_safe, reason = _is_command_safe(command)
+        if not is_safe:
+            return f"Command blocked for security: {reason}"
+
         try:
+            # Use shell=False with shlex.split for safety
+            parts = shlex.split(command, posix=os.name != 'nt')
             result = subprocess.run(
-                shlex.split(command, posix=False),
+                parts,
                 shell=False,
                 capture_output=True,
                 text=True,
-                timeout=60  # Safety timeout
+                timeout=60
             )
             output = result.stdout
             if result.stderr:
@@ -71,5 +144,7 @@ class ExecuteCommandTool(BaseTool):
             return output
         except subprocess.TimeoutExpired:
             return "Error: Command timed out"
+        except FileNotFoundError:
+            return f"Error: Command not found: {command}"
         except Exception as e:
-            return f"Error executing command: {str(e)}"
+            return f"Error executing command: {type(e).__name__}: {e}"

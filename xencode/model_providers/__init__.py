@@ -9,7 +9,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 
 
 @dataclass

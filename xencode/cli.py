@@ -89,21 +89,25 @@ def system(config_path, force):
 @cli.command()
 @click.argument('prompt', required=True)
 @click.option('--models', '-m', multiple=True, default=['llama3.1:8b', 'mistral:7b'],
-              help='Models to use in ensemble (can specify multiple)')
+              help='Models to use in ensemble (prefix with provider: openai:gpt-4o, anthropic:claude-sonnet-4)')
 @click.option('--method', type=click.Choice(['vote', 'weighted', 'consensus', 'hybrid']),
               default='vote', help='Ensemble method')
 @click.option('--max-tokens', type=int, default=512, help='Maximum tokens to generate')
 @click.option('--temperature', type=float, default=0.7, help='Sampling temperature')
 @click.option('--timeout', type=int, default=2000, help='Timeout in milliseconds')
 @click.option('--rag', is_flag=True, help='Use local RAG context')
-def query(prompt, models, method, max_tokens, temperature, timeout, rag):
+@click.option('--provider', default=None, help='Default provider for models without prefix')
+def query(prompt, models, method, max_tokens, temperature, timeout, rag, provider):
     """
     Query the AI ensemble with a prompt
 
+    Supports multiple providers: ollama, openai, anthropic, google_gemini, openrouter, qwen.
+    Prefix models with provider name: openai:gpt-4o, anthropic:claude-sonnet-4
     Examples:
-      xencode query "Explain microservices architecture"
-      xencode query "How to optimize database queries?" --method weighted
-      xencode query "Debug this Python code" --models llama3.1:8b --models phi3:mini
+      xencode query "Explain microservices"
+      xencode query "How to optimize DB?" --method weighted
+      xencode query "Debug code" --models llama3.1:8b --models phi3:mini
+      xencode query "Write API" --models openai:gpt-4o --models anthropic:claude-sonnet-4
     """
     console.print(f"[cyan]🧠 Querying AI ensemble: {method} method with {len(models)} models[/cyan]")
 
@@ -153,15 +157,18 @@ def query(prompt, models, method, max_tokens, temperature, timeout, rag):
 
 @cli.command()
 @click.option('--model', default='qwen3:4b', help='Model to use for the agent')
-@click.option('--base-url', default='http://localhost:11434', help='Ollama base URL')
-def agentic(model, base_url):
-    """Start an interactive agentic session"""
-    console.print(Panel.fit(f"Starting Agentic Session with {model}", style="bold blue"))
+@click.option('--base-url', default='http://localhost:11434', help='LLM base URL')
+@click.option('--provider', default=None, type=click.Choice(['ollama', 'openai', 'anthropic', 'google_gemini', 'openrouter', 'qwen', 'huggingface']),
+              help='LLM provider (auto-detected from model name if not specified)')
+def agentic(model, base_url, provider):
+    """Start an interactive agentic session with any LLM provider"""
+    provider_label = provider or "auto-detect"
+    console.print(Panel.fit(f"Starting Agentic Session with {model} ({provider_label})", style="bold blue"))
 
     try:
         from xencode.agentic.manager import LangChainManager
 
-        manager = LangChainManager(model_name=model, base_url=base_url)
+        manager = LangChainManager(model_name=model, base_url=base_url, provider=provider)
         console.print("[green]Agent initialized successfully![/green]")
         console.print("Type 'exit' or 'quit' to end the session.\n")
 
@@ -3063,9 +3070,6 @@ def version():
     ))
 
 
-
-
-
 @cli.group()
 def vault():
     """Credential Vault commands - Manage encrypted API keys and secrets
@@ -3428,6 +3432,38 @@ async def _run_vault_monitor(
         console.print(f"[red]\u274c WebSocket error: {e}[/red]")
     except asyncio.CancelledError:
         pass
+
+
+@cli.command()
+def providers():
+    """List available LLM providers and their status"""
+    console.print("[bold blue]🔌 Available LLM Providers[/bold blue]\n")
+
+    table = Table(title="LLM Providers")
+    table.add_column("Provider", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("API Key", style="yellow")
+    table.add_column("Example Models", style="white")
+
+    provider_info = [
+        ("ollama", "✅ Local", "Not required", "llama3.1:8b, qwen3:4b, mistral:7b"),
+        ("openai", "☁️ Cloud", os.environ.get("OPENAI_API_KEY", "❌ Not set")[:20] or "❌ Not set", "gpt-4o, gpt-4o-mini"),
+        ("anthropic", "☁️ Cloud", os.environ.get("ANTHROPIC_API_KEY", "❌ Not set")[:20] or "❌ Not set", "claude-sonnet-4, haiku"),
+        ("google_gemini", "☁️ Cloud", os.environ.get("GOOGLE_API_KEY", "❌ Not set")[:20] or "❌ Not set", "gemini-2.0-flash, pro"),
+        ("openrouter", "☁️ Cloud", os.environ.get("OPENROUTER_API_KEY", "❌ Not set")[:20] or "❌ Not set", "openai/gpt-4o, claude"),
+        ("qwen", "☁️ Cloud", "OAuth2 device flow", "qwen-max, qwen-plus"),
+        ("huggingface", "☁️ Cloud", os.environ.get("HUGGINGFACE_API_KEY", "❌ Not set")[:20] or "❌ Not set", "Llama-3-8B, Mixtral"),
+    ]
+
+    for name, status, key, models in provider_info:
+        key_display = "✅ Set" if key and "Not" not in key and key != "Not required" and key != "OAuth2 device flow" else key
+        table.add_row(name, status, key_display, models)
+
+    console.print(table)
+    console.print("\n[yellow]💡 Usage:[/yellow]")
+    console.print("  xencode query \"Hello\" --models openai:gpt-4o")
+    console.print("  xencode agentic --model anthropic:claude-sonnet-4")
+    console.print("  xencode agentic --model openai:gpt-4o --provider openai")
 
 
 if __name__ == '__main__':

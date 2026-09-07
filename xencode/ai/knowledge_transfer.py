@@ -5,13 +5,22 @@ context preservation during model switching, and transfer learning optimization.
 """
 
 import hashlib
+import json
 import logging
+import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError:
+    TfidfVectorizer = None
+    cosine_similarity = None
 
 logger = logging.getLogger(__name__)
 

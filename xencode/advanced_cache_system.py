@@ -15,9 +15,12 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 import psutil
 from rich.console import Console
 

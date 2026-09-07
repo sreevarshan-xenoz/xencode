@@ -1,8 +1,15 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    Document = None
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    RecursiveCharacterTextSplitter = None
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .graph_extractor import CodeGraphExtractor

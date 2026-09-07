@@ -4,12 +4,27 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Any, Optional
-import chromadb
-from chromadb.config import Settings
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-from langchain_ollama import OllamaEmbeddings
-from langchain_core.documents import Document
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
+
+# Optional dependencies — loaded lazily or guarded
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
+except ImportError:
+    chromadb = None
+    Settings = None
+    Documents = None
+    EmbeddingFunction = object
+    Embeddings = None
+
+try:
+    from langchain_ollama import OllamaEmbeddings
+    from langchain_core.documents import Document
+except ImportError:
+    OllamaEmbeddings = None
+    Document = None
+
 from .graph_store import GraphStore
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
@@ -542,7 +557,7 @@ class BatchIndexer:
                 separators=["\n\n", "\n", " ", ""]
             )
         except ImportError:
-            raise ImportError("Please install langchain-text-splitters: pip install langchain-text-splitters")  from None
+            self.text_splitter = None
 
     async def index_directory_batch(self, root_path: str, verbose: bool = True) -> None:
         from pathlib import Path
@@ -625,7 +640,13 @@ class BatchIndexer:
                     content = f.read()
 
                 metadatas = {"source": str(file_path), "filename": Path(file_path).name}
-                docs = self.text_splitter.create_documents([content], metadatas=[metadatas])
+                if self.text_splitter is not None:
+                    docs = self.text_splitter.create_documents([content], metadatas=[metadatas])
+                elif Document is not None:
+                    paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+                    docs = [Document(page_content=p, metadata=metadatas) for p in paragraphs]
+                else:
+                    docs = []
                 return docs
             except UnicodeDecodeError:
                 return []

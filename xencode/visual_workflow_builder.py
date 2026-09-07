@@ -258,43 +258,48 @@ class WorkflowBuilder:
     def save_workflow(self, filename: str) -> bool:
         """Save workflow to a file"""
         try:
-            workflow_data = {
-                "name": self.workflow_name,
-                "description": self.workflow_description,
-                "nodes": [
-                    {
-                        "id": node.id,
-                        "type": node.node_type.value,
-                        "name": node.name,
-                        "position": node.position,
-                        "properties": node.properties,
-                        "inputs": node.inputs,
-                        "outputs": node.outputs,
-                        "metadata": node.metadata
-                    }
-                    for node in self.nodes.values()
-                ],
-                "connections": [
-                    {
-                        "id": conn.id,
-                        "source": conn.source_node_id,
-                        "target": conn.target_node_id,
-                        "type": conn.connection_type.value,
-                        "properties": conn.properties
-                    }
-                    for conn in self.connections.values()
-                ],
-                "saved_at": datetime.now().isoformat()
-            }
-
+            workflow_data = self._export_workflow_data()
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(workflow_data, f, indent=2)
-
             return True
         except Exception as e:
             console.print(f"[red]Error saving workflow: {e}[/red]")
             return False
 
+    def export_workflow(self) -> Dict[str, Any]:
+        """Export workflow as a dictionary (for API/serialization)"""
+        return self._export_workflow_data()
+
+    def _export_workflow_data(self) -> Dict[str, Any]:
+        """Internal method to export workflow data as dictionary"""
+        return {
+            "name": self.workflow_name,
+            "description": self.workflow_description,
+            "nodes": [
+                {
+                    "id": node.id,
+                    "type": node.node_type.value,
+                    "name": node.name,
+                    "position": node.position,
+                    "properties": node.properties,
+                    "inputs": node.inputs,
+                    "outputs": node.outputs,
+                    "metadata": node.metadata
+                }
+                for node in self.nodes.values()
+            ],
+            "connections": [
+                {
+                    "id": conn.id,
+                    "source": conn.source_node_id,
+                    "target": conn.target_node_id,
+                    "type": conn.connection_type.value,
+                    "properties": conn.properties
+                }
+                for conn in self.connections.values()
+            ],
+            "saved_at": datetime.now().isoformat()
+        }
     def load_workflow(self, filename: str) -> bool:
         """Load workflow from a file"""
         try:

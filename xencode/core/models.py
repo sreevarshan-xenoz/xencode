@@ -35,7 +35,10 @@ class ModelManager:
         self.refresh_models()
 
     def refresh_models(self) -> None:
-        """Refresh list of available models"""
+        """Refresh list of available models from all providers."""
+        self.available_models = []
+
+        # 1. Get Ollama models (existing behavior)
         try:
             output = subprocess.check_output(["ollama", "list"], text=True, timeout=5)
             lines = output.strip().split('\n')

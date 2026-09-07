@@ -36,7 +36,6 @@ except ImportError as e:
     ResourceManager = None
     get_resource_manager = None
     RESOURCE_MANAGER_AVAILABLE = False
-
 # Benchmark components
 try:
     from .benchmark_engine import (
@@ -104,11 +103,17 @@ except ImportError as e:
     generate_recommendations = None
     BENCHMARK_RECOMMENDATIONS_AVAILABLE = False
 
+# Backward compatibility aliases
+HealthMonitor = ResourceManager
+AlertManager = None
+
 
 def get_monitoring_status() -> dict:
     """Get status of monitoring components"""
     return {
         "prometheus_metrics_available": PROMETHEUS_METRICS_AVAILABLE,
+        "health_monitor_available": RESOURCE_MANAGER_AVAILABLE,
+        "alert_manager_available": False,
         "performance_optimizer_available": PERFORMANCE_OPTIMIZER_AVAILABLE,
         "resource_manager_available": RESOURCE_MANAGER_AVAILABLE,
         "benchmark_engine_available": BENCHMARK_ENGINE_AVAILABLE,
@@ -124,6 +129,8 @@ __all__ = [
     'PerformanceOptimizer',
     'ResourceManager',
     'get_resource_manager',
+    'HealthMonitor',
+    'AlertManager',
     # Benchmark Engine
     'BenchmarkEngine',
     'BenchmarkTask',
