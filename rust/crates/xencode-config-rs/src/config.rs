@@ -49,6 +49,22 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub llama_cpp_args: Vec<String>,
 
+    /// llama.cpp sampling default: temperature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_temperature: Option<f64>,
+
+    /// llama.cpp sampling default: top-k.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_top_k: Option<i32>,
+
+    /// llama.cpp sampling default: min-p.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_min_p: Option<f64>,
+
+    /// llama.cpp sampling default: max generated tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_max_tokens: Option<u32>,
+
     /// Maximum cache size (number of entries).
     #[serde(default = "default_cache_size")]
     pub max_cache_size: usize,
@@ -120,6 +136,10 @@ impl Default for XencodeConfig {
             llama_cpp_model_path: default_llama_cpp_model_path(),
             llama_cpp_executable: String::new(),
             llama_cpp_args: Vec::new(),
+            llama_cpp_temperature: None,
+            llama_cpp_top_k: None,
+            llama_cpp_min_p: None,
+            llama_cpp_max_tokens: None,
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),
             cache_enabled: true,
@@ -232,6 +252,10 @@ mod tests {
         assert_eq!(config.llama_cpp_model_path, "");
         assert_eq!(config.llama_cpp_executable, "");
         assert!(config.llama_cpp_args.is_empty());
+        assert!(config.llama_cpp_temperature.is_none());
+        assert!(config.llama_cpp_top_k.is_none());
+        assert!(config.llama_cpp_min_p.is_none());
+        assert!(config.llama_cpp_max_tokens.is_none());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
