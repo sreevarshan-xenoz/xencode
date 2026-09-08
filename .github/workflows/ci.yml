@@ -98,7 +98,7 @@ jobs:
         pip install bandit
         bandit -r xencode/ -f json -o bandit-report.json || true
 
-    - name: Run Safety check
+    - name: Run pip-audit check
       run: |
-        pip install safety
-        safety check -r requirements.txt || true
+        pip install pip-audit
+        pip-audit -r requirements.txt || true
