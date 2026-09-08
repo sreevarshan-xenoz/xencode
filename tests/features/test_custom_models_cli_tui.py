@@ -11,10 +11,10 @@ Tests cover:
 """
 
 
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
-
-from pathlib import Path
 
 from xencode.features.custom_models import CustomModelManager, FeatureConfig
 
