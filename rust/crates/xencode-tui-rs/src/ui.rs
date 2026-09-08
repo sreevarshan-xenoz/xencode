@@ -145,7 +145,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
             FocusArea::CustomModels | FocusArea::LearningMode |
             FocusArea::MultiLanguage => "Enter:start  Esc:close",
-            _ => "i:edit  m:models  Tab:switch  Ctrl+,:settings  Ctrl+R:review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
+            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
         }
     };
 
@@ -755,12 +755,12 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled(
-                "  Ctrl+,",
+                "  s",
                 Style::default()
                     .fg(app.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  Open/close  ", Style::default().fg(app.theme.fg)),
+            Span::styled("       Open/close  ", Style::default().fg(app.theme.fg)),
             Span::styled(
                 "m",
                 Style::default()
