@@ -270,8 +270,9 @@ class TestCredentialVault:
 
     def test_vault_backend_priority(self):
         """Test backend priority (Windows first)"""
-        # Mock Windows backend as available
-        with patch.object(WindowsCredentialManagerBackend, 'is_available', return_value=True):
+        # Mock Windows platform and backend as available
+        with patch('xencode.auth.credential_vault.sys.platform', 'win32'), \
+                patch.object(WindowsCredentialManagerBackend, 'is_available', return_value=True):
             vault = CredentialVault(prefer_windows=True)
 
             # Windows backend should be first
