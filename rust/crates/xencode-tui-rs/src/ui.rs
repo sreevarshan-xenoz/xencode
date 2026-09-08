@@ -69,7 +69,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let padding = area.width as usize
         - left.len().min(area.width as usize)
         - right.len().min(area.width as usize);
-    let header_text = format!("{}{}{}", left, " ".repeat(padding.max(0)), right);
+    let header_text = format!("{}{}{}", left, " ".repeat(padding), right);
 
     let header = Paragraph::new(header_text).style(
         Style::default()

@@ -1052,7 +1052,7 @@ impl<'a> App<'a> {
             .push("🔍 Starting vulnerability scan...".to_string());
 
         tokio::spawn(async move {
-            let findings = vec![
+            let findings = [
                 (
                     "Critical",
                     "Hardcoded API Key",
@@ -1122,7 +1122,7 @@ impl<'a> App<'a> {
         self.profiler_functions.clear();
 
         tokio::spawn(async move {
-            let funcs = vec![
+            let funcs = [
                 ("process_data", 245.3, 128.0, 1240u32),
                 ("validate_input", 180.1, 64.0, 890u32),
                 ("render_template", 95.7, 32.0, 450u32),
@@ -1846,12 +1846,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         app.models_selected -= 1;
                                     }
                                 }
-                                FocusArea::ByteBotPanel => {
-                                    if !app.bytebot_running && !app.bytebot_history.is_empty() {
-                                        app.bytebot_command =
-                                            app.bytebot_history.last().unwrap().clone();
-                                        app.bytebot_cursor = app.bytebot_command.len();
-                                    }
+                                FocusArea::ByteBotPanel
+                                    if !app.bytebot_running && !app.bytebot_history.is_empty() =>
+                                {
+                                    app.bytebot_command =
+                                        app.bytebot_history.last().unwrap().clone();
+                                    app.bytebot_cursor = app.bytebot_command.len();
                                 }
                                 _ => {}
                             },

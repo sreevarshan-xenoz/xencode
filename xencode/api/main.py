@@ -51,9 +51,16 @@ except ImportError:
 # Import middleware
 import importlib.util
 
+
+def _middleware_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(f"xencode.api.middleware.{name}") is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
 MIDDLEWARE_AVAILABLE = all(
-    importlib.util.find_spec(f"xencode.api.middleware.{name}") is not None
-    for name in ("auth", "logging", "rate_limiting")
+    _middleware_available(name) for name in ("auth", "logging", "rate_limiting")
 )
 
 logger = logging.getLogger(__name__)
