@@ -3,6 +3,9 @@ pub mod llamacpp;
 pub mod ollama;
 
 pub use health::{current_timestamp, HealthStatus, HealthTracker, ModelHealth};
-pub use llamacpp::{LlamaCppClient, LlamaCppError, LlamaCppModelInfo, LlamaCppOptions};
+pub use llamacpp::{
+    find_llama_server, start_llama_server, LlamaCppClient, LlamaCppError, LlamaCppModelInfo,
+    LlamaCppOptions, LlamaCppTimings, LlamaServerProcess,
+};
 pub use ollama::{ModelInfo, OllamaClient, OllamaError};
 
