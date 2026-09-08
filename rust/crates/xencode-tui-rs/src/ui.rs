@@ -66,9 +66,11 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         model, theme_name, file_count, git_count
     );
 
-    let padding = area.width as usize
-        - left.len().min(area.width as usize)
-        - right.len().min(area.width as usize);
+    // Display width, not byte length: the header holds multi-byte glyphs.
+    // Saturating so a narrow terminal cannot underflow the padding.
+    let padding = (area.width as usize)
+        .saturating_sub(Line::raw(&left).width())
+        .saturating_sub(Line::raw(&right).width());
     let header_text = format!("{}{}{}", left, " ".repeat(padding), right);
 
     let header = Paragraph::new(header_text).style(
