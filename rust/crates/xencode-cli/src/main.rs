@@ -676,7 +676,7 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
         if file_type.is_dir() {
             copy_dir_recursive(&entry.path(), &dest_path)?;
         } else {
-            std::fs::copy(&entry.path(), &dest_path)?;
+            std::fs::copy(entry.path(), dest_path)?;
         }
     }
     Ok(())

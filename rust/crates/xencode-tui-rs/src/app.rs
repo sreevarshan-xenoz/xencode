@@ -969,15 +969,15 @@ impl<'a> App<'a> {
                     tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
                 }
 
-                let _ = tx.send(format!("[VOICE]status:processing"));
+                let _ = tx.send("[VOICE]status:processing".to_string());
                 tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-                let _ = tx.send(format!("[VOICE]status:speaking"));
+                let _ = tx.send("[VOICE]status:speaking".to_string());
                 let _ = tx.send(format!("[VOICE]transcript:{}", cmd));
                 let _ = tx.send(format!("[VOICE]command:{}|{}", cmd, result));
                 tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
 
-                let _ = tx.send(format!("[VOICE]status:listening"));
+                let _ = tx.send("[VOICE]status:listening".to_string());
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             }
 
@@ -1476,10 +1476,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
         // Drain async messages
         while let Ok(token) = rx.try_recv() {
-            if token.starts_with("[REVIEW]") {
-                app.append_review(&token[8..]);
-            } else if token.starts_with("[BYTEBOT]") {
-                let body = &token[9..];
+            if let Some(body) = token.strip_prefix("[REVIEW]") {
+                app.append_review(body);
+            } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
                 if body.starts_with("step:") {
                     let parts: Vec<&str> = body.splitn(4, ':').collect();
                     if parts.len() >= 4 {
@@ -1501,8 +1500,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if token == "[BYTEBOT_DONE]" {
                 app.bytebot_running = false;
                 app.bytebot_progress = 1.0;
-            } else if token.starts_with("[COLLAB]") {
-                let body = &token[8..];
+            } else if let Some(body) = token.strip_prefix("[COLLAB]") {
                 if body.starts_with("status:") {
                     if let Some(s) = body.strip_prefix("status:") {
                         app.collab_sync_status = s.to_string();
@@ -1533,8 +1531,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 } else if body == "ready" {
                     app.collab_last_sync = current_timestamp();
                 }
-            } else if token.starts_with("[HEALTH]") {
-                let parts: Vec<&str> = token[8..].splitn(4, '|').collect();
+            } else if let Some(body) = token.strip_prefix("[HEALTH]") {
+                let parts: Vec<&str> = body.splitn(4, '|').collect();
                 if parts.len() >= 3 {
                     let provider = parts[0].to_string();
                     let status = parts[1].to_string();
@@ -1561,8 +1559,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         app.average_latency = if count > 0.0 { total / count } else { 0.0 };
                     }
                 }
-            } else if token.starts_with("[VOICE]") {
-                let body = &token[7..];
+            } else if let Some(body) = token.strip_prefix("[VOICE]") {
                 if body.starts_with("status:") {
                     if let Some(s) = body.strip_prefix("status:") {
                         let new_status = s.to_string();
@@ -1587,8 +1584,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         app.voice_commands.push((cmd, result));
                     }
                 }
-            } else if token.starts_with("[TERM]") {
-                let body = &token[6..];
+            } else if let Some(body) = token.strip_prefix("[TERM]") {
                 if body.starts_with("suggestion:") {
                     if let Some(s) = body.strip_prefix("suggestion:") {
                         let parts: Vec<&str> = s.splitn(3, '|').collect();
@@ -1605,8 +1601,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 } else if body == "ready" {
                     app.term_asst_active = false;
                 }
-            } else if token.starts_with("[SECURITY]") {
-                let body = &token[10..];
+            } else if let Some(body) = token.strip_prefix("[SECURITY]") {
                 if body.starts_with("progress:") {
                     if let Some(p) = body.strip_prefix("progress:") {
                         app.sec_scan_progress = p.trim().parse::<f64>().unwrap_or(0.0);
@@ -1639,8 +1634,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 } else if body == "done" {
                     app.sec_scan_active = false;
                 }
-            } else if token.starts_with("[PROFILER]") {
-                let body = &token[10..];
+            } else if let Some(body) = token.strip_prefix("[PROFILER]") {
                 if body.starts_with("gauge:") {
                     if let Some(g) = body.strip_prefix("gauge:") {
                         let parts: Vec<&str> = g.splitn(2, '|').collect();
@@ -2486,18 +2480,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 Event::Resize(_, _) => {}
                 _ => {}
             }
-        } else {
-            if app.is_generating
-                || app.is_reviewing
-                || app.health_check_in_progress
-                || app.bytebot_running
-                || app.voice_active
-                || app.collab_sync_status == "syncing"
-                || app.sec_scan_active
-                || app.profiler_running
-            {
-                app.spinner_tick = app.spinner_tick.wrapping_add(1);
-            }
+        } else if app.is_generating
+            || app.is_reviewing
+            || app.health_check_in_progress
+            || app.bytebot_running
+            || app.voice_active
+            || app.collab_sync_status == "syncing"
+            || app.sec_scan_active
+            || app.profiler_running
+        {
+            app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
     }
 }

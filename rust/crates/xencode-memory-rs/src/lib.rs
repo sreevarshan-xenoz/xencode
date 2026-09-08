@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn start_and_switch_session() {
         let mut mem = ConversationMemory::new(10);
-        let s1 = mem.start_session(Some("sess1".to_string()));
+        mem.start_session(Some("sess1".to_string()));
         let s2 = mem.start_session(Some("sess2".to_string()));
 
         assert_eq!(s2, "sess2");

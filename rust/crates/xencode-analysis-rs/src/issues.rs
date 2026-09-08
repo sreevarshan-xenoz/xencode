@@ -61,6 +61,7 @@ pub struct CodeIssue {
 }
 
 impl CodeIssue {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         issue_type: IssueType,
         severity: Severity,

@@ -85,6 +85,12 @@ impl<T: Clone + Ord> GSet<T> {
     }
 }
 
+impl<T: Clone + Ord> Default for GSet<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn current_time() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -108,12 +114,11 @@ mod tests {
     #[test]
     fn test_lww_register_merge() {
         let mut alice = LWWRegister::new("alice_value".to_string(), "alice");
-        let bob = LWWRegister::new("bob_value".to_string(), "bob");
 
         // Give bob's register a higher timestamp for testing
         std::thread::sleep(std::time::Duration::from_millis(2));
 
-        let mut bob_later = LWWRegister::new("bob_later".to_string(), "bob");
+        let bob_later = LWWRegister::new("bob_later".to_string(), "bob");
         alice.merge(&bob_later);
         assert_eq!(*alice.get(), "bob_later");
     }

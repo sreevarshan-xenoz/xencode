@@ -39,6 +39,22 @@ impl PluginManifest {
     }
 }
 
+impl Default for PluginManifest {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            version: "0.1.0".to_string(),
+            description: String::new(),
+            author: String::new(),
+            license: "MIT".to_string(),
+            entry_point: "plugin.py".to_string(),
+            dependencies: Vec::new(),
+            xencode_version: "*".to_string(),
+            permissions: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,21 +101,5 @@ mod tests {
             ..Default::default()
         };
         assert!(manifest.is_compatible_with("any-version"));
-    }
-}
-
-impl Default for PluginManifest {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            version: "0.1.0".to_string(),
-            description: String::new(),
-            author: String::new(),
-            license: "MIT".to_string(),
-            entry_point: "plugin.py".to_string(),
-            dependencies: Vec::new(),
-            xencode_version: "*".to_string(),
-            permissions: Vec::new(),
-        }
     }
 }
