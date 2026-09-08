@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use xencode_models_rs::OllamaClient;
+use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, OllamaClient};
 
 pub mod anthropic;
 pub mod gemini;
@@ -46,7 +46,7 @@ struct OllamaResponse {
 
 /// ProviderManager abstracts over local and cloud models.
 ///
-/// Supports Ollama (local), OpenRouter (cloud), Qwen (cloud), Gemini (cloud),
+/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud), Gemini (cloud),
 /// and Anthropic (cloud).
 ///
 /// Features:
@@ -55,6 +55,7 @@ struct OllamaResponse {
 /// - Health tracking across all providers
 pub struct ProviderManager {
     ollama_client: OllamaClient,
+    llama_cpp_client: Option<LlamaCppClient>,
     openrouter_api_key: Option<String>,
     qwen_api_key: Option<String>,
     gemini_api_key: Option<String>,
@@ -74,6 +75,7 @@ impl ProviderManager {
         let client = reqwest::Client::new();
         Self {
             ollama_client,
+            llama_cpp_client: None,
             openrouter_api_key,
             qwen_api_key,
             gemini_api_key,
@@ -81,6 +83,12 @@ impl ProviderManager {
             retry_config: RetryConfig::default(),
             client,
         }
+    }
+
+    /// Set a llama.cpp client for local GGUF/llama-server inference.
+    pub fn with_llama_cpp(mut self, client: LlamaCppClient) -> Self {
+        self.llama_cpp_client = Some(client);
+        self
     }
 
     /// Set a custom retry configuration.
@@ -153,6 +161,22 @@ impl ProviderManager {
             return Err(ProviderError::Api(
                 "Google Gemini API key not configured".to_string(),
             ));
+        }
+
+        // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
+        let llamacpp_target = model
+            .strip_prefix("llamacpp:")
+            .or_else(|| model.strip_prefix("llama.cpp:"))
+            .or_else(|| {
+                if model.starts_with("llama:") {
+                    model.strip_prefix("llama:")
+                } else {
+                    None
+                }
+            });
+
+        if let Some(inner_model) = llamacpp_target {
+            return self.generate_llamacpp(inner_model, messages, None).await;
         }
 
         // OpenRouter route (models with a slash, e.g. "openai/gpt-4")
@@ -281,6 +305,24 @@ impl ProviderManager {
             return Err(ProviderError::Api(
                 "Google Gemini API key not configured".to_string(),
             ));
+        }
+
+        // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
+        let llamacpp_target = model
+            .strip_prefix("llamacpp:")
+            .or_else(|| model.strip_prefix("llama.cpp:"))
+            .or_else(|| {
+                if model.starts_with("llama:") {
+                    model.strip_prefix("llama:")
+                } else {
+                    None
+                }
+            });
+
+        if let Some(inner_model) = llamacpp_target {
+            return self
+                .generate_stream_llamacpp(inner_model, messages, None, callback)
+                .await;
         }
 
         // OpenRouter route
@@ -452,6 +494,181 @@ impl ProviderManager {
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            if let Ok(text) = std::str::from_utf8(&chunk) {
+                for line in text.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line == "data: [DONE]" {
+                        continue;
+                    }
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
+                                if let Some(first) = choices.first() {
+                                    if let Some(delta) = first.get("delta") {
+                                        if let Some(content) =
+                                            delta.get("content").and_then(|c| c.as_str())
+                                        {
+                                            callback(content);
+                                            full_response.push_str(content);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(full_response)
+    }
+
+    /// Non-streaming llama.cpp completion request using OpenAI-compatible /v1/chat/completions.
+    async fn generate_llamacpp(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
+    ) -> Result<String, ProviderError> {
+        let base_url = match &self.llama_cpp_client {
+            Some(client) => client.base_url(),
+            None => "http://localhost:8080",
+        };
+
+        let url = format!("{}/v1/chat/completions", base_url);
+
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": false
+        });
+
+        if let Some(opts) = options {
+            if let Some(ref grammar) = opts.grammar {
+                payload["grammar"] = serde_json::Value::String(grammar.clone());
+            }
+            if let Some(ref schema) = opts.json_schema {
+                payload["json_schema"] = schema.clone();
+            }
+            if let Some(min_p) = opts.min_p {
+                payload["min_p"] = serde_json::json!(min_p);
+            }
+            if let Some(top_k) = opts.top_k {
+                payload["top_k"] = serde_json::json!(top_k);
+            }
+            if let Some(mirostat) = opts.mirostat {
+                payload["mirostat"] = serde_json::json!(mirostat);
+            }
+            if let Some(temp) = opts.temperature {
+                payload["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(max_tokens) = opts.max_tokens {
+                payload["max_tokens"] = serde_json::json!(max_tokens);
+            }
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(format!("llama.cpp request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("llama.cpp {} - {}", status, msg)));
+        }
+
+        #[derive(Deserialize)]
+        struct LlamaCppResponse {
+            choices: Vec<LlamaCppChoice>,
+        }
+        #[derive(Deserialize)]
+        struct LlamaCppChoice {
+            message: ChatMessage,
+        }
+
+        let body: LlamaCppResponse = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(format!("llama.cpp parse error: {e}")))?;
+
+        body.choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| ProviderError::Parse("llama.cpp: empty choices".to_string()))
+    }
+
+    /// Streaming llama.cpp completion request using SSE /v1/chat/completions.
+    async fn generate_stream_llamacpp<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
+        mut callback: F,
+    ) -> Result<String, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        let base_url = match &self.llama_cpp_client {
+            Some(client) => client.base_url(),
+            None => "http://localhost:8080",
+        };
+
+        let url = format!("{}/v1/chat/completions", base_url);
+
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": true
+        });
+
+        if let Some(opts) = options {
+            if let Some(ref grammar) = opts.grammar {
+                payload["grammar"] = serde_json::Value::String(grammar.clone());
+            }
+            if let Some(ref schema) = opts.json_schema {
+                payload["json_schema"] = schema.clone();
+            }
+            if let Some(min_p) = opts.min_p {
+                payload["min_p"] = serde_json::json!(min_p);
+            }
+            if let Some(top_k) = opts.top_k {
+                payload["top_k"] = serde_json::json!(top_k);
+            }
+            if let Some(mirostat) = opts.mirostat {
+                payload["mirostat"] = serde_json::json!(mirostat);
+            }
+            if let Some(temp) = opts.temperature {
+                payload["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(max_tokens) = opts.max_tokens {
+                payload["max_tokens"] = serde_json::json!(max_tokens);
+            }
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(format!("llama.cpp request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api(format!("llama.cpp {} - {}", status, msg)));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut full_response = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result
+                .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
             if let Ok(text) = std::str::from_utf8(&chunk) {
                 for line in text.lines() {
                     let line = line.trim();
