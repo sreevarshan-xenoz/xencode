@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use axum::{
     extract::{Path, State, WebSocketUpgrade},
     response::IntoResponse,
@@ -6,6 +5,7 @@ use axum::{
     Json, Router,
 };
 use serde::Serialize;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use crate::ws::AppState;
@@ -65,7 +65,10 @@ async fn get_session(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Json<SessionInfo> {
-    let members = state.sessions.lock().await
+    let members = state
+        .sessions
+        .lock()
+        .await
         .get(&id)
         .cloned()
         .unwrap_or_default();
@@ -177,7 +180,10 @@ mod tests {
         // Manually add a session with members
         {
             let mut sessions = state.sessions.lock().await;
-            sessions.insert("active-session".to_string(), vec!["alice".to_string(), "bob".to_string()]);
+            sessions.insert(
+                "active-session".to_string(),
+                vec!["alice".to_string(), "bob".to_string()],
+            );
         }
         let session = get_session(Path("active-session".to_string()), State(state)).await;
         assert_eq!(session.members, vec!["alice", "bob"]);

@@ -59,7 +59,11 @@ impl VectorStore {
             .collect();
 
         // Sort by score descending (higher = more similar)
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         scored.truncate(top_k);
         scored
     }
@@ -77,8 +81,8 @@ impl VectorStore {
     pub fn load(path: &Path) -> Result<Self, StoreError> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| StoreError::ReadError(path.display().to_string(), e.to_string()))?;
-        let store: VectorStore = serde_json::from_str(&json)
-            .map_err(|e| StoreError::ParseError(e.to_string()))?;
+        let store: VectorStore =
+            serde_json::from_str(&json).map_err(|e| StoreError::ParseError(e.to_string()))?;
         Ok(store)
     }
 

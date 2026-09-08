@@ -80,7 +80,7 @@ impl OllamaClient {
             .timeout(std::time::Duration::from_secs(timeout_seconds))
             .build()
             .unwrap_or_default();
-            
+
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             health_tracker: HealthTracker::new(),
@@ -96,19 +96,16 @@ impl OllamaClient {
     /// List all installed models.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, OllamaError> {
         let url = format!("{}/api/tags", self.base_url);
-        
-        let response = self.client.get(&url)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    OllamaError::NotRunning(e.to_string())
-                } else if e.is_timeout() {
-                    OllamaError::Timeout(e.to_string())
-                } else {
-                    OllamaError::Api(e.to_string())
-                }
-            })?;
+
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            if e.is_connect() {
+                OllamaError::NotRunning(e.to_string())
+            } else if e.is_timeout() {
+                OllamaError::Timeout(e.to_string())
+            } else {
+                OllamaError::Api(e.to_string())
+            }
+        })?;
 
         let tags: TagsResponse = response
             .json()
@@ -140,10 +137,7 @@ impl OllamaClient {
         });
 
         let start = Instant::now();
-        let result = self.client.post(&url)
-            .json(&payload)
-            .send()
-            .await;
+        let result = self.client.post(&url).json(&payload).send().await;
 
         match result {
             Ok(resp) if resp.status().is_success() => {

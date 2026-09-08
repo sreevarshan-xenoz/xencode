@@ -54,7 +54,9 @@ impl CodeAnalyzer {
                     IssueType::StyleIssue,
                     Severity::Low,
                     "Print statement found; consider using logging instead",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Replace with logging.debug() or similar",
                     line.trim(),
                 ));
@@ -66,7 +68,9 @@ impl CodeAnalyzer {
                     IssueType::PotentialBug,
                     Severity::High,
                     "Mutable default argument is shared across all calls",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Use None as default and initialize inside the function",
                     line.trim(),
                 ));
@@ -78,7 +82,9 @@ impl CodeAnalyzer {
                     IssueType::StyleIssue,
                     Severity::Low,
                     "Line too long",
-                    path, lineno, 100,
+                    path,
+                    lineno,
+                    100,
                     "Break line into multiple lines",
                     &line[..100.min(line.len())],
                 ));
@@ -90,7 +96,9 @@ impl CodeAnalyzer {
                     IssueType::Maintainability,
                     Severity::Low,
                     "TODO/FIXME/HACK marker found",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Address the marked item",
                     line.trim(),
                 ));
@@ -114,7 +122,9 @@ impl CodeAnalyzer {
                     IssueType::Documentation,
                     Severity::Low,
                     "Function missing docstring",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Add a docstring describing purpose, args, and returns",
                     &source[cap.start()..cap.end()],
                 ));
@@ -138,7 +148,9 @@ impl CodeAnalyzer {
                     IssueType::StyleIssue,
                     Severity::Low,
                     "Console log statement found",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Remove or replace with proper logging",
                     line.trim(),
                 ));
@@ -150,7 +162,9 @@ impl CodeAnalyzer {
                     IssueType::PotentialBug,
                     Severity::Medium,
                     "Loose equality operator may cause type coercion issues",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Use === instead of ==",
                     line.trim(),
                 ));
@@ -162,7 +176,9 @@ impl CodeAnalyzer {
                     IssueType::StyleIssue,
                     Severity::Medium,
                     "'var' declaration may cause scoping issues",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Use 'let' or 'const' instead of 'var'",
                     line.trim(),
                 ));
@@ -186,7 +202,9 @@ impl CodeAnalyzer {
                     IssueType::PotentialBug,
                     Severity::Medium,
                     "Unwrap may cause panic on None/Err",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Use proper error handling with match or ? operator",
                     line.trim(),
                 ));
@@ -198,15 +216,19 @@ impl CodeAnalyzer {
                     IssueType::Maintainability,
                     Severity::Low,
                     "TODO/FIXME/HACK marker found",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Address the marked item",
                     line.trim(),
                 ));
             }
 
             // Check for missing documentation on public items
-            if line.trim().starts_with("pub fn") || line.trim().starts_with("pub struct")
-                || line.trim().starts_with("pub enum") || line.trim().starts_with("pub trait")
+            if line.trim().starts_with("pub fn")
+                || line.trim().starts_with("pub struct")
+                || line.trim().starts_with("pub enum")
+                || line.trim().starts_with("pub trait")
             {
                 // Check if previous non-blank line has a doc comment
                 let prev_line = if i > 0 { lines[i - 1].trim() } else { "" };
@@ -215,7 +237,9 @@ impl CodeAnalyzer {
                         IssueType::Documentation,
                         Severity::Low,
                         "Public item missing documentation",
-                        path, lineno, 0,
+                        path,
+                        lineno,
+                        0,
                         "Add /// doc comment explaining purpose and usage",
                         line.trim(),
                     ));
@@ -239,7 +263,9 @@ impl CodeAnalyzer {
                     IssueType::StyleIssue,
                     Severity::Low,
                     "Line too long",
-                    path, lineno, 120,
+                    path,
+                    lineno,
+                    120,
                     "Break line into multiple lines",
                     &line[..120.min(line.len())],
                 ));
@@ -250,7 +276,9 @@ impl CodeAnalyzer {
                     IssueType::Maintainability,
                     Severity::Low,
                     "TODO/FIXME marker found",
-                    path, lineno, 0,
+                    path,
+                    lineno,
+                    0,
                     "Address the marked item",
                     line.trim(),
                 ));

@@ -12,15 +12,13 @@
 //! was routed to the Qwen provider rather than Ollama or another provider.
 
 use xencode_models_rs::OllamaClient;
-use xencode_providers_rs::{ChatMessage, ProviderManager, ProviderError};
+use xencode_providers_rs::{ChatMessage, ProviderError, ProviderManager};
 
 fn test_messages() -> Vec<ChatMessage> {
-    vec![
-        ChatMessage {
-            role: "user".to_string(),
-            content: "Hello".to_string(),
-        },
-    ]
+    vec![ChatMessage {
+        role: "user".to_string(),
+        content: "Hello".to_string(),
+    }]
 }
 
 /// Helper: create a ProviderManager with the given keys.
@@ -30,8 +28,8 @@ fn make_manager(
     anthropic_key: Option<&str>,
 ) -> ProviderManager {
     ProviderManager::new(
-        OllamaClient::new("http://127.0.0.1:1", 1),  // Ollama URL won't be reachable
-        None,                                          // openrouter key
+        OllamaClient::new("http://127.0.0.1:1", 1), // Ollama URL won't be reachable
+        None,                                       // openrouter key
         qwen_key.map(|s| s.to_string()),
         gemini_key.map(|s| s.to_string()),
         anthropic_key.map(|s| s.to_string()),
@@ -42,15 +40,9 @@ fn make_manager(
 
 #[tokio::test]
 async fn qwen_prefix_routes_to_qwen_provider() {
-    let manager = make_manager(
-        Some("qwen-key"),
-        None,
-        None,
-    );
+    let manager = make_manager(Some("qwen-key"), None, None);
 
-    let result = manager
-        .generate("qwen:qwen2.5:72b", &test_messages())
-        .await;
+    let result = manager.generate("qwen:qwen2.5:72b", &test_messages()).await;
 
     // The Qwen provider will try to contact the real Qwen API (default URL).
     // Depending on the network environment this may fail with:
@@ -70,9 +62,7 @@ async fn qwen_prefix_routes_to_qwen_provider() {
 async fn qwen_missing_key_returns_error() {
     let manager = make_manager(None, None, None);
 
-    let result = manager
-        .generate("qwen:qwen2.5:72b", &test_messages())
-        .await;
+    let result = manager.generate("qwen:qwen2.5:72b", &test_messages()).await;
 
     assert!(result.is_err(), "expected error for missing Qwen key");
     match result.unwrap_err() {
@@ -90,11 +80,7 @@ async fn qwen_missing_key_returns_error() {
 
 #[tokio::test]
 async fn gemini_prefix_routes_to_gemini_provider() {
-    let manager = make_manager(
-        None,
-        Some("gemini-key"),
-        None,
-    );
+    let manager = make_manager(None, Some("gemini-key"), None);
 
     let result = manager
         .generate("google_gemini:gemini-1.5-pro", &test_messages())
@@ -134,11 +120,7 @@ async fn gemini_missing_key_returns_error() {
 
 #[tokio::test]
 async fn anthropic_prefix_routes_to_anthropic_provider() {
-    let manager = make_manager(
-        None,
-        None,
-        Some("anthropic-key"),
-    );
+    let manager = make_manager(None, None, Some("anthropic-key"));
 
     let result = manager
         .generate("anthropic:claude-3-5-sonnet-20241022", &test_messages())
@@ -184,11 +166,12 @@ async fn unknown_prefix_tries_ollama() {
     // The Ollama URL is deliberately broken (127.0.0.1:1).
     // The error should be from the ProviderManager's Ollama route,
     // NOT from any provider-specific error.
-    let result = manager
-        .generate("llama3.1:8b", &test_messages())
-        .await;
+    let result = manager.generate("llama3.1:8b", &test_messages()).await;
 
-    assert!(result.is_err(), "expected network error from Ollama fallback");
+    assert!(
+        result.is_err(),
+        "expected network error from Ollama fallback"
+    );
     match result.unwrap_err() {
         ProviderError::Network(msg) => {
             assert!(
@@ -218,9 +201,7 @@ async fn openrouter_prefix_routes() {
     // Models with '/' route to OpenRouter when the key is set.
     // The request will fail trying to reach the real OpenRouter API,
     // but the error will contain "OpenRouter" proving routing worked.
-    let result = manager
-        .generate("openai/gpt-4o", &test_messages())
-        .await;
+    let result = manager.generate("openai/gpt-4o", &test_messages()).await;
 
     assert!(result.is_err(), "expected error (routed to OpenRouter)");
     match result.unwrap_err() {

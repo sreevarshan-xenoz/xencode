@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -46,14 +46,17 @@ impl SyncCoordinator {
             is_active: true,
         };
 
-        let entry = self.sessions.entry(session_id.to_string()).or_insert_with(|| {
-            let now = chrono::Utc::now().to_rfc3339();
-            SessionState {
-                session_id: session_id.to_string(),
-                peers: Vec::new(),
-                created_at: now,
-            }
-        });
+        let entry = self
+            .sessions
+            .entry(session_id.to_string())
+            .or_insert_with(|| {
+                let now = chrono::Utc::now().to_rfc3339();
+                SessionState {
+                    session_id: session_id.to_string(),
+                    peers: Vec::new(),
+                    created_at: now,
+                }
+            });
 
         let info = peer.clone();
         entry.peers.push(peer);

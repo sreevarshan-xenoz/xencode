@@ -1,19 +1,19 @@
-use std::path::PathBuf;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use std::sync::Arc;
+use xencode_analysis_rs::analyzer::CodeAnalyzer;
+use xencode_analysis_rs::security::VulnerabilityScanner;
 use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::OllamaClient;
-use xencode_providers_rs::{ChatMessage, ProviderManager};
-use xencode_analysis_rs::analyzer::CodeAnalyzer;
-use xencode_analysis_rs::security::VulnerabilityScanner;
-use xencode_server_rs::ws::AppState as ServerState;
 use xencode_plugin_rs::PluginRegistry;
-use std::sync::Arc;
+use xencode_providers_rs::{ChatMessage, ProviderManager};
+use xencode_server_rs::ws::AppState as ServerState;
 
 /// Output format for analysis results
 #[derive(clap::ValueEnum, Clone)]
@@ -191,7 +191,12 @@ async fn main() {
         Commands::Config { action } => run_config(action),
         Commands::Models { action } => run_models(action).await,
         Commands::Cache { action } => run_cache(action),
-        Commands::Query { prompt, model, no_cache, session } => run_query(prompt, model, no_cache, session).await,
+        Commands::Query {
+            prompt,
+            model,
+            no_cache,
+            session,
+        } => run_query(prompt, model, no_cache, session).await,
         Commands::Memory { action } => run_memory(action),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
@@ -205,11 +210,7 @@ async fn main() {
     }
 }
 
-fn run_scan(
-    root: PathBuf,
-    include_hidden: bool,
-    max_depth: Option<usize>,
-) -> Result<(), String> {
+fn run_scan(root: PathBuf, include_hidden: bool, max_depth: Option<usize>) -> Result<(), String> {
     let options = ScanOptions {
         max_depth,
         include_hidden,
@@ -307,7 +308,10 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
         }
         ModelAction::Health { model } => {
             println!("Checking health of {model}...");
-            let health = client.check_health(&model).await.map_err(|e| e.to_string())?;
+            let health = client
+                .check_health(&model)
+                .await
+                .map_err(|e| e.to_string())?;
             println!("  Status:        {}", health.status);
             println!("  Response time: {:.3}s", health.response_time);
             if let Some(ref err) = health.error_message {
@@ -316,7 +320,10 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
             Ok(())
         }
         ModelAction::Default => {
-            let default = client.get_smart_default().await.map_err(|e| e.to_string())?;
+            let default = client
+                .get_smart_default()
+                .await
+                .map_err(|e| e.to_string())?;
             match default {
                 Some(model) => println!("Smart default: {model}"),
                 None => println!("No models available"),
@@ -390,7 +397,7 @@ async fn run_query(
     if let Some(ref mut c) = cache {
         if let Some(cached_resp) = c.get(&prompt, &model) {
             println!("{}", cached_resp);
-            
+
             if let Some(ref mut mem) = memory {
                 mem.add_message("user", &prompt, None);
                 mem.add_message("assistant", &cached_resp, Some(model.clone()));
@@ -408,7 +415,7 @@ async fn run_query(
             });
         }
     }
-    
+
     context_messages.push(ChatMessage {
         role: "user".to_string(),
         content: prompt.clone(),
@@ -424,11 +431,13 @@ async fn run_query(
     );
 
     let mut response_content = String::new();
-    let result = provider.generate_stream(&model, &context_messages, |token| {
-        print!("{}", token);
-        let _ = io::stdout().flush();
-        response_content.push_str(token);
-    }).await;
+    let result = provider
+        .generate_stream(&model, &context_messages, |token| {
+            print!("{}", token);
+            let _ = io::stdout().flush();
+            response_content.push_str(token);
+        })
+        .await;
 
     println!(); // Ensure final newline
 
@@ -484,9 +493,16 @@ async fn run_server(port: u16) -> Result<(), String> {
     let app = xencode_server_rs::build_app_with_state(state.clone());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("🚀 Xencode server starting on http://0.0.0.0:{}", port);
-    println!("   WebSocket: ws://0.0.0.0:{}/ws/{{session_id}}/{{username}}", port);
-    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| e.to_string())?;
-    axum::serve(listener, app).await.map_err(|e| e.to_string())?;
+    println!(
+        "   WebSocket: ws://0.0.0.0:{}/ws/{{session_id}}/{{username}}",
+        port
+    );
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| e.to_string())?;
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -524,7 +540,10 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
 
         match format {
             OutputFormat::Json => {
-                println!("{}", serde_json::to_string_pretty(&all_issue_lists).map_err(|e| e.to_string())?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&all_issue_lists).map_err(|e| e.to_string())?
+                );
             }
             OutputFormat::Text => {
                 let total: usize = all_issue_lists.iter().map(|(_, issues)| issues.len()).sum();
@@ -533,16 +552,26 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
                 println!("   Total issues:   {}", total);
                 for (file_path, issues) in &all_issue_lists {
                     if !issues.is_empty() {
-                        println!("
-  {} ({} issues)", file_path, issues.len());
+                        println!(
+                            "
+  {} ({} issues)",
+                            file_path,
+                            issues.len()
+                        );
                         for issue in issues {
                             let icon = match issue.severity.label() {
                                 "critical" | "high" => "R",
                                 "medium" => "Y",
                                 _ => "G",
                             };
-                            println!("    {} [{}] Ln{}: {} -- {}",
-                                icon, issue.severity.label(), issue.line_number, issue.message, issue.suggestion);
+                            println!(
+                                "    {} [{}] Ln{}: {} -- {}",
+                                icon,
+                                issue.severity.label(),
+                                issue.line_number,
+                                issue.message,
+                                issue.suggestion
+                            );
                         }
                     }
                 }
@@ -554,14 +583,22 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
 
         match format {
             OutputFormat::Json => {
-                println!("{}", serde_json::to_string_pretty(&issues).map_err(|e| e.to_string())?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&issues).map_err(|e| e.to_string())?
+                );
             }
             OutputFormat::Text => {
                 println!("Analysis of: {}", path.display());
                 println!("   Issues: {}", issues.len());
                 for issue in &issues {
-                    println!("  [{}] Ln{}: {} -- {}",
-                        issue.severity.label(), issue.line_number, issue.message, issue.suggestion);
+                    println!(
+                        "  [{}] Ln{}: {} -- {}",
+                        issue.severity.label(),
+                        issue.line_number,
+                        issue.message,
+                        issue.suggestion
+                    );
                 }
             }
         }
@@ -585,8 +622,10 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
             } else {
                 println!("📦 Installed Plugins (from {}):", plugin_dir.display());
                 for m in &manifests {
-                    println!("  {} v{} — {} (by {})",
-                        m.name, m.version, m.description, m.author);
+                    println!(
+                        "  {} v{} — {} (by {})",
+                        m.name, m.version, m.description, m.author
+                    );
                 }
             }
         }
@@ -595,7 +634,8 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
                 return Err(format!("Path does not exist: {}", path.display()));
             }
             // Copy plugin directory to plugin folder
-            let name = path.file_stem()
+            let name = path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("plugin");
             let dest = plugin_dir.join(name);
@@ -605,10 +645,12 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
             std::fs::create_dir_all(&plugin_dir).map_err(|e| e.to_string())?;
 
             if path.is_dir() {
-                copy_dir_recursive(&path, &dest).map_err(|e| format!("Failed to install: {}", e))?;
+                copy_dir_recursive(&path, &dest)
+                    .map_err(|e| format!("Failed to install: {}", e))?;
             } else {
                 std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-                std::fs::copy(&path, dest.join(path.file_name().unwrap())).map_err(|e| e.to_string())?;
+                std::fs::copy(&path, dest.join(path.file_name().unwrap()))
+                    .map_err(|e| e.to_string())?;
             }
             println!("✅ Plugin '{}' installed successfully.", name);
         }
@@ -643,8 +685,13 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 async fn run_tui() -> Result<(), String> {
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
     let mut stdout = io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen, crossterm::event::EnableMouseCapture).map_err(|e| e.to_string())?;
-    
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )
+    .map_err(|e| e.to_string())?;
+
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;
 
@@ -656,7 +703,8 @@ async fn run_tui() -> Result<(), String> {
         terminal.backend_mut(),
         crossterm::terminal::LeaveAlternateScreen,
         crossterm::event::DisableMouseCapture
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     terminal.show_cursor().map_err(|e| e.to_string())?;
 
     res.map_err(|e| e.to_string())

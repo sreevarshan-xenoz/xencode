@@ -73,7 +73,8 @@ impl QwenProvider {
             "stream": false,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -117,7 +118,8 @@ impl QwenProvider {
             "stream": true,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")

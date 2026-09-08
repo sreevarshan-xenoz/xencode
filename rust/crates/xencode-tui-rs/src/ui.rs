@@ -20,7 +20,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // header
-            Constraint::Min(1),   // body
+            Constraint::Min(1),    // body
             Constraint::Length(1), // status bar
         ])
         .split(f.area());
@@ -66,11 +66,17 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         model, theme_name, file_count, git_count
     );
 
-    let padding = area.width as usize - left.len().min(area.width as usize) - right.len().min(area.width as usize);
+    let padding = area.width as usize
+        - left.len().min(area.width as usize)
+        - right.len().min(area.width as usize);
     let header_text = format!("{}{}{}", left, " ".repeat(padding.max(0)), right);
 
-    let header = Paragraph::new(header_text)
-        .style(Style::default().bg(app.theme.accent).fg(app.theme.highlight_fg).add_modifier(Modifier::BOLD));
+    let header = Paragraph::new(header_text).style(
+        Style::default()
+            .bg(app.theme.accent)
+            .fg(app.theme.highlight_fg)
+            .add_modifier(Modifier::BOLD),
+    );
     f.render_widget(header, area);
 }
 
@@ -86,7 +92,9 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let branch_str = format!(" \u{1F9F0} {}", app.git_branch);
 
     // Provider health indicator
-    let ollama_ok = app.ollama_health_entries.get("ollama")
+    let ollama_ok = app
+        .ollama_health_entries
+        .get("ollama")
         .map(|(s, _, _)| s == "healthy")
         .unwrap_or(false);
     let health_icon = if ollama_ok { "\u{2705}" } else { "\u{2753}" };
@@ -106,7 +114,15 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // Build status text chunks
     let left_parts = match app.input_mode {
-        InputMode::Normal => format!(" {}  {} | {}  {}  {}  \u{394} {}  | ", mode_str, branch_str, health_icon, uptime_str, files_str, app.git_status.len()),
+        InputMode::Normal => format!(
+            " {}  {} | {}  {}  {}  \u{394} {}  | ",
+            mode_str,
+            branch_str,
+            health_icon,
+            uptime_str,
+            files_str,
+            app.git_status.len()
+        ),
         InputMode::Editing => format!(" {}  | ", mode_str),
     };
 
@@ -135,8 +151,11 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let status_text = format!("{}{}", left_parts, hints);
 
-    let bar = Paragraph::new(status_text)
-        .style(Style::default().bg(app.theme.status_bg).fg(app.theme.status_fg));
+    let bar = Paragraph::new(status_text).style(
+        Style::default()
+            .bg(app.theme.status_bg)
+            .fg(app.theme.status_fg),
+    );
     f.render_widget(bar, area);
 }
 
@@ -148,7 +167,7 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
         .constraints([
             Constraint::Percentage(20), // File Explorer
             Constraint::Percentage(50), // Code Editor
-            Constraint::Percentage(30)  // Chat
+            Constraint::Percentage(30), // Chat
         ])
         .split(area);
 
@@ -160,9 +179,9 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
         let right = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(6),      // chat
-                Constraint::Length(8),    // terminal
-                Constraint::Length(3),    // input
+                Constraint::Min(6),    // chat
+                Constraint::Length(8), // terminal
+                Constraint::Length(3), // input
             ])
             .split(main_chunks[2]);
         draw_messages(f, app, right[0]);
@@ -199,7 +218,10 @@ fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
         " 📝 Code Editor (Select a file & press Enter) ".to_string()
     };
 
-    let block = Block::default().borders(Borders::ALL).border_style(border_style).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(title);
 
     if app.opened_file.is_some() {
         let inner = block.inner(area);
@@ -208,10 +230,19 @@ fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
     } else {
         let text = vec![
             Line::from(""),
-            Line::from(Span::styled("  No file opened.", Style::default().fg(app.theme.message_system))),
+            Line::from(Span::styled(
+                "  No file opened.",
+                Style::default().fg(app.theme.message_system),
+            )),
             Line::from(""),
-            Line::from(Span::styled("  Select a file in the Explorer and press Enter.", Style::default().fg(app.theme.message_system))),
-            Line::from(Span::styled("  Press 'e' to enter edit mode, Ctrl+S to save.", Style::default().fg(app.theme.message_system))),
+            Line::from(Span::styled(
+                "  Select a file in the Explorer and press Enter.",
+                Style::default().fg(app.theme.message_system),
+            )),
+            Line::from(Span::styled(
+                "  Press 'e' to enter edit mode, Ctrl+S to save.",
+                Style::default().fg(app.theme.message_system),
+            )),
         ];
         let paragraph = Paragraph::new(text).block(block);
         f.render_widget(paragraph, area);
@@ -229,9 +260,13 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = format!(" 📁 Workspace ({} files) ", app.file_tree.len());
-    let block = Block::default().borders(Borders::ALL).border_style(border_style).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(title);
 
-    let items: Vec<ListItem> = app.file_tree
+    let items: Vec<ListItem> = app
+        .file_tree
         .iter()
         .enumerate()
         .map(|(i, path)| {
@@ -240,29 +275,39 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
             // Git status color
             let git_color = if let Some(status) = app.git_status.get(path) {
                 match status.as_str() {
-                    "M" | "MM" => app.theme.message_user,    // Modified
+                    "M" | "MM" => app.theme.message_user,      // Modified
                     "A" | "AM" => app.theme.message_assistant, // Added
-                    "D"        => ratatui::style::Color::Red,  // Deleted
-                    _          => app.theme.fg,               // Untracked etc
+                    "D" => ratatui::style::Color::Red,         // Deleted
+                    _ => app.theme.fg,                         // Untracked etc
                 }
             } else {
                 app.theme.fg
             };
 
             let style = if is_selected {
-                Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(app.theme.highlight_fg)
+                    .bg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(git_color)
             };
 
-            let attached = if app.attached_files.contains(path) { "📌 " } else { "   " };
+            let attached = if app.attached_files.contains(path) {
+                "📌 "
+            } else {
+                "   "
+            };
             let git_mark = if let Some(s) = app.git_status.get(path) {
                 format!("[{}]", s.chars().next().unwrap_or(' '))
             } else {
                 "   ".to_string()
             };
 
-            ListItem::new(Line::from(Span::styled(format!("{}{} {}", attached, git_mark, path), style)))
+            ListItem::new(Line::from(Span::styled(
+                format!("{}{} {}", attached, git_mark, path),
+                style,
+            )))
         })
         .collect();
 
@@ -297,12 +342,18 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
         };
 
         text.push(Line::from(vec![
-            Span::styled(format!(" {} {} ", icon, role_name), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" {} {} ", icon, role_name),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("─".repeat(40), Style::default().fg(app.theme.border)),
         ]));
 
         for line in msg.content.lines() {
-            text.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(app.theme.fg))));
+            text.push(Line::from(Span::styled(
+                format!("  {}", line),
+                Style::default().fg(app.theme.fg),
+            )));
         }
         text.push(Line::from(""));
     }
@@ -364,10 +415,19 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         " Press 'i' to start typing ".to_string()
     };
 
-    let block = Block::default().borders(Borders::ALL).border_style(border_style).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title(title);
 
-    let display_text = if app.is_generating { "Please wait..." } else { &app.input };
-    let paragraph = Paragraph::new(display_text).block(block).style(Style::default().fg(app.theme.fg));
+    let display_text = if app.is_generating {
+        "Please wait..."
+    } else {
+        &app.input
+    };
+    let paragraph = Paragraph::new(display_text)
+        .block(block)
+        .style(Style::default().fg(app.theme.fg));
     f.render_widget(paragraph, area);
 
     // Show cursor
@@ -388,9 +448,10 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.border_active))
         .title(" 🖥️  Terminal (Ctrl+T to toggle) ");
 
-    let text = Paragraph::new("  Terminal emulation coming soon.\n  Use Ctrl+T to toggle this pane.")
-        .block(block)
-        .style(Style::default().fg(app.theme.message_system));
+    let text =
+        Paragraph::new("  Terminal emulation coming soon.\n  Use Ctrl+T to toggle this pane.")
+            .block(block)
+            .style(Style::default().fg(app.theme.message_system));
     f.render_widget(text, area);
 }
 
@@ -405,16 +466,27 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🧠 Select Model (↑↓ Enter) ");
 
-    let items: Vec<ListItem> = app.available_models.iter().enumerate().map(|(i, model)| {
-        let is_current = model == &app.config.default_model;
-        let style = if i == app.selected_model {
-            Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(app.theme.fg)
-        };
-        let prefix = if is_current { " ● " } else { "   " };
-        ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, model), style)))
-    }).collect();
+    let items: Vec<ListItem> = app
+        .available_models
+        .iter()
+        .enumerate()
+        .map(|(i, model)| {
+            let is_current = model == &app.config.default_model;
+            let style = if i == app.selected_model {
+                Style::default()
+                    .fg(app.theme.highlight_fg)
+                    .bg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            let prefix = if is_current { " ● " } else { "   " };
+            ListItem::new(Line::from(Span::styled(
+                format!("{}{}", prefix, model),
+                style,
+            )))
+        })
+        .collect();
 
     let list = List::new(items).block(block);
     let mut state = ListState::default();
@@ -444,12 +516,34 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     // ── Settings List ──────────────────────────────────────────────────────
-    let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
-    let theme_pos = themes.iter().position(|t| *t == app.config.active_theme).unwrap_or(0);
-    let theme_indicators: String = (0..4).map(|i| if i == theme_pos { "●" } else { "○" }).collect::<Vec<_>>().join(" ");
+    let themes = [
+        "ocean",
+        "midnight",
+        "forest",
+        "terminal",
+        "dracula",
+        "solarized",
+        "nord",
+    ];
+    let theme_pos = themes
+        .iter()
+        .position(|t| *t == app.config.active_theme)
+        .unwrap_or(0);
+    let theme_indicators: String = (0..4)
+        .map(|i| if i == theme_pos { "●" } else { "○" })
+        .collect::<Vec<_>>()
+        .join(" ");
 
-    let cache_str = if app.config.cache_enabled { "✅ Enabled".to_string() } else { "❌ Disabled".to_string() };
-    let memory_str = if app.config.memory_enabled { "✅ Enabled".to_string() } else { "❌ Disabled".to_string() };
+    let cache_str = if app.config.cache_enabled {
+        "✅ Enabled".to_string()
+    } else {
+        "❌ Disabled".to_string()
+    };
+    let memory_str = if app.config.memory_enabled {
+        "✅ Enabled".to_string()
+    } else {
+        "❌ Disabled".to_string()
+    };
     let cache_size_str = format!("{} entries", app.config.max_cache_size);
     let memory_items_str = format!("{} entries", app.config.max_memory_items);
     let timeout_str = format!("{}s", app.config.response_timeout);
@@ -461,7 +555,11 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         app.config.ollama_url.clone()
     };
 
-    let reset_label = if app.settings_reset_active { "✅ Reset to defaults!" } else { "⚠️  Reset to defaults" };
+    let reset_label = if app.settings_reset_active {
+        "✅ Reset to defaults!"
+    } else {
+        "⚠️  Reset to defaults"
+    };
 
     let settings_values: [(&str, &str); 8] = [
         ("Theme           ", &theme_str),
@@ -486,7 +584,9 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     for &(start, end, section_name) in &sections {
         settings_lines.push(Line::from(Span::styled(
             section_name,
-            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
         )));
         settings_lines.push(Line::from(""));
 
@@ -494,7 +594,10 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
             let (label, value) = settings_values[idx];
             let is_selected = app.settings_cursor == idx;
             let style = if is_selected {
-                Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(app.theme.highlight_fg)
+                    .bg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(app.theme.fg)
             };
@@ -525,23 +628,50 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let mut provider_lines: Vec<Line> = Vec::new();
     provider_lines.push(Line::from(Span::styled(
         "  API Providers",
-        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
     )));
     provider_lines.push(Line::from(""));
 
     let checks: [(&str, bool, &str); 4] = [
         ("Ollama   ", true, &app.config.ollama_url),
-        ("OpenRouter", app.config.api_keys.openrouter_api_key.is_some(),
-         if app.config.api_keys.openrouter_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
-        ("Gemini   ", app.config.api_keys.google_gemini_api_key.is_some(),
-         if app.config.api_keys.google_gemini_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
-        ("Qwen     ", app.config.api_keys.qwen_api_key.is_some(),
-         if app.config.api_keys.qwen_api_key.is_some() { "✅ Key set" } else { "❌ No key" }),
+        (
+            "OpenRouter",
+            app.config.api_keys.openrouter_api_key.is_some(),
+            if app.config.api_keys.openrouter_api_key.is_some() {
+                "✅ Key set"
+            } else {
+                "❌ No key"
+            },
+        ),
+        (
+            "Gemini   ",
+            app.config.api_keys.google_gemini_api_key.is_some(),
+            if app.config.api_keys.google_gemini_api_key.is_some() {
+                "✅ Key set"
+            } else {
+                "❌ No key"
+            },
+        ),
+        (
+            "Qwen     ",
+            app.config.api_keys.qwen_api_key.is_some(),
+            if app.config.api_keys.qwen_api_key.is_some() {
+                "✅ Key set"
+            } else {
+                "❌ No key"
+            },
+        ),
     ];
 
     for &(name, configured, detail) in &checks {
         let icon = if configured { "✅" } else { "❌" };
-        let color = if configured { ratatui::style::Color::Green } else { ratatui::style::Color::Red };
+        let color = if configured {
+            ratatui::style::Color::Green
+        } else {
+            ratatui::style::Color::Red
+        };
         provider_lines.push(Line::from(vec![
             Span::styled(format!("  {}  {}", icon, name), Style::default().fg(color)),
             Span::styled(detail, Style::default().fg(app.theme.message_system)),
@@ -549,7 +679,10 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     }
     provider_lines.push(Line::from(""));
     provider_lines.push(Line::from(Span::styled(
-        format!("  Active Model: {}  (press 'm' to change)", app.config.default_model),
+        format!(
+            "  Active Model: {}  (press 'm' to change)",
+            app.config.default_model
+        ),
         Style::default().fg(app.theme.message_system),
     )));
 
@@ -558,24 +691,59 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Keyboard Shortcuts ─────────────────────────────────────────────────
     let shortcut_lines = vec![
-        Line::from(Span::styled("  Keyboard Shortcuts", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+        Line::from(Span::styled(
+            "  Keyboard Shortcuts",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  ↑↓", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  ↑↓",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  Navigate  ", Style::default().fg(app.theme.fg)),
-            Span::styled("←→", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "←→",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  Change value  ", Style::default().fg(app.theme.fg)),
         ]),
         Line::from(vec![
-            Span::styled("  Enter", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  Enter",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  Save & close  ", Style::default().fg(app.theme.fg)),
-            Span::styled("Esc", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("    Close", Style::default().fg(app.theme.fg)),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+,", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  Ctrl+,",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  Open/close  ", Style::default().fg(app.theme.fg)),
-            Span::styled("m", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "m",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("       Change model", Style::default().fg(app.theme.fg)),
         ]),
     ];
@@ -583,10 +751,6 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let shortcuts_para = Paragraph::new(shortcut_lines).style(Style::default().fg(app.theme.fg));
     f.render_widget(shortcuts_para, chunks[2]);
 }
-
-
-
-
 
 fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(80, 80, area);
@@ -608,7 +772,10 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     let review_text = if !app.code_review_output.is_empty() {
         app.code_review_output.clone()
     } else if let Some(fp) = app.file_tree.get(app.selected_file) {
-        format!("\n  Selected file: {}\n\n  Press Enter to start AI code review.", fp)
+        format!(
+            "\n  Selected file: {}\n\n  Press Enter to start AI code review.",
+            fp
+        )
     } else {
         "  Select a file in the File Explorer first.".to_string()
     };
@@ -626,7 +793,10 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(70, 60, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📊 Performance Dashboard (Esc to close) ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 📊 Performance Dashboard (Esc to close) ");
 
     // Compute workspace breakdown
     let mut rust_files = 0u64;
@@ -634,10 +804,15 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     let mut ts_files = 0u64;
     let mut other_files = 0u64;
     for file in &app.file_tree {
-        if file.ends_with(".rs") { rust_files += 1; }
-        else if file.ends_with(".py") { py_files += 1; }
-        else if file.ends_with(".ts") || file.ends_with(".tsx") { ts_files += 1; }
-        else { other_files += 1; }
+        if file.ends_with(".rs") {
+            rust_files += 1;
+        } else if file.ends_with(".py") {
+            py_files += 1;
+        } else if file.ends_with(".ts") || file.ends_with(".tsx") {
+            ts_files += 1;
+        } else {
+            other_files += 1;
+        }
     }
     let total_files = app.file_tree.len() as u64;
 
@@ -657,7 +832,9 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
 
     // Bar chart helper (simple ASCII)
     fn bar(value: u64, max: u64, width: usize) -> String {
-        if max == 0 { return " ".repeat(width); }
+        if max == 0 {
+            return " ".repeat(width);
+        }
         let filled = ((value as f64 / max as f64) * width as f64).round() as usize;
         let filled = filled.min(width);
         let empty = width.saturating_sub(filled);
@@ -669,7 +846,11 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     let max_bar = total_files.max(msg_count).max(1);
 
     let git_count = app.git_status.len() as u64;
-    let avg_latency = if app.average_latency > 0.0 { app.average_latency } else { 0.0 };
+    let avg_latency = if app.average_latency > 0.0 {
+        app.average_latency
+    } else {
+        0.0
+    };
 
     // Determine health status emoji for current model
     let model_health_icon = if let Some((status, _, _)) = app.ollama_health_entries.get("ollama") {
@@ -683,41 +864,141 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
 
     let lines = vec![
         Line::from(Span::styled(
-            format!(" Session Uptime:          {}  |  Messages: {}  |  LLM Calls: {}", uptime_str, msg_count, app.total_llm_calls),
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)
+            format!(
+                " Session Uptime:          {}  |  Messages: {}  |  LLM Calls: {}",
+                uptime_str, msg_count, app.total_llm_calls
+            ),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(" Workspace Breakdown", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
-        Line::from(format!("   Total Files: {}  |  Git Changes: {}", total_files, git_count)),
+        Line::from(Span::styled(
+            " Workspace Breakdown",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(format!(
+            "   Total Files: {}  |  Git Changes: {}",
+            total_files, git_count
+        )),
         Line::from(""),
-        Line::from(format!("   {} Rust:        {}  {}", "\u{1F980}", rust_files, bar(rust_files, max_bar, bar_width))),
-        Line::from(format!("   {} Python:      {}  {}", "\u{1F40D}", py_files, bar(py_files, max_bar, bar_width))),
-        Line::from(format!("   {} TypeScript:  {}  {}", "\u{1F4D8}", ts_files, bar(ts_files, max_bar, bar_width))),
-        Line::from(format!("   {} Other:       {}  {}", "\u{1F4C4}", other_files, bar(other_files, max_bar, bar_width))),
+        Line::from(format!(
+            "   {} Rust:        {}  {}",
+            "\u{1F980}",
+            rust_files,
+            bar(rust_files, max_bar, bar_width)
+        )),
+        Line::from(format!(
+            "   {} Python:      {}  {}",
+            "\u{1F40D}",
+            py_files,
+            bar(py_files, max_bar, bar_width)
+        )),
+        Line::from(format!(
+            "   {} TypeScript:  {}  {}",
+            "\u{1F4D8}",
+            ts_files,
+            bar(ts_files, max_bar, bar_width)
+        )),
+        Line::from(format!(
+            "   {} Other:       {}  {}",
+            "\u{1F4C4}",
+            other_files,
+            bar(other_files, max_bar, bar_width)
+        )),
         Line::from(""),
-        Line::from(Span::styled(" Configuration", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
-        Line::from(format!("   Model:      {}  {}", model_health_icon, app.config.default_model)),
+        Line::from(Span::styled(
+            " Configuration",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(format!(
+            "   Model:      {}  {}",
+            model_health_icon, app.config.default_model
+        )),
         Line::from(format!("   Theme:      {}", app.config.active_theme)),
-        Line::from(format!("   Cache:      {}  ({})", if app.config.cache_enabled { "\u{2705} Enabled" } else { "\u{274C} Disabled" }, app.config.max_memory_items)),
+        Line::from(format!(
+            "   Cache:      {}  ({})",
+            if app.config.cache_enabled {
+                "\u{2705} Enabled"
+            } else {
+                "\u{274C} Disabled"
+            },
+            app.config.max_memory_items
+        )),
         Line::from(format!("   Timeout:    {}s", app.config.response_timeout)),
         Line::from(""),
-        Line::from(Span::styled(" Latency & Performance", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
-        Line::from(format!("   Avg Latency:      {} ms", if avg_latency > 0.0 { format!("{:.0}", avg_latency) } else { "N/A".to_string() })),
+        Line::from(Span::styled(
+            " Latency & Performance",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(format!(
+            "   Avg Latency:      {} ms",
+            if avg_latency > 0.0 {
+                format!("{:.0}", avg_latency)
+            } else {
+                "N/A".to_string()
+            }
+        )),
         Line::from(format!("   Total LLM Calls:  {}", app.total_llm_calls)),
         Line::from(""),
-        Line::from(Span::styled(" System Utilization (simulated)", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
-        Line::from(format!("   CPU:     [{}{}]  {:.0}%", "\u{2588}".repeat((app.profiler_gauge_cpu / 10.0) as usize), "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_cpu / 10.0) as usize)), app.profiler_gauge_cpu)),
-        Line::from(format!("   Memory:  [{}{}]  {:.0}%", "\u{2588}".repeat((app.profiler_gauge_mem / 10.0) as usize), "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_mem / 10.0) as usize)), app.profiler_gauge_mem)),
+        Line::from(Span::styled(
+            " System Utilization (simulated)",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(format!(
+            "   CPU:     [{}{}]  {:.0}%",
+            "\u{2588}".repeat((app.profiler_gauge_cpu / 10.0) as usize),
+            "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_cpu / 10.0) as usize)),
+            app.profiler_gauge_cpu
+        )),
+        Line::from(format!(
+            "   Memory:  [{}{}]  {:.0}%",
+            "\u{2588}".repeat((app.profiler_gauge_mem / 10.0) as usize),
+            "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_mem / 10.0) as usize)),
+            app.profiler_gauge_mem
+        )),
         Line::from(""),
-        Line::from(Span::styled(" Session Timeline", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
-        Line::from(format!("   {}  Started TUI session", if app.session_start_time > 0.0 { "\u{25B6}" } else { "\u{25CB}" })),
-        Line::from(format!("   {}  Workspace scanned ({} files)", "\u{25B6}", app.file_tree.len())),
-        Line::from(format!("   {}  {} LLM calls made", "\u{25B6}", app.total_llm_calls)),
+        Line::from(Span::styled(
+            " Session Timeline",
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(format!(
+            "   {}  Started TUI session",
+            if app.session_start_time > 0.0 {
+                "\u{25B6}"
+            } else {
+                "\u{25CB}"
+            }
+        )),
+        Line::from(format!(
+            "   {}  Workspace scanned ({} files)",
+            "\u{25B6}",
+            app.file_tree.len()
+        )),
+        Line::from(format!(
+            "   {}  {} LLM calls made",
+            "\u{25B6}", app.total_llm_calls
+        )),
         Line::from(""),
-        Line::from(Span::styled(" Press 'h' to refresh health checks. Esc to close.", Style::default().fg(app.theme.message_system))),
+        Line::from(Span::styled(
+            " Press 'h' to refresh health checks. Esc to close.",
+            Style::default().fg(app.theme.message_system),
+        )),
     ];
 
-    let para = Paragraph::new(lines).block(block).style(Style::default().fg(app.theme.fg));
+    let para = Paragraph::new(lines)
+        .block(block)
+        .style(Style::default().fg(app.theme.fg));
     f.render_widget(para, popup_area);
 }
 
@@ -725,7 +1006,10 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(70, 55, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 🏥 Provider Health (Esc to close · h to refresh) ");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 🏥 Provider Health (Esc to close · h to refresh) ");
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -767,11 +1051,15 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("  {}  {}    ", status_icon, provider_name(provider)),
-                Style::default().fg(app.theme.fg).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("[{}]", status),
-                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  Latency: {}", latency_str),
@@ -790,18 +1078,29 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
     // Add provider-specific detail cards
     lines.push(Line::from(Span::styled(
         " Connection Details",
-        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
     )));
-    lines.push(Line::from(format!("   Ollama URI:   {}", app.config.ollama_url)));
+    lines.push(Line::from(format!(
+        "   Ollama URI:   {}",
+        app.config.ollama_url
+    )));
     lines.push(Line::from(format!(
         "   OpenRouter:   {}",
-        if app.config.api_keys.openrouter_api_key.is_some() { "\u{2705} Key configured" } else { "\u{274C} No API key" }
+        if app.config.api_keys.openrouter_api_key.is_some() {
+            "\u{2705} Key configured"
+        } else {
+            "\u{274C} No API key"
+        }
     )));
     lines.push(Line::from(""));
 
     lines.push(Line::from(Span::styled(
         " Active Model",
-        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
     )));
     lines.push(Line::from(format!("   {}", app.config.default_model)));
     lines.push(Line::from(""));
@@ -820,7 +1119,10 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
     if app.health_check_in_progress {
-        let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+        let frames = [
+            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
+            '\u{2827}', '\u{2807}', '\u{280F}',
+        ];
         let frame = frames[app.spinner_tick % frames.len()];
         lines.push(Line::from(Span::styled(
             format!(" {} Checking provider status...", frame),
@@ -828,7 +1130,10 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
-    let para = Paragraph::new(lines).block(block).style(Style::default().fg(app.theme.fg)).scroll((app.provider_health_scroll, 0));
+    let para = Paragraph::new(lines)
+        .block(block)
+        .style(Style::default().fg(app.theme.fg))
+        .scroll((app.provider_health_scroll, 0));
     f.render_widget(para, popup_area);
 }
 
@@ -836,18 +1141,26 @@ fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(60, 60, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📈 Project Analyzer (Esc to close) ");
-    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 📈 Project Analyzer (Esc to close) ");
+
     let mut rust_files = 0;
     let mut py_files = 0;
     let mut ts_files = 0;
     let mut other = 0;
-    
+
     for file in &app.file_tree {
-        if file.ends_with(".rs") { rust_files += 1; }
-        else if file.ends_with(".py") { py_files += 1; }
-        else if file.ends_with(".ts") || file.ends_with(".tsx") { ts_files += 1; }
-        else { other += 1; }
+        if file.ends_with(".rs") {
+            rust_files += 1;
+        } else if file.ends_with(".py") {
+            py_files += 1;
+        } else if file.ends_with(".ts") || file.ends_with(".tsx") {
+            ts_files += 1;
+        } else {
+            other += 1;
+        }
     }
 
     let text = format!(
@@ -855,7 +1168,9 @@ fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
         app.file_tree.len(), rust_files, py_files, ts_files, other
     );
 
-    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    let para = Paragraph::new(text)
+        .block(block)
+        .style(Style::default().fg(app.theme.fg));
     f.render_widget(para, popup_area);
 }
 
@@ -863,18 +1178,23 @@ fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(50, 40, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.accent)).title(" 📝 Git Commit (Enter to commit, Esc to cancel) ");
-    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 📝 Git Commit (Enter to commit, Esc to cancel) ");
+
     let modified_count = app.git_status.len();
-    
+
     let text = format!(
         "\n  Staging {} files...\n\n  Message:\n  > {}\n\n  (Type your message and press Enter)",
         modified_count, app.commit_message
     );
 
-    let para = Paragraph::new(text).block(block).style(Style::default().fg(app.theme.fg));
+    let para = Paragraph::new(text)
+        .block(block)
+        .style(Style::default().fg(app.theme.fg));
     f.render_widget(para, popup_area);
-    
+
     // Draw cursor
     let cursor_x = popup_area.x + 4 + app.commit_cursor as u16;
     let cursor_y = popup_area.y + 5;
@@ -909,17 +1229,27 @@ fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🚀 Feature Navigator (↑↓ Enter, Esc to close) ");
 
-    let items: Vec<ListItem> = FEATURE_LIST.iter().enumerate().map(|(i, (name, desc))| {
-        let style = if i == app.feature_nav_selected {
-            Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(app.theme.fg)
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!(" {} ", name), style),
-            Span::styled(format!("— {}", desc), Style::default().fg(app.theme.message_system)),
-        ]))
-    }).collect();
+    let items: Vec<ListItem> = FEATURE_LIST
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| {
+            let style = if i == app.feature_nav_selected {
+                Style::default()
+                    .fg(app.theme.highlight_fg)
+                    .bg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.fg)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {} ", name), style),
+                Span::styled(
+                    format!("— {}", desc),
+                    Style::default().fg(app.theme.message_system),
+                ),
+            ]))
+        })
+        .collect();
 
     let list = List::new(items).block(block);
     let mut state = ListState::default();
@@ -934,13 +1264,26 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let status_icon = if app.bytebot_running {
-        let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+        let frames = [
+            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
+            '\u{2827}', '\u{2807}', '\u{280F}',
+        ];
         frames[app.spinner_tick % frames.len()]
-    } else { '\u{25C9}' };
-    let status_str = if app.bytebot_running { " Running" } else { " Idle" };
+    } else {
+        '\u{25C9}'
+    };
+    let status_str = if app.bytebot_running {
+        " Running"
+    } else {
+        " Idle"
+    };
 
-    let title = format!(" {} ByteBot Agent [{}]{} (Enter:run, Esc:close) ", "\u{1F916}", status_icon, status_str);
-    let block = Block::default().borders(Borders::ALL)
+    let title = format!(
+        " {} ByteBot Agent [{}]{} (Enter:run, Esc:close) ",
+        "\u{1F916}", status_icon, status_str
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
 
@@ -951,8 +1294,8 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // command input
-            Constraint::Min(1),     // steps + log
+            Constraint::Length(3), // command input
+            Constraint::Min(1),    // steps + log
         ])
         .split(inner);
 
@@ -967,9 +1310,13 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(cmd_border)
         .title(" ⌨️  Command (e.g., 'update deps', 'analyze tests') ");
-    let display_cmd = if app.bytebot_running { "Executing... press Esc to return".to_string() }
-                      else if app.bytebot_command.is_empty() { "Type a command and press Enter".to_string() }
-                      else { app.bytebot_command.clone() };
+    let display_cmd = if app.bytebot_running {
+        "Executing... press Esc to return".to_string()
+    } else if app.bytebot_command.is_empty() {
+        "Type a command and press Enter".to_string()
+    } else {
+        app.bytebot_command.clone()
+    };
     let cmd_para = Paragraph::new(display_cmd)
         .block(cmd_block)
         .style(Style::default().fg(app.theme.fg));
@@ -988,8 +1335,8 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(40),  // steps
-            Constraint::Percentage(60),  // log
+            Constraint::Percentage(40), // steps
+            Constraint::Percentage(60), // log
         ])
         .split(chunks[1]);
 
@@ -998,7 +1345,9 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     if !app.bytebot_steps.is_empty() || app.bytebot_running {
         steps_lines.push(Line::from(Span::styled(
             " Execution Steps",
-            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
         )));
         steps_lines.push(Line::from(""));
 
@@ -1007,19 +1356,28 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
                 "done" => ("\u{2705}".to_string(), ratatui::style::Color::Green),
                 "running" => {
                     let running_icon: String = if app.bytebot_running {
-                        let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+                        let frames = [
+                            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}',
+                            '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}',
+                        ];
                         frames[app.spinner_tick % frames.len()].to_string()
-                    } else { "\u{23F3}".to_string() };
+                    } else {
+                        "\u{23F3}".to_string()
+                    };
                     (running_icon, ratatui::style::Color::Yellow)
-                },
+                }
                 "failed" => ("\u{274C}".to_string(), ratatui::style::Color::Red),
-                _ => ("\u{25CB}".to_string(), app.theme.message_system),  // pending / unknown
+                _ => ("\u{25CB}".to_string(), app.theme.message_system), // pending / unknown
             };
             steps_lines.push(Line::from(vec![
                 Span::styled(format!(" {} ", icon), Style::default().fg(color)),
                 Span::styled(
                     format!("Step {}: {}", i + 1, step_name),
-                    Style::default().fg(if status == "done" || status == "running" { app.theme.fg } else { app.theme.message_system }),
+                    Style::default().fg(if status == "done" || status == "running" {
+                        app.theme.fg
+                    } else {
+                        app.theme.message_system
+                    }),
                 ),
             ]));
         }
@@ -1037,7 +1395,10 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
                 format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty)),
                 pct,
             );
-            steps_lines.push(Line::from(Span::styled(bar_str, Style::default().fg(app.theme.accent))));
+            steps_lines.push(Line::from(Span::styled(
+                bar_str,
+                Style::default().fg(app.theme.accent),
+            )));
         }
     } else {
         // Empty state
@@ -1066,7 +1427,9 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     let mut log_lines: Vec<Line> = Vec::new();
     log_lines.push(Line::from(Span::styled(
         " Execution Log",
-        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
     )));
     log_lines.push(Line::from(""));
 
@@ -1078,9 +1441,13 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for entry in &app.bytebot_log {
             // Color based on content prefix
-            let color = if entry.starts_with('✅') { ratatui::style::Color::Green }
-                       else if entry.starts_with('❌') || entry.starts_with("failed") { ratatui::style::Color::Red }
-                       else { app.theme.fg };
+            let color = if entry.starts_with('✅') {
+                ratatui::style::Color::Green
+            } else if entry.starts_with('❌') || entry.starts_with("failed") {
+                ratatui::style::Color::Red
+            } else {
+                app.theme.fg
+            };
             log_lines.push(Line::from(Span::styled(
                 format!("  {}", entry),
                 Style::default().fg(color),
@@ -1101,25 +1468,46 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     // Command history
     let history_lines: Vec<Line> = if !app.bytebot_history.is_empty() {
         let mut hl = vec![
-            Line::from(Span::styled(" History (press Up to recall)", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+            Line::from(Span::styled(
+                " History (press Up to recall)",
+                Style::default()
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::UNDERLINED),
+            )),
             Line::from(""),
         ];
         for cmd in app.bytebot_history.iter().rev().take(5) {
-            hl.push(Line::from(Span::styled(format!("  \u{25B6} {}", cmd), Style::default().fg(app.theme.message_system))));
+            hl.push(Line::from(Span::styled(
+                format!("  \u{25B6} {}", cmd),
+                Style::default().fg(app.theme.message_system),
+            )));
         }
         hl
     } else {
         vec![
-            Line::from(Span::styled(" History", Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED))),
+            Line::from(Span::styled(
+                " History",
+                Style::default()
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::UNDERLINED),
+            )),
             Line::from(""),
-            Line::from(Span::styled("  No previous commands", Style::default().fg(app.theme.message_system))),
+            Line::from(Span::styled(
+                "  No previous commands",
+                Style::default().fg(app.theme.message_system),
+            )),
         ]
     };
-    
+
     // Add history as a small section below the split panels if there's room
     if bottom[1].height > 8 {
         let hist_bottom_y = popup_area.y + popup_area.height - 7;
-        let hist_area = Rect { x: popup_area.x + 1, y: hist_bottom_y, width: popup_area.width - 2, height: 6 };
+        let hist_area = Rect {
+            x: popup_area.x + 1,
+            y: hist_bottom_y,
+            width: popup_area.width - 2,
+            height: 6,
+        };
         f.render_widget(Clear, hist_area);
         let hist_block = Block::default()
             .borders(Borders::ALL)
@@ -1127,8 +1515,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
             .title(" History ");
         let inner_hist = hist_block.inner(hist_area);
         f.render_widget(hist_block, hist_area);
-        let hist_para = Paragraph::new(history_lines)
-            .style(Style::default().fg(app.theme.fg));
+        let hist_para = Paragraph::new(history_lines).style(Style::default().fg(app.theme.fg));
         f.render_widget(hist_para, inner_hist);
     }
 }
@@ -1144,13 +1531,17 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         "syncing" | "connecting" => {
             let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
             frames[app.spinner_tick % frames.len()].to_string()
-        },
+        }
         "error" | "disconnected" => "❌".to_string(),
         _ => "❓".to_string(),
     };
 
-    let title = format!(" 👥 Collaboration Hub [{}] (Enter:start, Esc:close) ", status_icon);
-    let block = Block::default().borders(Borders::ALL)
+    let title = format!(
+        " 👥 Collaboration Hub [{}] (Enter:start, Esc:close) ",
+        status_icon
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
 
@@ -1161,8 +1552,8 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // session info bar
-            Constraint::Min(1),     // body
+            Constraint::Length(3), // session info bar
+            Constraint::Min(1),    // body
         ])
         .split(inner);
 
@@ -1205,8 +1596,8 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(35),  // members
-            Constraint::Percentage(65),  // activity
+            Constraint::Percentage(35), // members
+            Constraint::Percentage(65), // activity
         ])
         .split(chunks[1]);
 
@@ -1215,7 +1606,9 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     if !app.collab_members.is_empty() {
         member_lines.push(Line::from(Span::styled(
             " Team Members",
-            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
         )));
         member_lines.push(Line::from(""));
 
@@ -1234,7 +1627,10 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
                 _ => "",
             };
             member_lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", status_icon), Style::default().fg(status_color)),
+                Span::styled(
+                    format!(" {} ", status_icon),
+                    Style::default().fg(status_color),
+                ),
                 Span::styled(
                     format!("{}{}  {}", name, role_badge, connection),
                     Style::default().fg(app.theme.fg),
@@ -1258,7 +1654,9 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         member_lines.push(Line::from(""));
         member_lines.push(Line::from(Span::styled(
             " Connection",
-            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
         )));
         member_lines.push(Line::from(""));
         member_lines.push(Line::from(format!(
@@ -1269,10 +1667,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         member_lines.push(Line::from("   Latency: <15ms"));
         if app.collab_last_sync > 0.0 {
             let elapsed = (current_timestamp() - app.collab_last_sync).max(0.0);
-            member_lines.push(Line::from(format!(
-                "   Last sync: {:.0}s ago",
-                elapsed
-            )));
+            member_lines.push(Line::from(format!("   Last sync: {:.0}s ago", elapsed)));
         }
     }
 
@@ -1289,7 +1684,9 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     let mut activity_lines: Vec<Line> = Vec::new();
     activity_lines.push(Line::from(Span::styled(
         " Activity Feed",
-        Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
     )));
     activity_lines.push(Line::from(""));
 
@@ -1320,7 +1717,10 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         // Sync status indicator at bottom
         if app.collab_sync_status == "syncing" || app.collab_sync_status == "connecting" {
             activity_lines.push(Line::from(""));
-            let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+            let frames = [
+                '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
+                '\u{2827}', '\u{2807}', '\u{280F}',
+            ];
             let frame = frames[app.spinner_tick % frames.len()];
             activity_lines.push(Line::from(Span::styled(
                 format!(" {} Synchronizing...", frame),
@@ -1352,14 +1752,22 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
             let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
             let idx = app.spinner_tick % frames.len();
             // Return as &str slice
-            if idx < 5 { "🔄" } else { "⚡" }
-        },
+            if idx < 5 {
+                "🔄"
+            } else {
+                "⚡"
+            }
+        }
         "speaking" => "🔊",
         _ => "🎙️",
     };
 
-    let title = format!(" 🎙️ Voice Interface [{}] (Enter:start, Esc:close) ", status_icon);
-    let block = Block::default().borders(Borders::ALL)
+    let title = format!(
+        " 🎙️ Voice Interface [{}] (Enter:start, Esc:close) ",
+        status_icon
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
 
@@ -1369,9 +1777,9 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),   // audio meter + status
-            Constraint::Length(6),   // recent commands
-            Constraint::Min(1),      // transcript
+            Constraint::Length(4), // audio meter + status
+            Constraint::Length(6), // recent commands
+            Constraint::Min(1),    // transcript
         ])
         .split(inner);
 
@@ -1413,7 +1821,9 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
         for (cmd, result) in app.voice_commands.iter().rev().take(3) {
             cmd_lines.push(Line::from(Span::styled(
                 format!("  🗣️  {}", cmd),
-                Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )));
             cmd_lines.push(Line::from(Span::styled(
                 format!("     {}", result),
@@ -1440,9 +1850,13 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
         )));
     } else {
         for entry in &app.voice_transcript {
-            let color = if entry.starts_with('✅') { ratatui::style::Color::Green }
-                       else if entry.starts_with('❌') { ratatui::style::Color::Red }
-                       else { app.theme.fg };
+            let color = if entry.starts_with('✅') {
+                ratatui::style::Color::Green
+            } else if entry.starts_with('❌') {
+                ratatui::style::Color::Red
+            } else {
+                app.theme.fg
+            };
             trans_lines.push(Line::from(Span::styled(
                 format!("  {}", entry),
                 Style::default().fg(color),
@@ -1461,7 +1875,8 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(75, 65, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL)
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 💡 Terminal Assistant (Enter:refresh, Esc:close) ");
 
@@ -1471,9 +1886,9 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),   // status
-            Constraint::Min(1),      // suggestions
-            Constraint::Length(4),   // history
+            Constraint::Length(3), // status
+            Constraint::Min(1),    // suggestions
+            Constraint::Length(4), // history
         ])
         .split(inner);
 
@@ -1518,9 +1933,13 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
         )));
     } else {
         for suggestion in &app.term_asst_suggestions {
-            let color = if suggestion.starts_with("✅") { ratatui::style::Color::Green }
-                       else if suggestion.starts_with("⚠️") { ratatui::style::Color::Yellow }
-                       else { app.theme.fg };
+            let color = if suggestion.starts_with("✅") {
+                ratatui::style::Color::Green
+            } else if suggestion.starts_with("⚠️") {
+                ratatui::style::Color::Yellow
+            } else {
+                app.theme.fg
+            };
             sugg_lines.push(Line::from(Span::styled(
                 format!("  {}", suggestion),
                 Style::default().fg(color),
@@ -1554,7 +1973,8 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(75, 70, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL)
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🛡️ Security Auditor (Enter:scan, Esc:close) ");
 
@@ -1564,8 +1984,8 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),   // summary cards
-            Constraint::Min(1),      // findings list
+            Constraint::Length(5), // summary cards
+            Constraint::Min(1),    // findings list
         ])
         .split(inner);
 
@@ -1574,7 +1994,11 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let total = critical + high + medium + low;
     let severity_bar = |count: u32, max: u32, color: ratatui::style::Color| -> Line {
         let w = 15usize;
-        let filled = if max > 0 { (count as f64 / max as f64 * w as f64).round() as usize } else { 0 };
+        let filled = if max > 0 {
+            (count as f64 / max as f64 * w as f64).round() as usize
+        } else {
+            0
+        };
         let filled = filled.min(w);
         let empty = w.saturating_sub(filled);
         Line::from(Span::styled(
@@ -1587,9 +2011,14 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
 
     let summary_lines = vec![
         Line::from(Span::styled(
-            format!(" Vulnerability Scan  |  Total: {}  |  Progress: {:.0}%",
-                total, app.sec_scan_progress * 100.0),
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            format!(
+                " Vulnerability Scan  |  Total: {}  |  Progress: {:.0}%",
+                total,
+                app.sec_scan_progress * 100.0
+            ),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         severity_bar(critical, max_sev, ratatui::style::Color::Red),
@@ -1636,7 +2065,9 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!(" {} ", icon), Style::default().fg(color)),
                 Span::styled(
                     format!("[{}] {} — {}", severity, category, location),
-                    Style::default().fg(app.theme.fg).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(app.theme.fg)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
         }
@@ -1647,13 +2078,20 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
         find_lines.push(Line::from(""));
         find_lines.push(Line::from(Span::styled(
             " Scan Log",
-            Style::default().fg(app.theme.message_system).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.message_system)
+                .add_modifier(Modifier::UNDERLINED),
         )));
         for entry in app.sec_scan_log.iter().rev().take(5) {
-            let color = if entry.starts_with('❌') { ratatui::style::Color::Red }
-                       else if entry.starts_with('⚠') { ratatui::style::Color::Yellow }
-                       else if entry.starts_with('🚨') { ratatui::style::Color::Red }
-                       else { app.theme.fg };
+            let color = if entry.starts_with('❌') {
+                ratatui::style::Color::Red
+            } else if entry.starts_with('⚠') {
+                ratatui::style::Color::Yellow
+            } else if entry.starts_with('🚨') {
+                ratatui::style::Color::Red
+            } else {
+                app.theme.fg
+            };
             find_lines.push(Line::from(Span::styled(
                 format!("  {}", entry),
                 Style::default().fg(color),
@@ -1678,10 +2116,16 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     let status_indicator = if app.profiler_running {
         let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         frames[app.spinner_tick % frames.len()]
-    } else { '●' };
+    } else {
+        '●'
+    };
 
-    let title = format!(" ⚡ Performance Profiler [{}] (Enter:profile, Esc:close) ", status_indicator);
-    let block = Block::default().borders(Borders::ALL)
+    let title = format!(
+        " ⚡ Performance Profiler [{}] (Enter:profile, Esc:close) ",
+        status_indicator
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
 
@@ -1691,20 +2135,30 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),   // gauges
-            Constraint::Min(1),      // function list
+            Constraint::Length(5), // gauges
+            Constraint::Min(1),    // function list
         ])
         .split(inner);
 
     // ── Gauges ──────────────────────────────────────────────────────────────
     fn gauge_block(title: &str, value: f64, max: f64, color: ratatui::style::Color) -> Line<'_> {
         let w = 15usize;
-        let pct = if max > 0.0 { (value / max * 100.0).min(100.0).round() } else { 0.0 };
+        let pct = if max > 0.0 {
+            (value / max * 100.0).min(100.0).round()
+        } else {
+            0.0
+        };
         let filled = (pct / 100.0 * w as f64).round() as usize;
         let filled = filled.min(w);
         let empty = w.saturating_sub(filled);
         Line::from(Span::styled(
-            format!(" {}  [{}{}]  {:.0}%", title, "█".repeat(filled), "░".repeat(empty), pct),
+            format!(
+                " {}  [{}{}]  {:.0}%",
+                title,
+                "█".repeat(filled),
+                "░".repeat(empty),
+                pct
+            ),
             Style::default().fg(color),
         ))
     }
@@ -1712,12 +2166,29 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     let gauge_lines = vec![
         Line::from(Span::styled(
             " System Metrics",
-            Style::default().fg(app.theme.fg).add_modifier(Modifier::UNDERLINED),
+            Style::default()
+                .fg(app.theme.fg)
+                .add_modifier(Modifier::UNDERLINED),
         )),
         Line::from(""),
-        gauge_block("CPU     ", app.profiler_gauge_cpu, 100.0, ratatui::style::Color::Cyan),
-        gauge_block("Memory  ", app.profiler_gauge_mem, 100.0, ratatui::style::Color::Magenta),
-        gauge_block("Latency ", app.profiler_gauge_latency, 500.0, ratatui::style::Color::Yellow),
+        gauge_block(
+            "CPU     ",
+            app.profiler_gauge_cpu,
+            100.0,
+            ratatui::style::Color::Cyan,
+        ),
+        gauge_block(
+            "Memory  ",
+            app.profiler_gauge_mem,
+            100.0,
+            ratatui::style::Color::Magenta,
+        ),
+        gauge_block(
+            "Latency ",
+            app.profiler_gauge_latency,
+            500.0,
+            ratatui::style::Color::Yellow,
+        ),
     ];
 
     let gauge_block_w = Block::default()
@@ -1753,8 +2224,16 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     } else {
         // Header
         func_lines.push(Line::from(vec![
-            Span::styled("  Function", Style::default().fg(app.theme.fg).add_modifier(Modifier::BOLD)),
-            Span::styled("        Time(ms)  Mem(MB)  Calls", Style::default().fg(app.theme.fg)),
+            Span::styled(
+                "  Function",
+                Style::default()
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "        Time(ms)  Mem(MB)  Calls",
+                Style::default().fg(app.theme.fg),
+            ),
         ]));
         func_lines.push(Line::from(Span::styled(
             "  ".to_owned() + &"─".repeat(45),
@@ -1763,10 +2242,17 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
 
         for (name, time_ms, mem_mb, calls) in &app.profiler_functions {
             let hot = *time_ms > 200.0;
-            let color = if hot { ratatui::style::Color::Red } else { app.theme.fg };
+            let color = if hot {
+                ratatui::style::Color::Red
+            } else {
+                app.theme.fg
+            };
             let hot_mark = if hot { " 🔥" } else { "  " };
             func_lines.push(Line::from(Span::styled(
-                format!("  {:<15} {:>8.1} {:>8.1} {:>6}{}", name, time_ms, mem_mb, calls, hot_mark),
+                format!(
+                    "  {:<15} {:>8.1} {:>8.1} {:>6}{}",
+                    name, time_ms, mem_mb, calls, hot_mark
+                ),
                 Style::default().fg(color),
             )));
         }
@@ -1784,7 +2270,8 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(70, 65, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL)
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🧩 Custom Models (↑↓ select, Esc:close) ");
 
@@ -1794,8 +2281,8 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(40),  // profiles list
-            Constraint::Percentage(60),  // details
+            Constraint::Percentage(40), // profiles list
+            Constraint::Percentage(60), // details
         ])
         .split(inner);
 
@@ -1808,7 +2295,10 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
     let mut profile_items: Vec<ListItem> = Vec::new();
     for (i, (name, provider, temp, tokens, _top_p)) in app.models_profiles.iter().enumerate() {
         let style = if i == app.models_selected {
-            Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(app.theme.highlight_fg)
+                .bg(app.theme.highlight)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(app.theme.fg)
         };
@@ -1838,10 +2328,14 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         .title(" 🔧 Parameters ");
 
     let mut detail_lines: Vec<Line> = Vec::new();
-    if let Some((name, provider, temp, tokens, top_p)) = app.models_profiles.get(app.models_selected) {
+    if let Some((name, provider, temp, tokens, top_p)) =
+        app.models_profiles.get(app.models_selected)
+    {
         detail_lines.push(Line::from(Span::styled(
             format!("  {} (via {})", name, provider),
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )));
         detail_lines.push(Line::from(""));
 
@@ -1852,7 +2346,9 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         let t_empty = slider_w.saturating_sub(t_filled);
         detail_lines.push(Line::from(format!(
             "  Temperature: [{}{}] {:.2}",
-            "█".repeat(t_filled), "░".repeat(t_empty), temp
+            "█".repeat(t_filled),
+            "░".repeat(t_empty),
+            temp
         )));
 
         // Max tokens
@@ -1861,7 +2357,9 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         let tk_empty = slider_w.saturating_sub(tk_filled);
         detail_lines.push(Line::from(format!(
             "  Max Tokens:  [{}{}] {}",
-            "█".repeat(tk_filled), "░".repeat(tk_empty), tokens
+            "█".repeat(tk_filled),
+            "░".repeat(tk_empty),
+            tokens
         )));
 
         // Top-P
@@ -1870,7 +2368,9 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         let p_empty = slider_w.saturating_sub(p_filled);
         detail_lines.push(Line::from(format!(
             "  Top-P:       [{}{}] {:.2}",
-            "█".repeat(p_filled), "░".repeat(p_empty), top_p
+            "█".repeat(p_filled),
+            "░".repeat(p_empty),
+            top_p
         )));
 
         detail_lines.push(Line::from(""));
@@ -1899,7 +2399,8 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(70, 70, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL)
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📚 Learning Mode (Enter:start, Esc:close) ");
 
@@ -1909,8 +2410,8 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),   // header + progress
-            Constraint::Min(1),      // content
+            Constraint::Length(3), // header + progress
+            Constraint::Min(1),    // content
         ])
         .split(inner);
 
@@ -1935,10 +2436,18 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
 
     let header_lines = vec![
         Line::from(Span::styled(
-            format!("  Lesson {}: {}", app.learn_current_lesson, app.learn_lesson_title),
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            format!(
+                "  Lesson {}: {}",
+                app.learn_current_lesson, app.learn_lesson_title
+            ),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(progress_str, Style::default().fg(app.theme.fg))),
+        Line::from(Span::styled(
+            progress_str,
+            Style::default().fg(app.theme.fg),
+        )),
     ];
     let header_para = Paragraph::new(header_lines)
         .block(header_block)
@@ -1971,7 +2480,9 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
         if !app.learn_code_example.is_empty() {
             content_lines.push(Line::from(Span::styled(
                 "  Code Example:",
-                Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )));
             for line in app.learn_code_example.lines() {
                 content_lines.push(Line::from(Span::styled(
@@ -1986,7 +2497,9 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
         if !app.learn_exercise.is_empty() {
             content_lines.push(Line::from(Span::styled(
                 "  Exercise:",
-                Style::default().fg(ratatui::style::Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(ratatui::style::Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             )));
             content_lines.push(Line::from(Span::styled(
                 format!("    {}", app.learn_exercise),
@@ -1999,7 +2512,9 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
             content_lines.push(Line::from(""));
             content_lines.push(Line::from(Span::styled(
                 "  Quiz:",
-                Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )));
             content_lines.push(Line::from(Span::styled(
                 format!("    {}", app.learn_quiz_question),
@@ -2008,9 +2523,15 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
             content_lines.push(Line::from(""));
             for (i, option) in app.learn_quiz_options.iter().enumerate() {
                 let is_selected = i == app.learn_quiz_selected;
-                let prefix = if is_selected && !app.learn_quiz_answered { "  \u{25B6} " } else { "    " };
+                let prefix = if is_selected && !app.learn_quiz_answered {
+                    "  \u{25B6} "
+                } else {
+                    "    "
+                };
                 let style = if is_selected && !app.learn_quiz_answered {
-                    Style::default().fg(app.theme.highlight_fg).bg(app.theme.highlight)
+                    Style::default()
+                        .fg(app.theme.highlight_fg)
+                        .bg(app.theme.highlight)
                 } else if app.learn_quiz_answered && i == 0 {
                     Style::default().fg(ratatui::style::Color::Green)
                 } else if app.learn_quiz_answered && is_selected && !app.learn_quiz_correct {
@@ -2059,7 +2580,8 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(70, 65, area);
     f.render_widget(Clear, popup_area);
 
-    let block = Block::default().borders(Borders::ALL)
+    let block = Block::default()
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🌐 Multi-Language (Enter:detect, Esc:close) ");
 
@@ -2069,8 +2591,8 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),  // detection + supported
-            Constraint::Percentage(50),  // translation
+            Constraint::Percentage(50), // detection + supported
+            Constraint::Percentage(50), // translation
         ])
         .split(inner);
 
@@ -2078,8 +2600,8 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(55),  // detection
-            Constraint::Percentage(45),  // supported
+            Constraint::Percentage(55), // detection
+            Constraint::Percentage(45), // supported
         ])
         .split(chunks[0]);
 
@@ -2140,7 +2662,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let right = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),       // translate input/output
+            Constraint::Min(1), // translate input/output
         ])
         .split(chunks[1]);
 
@@ -2151,7 +2673,10 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 
     let mut trans_lines: Vec<Line> = Vec::new();
     trans_lines.push(Line::from(Span::styled(
-        format!("  Source: {}  Target: {}", app.lang_translate_source, app.lang_translate_target),
+        format!(
+            "  Source: {}  Target: {}",
+            app.lang_translate_source, app.lang_translate_target
+        ),
         Style::default().fg(app.theme.accent),
     )));
     trans_lines.push(Line::from(""));
@@ -2182,5 +2707,3 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg));
     f.render_widget(trans_para, right[0]);
 }
-
-

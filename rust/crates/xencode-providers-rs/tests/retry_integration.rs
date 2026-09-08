@@ -18,18 +18,16 @@
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use xencode_providers_rs::{ChatMessage, ProviderError};
 use xencode_providers_rs::qwen::QwenProvider;
 use xencode_providers_rs::retry::{self, RetryConfig};
+use xencode_providers_rs::{ChatMessage, ProviderError};
 
 /// Helper: create a standard set of chat messages.
 fn test_messages() -> Vec<ChatMessage> {
-    vec![
-        ChatMessage {
-            role: "user".to_string(),
-            content: "Hello".to_string(),
-        },
-    ]
+    vec![ChatMessage {
+        role: "user".to_string(),
+        content: "Hello".to_string(),
+    }]
 }
 
 /// Helper: fast retry config so tests don't take forever.
@@ -55,7 +53,7 @@ async fn retry_429_calls_expected_number_of_times() {
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(429).set_body_string("Rate limited"))
-        .expect(4)  // initial + 3 retries
+        .expect(4) // initial + 3 retries
         .mount(&mock_server)
         .await;
 
@@ -70,7 +68,10 @@ async fn retry_429_calls_expected_number_of_times() {
     })
     .await;
 
-    assert!(result.is_err(), "expected error after all retries returned 429");
+    assert!(
+        result.is_err(),
+        "expected error after all retries returned 429"
+    );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("429"), "expected 429 in final error: {err}");
 }
@@ -84,7 +85,7 @@ async fn retry_503_calls_expected_number_of_times() {
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(503).set_body_string("Service Unavailable"))
-        .expect(4)  // initial + 3 retries
+        .expect(4) // initial + 3 retries
         .mount(&mock_server)
         .await;
 
@@ -99,7 +100,10 @@ async fn retry_503_calls_expected_number_of_times() {
     })
     .await;
 
-    assert!(result.is_err(), "expected error after all retries returned 503");
+    assert!(
+        result.is_err(),
+        "expected error after all retries returned 503"
+    );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("503"), "expected 503 in final error: {err}");
 }
@@ -114,7 +118,7 @@ async fn retry_400_fails_fast() {
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(400).set_body_string("Bad Request"))
-        .expect(1)  // exactly one call, no retry
+        .expect(1) // exactly one call, no retry
         .mount(&mock_server)
         .await;
 
@@ -145,7 +149,7 @@ async fn retry_exhaustion_permanent_503() {
     let mock_server = MockServer::start().await;
 
     let cfg = RetryConfig {
-        max_retries: 2,      // initial + 2 retries = 3 total calls
+        max_retries: 2, // initial + 2 retries = 3 total calls
         base_delay_ms: 5,
         max_delay_ms: 20,
         backoff_factor: 2.0,
@@ -154,7 +158,7 @@ async fn retry_exhaustion_permanent_503() {
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(503).set_body_string("Always down"))
-        .expect(3u64)  // initial + 2 retries
+        .expect(3u64) // initial + 2 retries
         .mount(&mock_server)
         .await;
 
@@ -192,7 +196,7 @@ async fn provider_manager_ollama_retry_429_call_count() {
     Mock::given(method("POST"))
         .and(path("/api/chat"))
         .respond_with(ResponseTemplate::new(429).set_body_string("Rate limited"))
-        .expect(1)  // Parse errors aren't retried, so only 1 attempt
+        .expect(1) // Parse errors aren't retried, so only 1 attempt
         .mount(&mock_server)
         .await;
 
@@ -201,18 +205,16 @@ async fn provider_manager_ollama_retry_429_call_count() {
 
     use xencode_providers_rs::ProviderManager;
 
-    let manager = ProviderManager::new(
-        llm_client,
-        None, None, None, None,
-    )
-    .with_retry_config(fast_retry());
+    let manager =
+        ProviderManager::new(llm_client, None, None, None, None).with_retry_config(fast_retry());
 
-    let result = manager
-        .generate("llama3.1:8b", &test_messages())
-        .await;
+    let result = manager.generate("llama3.1:8b", &test_messages()).await;
 
     // Must fail: the body isn't valid JSON
-    assert!(result.is_err(), "expected parse error from non-JSON 429 body");
+    assert!(
+        result.is_err(),
+        "expected parse error from non-JSON 429 body"
+    );
 }
 
 #[tokio::test]
@@ -222,7 +224,7 @@ async fn provider_manager_ollama_retry_503_call_count() {
     Mock::given(method("POST"))
         .and(path("/api/chat"))
         .respond_with(ResponseTemplate::new(503).set_body_string("Down"))
-        .expect(1)  // Parse errors aren't retried, so only 1 attempt
+        .expect(1) // Parse errors aren't retried, so only 1 attempt
         .mount(&mock_server)
         .await;
 
@@ -231,22 +233,20 @@ async fn provider_manager_ollama_retry_503_call_count() {
 
     use xencode_providers_rs::ProviderManager;
 
-    let manager = ProviderManager::new(
-        llm_client,
-        None, None, None, None,
-    )
-    .with_retry_config(RetryConfig {
-        max_retries: 2,
-        base_delay_ms: 5,
-        max_delay_ms: 20,
-        backoff_factor: 2.0,
-    });
+    let manager =
+        ProviderManager::new(llm_client, None, None, None, None).with_retry_config(RetryConfig {
+            max_retries: 2,
+            base_delay_ms: 5,
+            max_delay_ms: 20,
+            backoff_factor: 2.0,
+        });
 
-    let result = manager
-        .generate("llama3.1:8b", &test_messages())
-        .await;
+    let result = manager.generate("llama3.1:8b", &test_messages()).await;
 
-    assert!(result.is_err(), "expected parse error from non-JSON 503 body");
+    assert!(
+        result.is_err(),
+        "expected parse error from non-JSON 503 body"
+    );
 }
 
 // ── ProviderManager Ollama: successful request (no retry needed) ─────────
@@ -274,15 +274,10 @@ async fn provider_manager_ollama_success_no_retry() {
 
     use xencode_providers_rs::ProviderManager;
 
-    let manager = ProviderManager::new(
-        llm_client,
-        None, None, None, None,
-    )
-    .with_retry_config(fast_retry());
+    let manager =
+        ProviderManager::new(llm_client, None, None, None, None).with_retry_config(fast_retry());
 
-    let result = manager
-        .generate("llama3.1:8b", &test_messages())
-        .await;
+    let result = manager.generate("llama3.1:8b", &test_messages()).await;
 
     assert!(result.is_ok(), "expected success: {:?}", result.err());
     assert_eq!(result.unwrap(), "Hello from Ollama!");

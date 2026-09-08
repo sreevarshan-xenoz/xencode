@@ -69,12 +69,24 @@ impl ChunkIndexer {
                 let start_line = (i + 1) as u32;
                 // Find the end of this function/class (next top-level def/class or end of file)
                 let mut end = i + 1;
-                let indent_level = lines[i].chars().position(|c| !c.is_whitespace()).unwrap_or(0);
+                let indent_level = lines[i]
+                    .chars()
+                    .position(|c| !c.is_whitespace())
+                    .unwrap_or(0);
                 while end < lines.len() {
                     let next_line = lines[end].trim();
-                    if !next_line.is_empty() && !next_line.starts_with('#') && !next_line.starts_with('"') && !next_line.starts_with('\'') {
-                        let next_indent = lines[end].chars().position(|c| !c.is_whitespace()).unwrap_or(0);
-                        if next_indent <= indent_level && (next_line.starts_with("class ") || next_line.starts_with("def ")) {
+                    if !next_line.is_empty()
+                        && !next_line.starts_with('#')
+                        && !next_line.starts_with('"')
+                        && !next_line.starts_with('\'')
+                    {
+                        let next_indent = lines[end]
+                            .chars()
+                            .position(|c| !c.is_whitespace())
+                            .unwrap_or(0);
+                        if next_indent <= indent_level
+                            && (next_line.starts_with("class ") || next_line.starts_with("def "))
+                        {
                             break;
                         }
                     }
@@ -112,10 +124,14 @@ impl ChunkIndexer {
 
         while i < lines.len() {
             let trimmed = lines[i].trim();
-            if trimmed.starts_with("pub fn") || trimmed.starts_with("fn ")
-                || trimmed.starts_with("pub struct") || trimmed.starts_with("struct ")
-                || trimmed.starts_with("pub enum") || trimmed.starts_with("enum ")
-                || trimmed.starts_with("pub trait") || trimmed.starts_with("trait ")
+            if trimmed.starts_with("pub fn")
+                || trimmed.starts_with("fn ")
+                || trimmed.starts_with("pub struct")
+                || trimmed.starts_with("struct ")
+                || trimmed.starts_with("pub enum")
+                || trimmed.starts_with("enum ")
+                || trimmed.starts_with("pub trait")
+                || trimmed.starts_with("trait ")
                 || trimmed.starts_with("impl")
             {
                 let start_line = (i + 1) as u32;
@@ -158,7 +174,13 @@ impl ChunkIndexer {
     }
 
     /// Simple line-based chunking with overlap.
-    fn chunk_by_lines(source: &str, file_path: &str, language: &str, chunk_size: usize, overlap: usize) -> Vec<DocumentChunk> {
+    fn chunk_by_lines(
+        source: &str,
+        file_path: &str,
+        language: &str,
+        chunk_size: usize,
+        overlap: usize,
+    ) -> Vec<DocumentChunk> {
         let lines: Vec<&str> = source.lines().collect();
         let mut chunks = Vec::new();
         let mut start = 0;

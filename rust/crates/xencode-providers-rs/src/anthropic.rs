@@ -75,10 +75,8 @@ impl AnthropicProvider {
         let client = reqwest::Client::new();
         Self {
             api_key,
-            base_url: base_url
-                .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-            anthropic_version: anthropic_version
-                .unwrap_or_else(|| "2023-06-01".to_string()),
+            base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+            anthropic_version: anthropic_version.unwrap_or_else(|| "2023-06-01".to_string()),
             client,
         }
     }
@@ -123,11 +121,7 @@ impl AnthropicProvider {
     }
 
     /// Build the request payload for the Anthropic Messages API.
-    fn build_payload(
-        model: &str,
-        messages: &[ChatMessage],
-        max_tokens: u32,
-    ) -> serde_json::Value {
+    fn build_payload(model: &str, messages: &[ChatMessage], max_tokens: u32) -> serde_json::Value {
         let (system, anthy_messages) = Self::convert_messages(messages);
 
         let mut payload = serde_json::json!({
@@ -153,7 +147,8 @@ impl AnthropicProvider {
         let url = format!("{}/v1/messages", self.base_url);
         let payload = Self::build_payload(model, messages, max_tokens.unwrap_or(1024));
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", &self.anthropic_version)
@@ -174,7 +169,10 @@ impl AnthropicProvider {
                 .and_then(|e| e.message)
                 .unwrap_or(body_text);
 
-            return Err(ProviderError::Api(format!("Anthropic {} - {detail}", status)));
+            return Err(ProviderError::Api(format!(
+                "Anthropic {} - {detail}",
+                status
+            )));
         }
 
         let body: AnthropicResponse = response
@@ -219,7 +217,8 @@ impl AnthropicProvider {
         let mut payload = Self::build_payload(model, messages, max_tokens.unwrap_or(1024));
         payload["stream"] = serde_json::json!(true);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", &self.anthropic_version)
@@ -263,8 +262,12 @@ impl AnthropicProvider {
                         if current_event == "content_block_delta" {
                             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
                                 if let Some(delta) = parsed.get("delta") {
-                                    if delta.get("type").and_then(|t| t.as_str()) == Some("text_delta") {
-                                        if let Some(text_chunk) = delta.get("text").and_then(|t| t.as_str()) {
+                                    if delta.get("type").and_then(|t| t.as_str())
+                                        == Some("text_delta")
+                                    {
+                                        if let Some(text_chunk) =
+                                            delta.get("text").and_then(|t| t.as_str())
+                                        {
                                             if !text_chunk.is_empty() {
                                                 callback(text_chunk);
                                                 full_response.push_str(text_chunk);
@@ -321,8 +324,14 @@ mod tests {
     #[test]
     fn convert_messages_simple() {
         let messages = vec![
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
-            ChatMessage { role: "assistant".to_string(), content: "Hi there".to_string() },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "Hi there".to_string(),
+            },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert!(system.is_none());
@@ -336,8 +345,14 @@ mod tests {
     #[test]
     fn convert_messages_with_system() {
         let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "You are a helpful assistant.".to_string() },
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You are a helpful assistant.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert_eq!(system.unwrap(), "You are a helpful assistant.");
@@ -347,9 +362,10 @@ mod tests {
 
     #[test]
     fn convert_messages_system_only() {
-        let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "Be concise.".to_string() },
-        ];
+        let messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: "Be concise.".to_string(),
+        }];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert_eq!(system.unwrap(), "Be concise.");
         assert_eq!(msgs.len(), 0);
@@ -358,9 +374,18 @@ mod tests {
     #[test]
     fn convert_messages_multiple_system_accumulates() {
         let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "Be helpful.".to_string() },
-            ChatMessage { role: "system".to_string(), content: "Be concise.".to_string() },
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
+            ChatMessage {
+                role: "system".to_string(),
+                content: "Be helpful.".to_string(),
+            },
+            ChatMessage {
+                role: "system".to_string(),
+                content: "Be concise.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         let system_text = system.unwrap();
@@ -371,9 +396,10 @@ mod tests {
 
     #[test]
     fn convert_messages_unknown_role() {
-        let messages = vec![
-            ChatMessage { role: "unknown".to_string(), content: "test".to_string() },
-        ];
+        let messages = vec![ChatMessage {
+            role: "unknown".to_string(),
+            content: "test".to_string(),
+        }];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert!(system.is_none());
         assert_eq!(msgs.len(), 1);
@@ -383,10 +409,17 @@ mod tests {
     #[test]
     fn build_payload_with_system() {
         let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "You are Claude.".to_string() },
-            ChatMessage { role: "user".to_string(), content: "Hi".to_string() },
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You are Claude.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            },
         ];
-        let payload = AnthropicProvider::build_payload("claude-3-5-sonnet-20241022", &messages, 2048);
+        let payload =
+            AnthropicProvider::build_payload("claude-3-5-sonnet-20241022", &messages, 2048);
         assert_eq!(payload["model"], "claude-3-5-sonnet-20241022");
         assert_eq!(payload["max_tokens"], 2048);
         assert_eq!(payload["system"], "You are Claude.");
@@ -395,9 +428,10 @@ mod tests {
 
     #[test]
     fn build_payload_no_system() {
-        let messages = vec![
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
-        ];
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        }];
         let payload = AnthropicProvider::build_payload("claude-3-haiku-20240307", &messages, 512);
         assert_eq!(payload["model"], "claude-3-haiku-20240307");
         assert_eq!(payload["max_tokens"], 512);

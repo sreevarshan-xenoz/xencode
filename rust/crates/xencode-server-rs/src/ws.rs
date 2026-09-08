@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -25,7 +25,10 @@ mod tests {
         // Manually add a user to a session
         {
             let mut sessions = state.sessions.lock().await;
-            sessions.insert("session-1".to_string(), vec!["alice".to_string(), "bob".to_string()]);
+            sessions.insert(
+                "session-1".to_string(),
+                vec!["alice".to_string(), "bob".to_string()],
+            );
         }
         remove_peer(&state, "session-1", "alice").await;
         let sessions = state.sessions.lock().await;
@@ -76,12 +79,7 @@ mod tests {
             let mut sessions = state.sessions.lock().await;
             sessions.insert("empty-session".to_string(), vec!["alice".to_string()]);
         }
-        broadcast_to_session(
-            &state,
-            "empty-session",
-            r#"{"type":"test"}"#,
-            None,
-        ).await;
+        broadcast_to_session(&state, "empty-session", r#"{"type":"test"}"#, None).await;
         // No assertions needed — just shouldn't crash
     }
 
@@ -89,12 +87,7 @@ mod tests {
     async fn test_broadcast_to_session_nonexistent() {
         // Broadcasting to a session that doesn't exist should not panic
         let state = Arc::new(AppState::new());
-        broadcast_to_session(
-            &state,
-            "no-such-session",
-            r#"{"type":"test"}"#,
-            None,
-        ).await;
+        broadcast_to_session(&state, "no-such-session", r#"{"type":"test"}"#, None).await;
     }
 }
 
@@ -130,7 +123,10 @@ pub async fn handle_socket(
     }
     {
         let mut sessions = state.sessions.lock().await;
-        sessions.entry(session_id.clone()).or_default().push(username.clone());
+        sessions
+            .entry(session_id.clone())
+            .or_default()
+            .push(username.clone());
     }
 
     info!("User {username} joined session {session_id}");
@@ -142,19 +138,16 @@ pub async fn handle_socket(
         &serde_json::json!({
             "type": "join",
             "username": username,
-        }).to_string(),
+        })
+        .to_string(),
         None,
-    ).await;
+    )
+    .await;
 
     // Forward messages from this peer to others
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Text(text) = msg {
-            broadcast_to_session(
-                &state,
-                &session_id,
-                &text,
-                Some(&username),
-            ).await;
+            broadcast_to_session(&state, &session_id, &text, Some(&username)).await;
         }
     }
 
@@ -168,9 +161,11 @@ pub async fn handle_socket(
         &serde_json::json!({
             "type": "leave",
             "username": username,
-        }).to_string(),
+        })
+        .to_string(),
         None,
-    ).await;
+    )
+    .await;
 }
 
 /// Broadcast a message to all peers in a session, optionally excluding a sender.

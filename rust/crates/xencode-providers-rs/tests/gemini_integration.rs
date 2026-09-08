@@ -3,20 +3,18 @@
 //! These tests use `wiremock` to simulate the Gemini HTTP API, so no real
 //! API key or network access is required.
 
-use wiremock::matchers::{method, path, query_param, header, body_json};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use xencode_providers_rs::{ChatMessage, ProviderError};
 use xencode_providers_rs::gemini::GeminiProvider;
+use xencode_providers_rs::{ChatMessage, ProviderError};
 
 /// Helper: standard test messages.
 fn test_messages() -> Vec<ChatMessage> {
-    vec![
-        ChatMessage {
-            role: "user".to_string(),
-            content: "Tell me about Rust.".to_string(),
-        },
-    ]
+    vec![ChatMessage {
+        role: "user".to_string(),
+        content: "Tell me about Rust.".to_string(),
+    }]
 }
 
 /// Helper: expected Gemini request body for the standard test messages.
@@ -208,7 +206,10 @@ async fn gemini_generate_empty_candidates() {
         .await;
 
     // Empty candidates returns empty string (not an error for Gemini)
-    assert!(result.is_ok(), "empty candidates should return empty string");
+    assert!(
+        result.is_ok(),
+        "empty candidates should return empty string"
+    );
     assert_eq!(result.unwrap(), "");
 }
 
@@ -247,14 +248,11 @@ async fn gemini_stream_basic() {
         .and(query_param("alt", "sse"))
         .and(query_param("key", "test-key"))
         .and(body_json(expected_body()))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(
-                    "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Rust\"}]}}]}\n\
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Rust\"}]}}]}\n\
                      data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" is\"}]}}]}\n\
                      data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" fast\"}]}}]}\n",
-                ),
-        )
+        ))
         .expect(1)
         .mount(&mock_server)
         .await;
@@ -271,7 +269,11 @@ async fn gemini_stream_basic() {
         })
         .await;
 
-    assert!(result.is_ok(), "generate_stream() failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "generate_stream() failed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap(), "Rust is fast");
     assert_eq!(tokens, vec!["Rust", " is", " fast"]);
 }

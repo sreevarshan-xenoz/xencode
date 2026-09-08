@@ -3,20 +3,18 @@
 //! These tests use `wiremock` to simulate the Qwen HTTP API, so no real
 //! API key or network access is required.
 
-use wiremock::matchers::{method, path, header, body_json};
+use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use xencode_providers_rs::{ChatMessage, ProviderError};
 use xencode_providers_rs::qwen::QwenProvider;
+use xencode_providers_rs::{ChatMessage, ProviderError};
 
 /// Helper: create a standard set of chat messages used in most tests.
 fn test_messages() -> Vec<ChatMessage> {
-    vec![
-        ChatMessage {
-            role: "user".to_string(),
-            content: "What is Rust?".to_string(),
-        },
-    ]
+    vec![ChatMessage {
+        role: "user".to_string(),
+        content: "What is Rust?".to_string(),
+    }]
 }
 
 /// Helper: the standard JSON body the Qwen provider should send for a
@@ -57,9 +55,10 @@ async fn qwen_generate_basic() {
         .and(header("Authorization", "Bearer test-api-key"))
         .and(header("Content-Type", "application/json"))
         .and(body_json(expected_body("qwen2.5:72b", false)))
-        .respond_with(ResponseTemplate::new(200).set_body_json(success_response(
-            "Rust is a systems programming language.",
-        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(success_response("Rust is a systems programming language.")),
+        )
         .expect(1)
         .mount(&mock_server)
         .await;
@@ -69,15 +68,10 @@ async fn qwen_generate_basic() {
         Some(format!("{}/v1", mock_server.uri())),
     );
 
-    let result = provider
-        .generate("qwen2.5:72b", &test_messages())
-        .await;
+    let result = provider.generate("qwen2.5:72b", &test_messages()).await;
 
     assert!(result.is_ok(), "generate() failed: {:?}", result.err());
-    assert_eq!(
-        result.unwrap(),
-        "Rust is a systems programming language."
-    );
+    assert_eq!(result.unwrap(), "Rust is a systems programming language.");
 }
 
 #[tokio::test]
@@ -96,9 +90,7 @@ async fn qwen_generate_http_error() {
         Some(format!("{}/v1", mock_server.uri())),
     );
 
-    let result = provider
-        .generate("qwen2.5:72b", &test_messages())
-        .await;
+    let result = provider.generate("qwen2.5:72b", &test_messages()).await;
 
     assert!(result.is_err(), "expected error for 401 response");
     match result.unwrap_err() {
@@ -127,9 +119,7 @@ async fn qwen_generate_empty_choices() {
         Some(format!("{}/v1", mock_server.uri())),
     );
 
-    let result = provider
-        .generate("qwen2.5:72b", &test_messages())
-        .await;
+    let result = provider.generate("qwen2.5:72b", &test_messages()).await;
 
     assert!(result.is_err(), "expected error for empty choices");
     match result.unwrap_err() {
@@ -148,9 +138,7 @@ async fn qwen_generate_network_error() {
         Some("http://127.0.0.1:1/v1".to_string()),
     );
 
-    let result = provider
-        .generate("qwen2.5:72b", &test_messages())
-        .await;
+    let result = provider.generate("qwen2.5:72b", &test_messages()).await;
 
     assert!(result.is_err(), "expected network error");
     match result.unwrap_err() {
@@ -176,16 +164,13 @@ async fn qwen_stream_basic() {
         .and(path("/v1/chat/completions"))
         .and(header("Authorization", "Bearer test-api-key"))
         .and(body_json(expected_body("qwen2.5:72b", true)))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(
-                    "data: {\"choices\":[{\"delta\":{\"content\":\"Rust\"}}]}\n\
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Rust\"}}]}\n\
                      data: {\"choices\":[{\"delta\":{\"content\":\" is\"}}]}\n\
                      data: {\"choices\":[{\"delta\":{\"content\":\" safe\"}}]}\n\
                      data: {\"choices\":[{\"delta\":{\"content\":\".\"}}]}\n\
                      data: [DONE]\n",
-                ),
-        )
+        ))
         .expect(1)
         .mount(&mock_server)
         .await;
@@ -202,7 +187,11 @@ async fn qwen_stream_basic() {
         })
         .await;
 
-    assert!(result.is_ok(), "generate_stream() failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "generate_stream() failed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap(), "Rust is safe.");
     assert_eq!(tokens, vec!["Rust", " is", " safe", "."]);
 }

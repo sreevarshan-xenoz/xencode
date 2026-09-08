@@ -194,7 +194,10 @@ pub async fn verify_token(
 pub async fn login(
     axum::Json(req): axum::Json<LoginRequest>,
 ) -> Result<axum::Json<LoginResponse>, AuthError> {
-    let token = format!("xencode_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+    let token = format!(
+        "xencode_{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")
+    );
     let expires = chrono::Utc::now() + chrono::Duration::hours(24);
     Ok(axum::Json(LoginResponse {
         token,

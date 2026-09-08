@@ -1,6 +1,3 @@
 pub mod workspace;
 
-pub use workspace::{
-    scan_workspace, EntryKind, ScanOptions, WorkspaceEntry, WorkspaceScanError,
-};
-
+pub use workspace::{scan_workspace, EntryKind, ScanOptions, WorkspaceEntry, WorkspaceScanError};
