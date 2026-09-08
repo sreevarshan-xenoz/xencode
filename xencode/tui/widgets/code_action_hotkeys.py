@@ -267,21 +267,26 @@ class CodeActionHandler:
             if self.model_callback:
                 result_text = await self.model_callback(prompt)
 
-                return CodeActionResult(
+                result = CodeActionResult(
                     action_type=action_type,
                     success=True,
                     result=result_text,
                 )
             else:
                 # No callback - return simulated response
-                return self._simulate_action(action_type, code, lang)
+                result = self._simulate_action(action_type, code, lang)
+
+            self._history.append(result)
+            return result
 
         except Exception as e:
-            return CodeActionResult(
+            result = CodeActionResult(
                 action_type=action_type,
                 success=False,
                 error=str(e),
             )
+            self._history.append(result)
+            return result
 
     def _simulate_action(
         self,

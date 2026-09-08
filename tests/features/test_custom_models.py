@@ -22,6 +22,22 @@ from xencode.features.custom_models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_models_storage():
+    """Isolate CustomModelManager's persistent storage per test."""
+    models_file = Path.home() / '.xencode' / 'custom_models.json'
+    backup = models_file.read_text() if models_file.exists() else None
+    models_file.parent.mkdir(parents=True, exist_ok=True)
+    models_file.unlink(missing_ok=True)
+
+    yield
+
+    if backup is None:
+        models_file.unlink(missing_ok=True)
+    else:
+        models_file.write_text(backup)
+
+
 @pytest.fixture
 def temp_codebase():
     """Create a temporary codebase for testing"""

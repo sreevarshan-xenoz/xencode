@@ -39,6 +39,35 @@ class OllamaChromaWrapper(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings:
         return self.ollama_embeddings.embed_documents(list(input))
 
+
+class HashEmbeddingModel:
+    """Deterministic offline embeddings used when Ollama is unavailable or unreachable."""
+
+    DIMENSION = 384
+
+    def __init__(self, model: str = "nomic-embed-text"):
+        self.model = model
+
+    def _embed(self, text: str) -> List[float]:
+        import hashlib
+        import math
+        import re
+
+        vector = [0.0] * self.DIMENSION
+        for token in re.findall(r'\w+', text.lower()):
+            digest = int(hashlib.sha256(token.encode('utf-8')).hexdigest(), 16)
+            idx = digest % self.DIMENSION
+            vector[idx] += 1.0 if (digest & 1) else -1.0
+
+        norm = math.sqrt(sum(v * v for v in vector)) or 1.0
+        return [v / norm for v in vector]
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._embed(text)
+
 class VectorStore:
     """
     Wrapper around ChromaDB for storing and retrieving code context.
@@ -68,8 +97,9 @@ class VectorStore:
         self.embedding_model = embedding_model
         self.graph_store = graph_store or GraphStore()
 
-        # Initialize Embeddings
-        self.embeddings = OllamaEmbeddings(model=embedding_model)
+        # Initialize Embeddings (fall back to offline hashing when Ollama is unavailable)
+        self.embeddings = OllamaEmbeddings(model=embedding_model) if OllamaEmbeddings is not None else HashEmbeddingModel(model=embedding_model)
+        self._fallback_embeddings = HashEmbeddingModel(model=embedding_model)
 
         # Initialize Chroma Client
         self.client = chromadb.PersistentClient(path=persist_directory)
@@ -81,6 +111,16 @@ class VectorStore:
             embedding_function=OllamaChromaWrapper(self.embeddings),
             metadata={"hnsw:space": "cosine"}
         )
+
+    def _embed_with_fallback(self, method: str, *args):
+        """Run an embedding call, switching to offline hashing on failure."""
+        try:
+            return getattr(self.embeddings, method)(*args)
+        except Exception:
+            if isinstance(self.embeddings, HashEmbeddingModel):
+                raise
+            self.embeddings = self._fallback_embeddings
+            return getattr(self.embeddings, method)(*args)
 
     def add_documents(self, documents: List[Document]):
         """
@@ -95,8 +135,8 @@ class VectorStore:
 
         # Generate embeddings
         # We can either let Chroma compute them (if we provide an embedding function)
-        # or pre-compute them. Let's pre-compute with LangChain's OllamaEmbeddings.
-        embeddings = self.embeddings.embed_documents(texts)
+        # or pre-compute them. Use offline hashing fallback if Ollama is unreachable.
+        embeddings = self._embed_with_fallback("embed_documents", texts)
 
         self.collection.add(
             documents=texts,
@@ -109,7 +149,7 @@ class VectorStore:
         """
         Search for similar documents.
         """
-        query_embedding = self.embeddings.embed_query(query)
+        query_embedding = self._embed_with_fallback("embed_query", query)
 
         results = self.collection.query(
             query_embeddings=[query_embedding],

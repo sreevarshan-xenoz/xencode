@@ -16,6 +16,7 @@ Features:
 
 import asyncio
 import json
+import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -80,13 +81,13 @@ class LatencyMetrics:
         # Update average
         self.avg_ms = sum(self.samples) / len(self.samples)
 
-        # Calculate percentiles
+        # Calculate percentiles (nearest-rank: index = ceil(p * n) - 1)
         sorted_samples = sorted(self.samples)
         n = len(sorted_samples)
         if n > 0:
-            self.p50_ms = sorted_samples[int(n * 0.50)]
-            self.p95_ms = sorted_samples[int(n * 0.95)] if n >= 20 else self.max_ms
-            self.p99_ms = sorted_samples[int(n * 0.99)] if n >= 100 else self.max_ms
+            self.p50_ms = sorted_samples[max(0, math.ceil(n * 0.50) - 1)]
+            self.p95_ms = sorted_samples[max(0, math.ceil(n * 0.95) - 1)] if n >= 20 else self.max_ms
+            self.p99_ms = sorted_samples[max(0, math.ceil(n * 0.99) - 1)] if n >= 100 else self.max_ms
 
     def get_trend(self) -> str:
         """Get latency trend direction"""
@@ -106,7 +107,7 @@ class LatencyMetrics:
         return {
             'current_ms': self.current_ms,
             'avg_ms': self.avg_ms,
-            'min_ms': self.min_ms,
+            'min_ms': self.min_ms if math.isfinite(self.min_ms) else 0.0,
             'max_ms': self.max_ms,
             'p50_ms': self.p50_ms,
             'p95_ms': self.p95_ms,

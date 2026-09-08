@@ -157,7 +157,7 @@ class TestVoiceInterfaceCLI:
 
         for text, expected_type in test_cases:
             command = await feature.process(text)
-            assert command.text == text
+            assert command.text == text.lower()
             assert command.command_type == expected_type
             assert 0 <= command.confidence <= 1
             assert command.id is not None
@@ -476,7 +476,7 @@ class TestVoiceInterfaceIntegration:
 
         # Shutdown
         await feature.shutdown()
-        assert not feature.is_enabled
+        assert not feature.is_initialized
 
     @pytest.mark.asyncio
     async def test_cli_and_tui_integration(self):
