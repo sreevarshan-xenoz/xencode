@@ -2951,6 +2951,7 @@ dependencies = [
  "fastrand",
  "ratatui",
  "reqwest",
+ "serde_json",
  "tokio",
  "tui-textarea",
  "xencode-config-rs",

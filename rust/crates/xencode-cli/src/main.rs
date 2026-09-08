@@ -374,7 +374,34 @@ async fn run_query(
     session_id: Option<String>,
 ) -> Result<(), String> {
     let config = XencodeConfig::load().unwrap_or_default();
-    let model = model_override.unwrap_or(config.default_model);
+    let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
+
+    // If no model override is provided, verify default model against Ollama's installed models
+    let model = match model_override {
+        Some(m) => m,
+        None => {
+            if !config.default_model.contains('/') {
+                if let Ok(installed) = client.list_models().await {
+                    if !installed.is_empty() && !installed.iter().any(|m| m.name == config.default_model) {
+                        // Configured default is not installed; use smart default or first installed
+                        if let Ok(Some(smart)) = client.get_smart_default().await {
+                            smart
+                        } else if let Some(first) = installed.first() {
+                            first.name.clone()
+                        } else {
+                            config.default_model.clone()
+                        }
+                    } else {
+                        config.default_model.clone()
+                    }
+                } else {
+                    config.default_model.clone()
+                }
+            } else {
+                config.default_model.clone()
+            }
+        }
+    };
 
     let mut cache = if config.cache_enabled && !no_cache {
         ResponseCache::with_persistence(config.max_cache_size, config.response_timeout as f64).ok()

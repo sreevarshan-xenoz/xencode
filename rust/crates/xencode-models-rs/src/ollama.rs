@@ -93,6 +93,36 @@ impl OllamaClient {
         Self::new("http://localhost:11434", 30)
     }
 
+    /// Check if Ollama service is reachable and responsive, returning latency in seconds.
+    pub async fn ping(&self) -> Result<f64, OllamaError> {
+        let url = format!("{}/api/version", self.base_url);
+        let start = Instant::now();
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            if e.is_connect() {
+                OllamaError::NotRunning(e.to_string())
+            } else if e.is_timeout() {
+                OllamaError::Timeout(e.to_string())
+            } else {
+                OllamaError::Api(e.to_string())
+            }
+        })?;
+
+        if response.status().is_success() {
+            Ok(start.elapsed().as_secs_f64())
+        } else {
+            // Fallback to tags endpoint if /api/version isn't available
+            let tags_url = format!("{}/api/tags", self.base_url);
+            let resp2 = self.client.get(&tags_url).send().await.map_err(|e| {
+                OllamaError::Api(e.to_string())
+            })?;
+            if resp2.status().is_success() {
+                Ok(start.elapsed().as_secs_f64())
+            } else {
+                Err(OllamaError::Api(format!("HTTP {}", resp2.status())))
+            }
+        }
+    }
+
     /// List all installed models.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, OllamaError> {
         let url = format!("{}/api/tags", self.base_url);
@@ -124,8 +154,32 @@ impl OllamaClient {
             .collect())
     }
 
-    /// Check the health of a specific model by sending a tiny prompt.
+    /// Check the health of a specific model by sending a tiny prompt, or ping if model is empty.
     pub async fn check_health(&mut self, model: &str) -> Result<ModelHealth, OllamaError> {
+        if model.is_empty() {
+            let start = Instant::now();
+            return match self.ping().await {
+                Ok(response_time) => {
+                    let health = ModelHealth {
+                        status: HealthStatus::Healthy,
+                        response_time,
+                        last_check: crate::health::current_timestamp(),
+                        error_message: None,
+                    };
+                    Ok(health)
+                }
+                Err(e) => {
+                    let health = ModelHealth {
+                        status: HealthStatus::Unavailable,
+                        response_time: start.elapsed().as_secs_f64(),
+                        last_check: crate::health::current_timestamp(),
+                        error_message: Some(e.to_string()),
+                    };
+                    Ok(health)
+                }
+            };
+        }
+
         let url = format!("{}/api/generate", self.base_url);
         let payload = serde_json::json!({
             "model": model,
@@ -154,11 +208,16 @@ impl OllamaClient {
             Ok(resp) => {
                 let status = resp.status();
                 let msg = resp.text().await.unwrap_or_default();
+                let err_msg = if status.as_u16() == 404 {
+                    format!("Model '{model}' not found in Ollama (run 'ollama pull {model}')")
+                } else {
+                    format!("HTTP {}: {}", status, msg)
+                };
                 let health = ModelHealth {
                     status: HealthStatus::Error,
                     response_time: start.elapsed().as_secs_f64(),
                     last_check: crate::health::current_timestamp(),
-                    error_message: Some(format!("HTTP {}: {}", status, msg)),
+                    error_message: Some(err_msg),
                 };
                 self.health_tracker.update(model, health.clone());
                 Ok(health)
