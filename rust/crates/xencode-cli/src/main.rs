@@ -10,7 +10,9 @@ use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
-use xencode_models_rs::{LlamaCppClient, OllamaClient};
+use xencode_models_rs::{
+    find_llama_server, start_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient,
+};
 use xencode_plugin_rs::PluginRegistry;
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
@@ -82,6 +84,34 @@ enum Commands {
         /// Session ID to attach to
         #[arg(long)]
         session: Option<String>,
+
+        /// llama.cpp sampling: temperature (e.g. 0.7)
+        #[arg(long)]
+        temperature: Option<f64>,
+
+        /// llama.cpp sampling: top-k
+        #[arg(long, name = "top-k")]
+        top_k: Option<i32>,
+
+        /// llama.cpp sampling: min-p (e.g. 0.05)
+        #[arg(long, name = "min-p")]
+        min_p: Option<f64>,
+
+        /// llama.cpp sampling: mirostat mode (0, 1, or 2)
+        #[arg(long)]
+        mirostat: Option<i32>,
+
+        /// llama.cpp sampling: max generated tokens
+        #[arg(long = "max-tokens")]
+        max_tokens: Option<u32>,
+
+        /// llama.cpp sampling: GBNF grammar file/string
+        #[arg(long)]
+        grammar: Option<String>,
+
+        /// llama.cpp sampling: JSON schema for structured output
+        #[arg(long = "json-schema")]
+        json_schema: Option<String>,
     },
 
     /// Manage conversation memory
@@ -111,6 +141,12 @@ enum Commands {
     Plugin {
         #[command(subcommand)]
         action: PluginAction,
+    },
+
+    /// llama.cpp server management (status/start/stop/load/unload)
+    Llamacpp {
+        #[command(subcommand)]
+        action: LlamacppAction,
     },
 
     /// Launch the Terminal User Interface
@@ -161,6 +197,40 @@ enum ModelAction {
 }
 
 #[derive(Subcommand)]
+enum LlamacppAction {
+    /// Show llama.cpp server status, loaded model, and token throughput
+    Status,
+    /// Start a llama-server process hosting the configured GGUF model
+    Start {
+        /// GGUF model path (overrides config llama_cpp_model_path)
+        #[arg(long)]
+        model: Option<String>,
+        /// Port to bind (defaults to 8080)
+        #[arg(long, default_value = "8080")]
+        port: u16,
+        /// llama-server executable path (overrides config / PATH lookup)
+        #[arg(long)]
+        exec: Option<String>,
+    },
+    /// Stop a llama-server process started by xencode
+    Stop,
+    /// Load / switch a model on a running llama-server
+    Load {
+        /// GGUF model path to load
+        model: String,
+    },
+    /// Unload the currently loaded model
+    Unload,
+    /// List models available on a running llama-server
+    List,
+    /// Set the configured GGUF model path used for auto-start/load
+    SetPath {
+        /// GGUF model path
+        path: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum CacheAction {
     /// Show cache statistics
     Stats,
@@ -198,11 +268,34 @@ async fn main() {
             model,
             no_cache,
             session,
-        } => run_query(prompt, model, no_cache, session).await,
+            temperature,
+            top_k,
+            min_p,
+            mirostat,
+            max_tokens,
+            grammar,
+            json_schema,
+        } => {
+            run_query(
+                prompt,
+                model,
+                no_cache,
+                session,
+                temperature,
+                top_k,
+                min_p,
+                mirostat,
+                max_tokens,
+                grammar,
+                json_schema,
+            )
+            .await
+        }
         Commands::Memory { action } => run_memory(action),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Plugin { action } => run_plugin_action(action),
+        Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Tui => run_tui().await,
     };
 
@@ -244,6 +337,12 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 "default_model" => config.default_model = value.clone(),
                 "ollama_url" => config.ollama_url = value.clone(),
                 "llama_cpp_url" => config.llama_cpp_url = value.clone(),
+                "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
+                "llama_cpp_executable" => config.llama_cpp_executable = value.clone(),
+                "llama_cpp_args" => {
+                    config.llama_cpp_args =
+                        value.split_whitespace().map(|s| s.to_string()).collect();
+                }
                 "max_cache_size" => {
                     config.max_cache_size = value
                         .parse()
@@ -358,6 +457,208 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
     }
 }
 
+async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
+    fn pid_file() -> std::path::PathBuf {
+        dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".xencode")
+            .join("llamaserver.pid")
+    }
+
+    fn write_pid_file(path: &std::path::Path, pid: u32) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(path, pid.to_string()).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn read_pid_file(path: &std::path::Path) -> Option<u32> {
+        std::fs::read_to_string(path)
+            .ok()?
+            .trim()
+            .parse::<u32>()
+            .ok()
+    }
+
+    fn kill_pid(pid: u32) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !status.status.success() {
+                return Err(String::from_utf8_lossy(&status.stderr).to_string());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let status = std::process::Command::new("kill")
+                .args([pid.to_string()])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !status.status.success() {
+                return Err(String::from_utf8_lossy(&status.stderr).to_string());
+            }
+        }
+        Ok(())
+    }
+
+    match action {
+        LlamacppAction::Status => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+            match client.ping().await {
+                Ok(resp_time) => {
+                    println!("llama.cpp status: healthy  ({:.3}s)", resp_time);
+                    println!("  URL: {}", config.llama_cpp_url);
+                    let models = client.list_models().await.unwrap_or_default();
+                    for m in &models {
+                        println!("  Model: {}", m.id);
+                    }
+                    if let Some(t) = client.timings().await.ok().flatten() {
+                        if t.tokens_generated > 0 {
+                            println!(
+                                "  Throughput: ~{:.0} tok/s · {} tokens (last gen)",
+                                t.predicted_per_second, t.tokens_generated
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("llama.cpp status: unavailable");
+                    println!("  URL: {}", config.llama_cpp_url);
+                    println!("  Error: {e}");
+                }
+            }
+            Ok(())
+        }
+        LlamacppAction::Start { model, port, exec } => {
+            let mut config = XencodeConfig::load().unwrap_or_default();
+            let model_path = model.clone().unwrap_or_else(|| config.llama_cpp_model_path.clone());
+            if model_path.trim().is_empty() {
+                return Err(
+                    "no GGUF model path set (use --model or `xencode config set llama_cpp_model_path <path>`)"
+                        .to_string(),
+                );
+            }
+            let exe = find_llama_server(
+                exec.as_deref().or(if config.llama_cpp_executable.is_empty() {
+                    None
+                } else {
+                    Some(config.llama_cpp_executable.as_str())
+                }),
+            );
+            let exe = exe.ok_or_else(|| {
+                "could not find llama-server on PATH (set config llama_cpp_executable)".to_string()
+            })?;
+
+            println!("Starting llama-server: {exe}");
+            println!("  model: {model_path}");
+            println!("  port:  {port}");
+
+            let extra: Vec<&str> = config.llama_cpp_args.iter().map(|s| s.as_str()).collect();
+            let mut server = start_llama_server(&exe, &model_path, port, &extra)
+                .map_err(|e| e.to_string())?;
+
+            // Save PID so `xencode llamacpp stop` can terminate it later.
+            let _ = write_pid_file(&pid_file(), server.pid());
+
+            // Wait for the server to become healthy (ping until success).
+            let client = LlamaCppClient::new(&server.base_url, 5);
+            let mut ready = false;
+            for _ in 0..120 {
+                if client.ping().await.is_ok() {
+                    ready = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            if !ready {
+                let _ = server.stop();
+                let _ = std::fs::remove_file(&pid_file());
+                return Err("llama-server did not become ready in time".to_string());
+            }
+
+            config.llama_cpp_url = server.base_url.clone();
+            config.llama_cpp_model_path = model_path.clone();
+            config.save().map_err(|e| e.to_string())?;
+
+            println!("llama-server ready at {}", server.base_url);
+            println!("Model loaded: {}", model_path);
+            println!("Server will keep running; use `xencode llamacpp stop` to terminate.");
+            // Keep the process alive under this CLI invocation.
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(604800)).await;
+                }
+            });
+            let _ = tokio::signal::ctrl_c().await;
+            let _ = server.stop();
+            let _ = std::fs::remove_file(&pid_file());
+            Ok(())
+        }
+        LlamacppAction::Stop => {
+            match read_pid_file(&pid_file()) {
+                Some(pid) => {
+                    println!("Stopping llama-server (PID {pid})...");
+                    match kill_pid(pid) {
+                        Ok(()) => {
+                            let _ = std::fs::remove_file(&pid_file());
+                            println!("Stopped");
+                        }
+                        Err(e) => eprintln!("Failed to stop PID {pid}: {e}"),
+                    }
+                }
+                None => {
+                    println!("No xencode-managed llama-server PID file found.");
+                }
+            }
+            Ok(())
+        }
+        LlamacppAction::Load { model } => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+            println!("Loading model: {model}");
+            match client.load_model(&model).await {
+                Ok(()) => {
+                    println!("Model loaded: {model}");
+                    Ok(())
+                }
+                Err(e) => Err(format!("failed to load model: {e}")),
+            }
+        }
+        LlamacppAction::Unload => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+            match client.unload_models().await {
+                Ok(()) => {
+                    println!("Model unloaded");
+                    Ok(())
+                }
+                Err(e) => Err(format!("failed to unload model: {e}")),
+            }
+        }
+        LlamacppAction::List => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+            let models = client.list_models().await.map_err(|e| e.to_string())?;
+            for m in &models {
+                println!("{}", m.id);
+            }
+            Ok(())
+        }
+        LlamacppAction::SetPath { path } => {
+            let mut config = XencodeConfig::load().unwrap_or_default();
+            config.llama_cpp_model_path = path.clone();
+            config.save().map_err(|e| e.to_string())?;
+            println!("llama_cpp_model_path = {path}");
+            Ok(())
+        }
+    }
+}
+
 fn run_cache(action: CacheAction) -> Result<(), String> {
     match action {
         CacheAction::Stats => {
@@ -395,6 +696,13 @@ async fn run_query(
     model_override: Option<String>,
     no_cache: bool,
     session_id: Option<String>,
+    temperature: Option<f64>,
+    top_k: Option<i32>,
+    min_p: Option<f64>,
+    mirostat: Option<i32>,
+    max_tokens: Option<u32>,
+    grammar: Option<String>,
+    json_schema: Option<String>,
 ) -> Result<(), String> {
     let config = XencodeConfig::load().unwrap_or_default();
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
@@ -475,6 +783,18 @@ async fn run_query(
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
     let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
+
+    let llamacpp_opts = LlamaCppOptions {
+        temperature,
+        top_k,
+        min_p,
+        mirostat,
+        max_tokens,
+        grammar,
+        json_schema: json_schema
+            .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))),
+    };
+
     let provider = ProviderManager::new(
         client,
         config.api_keys.openrouter_api_key.clone(),
@@ -486,7 +806,7 @@ async fn run_query(
 
     let mut response_content = String::new();
     let result = provider
-        .generate_stream(&model, &context_messages, |token| {
+        .generate_stream_with_options(&model, &context_messages, Some(&llamacpp_opts), |token| {
             print!("{}", token);
             let _ = io::stdout().flush();
             response_content.push_str(token);
@@ -497,6 +817,12 @@ async fn run_query(
 
     match result {
         Ok(_) => {
+            if let Some(timings) = provider.last_llamacpp_timings() {
+                println!(
+                    "\n(llama.cpp ~{} tok/s · {} tokens generated)",
+                    timings.predicted_per_second as u64, timings.tokens_generated
+                );
+            }
             if let Some(ref mut c) = cache {
                 c.set(&prompt, &model, &response_content);
             }

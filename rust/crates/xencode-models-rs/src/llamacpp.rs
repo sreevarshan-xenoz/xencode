@@ -84,6 +84,11 @@ pub struct LlamaServerProcess {
 }
 
 impl LlamaServerProcess {
+    /// The OS process id of the spawned server (if available).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Check whether the spawned server is still running.
     pub fn is_running(&mut self) -> bool {
         self.child.try_wait().map(|s| s.is_none()).unwrap_or(false)
