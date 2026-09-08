@@ -8,11 +8,10 @@ Provides JWT verification, user extraction, and authorization dependencies.
 
 import logging
 import os
-from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +97,9 @@ async def verify_jwt_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return None
-    
+
     token = credentials.credentials
-    
+
     if not token:
         if required:
             raise HTTPException(
@@ -109,7 +108,7 @@ async def verify_jwt_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return None
-    
+
     try:
         # Import JWT handler
         from xencode.auth.jwt_handler import JWTHandler
@@ -140,7 +139,7 @@ async def verify_jwt_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 async def get_current_user(
@@ -156,7 +155,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-    
+
     return {
         'user_id': payload.get('user_id'),
         'username': payload.get('username'),
@@ -180,22 +179,22 @@ async def require_role(
         HTTPException: If user doesn't have required role
     """
     user_role = user.get('role', '')
-    
+
     # Role hierarchy (higher roles include lower roles)
     role_hierarchy = {
         'admin': ['admin', 'developer', 'viewer'],
         'developer': ['developer', 'viewer'],
         'viewer': ['viewer'],
     }
-    
+
     allowed_roles = role_hierarchy.get(required_role, [required_role])
-    
+
     if user_role not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Insufficient permissions. Required role: {required_role}",
         )
-    
+
     return user
 
 

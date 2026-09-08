@@ -71,9 +71,9 @@ class PerformanceProfilerPanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="performance_profiler",
             title="⚡ Performance Profiler",
-            *args,
             **kwargs
         )
         self.bottlenecks: List[Dict[str, Any]] = []

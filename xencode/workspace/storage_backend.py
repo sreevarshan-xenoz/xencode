@@ -312,7 +312,7 @@ class SQLiteStorageBackend:
                         JOIN changes cb ON c.change_b_id = cb.id
                         WHERE c.workspace_id = ?
                     """, (workspace_id,)) as cursor:
-                        async for row in cursor:
+                        async for _row in cursor:
                             # This would need more complex parsing for conflicts
                             # For now, we'll skip detailed conflict loading
                             pass

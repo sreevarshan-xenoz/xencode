@@ -11,12 +11,12 @@ Tests the 'xencode vault monitor' command:
 
 import json
 import sys
-import pytest
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from click.testing import CliRunner
-from xencode.cli import cli
 
+import pytest
+from click.testing import CliRunner
+
+from xencode.cli import cli
 
 # ---------------------------------------------------------------------------
 # Helpers for async websocket mocks

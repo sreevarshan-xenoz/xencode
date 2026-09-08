@@ -19,17 +19,14 @@ from typing import Any, Callable, Dict, List, Optional
 # Prometheus client imports
 try:
     from prometheus_client import (
-        CONTENT_TYPE_LATEST,
         CollectorRegistry,
         Counter,
         Gauge,
         Histogram,
-        Info,
         Summary,
         generate_latest,
         start_http_server,
     )
-    from prometheus_client import Enum as PrometheusEnum
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False

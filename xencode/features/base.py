@@ -113,7 +113,7 @@ class FeatureBase(ABC):
         self._initialized = False
         self.status = FeatureStatus.DISABLED
 
-    async def _shutdown(self) -> None:
+    async def _shutdown(self) -> None:  # noqa: B027 - optional hook; subclasses may skip cleanup
         """Internal shutdown logic"""
         pass
 

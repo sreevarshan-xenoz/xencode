@@ -24,10 +24,27 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import all needed classes for tests
-from xencode.rag.context_indexer_v2 import ContextIndexerV2, FileMetadata, IndexManifest, IndexStatus, Symbol  # noqa: E402
-from xencode.routing.prompt_router import TaskClassifier, TaskType, ProviderType, PromptRouter, RoutingPolicy  # noqa: E402
-from xencode.memory.session_summarizer import MemorySummarizer, ImportanceLevel  # noqa: E402
-from xencode.core.project_profiles import ModelProfile, ProjectProfileManager  # noqa: E402
+from xencode.core.project_profiles import (  # noqa: E402
+    ModelProfile,
+    ProjectProfileManager,
+)
+from xencode.memory.session_summarizer import (  # noqa: E402
+    ImportanceLevel,
+    MemorySummarizer,
+)
+from xencode.rag.context_indexer_v2 import (  # noqa: E402
+    ContextIndexerV2,
+    FileMetadata,
+    IndexManifest,
+    IndexStatus,
+)
+from xencode.routing.prompt_router import (  # noqa: E402
+    PromptRouter,
+    ProviderType,
+    RoutingPolicy,
+    TaskClassifier,
+    TaskType,
+)
 
 
 class TestContextIndexerV2:
@@ -143,7 +160,6 @@ from typing import List
 
     def test_index_manifest_serialization(self):
         """Test IndexManifest serialization"""
-        from xencode.rag.context_indexer_v2 import IndexManifest
 
         manifest = IndexManifest(
             project_root="/test/project",

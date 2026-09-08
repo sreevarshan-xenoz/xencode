@@ -10,6 +10,7 @@ Features:
 - Efficient batch processing with async support
 """
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -749,7 +750,7 @@ class ContextIndexerV2:
             return self.manifest.symbols.get(key)
 
         # Search all symbols
-        for key, symbol in self.manifest.symbols.items():
+        for _, symbol in self.manifest.symbols.items():
             if symbol.name == name:
                 return symbol
 
@@ -791,7 +792,3 @@ class ContextIndexerV2:
             self.vector_store.clear()
         self.graph_store.clear()
         self.manifest = None
-
-
-# Import ast at module level for symbol extraction
-import ast

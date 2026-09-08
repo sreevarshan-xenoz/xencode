@@ -16,7 +16,9 @@ try:
     from pydantic import BaseModel, Field
 except ImportError:
     BaseModel = object
-    Field = lambda default=None, **kwargs: default
+
+    def Field(default=None, **kwargs):
+        return default
 
 
 # Allowed safe commands (allowlist approach)

@@ -287,7 +287,8 @@ class HybridModelConfigManager:
         return False
 def _safe_eval_condition(condition: str, context: dict) -> bool:
     """Safely evaluate a simple condition (comparisons, and/or, arithmetic) without eval()."""
-    import ast, operator as op
+    import ast
+    import operator as op
     _SAFE = {
         ast.Eq: op.eq, ast.NotEq: op.ne, ast.Lt: op.lt, ast.LtE: op.le,
         ast.Gt: op.gt, ast.GtE: op.ge,
@@ -296,15 +297,19 @@ def _safe_eval_condition(condition: str, context: dict) -> bool:
         ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv,
     }
     def _eval(node, ctx):
-        if isinstance(node, ast.Constant): return node.value
-        if isinstance(node, ast.Name): return ctx.get(node.id, 0)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            return ctx.get(node.id, 0)
         if isinstance(node, ast.Compare):
             left = _eval(node.left, ctx)
             for opr, comp in zip(node.ops, node.comparators):
                 right = _eval(comp, ctx)
                 f = _SAFE.get(type(opr))
-                if not f: raise ValueError(f"Unsafe: {type(opr)}")
-                if not f(left, right): return False
+                if not f:
+                    raise ValueError(f"Unsafe: {type(opr)}")
+                if not f(left, right):
+                    return False
                 left = right
             return True
         if isinstance(node, ast.BoolOp):

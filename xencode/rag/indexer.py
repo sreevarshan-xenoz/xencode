@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional
 
 try:
     from langchain_core.documents import Document

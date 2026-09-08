@@ -3,22 +3,19 @@
 Unit tests for FileBasedCredentialBackend
 """
 
-import pytest
 import json
-import os
-import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import patch
+
+import pytest
 
 from xencode.auth.credential_vault import (
+    CRYPTO_AVAILABLE,
     Credential,
     CredentialVault,
     FileBasedCredentialBackend,
     WindowsCredentialManagerBackend,
-    EnvironmentBackend,
-    get_vault,
-    CRYPTO_AVAILABLE,
 )
 
 
@@ -217,10 +214,11 @@ class TestFileBasedCredentialBackend:
     def test_different_machine_keys_produce_different_ciphertext(self, temp_vault_path):
         """Test that different encryption keys produce different ciphertext for same secret"""
         import base64
+
         from cryptography.fernet import Fernet
+        from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.backends import default_backend
 
         # Derive two different keys
         seed1 = "machine-1|/home/user1|user1"

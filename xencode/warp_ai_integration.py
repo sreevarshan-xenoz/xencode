@@ -21,8 +21,7 @@ from rich.console import Console
 try:
     from .advanced_cache_system import get_cache_manager
     from .enhancement_integration import get_enhancement_integration
-    from .intelligent_model_selector import HardwareDetector, IntelligentModelSelector
-    from .smart_config_manager import ConfigurationManager
+    from .intelligent_model_selector import IntelligentModelSelector
     XENCODE_AI_AVAILABLE = True
 except ImportError:
     XENCODE_AI_AVAILABLE = False

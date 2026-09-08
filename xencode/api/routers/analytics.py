@@ -19,17 +19,10 @@ from pydantic import BaseModel, Field
 
 # Import analytics components
 try:
-    from ...advanced_analytics_engine import AdvancedAnalyticsEngine
     from ...analytics.event_tracker import EventTracker
     from ...analytics.metrics_collector import MetricsCollector
-    from ...analytics_integration import IntegratedAnalyticsOrchestrator
     from ...analytics_reporting_system import (
         AnalyticsReportingSystem,
-        DeliveryConfig,
-        DeliveryMethod,
-        ReportConfig,
-        ReportFormat,
-        ReportType,
     )
     ANALYTICS_AVAILABLE = bool(os.environ.get("XENCODE_ENABLE_ANALYTICS"))
 except ImportError:

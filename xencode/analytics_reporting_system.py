@@ -50,19 +50,14 @@ except ImportError:
         async def run_comprehensive_analysis(self, *args, **kwargs): return {}
 
 # Try to import optional dependencies for advanced features
-try:
-    import matplotlib.dates as mdates
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
+import importlib.util
+
+MATPLOTLIB_AVAILABLE = importlib.util.find_spec("matplotlib") is not None
 
 try:
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, letter
+    from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, TableStyle
     from reportlab.platypus import Table as RLTable
     REPORTLAB_AVAILABLE = True

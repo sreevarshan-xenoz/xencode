@@ -150,8 +150,8 @@ class ChatInput(Input):
     def __init__(self, *args, **kwargs):
         """Initialize chat input"""
         super().__init__(
-            placeholder="Ask Xencode AI anything... (Ctrl+Enter to send)",
             *args,
+            placeholder="Ask Xencode AI anything... (Ctrl+Enter to send)",
             **kwargs
         )
 

@@ -45,7 +45,7 @@ except ImportError as e:
     AUDIT_LOGGER_AVAILABLE = False
 
 try:
-    from .credential_vault import FileBasedCredentialBackend, CredentialVault
+    from .credential_vault import CredentialVault, FileBasedCredentialBackend
     FILE_BACKEND_AVAILABLE = True
 except ImportError as e:
     logger.warning("Failed to import FileBasedCredentialBackend: %s", e)

@@ -5,7 +5,7 @@ Contains Pydantic models for documents, users, workspaces, and code analysis.
 """
 
 try:
-    from .document import DocumentType, DocumentMetadata, ProcessedDocument
+    from .document import DocumentMetadata, DocumentType, ProcessedDocument
 except ImportError:
     DocumentType = DocumentMetadata = ProcessedDocument = None
 
@@ -20,7 +20,7 @@ except ImportError:
     WorkspaceConfig = WorkspaceFile = None
 
 try:
-    from .code_analysis import AnalysisIssue, SeverityLevel, ComplexityMetrics
+    from .code_analysis import AnalysisIssue, ComplexityMetrics, SeverityLevel
 except ImportError:
     AnalysisIssue = SeverityLevel = ComplexityMetrics = None
 

@@ -12,9 +12,6 @@ from typing import Any, Dict, List
 
 try:
     from docx import Document as DocxDocument
-    from docx.enum.style import WD_STYLE_TYPE
-    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-    from docx.shared import Inches
     PYTHON_DOCX_AVAILABLE = True
 except ImportError:
     PYTHON_DOCX_AVAILABLE = False

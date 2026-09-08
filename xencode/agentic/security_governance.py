@@ -678,20 +678,20 @@ class PrivacyPreservationManager:
         """Anonymize sensitive fields in data."""
         anonymized = data.copy()
 
-        for field in sensitive_fields:
-            if field in anonymized:
-                original_value = anonymized[field]
+        for f in sensitive_fields:
+            if f in anonymized:
+                original_value = anonymized[f]
 
                 # Store original hash for reference (without storing original data)
                 original_hash = hashlib.sha256(str(original_value).encode()).hexdigest()
 
                 # Replace with anonymized version
                 if isinstance(original_value, str):
-                    anonymized[field] = f"ANONYMIZED_{original_hash[:8]}"
+                    anonymized[f] = f"ANONYMIZED_{original_hash[:8]}"
                 elif isinstance(original_value, (int, float)):
-                    anonymized[field] = hash(str(original_value)) % 10000
+                    anonymized[f] = hash(str(original_value)) % 10000
                 else:
-                    anonymized[field] = f"ANONYMIZED_{type(original_value).__name__}"
+                    anonymized[f] = f"ANONYMIZED_{type(original_value).__name__}"
 
         return anonymized
 
@@ -703,16 +703,16 @@ class PrivacyPreservationManager:
 
         pseudonymized = data.copy()
 
-        for field in sensitive_fields:
-            if field in pseudonymized:
-                original_value = str(pseudonymized[field])
+        for f in sensitive_fields:
+            if f in pseudonymized:
+                original_value = str(pseudonymized[f])
 
                 # Create or reuse pseudonym
                 if original_value not in pseudonym_map:
                     pseudonym = f"PSEUDO_{hashlib.sha256(original_value.encode()).hexdigest()[:8]}"
                     pseudonym_map[original_value] = pseudonym
 
-                pseudonymized[field] = pseudonym_map[original_value]
+                pseudonymized[f] = pseudonym_map[original_value]
 
         return pseudonymized, pseudonym_map
 

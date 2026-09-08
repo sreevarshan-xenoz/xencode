@@ -15,7 +15,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import aiofiles
@@ -864,10 +864,6 @@ class HybridCacheManager:
         deleted += disk_deleted
 
         return deleted
-
-    async def cleanup_expired(self):
-        """Clean up expired cache entries"""
-        await self._cleanup_old_entries()
 
     async def optimize_memory(self):
         """Optimize memory usage"""

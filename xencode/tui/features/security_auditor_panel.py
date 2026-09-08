@@ -94,9 +94,9 @@ class SecurityAuditorPanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="security_auditor",
             title="🔒 Security Auditor",
-            *args,
             **kwargs
         )
         self.vulnerabilities: List[Dict[str, Any]] = []

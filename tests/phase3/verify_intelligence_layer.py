@@ -156,9 +156,7 @@ def test_context_indexer_basic():
         from xencode.rag.context_indexer_v2 import (
             ContextIndexerV2,
             FileMetadata,
-            IndexManifest,
             IndexStatus,
-            Symbol,
         )
     except ImportError as e:
         print(f"  [WARN] Skipping full indexer tests (missing dependencies): {e}")

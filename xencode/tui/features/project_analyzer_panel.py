@@ -79,9 +79,9 @@ class ProjectAnalyzerPanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="project_analyzer",
             title="📊 Project Analyzer",
-            *args,
             **kwargs
         )
         self.current_path: Optional[Path] = None

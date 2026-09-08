@@ -680,12 +680,17 @@ class PerformanceProfiler(FeatureBase):
     async def _initialize(self) -> None:
         """Initialize the performance profiler"""
         # Verify required tools are available
-        try:
-            import cProfile
+        import importlib.util
 
-            import psutil
-        except ImportError as e:
-            raise RuntimeError(f"Required profiling tools not available: {str(e)}")  from e
+        missing_tools = [
+            tool
+            for tool in ("cProfile", "psutil")
+            if importlib.util.find_spec(tool) is None
+        ]
+        if missing_tools:
+            raise RuntimeError(
+                f"Required profiling tools not available: {', '.join(missing_tools)}"
+            )
 
     async def _shutdown(self) -> None:
         """Shutdown the performance profiler"""

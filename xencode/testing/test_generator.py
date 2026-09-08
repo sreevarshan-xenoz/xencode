@@ -23,11 +23,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-try:
-    from typing import get_args, get_origin, get_type_hints
-except ImportError:
-    pass
-
 
 class TestFramework(Enum):
     """Supported test frameworks"""

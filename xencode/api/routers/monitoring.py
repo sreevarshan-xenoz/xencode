@@ -8,7 +8,6 @@ and system health endpoints with comprehensive observability features.
 
 import asyncio
 import os
-import uuid
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -19,20 +18,22 @@ from pydantic import BaseModel, Field
 
 # Import monitoring components
 try:
-    from ...monitoring.resource_manager import get_resource_manager, ResourceType, CleanupPriority
     from ...monitoring.performance_optimizer import PerformanceOptimizer
+    from ...monitoring.resource_manager import (
+        ResourceType,
+        get_resource_manager,
+    )
     from ...performance_monitoring_dashboard import PerformanceMonitoringDashboard
-    from ...monitoring.metrics_collector import MetricsCollector
     MONITORING_AVAILABLE = bool(os.environ.get("XENCODE_ENABLE_MONITORING"))
 except ImportError:
     MONITORING_AVAILABLE = False
 
 # Import benchmark components
 try:
-    from ...monitoring.benchmark_engine import BenchmarkEngine, BenchmarkTask, TaskType
-    from ...monitoring.benchmark_suites import get_benchmark_suites, BenchmarkSuites
+    from ...monitoring.benchmark_engine import BenchmarkEngine
     from ...monitoring.benchmark_recommendations import get_recommendations_engine
     from ...monitoring.benchmark_store import BenchmarkStore
+    from ...monitoring.benchmark_suites import get_benchmark_suites
     BENCHMARK_AVAILABLE = True
 except ImportError:
     BENCHMARK_AVAILABLE = False
@@ -260,7 +261,7 @@ async def get_performance_optimizer():
                 }
 
         return _StubOptimizer()
-    
+
     try:
         return PerformanceOptimizer()
     except Exception as e:
@@ -283,7 +284,7 @@ async def get_monitoring_dashboard():
                 }
 
         return _StubDashboard()
-    
+
     try:
         return PerformanceMonitoringDashboard()
     except Exception as e:
@@ -315,13 +316,13 @@ async def get_system_health():
         disk = psutil.disk_usage('/')
         network = psutil.net_io_counters()
         boot_time = datetime.fromtimestamp(psutil.boot_time())
-        
+
         # Calculate health score based on resource usage
         memory_score = max(0, 100 - memory.percent) / 100
         cpu_score = max(0, 100 - cpu_percent) / 100
         disk_score = max(0, 100 - (disk.used / disk.total * 100)) / 100
         health_score = (memory_score + cpu_score + disk_score) / 3
-        
+
         # Determine overall status
         if health_score >= 0.8:
             status = "healthy"
@@ -329,7 +330,7 @@ async def get_system_health():
             status = "warning"
         else:
             status = "critical"
-        
+
         return SystemHealthResponse(
             overall_status=status,
             health_score=health_score,
@@ -343,7 +344,7 @@ async def get_system_health():
             alerts_count=1 if memory.percent > 90 else 0,  # Basic alert counting based on resource thresholds
             timestamp=datetime.now()
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")  from e
 
@@ -369,10 +370,9 @@ async def get_resource_usage(
                 utilization_percent=memory.percent,
                 trend="stable"
             )
-        
+
         elif resource_type == ResourceTypeEnum.CPU:
             cpu_percent = psutil.cpu_percent(interval=1)
-            cpu_count = psutil.cpu_count()
             return ResourceUsageResponse(
                 resource_type=resource_type.value,
                 current_usage=cpu_percent,
@@ -385,7 +385,7 @@ async def get_resource_usage(
                 utilization_percent=cpu_percent,
                 trend="stable"
             )
-        
+
         elif resource_type == ResourceTypeEnum.DISK:
             disk = psutil.disk_usage('/')
             return ResourceUsageResponse(
@@ -400,7 +400,7 @@ async def get_resource_usage(
                 utilization_percent=(disk.used / disk.total * 100),
                 trend="increasing"
             )
-        
+
         else:
             # Mock implementation for other resource types
             return ResourceUsageResponse(
@@ -413,7 +413,7 @@ async def get_resource_usage(
                 utilization_percent=50.0,
                 trend="stable"
             )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
 
@@ -423,7 +423,7 @@ async def get_all_resources():
     """Get usage for all monitored resources"""
     try:
         resources = []
-        
+
         # Memory
         memory = psutil.virtual_memory()
         resources.append(ResourceUsageResponse(
@@ -436,7 +436,7 @@ async def get_all_resources():
             utilization_percent=memory.percent,
             trend="stable"
         ))
-        
+
         # CPU
         cpu_percent = psutil.cpu_percent(interval=1)
         resources.append(ResourceUsageResponse(
@@ -449,7 +449,7 @@ async def get_all_resources():
             utilization_percent=cpu_percent,
             trend="stable"
         ))
-        
+
         # Disk
         disk = psutil.disk_usage('/')
         resources.append(ResourceUsageResponse(
@@ -462,9 +462,9 @@ async def get_all_resources():
             utilization_percent=(disk.used / disk.total * 100),
             trend="increasing"
         ))
-        
+
         return resources
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get all resources: {e}")  from e
 
@@ -489,7 +489,7 @@ async def get_performance_metrics(
                 "memory_usage_mb": 512.8,
                 "cpu_usage_percent": 23.4
             }
-        
+
         return PerformanceMetricsResponse(
             timestamp=datetime.now(),
             response_time_ms=metrics.get("response_time_ms", 0.0),
@@ -501,7 +501,7 @@ async def get_performance_metrics(
             memory_usage_mb=metrics.get("memory_usage_mb", 0.0),
             cpu_usage_percent=metrics.get("cpu_usage_percent", 0.0)
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")  from e
 
@@ -514,14 +514,14 @@ async def trigger_cleanup(
     """Trigger system cleanup operations"""
     try:
         cleanup_id = f"cleanup_{int(datetime.now().timestamp())}"
-        
+
         # Start cleanup in background
         background_tasks.add_task(
             perform_cleanup_background,
             cleanup_id,
             request
         )
-        
+
         return CleanupResultResponse(
             cleanup_id=cleanup_id,
             tasks_executed=len(request.resource_types),
@@ -533,7 +533,7 @@ async def trigger_cleanup(
             duration_seconds=2.5,
             timestamp=datetime.now()
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")  from e
 
@@ -548,7 +548,7 @@ async def get_alerts(
     try:
         # Mock implementation - in production this would query alert storage
         alerts = []
-        
+
         # Check current resource usage for alerts
         memory = psutil.virtual_memory()
         if memory.percent > 80:
@@ -564,7 +564,7 @@ async def get_alerts(
                 acknowledged=False,
                 resolved=False
             ))
-        
+
         cpu_percent = psutil.cpu_percent(interval=1)
         if cpu_percent > 80:
             alerts.append(AlertResponse(
@@ -579,15 +579,15 @@ async def get_alerts(
                 acknowledged=False,
                 resolved=False
             ))
-        
+
         # Apply filters
         if severity:
             alerts = [alert for alert in alerts if alert.severity == severity]
         if resolved is not None:
             alerts = [alert for alert in alerts if alert.resolved == resolved]
-        
+
         return alerts[:limit]
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")  from e
 
@@ -603,7 +603,7 @@ async def acknowledge_alert(alert_id: str):
             "acknowledged_at": datetime.now().isoformat(),
             "message": f"Alert {alert_id} acknowledged"
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to acknowledge alert: {e}")  from e
 
@@ -616,12 +616,12 @@ async def get_processes(
     """Get running processes information"""
     try:
         processes = []
-        
+
         for proc in psutil.process_iter(['pid', 'name', 'status', 'cpu_percent', 'memory_info', 'create_time', 'cmdline']):
             try:
                 proc_info = proc.info
                 memory_mb = proc_info['memory_info'].rss / 1024 / 1024 if proc_info['memory_info'] else 0
-                
+
                 processes.append(ProcessInfoResponse(
                     pid=proc_info['pid'],
                     name=proc_info['name'] or 'Unknown',
@@ -635,7 +635,7 @@ async def get_processes(
                 ))
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-        
+
         # Sort processes
         if sort_by == "memory":
             processes.sort(key=lambda x: x.memory_mb, reverse=True)
@@ -645,9 +645,9 @@ async def get_processes(
             processes.sort(key=lambda x: x.name.lower())
         elif sort_by == "pid":
             processes.sort(key=lambda x: x.pid)
-        
+
         return processes[:limit]
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get processes: {e}")  from e
 
@@ -658,7 +658,7 @@ async def get_network_stats():
     try:
         network_stats = []
         net_io = psutil.net_io_counters(pernic=True)
-        
+
         for interface, stats in net_io.items():
             network_stats.append(NetworkStatsResponse(
                 interface=interface,
@@ -673,9 +673,9 @@ async def get_network_stats():
                 speed_mbps=None,  # Would need additional system call
                 timestamp=datetime.now()
             ))
-        
+
         return network_stats
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get network stats: {e}")  from e
 
@@ -685,12 +685,12 @@ async def get_disk_stats():
     """Get disk usage and I/O statistics"""
     try:
         disk_stats = []
-        
+
         # Get disk usage for all mount points
         for partition in psutil.disk_partitions():
             try:
                 usage = psutil.disk_usage(partition.mountpoint)
-                
+
                 disk_stats.append(DiskStatsResponse(
                     device=partition.device,
                     mountpoint=partition.mountpoint,
@@ -707,9 +707,9 @@ async def get_disk_stats():
                 ))
             except PermissionError:
                 continue
-        
+
         return disk_stats
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get disk stats: {e}")  from e
 
@@ -743,13 +743,13 @@ async def get_monitoring_dashboard(
                     "info": 5
                 }
             }
-        
+
         return {
             "dashboard_data": dashboard_data,
             "last_updated": datetime.now().isoformat(),
             "refresh_interval": 30
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get monitoring dashboard: {e}")  from e
 
@@ -768,7 +768,7 @@ async def update_monitoring_config(request: MonitoringConfigRequest):
             "updated_at": datetime.now().isoformat(),
             "message": f"Monitoring configuration updated for {request.resource_type.value}"
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update monitoring config: {e}")  from e
 
@@ -793,7 +793,6 @@ async def perform_cleanup_background(cleanup_id: str, request: CleanupRequest):
 
         # Clean temporary files
         import tempfile
-        import shutil
         temp_dir = tempfile.gettempdir()
         try:
             # Clean up temporary files older than 1 day
@@ -843,320 +842,11 @@ async def get_resource_manager_dep():
     """Dependency to get resource manager"""
     if not MONITORING_AVAILABLE:
         return None
-    
+
     try:
         return await get_resource_manager()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get resource manager: {e}")  from e
-
-
-@router.get("/health", response_model=SystemHealthResponse)
-async def get_system_health(
-    resource_manager = Depends(get_resource_manager_dep)
-):
-    """Get comprehensive system health status"""
-    try:
-        # Get resource usage
-        resource_usage = await resource_manager.get_resource_usage()
-        
-        # Check for violations
-        violations = await resource_manager.check_resource_limits()
-        
-        # Get statistics
-        stats = resource_manager.get_statistics()
-        
-        # Determine overall health status
-        status = "healthy"
-        if violations:
-            critical_violations = [v for v in violations if v.current_usage >= v.limit.hard_limit]
-            if critical_violations:
-                status = "critical"
-            else:
-                status = "warning"
-        
-        # Generate recommendations
-        recommendations = []
-        if violations:
-            for violation in violations:
-                recommendations.append(
-                    f"Resource {violation.resource_type.value} is at {violation.current_usage:.1f}% "
-                    f"(limit: {violation.limit.soft_limit:.1f}%/{violation.limit.hard_limit:.1f}%)"
-                )
-        
-        if stats["cleanup_stats"]["total_cleanups"] == 0:
-            recommendations.append("Consider running cleanup operations to optimize performance")
-        
-        # Calculate actual uptime since system boot
-        boot_time = psutil.boot_time()
-        current_time = datetime.now().timestamp()
-        actual_uptime = current_time - boot_time
-
-        return SystemHealthResponse(
-            status=status,
-            timestamp=datetime.now(),
-            uptime_seconds=actual_uptime,
-            components={
-                "resource_manager": "healthy",
-                "memory_tracker": "healthy" if resource_manager.memory_tracker.tracking_enabled else "disabled",
-                "gc_manager": "healthy",
-                "temp_file_manager": "healthy"
-            },
-            alerts=[
-                {
-                    "type": "resource_violation",
-                    "resource": v.resource_type.value,
-                    "current": v.current_usage,
-                    "limit": v.limit.hard_limit,
-                    "severity": "critical" if v.current_usage >= v.limit.hard_limit else "warning"
-                }
-                for v in violations
-            ],
-            recommendations=recommendations
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e}")  from e
-
-
-@router.get("/resources", response_model=List[ResourceUsageResponse])
-async def get_resource_usage(
-    resource_manager = Depends(get_resource_manager_dep)
-):
-    """Get current resource usage for all monitored resources"""
-    if resource_manager is None:
-        now = datetime.now()
-        return [
-            ResourceUsageResponse(
-                resource_type="memory",
-                current_usage=12.5,
-                peak_usage=16.0,
-                average_usage=11.0,
-                unit="GB",
-                timestamp=now,
-                limit_soft=14.0,
-                limit_hard=16.0,
-                utilization_percent=78.0,
-                trend="stable"
-            ),
-            ResourceUsageResponse(
-                resource_type="cpu",
-                current_usage=35.0,
-                peak_usage=100.0,
-                average_usage=30.0,
-                unit="percent",
-                timestamp=now,
-                limit_soft=80.0,
-                limit_hard=95.0,
-                utilization_percent=35.0,
-                trend="stable"
-            ),
-            ResourceUsageResponse(
-                resource_type="disk",
-                current_usage=120.0,
-                peak_usage=256.0,
-                average_usage=110.0,
-                unit="GB",
-                timestamp=now,
-                limit_soft=200.0,
-                limit_hard=256.0,
-                utilization_percent=47.0,
-                trend="increasing"
-            ),
-        ]
-    try:
-        usage_data = await resource_manager.get_resource_usage()
-        
-        return [
-            ResourceUsageResponse(
-                resource_type=resource_type.value,
-                current_usage=usage.current_usage,
-                peak_usage=usage.peak_usage,
-                unit=usage.limit.unit if usage.limit else "unknown",
-                timestamp=usage.timestamp,
-                limit_soft=usage.limit.soft_limit if usage.limit else None,
-                limit_hard=usage.limit.hard_limit if usage.limit else None
-            )
-            for resource_type, usage in usage_data.items()
-        ]
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
-
-
-@router.get("/resources/{resource_type}")
-async def get_specific_resource_usage(
-    resource_type: str,
-    resource_manager = Depends(get_resource_manager_dep)
-):
-    """Get usage information for a specific resource type"""
-    if resource_manager is None:
-        defaults = {
-            "memory": {
-                "current_usage": 12.5,
-                "peak_usage": 16.0,
-                "unit": "GB",
-                "utilization_percent": 78.0,
-            },
-            "cpu": {
-                "current_usage": 35.0,
-                "peak_usage": 100.0,
-                "unit": "percent",
-                "utilization_percent": 35.0,
-            },
-            "disk": {
-                "current_usage": 120.0,
-                "peak_usage": 256.0,
-                "unit": "GB",
-                "utilization_percent": 47.0,
-            },
-        }
-        key = resource_type.lower()
-        if key not in defaults:
-            raise HTTPException(status_code=404, detail=f"Resource type {resource_type} not found")
-
-        payload = defaults[key]
-        return ResourceUsageResponse(
-            resource_type=key,
-            current_usage=payload["current_usage"],
-            peak_usage=payload["peak_usage"],
-            average_usage=payload["current_usage"],
-            unit=payload["unit"],
-            timestamp=datetime.now(),
-            limit_soft=None,
-            limit_hard=None,
-            utilization_percent=payload["utilization_percent"],
-            trend="stable"
-        )
-    try:
-        # Convert string to ResourceType enum
-        try:
-            resource_enum = ResourceType(resource_type.lower())
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")  from None
-        
-        usage_data = await resource_manager.get_resource_usage()
-        
-        if resource_enum not in usage_data:
-            raise HTTPException(status_code=404, detail=f"Resource type {resource_type} not found")
-        
-        usage = usage_data[resource_enum]
-        
-        return ResourceUsageResponse(
-            resource_type=resource_enum.value,
-            current_usage=usage.current_usage,
-            peak_usage=usage.peak_usage,
-            unit=usage.limit.unit if usage.limit else "unknown",
-            timestamp=usage.timestamp,
-            limit_soft=usage.limit.soft_limit if usage.limit else None,
-            limit_hard=usage.limit.hard_limit if usage.limit else None
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get resource usage: {e}")  from e
-
-
-@router.post("/cleanup", response_model=CleanupResultResponse)
-async def trigger_cleanup(
-    priority: str = Query("medium", description="Cleanup priority: low, medium, high, critical"),
-    background_tasks: BackgroundTasks = None,
-    resource_manager = Depends(get_resource_manager_dep)
-):
-    """Trigger resource cleanup operations"""
-    if resource_manager is None:
-        return CleanupResultResponse(
-            cleanup_id=str(uuid.uuid4()),
-            tasks_executed=3,
-            tasks_successful=3,
-            memory_freed_mb=512.0,
-            disk_freed_mb=1024.0,
-            cache_cleared_mb=256.0,
-            errors=[],
-            duration_seconds=2.5,
-            timestamp=datetime.now()
-        )
-    try:
-        # Convert string to CleanupPriority enum
-        try:
-            priority_enum = CleanupPriority(priority.lower())
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid priority: {priority}")  from None
-        
-        # Trigger cleanup
-        results = await resource_manager.trigger_cleanup(priority_enum)
-        
-        return CleanupResultResponse(
-            tasks_executed=results["tasks_executed"],
-            tasks_successful=results["tasks_successful"],
-            memory_freed_mb=results["memory_freed_mb"],
-            errors=results["errors"],
-            timestamp=datetime.now()
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger cleanup: {e}")  from e
-
-
-@router.get("/metrics", response_model=PerformanceMetricsResponse)
-async def get_performance_metrics(
-    resource_manager = Depends(get_resource_manager_dep)
-):
-    """Get current performance metrics"""
-    if resource_manager is None:
-        return PerformanceMetricsResponse(
-            timestamp=datetime.now(),
-            response_time_ms=42.5,
-            throughput_rps=125.0,
-            error_rate_percent=0.5,
-            cache_hit_rate_percent=96.0,
-            active_connections=12,
-            queue_length=3,
-            memory_usage_mb=2048.0,
-            cpu_usage_percent=37.5
-        )
-    try:
-        # Get resource usage
-        usage_data = await resource_manager.get_resource_usage()
-        
-        # Extract key metrics
-        memory_usage = usage_data.get(ResourceType.MEMORY)
-        
-        # Get cache statistics if available
-        cache_hit_rate = 0.0
-        try:
-            from ...cache.multimodal_cache import get_multimodal_cache_async
-            cache_system = await get_multimodal_cache_async()
-            cache_stats = await cache_system.get_cache_statistics()
-            cache_hit_rate = cache_stats.get("base_cache", {}).get("hit_rate", 0.0)
-        except Exception:
-            pass
-
-        # Get actual CPU usage
-        cpu_usage = psutil.cpu_percent(interval=1)
-
-        # For response time average, we'll use a mock value since we don't have actual request logs
-        # In a real implementation, this would come from monitoring middleware
-        response_time_avg = 0.05  # 50ms average response time
-
-        # For active connections, we'll use a mock value since we don't have connection tracking
-        # In a real implementation, this would come from connection tracking middleware
-        active_connections = 10  # Mock active connections count
-
-        return PerformanceMetricsResponse(
-            timestamp=datetime.now(),
-            cpu_usage=cpu_usage,
-            memory_usage=memory_usage.current_usage if memory_usage else 0.0,
-            disk_usage=usage_data.get(ResourceType.TEMPORARY_FILES, {}).current_usage or 0.0,
-            response_time_avg=response_time_avg,
-            cache_hit_rate=cache_hit_rate,
-            active_connections=active_connections
-        )
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e}")  from e
 
 
 @router.get("/statistics")
@@ -1181,7 +871,7 @@ async def get_monitoring_statistics(
             "timestamp": datetime.now().isoformat(),
             "statistics": stats
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get statistics: {e}")  from e
 
@@ -1209,10 +899,10 @@ async def update_resource_limit(
             resource_enum = ResourceType(resource_type.lower())
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid resource type: {resource_type}")  from None
-        
+
         # Create new resource limit
         from ...monitoring.resource_manager import ResourceLimit
-        
+
         new_limit = ResourceLimit(
             resource_type=resource_enum,
             soft_limit=limit_request.soft_limit,
@@ -1220,10 +910,10 @@ async def update_resource_limit(
             unit=limit_request.unit,
             enabled=limit_request.enabled
         )
-        
+
         # Update the limit
         resource_manager.resource_limits[resource_enum] = new_limit
-        
+
         return {
             "message": f"Resource limit updated for {resource_type}",
             "resource_type": resource_type,
@@ -1233,7 +923,7 @@ async def update_resource_limit(
             "enabled": limit_request.enabled,
             "timestamp": datetime.now().isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1263,11 +953,11 @@ async def get_active_alerts(
     try:
         # Check for resource violations
         violations = await resource_manager.check_resource_limits()
-        
+
         alerts = []
         for violation in violations:
             severity = "critical" if violation.current_usage >= violation.limit.hard_limit else "warning"
-            
+
             alerts.append({
                 "id": f"{violation.resource_type.value}_{severity}",
                 "type": "resource_violation",
@@ -1279,7 +969,7 @@ async def get_active_alerts(
                 "timestamp": violation.timestamp.isoformat(),
                 "message": f"Resource {violation.resource_type.value} usage is {violation.current_usage:.1f}{violation.limit.unit}"
             })
-        
+
         return {
             "alerts": alerts,
             "total_count": len(alerts),
@@ -1287,7 +977,7 @@ async def get_active_alerts(
             "warning_count": len([a for a in alerts if a["severity"] == "warning"]),
             "timestamp": datetime.now().isoformat()
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get alerts: {e}")  from e
 
@@ -1307,17 +997,17 @@ async def take_memory_snapshot(
         }
     try:
         snapshot = resource_manager.memory_tracker.take_snapshot(label)
-        
+
         if snapshot is None:
             raise HTTPException(status_code=400, detail="Memory tracking is not enabled")
-        
+
         return {
             "message": "Memory snapshot taken successfully",
             "label": label,
             "timestamp": datetime.now().isoformat(),
             "snapshot_count": len(resource_manager.memory_tracker.snapshots)
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1341,13 +1031,13 @@ async def get_memory_analysis(
         }
     try:
         analysis = resource_manager.memory_tracker.analyze_memory_growth()
-        
+
         return {
             "timestamp": datetime.now().isoformat(),
             "analysis": analysis,
             "current_usage": resource_manager.memory_tracker.get_current_memory_usage()
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get memory analysis: {e}")  from e
 
@@ -1405,28 +1095,29 @@ async def get_provider_health_summary():
     """
     try:
         from ...monitoring.provider_health import get_health_monitor
-        
+
         monitor = get_health_monitor()
-        
+
         # Check all providers
-        from ...monitoring.provider_health import ProviderType
         import asyncio
-        
+
+        from ...monitoring.provider_health import ProviderType
+
         async def check_all():
             tasks = [
                 monitor.check_provider_health(provider)
                 for provider in ProviderType
             ]
             await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         await check_all()
-        
+
         # Get summary
         summary = monitor.get_health_summary()
-        
+
         # Get recommendation
         recommended = monitor.get_recommended_provider()
-        
+
         return ProviderHealthSummaryResponse(
             timestamp=summary['timestamp'],
             providers={
@@ -1439,7 +1130,7 @@ async def get_provider_health_summary():
             unhealthy_count=summary['unhealthy_count'],
             recommended_provider=recommended.value,
         )
-        
+
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -1461,10 +1152,10 @@ async def get_provider_health(provider_name: str):
         provider_name: Provider identifier (e.g., 'local_ollama', 'cloud_qwen')
     """
     try:
-        from ...monitoring.provider_health import get_health_monitor, ProviderType
-        
+        from ...monitoring.provider_health import ProviderType, get_health_monitor
+
         monitor = get_health_monitor()
-        
+
         # Find provider
         try:
             provider = ProviderType(provider_name)
@@ -1473,10 +1164,10 @@ async def get_provider_health(provider_name: str):
                 status_code=404,
                 detail=f"Unknown provider: {provider_name}"
             )  from None
-        
+
         # Check health
         health = await monitor.check_provider_health(provider)
-        
+
         return ProviderHealthResponse(
             provider=health.provider.value,
             status=health.status.value,
@@ -1490,7 +1181,7 @@ async def get_provider_health(provider_name: str):
             model_count=health.model_count,
             available_models=health.available_models,
         )
-        
+
     except HTTPException:
         raise
     except ImportError:
@@ -1514,10 +1205,10 @@ async def check_provider(provider_name: str):
         provider_name: Provider identifier
     """
     try:
-        from ...monitoring.provider_health import get_health_monitor, ProviderType
-        
+        from ...monitoring.provider_health import ProviderType, get_health_monitor
+
         monitor = get_health_monitor()
-        
+
         try:
             provider = ProviderType(provider_name)
         except ValueError:
@@ -1525,9 +1216,9 @@ async def check_provider(provider_name: str):
                 status_code=404,
                 detail=f"Unknown provider: {provider_name}"
             )  from None
-        
+
         health = await monitor.check_provider_health(provider)
-        
+
         return {
             "provider": health.provider.value,
             "status": health.status.value,
@@ -1535,7 +1226,7 @@ async def check_provider(provider_name: str):
             "error_rate": health.errors.error_rate,
             "checked_at": health.last_checked.isoformat() if health.last_checked else None,
         }
-        
+
     except HTTPException:
         raise
     except ImportError:
@@ -1560,12 +1251,12 @@ async def get_recommended_provider(task_type: str = Query(default="general")):
     """
     try:
         from ...monitoring.provider_health import get_health_monitor
-        
+
         monitor = get_health_monitor()
         recommended = monitor.get_recommended_provider(task_type)
-        
+
         health = monitor.get_provider_health(recommended)
-        
+
         return {
             "provider": recommended.value,
             "status": health.status.value if health else "unknown",
@@ -1574,7 +1265,7 @@ async def get_recommended_provider(task_type: str = Query(default="general")):
             "error_rate": health.errors.error_rate if health else None,
             "uptime_percentage": health.uptime_percentage if health else None,
         }
-        
+
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -1595,10 +1286,10 @@ async def get_latency_trends():
     Returns historical latency data and trend analysis.
     """
     try:
-        from ...monitoring.provider_health import get_health_monitor, ProviderType
-        
+        from ...monitoring.provider_health import ProviderType, get_health_monitor
+
         monitor = get_health_monitor()
-        
+
         trends = {}
         for provider in ProviderType:
             health = monitor.get_provider_health(provider)
@@ -1613,12 +1304,12 @@ async def get_latency_trends():
                     "trend": health.latency.get_trend(),
                     "sample_count": health.latency.sample_count,
                 }
-        
+
         return {
             "timestamp": datetime.now().isoformat(),
             "trends": trends,
         }
-        
+
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -1640,10 +1331,10 @@ async def get_provider_errors(hours: int = Query(default=24, ge=1, le=168)):
         hours: Number of hours to look back (1-168)
     """
     try:
-        from ...monitoring.provider_health import get_health_monitor, ProviderType
-        
+        from ...monitoring.provider_health import ProviderType, get_health_monitor
+
         monitor = get_health_monitor()
-        
+
         errors = {}
         for provider in ProviderType:
             health = monitor.get_provider_health(provider)
@@ -1656,13 +1347,13 @@ async def get_provider_errors(hours: int = Query(default=24, ge=1, le=168)):
                     "last_error_message": health.errors.last_error_message,
                     "consecutive_errors": health.errors.consecutive_errors,
                 }
-        
+
         return {
             "timestamp": datetime.now().isoformat(),
             "hours": hours,
             "errors": errors,
         }
-        
+
     except ImportError:
         raise HTTPException(
             status_code=503,
@@ -1690,17 +1381,17 @@ async def run_benchmark_suite(request: BenchmarkRunRequest):
             "run_id": "mock_run",
             "status": "mock",
         }
-    
+
     try:
         engine = BenchmarkEngine()
         suites = get_benchmark_suites()
-        
+
         # Get tasks from suite
         tasks = suites.get_suite(request.suite_name)
-        
+
         if not tasks:
             raise HTTPException(status_code=400, detail=f"Unknown suite: {request.suite_name}")
-        
+
         # Add custom tasks if provided
         if request.custom_tasks:
             for custom in request.custom_tasks:
@@ -1711,10 +1402,10 @@ async def run_benchmark_suite(request: BenchmarkRunRequest):
                     expected_output=custom.get("expected_output"),
                 )
                 tasks.append(task)
-        
+
         # Parse providers
         providers = [(p["provider"], p["model"]) for p in request.providers]
-        
+
         # Run benchmark
         summary = await engine.run_benchmark_suite(
             tasks=tasks,
@@ -1722,10 +1413,10 @@ async def run_benchmark_suite(request: BenchmarkRunRequest):
             suite_name=request.suite_name,
             concurrent=request.concurrent,
         )
-        
+
         # Close engine session
         await engine.close()
-        
+
         return {
             "run_id": summary["run_id"],
             "status": "completed",
@@ -1736,7 +1427,7 @@ async def run_benchmark_suite(request: BenchmarkRunRequest):
             "avg_latency_ms": summary.get("avg_latency_ms"),
             "avg_accuracy_score": summary.get("avg_accuracy_score"),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1754,16 +1445,16 @@ async def get_benchmark_results(
     """Get benchmark results with optional filters"""
     if not BENCHMARK_AVAILABLE:
         return []
-    
+
     try:
         store = BenchmarkStore()
-        
+
         if run_id:
             # Get results for specific run
             run = store.get_run(run_id)
             if not run:
                 raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-            
+
             # Query would need run_id filter - simplified for now
             results = store.get_results_by_task_type("general", limit=limit)
         elif provider and model:
@@ -1775,7 +1466,7 @@ async def get_benchmark_results(
         else:
             # Get recent results from all providers
             results = store.get_results_by_task_type("general", limit)
-        
+
         return [
             BenchmarkResultResponse(
                 run_id=r.get("run_id", ""),
@@ -1792,7 +1483,7 @@ async def get_benchmark_results(
             )
             for r in results
         ]
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1811,14 +1502,14 @@ async def compare_providers(
             "best_provider": "ollama",
             "best_model": "llama3.2",
         }
-    
+
     try:
         store = BenchmarkStore()
         recommendations = get_recommendations_engine(store)
-        
+
         # Get analysis
         analysis = recommendations.get_cost_quality_analysis(task_type or "general")
-        
+
         if "error" in analysis:
             return {
                 "task_type": task_type or "general",
@@ -1827,7 +1518,7 @@ async def compare_providers(
                 "best_model": "unknown",
                 "message": analysis["error"],
             }
-        
+
         # Format comparison
         providers = []
         for model in analysis.get("all_models", []):
@@ -1842,9 +1533,9 @@ async def compare_providers(
                 "avg_accuracy": model["avg_accuracy"],
                 "avg_cost": model["avg_cost_per_request"],
             })
-        
+
         best = providers[0] if providers else {}
-        
+
         return {
             "task_type": task_type or "general",
             "providers": providers,
@@ -1852,7 +1543,7 @@ async def compare_providers(
             "best_model": best.get("model", "unknown"),
             "pareto_optimal_count": analysis.get("pareto_optimal", 0),
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Comparison failed: {e}")  from e
 
@@ -1877,11 +1568,11 @@ async def get_recommendations(
             "alternatives": [],
             "tradeoffs": {},
         }
-    
+
     try:
         store = BenchmarkStore()
         recommendations = get_recommendations_engine(store)
-        
+
         rec = recommendations.get_recommendations(
             task_type=task_type,
             use_case=use_case,
@@ -1889,7 +1580,7 @@ async def get_recommendations(
             max_latency_ms=max_latency_ms,
             min_accuracy=min_accuracy,
         )
-        
+
         return BenchmarkRecommendationResponse(
             task_type=rec.task_type,
             use_case=rec.use_case,
@@ -1900,7 +1591,7 @@ async def get_recommendations(
             alternatives=rec.alternatives,
             tradeoffs=rec.tradeoffs,
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Recommendations failed: {e}")  from e
 
@@ -1913,23 +1604,23 @@ async def list_benchmark_suites():
             "suites": ["code_generation", "chat", "reasoning"],
             "message": "Mock response - benchmark module not available",
         }
-    
+
     try:
         suites = get_benchmark_suites()
-        
+
         all_suites = suites.get_all_suites()
-        
+
         return {
             "suites": {
                 name: {
                     "task_count": len(tasks),
-                    "task_types": list(set(t.task_type.value if hasattr(t.task_type, 'value') else str(t.task_type) for t in tasks)),
+                    "task_types": list({t.task_type.value if hasattr(t.task_type, 'value') else str(t.task_type) for t in tasks}),
                 }
                 for name, tasks in all_suites.items()
             },
             "task_types": suites.get_task_types(),
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list suites: {e}")  from e
 

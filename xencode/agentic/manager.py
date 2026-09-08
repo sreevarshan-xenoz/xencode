@@ -28,7 +28,6 @@ try:
 except ImportError:
     ChatPromptTemplate = None
 
-from .tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
 
 # Import AgentExecutor with fallback
 try:
@@ -77,6 +76,15 @@ class LangChainManager:
         self.tools = self._setup_tools()
         self.agent_executor = self._setup_agent()
 
+        # Memory system
+        self.use_memory = use_memory
+        if use_memory:
+            from .memory import ContextManager, ConversationMemory
+
+            self.memory = ConversationMemory(db_path)
+            self.context_manager = ContextManager()
+            self.memory.start_session(model_name=model_name)
+
     @staticmethod
     def _detect_provider_from_model(model_name: str) -> str:
         """Detect provider from model name prefix."""
@@ -113,18 +121,10 @@ class LangChainManager:
                 "Install langchain-ollama, langchain-openai, or langchain-anthropic."
             )
 
-        # Memory system
-        self.use_memory = use_memory
-        if use_memory:
-            from .memory import ConversationMemory, ContextManager
-            self.memory = ConversationMemory(db_path)
-            self.context_manager = ContextManager()
-            self.memory.start_session(model_name=model_name)
-
     def _setup_tools(self) -> List[BaseTool]:
         """Initialize the tools available to the agent."""
         from .advanced_tools import ToolRegistry
-        
+
         registry = ToolRegistry()
         return registry.get_all_tools()
 
@@ -256,7 +256,6 @@ After receiving the tool result, respond with your final answer."""),
             # Add agent_scratchpad if needed by the agent
             if hasattr(self.agent_executor, 'agent') and hasattr(self.agent_executor.agent, 'input_keys'):
                 if 'agent_scratchpad' in self.agent_executor.agent.input_keys:
-                    from langchain_core.messages import AIMessage, HumanMessage
                     inputs["agent_scratchpad"] = []
 
             # Run agent with context
@@ -284,15 +283,15 @@ After receiving the tool result, respond with your final answer."""),
                 except Exception as mem_e:
                     print(f"Failed to store error message in memory: {mem_e}")
             return error_msg
-    
+
     def suggest_model_for_task(self, task: str) -> str:
         """Suggest the best model for a given task using MultiModelManager."""
         if not self.smart_model_selection:
             return self.model_name
-        
+
         suggested_model, reason = self.model_selector.suggest_best_model(task)
         return suggested_model
-    
+
     def switch_model(self, new_model: str) -> bool:
         """Switch to a different model."""
         try:
@@ -303,12 +302,12 @@ After receiving the tool result, respond with your final answer."""),
             return True
         except Exception:
             return False
-    
+
     def run_agent_with_smart_model(self, user_input: str) -> str:
         """Run agent with automatic model selection based on task."""
         if self.smart_model_selection:
             suggested_model = self.suggest_model_for_task(user_input)
             if suggested_model != self.model_name:
                 self.switch_model(suggested_model)
-        
+
         return self.run_agent(user_input)

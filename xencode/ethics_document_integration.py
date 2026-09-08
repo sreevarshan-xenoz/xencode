@@ -21,11 +21,7 @@ from typing import Any, Dict, List, Set, Tuple
 try:
     from .ai_ethics_framework import (
         BiasDetector,
-        BiasType,
         EthicsFramework,
-        EthicsSeverity,
-        EthicsViolation,
-        EthicsViolationType,
         FairnessAnalyzer,
         PrivacyAnalyzer,
         get_ethics_framework,

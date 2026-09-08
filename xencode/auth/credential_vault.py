@@ -14,10 +14,10 @@ import json
 import os
 import sys
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 try:
     import keyring
@@ -26,18 +26,19 @@ except ImportError:
     KEYRING_AVAILABLE = False
 
 try:
-    import win32cred
     import pywintypes
+    import win32cred
     WIN32_AVAILABLE = True
 except ImportError:
     WIN32_AVAILABLE = False
 
 try:
+    import base64
+
     from cryptography.fernet import Fernet
+    from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.backends import default_backend
-    import base64
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
@@ -701,12 +702,10 @@ class CredentialVault:
         # Initialize backends in priority order
 
         # 1. Windows Credential Manager (highest security, Windows only)
-        win_available = False
         if prefer_windows and sys.platform == "win32":
             windows_backend = WindowsCredentialManagerBackend()
             if windows_backend.is_available():
                 self.backends.append(windows_backend)
-                win_available = True
                 console.print("[green]OK: Windows Credential Manager available[/green]")
 
         # 2. File-based encrypted storage (cross-platform, persistent)
@@ -942,7 +941,7 @@ if __name__ == "__main__":
 
             # Show status
             status = vault.get_status()
-            console.print(f"[bold]Vault Status:[/bold]")
+            console.print("[bold]Vault Status:[/bold]")
             console.print(f"  Backends: {', '.join(status['backends'])}")
             console.print(f"  Services: {status['services'] or 'None'}")
             console.print(f"  Has credentials: {status['has_credentials']}")
@@ -969,7 +968,7 @@ if __name__ == "__main__":
 
                 retrieved = vault.get("demo_service", "demo_user")
                 if retrieved:
-                    console.print(f"[green]OK: Credential retrieved[/green]")
+                    console.print("[green]OK: Credential retrieved[/green]")
 
                 # Clean up
                 vault.delete("demo_service", "demo_user")

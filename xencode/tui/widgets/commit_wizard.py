@@ -249,8 +249,8 @@ class CommitWizard(ModalScreen):
 
         # Calculate stats
         lines = self.diff.splitlines()
-        additions = sum(1 for l in lines if l.startswith('+') and not l.startswith('+++'))
-        deletions = sum(1 for l in lines if l.startswith('-') and not l.startswith('---'))
+        additions = sum(1 for line in lines if line.startswith('+') and not line.startswith('+++'))
+        deletions = sum(1 for line in lines if line.startswith('-') and not line.startswith('---'))
 
         summary_msg = self.query_one("#summary-message", Label)
         summary_msg.update(f"📝 Message:\n{message[:200]}{'...' if len(message) > 200 else ''}")

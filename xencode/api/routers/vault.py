@@ -13,7 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
 
 # Import vault with graceful fallback
@@ -25,7 +32,7 @@ except ImportError:
     VAULT_AVAILABLE = False
 
 # Import authentication
-from xencode.api.auth import verify_jwt_token, resolve_jwt_secret
+from xencode.api.auth import resolve_jwt_secret, verify_jwt_token
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +135,7 @@ async def vault_health(
         )
     except Exception as e:
         logger.error("Vault health check failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {e}") from e
 
 
 @router.post("/init", response_model=VaultInitResponse)
@@ -141,7 +148,7 @@ async def vault_init(
     Creates the vault directory and an empty vault file.
     Safe to call multiple times — won't overwrite an existing vault.
     """
-    vault = _get_vault_or_404()
+    _get_vault_or_404()
 
     try:
         vault_path = Path(request.vault_path) if request.vault_path else None
@@ -157,7 +164,7 @@ async def vault_init(
         )
     except Exception as e:
         logger.error("Vault init failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Vault initialization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Vault initialization failed: {e}") from e
 
 
 @router.post("/migrate", response_model=VaultMigrateResponse)
@@ -196,7 +203,7 @@ async def vault_migrate(
         )
     except Exception as e:
         logger.error("Vault migration failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Vault migration failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Vault migration failed: {e}") from e
 
 
 # ---------------------------------------------------------------------------

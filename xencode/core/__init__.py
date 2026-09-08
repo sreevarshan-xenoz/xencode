@@ -14,7 +14,7 @@ from .models import (
 
 # Lazy-load connection pool (requires optional aiohttp)
 try:
-    from .connection_pool import APIClient, get_api_client, close_api_client
+    from .connection_pool import APIClient, close_api_client, get_api_client
 except ImportError:
     APIClient = None
     get_api_client = None
