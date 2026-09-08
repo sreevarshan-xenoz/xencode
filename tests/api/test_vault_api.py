@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 from xencode.api.main import app
 
-
 pytestmark = [pytest.mark.unit]
 
 # Dev secret key (mirrors xencode/api/auth.py fallback)

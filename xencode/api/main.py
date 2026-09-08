@@ -29,7 +29,6 @@ try:
         get_global_audit_logger,
     )
     from ..cache.multimodal_cache import get_multimodal_cache_async
-    from ..monitoring.performance_optimizer import PerformanceOptimizer
     from ..monitoring.resource_manager import get_resource_manager
     XENCODE_COMPONENTS_AVAILABLE = True
 except ImportError:
@@ -50,13 +49,12 @@ except ImportError:
     ROUTERS_AVAILABLE = False
 
 # Import middleware
-try:
-    from .middleware.auth import AuthMiddleware
-    from .middleware.logging import LoggingMiddleware
-    from .middleware.rate_limiting import RateLimitMiddleware
-    MIDDLEWARE_AVAILABLE = True
-except ImportError:
-    MIDDLEWARE_AVAILABLE = False
+import importlib.util
+
+MIDDLEWARE_AVAILABLE = all(
+    importlib.util.find_spec(f"xencode.api.middleware.{name}") is not None
+    for name in ("auth", "logging", "rate_limiting")
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1,10 +1,7 @@
-import json
-import os
 import platform
 import re
 import shlex
 import subprocess
-import sys
 from typing import Tuple
 
 from rich.console import Console

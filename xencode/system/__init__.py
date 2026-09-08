@@ -10,7 +10,7 @@ except ImportError:
     DebuggingManager = None
 
 try:
-    from .session_manager import SessionManager, SessionInfo, get_session_manager
+    from .session_manager import SessionInfo, SessionManager, get_session_manager
 except ImportError:
     SessionManager = SessionInfo = get_session_manager = None
 

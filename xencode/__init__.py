@@ -38,7 +38,7 @@ except ImportError as e:
     ConfigurationManager = XencodeConfig = None
 
 try:
-    from .advanced_error_handler import ErrorHandler, ErrorCategory
+    from .advanced_error_handler import ErrorCategory, ErrorHandler
 except ImportError as e:
     logger.warning("Failed to import ErrorCategory: %s", e)
     ErrorHandler = ErrorCategory = None
@@ -52,8 +52,14 @@ except ImportError as e:
 # AI/ML Phase 6 systems - with optional imports
 try:
     from .ai_ensembles import (
-        EnsembleReasoner, QueryRequest, QueryResponse, ModelResponse,
-        EnsembleMethod, ModelTier, TokenVoter, create_ensemble_reasoner
+        EnsembleMethod,
+        EnsembleReasoner,
+        ModelResponse,
+        ModelTier,
+        QueryRequest,
+        QueryResponse,
+        TokenVoter,
+        create_ensemble_reasoner,
     )
 except ImportError as e:
     logger.warning("Failed to import ModelResponse: %s", e)
@@ -62,8 +68,12 @@ except ImportError as e:
 
 try:
     from .ollama_optimizer import (
-        OllamaOptimizer, ModelInfo, BenchmarkResult, QuantizationLevel,
-        ModelStatus, create_ollama_optimizer
+        BenchmarkResult,
+        ModelInfo,
+        ModelStatus,
+        OllamaOptimizer,
+        QuantizationLevel,
+        create_ollama_optimizer,
     )
 except ImportError as e:
     logger.warning("Failed to import QuantizationLevel: %s", e)
@@ -79,8 +89,12 @@ except ImportError as e:
 
 try:
     from .rlhf_tuner import (
-        RLHFTuner, RLHFConfig, CodePair, TrainingMetrics,
-        SyntheticDataGenerator, create_rlhf_tuner
+        CodePair,
+        RLHFConfig,
+        RLHFTuner,
+        SyntheticDataGenerator,
+        TrainingMetrics,
+        create_rlhf_tuner,
     )
 except ImportError as e:
     logger.warning("Failed to import TrainingMetrics: %s", e)
@@ -90,8 +104,12 @@ except ImportError as e:
 # Enhancement systems (Phase 3+) - with optional imports
 try:
     from .user_feedback_system import (
-        UserFeedbackManager, FeedbackType, UserJourneyEvent,
-        get_feedback_manager, collect_user_feedback, track_user_event
+        FeedbackType,
+        UserFeedbackManager,
+        UserJourneyEvent,
+        collect_user_feedback,
+        get_feedback_manager,
+        track_user_event,
     )
 except ImportError as e:
     logger.warning("Failed to import UserJourneyEvent: %s", e)
@@ -100,7 +118,10 @@ except ImportError as e:
 
 try:
     from .technical_debt_manager import (
-        TechnicalDebtManager, DebtType, DebtSeverity, get_debt_manager
+        DebtSeverity,
+        DebtType,
+        TechnicalDebtManager,
+        get_debt_manager,
     )
 except ImportError as e:
     logger.warning("Failed to import get_debt_manager: %s", e)
@@ -108,8 +129,11 @@ except ImportError as e:
 
 try:
     from .ai_ethics_framework import (
-        EthicsFramework, BiasType, EthicsViolationType,
-        get_ethics_framework, analyze_ai_interaction
+        BiasType,
+        EthicsFramework,
+        EthicsViolationType,
+        analyze_ai_interaction,
+        get_ethics_framework,
     )
 except ImportError as e:
     logger.warning("Failed to import EthicsViolationType: %s", e)
@@ -118,9 +142,13 @@ except ImportError as e:
 
 try:
     from .enhancement_integration import (
-        EnhancementSystemsIntegration, get_enhancement_integration,
-        track_model_selection, track_query_response, collect_response_feedback,
-        report_system_error, get_system_insights
+        EnhancementSystemsIntegration,
+        collect_response_feedback,
+        get_enhancement_integration,
+        get_system_insights,
+        report_system_error,
+        track_model_selection,
+        track_query_response,
     )
 except ImportError as e:
     logger.warning("Failed to import get_enhancement_integration: %s", e)
@@ -131,8 +159,12 @@ except ImportError as e:
 # Warp Terminal (Phase 3.5+) - with optional imports
 try:
     from .warp_terminal import (
-        WarpTerminal, CommandBlock, StreamingOutputParser, 
-        LazyCommandBlock, GPUAcceleratedRenderer, example_ai_suggester
+        CommandBlock,
+        GPUAcceleratedRenderer,
+        LazyCommandBlock,
+        StreamingOutputParser,
+        WarpTerminal,
+        example_ai_suggester,
     )
 except ImportError as e:
     logger.warning("Failed to import StreamingOutputParser: %s", e)
@@ -141,8 +173,10 @@ except ImportError as e:
 
 try:
     from .enhanced_command_palette import (
-        EnhancedCommandPalette, WarpTerminalWithPalette, 
-        CommandSuggestion, FuzzyMatcher
+        CommandSuggestion,
+        EnhancedCommandPalette,
+        FuzzyMatcher,
+        WarpTerminalWithPalette,
     )
 except ImportError as e:
     logger.warning("Failed to import WarpTerminalWithPalette: %s", e)
@@ -150,16 +184,16 @@ except ImportError as e:
     CommandSuggestion = FuzzyMatcher = None
 
 try:
-    from .warp_ui_components import (
-        OutputRenderer, WarpLayoutManager
-    )
+    from .warp_ui_components import OutputRenderer, WarpLayoutManager
 except ImportError as e:
     logger.warning("Failed to import WarpLayoutManager: %s", e)
     OutputRenderer = WarpLayoutManager = None
 
 try:
     from .warp_testing_harness import (
-        CommandTestingHarness, TestResult, run_comprehensive_test
+        CommandTestingHarness,
+        TestResult,
+        run_comprehensive_test,
     )
 except ImportError as e:
     logger.warning("Failed to import run_comprehensive_test: %s", e)
@@ -167,8 +201,12 @@ except ImportError as e:
 
 try:
     from .warp_ai_integration import (
-        WarpAIIntegration, ProjectAnalyzer, AdvancedAISuggester,
-        ProjectContext, CommandSuggestionContext, get_warp_ai_integration
+        AdvancedAISuggester,
+        CommandSuggestionContext,
+        ProjectAnalyzer,
+        ProjectContext,
+        WarpAIIntegration,
+        get_warp_ai_integration,
     )
 except ImportError as e:
     logger.warning("Failed to import AdvancedAISuggester: %s", e)
@@ -178,8 +216,13 @@ except ImportError as e:
 # Feature system
 try:
     from .features import (
-        FeatureBase, FeatureConfig, FeatureStatus, FeatureError,
-        FeatureManager, FeatureSystemConfig, FeatureConfigManager
+        FeatureBase,
+        FeatureConfig,
+        FeatureConfigManager,
+        FeatureError,
+        FeatureManager,
+        FeatureStatus,
+        FeatureSystemConfig,
     )
 except ImportError as e:
     logger.warning("Failed to import FeatureError: %s", e)
@@ -189,14 +232,14 @@ except ImportError as e:
 __all__ = [
     # Core systems
     "ContextCacheManager", "ModelStabilityManager", "SmartContextManager",
-    
+
     # Phase 2 systems
     "HardwareDetector", "ModelRecommendationEngine",
     "HybridCacheManager", "get_cache_manager",
     "ConfigurationManager", "XencodeConfig",
     "ErrorHandler", "ErrorCategory",
     "Phase2Coordinator",
-    
+
     # AI/ML Phase 6 systems
     "EnsembleReasoner", "QueryRequest", "QueryResponse", "ModelResponse",
     "EnsembleMethod", "ModelTier", "TokenVoter", "create_ensemble_reasoner",
@@ -205,7 +248,7 @@ __all__ = [
     "OllamaFallbackManager", "ensure_ollama",
     "RLHFTuner", "RLHFConfig", "CodePair", "TrainingMetrics",
     "SyntheticDataGenerator", "create_rlhf_tuner",
-    
+
     # Enhancement systems
     "UserFeedbackManager", "FeedbackType", "UserJourneyEvent",
     "get_feedback_manager", "collect_user_feedback", "track_user_event",
@@ -215,7 +258,7 @@ __all__ = [
     "EnhancementSystemsIntegration", "get_enhancement_integration",
     "track_model_selection", "track_query_response", "collect_response_feedback",
     "report_system_error", "get_system_insights",
-    
+
     # Warp Terminal systems
     "WarpTerminal", "CommandBlock", "StreamingOutputParser",
     "LazyCommandBlock", "GPUAcceleratedRenderer", "example_ai_suggester",
@@ -225,7 +268,7 @@ __all__ = [
     "CommandTestingHarness", "TestResult", "run_comprehensive_test",
     "WarpAIIntegration", "ProjectAnalyzer", "AdvancedAISuggester",
     "ProjectContext", "CommandSuggestionContext", "get_warp_ai_integration",
-    
+
     # Feature system
     "FeatureBase", "FeatureConfig", "FeatureStatus", "FeatureError",
     "FeatureManager", "FeatureSystemConfig", "FeatureConfigManager"

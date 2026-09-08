@@ -688,7 +688,7 @@ class ComplianceManager:
 
         # Count by standard
         standard_counts = {}
-        for finding in all_findings:
+        for _finding in all_findings:
             # Extract standard from check_id or other metadata
             # This is a simplification - in reality, you'd have better categorization
             standard_counts["unknown"] = standard_counts.get("unknown", 0) + 1

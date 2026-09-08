@@ -190,12 +190,12 @@ class CUDAManager:
             import torch
             return torch.cuda.is_available()
         except ImportError:
-            try:
-                import cupy
+            import importlib.util
+
+            if importlib.util.find_spec("cupy") is not None:
                 return True  # Cupy can work with CUDA
-            except ImportError:
-                logger.warning("Neither PyTorch nor CuPy is available for CUDA operations")
-                return False
+            logger.warning("Neither PyTorch nor CuPy is available for CUDA operations")
+            return False
         except Exception:
             logger.warning("CUDA not available")
             return False

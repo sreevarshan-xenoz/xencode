@@ -13,10 +13,11 @@ import asyncio
 import hashlib
 import json
 import time
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional
+
 try:
     import ollama
 except ImportError:
@@ -26,7 +27,7 @@ try:
     HAS_PYDANTIC = True
 except ImportError:
     # Fallback: use dataclasses instead of pydantic
-    from dataclasses import dataclass, field
+    from dataclasses import dataclass
     HAS_PYDANTIC = False
     class BaseModel:
         """Minimal BaseModel compatibility using dataclasses."""
@@ -34,26 +35,12 @@ except ImportError:
     def Field(default=None, **kwargs):
         return default
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 
 # Import metrics (optional)
 try:
-    from .ai_metrics import record_ensemble_success, record_ensemble_error
+    from .ai_metrics import record_ensemble_error, record_ensemble_success
 except ImportError:
     record_ensemble_success = record_ensemble_error = lambda *args, **kwargs: None
-
-# Import improved ensemble components
-try:
-    from .ensemble_lightweight import (
-        LightweightTokenVoter,
-        ImprovedConsensus,
-        EnhancedQualityMetrics
-    )
-    IMPROVEMENTS_AVAILABLE = True
-    print("[green][OK] Ensemble improvements loaded[/green]")
-except ImportError:
-    IMPROVEMENTS_AVAILABLE = False
-    print("[yellow][WARN] Using original ensemble components[/yellow]")
 
 console = Console()
 
@@ -70,7 +57,7 @@ class EnsembleMethod(Enum):
 class ModelTier(Enum):
     """Model performance tiers"""
     FAST = "fast"  # <20ms inference
-    BALANCED = "balanced"  # 20-50ms inference  
+    BALANCED = "balanced"  # 20-50ms inference
     POWERFUL = "powerful"  # >50ms inference
 
 
@@ -204,8 +191,8 @@ class TokenVoter:
     def semantic_vote_tokens(responses: List[str], weights: Optional[List[float]] = None) -> str:
         """Semantic-aware token voting using sentence embeddings"""
         try:
-            from sentence_transformers import SentenceTransformer
             import numpy as np
+            from sentence_transformers import SentenceTransformer
 
             # Load pre-trained sentence transformer model
             model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -272,8 +259,8 @@ class TokenVoter:
     def calculate_semantic_consensus(responses: List[str]) -> float:
         """Calculate semantic consensus using sentence embeddings"""
         try:
-            from sentence_transformers import SentenceTransformer
             import numpy as np
+            from sentence_transformers import SentenceTransformer
 
             if len(responses) <= 1:
                 return 1.0
@@ -327,7 +314,7 @@ class EnsembleReasoner:
             self.client = None
 
         self.voter = TokenVoter()
-        
+
         # Performance tracking
         self.stats = {
             "total_queries": 0,
@@ -336,13 +323,13 @@ class EnsembleReasoner:
             "consensus_scores": [],
             "model_success_rates": defaultdict(list)
         }
-    
+
     def _load_default_models(self) -> Dict[str, ModelConfig]:
         """Load default model configurations"""
         return {
             "llama3.1:8b": ModelConfig(
                 name="Llama 3.1 8B",
-                ollama_tag="llama3.1:8b", 
+                ollama_tag="llama3.1:8b",
                 tier=ModelTier.BALANCED,
                 weight=1.2,  # Slightly higher weight for quality
                 fallback_priority=1
@@ -362,7 +349,7 @@ class EnsembleReasoner:
                 fallback_priority=3
             ),
             "qwen2.5:14b": ModelConfig(
-                name="Qwen 2.5 14B", 
+                name="Qwen 2.5 14B",
                 ollama_tag="qwen2.5:14b",
                 tier=ModelTier.POWERFUL,
                 weight=1.3,  # Highest quality weight
@@ -370,16 +357,15 @@ class EnsembleReasoner:
                 enabled=False  # Disabled by default (high resource)
             )
         }
-    
+
     async def reason(self, query: QueryRequest) -> QueryResponse:
         """Main reasoning method with ensemble fusion"""
         start_time = time.perf_counter()
         self.stats["total_queries"] += 1
-        
+
         # RAG Context Retrieval
         augmented_prompt = query.prompt
-        rag_context_found = False
-        
+
         if query.use_rag:
             try:
                 # Lazy import to avoid circular dependencies
@@ -387,74 +373,72 @@ class EnsembleReasoner:
                 # Initialize vector store (assuming default path)
                 vector_store = VectorStore()
                 results = vector_store.similarity_search(query.prompt, k=3)
-                
+
                 if results:
                     context_strings = []
                     for doc in results:
                         source = doc.metadata.get('filename', 'unknown')
                         context_strings.append(f"--- snippet from {source} ---\n{doc.page_content}\n")
-                    
+
                     context_block = "\nContext from Codebase:\n" + "\n".join(context_strings) + "\nEnd of Context.\n"
                     augmented_prompt = f"{context_block}\n\nQuestion: {query.prompt}"
-                    rag_context_found = True
                     console.print(f"[blue]🔍 Retrieved {len(results)} context chunks for RAG[/blue]")
             except Exception as e:
                 console.print(f"[yellow]⚠️ RAG retrieval failed: {e}[/yellow]")
 
         # Check cache first (using augmented prompt for cache key if RAG used)
         if self.cache_manager:
-            # We use the original prompt for cache key lookup usually, but if RAG changes context, 
-            # maybe we should cache based on augmented prompt? 
+            # We use the original prompt for cache key lookup usually, but if RAG changes context,
+            # maybe we should cache based on augmented prompt?
             # For now, let's keep original prompt but add a tag/flag in key if RAG was used.
             # Actually, if context changes, response should change.
             # So effective prompt is augmented_prompt.
-            
-            # Temporary: modify query object locally just for this run? 
+
+            # Temporary: modify query object locally just for this run?
             # But query is Pydantic.
             pass # We'll handle caching later or let it cache without context awareness for now (simplified)
 
         if self.cache_manager:
-            cache_key = self._generate_cache_key(query)
             method_value = query.method.value if hasattr(query.method, 'value') else query.method
             cached_response = await self.cache_manager.get_response(
-                query.prompt, f"ensemble:{':'.join(query.models)}", 
+                query.prompt, f"ensemble:{':'.join(query.models)}",
                 {"method": method_value, "temperature": query.temperature}
             )
             if cached_response:
                 self.stats["cache_hits"] += 1
                 cached_response.cache_hit = True
                 return cached_response
-        
+
         # Get available models
         available_models = await self._get_available_models(query.models)
         if not available_models:
             raise RuntimeError("No models available for ensemble reasoning")
-        
+
         # Parallel inference across models
         # We need to pass augmented_prompt to _parallel_inference, but _parallel_inference calls _single_model_inference
         # which uses query.prompt.
         # We can create a temporary query object with augmented prompt
         effective_query = query.model_copy(update={"prompt": augmented_prompt})
-        
+
         model_responses = await self._parallel_inference(effective_query, available_models)
-        
+
         # Filter successful responses
         successful_responses = [r for r in model_responses if r.success]
         if not successful_responses:
             raise RuntimeError("All models failed to generate responses")
-        
+
         # Fuse responses using selected method
         fused_response = await self._fuse_responses(
             successful_responses, query.method, available_models
         )
-        
+
         # Calculate metrics
         total_time = (time.perf_counter() - start_time) * 1000
         consensus_score = self.voter.calculate_consensus(
             [r.response for r in successful_responses]
         )
         confidence = self._calculate_confidence(successful_responses, consensus_score)
-        
+
         # Create response
         response = QueryResponse(
             fused_response=fused_response,
@@ -465,7 +449,7 @@ class EnsembleReasoner:
             confidence=confidence,
             cache_hit=False
         )
-        
+
         # Cache the response
         if self.cache_manager:
             method_value = query.method.value if hasattr(query.method, 'value') else query.method
@@ -474,10 +458,10 @@ class EnsembleReasoner:
                 {"method": method_value, "temperature": query.temperature},
                 tags={"ensemble", "ai_reasoning"}
             )
-        
+
         # Update stats
         self._update_stats(response)
-        
+
         # Record metrics
         record_ensemble_success(
             method=query.method.value if hasattr(query.method, 'value') else str(query.method),
@@ -486,9 +470,9 @@ class EnsembleReasoner:
             consensus_score=response.consensus_score,
             cache_hit=response.cache_hit
         )
-        
+
         return response
-    
+
     async def _get_available_models(self, requested_models: List[str]) -> List[ModelConfig]:
         """Get available and enabled models from request - OPTIMIZED"""
         available = []
@@ -537,7 +521,7 @@ class EnsembleReasoner:
                         break
 
         return available
-    
+
     async def _parallel_inference(self, query: QueryRequest,
                                 models: List[ModelConfig]) -> List[ModelResponse]:
         """Run parallel inference across models - OPTIMIZED"""
@@ -591,7 +575,7 @@ class EnsembleReasoner:
                 valid_responses.append(response)
 
         return valid_responses
-    
+
     async def _single_model_inference(self, query: QueryRequest,
                                     model_config: ModelConfig) -> ModelResponse:
         """Single model inference with error handling and multi-provider support"""
@@ -668,7 +652,7 @@ class EnsembleReasoner:
             if prefix.lower() in known_providers:
                 return (prefix.lower(), rest)
         return (None, model_name)
-    
+
     async def _fuse_responses(self, responses: List[ModelResponse],
                             method: EnsembleMethod,
                             model_configs: List[ModelConfig]) -> str:
@@ -730,7 +714,7 @@ class EnsembleReasoner:
 
         # Default fallback
         return response_texts[0]
-    
+
     def _calculate_confidence(self, responses: List[ModelResponse],
                             consensus_score: float) -> float:
         """Calculate overall confidence score - OPTIMIZED"""
@@ -754,7 +738,7 @@ class EnsembleReasoner:
 
         final_confidence = (avg_confidence + consensus_boost) * success_rate
         return min(1.0, final_confidence)
-    
+
     def _generate_cache_key(self, query: QueryRequest) -> str:
         """Generate cache key for query"""
         method_value = query.method.value if hasattr(query.method, 'value') else query.method
@@ -767,7 +751,7 @@ class EnsembleReasoner:
         }
         key_str = json.dumps(key_data, sort_keys=True)
         return hashlib.sha256(key_str.encode()).hexdigest()[:16]
-    
+
     def _update_stats(self, response: QueryResponse):
         """Update performance statistics"""
         # Update average inference time
@@ -775,20 +759,20 @@ class EnsembleReasoner:
         current_avg = self.stats["avg_inference_time"]
         new_avg = ((current_avg * (total - 1)) + response.total_time_ms) / total
         self.stats["avg_inference_time"] = new_avg
-        
+
         # Track consensus scores
         self.stats["consensus_scores"].append(response.consensus_score)
-        
+
         # Track model success rates
         for model_resp in response.model_responses:
             self.stats["model_success_rates"][model_resp.model].append(model_resp.success)
-    
+
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get comprehensive performance statistics"""
         cache_hit_rate = (self.stats["cache_hits"] / self.stats["total_queries"] * 100) if self.stats["total_queries"] > 0 else 0
-        
+
         avg_consensus = sum(self.stats["consensus_scores"]) / len(self.stats["consensus_scores"]) if self.stats["consensus_scores"] else 0
-        
+
         model_stats = {}
         for model, successes in self.stats["model_success_rates"].items():
             success_rate = sum(successes) / len(successes) * 100 if successes else 0
@@ -796,7 +780,7 @@ class EnsembleReasoner:
                 "success_rate": success_rate,
                 "total_requests": len(successes)
             }
-        
+
         return {
             "total_queries": self.stats["total_queries"],
             "cache_hit_rate": cache_hit_rate,
@@ -805,7 +789,7 @@ class EnsembleReasoner:
             "model_performance": model_stats,
             "efficiency_score": min(100, (cache_hit_rate * 0.3 + (100 - min(100, self.stats["avg_inference_time"] / 10)) * 0.4 + avg_consensus * 100 * 0.3))
         }
-    
+
     async def benchmark_models(self, test_prompts: List[str] = None) -> Dict[str, Any]:
         """Benchmark individual models and ensemble performance"""
         if not test_prompts:
@@ -814,53 +798,53 @@ class EnsembleReasoner:
                 "What are the benefits of using microservices architecture?",
                 "How does machine learning differ from traditional programming?"
             ]
-        
+
         console.print("[bold blue]🔬 Benchmarking AI Ensemble Performance...[/bold blue]")
-        
+
         results = {
             "individual_models": {},
             "ensemble_methods": {},
             "performance_summary": {}
         }
-        
+
         # Test individual models
         for model_name, config in self.model_configs.items():
             if not config.enabled:
                 continue
-                
+
             model_times = []
             model_successes = 0
-            
+
             for prompt in test_prompts:
                 query = QueryRequest(prompt=prompt, models=[model_name])
                 try:
                     start_time = time.perf_counter()
                     response = await self._single_model_inference(query, config)
                     elapsed = (time.perf_counter() - start_time) * 1000
-                    
+
                     if response.success:
                         model_times.append(elapsed)
                         model_successes += 1
                 except Exception:
                     pass
-            
+
             if model_times:
                 results["individual_models"][model_name] = {
                     "avg_time_ms": sum(model_times) / len(model_times),
                     "success_rate": model_successes / len(test_prompts) * 100,
                     "tier": config.tier.value
                 }
-        
+
         # Test ensemble methods
         available_models = [name for name, config in self.model_configs.items() if config.enabled][:3]
-        
+
         for method in EnsembleMethod:
             method_times = []
             method_successes = 0
-            
+
             for prompt in test_prompts:
                 query = QueryRequest(
-                    prompt=prompt, 
+                    prompt=prompt,
                     models=available_models,
                     method=method
                 )
@@ -871,25 +855,25 @@ class EnsembleReasoner:
                         method_successes += 1
                 except Exception:
                     pass
-            
+
             if method_times:
                 results["ensemble_methods"][method.value] = {
                     "avg_time_ms": sum(method_times) / len(method_times),
                     "success_rate": method_successes / len(test_prompts) * 100
                 }
-        
+
         # Performance summary
         if results["individual_models"] and results["ensemble_methods"]:
             fastest_individual = min(
                 results["individual_models"].values(),
                 key=lambda x: x["avg_time_ms"]
             )["avg_time_ms"]
-            
+
             fastest_ensemble = min(
                 results["ensemble_methods"].values(),
                 key=lambda x: x["avg_time_ms"]
             )["avg_time_ms"]
-            
+
             results["performance_summary"] = {
                 "fastest_individual_ms": fastest_individual,
                 "fastest_ensemble_ms": fastest_ensemble,
@@ -898,7 +882,7 @@ class EnsembleReasoner:
                 "models_tested": len(results["individual_models"]),
                 "methods_tested": len(results["ensemble_methods"])
             }
-        
+
         return results
 
 
@@ -908,17 +892,17 @@ async def create_ensemble_reasoner(cache_manager=None) -> EnsembleReasoner:
     return EnsembleReasoner(cache_manager)
 
 
-async def quick_ensemble_query(prompt: str, models: List[str] = None, 
+async def quick_ensemble_query(prompt: str, models: List[str] = None,
                              method: EnsembleMethod = EnsembleMethod.VOTE) -> str:
     """Quick ensemble query for simple use cases"""
     reasoner = await create_ensemble_reasoner()
-    
+
     query = QueryRequest(
         prompt=prompt,
         models=models or ["llama3.1:8b", "mistral:7b"],
         method=method
     )
-    
+
     response = await reasoner.reason(query)
     return response.fused_response
 
@@ -927,33 +911,33 @@ if __name__ == "__main__":
     async def main():
         """Demo the ensemble system"""
         console.print("[bold green]🤖 Xencode AI Ensemble Demo[/bold green]\n")
-        
+
         reasoner = await create_ensemble_reasoner()
-        
+
         # Demo query
         query = QueryRequest(
             prompt="Explain the advantages of ensemble learning in AI systems",
             models=["llama3.1:8b", "mistral:7b"],
             method=EnsembleMethod.VOTE
         )
-        
+
         console.print(f"[cyan]Query:[/cyan] {query.prompt}")
         console.print(f"[cyan]Models:[/cyan] {', '.join(query.models)}")
         console.print(f"[cyan]Method:[/cyan] {query.method.value}\n")
-        
+
         with console.status("[bold blue]Running ensemble reasoning..."):
             response = await reasoner.reason(query)
-        
+
         console.print(f"[green]✅ Response ({response.total_time_ms:.1f}ms):[/green]")
         console.print(f"{response.fused_response}\n")
-        
+
         console.print(f"[yellow]Consensus Score:[/yellow] {response.consensus_score:.2f}")
         console.print(f"[yellow]Confidence:[/yellow] {response.confidence:.2f}")
-        
+
         # Show individual model responses
         console.print("\n[bold]Individual Model Responses:[/bold]")
         for model_resp in response.model_responses:
             status = "✅" if model_resp.success else "❌"
             console.print(f"{status} {model_resp.model}: {model_resp.inference_time_ms:.1f}ms")
-    
+
     asyncio.run(main())

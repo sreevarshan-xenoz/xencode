@@ -112,9 +112,9 @@ class LearningModePanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="learning_mode",
             title="🎓 Learning Mode",
-            *args,
             **kwargs
         )
         self.topics: List[Dict[str, Any]] = []

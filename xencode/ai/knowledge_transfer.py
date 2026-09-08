@@ -5,9 +5,7 @@ context preservation during model switching, and transfer learning optimization.
 """
 
 import hashlib
-import json
 import logging
-import pickle
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum

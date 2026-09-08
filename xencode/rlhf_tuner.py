@@ -17,6 +17,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
+from rich.table import Table
+
 # Lazy imports for heavy ML dependencies
 torch = None
 AutoTokenizer = None
@@ -30,16 +40,6 @@ TaskType = None
 PeftModel = None
 Dataset = None
 np = None
-
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-)
-from rich.table import Table
 
 console = Console()
 logger = logging.getLogger(__name__)

@@ -8,9 +8,9 @@ This module serves as the main entry point for security scanning functionality.
 For detailed scanning capabilities, use xencode.analyzers.SecurityAnalyzer.
 """
 
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class SeverityLevel(Enum):

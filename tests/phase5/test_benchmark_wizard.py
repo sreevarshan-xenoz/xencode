@@ -511,12 +511,10 @@ class TestBenchmarkAPI:
             from xencode.monitoring.benchmark_engine import BenchmarkEngine
             from xencode.monitoring.benchmark_recommendations import (
                 RecommendationsEngine,
-                get_recommendations_engine,
             )
             from xencode.monitoring.benchmark_store import BenchmarkStore
             from xencode.monitoring.benchmark_suites import (
                 BenchmarkSuites,
-                get_benchmark_suites,
             )
 
             assert BenchmarkEngine is not None
@@ -531,8 +529,6 @@ class TestBenchmarkAPI:
         # Just verify the imports don't fail
         try:
             from xencode.api.routers.monitoring import (
-                BenchmarkComparisonResponse,
-                BenchmarkRecommendationResponse,
                 BenchmarkResultResponse,
                 BenchmarkRunRequest,
             )

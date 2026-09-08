@@ -27,12 +27,8 @@ from pydantic import BaseModel, Field
 # Import plugin system components
 try:
     from ...plugin_system import (
-        PluginError,
         PluginManager,
-        PluginMetadata,
-        PluginPermission,
         PluginStatus,
-        SecurityLevel,
     )
     from ...plugins.marketplace_client import MarketplaceClient
     PLUGIN_COMPONENTS_AVAILABLE = True

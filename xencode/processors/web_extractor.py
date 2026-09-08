@@ -12,7 +12,6 @@ from urllib.parse import urljoin
 
 try:
     from bs4 import BeautifulSoup, Comment
-    from bs4.element import NavigableString, Tag
     BEAUTIFULSOUP_AVAILABLE = True
 except ImportError:
     BEAUTIFULSOUP_AVAILABLE = False

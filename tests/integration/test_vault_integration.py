@@ -23,7 +23,6 @@ import httpx
 import jwt
 import pytest
 
-
 pytestmark = [pytest.mark.integration]
 
 # Dev secret key (mirrors xencode/api/auth.py fallback)

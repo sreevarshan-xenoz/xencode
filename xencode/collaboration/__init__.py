@@ -5,12 +5,12 @@ Provides workspace collaboration features including session management,
 RBAC, knowledge bases, and database utilities.
 """
 
-from .models import Session, Workspace, WorkspaceMember, Role, Permission, KnowledgeItem
+from .database import CollaborationDatabase
+from .knowledge_base import KnowledgeBase
+from .models import KnowledgeItem, Permission, Role, Session, Workspace, WorkspaceMember
 from .rbac import RBAC
 from .session_manager import SessionManager
-from .knowledge_base import KnowledgeBase
 from .workspace_manager import WorkspaceManager
-from .database import CollaborationDatabase
 
 __all__ = [
     "Session",

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
 import aiohttp
 
 from .benchmark_store import BenchmarkStore
@@ -58,32 +59,32 @@ class BenchmarkResult:
     provider: str
     model: str
     run_id: str
-    
+
     # Performance metrics
     latency_ms: float
     tokens_per_sec: float
     throughput_rps: float
-    
+
     # Quality metrics
     accuracy_score: float
     consistency_score: float
     quality_rating: float
-    
+
     # Cost metrics
     cost_per_request: float
     cost_per_1k_tokens: float
-    
+
     # Token counts
     input_tokens: int
     output_tokens: int
     total_tokens: int
-    
+
     # Execution details
     success: bool
     error_message: Optional[str] = None
     raw_response: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage"""
         return {
@@ -215,7 +216,7 @@ class BenchmarkEngine:
     - Comprehensive metrics collection
     - Quality scoring
     """
-    
+
     # Provider endpoint mappings
     PROVIDER_ENDPOINTS = {
         "ollama": "http://localhost:11434/api/generate",
@@ -224,7 +225,7 @@ class BenchmarkEngine:
         "qwen": "https://chat.qwen.ai/api/v1/chat/completions",
         "openrouter": "https://openrouter.ai/api/v1/chat/completions",
     }
-    
+
     # Cost estimates per 1K tokens (USD)
     COST_PER_1K_TOKENS = {
         "ollama": 0.0,  # Local, free
@@ -235,7 +236,7 @@ class BenchmarkEngine:
         "qwen": 0.0,  # Free tier
         "openrouter": 0.001,  # Average
     }
-    
+
     def __init__(self, store: Optional[BenchmarkStore] = None):
         """
         Initialize benchmark engine
@@ -245,18 +246,18 @@ class BenchmarkEngine:
         """
         self.store = store or BenchmarkStore()
         self._session: Optional[aiohttp.ClientSession] = None
-    
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create HTTP session"""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
-    
+
     async def close(self):
         """Close HTTP session"""
         if self._session and not self._session.closed:
             await self._session.close()
-    
+
     async def execute_task(
         self,
         task: BenchmarkTask,
@@ -278,7 +279,7 @@ class BenchmarkEngine:
         """
         run_id = run_id or str(uuid.uuid4())
         start_time = time.perf_counter()
-        
+
         try:
             # Execute against provider
             response, output_tokens = await self._call_provider(
@@ -288,28 +289,28 @@ class BenchmarkEngine:
                 max_tokens=task.max_tokens,
                 timeout=task.timeout_seconds,
             )
-            
+
             end_time = time.perf_counter()
             latency_ms = (end_time - start_time) * 1000
-            
+
             # Calculate metrics
             input_tokens = len(task.prompt.split())  # Approximate
             total_tokens = input_tokens + output_tokens
             tokens_per_sec = (total_tokens / latency_ms) * 1000 if latency_ms > 0 else 0
             throughput_rps = 1000 / latency_ms if latency_ms > 0 else 0
-            
+
             # Calculate quality scores
             accuracy_score = self._calculate_accuracy(
                 response=response,
                 expected=task.expected_output,
                 pattern=task.expected_pattern,
             )
-            
+
             # Calculate cost
             cost_key = f"{provider}/{model}".lower()
             cost_per_1k = self.COST_PER_1K_TOKENS.get(cost_key, 0.001)
             cost_per_request = (total_tokens / 1000) * cost_per_1k
-            
+
             # Create result
             result = BenchmarkResult(
                 task_name=task.name,
@@ -331,16 +332,16 @@ class BenchmarkEngine:
                 success=True,
                 raw_response=response,
             )
-            
+
             # Store result
             self.store.save_result(result.to_dict())
-            
+
             return result
-            
+
         except Exception as e:
             end_time = time.perf_counter()
             latency_ms = (end_time - start_time) * 1000
-            
+
             result = BenchmarkResult(
                 task_name=task.name,
                 task_type=task.task_type.value if isinstance(task.task_type, TaskType) else task.task_type,
@@ -361,10 +362,10 @@ class BenchmarkEngine:
                 success=False,
                 error_message=str(e),
             )
-            
+
             self.store.save_result(result.to_dict())
             return result
-    
+
     async def _call_provider(
         self,
         provider: str,
@@ -387,13 +388,13 @@ class BenchmarkEngine:
             Tuple of (response_text, output_tokens)
         """
         session = await self._get_session()
-        
+
         endpoint = self.PROVIDER_ENDPOINTS.get(provider)
         if not endpoint:
             # Mock response for unknown providers
             await asyncio.sleep(0.1)  # Simulate latency
             return f"Mock response for {provider}/{model}", 10
-        
+
         try:
             # Build request based on provider
             if provider == "ollama":
@@ -403,20 +404,20 @@ class BenchmarkEngine:
                     "max_tokens": max_tokens,
                     "stream": False,
                 }
-                
+
                 async with session.post(endpoint, json=payload, timeout=timeout) as resp:
                     data = await resp.json()
                     response = data.get("response", "")
                     output_tokens = len(response.split())
                     return response, output_tokens
-                    
+
             elif provider in ["openai", "qwen", "openrouter"]:
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": max_tokens,
                 }
-                
+
                 async with session.post(endpoint, json=payload, timeout=timeout) as resp:
                     data = await resp.json()
                     if "choices" in data and len(data["choices"]) > 0:
@@ -425,30 +426,30 @@ class BenchmarkEngine:
                         response = str(data)
                     output_tokens = len(response.split())
                     return response, output_tokens
-                    
+
             elif provider == "anthropic":
                 payload = {
                     "model": model,
                     "max_tokens": max_tokens,
                     "messages": [{"role": "user", "content": prompt}],
                 }
-                
+
                 async with session.post(endpoint, json=payload, timeout=timeout) as resp:
                     data = await resp.json()
                     response = data.get("content", "")
                     output_tokens = len(response.split())
                     return response, output_tokens
-            
+
             else:
                 # Unknown provider
                 await asyncio.sleep(0.1)
                 return "Mock response", 10
-                
+
         except asyncio.TimeoutError:
             raise TimeoutError(f"Provider {provider} timed out")  from None
         except Exception as e:
             raise RuntimeError(f"Provider {provider} error: {e}")  from e
-    
+
     def _calculate_accuracy(
         self,
         response: str,
@@ -467,10 +468,10 @@ class BenchmarkEngine:
             Accuracy score (0.0 to 1.0)
         """
         import re
-        
+
         if not response:
             return 0.0
-        
+
         if expected:
             # Exact match or contains
             if response.strip() == expected.strip():
@@ -484,17 +485,17 @@ class BenchmarkEngine:
                 if expected_tokens:
                     overlap = len(response_tokens & expected_tokens) / len(expected_tokens)
                     return min(1.0, overlap * 1.5)  # Boost for partial matches
-        
+
         if pattern:
             try:
                 if re.search(pattern, response):
                     return 1.0
             except re.error:
                 pass
-        
+
         # No validation criteria, assume success
         return 0.7
-    
+
     async def run_benchmark_suite(
         self,
         tasks: List[BenchmarkTask],
@@ -515,7 +516,7 @@ class BenchmarkEngine:
             Summary of benchmark results
         """
         run_id = str(uuid.uuid4())
-        
+
         # Save run metadata
         self.store.save_run(
             run_id=run_id,
@@ -523,9 +524,9 @@ class BenchmarkEngine:
             config={"tasks": len(tasks), "providers": len(providers)},
             total_tasks=len(tasks) * len(providers),
         )
-        
+
         results = []
-        
+
         if concurrent:
             # Run all tasks concurrently
             coroutines = []
@@ -534,23 +535,23 @@ class BenchmarkEngine:
                     coroutines.append(
                         self.execute_task(task, provider, model, run_id)
                     )
-            
+
             results = await asyncio.gather(*coroutines, return_exceptions=True)
-            
+
         else:
             # Run sequentially
             for task in tasks:
                 for provider, model in providers:
                     result = await self.execute_task(task, provider, model, run_id)
                     results.append(result)
-        
+
         # Update run status
         completed = sum(1 for r in results if isinstance(r, BenchmarkResult) and r.success)
         self.store.update_run_status(run_id, "completed", completed)
-        
+
         # Generate summary
         return self._generate_summary(results, run_id, suite_name)
-    
+
     def _generate_summary(
         self,
         results: List[Any],
@@ -560,7 +561,7 @@ class BenchmarkEngine:
         """Generate summary statistics from results"""
         valid_results = [r for r in results if isinstance(r, BenchmarkResult)]
         successful = [r for r in valid_results if r.success]
-        
+
         if not successful:
             return {
                 "run_id": run_id,
@@ -570,13 +571,13 @@ class BenchmarkEngine:
                 "failed": len(results),
                 "results": [],
             }
-        
+
         # Calculate aggregates
         avg_latency = sum(r.latency_ms for r in successful) / len(successful)
         avg_tokens_per_sec = sum(r.tokens_per_sec for r in successful) / len(successful)
         avg_accuracy = sum(r.accuracy_score for r in successful) / len(successful)
         avg_cost = sum(r.cost_per_request for r in successful) / len(successful)
-        
+
         # Group by provider
         provider_stats = {}
         for result in successful:
@@ -584,7 +585,7 @@ class BenchmarkEngine:
             if key not in provider_stats:
                 provider_stats[key] = []
             provider_stats[key].append(result)
-        
+
         # Calculate per-provider averages
         provider_summary = {}
         for key, prov_results in provider_stats.items():
@@ -595,7 +596,7 @@ class BenchmarkEngine:
                 "avg_accuracy": sum(r.accuracy_score for r in prov_results) / len(prov_results),
                 "avg_cost": sum(r.cost_per_request for r in prov_results) / len(prov_results),
             }
-        
+
         return {
             "run_id": run_id,
             "suite_name": suite_name,

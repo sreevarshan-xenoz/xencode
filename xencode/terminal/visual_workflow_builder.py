@@ -28,6 +28,19 @@ from ..cache.advanced_memory_manager import get_memory_manager
 logger = logging.getLogger(__name__)
 
 
+def _safe_eval_condition(condition: str, context: Dict[str, Any]) -> Any:
+    """Evaluate a workflow condition string in a restricted environment."""
+    allowed_names = {
+        **context,
+        "len": len,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+    }
+    return eval(condition, {"__builtins__": {}}, allowed_names)
+
+
 class NodeType(Enum):
     """Types of nodes in the workflow"""
     START = "start"

@@ -6,9 +6,9 @@ This module re-exports everything from the new location.
 """
 
 from xencode.ensemble.ensemble_lightweight import (
-    LightweightTokenVoter,
-    ImprovedConsensus,
     EnhancedQualityMetrics,
+    ImprovedConsensus,
+    LightweightTokenVoter,
     create_improved_components,
 )
 

@@ -23,14 +23,13 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .credential_vault import (
     Credential,
     CredentialVault,
     FileBasedCredentialBackend,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +220,7 @@ class JsonFileCredentialVault(CredentialVault):
             with open(source_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid vault file: {e}")
+            raise ValueError(f"Invalid vault file: {e}") from e
 
         credentials_data = data.get("credentials", {})
         if not isinstance(credentials_data, dict):
@@ -325,11 +324,9 @@ class JsonFileCredentialVault(CredentialVault):
             return result
 
         # Check if cryptography is available
-        try:
-            from cryptography.fernet import Fernet
-            result["encryption_available"] = True
-        except ImportError:
-            result["encryption_available"] = False
+        import importlib.util
+
+        result["encryption_available"] = importlib.util.find_spec("cryptography") is not None
 
         return result
 

@@ -7,13 +7,13 @@ for AI-powered code understanding and retrieval.
 
 try:
     from .vector_store import (
-        VectorStore,
         AsyncVectorStore,
+        BatchIndexer,
         BatchProcessingConfig,
+        OllamaChromaWrapper,
         OllamaEmbeddingBatchProcessor,
         OptimizedVectorStore,
-        BatchIndexer,
-        OllamaChromaWrapper,
+        VectorStore,
     )
 except ImportError:
     VectorStore = AsyncVectorStore = BatchProcessingConfig = None
@@ -28,10 +28,10 @@ except ImportError:
 try:
     from .context_indexer_v2 import (
         ContextIndexerV2,
-        IndexStatus,
         FileMetadata,
-        Symbol,
         IndexManifest,
+        IndexStatus,
+        Symbol,
     )
 except ImportError:
     ContextIndexerV2 = IndexStatus = FileMetadata = Symbol = IndexManifest = None

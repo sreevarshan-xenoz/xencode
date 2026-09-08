@@ -72,16 +72,40 @@ select = [
     "W",  # pycodestyle warnings
     "F",  # pyflakes
     "I",  # isort
-    "C",  # flake8-comprehensions
+    "C4",  # flake8-comprehensions (excludes C901 complexity checks)
     "B",  # flake8-bugbear
     "S604",  # subprocess-shell-true — prevent shell=True regressions
 ]
 ignore = [
     "E501",  # Line too long (handled by black)
+    "W291",  # Trailing whitespace (bulk of occurrences live inside string literals/prompts)
+    "W293",  # Blank line contains whitespace (same string-literal reason)
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Security",
+    "fastapi.params.Depends",
+    "fastapi.params.Query",
+    "fastapi.params.Path",
+    "fastapi.params.Body",
+    "fastapi.params.Header",
+    "fastapi.params.Cookie",
+    "fastapi.params.File",
+    "fastapi.params.Form",
+    "fastapi.params.Security",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
+"__init__.py" = ["F401", "E402"]
 
 [tool.black]
 line-length = 88

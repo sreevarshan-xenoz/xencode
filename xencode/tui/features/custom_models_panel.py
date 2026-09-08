@@ -72,9 +72,9 @@ class CustomModelsPanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="custom_models",
             title="🤖 Custom AI Models",
-            *args,
             **kwargs
         )
         self.models: List[Dict[str, Any]] = []

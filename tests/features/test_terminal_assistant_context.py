@@ -279,7 +279,10 @@ class TestProcessAnalysis:
     async def test_analyze_processes_with_psutil(self, context_analyzer):
         """Test process analysis with psutil available"""
         try:
-            import psutil
+            import importlib.util
+
+            if importlib.util.find_spec("psutil") is None:
+                raise ImportError
             # If psutil is available, test with real module
             process_info = context_analyzer._analyze_processes()
 
@@ -312,7 +315,10 @@ class TestNetworkAnalysis:
     async def test_analyze_network_with_listening_ports(self, context_analyzer):
         """Test network analysis with listening ports"""
         try:
-            import psutil
+            import importlib.util
+
+            if importlib.util.find_spec("psutil") is None:
+                raise ImportError
             # If psutil is available, test with real module
             network_info = context_analyzer._analyze_network()
 

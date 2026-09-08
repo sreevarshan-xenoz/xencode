@@ -19,6 +19,9 @@ Key Features:
 """
 
 import asyncio
+
+# Import for ML-powered analysis
+import importlib.util
 import json
 import math
 import sqlite3
@@ -30,12 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# Import for ML-powered analysis
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except ImportError:
-    NUMPY_AVAILABLE = False
+NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
 
 # Import existing analytics components
 try:

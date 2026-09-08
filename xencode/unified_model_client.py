@@ -10,9 +10,9 @@ Supported providers: ollama, openai, anthropic, huggingface, google_gemini, open
 
 import asyncio
 import os
-from typing import AsyncIterator, Dict, List, Optional, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class ProviderType(Enum):

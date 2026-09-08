@@ -6,7 +6,7 @@ adaptive reasoning, prompt optimization, and knowledge transfer.
 """
 
 try:
-    from .hybrid_model_architecture import ModelRouter, ModelChain, HybridModelManager
+    from .hybrid_model_architecture import HybridModelManager, ModelChain, ModelRouter
 except ImportError:
     ModelRouter = ModelChain = HybridModelManager = None
 

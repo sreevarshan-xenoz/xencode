@@ -1,22 +1,33 @@
 """
 Specialized agents for specific domains in Xencode
 """
-from enum import Enum
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
 import asyncio
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from ...core.models import ModelManager
-from ..manager import LangChainManager
-from ..tools import ReadFileTool, WriteFileTool, ExecuteCommandTool
 from ..advanced_tools import (
-    GitStatusTool, GitDiffTool, GitLogTool, GitCommitTool,
-    WebSearchTool, CodeAnalysisTool
+    CodeAnalysisTool,
+    GitCommitTool,
+    GitDiffTool,
+    GitLogTool,
+    GitStatusTool,
+    WebSearchTool,
 )
 from ..enhanced_tools import (
-    GitBranchTool, GitPushTool, GitPullTool,
-    FindFileTool, FileStatTool, DependencyAnalysisTool,
-    SystemInfoTool, ProcessInfoTool, WebSearchDetailedTool
+    DependencyAnalysisTool,
+    FileStatTool,
+    FindFileTool,
+    GitBranchTool,
+    GitPullTool,
+    GitPushTool,
+    ProcessInfoTool,
+    SystemInfoTool,
+    WebSearchDetailedTool,
 )
+from ..manager import LangChainManager
+from ..tools import ExecuteCommandTool, ReadFileTool, WriteFileTool
 
 
 class SpecializedAgentType(Enum):
@@ -43,7 +54,7 @@ class AgentProfile:
 
 class SpecializedAgent:
     """Base class for specialized agents."""
-    
+
     def __init__(self, agent_type: SpecializedAgentType, profile: AgentProfile):
         self.agent_type = agent_type
         self.profile = profile
@@ -54,7 +65,7 @@ class SpecializedAgent:
             db_path=f"agent_{agent_type.value}_memory.db"
         )
         self.tools = self._initialize_tools()
-    
+
     def _initialize_tools(self):
         """Initialize tools specific to this agent type."""
         # Base tools that all agents have
@@ -63,21 +74,21 @@ class SpecializedAgent:
             WriteFileTool(),
             ExecuteCommandTool()
         ]
-        
+
         # Add specialized tools based on agent type
         specialized_tools = self._get_specialized_tools()
         return base_tools + specialized_tools
-    
+
     def _get_specialized_tools(self):
         """Get specialized tools for this agent type."""
         # This will be overridden by subclasses
         return []
-    
+
     async def process_request(self, request: str) -> str:
         """Process a request using the specialized agent."""
         # This will be implemented by subclasses
         raise NotImplementedError
-    
+
     def get_capabilities(self) -> Dict[str, Any]:
         """Get the agent's capabilities."""
         return {
@@ -92,7 +103,7 @@ class SpecializedAgent:
 
 class DataScienceAgent(SpecializedAgent):
     """Specialized agent for data science tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="Data Science Assistant",
@@ -100,14 +111,14 @@ class DataScienceAgent(SpecializedAgent):
             primary_model="codellama:7b",  # Good for code generation
             fallback_models=["llama3.1:8b", "mistral:7b"],
             specialized_tools=[
-                "pandas_operations", "matplotlib_visualization", 
+                "pandas_operations", "matplotlib_visualization",
                 "sklearn_modeling", "jupyter_notebook"
             ],
             expertise_domains=["data analysis", "machine learning", "statistics", "visualization"],
             personality_traits=["analytical", "detail-oriented", "methodical"]
         )
         super().__init__(SpecializedAgentType.DATA_SCIENCE, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to data science."""
         # In a real implementation, these would be actual LangChain tools
@@ -118,7 +129,7 @@ class DataScienceAgent(SpecializedAgent):
             CodeAnalysisTool(),  # Analyze data processing code
             WebSearchDetailedTool()  # Search for data science techniques
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a data science request."""
         # Enhanced processing for data science tasks
@@ -132,13 +143,13 @@ class DataScienceAgent(SpecializedAgent):
         - Model selection criteria
         - Evaluation metrics
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class WebDevelopmentAgent(SpecializedAgent):
     """Specialized agent for web development tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="Web Development Assistant",
@@ -153,7 +164,7 @@ class WebDevelopmentAgent(SpecializedAgent):
             personality_traits=["practical", "up-to-date", "performance-focused"]
         )
         super().__init__(SpecializedAgentType.WEB_DEVELOPMENT, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to web development."""
         return [
@@ -165,7 +176,7 @@ class WebDevelopmentAgent(SpecializedAgent):
             GitDiffTool(),  # Review changes before deployment
             WebSearchDetailedTool()  # Search for web technologies
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a web development request."""
         enhanced_prompt = f"""
@@ -178,13 +189,13 @@ class WebDevelopmentAgent(SpecializedAgent):
         - Security best practices
         - Responsive design principles
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class SecurityAnalysisAgent(SpecializedAgent):
     """Specialized agent for security analysis tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="Security Analysis Assistant",
@@ -192,14 +203,14 @@ class SecurityAnalysisAgent(SpecializedAgent):
             primary_model="llama3.1:8b",  # Good for analytical tasks
             fallback_models=["mistral:7b", "codellama:7b"],
             specialized_tools=[
-                "vulnerability_scanning", "penetration_testing", 
+                "vulnerability_scanning", "penetration_testing",
                 "secure_coding", "compliance_checking"
             ],
             expertise_domains=["vulnerability assessment", "secure coding", "compliance", "threat modeling"],
             personality_traits=["cautious", "thorough", "proactive"]
         )
         super().__init__(SpecializedAgentType.SECURITY_ANALYSIS, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to security analysis."""
         return [
@@ -211,7 +222,7 @@ class SecurityAnalysisAgent(SpecializedAgent):
             ProcessInfoTool(),  # Check running processes
             WebSearchDetailedTool()  # Search for security advisories
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a security analysis request."""
         enhanced_prompt = f"""
@@ -224,13 +235,13 @@ class SecurityAnalysisAgent(SpecializedAgent):
         - Attack vectors to consider
         - Security testing recommendations
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class DevOpsAgent(SpecializedAgent):
     """Specialized agent for DevOps tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="DevOps Assistant",
@@ -245,7 +256,7 @@ class DevOpsAgent(SpecializedAgent):
             personality_traits=["automated", "reliable", "scalable"]
         )
         super().__init__(SpecializedAgentType.DEVOPS, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to DevOps."""
         return [
@@ -261,7 +272,7 @@ class DevOpsAgent(SpecializedAgent):
             ProcessInfoTool(),  # Check running services
             WebSearchDetailedTool()  # Search for DevOps practices
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a DevOps request."""
         enhanced_prompt = f"""
@@ -274,13 +285,13 @@ class DevOpsAgent(SpecializedAgent):
         - Cloud deployment options
         - Monitoring and alerting
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class TestingAgent(SpecializedAgent):
     """Specialized agent for testing tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="Testing Assistant",
@@ -295,7 +306,7 @@ class TestingAgent(SpecializedAgent):
             personality_traits=["thorough", "quality-focused", "systematic"]
         )
         super().__init__(SpecializedAgentType.TESTING, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to testing."""
         return [
@@ -305,7 +316,7 @@ class TestingAgent(SpecializedAgent):
             DependencyAnalysisTool(),  # Analyze test dependencies
             WebSearchDetailedTool()  # Search for testing strategies
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a testing request."""
         enhanced_prompt = f"""
@@ -318,13 +329,13 @@ class TestingAgent(SpecializedAgent):
         - Test data management
         - Continuous testing practices
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 
 class DocumentationAgent(SpecializedAgent):
     """Specialized agent for documentation tasks."""
-    
+
     def __init__(self):
         profile = AgentProfile(
             name="Documentation Assistant",
@@ -339,7 +350,7 @@ class DocumentationAgent(SpecializedAgent):
             personality_traits=["clear", "concise", "organized"]
         )
         super().__init__(SpecializedAgentType.DOCUMENTATION, profile)
-    
+
     def _get_specialized_tools(self):
         """Get tools specific to documentation."""
         return [
@@ -350,7 +361,7 @@ class DocumentationAgent(SpecializedAgent):
             FileStatTool(),  # Check doc file properties
             WebSearchDetailedTool()  # Search for documentation best practices
         ]
-    
+
     async def process_request(self, request: str) -> str:
         """Process a documentation request."""
         enhanced_prompt = f"""
@@ -363,7 +374,7 @@ class DocumentationAgent(SpecializedAgent):
         - Accessibility and usability
         - Maintenance and versioning
         """
-        
+
         return await asyncio.to_thread(self.langchain_manager.run_agent, enhanced_prompt)
 
 

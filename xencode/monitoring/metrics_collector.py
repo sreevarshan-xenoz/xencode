@@ -16,14 +16,10 @@ import psutil
 # Prometheus client imports
 try:
     from prometheus_client import (
-        CONTENT_TYPE_LATEST,
         REGISTRY,
-        CollectorRegistry,
         Counter,
         Gauge,
         Histogram,
-        Info,
-        Summary,
         generate_latest,
         start_http_server,
     )

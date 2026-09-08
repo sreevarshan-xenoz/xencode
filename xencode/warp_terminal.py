@@ -6,6 +6,8 @@ A Warp-like terminal experience with structured command blocks, AI suggestions,
 and performance optimizations for large outputs.
 """
 
+# Try to import wgpu for GPU acceleration (optional)
+import importlib.util
 import json
 import logging
 import shlex
@@ -27,12 +29,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-# Try to import wgpu for GPU acceleration (optional)
-try:
-    import wgpu
-    GPU_AVAILABLE = True
-except ImportError:
-    GPU_AVAILABLE = False
+GPU_AVAILABLE = importlib.util.find_spec("wgpu") is not None
 
 logger = logging.getLogger(__name__)
 

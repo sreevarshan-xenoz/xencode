@@ -282,9 +282,9 @@ class MultiLanguagePanel(BaseFeaturePanel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(
+            *args,
             feature_name="multi_language",
             title="🌍 Multi-language Support",
-            *args,
             **kwargs
         )
         self.languages: List[Dict[str, str]] = []

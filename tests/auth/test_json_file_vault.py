@@ -3,16 +3,14 @@
 Unit tests for JsonFileCredentialVault
 """
 
-import pytest
 import json
-import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from xencode.auth.credential_vault import (
     Credential,
-    WindowsCredentialManagerBackend,
 )
 from xencode.auth.json_file_vault import JsonFileCredentialVault
 

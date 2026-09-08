@@ -5,8 +5,8 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 try:
-    from langchain_ollama import ChatOllama
     from langchain_core.prompts import PromptTemplate
+    from langchain_ollama import ChatOllama
 except ImportError:
     ChatOllama = None
     PromptTemplate = None
@@ -65,7 +65,8 @@ Return ONLY the content of the Dockerfile. Do not include markdown formatting or
         # Format context for prompt
         context_str = ""
         for filename, content in context.items():
-            if filename == "existing_dockerfile": continue
+            if filename == "existing_dockerfile":
+                continue
             # Truncate large files
             display_content = content[:1000] + "..." if len(content) > 1000 else content
             context_str += f"--- {filename} ---\n{display_content}\n\n"
@@ -101,7 +102,8 @@ Return ONLY the content of the docker-compose.yml. Do not include markdown forma
 
         context_str = ""
         for filename, content in context.items():
-            if filename == "existing_dockerfile": continue
+            if filename == "existing_dockerfile":
+                continue
             display_content = content[:1000] + "..." if len(content) > 1000 else content
             context_str += f"--- {filename} ---\n{display_content}\n\n"
 
@@ -110,7 +112,7 @@ Return ONLY the content of the docker-compose.yml. Do not include markdown forma
         content = response.content.strip()
         if content.startswith("```"):
             lines = content.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
+            lines = [line for line in lines if not line.strip().startswith("```")]
             content = "\n".join(lines)
 
         return content

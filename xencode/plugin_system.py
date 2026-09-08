@@ -270,7 +270,7 @@ class PluginInterface(ABC):
         """Return plugin metadata"""
         pass
 
-    async def on_config_change(self, config: Dict[str, Any]) -> None:
+    async def on_config_change(self, config: Dict[str, Any]) -> None:  # noqa: B027 - optional hook; plugins may ignore config changes
         """Handle configuration changes (optional)"""
         pass
 

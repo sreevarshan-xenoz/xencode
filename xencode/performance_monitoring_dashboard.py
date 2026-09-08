@@ -39,7 +39,6 @@ try:
     from xencode.analytics.analytics_infrastructure import AnalyticsInfrastructure
     from xencode.monitoring.metrics_collector import (
         PrometheusMetricsCollector,
-        SystemMetrics,
     )
     MONITORING_AVAILABLE = True
 except ImportError:

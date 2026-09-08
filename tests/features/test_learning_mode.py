@@ -9,7 +9,7 @@ and exercise generation functionality.
 import pytest
 import pytest_asyncio
 
-from xencode.features.base import FeatureConfig
+from xencode.features.base import FeatureConfig, FeatureError
 from xencode.features.learning_mode import (
     AdaptiveDifficultyController,
     DifficultyLevel,
@@ -110,7 +110,7 @@ class TestLearningModeFeature:
     @pytest.mark.asyncio
     async def test_start_nonexistent_topic(self, learning_feature):
         """Test starting a non-existent topic"""
-        with pytest.raises(Exception):
+        with pytest.raises(FeatureError):
             await learning_feature.start_topic('nonexistent')
 
     @pytest.mark.asyncio

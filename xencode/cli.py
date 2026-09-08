@@ -214,8 +214,8 @@ def features():
     pass
 
 
-@features.command()
-def list():
+@features.command(name='list')
+def list_features():
     """List all available features
 
     Examples:
@@ -494,9 +494,9 @@ def ollama():
     pass
 
 
-@ollama.command()
+@ollama.command(name='list')
 @click.option('--refresh', is_flag=True, help='Refresh model list from Ollama')
-def list(refresh):
+def list_ollama_models(refresh):
     """List available Ollama models"""
     console.print("[blue]📋 Listing Ollama models...[/blue]")
 
@@ -607,8 +607,8 @@ def benchmark(model_name, prompts):
     asyncio.run(_benchmark_model())
 
 
-@ollama.command()
-def optimize():
+@ollama.command(name='optimize')
+def optimize_ollama():
     """Optimize model selection for current hardware"""
     console.print("[blue]⚡ Optimizing for current hardware...[/blue]")
 
@@ -1531,7 +1531,7 @@ def history(ctx, pattern, limit):
                 timestamp = cmd_data.get('timestamp', '')
                 if timestamp:
                     try:
-                        from datetime import datetime, timedelta
+                        from datetime import datetime
                         dt = datetime.fromisoformat(timestamp)
                         timestamp = dt.strftime("%Y-%m-%d %H:%M")
                     except Exception:
@@ -1561,9 +1561,9 @@ def history(ctx, pattern, limit):
     asyncio.run(_search_history())
 
 
-@terminal.command()
+@terminal.command(name='learn')
 @click.pass_context
-def learn(ctx):
+def terminal_learn(ctx):
     """
     Start learning mode - interactive tutorial
 
@@ -2813,10 +2813,10 @@ def set(language_code):
         console.print(f"[red]❌ Error setting language: {e}[/red]")
 
 
-@lang.command()
+@lang.command(name='list')
 @click.option('--enabled-only', is_flag=True, help='Show only enabled languages')
 @click.option('--rtl-only', is_flag=True, help='Show only RTL languages')
-def list(enabled_only, rtl_only):
+def list_languages(enabled_only, rtl_only):
     """List all supported languages
 
     Examples:
@@ -3188,7 +3188,7 @@ def migrate(config_path, vault_path, master_key, delete_after, yes):
             console.print(f"[yellow]\u23e9 Skipped {skipped} env-var references (already secure)[/yellow]")
 
         if errors:
-            console.print(f"\n[yellow]\u26a0\ufe0f  Notes:[/yellow]")
+            console.print("\n[yellow]\u26a0\ufe0f  Notes:[/yellow]")
             for err in errors:
                 console.print(f"  \u2022 {err}")
 
@@ -3204,8 +3204,8 @@ def migrate(config_path, vault_path, master_key, delete_after, yes):
         console.print(f"[red]\u274c Migration failed: {e}[/red]")
 
 
-@vault.command()
-def status():
+@vault.command(name='status')
+def vault_status():
     """Show vault status and storage information
 
     Displays the vault path, credential count, encryption status,
