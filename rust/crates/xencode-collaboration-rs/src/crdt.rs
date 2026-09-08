@@ -57,7 +57,9 @@ pub struct GSet<T: Clone + Ord> {
 
 impl<T: Clone + Ord> GSet<T> {
     pub fn new() -> Self {
-        Self { elements: Vec::new() }
+        Self {
+            elements: Vec::new(),
+        }
     }
 
     pub fn add(&mut self, element: T) {

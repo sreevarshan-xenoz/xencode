@@ -82,7 +82,7 @@ impl ConversationMemory {
         let xencode_dir = dirs::home_dir()
             .ok_or(MemoryError::NoHomeDir)?
             .join(".xencode");
-            
+
         std::fs::create_dir_all(&xencode_dir).map_err(MemoryError::Io)?;
         let memory_file = xencode_dir.join("conversation_memory.json");
 
@@ -127,7 +127,7 @@ impl ConversationMemory {
     /// Start a new conversation session.
     pub fn start_session(&mut self, session_id: Option<String>) -> String {
         let id = session_id.unwrap_or_else(|| format!("session_{}", Utc::now().timestamp()));
-        
+
         if !self.conversations.contains_key(&id) {
             self.conversations.insert(
                 id.clone(),
@@ -188,7 +188,7 @@ impl ConversationMemory {
     pub fn list_sessions(&self) -> Vec<String> {
         self.conversations.keys().cloned().collect()
     }
-    
+
     /// Get a specific session.
     pub fn get_session(&self, session_id: &str) -> Option<&ConversationSession> {
         self.conversations.get(session_id)
@@ -204,7 +204,7 @@ impl ConversationMemory {
             false
         }
     }
-    
+
     /// Get the current session ID
     pub fn current_session(&self) -> Option<&String> {
         self.current_session.as_ref()
@@ -233,7 +233,7 @@ mod tests {
 
         assert_eq!(s2, "sess2");
         assert_eq!(mem.current_session(), Some(&"sess2".to_string()));
-        
+
         let switched = mem.switch_session("sess1");
         assert!(switched);
         assert_eq!(mem.current_session(), Some(&"sess1".to_string()));
@@ -243,10 +243,10 @@ mod tests {
     fn add_and_get_messages() {
         let mut mem = ConversationMemory::new(10);
         mem.start_session(Some("sess".to_string()));
-        
+
         mem.add_message("user", "hello", None);
         mem.add_message("assistant", "hi there", Some("model-a".to_string()));
-        
+
         let ctx = mem.get_context(5);
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0].role, "user");
@@ -259,11 +259,11 @@ mod tests {
     fn max_items_trimming() {
         let mut mem = ConversationMemory::new(2);
         mem.start_session(Some("sess".to_string()));
-        
+
         mem.add_message("user", "msg1", None);
         mem.add_message("user", "msg2", None);
         mem.add_message("user", "msg3", None);
-        
+
         let ctx = mem.get_context(10);
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0].content, "msg2");
@@ -275,17 +275,17 @@ mod tests {
         let dir = temp_dir();
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("conversation_memory.json");
-        
+
         let mut mem1 = ConversationMemory {
             max_items: 10,
             conversations: HashMap::new(),
             current_session: None,
             memory_file: Some(file.clone()),
         };
-        
+
         mem1.start_session(Some("persisted_sess".to_string()));
         mem1.add_message("user", "save me", None);
-        
+
         let mut mem2 = ConversationMemory {
             max_items: 10,
             conversations: HashMap::new(),
@@ -293,12 +293,12 @@ mod tests {
             memory_file: Some(file.clone()),
         };
         mem2.load_memory().unwrap();
-        
+
         assert_eq!(mem2.current_session(), Some(&"persisted_sess".to_string()));
         let ctx = mem2.get_context(5);
         assert_eq!(ctx.len(), 1);
         assert_eq!(ctx[0].content, "save me");
-        
+
         fs::remove_dir_all(&dir).unwrap();
     }
 }

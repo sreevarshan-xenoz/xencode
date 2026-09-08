@@ -29,7 +29,8 @@ impl BasicHost {
     }
 
     pub fn set_config(&mut self, key: &str, value: &str) {
-        self.config_values.insert(key.to_string(), value.to_string());
+        self.config_values
+            .insert(key.to_string(), value.to_string());
     }
 }
 
@@ -103,7 +104,10 @@ impl Host {
     }
 
     /// Route an incoming event to all registered plugins.
-    pub fn route_event(&mut self, event: &PluginEvent) -> Vec<Result<Option<PluginResponse>, PluginError>> {
+    pub fn route_event(
+        &mut self,
+        event: &PluginEvent,
+    ) -> Vec<Result<Option<PluginResponse>, PluginError>> {
         let mut results = Vec::new();
         for (name, plugin) in &mut self.plugins {
             match plugin.handle_event(event.clone()) {
@@ -131,8 +135,6 @@ impl Host {
     pub fn get_plugin(&self, name: &str) -> Option<&dyn XencodePlugin> {
         self.plugins.get(name).map(|p| p.as_ref())
     }
-
-
 
     /// Get the number of registered plugins.
     pub fn plugin_count(&self) -> usize {

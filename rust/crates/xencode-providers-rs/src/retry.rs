@@ -84,7 +84,7 @@ pub fn is_retriable(err: &ProviderError) -> bool {
                 || msg.contains("502")  // bad gateway
                 || msg.contains("503")  // service unavailable
                 || msg.contains("504")  // gateway timeout
-                || msg.contains("529")  // rate limited (Anthropic-specific)
+                || msg.contains("529") // rate limited (Anthropic-specific)
         }
         // Parse errors are not retriable — the response came back but couldn't be parsed
         ProviderError::Parse(_) => false,
@@ -163,9 +163,8 @@ where
         }
     }
 
-    Err(last_error.unwrap_or_else(|| {
-        ProviderError::Network("exhausted all retry attempts".to_string())
-    }))
+    Err(last_error
+        .unwrap_or_else(|| ProviderError::Network("exhausted all retry attempts".to_string())))
 }
 
 #[cfg(test)]
@@ -244,9 +243,8 @@ mod tests {
     #[tokio::test]
     async fn retry_succeeds_on_first_try() {
         let cfg = RetryConfig::default();
-        let result: Result<i32, ProviderError> = retry_async(&cfg, || async {
-            Ok::<i32, ProviderError>(42)
-        }).await;
+        let result: Result<i32, ProviderError> =
+            retry_async(&cfg, || async { Ok::<i32, ProviderError>(42) }).await;
         assert_eq!(result.unwrap(), 42);
     }
 
@@ -255,7 +253,8 @@ mod tests {
         let cfg = RetryConfig::default();
         let result: Result<String, ProviderError> = retry_async(&cfg, || async {
             Err::<String, ProviderError>(ProviderError::Api("400 Bad Request".to_string()))
-        }).await;
+        })
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("400"));
     }
@@ -273,7 +272,8 @@ mod tests {
             } else {
                 Ok("success".to_string())
             }
-        }).await;
+        })
+        .await;
         assert_eq!(result.unwrap(), "success");
         assert_eq!(counter.load(Ordering::SeqCst), 3); // initial + 2 retries
     }
@@ -292,7 +292,8 @@ mod tests {
         let result: Result<String, ProviderError> = retry_async(&cfg, || async {
             counter.fetch_add(1, Ordering::SeqCst);
             Err::<String, ProviderError>(ProviderError::Network("always fails".to_string()))
-        }).await;
+        })
+        .await;
         assert!(result.is_err());
         assert_eq!(counter.load(Ordering::SeqCst), 3); // initial + 2 retries
     }
@@ -330,7 +331,8 @@ mod tests {
                     unreachable!("operation must not be re-invoked after tokens emitted")
                 }
             },
-        ).await;
+        )
+        .await;
 
         assert!(result.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -356,7 +358,8 @@ mod tests {
                     Ok("success".to_string())
                 }
             },
-        ).await;
+        )
+        .await;
 
         assert_eq!(result.unwrap(), "success");
         assert_eq!(calls.load(Ordering::SeqCst), 3);
@@ -390,7 +393,8 @@ mod tests {
                 emitted.store(true, Ordering::SeqCst);
                 Err(ProviderError::Network("mid-stream disconnect".to_string()))
             },
-        ).await;
+        )
+        .await;
         let elapsed = start.elapsed();
 
         assert!(result.is_err());

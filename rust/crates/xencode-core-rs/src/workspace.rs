@@ -68,10 +68,18 @@ impl fmt::Display for WorkspaceScanError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WorkspaceScanError::RootNotFound(path) => {
-                write!(formatter, "workspace root does not exist: {}", path.display())
+                write!(
+                    formatter,
+                    "workspace root does not exist: {}",
+                    path.display()
+                )
             }
             WorkspaceScanError::RootIsNotDirectory(path) => {
-                write!(formatter, "workspace root is not a directory: {}", path.display())
+                write!(
+                    formatter,
+                    "workspace root is not a directory: {}",
+                    path.display()
+                )
             }
             WorkspaceScanError::Io { path, source } => {
                 write!(formatter, "failed to scan {}: {}", path.display(), source)
@@ -170,7 +178,10 @@ fn should_skip(name: &str, options: &ScanOptions) -> bool {
         return true;
     }
 
-    options.excluded_dirs.iter().any(|excluded| excluded == name)
+    options
+        .excluded_dirs
+        .iter()
+        .any(|excluded| excluded == name)
 }
 
 #[cfg(test)]
@@ -226,4 +237,3 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
-

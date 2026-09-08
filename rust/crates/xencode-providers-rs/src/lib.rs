@@ -104,24 +104,35 @@ impl ProviderManager {
     /// - else → local Ollama
     ///
     /// Retries on transient errors (network failures, 5xx, 429) using exponential backoff.
-    pub async fn generate(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+    pub async fn generate(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+    ) -> Result<String, ProviderError> {
         let model_owned = model.to_string();
         let messages_owned = messages.to_vec();
 
         retry::retry_async(&self.retry_config, || async {
             self.generate_inner(&model_owned, &messages_owned).await
-        }).await
+        })
+        .await
     }
 
     /// Inner generate without retry wrapping (used by retry logic).
-    async fn generate_inner(&self, model: &str, messages: &[ChatMessage]) -> Result<String, ProviderError> {
+    async fn generate_inner(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+    ) -> Result<String, ProviderError> {
         // Route based on model prefix
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
             if let Some(ref key) = self.anthropic_api_key {
                 let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
                 return provider.generate(inner_model, messages, None).await;
             }
-            return Err(ProviderError::Api("Anthropic API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Anthropic API key not configured".to_string(),
+            ));
         }
 
         if let Some(inner_model) = model.strip_prefix("qwen:") {
@@ -129,7 +140,9 @@ impl ProviderManager {
                 let provider = qwen::QwenProvider::new(key.clone(), None);
                 return provider.generate(inner_model, messages).await;
             }
-            return Err(ProviderError::Api("Qwen API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Qwen API key not configured".to_string(),
+            ));
         }
 
         if let Some(inner_model) = model.strip_prefix("google_gemini:") {
@@ -137,7 +150,9 @@ impl ProviderManager {
                 let provider = gemini::GeminiProvider::new(key.clone(), None);
                 return provider.generate(inner_model, messages, None, None).await;
             }
-            return Err(ProviderError::Api("Google Gemini API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Google Gemini API key not configured".to_string(),
+            ));
         }
 
         // OpenRouter route (models with a slash, e.g. "openai/gpt-4")
@@ -154,7 +169,9 @@ impl ProviderManager {
             "stream": false
         });
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .json(&payload)
             .send()
             .await
@@ -202,15 +219,21 @@ impl ProviderManager {
         // fresh attempt would re-deliver the same tokens (duplicate output).
         let emitted = AtomicBool::new(false);
 
-        retry::retry_async_with_guard(&self.retry_config, || emitted.load(Ordering::SeqCst), || async {
-            let cb_ref = &cb;
-            let emitted_ref = &emitted;
-            self.generate_stream_inner(&model_owned, &messages_owned, |token| {
-                emitted_ref.store(true, Ordering::SeqCst);
-                let mut guard = cb_ref.lock().unwrap();
-                guard(token);
-            }).await
-        }).await
+        retry::retry_async_with_guard(
+            &self.retry_config,
+            || emitted.load(Ordering::SeqCst),
+            || async {
+                let cb_ref = &cb;
+                let emitted_ref = &emitted;
+                self.generate_stream_inner(&model_owned, &messages_owned, |token| {
+                    emitted_ref.store(true, Ordering::SeqCst);
+                    let mut guard = cb_ref.lock().unwrap();
+                    guard(token);
+                })
+                .await
+            },
+        )
+        .await
     }
 
     /// Inner stream generate without retry wrapping.
@@ -227,36 +250,47 @@ impl ProviderManager {
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
             if let Some(ref key) = self.anthropic_api_key {
                 let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
-                return provider.generate_stream(inner_model, messages, None, callback).await;
+                return provider
+                    .generate_stream(inner_model, messages, None, callback)
+                    .await;
             }
-            return Err(ProviderError::Api("Anthropic API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Anthropic API key not configured".to_string(),
+            ));
         }
 
         if let Some(inner_model) = model.strip_prefix("qwen:") {
             if let Some(ref key) = self.qwen_api_key {
                 let provider = qwen::QwenProvider::new(key.clone(), None);
-                return provider.generate_stream(inner_model, messages, callback).await;
+                return provider
+                    .generate_stream(inner_model, messages, callback)
+                    .await;
             }
-            return Err(ProviderError::Api("Qwen API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Qwen API key not configured".to_string(),
+            ));
         }
 
         if let Some(inner_model) = model.strip_prefix("google_gemini:") {
             if let Some(ref key) = self.gemini_api_key {
                 let provider = gemini::GeminiProvider::new(key.clone(), None);
-                return provider.generate_stream(inner_model, messages, None, None, callback).await;
+                return provider
+                    .generate_stream(inner_model, messages, None, None, callback)
+                    .await;
             }
-            return Err(ProviderError::Api("Google Gemini API key not configured".to_string()));
+            return Err(ProviderError::Api(
+                "Google Gemini API key not configured".to_string(),
+            ));
         }
 
         // OpenRouter route
         if model.contains('/') && self.openrouter_api_key.is_some() {
-            self.generate_stream_openrouter(model, messages, callback).await
+            self.generate_stream_openrouter(model, messages, callback)
+                .await
         } else {
             self.generate_stream_ollama(model, messages, callback).await
         }
     }
-
-
 
     async fn generate_stream_ollama<F>(
         &self,
@@ -275,7 +309,9 @@ impl ProviderManager {
             "stream": true
         });
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .json(&payload)
             .send()
             .await
@@ -329,7 +365,9 @@ impl ProviderManager {
             "stream": false
         });
 
-        let response = self.client.post(url)
+        let response = self
+            .client
+            .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("HTTP-Referer", "http://localhost")
             .header("X-Title", "Xencode")
@@ -341,7 +379,10 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("OpenRouter {} - {}", status, msg)));
+            return Err(ProviderError::Api(format!(
+                "OpenRouter {} - {}",
+                status, msg
+            )));
         }
 
         #[derive(Deserialize)]
@@ -386,7 +427,9 @@ impl ProviderManager {
             "stream": true
         });
 
-        let response = self.client.post(url)
+        let response = self
+            .client
+            .post(url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("HTTP-Referer", "http://localhost")
             .header("X-Title", "Xencode")
@@ -398,7 +441,10 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("OpenRouter {} - {}", status, msg)));
+            return Err(ProviderError::Api(format!(
+                "OpenRouter {} - {}",
+                status, msg
+            )));
         }
 
         let mut stream = response.bytes_stream();
@@ -417,7 +463,9 @@ impl ProviderManager {
                             if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
                                 if let Some(first) = choices.first() {
                                     if let Some(delta) = first.get("delta") {
-                                        if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                                        if let Some(content) =
+                                            delta.get("content").and_then(|c| c.as_str())
+                                        {
                                             callback(content);
                                             full_response.push_str(content);
                                         }

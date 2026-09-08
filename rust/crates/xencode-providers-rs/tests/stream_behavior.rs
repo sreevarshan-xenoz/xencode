@@ -10,8 +10,8 @@
 //! - a mid-stream disconnect surfaces the error without re-running
 //! - pre-emission 5xx failures are retried, then succeed
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -47,9 +47,7 @@ fn ndjson_line(content: &str, done: bool) -> String {
 /// Scripted local server: each connection reads the request, then responds
 /// according to `plan` (one entry per connection). Returns the base URL and a
 /// connection counter.
-async fn spawn_server(
-    plan: Vec<PlanStep>,
-) -> (String, Arc<AtomicUsize>) {
+async fn spawn_server(plan: Vec<PlanStep>) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let counter = Arc::new(AtomicUsize::new(0));
@@ -59,7 +57,9 @@ async fn spawn_server(
     tokio::spawn(async move {
         let mut idx = 0usize;
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else { break };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
             counter_task.fetch_add(1, Ordering::SeqCst);
 
             // Drain the request (headers + small body), with a timeout so a
@@ -84,7 +84,10 @@ async fn spawn_server(
                 }
             };
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), read_loop).await;
-            let step = plan.get(idx.min(plan.len() - 1)).cloned().unwrap_or(PlanStep::ChunkedClose);
+            let step = plan
+                .get(idx.min(plan.len() - 1))
+                .cloned()
+                .unwrap_or(PlanStep::ChunkedClose);
             idx += 1;
             let bytes = step.to_http();
             let _ = sock.write_all(&bytes).await;
@@ -140,10 +143,7 @@ impl PlanStep {
                 .into_bytes()
             }
             PlanStep::ChunkedOk(lines) => {
-                let body: String = lines
-                    .iter()
-                    .map(|(c, d)| ndjson_line(c, *d))
-                    .collect();
+                let body: String = lines.iter().map(|(c, d)| ndjson_line(c, *d)).collect();
                 format!(
                     "HTTP/1.1 200 OK\r\n\
                      Content-Type: application/x-ndjson\r\n\
@@ -166,13 +166,7 @@ impl PlanStep {
 #[tokio::test]
 async fn mid_stream_disconnect_is_not_retried_and_tokens_delivered_once() {
     let (base_url, counter) = spawn_server(vec![PlanStep::ChunkedClose]).await;
-    let manager = ProviderManager::new(
-        OllamaClient::new(&base_url, 5),
-        None,
-        None,
-        None,
-        None,
-    );
+    let manager = ProviderManager::new(OllamaClient::new(&base_url, 5), None, None, None, None);
     let manager = manager.with_retry_config(fast_config());
 
     let mut tokens: Vec<String> = Vec::new();
@@ -185,7 +179,11 @@ async fn mid_stream_disconnect_is_not_retried_and_tokens_delivered_once() {
     assert_eq!(tokens, vec!["Hello".to_string()]);
     // The failure is surfaced as-is (not masked by a retried success).
     assert!(result.is_err(), "expected error, got {result:?}");
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "operation must not re-run after emission");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "operation must not re-run after emission"
+    );
 }
 
 /// Pre-emission 5xx failures must be retried (with backoff), then succeed.
@@ -195,16 +193,14 @@ async fn mid_stream_disconnect_is_not_retried_and_tokens_delivered_once() {
 async fn pre_emission_503_is_retried_then_succeeds() {
     let (base_url, counter) = spawn_server(vec![
         PlanStep::Http503,
-        PlanStep::Http503,            PlanStep::ChunkedOk(vec![("Hello".to_string(), false), (" world".to_string(), true)]),
+        PlanStep::Http503,
+        PlanStep::ChunkedOk(vec![
+            ("Hello".to_string(), false),
+            (" world".to_string(), true),
+        ]),
     ])
     .await;
-    let manager = ProviderManager::new(
-        OllamaClient::new(&base_url, 5),
-        None,
-        None,
-        None,
-        None,
-    );
+    let manager = ProviderManager::new(OllamaClient::new(&base_url, 5), None, None, None, None);
     let manager = manager.with_retry_config(fast_config());
 
     let mut tokens: Vec<String> = Vec::new();
@@ -229,13 +225,7 @@ async fn clean_stream_delivers_tokens_in_order() {
         ("!".to_string(), true),
     ])])
     .await;
-    let manager = ProviderManager::new(
-        OllamaClient::new(&base_url, 5),
-        None,
-        None,
-        None,
-        None,
-    );
+    let manager = ProviderManager::new(OllamaClient::new(&base_url, 5), None, None, None, None);
     let manager = manager.with_retry_config(fast_config());
 
     let mut tokens: Vec<String> = Vec::new();
@@ -245,6 +235,9 @@ async fn clean_stream_delivers_tokens_in_order() {
 
     let output = result.expect("clean stream should succeed");
     assert_eq!(output, "Hello!");
-    assert_eq!(tokens, vec!["Hel".to_string(), "lo".to_string(), "!".to_string()]);
+    assert_eq!(
+        tokens,
+        vec!["Hel".to_string(), "lo".to_string(), "!".to_string()]
+    );
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }

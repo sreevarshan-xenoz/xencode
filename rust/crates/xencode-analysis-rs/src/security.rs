@@ -40,7 +40,11 @@ impl VulnerabilityScanner {
     }
 
     /// Check for hardcoded secrets (passwords, API keys, tokens).
-    fn check_hardcoded_secrets(line: &str, file_path: &str, lineno: u32) -> Option<SecurityFinding> {
+    fn check_hardcoded_secrets(
+        line: &str,
+        file_path: &str,
+        lineno: u32,
+    ) -> Option<SecurityFinding> {
         static PASSWORD_RE: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r#"(?i)(password|passwd|pwd|secret|api[-_]?key|api[-_]?secret|access[-_]?token)\s*[=:]\s*['\"][^'"]{8,}['"]"#).unwrap()
         });
@@ -67,7 +71,9 @@ impl VulnerabilityScanner {
                     "hardcoded-token",
                     Severity::Critical,
                     "Hardcoded API token or key detected",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Revoke this token and use environment variables instead",
                 )
                 .with_cwe("CWE-798"),
@@ -86,13 +92,14 @@ impl VulnerabilityScanner {
 
         // Command injection: user input in shell commands
         static CMD_INJECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?i)(os\.system|subprocess\.call|subprocess\.run|exec|eval|`)\s*\([^)]*\+"#).unwrap()
+            Regex::new(
+                r#"(?i)(os\.system|subprocess\.call|subprocess\.run|exec|eval|`)\s*\([^)]*\+"#,
+            )
+            .unwrap()
         });
 
         // Eval usage
-        static EVAL_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(?i)\beval\s*\(").unwrap()
-        });
+        static EVAL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\beval\s*\(").unwrap());
 
         if SQL_INJECTION_RE.is_match(line) {
             return Some(
@@ -100,7 +107,9 @@ impl VulnerabilityScanner {
                     "sql-injection",
                     Severity::Critical,
                     "Potential SQL injection: string concatenation in database query",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Use parameterized queries or an ORM instead of string concatenation",
                 )
                 .with_cwe("CWE-89"),
@@ -113,7 +122,9 @@ impl VulnerabilityScanner {
                     "command-injection",
                     Severity::Critical,
                     "Potential command injection: user input in shell command",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Use subprocess with argument list instead of shell=True or string formatting",
                 )
                 .with_cwe("CWE-78"),
@@ -126,7 +137,9 @@ impl VulnerabilityScanner {
                     "dangerous-eval",
                     Severity::High,
                     "Use of eval() can execute arbitrary code",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Avoid eval(); use safer alternatives like ast.literal_eval()",
                 )
                 .with_cwe("CWE-95"),
@@ -138,13 +151,11 @@ impl VulnerabilityScanner {
 
     /// Check for weak cryptography.
     fn check_weak_crypto(line: &str, file_path: &str, lineno: u32) -> Option<SecurityFinding> {
-        static WEAK_HASH_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(?i)(md5|sha1)\s*\(").unwrap()
-        });
+        static WEAK_HASH_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?i)(md5|sha1)\s*\(").unwrap());
 
-        static WEAK_CIPHER_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"(?i)(DES|RC2|RC4|Blowfish)\s*\(").unwrap()
-        });
+        static WEAK_CIPHER_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?i)(DES|RC2|RC4|Blowfish)\s*\(").unwrap());
 
         if let Some(cap) = WEAK_HASH_RE.find(line) {
             return Some(
@@ -152,7 +163,9 @@ impl VulnerabilityScanner {
                     "weak-crypto-hash",
                     Severity::High,
                     format!("Weak cryptographic hash function: {}", cap.as_str()),
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Use SHA-256 or SHA-3 instead of MD5/SHA1",
                 )
                 .with_cwe("CWE-327"),
@@ -165,7 +178,9 @@ impl VulnerabilityScanner {
                     "weak-crypto-cipher",
                     Severity::High,
                     format!("Weak cipher algorithm: {}", cap.as_str()),
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Use AES-256-GCM instead of DES/RC2/RC4",
                 )
                 .with_cwe("CWE-327"),
@@ -187,7 +202,9 @@ impl VulnerabilityScanner {
                     "path-traversal",
                     Severity::High,
                     "Potential path traversal: user-controlled path used in file operation",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Validate and sanitize user input; use a allowlist of permitted paths",
                 )
                 .with_cwe("CWE-22"),
@@ -209,7 +226,9 @@ impl VulnerabilityScanner {
                     "ssrf",
                     Severity::Medium,
                     "Potential SSRF: user-controlled URL used in HTTP request",
-                    file_path, lineno, line,
+                    file_path,
+                    lineno,
+                    line,
                     "Validate URLs against an allowlist of permitted hosts",
                 )
                 .with_cwe("CWE-918"),

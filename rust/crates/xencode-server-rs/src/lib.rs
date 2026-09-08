@@ -2,8 +2,8 @@ pub mod auth;
 pub mod routes;
 pub mod ws;
 
-use std::sync::Arc;
 use axum::Router;
+use std::sync::Arc;
 
 /// Build the full application router with default state.
 pub fn build_app() -> Router {
@@ -40,7 +40,12 @@ mod tests {
     async fn test_api_status() {
         let app = build_app();
         let response = app
-            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -50,7 +55,12 @@ mod tests {
     async fn test_api_config() {
         let app = build_app();
         let response = app
-            .oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -60,7 +70,12 @@ mod tests {
     async fn test_list_models() {
         let app = build_app();
         let response = app
-            .oneshot(Request::builder().uri("/api/models").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/models")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -92,20 +107,13 @@ mod tests {
                     .method("POST")
                     .uri("/auth/login")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        r#"{"username":"alice","api_key":null}"#,
-                    ))
+                    .body(Body::from(r#"{"username":"alice","api_key":null}"#))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["token"].as_str().unwrap().starts_with("xencode_"));
         assert_eq!(json["username"], "alice");
@@ -121,9 +129,7 @@ mod tests {
                     .method("POST")
                     .uri("/auth/login")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        r#"{"username":"bob","api_key":"sk-123"}"#,
-                    ))
+                    .body(Body::from(r#"{"username":"bob","api_key":"sk-123"}"#))
                     .unwrap(),
             )
             .await
@@ -148,12 +154,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["valid"], true);
         assert!(!json["session_token"].as_str().unwrap().is_empty());
@@ -168,9 +169,7 @@ mod tests {
                     .method("POST")
                     .uri("/auth/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        r#"{"token":"bad_token"}"#,
-                    ))
+                    .body(Body::from(r#"{"token":"bad_token"}"#))
                     .unwrap(),
             )
             .await
@@ -187,9 +186,7 @@ mod tests {
                     .method("POST")
                     .uri("/auth/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(
-                        r#"{"token":"xencode_abc"}"#,
-                    ))
+                    .body(Body::from(r#"{"token":"xencode_abc"}"#))
                     .unwrap(),
             )
             .await
@@ -212,12 +209,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["id"].as_str().unwrap().starts_with("xencode-"));
         assert!(json["members"].as_array().unwrap().is_empty());
@@ -237,12 +229,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["id"], "no-such-session");
         assert!(json["members"].as_array().unwrap().is_empty());
@@ -261,12 +248,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["online"], true);
         assert_eq!(json["sessions"], 0);
@@ -280,12 +262,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "online");
         assert_eq!(json["service"], "Xencode Server");
@@ -305,12 +282,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         let models = json["models"].as_array().unwrap();
         assert_eq!(models.len(), 4);
@@ -329,12 +301,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
         assert!(json["features"].as_array().unwrap().len() >= 3);
@@ -369,7 +336,9 @@ mod tests {
             .await
             .unwrap();
         // CORS preflight headers should allow all origins
-        assert!(response.headers().contains_key("access-control-allow-origin"));
+        assert!(response
+            .headers()
+            .contains_key("access-control-allow-origin"));
     }
 
     #[tokio::test]

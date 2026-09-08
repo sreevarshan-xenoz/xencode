@@ -3,7 +3,9 @@ use std::io;
 use std::process::Command;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind, MouseButton};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
@@ -232,29 +234,29 @@ pub struct App<'a> {
     // ByteBot state
     pub bytebot_command: String,
     pub bytebot_cursor: usize,
-    pub bytebot_steps: Vec<(String, String)>,  // (step_name, status)
+    pub bytebot_steps: Vec<(String, String)>, // (step_name, status)
     pub bytebot_progress: f64,
     pub bytebot_running: bool,
     pub bytebot_log: Vec<String>,
-    pub bytebot_history: Vec<String>,  // previously executed commands
+    pub bytebot_history: Vec<String>, // previously executed commands
 
     // Collaboration Hub state
     pub collab_session_active: bool,
     pub collab_session_id: String,
-    pub collab_members: Vec<(String, String, String)>,  // (name, status, connection)
-    pub collab_sync_status: String,  // "synced", "syncing", "error"
+    pub collab_members: Vec<(String, String, String)>, // (name, status, connection)
+    pub collab_sync_status: String,                    // "synced", "syncing", "error"
     pub collab_last_sync: f64,
     pub collab_pending_changes: u32,
     pub collab_activity_log: Vec<String>,
-    pub collab_commit_stream: Vec<(String, String)>,  // (author, message)
-    pub collab_shared_files: Vec<String>,  // shared file names
+    pub collab_commit_stream: Vec<(String, String)>, // (author, message)
+    pub collab_shared_files: Vec<String>,            // shared file names
 
     // Voice Interface state
     pub voice_active: bool,
-    pub voice_status: String,  // "idle", "listening", "processing", "speaking"
-    pub voice_level: f64,      // simulated audio level 0.0-1.0
+    pub voice_status: String, // "idle", "listening", "processing", "speaking"
+    pub voice_level: f64,     // simulated audio level 0.0-1.0
     pub voice_transcript: Vec<String>,
-    pub voice_commands: Vec<(String, String)>,  // (command, result)
+    pub voice_commands: Vec<(String, String)>, // (command, result)
     pub voice_confidence: f64,
     pub voice_muted: bool,
     pub voice_language: String,
@@ -265,30 +267,30 @@ pub struct App<'a> {
     pub term_asst_cursor: usize,
     pub term_asst_suggestions: Vec<String>,
     pub term_asst_output: String,
-    pub term_asst_history: Vec<(String, String, String)>,  // (command, risk, explanation)
-    pub term_risk_filter: String,  // "All", "Safe", "Destructive"
+    pub term_asst_history: Vec<(String, String, String)>, // (command, risk, explanation)
+    pub term_risk_filter: String,                         // "All", "Safe", "Destructive"
 
     // Security Auditor state
     pub sec_scan_active: bool,
     pub sec_scan_path: String,
-    pub sec_scan_results: Vec<(String, String, String)>,  // (severity, category, file)
-    pub sec_scan_summary: (u32, u32, u32, u32),  // (critical, high, medium, low)
+    pub sec_scan_results: Vec<(String, String, String)>, // (severity, category, file)
+    pub sec_scan_summary: (u32, u32, u32, u32),          // (critical, high, medium, low)
     pub sec_scan_progress: f64,
     pub sec_scan_log: Vec<String>,
-    pub sec_filter_severity: String,  // "All", "Critical", "High", "Medium", "Low"
-    pub sec_sort_mode: String,  // "severity" or "category"
+    pub sec_filter_severity: String, // "All", "Critical", "High", "Medium", "Low"
+    pub sec_sort_mode: String,       // "severity" or "category"
 
     // Performance Profiler state
     pub profiler_active: bool,
     pub profiler_running: bool,
-    pub profiler_functions: Vec<(String, f64, f64, u32)>,  // (name, time_ms, mem_mb, calls)
+    pub profiler_functions: Vec<(String, f64, f64, u32)>, // (name, time_ms, mem_mb, calls)
     pub profiler_gauge_cpu: f64,
     pub profiler_gauge_mem: f64,
     pub profiler_gauge_latency: f64,
 
     // Custom Models state
     pub models_editing: bool,
-    pub models_profiles: Vec<(String, String, f64, u32, f64)>,  // (name, provider, temp, max_tokens, top_p)
+    pub models_profiles: Vec<(String, String, f64, u32, f64)>, // (name, provider, temp, max_tokens, top_p)
     pub models_selected: usize,
     pub models_test_output: String,
     pub models_saving: bool,
@@ -311,8 +313,8 @@ pub struct App<'a> {
 
     // Multi-Language state
     pub lang_active: bool,
-    pub lang_detection_results: Vec<(String, String, String)>,  // (file, language, confidence)
-    pub lang_supported: Vec<(String, String)>,  // (language, status)
+    pub lang_detection_results: Vec<(String, String, String)>, // (file, language, confidence)
+    pub lang_supported: Vec<(String, String)>,                 // (language, status)
     pub lang_translate_input: String,
     pub lang_translate_output: String,
     pub lang_translate_source: String,
@@ -343,19 +345,31 @@ impl<'a> App<'a> {
             max_depth: Some(5),
             include_hidden: false,
             excluded_dirs: vec![
-                ".git".to_string(), "node_modules".to_string(), "target".to_string(),
-                "__pycache__".to_string(), ".pytest_cache".to_string(), ".venv".to_string(),
+                ".git".to_string(),
+                "node_modules".to_string(),
+                "target".to_string(),
+                "__pycache__".to_string(),
+                ".pytest_cache".to_string(),
+                ".venv".to_string(),
             ],
         };
         let tree = scan_workspace(".", &scan_opts).unwrap_or_default();
-        let file_tree: Vec<String> = tree.into_iter().map(|f| f.path.display().to_string()).collect();
+        let file_tree: Vec<String> = tree
+            .into_iter()
+            .map(|f| f.path.display().to_string())
+            .collect();
 
         let available_models = vec![
-            "qwen2.5:7b".to_string(), "llama3.1:8b".to_string(),
-            "anthropic/claude-3.5-sonnet".to_string(), "google/gemini-1.5-pro".to_string(),
+            "qwen2.5:7b".to_string(),
+            "llama3.1:8b".to_string(),
+            "anthropic/claude-3.5-sonnet".to_string(),
+            "google/gemini-1.5-pro".to_string(),
             "openai/gpt-4o".to_string(),
         ];
-        let selected_model = available_models.iter().position(|m| m == &config.default_model).unwrap_or(0);
+        let selected_model = available_models
+            .iter()
+            .position(|m| m == &config.default_model)
+            .unwrap_or(0);
         let theme = ThemeColors::get(&config.active_theme);
 
         let mut git_status = HashMap::new();
@@ -381,7 +395,9 @@ impl<'a> App<'a> {
             .unwrap_or_else(|| "main".to_string());
 
         let mut editor = TextArea::default();
-        editor.set_line_number_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+        editor.set_line_number_style(
+            ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+        );
 
         let now = current_timestamp();
 
@@ -517,30 +533,57 @@ impl<'a> App<'a> {
         app.ollama_health_entries.insert(
             "openrouter".to_string(),
             (
-                if app.config.api_keys.openrouter_api_key.is_some() { HealthStatus::Unknown.to_string() } else { HealthStatus::Error.to_string() },
+                if app.config.api_keys.openrouter_api_key.is_some() {
+                    HealthStatus::Unknown.to_string()
+                } else {
+                    HealthStatus::Error.to_string()
+                },
                 0.0,
-                if app.config.api_keys.openrouter_api_key.is_none() { Some("API key not configured".to_string()) } else { None },
+                if app.config.api_keys.openrouter_api_key.is_none() {
+                    Some("API key not configured".to_string())
+                } else {
+                    None
+                },
             ),
         );
         app.ollama_health_entries.insert(
             "qwen".to_string(),
             (
-                if app.config.api_keys.qwen_api_key.is_some() { HealthStatus::Unknown.to_string() } else { HealthStatus::Error.to_string() },
+                if app.config.api_keys.qwen_api_key.is_some() {
+                    HealthStatus::Unknown.to_string()
+                } else {
+                    HealthStatus::Error.to_string()
+                },
                 0.0,
-                if app.config.api_keys.qwen_api_key.is_none() { Some("API key not configured".to_string()) } else { None },
+                if app.config.api_keys.qwen_api_key.is_none() {
+                    Some("API key not configured".to_string())
+                } else {
+                    None
+                },
             ),
         );
         app.ollama_health_entries.insert(
             "gemini".to_string(),
             (
-                if app.config.api_keys.google_gemini_api_key.is_some() { HealthStatus::Unknown.to_string() } else { HealthStatus::Error.to_string() },
+                if app.config.api_keys.google_gemini_api_key.is_some() {
+                    HealthStatus::Unknown.to_string()
+                } else {
+                    HealthStatus::Error.to_string()
+                },
                 0.0,
-                if app.config.api_keys.google_gemini_api_key.is_none() { Some("API key not configured".to_string()) } else { None },
+                if app.config.api_keys.google_gemini_api_key.is_none() {
+                    Some("API key not configured".to_string())
+                } else {
+                    None
+                },
             ),
         );
 
         for msg in app.memory.get_context(10) {
-            app.messages.push(UiMessage { role: msg.role.clone(), content: msg.content.clone() });
+            app.messages.push(UiMessage {
+                role: msg.role.clone(),
+                content: msg.content.clone(),
+            });
         }
         app
     }
@@ -549,8 +592,14 @@ impl<'a> App<'a> {
         match std::fs::read_to_string(path) {
             Ok(content) => {
                 let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-                self.editor = TextArea::new(if lines.is_empty() { vec![String::new()] } else { lines });
-                self.editor.set_line_number_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray));
+                self.editor = TextArea::new(if lines.is_empty() {
+                    vec![String::new()]
+                } else {
+                    lines
+                });
+                self.editor.set_line_number_style(
+                    ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+                );
                 self.opened_file = Some(path.to_string());
                 self.editor_dirty = false;
             }
@@ -603,7 +652,10 @@ impl<'a> App<'a> {
                 }
             }
         }
-        if let Ok(output) = Command::new("git").args(["branch", "--show-current"]).output() {
+        if let Ok(output) = Command::new("git")
+            .args(["branch", "--show-current"])
+            .output()
+        {
             if let Ok(s) = String::from_utf8(output.stdout) {
                 let branch = s.trim().to_string();
                 if !branch.is_empty() {
@@ -614,23 +666,38 @@ impl<'a> App<'a> {
     }
 
     pub fn submit_message(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.input.trim().is_empty() { return; }
+        if self.input.trim().is_empty() {
+            return;
+        }
         let prompt = self.input.clone();
         self.input.clear();
         self.input_cursor = 0;
 
-        self.messages.push(UiMessage { role: "user".to_string(), content: prompt.clone() });
+        self.messages.push(UiMessage {
+            role: "user".to_string(),
+            content: prompt.clone(),
+        });
         self.memory.add_message("user", &prompt, None);
         self.is_generating = true;
 
         // ByteBot interception
         if prompt.starts_with("/bytebot") {
-            let command = prompt.strip_prefix("/bytebot").unwrap_or("").trim().to_string();
+            let command = prompt
+                .strip_prefix("/bytebot")
+                .unwrap_or("")
+                .trim()
+                .to_string();
             tokio::spawn(async move {
                 let _ = tx.send(format!("⚡ ByteBot: Initializing for '{}'\n", command));
                 tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
-                for step in ["Analyzing workspace...", "Formulating plan...", "Scanning deps...",
-                             "Running tests...", "Applying changes...", "Verifying..."] {
+                for step in [
+                    "Analyzing workspace...",
+                    "Formulating plan...",
+                    "Scanning deps...",
+                    "Running tests...",
+                    "Applying changes...",
+                    "Verifying...",
+                ] {
                     let _ = tx.send(format!("  → {}\n", step));
                     tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
                 }
@@ -643,20 +710,29 @@ impl<'a> App<'a> {
         // Normal LLM generation
         let mut context_messages = Vec::new();
         for msg in self.memory.get_context(10) {
-            context_messages.push(ChatMessage { role: msg.role, content: msg.content });
+            context_messages.push(ChatMessage {
+                role: msg.role,
+                content: msg.content,
+            });
         }
 
         let mut attached_context = String::new();
         for path in &self.attached_files {
             if let Ok(content) = std::fs::read_to_string(path) {
-                attached_context.push_str(&format!("<file path=\"{}\">\n{}\n</file>\n\n", path, content));
+                attached_context.push_str(&format!(
+                    "<file path=\"{}\">\n{}\n</file>\n\n",
+                    path, content
+                ));
             }
         }
         if !attached_context.is_empty() {
-            context_messages.insert(0, ChatMessage {
-                role: "system".to_string(),
-                content: format!("Attached files:\n{}", attached_context),
-            });
+            context_messages.insert(
+                0,
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Attached files:\n{}", attached_context),
+                },
+            );
         }
 
         let model = self.config.default_model.clone();
@@ -669,9 +745,11 @@ impl<'a> App<'a> {
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
             let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
-            let _ = manager.generate_stream(&model, &context_messages, |token| {
-                let _ = tx.send(token.to_string());
-            }).await;
+            let _ = manager
+                .generate_stream(&model, &context_messages, |token| {
+                    let _ = tx.send(token.to_string());
+                })
+                .await;
             let _ = tx.send("[DONE]".to_string());
         });
     }
@@ -682,7 +760,11 @@ impl<'a> App<'a> {
             self.total_llm_calls += 1;
             if let Some(last) = self.messages.last() {
                 if last.role == "assistant" {
-                    self.memory.add_message("assistant", &last.content, Some(self.config.default_model.clone()));
+                    self.memory.add_message(
+                        "assistant",
+                        &last.content,
+                        Some(self.config.default_model.clone()),
+                    );
                 }
             }
             return;
@@ -693,19 +775,27 @@ impl<'a> App<'a> {
                 return;
             }
         }
-        self.messages.push(UiMessage { role: "assistant".to_string(), content: text.to_string() });
+        self.messages.push(UiMessage {
+            role: "assistant".to_string(),
+            content: text.to_string(),
+        });
     }
 
     pub fn append_review(&mut self, text: &str) {
-        if text == "[DONE]" { self.is_reviewing = false; }
-        else { self.code_review_output.push_str(text); }
+        if text == "[DONE]" {
+            self.is_reviewing = false;
+        } else {
+            self.code_review_output.push_str(text);
+        }
     }
 
     /// Run asynchronous health checks for all configured providers.
     /// Results are sent back through the channel for processing in the event loop.
     /// Start a Collaboration Hub session with simulated team members and sync.
     pub fn start_collab_session(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.collab_session_active { return; }
+        if self.collab_session_active {
+            return;
+        }
         self.collab_session_active = true;
         self.collab_session_id = format!("xencode-{:06x}", (current_timestamp() as u64) & 0xFFFFFF);
         self.collab_sync_status = "connecting".to_string();
@@ -714,19 +804,35 @@ impl<'a> App<'a> {
 
         // Seed initial team members
         self.collab_members = vec![
-            ("You (local)".to_string(), "online".to_string(), "🔗 LAN".to_string()),
-            ("alice".to_string(), "online".to_string(), "🌐 WAN".to_string()),
+            (
+                "You (local)".to_string(),
+                "online".to_string(),
+                "🔗 LAN".to_string(),
+            ),
+            (
+                "alice".to_string(),
+                "online".to_string(),
+                "🌐 WAN".to_string(),
+            ),
             ("bob".to_string(), "away".to_string(), "🌐 WAN".to_string()),
-            ("carol".to_string(), "busy".to_string(), "🔗 LAN".to_string()),
+            (
+                "carol".to_string(),
+                "busy".to_string(),
+                "🔗 LAN".to_string(),
+            ),
         ];
 
-        self.collab_activity_log.push("🔌 Connecting to collaboration server...".to_string());
+        self.collab_activity_log
+            .push("🔌 Connecting to collaboration server...".to_string());
 
         let session_id = self.collab_session_id.clone();
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             let _ = tx.send("[COLLAB]status:connected".to_string());
-            let _ = tx.send(format!("[COLLAB]log:🔗 Connected — Session: {}", session_id));
+            let _ = tx.send(format!(
+                "[COLLAB]log:🔗 Connected — Session: {}",
+                session_id
+            ));
             let _ = tx.send("[COLLAB]log:👥 3 remote team members online".to_string());
             let _ = tx.send("[COLLAB]member:alice:online".to_string());
             let _ = tx.send("[COLLAB]member:bob:away".to_string());
@@ -763,29 +869,41 @@ impl<'a> App<'a> {
     /// Start a ByteBot autonomous task execution.
     /// Sends step updates back through the channel.
     pub fn run_bytebot(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.bytebot_running || self.bytebot_command.trim().is_empty() { return; }
-        
+        if self.bytebot_running || self.bytebot_command.trim().is_empty() {
+            return;
+        }
+
         let command = self.bytebot_command.trim().to_string();
         self.bytebot_running = true;
         self.bytebot_progress = 0.0;
         self.bytebot_steps = vec![
             ("Analyzing workspace".to_string(), "pending".to_string()),
             ("Scanning dependencies".to_string(), "pending".to_string()),
-            ("Formulating execution plan".to_string(), "pending".to_string()),
+            (
+                "Formulating execution plan".to_string(),
+                "pending".to_string(),
+            ),
             ("Running tests".to_string(), "pending".to_string()),
             ("Applying changes".to_string(), "pending".to_string()),
             ("Verifying results".to_string(), "pending".to_string()),
         ];
         self.bytebot_log.clear();
-        self.bytebot_log.push(format!("⚡ ByteBot: Initializing for '{}'", command));
+        self.bytebot_log
+            .push(format!("⚡ ByteBot: Initializing for '{}'", command));
         self.bytebot_command.clear();
         self.bytebot_cursor = 0;
 
         tokio::spawn(async move {
             let steps = [
                 ("Analyzing workspace", "📁 Found 342 files in workspace"),
-                ("Scanning dependencies", "🔍 Identified 12 outdated packages"),
-                ("Formulating execution plan", "📋 Plan: update 5 deps, fix 3 deprecations"),
+                (
+                    "Scanning dependencies",
+                    "🔍 Identified 12 outdated packages",
+                ),
+                (
+                    "Formulating execution plan",
+                    "📋 Plan: update 5 deps, fix 3 deprecations",
+                ),
                 ("Running tests", "🧪 Running test suite (142 tests)"),
                 ("Applying changes", "🔧 Applying 8 changes across 6 files"),
                 ("Verifying results", "✅ All tests pass, changes verified"),
@@ -795,18 +913,21 @@ impl<'a> App<'a> {
                 // Mark current step as running
                 let _ = tx.send(format!("[BYTEBOT]step:{}:running:{}", i, step_name));
                 tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-                
+
                 // Send progress update
                 let progress = (i as f64 + 1.0) / steps.len() as f64;
                 let _ = tx.send(format!("[BYTEBOT]progress:{:.2}", progress));
-                
+
                 // Send log line
-                let _ = tx.send(format!("[BYTEBOT]log:{}  → {} — {}", "▸", step_name, detail));
-                
+                let _ = tx.send(format!(
+                    "[BYTEBOT]log:{}  → {} — {}",
+                    "▸", step_name, detail
+                ));
+
                 // Mark step as done
                 let _ = tx.send(format!("[BYTEBOT]step:{}:done:{}", i, step_name));
             }
-            
+
             let _ = tx.send("[BYTEBOT]log:✅ ByteBot execution complete.".to_string());
             let _ = tx.send("[BYTEBOT_DONE]".to_string());
         });
@@ -814,19 +935,31 @@ impl<'a> App<'a> {
 
     /// Start Voice Interface simulation with audio level and speech-to-text.
     pub fn start_voice_session(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.voice_active { return; }
+        if self.voice_active {
+            return;
+        }
         self.voice_active = true;
         self.voice_status = "listening".to_string();
         self.voice_transcript.clear();
         self.voice_commands.clear();
-        self.voice_transcript.push("🎤 Microphone initialized".to_string());
+        self.voice_transcript
+            .push("🎤 Microphone initialized".to_string());
 
         tokio::spawn(async move {
             let phrases = vec![
-                ("refactor user model", "✅ Model refactored — UserModel split into User + Profile"),
-                ("add validation for email", "✅ Added email validation regex to UserService"),
+                (
+                    "refactor user model",
+                    "✅ Model refactored — UserModel split into User + Profile",
+                ),
+                (
+                    "add validation for email",
+                    "✅ Added email validation regex to UserService",
+                ),
                 ("run tests", "✅ 142 tests passed, 0 failed"),
-                ("commit changes", "✅ Committed 'feat: add email validation'"),
+                (
+                    "commit changes",
+                    "✅ Committed 'feat: add email validation'",
+                ),
             ];
 
             for (cmd, result) in &phrases {
@@ -854,21 +987,46 @@ impl<'a> App<'a> {
 
     /// Start Terminal Assistant with command suggestions.
     pub fn start_terminal_assistant(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.term_asst_active { return; }
+        if self.term_asst_active {
+            return;
+        }
         self.term_asst_active = true;
         self.term_asst_suggestions.clear();
         self.term_asst_output.clear();
         self.term_asst_history.clear();
 
         tokio::spawn(async move {
-            let _ = tx.send("[TERM]output:🧠 Terminal Assistant ready — type a query and press Enter".to_string());
+            let _ = tx.send(
+                "[TERM]output:🧠 Terminal Assistant ready — type a query and press Enter"
+                    .to_string(),
+            );
 
             let suggestions = vec![
-                ("find . -name \"*.py\" | xargs grep -l \"def \"", "🔍 Safe", "Find all Python files with function definitions"),
-                ("git log --oneline --graph --all", "✅ Safe", "Visual git history graph"),
-                ("du -sh */ 2>/dev/null | sort -rh", "✅ Safe", "Show directory sizes sorted by size"),
-                ("docker system prune -af", "⚠️ Destructive", "⚠ Removes ALL unused Docker data"),
-                ("rm -rf node_modules && npm install", "⚠️ Destructive", "⚠ Deletes node_modules and reinstalls"),
+                (
+                    "find . -name \"*.py\" | xargs grep -l \"def \"",
+                    "🔍 Safe",
+                    "Find all Python files with function definitions",
+                ),
+                (
+                    "git log --oneline --graph --all",
+                    "✅ Safe",
+                    "Visual git history graph",
+                ),
+                (
+                    "du -sh */ 2>/dev/null | sort -rh",
+                    "✅ Safe",
+                    "Show directory sizes sorted by size",
+                ),
+                (
+                    "docker system prune -af",
+                    "⚠️ Destructive",
+                    "⚠ Removes ALL unused Docker data",
+                ),
+                (
+                    "rm -rf node_modules && npm install",
+                    "⚠️ Destructive",
+                    "⚠ Deletes node_modules and reinstalls",
+                ),
             ];
 
             for (cmd, risk, explanation) in &suggestions {
@@ -882,23 +1040,61 @@ impl<'a> App<'a> {
 
     /// Start Security Auditor scan simulation.
     pub fn start_security_scan(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.sec_scan_active { return; }
+        if self.sec_scan_active {
+            return;
+        }
         self.sec_scan_active = true;
         self.sec_scan_results.clear();
         self.sec_scan_summary = (0, 0, 0, 0);
         self.sec_scan_progress = 0.0;
         self.sec_scan_log.clear();
-        self.sec_scan_log.push("🔍 Starting vulnerability scan...".to_string());
+        self.sec_scan_log
+            .push("🔍 Starting vulnerability scan...".to_string());
 
         tokio::spawn(async move {
             let findings = vec![
-                ("Critical", "Hardcoded API Key", "src/config.py:42", "❌ Found hardcoded AWS_SECRET_KEY"),
-                ("High", "SQL Injection", "src/queries.py:18", "🚨 Raw SQL concatenation detected"),
-                ("High", "Command Injection", "src/deploy.py:55", "🚨 Using os.system() with user input"),
-                ("Medium", "Weak Crypto", "src/crypto.py:10", "⚠️ MD5 used for password hashing"),
-                ("Medium", "XSS Vulnerability", "src/templates/user.html:22", "⚠️ Unsafe innerHTML assignment"),
-                ("Low", "Deprecated Package", "requirements.txt:1", "📦 PyCrypto v2.6.1 is end-of-life"),
-                ("Low", "Missing Rate Limit", "src/api.py:30", "🐢 No rate limiting on /login endpoint"),
+                (
+                    "Critical",
+                    "Hardcoded API Key",
+                    "src/config.py:42",
+                    "❌ Found hardcoded AWS_SECRET_KEY",
+                ),
+                (
+                    "High",
+                    "SQL Injection",
+                    "src/queries.py:18",
+                    "🚨 Raw SQL concatenation detected",
+                ),
+                (
+                    "High",
+                    "Command Injection",
+                    "src/deploy.py:55",
+                    "🚨 Using os.system() with user input",
+                ),
+                (
+                    "Medium",
+                    "Weak Crypto",
+                    "src/crypto.py:10",
+                    "⚠️ MD5 used for password hashing",
+                ),
+                (
+                    "Medium",
+                    "XSS Vulnerability",
+                    "src/templates/user.html:22",
+                    "⚠️ Unsafe innerHTML assignment",
+                ),
+                (
+                    "Low",
+                    "Deprecated Package",
+                    "requirements.txt:1",
+                    "📦 PyCrypto v2.6.1 is end-of-life",
+                ),
+                (
+                    "Low",
+                    "Missing Rate Limit",
+                    "src/api.py:30",
+                    "🐢 No rate limiting on /login endpoint",
+                ),
             ];
 
             let total = findings.len();
@@ -906,7 +1102,10 @@ impl<'a> App<'a> {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 let progress = (i as f64 + 1.0) / total as f64;
                 let _ = tx.send(format!("[SECURITY]progress:{:.2}", progress));
-                let _ = tx.send(format!("[SECURITY]finding:{}|{}|{}|{}", severity, category, location, detail));
+                let _ = tx.send(format!(
+                    "[SECURITY]finding:{}|{}|{}|{}",
+                    severity, category, location, detail
+                ));
             }
 
             let _ = tx.send("[SECURITY]done".to_string());
@@ -915,7 +1114,9 @@ impl<'a> App<'a> {
 
     /// Start Performance Profiler simulation.
     pub fn start_profiler(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.profiler_running { return; }
+        if self.profiler_running {
+            return;
+        }
         self.profiler_active = true;
         self.profiler_running = true;
         self.profiler_functions.clear();
@@ -938,7 +1139,10 @@ impl<'a> App<'a> {
                 let _ = tx.send(format!("[PROFILER]gauge:cpu|{:.0}", cpu));
                 let _ = tx.send(format!("[PROFILER]gauge:mem|{:.0}", mem));
                 let _ = tx.send(format!("[PROFILER]gauge:latency|{:.0}", latency));
-                let _ = tx.send(format!("[PROFILER]func:{}|{}|{}|{}", name, time_ms, mem_mb, calls));
+                let _ = tx.send(format!(
+                    "[PROFILER]func:{}|{}|{}|{}",
+                    name, time_ms, mem_mb, calls
+                ));
             }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
@@ -948,14 +1152,40 @@ impl<'a> App<'a> {
 
     /// Start Custom Models session (seeds profile data).
     pub fn start_custom_models(&mut self) {
-        if self.models_editing { return; }
+        if self.models_editing {
+            return;
+        }
         self.models_editing = true;
         self.models_saving = false;
         self.models_profiles = vec![
-            ("Code Assistant".to_string(), "ollama".to_string(), 0.3, 4096, 0.9),
-            ("Creative Writer".to_string(), "openrouter".to_string(), 0.8, 2048, 0.95),
-            ("Bug Hunter".to_string(), "ollama".to_string(), 0.2, 8192, 0.8),
-            ("Code Reviewer".to_string(), "openrouter".to_string(), 0.15, 4096, 0.85),
+            (
+                "Code Assistant".to_string(),
+                "ollama".to_string(),
+                0.3,
+                4096,
+                0.9,
+            ),
+            (
+                "Creative Writer".to_string(),
+                "openrouter".to_string(),
+                0.8,
+                2048,
+                0.95,
+            ),
+            (
+                "Bug Hunter".to_string(),
+                "ollama".to_string(),
+                0.2,
+                8192,
+                0.8,
+            ),
+            (
+                "Code Reviewer".to_string(),
+                "openrouter".to_string(),
+                0.15,
+                4096,
+                0.85,
+            ),
         ];
         self.models_selected = 0;
         self.models_test_output = String::new();
@@ -963,7 +1193,9 @@ impl<'a> App<'a> {
 
     /// Start Learning Mode with lesson content.
     pub fn start_learning_mode(&mut self) {
-        if self.learn_active { return; }
+        if self.learn_active {
+            return;
+        }
         self.learn_active = true;
         self.learn_current_lesson = 1;
         self.learn_total_lessons = 5;
@@ -985,8 +1217,10 @@ impl<'a> App<'a> {
             "fn calculate_length(s: &String) -> usize {",
             "    s.len()  // s is a reference, no ownership transfer",
             "}",
-        ].join("\n");
-        self.learn_exercise = "Fix the ownership error: let s2 = s; println!(\"{}\", s);".to_string();
+        ]
+        .join("\n");
+        self.learn_exercise =
+            "Fix the ownership error: let s2 = s; println!(\"{}\", s);".to_string();
         self.learn_progress_pct = 20.0;
         // Seed quiz for lesson 1
         self.learn_quiz_active = true;
@@ -1004,14 +1238,36 @@ impl<'a> App<'a> {
 
     /// Start Multi-Language panel with detection results.
     pub fn start_multi_language(&mut self) {
-        if self.lang_active { return; }
+        if self.lang_active {
+            return;
+        }
         self.lang_active = true;
         self.lang_detection_results = vec![
-            ("src/main.rs".to_string(), "Rust".to_string(), "99.2%".to_string()),
-            ("src/app.py".to_string(), "Python".to_string(), "98.7%".to_string()),
-            ("src/components.tsx".to_string(), "TypeScript".to_string(), "97.5%".to_string()),
-            ("templates/index.html".to_string(), "HTML".to_string(), "96.8%".to_string()),
-            ("styles/main.css".to_string(), "CSS".to_string(), "95.1%".to_string()),
+            (
+                "src/main.rs".to_string(),
+                "Rust".to_string(),
+                "99.2%".to_string(),
+            ),
+            (
+                "src/app.py".to_string(),
+                "Python".to_string(),
+                "98.7%".to_string(),
+            ),
+            (
+                "src/components.tsx".to_string(),
+                "TypeScript".to_string(),
+                "97.5%".to_string(),
+            ),
+            (
+                "templates/index.html".to_string(),
+                "HTML".to_string(),
+                "96.8%".to_string(),
+            ),
+            (
+                "styles/main.css".to_string(),
+                "CSS".to_string(),
+                "95.1%".to_string(),
+            ),
         ];
         self.lang_supported = vec![
             ("Rust".to_string(), "✅".to_string()),
@@ -1026,7 +1282,9 @@ impl<'a> App<'a> {
     }
 
     pub fn run_health_check(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.health_check_in_progress { return; }
+        if self.health_check_in_progress {
+            return;
+        }
         self.health_check_in_progress = true;
 
         let ollama_url = self.config.ollama_url.clone();
@@ -1090,7 +1348,11 @@ impl<'a> App<'a> {
                         if resp.status().is_success() {
                             let _ = tx.send(format!("[HEALTH]openrouter|healthy|{}|", latency));
                         } else {
-                            let _ = tx.send(format!("[HEALTH]openrouter|error|{}|HTTP {}", latency, resp.status()));
+                            let _ = tx.send(format!(
+                                "[HEALTH]openrouter|error|{}|HTTP {}",
+                                latency,
+                                resp.status()
+                            ));
                         }
                     }
                     Err(e) => {
@@ -1143,7 +1405,11 @@ impl<'a> App<'a> {
                         if resp.status().is_success() {
                             let _ = tx.send(format!("[HEALTH]gemini|healthy|{}|", latency));
                         } else {
-                            let _ = tx.send(format!("[HEALTH]gemini|error|{}|HTTP {}", latency, resp.status()));
+                            let _ = tx.send(format!(
+                                "[HEALTH]gemini|error|{}|HTTP {}",
+                                latency,
+                                resp.status()
+                            ));
                         }
                     }
                     Err(e) => {
@@ -1158,7 +1424,9 @@ impl<'a> App<'a> {
     }
 
     pub fn submit_review(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.is_reviewing { return; }
+        if self.is_reviewing {
+            return;
+        }
         if let Some(file_path) = self.file_tree.get(self.selected_file) {
             if let Ok(content) = std::fs::read_to_string(file_path) {
                 self.is_reviewing = true;
@@ -1167,7 +1435,10 @@ impl<'a> App<'a> {
                     "Code review of {}. Identify bugs, security issues, and performance bottlenecks.\n\n```\n{}\n```",
                     file_path, content
                 );
-                let messages = vec![ChatMessage { role: "user".to_string(), content: prompt }];
+                let messages = vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: prompt,
+                }];
                 let model = self.config.default_model.clone();
                 let ollama_url = self.config.ollama_url.clone();
                 let timeout = self.config.response_timeout;
@@ -1178,9 +1449,11 @@ impl<'a> App<'a> {
                 tokio::spawn(async move {
                     let client = OllamaClient::new(&ollama_url, timeout);
                     let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
-                    let _ = manager.generate_stream(&model, &messages, |token| {
-                        let _ = tx.send(format!("[REVIEW]{}", token));
-                    }).await;
+                    let _ = manager
+                        .generate_stream(&model, &messages, |token| {
+                            let _ = tx.send(format!("[REVIEW]{}", token));
+                        })
+                        .await;
                     let _ = tx.send("[REVIEW][DONE]".to_string());
                 });
             }
@@ -1189,7 +1462,9 @@ impl<'a> App<'a> {
 }
 
 impl<'a> Default for App<'a> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
@@ -1245,7 +1520,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     if parts.len() >= 3 {
                         let name = parts[1].to_string();
                         let new_status = parts[2].to_string();
-                        if let Some(member) = app.collab_members.iter_mut().find(|(n, _, _)| n == &name) {
+                        if let Some(member) =
+                            app.collab_members.iter_mut().find(|(n, _, _)| n == &name)
+                        {
                             member.1 = new_status;
                         }
                     }
@@ -1262,12 +1539,25 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     let provider = parts[0].to_string();
                     let status = parts[1].to_string();
                     let latency = parts[2].parse::<f64>().unwrap_or(0.0);
-                    let error = if parts.len() > 3 && !parts[3].is_empty() { Some(parts[3].to_string()) } else { None };
-                    app.ollama_health_entries.insert(provider, (status.clone(), latency, error));
+                    let error = if parts.len() > 3 && !parts[3].is_empty() {
+                        Some(parts[3].to_string())
+                    } else {
+                        None
+                    };
+                    app.ollama_health_entries
+                        .insert(provider, (status.clone(), latency, error));
                     // Update average latency across all providers
                     if status == "healthy" {
-                        let total: f64 = app.ollama_health_entries.values().map(|(s, l, _)| if s == "healthy" { *l } else { 0.0 }).sum();
-                        let count = app.ollama_health_entries.values().filter(|(s, _, _)| s == "healthy").count() as f64;
+                        let total: f64 = app
+                            .ollama_health_entries
+                            .values()
+                            .map(|(s, l, _)| if s == "healthy" { *l } else { 0.0 })
+                            .sum();
+                        let count = app
+                            .ollama_health_entries
+                            .values()
+                            .filter(|(s, _, _)| s == "healthy")
+                            .count() as f64;
                         app.average_latency = if count > 0.0 { total / count } else { 0.0 };
                     }
                 }
@@ -1305,7 +1595,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         let cmd = parts.first().unwrap_or(&"").to_string();
                         let risk = parts.get(1).unwrap_or(&"").to_string();
                         let explanation = parts.get(2).unwrap_or(&"").to_string();
-                        app.term_asst_suggestions.push(format!("{}  {} — {}", risk, cmd, explanation));
+                        app.term_asst_suggestions
+                            .push(format!("{}  {} — {}", risk, cmd, explanation));
                     }
                 } else if body.starts_with("output:") {
                     if let Some(o) = body.strip_prefix("output:") {
@@ -1328,7 +1619,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             let category = parts[1].to_string();
                             let location = parts[2].to_string();
                             let detail = parts[3].to_string();
-                            app.sec_scan_results.push((severity.clone(), category.clone(), location.clone()));
+                            app.sec_scan_results.push((
+                                severity.clone(),
+                                category.clone(),
+                                location.clone(),
+                            ));
                             app.sec_scan_log.push(detail);
                             // Update summary counts
                             let (mut c, mut h, mut m, mut l) = app.sec_scan_summary;
@@ -1390,9 +1685,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     if ctrl {
                         match key.code {
                             KeyCode::Char('c') => return Ok(()),
-                            KeyCode::Char('g') => { app.refresh_git(); continue; }
+                            KeyCode::Char('g') => {
+                                app.refresh_git();
+                                continue;
+                            }
                             KeyCode::Char(',') => {
-                                app.focus = if app.focus == FocusArea::Settings { FocusArea::ChatInput } else { FocusArea::Settings };
+                                app.focus = if app.focus == FocusArea::Settings {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::Settings
+                                };
                                 continue;
                             }
                             KeyCode::Char('b') => {
@@ -1404,29 +1706,49 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 continue;
                             }
                             KeyCode::Char('d') => {
-                                app.focus = if app.focus == FocusArea::PerformanceDashboard { FocusArea::ChatInput } else { FocusArea::PerformanceDashboard };
+                                app.focus = if app.focus == FocusArea::PerformanceDashboard {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::PerformanceDashboard
+                                };
                                 continue;
                             }
                             KeyCode::Char('p') => {
-                                app.focus = if app.focus == FocusArea::ProjectAnalyzer { FocusArea::ChatInput } else { FocusArea::ProjectAnalyzer };
+                                app.focus = if app.focus == FocusArea::ProjectAnalyzer {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::ProjectAnalyzer
+                                };
                                 continue;
                             }
                             KeyCode::Char('e') => {
-                                app.focus = if app.focus == FocusArea::FileExplorer { FocusArea::ChatInput } else { FocusArea::FileExplorer };
+                                app.focus = if app.focus == FocusArea::FileExplorer {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::FileExplorer
+                                };
                                 continue;
                             }
                             KeyCode::Char('w') => {
                                 // Close current panel and return to ChatInput
                                 match app.focus {
-                                    FocusArea::ByteBotPanel | FocusArea::CollaborationHub |
-                                    FocusArea::VoiceInterface | FocusArea::TerminalAssistant |
-                                    FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
-                                    FocusArea::CustomModels | FocusArea::LearningMode |
-                                    FocusArea::MultiLanguage | FocusArea::ProviderHealth |
-                                    FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
-                                    FocusArea::GitCommit | FocusArea::CodeReview |
-                                    FocusArea::FeatureNavigator | FocusArea::ModelSelector |
-                                    FocusArea::Settings => {
+                                    FocusArea::ByteBotPanel
+                                    | FocusArea::CollaborationHub
+                                    | FocusArea::VoiceInterface
+                                    | FocusArea::TerminalAssistant
+                                    | FocusArea::SecurityAuditor
+                                    | FocusArea::PerformanceProfiler
+                                    | FocusArea::CustomModels
+                                    | FocusArea::LearningMode
+                                    | FocusArea::MultiLanguage
+                                    | FocusArea::ProviderHealth
+                                    | FocusArea::PerformanceDashboard
+                                    | FocusArea::ProjectAnalyzer
+                                    | FocusArea::GitCommit
+                                    | FocusArea::CodeReview
+                                    | FocusArea::FeatureNavigator
+                                    | FocusArea::ModelSelector
+                                    | FocusArea::Settings => {
                                         app.focus = FocusArea::ChatInput;
                                     }
                                     _ => {}
@@ -1434,7 +1756,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 continue;
                             }
                             KeyCode::Char('r') => {
-                                app.focus = if app.focus == FocusArea::CodeReview { FocusArea::ChatInput } else { FocusArea::CodeReview };
+                                app.focus = if app.focus == FocusArea::CodeReview {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::CodeReview
+                                };
                                 continue;
                             }
                             KeyCode::Char('t') => {
@@ -1451,14 +1777,22 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 continue;
                             }
                             KeyCode::Char('f') => {
-                                app.focus = if app.focus == FocusArea::FeatureNavigator { FocusArea::ChatInput } else { FocusArea::FeatureNavigator };
+                                app.focus = if app.focus == FocusArea::FeatureNavigator {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::FeatureNavigator
+                                };
                                 continue;
                             }
                             KeyCode::Char('s') => {
                                 if app.focus == FocusArea::CodeEditor {
                                     app.save_editor();
                                 } else {
-                                    app.focus = if app.focus == FocusArea::GitCommit { FocusArea::ChatInput } else { FocusArea::GitCommit };
+                                    app.focus = if app.focus == FocusArea::GitCommit {
+                                        FocusArea::ChatInput
+                                    } else {
+                                        FocusArea::GitCommit
+                                    };
                                 }
                                 continue;
                             }
@@ -1476,50 +1810,95 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     _ => FocusArea::ChatInput,
                                 };
                             }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                match app.focus {
-                                    FocusArea::Settings => {
-                                        if app.settings_cursor > 0 { app.settings_cursor -= 1; }
+                            KeyCode::Up | KeyCode::Char('k') => match app.focus {
+                                FocusArea::Settings => {
+                                    if app.settings_cursor > 0 {
+                                        app.settings_cursor -= 1;
                                     }
-                                    FocusArea::FileExplorer => { if app.selected_file > 0 { app.selected_file -= 1; } }
-                                    FocusArea::ModelSelector => { if app.selected_model > 0 { app.selected_model -= 1; } }
-                                    FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(1); }
-                                    FocusArea::FeatureNavigator => { if app.feature_nav_selected > 0 { app.feature_nav_selected -= 1; } }
-                                    FocusArea::ProviderHealth => { if app.provider_health_scroll > 0 { app.provider_health_scroll -= 1; } }
-                                    FocusArea::SecurityAuditor => { if app.security_scroll > 0 { app.security_scroll -= 1; } }
-                                    FocusArea::CodeEditor => { app.editor.scroll((-1, 0)); }
-                                    FocusArea::CustomModels => {
-                                        if app.models_selected > 0 { app.models_selected -= 1; }
-                                    }
-                                    FocusArea::ByteBotPanel => {
-                                        if !app.bytebot_running && !app.bytebot_history.is_empty() {
-                                            app.bytebot_command = app.bytebot_history.last().unwrap().clone();
-                                            app.bytebot_cursor = app.bytebot_command.len();
-                                        }
-                                    }
-                                    _ => {}
                                 }
-                            }
+                                FocusArea::FileExplorer => {
+                                    if app.selected_file > 0 {
+                                        app.selected_file -= 1;
+                                    }
+                                }
+                                FocusArea::ModelSelector => {
+                                    if app.selected_model > 0 {
+                                        app.selected_model -= 1;
+                                    }
+                                }
+                                FocusArea::ChatInput => {
+                                    app.chat_scroll = app.chat_scroll.saturating_add(1);
+                                }
+                                FocusArea::FeatureNavigator => {
+                                    if app.feature_nav_selected > 0 {
+                                        app.feature_nav_selected -= 1;
+                                    }
+                                }
+                                FocusArea::ProviderHealth => {
+                                    if app.provider_health_scroll > 0 {
+                                        app.provider_health_scroll -= 1;
+                                    }
+                                }
+                                FocusArea::SecurityAuditor => {
+                                    if app.security_scroll > 0 {
+                                        app.security_scroll -= 1;
+                                    }
+                                }
+                                FocusArea::CodeEditor => {
+                                    app.editor.scroll((-1, 0));
+                                }
+                                FocusArea::CustomModels => {
+                                    if app.models_selected > 0 {
+                                        app.models_selected -= 1;
+                                    }
+                                }
+                                FocusArea::ByteBotPanel => {
+                                    if !app.bytebot_running && !app.bytebot_history.is_empty() {
+                                        app.bytebot_command =
+                                            app.bytebot_history.last().unwrap().clone();
+                                        app.bytebot_cursor = app.bytebot_command.len();
+                                    }
+                                }
+                                _ => {}
+                            },
                             KeyCode::Down | KeyCode::Char('j') => {
                                 match app.focus {
                                     FocusArea::Settings => {
-                                        if app.settings_cursor + 1 < 8 { app.settings_cursor += 1; }
+                                        if app.settings_cursor + 1 < 8 {
+                                            app.settings_cursor += 1;
+                                        }
                                     }
                                     FocusArea::FileExplorer => {
-                                        if app.selected_file + 1 < app.file_tree.len() { app.selected_file += 1; }
+                                        if app.selected_file + 1 < app.file_tree.len() {
+                                            app.selected_file += 1;
+                                        }
                                     }
                                     FocusArea::ModelSelector => {
-                                        if app.selected_model + 1 < app.available_models.len() { app.selected_model += 1; }
+                                        if app.selected_model + 1 < app.available_models.len() {
+                                            app.selected_model += 1;
+                                        }
                                     }
-                                    FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_sub(1); }
+                                    FocusArea::ChatInput => {
+                                        app.chat_scroll = app.chat_scroll.saturating_sub(1);
+                                    }
                                     FocusArea::FeatureNavigator => {
-                                        if app.feature_nav_selected + 1 < FEATURE_LIST.len() { app.feature_nav_selected += 1; }
+                                        if app.feature_nav_selected + 1 < FEATURE_LIST.len() {
+                                            app.feature_nav_selected += 1;
+                                        }
                                     }
-                                    FocusArea::ProviderHealth => { app.provider_health_scroll += 1; }
-                                    FocusArea::SecurityAuditor => { app.security_scroll += 1; }
-                                    FocusArea::CodeEditor => { app.editor.scroll((1, 0)); }
+                                    FocusArea::ProviderHealth => {
+                                        app.provider_health_scroll += 1;
+                                    }
+                                    FocusArea::SecurityAuditor => {
+                                        app.security_scroll += 1;
+                                    }
+                                    FocusArea::CodeEditor => {
+                                        app.editor.scroll((1, 0));
+                                    }
                                     FocusArea::CustomModels => {
-                                        if app.models_selected + 1 < app.models_profiles.len() { app.models_selected += 1; }
+                                        if app.models_selected + 1 < app.models_profiles.len() {
+                                            app.models_selected += 1;
+                                        }
                                     }
                                     FocusArea::ByteBotPanel => {
                                         // Down in ByteBot - no-op
@@ -1530,25 +1909,33 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Enter => {
                                 match app.focus {
                                     FocusArea::FileExplorer => {
-                                        if let Some(fp) = app.file_tree.get(app.selected_file).cloned() {
+                                        if let Some(fp) =
+                                            app.file_tree.get(app.selected_file).cloned()
+                                        {
                                             app.open_file_in_editor(&fp);
                                         }
                                     }
                                     FocusArea::ModelSelector => {
-                                        if let Some(model) = app.available_models.get(app.selected_model) {
+                                        if let Some(model) =
+                                            app.available_models.get(app.selected_model)
+                                        {
                                             app.config.default_model = model.clone();
                                             let _ = app.config.save();
                                             app.focus = FocusArea::ChatInput;
                                         }
                                     }
                                     FocusArea::CodeReview => {
-                                        if !app.is_reviewing { app.submit_review(tx.clone()); }
+                                        if !app.is_reviewing {
+                                            app.submit_review(tx.clone());
+                                        }
                                     }
                                     FocusArea::GitCommit => {
                                         if !app.commit_message.trim().is_empty() {
                                             // Execute git commit async or blockingly
                                             let msg = app.commit_message.clone();
-                                            let _ = Command::new("git").args(["commit", "-am", &msg]).output();
+                                            let _ = Command::new("git")
+                                                .args(["commit", "-am", &msg])
+                                                .output();
                                             app.commit_message.clear();
                                             app.commit_cursor = 0;
                                             app.refresh_git();
@@ -1559,7 +1946,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         if !app.bytebot_running {
                                             // ↑ recalls last command from history
                                             if !app.bytebot_history.is_empty() {
-                                                app.bytebot_command = app.bytebot_history.last().unwrap().clone();
+                                                app.bytebot_command =
+                                                    app.bytebot_history.last().unwrap().clone();
                                                 app.bytebot_cursor = app.bytebot_command.len();
                                             }
                                         }
@@ -1597,13 +1985,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::LearningMode => {
                                         if !app.learn_active {
                                             app.start_learning_mode();
-                                        } else if app.learn_quiz_active && !app.learn_quiz_answered {
+                                        } else if app.learn_quiz_active && !app.learn_quiz_answered
+                                        {
                                             // Check quiz answer
                                             app.learn_quiz_answered = true;
                                             // Simple check: first option is correct
                                             app.learn_quiz_correct = app.learn_quiz_selected == 0;
                                             if app.learn_quiz_correct {
-                                                app.learn_progress_pct = (app.learn_progress_pct + 20.0).min(100.0);
+                                                app.learn_progress_pct =
+                                                    (app.learn_progress_pct + 20.0).min(100.0);
                                             }
                                         }
                                     }
@@ -1648,25 +2038,31 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 if app.focus == FocusArea::FileExplorer {
                                     if let Some(fp) = app.file_tree.get(app.selected_file) {
                                         let fp = fp.clone();
-                                        if app.attached_files.contains(&fp) { app.attached_files.remove(&fp); }
-                                        else { app.attached_files.insert(fp); }
+                                        if app.attached_files.contains(&fp) {
+                                            app.attached_files.remove(&fp);
+                                        } else {
+                                            app.attached_files.insert(fp);
+                                        }
                                     }
                                 } else if app.focus == FocusArea::SecurityAuditor {
                                     // Cycle severity filter
-                                    app.sec_filter_severity = match app.sec_filter_severity.as_str() {
-                                        "All" => "Critical",
-                                        "Critical" => "High",
-                                        "High" => "Medium",
-                                        "Medium" => "Low",
-                                        _ => "All",
-                                    }.to_string();
+                                    app.sec_filter_severity =
+                                        match app.sec_filter_severity.as_str() {
+                                            "All" => "Critical",
+                                            "Critical" => "High",
+                                            "High" => "Medium",
+                                            "Medium" => "Low",
+                                            _ => "All",
+                                        }
+                                        .to_string();
                                 } else if app.focus == FocusArea::TerminalAssistant {
                                     // Cycle risk filter
                                     app.term_risk_filter = match app.term_risk_filter.as_str() {
                                         "All" => "Safe",
                                         "Safe" => "Destructive",
                                         _ => "All",
-                                    }.to_string();
+                                    }
+                                    .to_string();
                                 } else if app.focus == FocusArea::VoiceInterface {
                                     // Toggle mute
                                     app.voice_muted = !app.voice_muted;
@@ -1677,32 +2073,45 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.focus = FocusArea::ChatInput;
                             }
                             KeyCode::Char('m') => {
-                                app.focus = if app.focus == FocusArea::ModelSelector { FocusArea::ChatInput } else { FocusArea::ModelSelector };
+                                app.focus = if app.focus == FocusArea::ModelSelector {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::ModelSelector
+                                };
                             }
                             KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Esc => {
-                                match app.focus {
-                                    FocusArea::Settings => {
-                                        if app.settings_url_editing {
-                                            app.settings_url_editing = false;
-                                        } else {
-                                            app.settings_reset_active = false;
-                                            app.focus = FocusArea::ChatInput;
-                                        }
-                                    }
-                                    FocusArea::ModelSelector | FocusArea::CodeReview |
-                                    FocusArea::PerformanceDashboard | FocusArea::ProviderHealth | FocusArea::ProjectAnalyzer | FocusArea::GitCommit |
-                                    FocusArea::FeatureNavigator | FocusArea::ByteBotPanel | FocusArea::CollaborationHub |
-                                    FocusArea::VoiceInterface | FocusArea::TerminalAssistant | FocusArea::SecurityAuditor |
-                                    FocusArea::PerformanceProfiler | FocusArea::CustomModels | FocusArea::LearningMode | FocusArea::MultiLanguage => {
+                            KeyCode::Esc => match app.focus {
+                                FocusArea::Settings => {
+                                    if app.settings_url_editing {
+                                        app.settings_url_editing = false;
+                                    } else {
+                                        app.settings_reset_active = false;
                                         app.focus = FocusArea::ChatInput;
                                     }
-                                    FocusArea::CodeEditor => {
-                                        app.input_mode = InputMode::Normal;
-                                    }
-                                    _ => {}
                                 }
-                            }
+                                FocusArea::ModelSelector
+                                | FocusArea::CodeReview
+                                | FocusArea::PerformanceDashboard
+                                | FocusArea::ProviderHealth
+                                | FocusArea::ProjectAnalyzer
+                                | FocusArea::GitCommit
+                                | FocusArea::FeatureNavigator
+                                | FocusArea::ByteBotPanel
+                                | FocusArea::CollaborationHub
+                                | FocusArea::VoiceInterface
+                                | FocusArea::TerminalAssistant
+                                | FocusArea::SecurityAuditor
+                                | FocusArea::PerformanceProfiler
+                                | FocusArea::CustomModels
+                                | FocusArea::LearningMode
+                                | FocusArea::MultiLanguage => {
+                                    app.focus = FocusArea::ChatInput;
+                                }
+                                FocusArea::CodeEditor => {
+                                    app.input_mode = InputMode::Normal;
+                                }
+                                _ => {}
+                            },
                             KeyCode::Char(c) => {
                                 if app.focus == FocusArea::Settings && app.settings_url_editing {
                                     app.settings_url_buffer.insert(app.settings_url_cursor, c);
@@ -1715,11 +2124,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     app.bytebot_cursor += 1;
                                 } else if c == 's' && app.focus == FocusArea::SecurityAuditor {
                                     // Toggle sort mode
-                                    app.sec_sort_mode = if app.sec_sort_mode == "severity" { "category".to_string() } else { "severity".to_string() };
+                                    app.sec_sort_mode = if app.sec_sort_mode == "severity" {
+                                        "category".to_string()
+                                    } else {
+                                        "severity".to_string()
+                                    };
                                 } else if c == 'm' && app.focus == FocusArea::VoiceInterface {
                                     // Toggle mute
                                     app.voice_muted = !app.voice_muted;
-                                } else if c == 's' && app.focus == FocusArea::CustomModels && app.models_editing {
+                                } else if c == 's'
+                                    && app.focus == FocusArea::CustomModels
+                                    && app.models_editing
+                                {
                                     // Save profile
                                     app.models_saving = true;
                                     app.models_test_output = "Profile saved!".to_string();
@@ -1728,39 +2144,80 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 }
                             }
                             KeyCode::Backspace => {
-                                if app.focus == FocusArea::Settings && app.settings_url_editing && app.settings_url_cursor > 0 {
+                                if app.focus == FocusArea::Settings
+                                    && app.settings_url_editing
+                                    && app.settings_url_cursor > 0
+                                {
                                     app.settings_url_cursor -= 1;
                                     app.settings_url_buffer.remove(app.settings_url_cursor);
-                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 {
+                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0
+                                {
                                     app.commit_cursor -= 1;
                                     app.commit_message.remove(app.commit_cursor);
-                                } else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor > 0 {
+                                } else if app.focus == FocusArea::ByteBotPanel
+                                    && app.bytebot_cursor > 0
+                                {
                                     app.bytebot_cursor -= 1;
                                     app.bytebot_command.remove(app.bytebot_cursor);
                                 }
                             }
                             KeyCode::Left => {
                                 if app.focus == FocusArea::Settings {
-                                    if app.settings_url_editing && app.settings_cursor == 7 && app.settings_url_cursor > 0 {
+                                    if app.settings_url_editing
+                                        && app.settings_cursor == 7
+                                        && app.settings_url_cursor > 0
+                                    {
                                         app.settings_url_cursor -= 1;
                                     } else if !app.settings_url_editing {
                                         match app.settings_cursor {
                                             0 => {
-                                                let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
-                                                if let Some(pos) = themes.iter().position(|t| *t == app.config.active_theme) {
-                                                    app.config.active_theme = themes[(pos + themes.len() - 1) % themes.len()].to_string();
-                                                    app.theme = ThemeColors::get(&app.config.active_theme);
+                                                let themes = [
+                                                    "ocean",
+                                                    "midnight",
+                                                    "forest",
+                                                    "terminal",
+                                                    "dracula",
+                                                    "solarized",
+                                                    "nord",
+                                                ];
+                                                if let Some(pos) = themes
+                                                    .iter()
+                                                    .position(|t| *t == app.config.active_theme)
+                                                {
+                                                    app.config.active_theme = themes
+                                                        [(pos + themes.len() - 1) % themes.len()]
+                                                    .to_string();
+                                                    app.theme =
+                                                        ThemeColors::get(&app.config.active_theme);
                                                 }
                                             }
-                                            1 => app.config.cache_enabled = !app.config.cache_enabled,
-                                            2 => app.config.memory_enabled = !app.config.memory_enabled,
-                                            3 => { if app.config.max_cache_size >= 20 { app.config.max_cache_size -= 10; } }
-                                            4 => { if app.config.max_memory_items >= 10 { app.config.max_memory_items -= 5; } }
-                                            5 => { if app.config.response_timeout >= 10 { app.config.response_timeout -= 5; } }
+                                            1 => {
+                                                app.config.cache_enabled = !app.config.cache_enabled
+                                            }
+                                            2 => {
+                                                app.config.memory_enabled =
+                                                    !app.config.memory_enabled
+                                            }
+                                            3 => {
+                                                if app.config.max_cache_size >= 20 {
+                                                    app.config.max_cache_size -= 10;
+                                                }
+                                            }
+                                            4 => {
+                                                if app.config.max_memory_items >= 10 {
+                                                    app.config.max_memory_items -= 5;
+                                                }
+                                            }
+                                            5 => {
+                                                if app.config.response_timeout >= 10 {
+                                                    app.config.response_timeout -= 5;
+                                                }
+                                            }
                                             7 => {
                                                 let defaults = XencodeConfig::default();
                                                 app.config = defaults;
-                                                app.theme = ThemeColors::get(&app.config.active_theme);
+                                                app.theme =
+                                                    ThemeColors::get(&app.config.active_theme);
                                                 app.settings_reset_active = true;
                                                 app.settings_url_editing = false;
                                                 app.settings_url_buffer.clear();
@@ -1768,37 +2225,89 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             _ => {}
                                         }
                                     }
-                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0 { app.commit_cursor -= 1; }
-                                else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor > 0 { app.bytebot_cursor -= 1; }
-                                else if app.focus == FocusArea::LearningMode && app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected > 0 {
+                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0
+                                {
+                                    app.commit_cursor -= 1;
+                                } else if app.focus == FocusArea::ByteBotPanel
+                                    && app.bytebot_cursor > 0
+                                {
+                                    app.bytebot_cursor -= 1;
+                                } else if app.focus == FocusArea::LearningMode
+                                    && app.learn_quiz_active
+                                    && !app.learn_quiz_answered
+                                    && app.learn_quiz_selected > 0
+                                {
                                     app.learn_quiz_selected -= 1;
-                                }
-                                else if app.focus == FocusArea::CustomModels && app.models_editing && app.models_selected > 0 {
+                                } else if app.focus == FocusArea::CustomModels
+                                    && app.models_editing
+                                    && app.models_selected > 0
+                                {
                                     app.models_selected -= 1;
                                 }
                             }
                             KeyCode::Right => {
                                 if app.focus == FocusArea::Settings {
-                                    if app.settings_url_editing && app.settings_cursor == 7 && app.settings_url_cursor < app.settings_url_buffer.len() {
+                                    if app.settings_url_editing
+                                        && app.settings_cursor == 7
+                                        && app.settings_url_cursor < app.settings_url_buffer.len()
+                                    {
                                         app.settings_url_cursor += 1;
                                     } else if !app.settings_url_editing {
                                         match app.settings_cursor {
                                             0 => {
-                                                let themes = ["ocean", "midnight", "forest", "terminal", "dracula", "solarized", "nord"];
-                                                if let Some(pos) = themes.iter().position(|t| *t == app.config.active_theme) {
-                                                    app.config.active_theme = themes[(pos + 1) % themes.len()].to_string();
-                                                    app.theme = ThemeColors::get(&app.config.active_theme);
+                                                let themes = [
+                                                    "ocean",
+                                                    "midnight",
+                                                    "forest",
+                                                    "terminal",
+                                                    "dracula",
+                                                    "solarized",
+                                                    "nord",
+                                                ];
+                                                if let Some(pos) = themes
+                                                    .iter()
+                                                    .position(|t| *t == app.config.active_theme)
+                                                {
+                                                    app.config.active_theme = themes
+                                                        [(pos + 1) % themes.len()]
+                                                    .to_string();
+                                                    app.theme =
+                                                        ThemeColors::get(&app.config.active_theme);
                                                 }
                                             }
-                                            1 => app.config.cache_enabled = !app.config.cache_enabled,
-                                            2 => app.config.memory_enabled = !app.config.memory_enabled,
-                                            3 => app.config.max_cache_size = app.config.max_cache_size.saturating_add(10).min(1000),
-                                            4 => app.config.max_memory_items = app.config.max_memory_items.saturating_add(5).min(500),
-                                            5 => app.config.response_timeout = app.config.response_timeout.saturating_add(5).min(300),
+                                            1 => {
+                                                app.config.cache_enabled = !app.config.cache_enabled
+                                            }
+                                            2 => {
+                                                app.config.memory_enabled =
+                                                    !app.config.memory_enabled
+                                            }
+                                            3 => {
+                                                app.config.max_cache_size = app
+                                                    .config
+                                                    .max_cache_size
+                                                    .saturating_add(10)
+                                                    .min(1000)
+                                            }
+                                            4 => {
+                                                app.config.max_memory_items = app
+                                                    .config
+                                                    .max_memory_items
+                                                    .saturating_add(5)
+                                                    .min(500)
+                                            }
+                                            5 => {
+                                                app.config.response_timeout = app
+                                                    .config
+                                                    .response_timeout
+                                                    .saturating_add(5)
+                                                    .min(300)
+                                            }
                                             7 => {
                                                 let defaults = XencodeConfig::default();
                                                 app.config = defaults;
-                                                app.theme = ThemeColors::get(&app.config.active_theme);
+                                                app.theme =
+                                                    ThemeColors::get(&app.config.active_theme);
                                                 app.settings_reset_active = true;
                                                 app.settings_url_editing = false;
                                                 app.settings_url_buffer.clear();
@@ -1806,12 +2315,24 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             _ => {}
                                         }
                                     }
-                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor < app.commit_message.len() { app.commit_cursor += 1; }
-                                else if app.focus == FocusArea::ByteBotPanel && app.bytebot_cursor < app.bytebot_command.len() { app.bytebot_cursor += 1; }
-                                else if app.focus == FocusArea::LearningMode && app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected + 1 < app.learn_quiz_options.len() {
+                                } else if app.focus == FocusArea::GitCommit
+                                    && app.commit_cursor < app.commit_message.len()
+                                {
+                                    app.commit_cursor += 1;
+                                } else if app.focus == FocusArea::ByteBotPanel
+                                    && app.bytebot_cursor < app.bytebot_command.len()
+                                {
+                                    app.bytebot_cursor += 1;
+                                } else if app.focus == FocusArea::LearningMode
+                                    && app.learn_quiz_active
+                                    && !app.learn_quiz_answered
+                                    && app.learn_quiz_selected + 1 < app.learn_quiz_options.len()
+                                {
                                     app.learn_quiz_selected += 1;
-                                }
-                                else if app.focus == FocusArea::CustomModels && app.models_editing && app.models_selected + 1 < app.models_profiles.len() {
+                                } else if app.focus == FocusArea::CustomModels
+                                    && app.models_editing
+                                    && app.models_selected + 1 < app.models_profiles.len()
+                                {
                                     app.models_selected += 1;
                                 }
                             }
@@ -1821,7 +2342,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             // If editor is focused, forward input to textarea
                             if app.focus == FocusArea::CodeEditor {
                                 match key.code {
-                                    KeyCode::Esc => { app.input_mode = InputMode::Normal; }
+                                    KeyCode::Esc => {
+                                        app.input_mode = InputMode::Normal;
+                                    }
                                     _ => {
                                         app.editor.input(key);
                                         app.editor_dirty = true;
@@ -1830,113 +2353,149 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             } else {
                                 // Normal chat input editing
                                 match key.code {
-                            KeyCode::Enter => {
-                                if !app.is_generating {
-                                    app.submit_message(tx.clone());
-                                    app.chat_scroll = 0;
+                                    KeyCode::Enter => {
+                                        if !app.is_generating {
+                                            app.submit_message(tx.clone());
+                                            app.chat_scroll = 0;
+                                        }
+                                    }
+                                    KeyCode::Char(c) => {
+                                        app.input.insert(app.input_cursor, c);
+                                        app.input_cursor += 1;
+                                    }
+                                    KeyCode::Backspace => {
+                                        if app.input_cursor > 0 {
+                                            app.input_cursor -= 1;
+                                            app.input.remove(app.input_cursor);
+                                        }
+                                    }
+                                    KeyCode::Delete => {
+                                        if app.input_cursor < app.input.len() {
+                                            app.input.remove(app.input_cursor);
+                                        }
+                                    }
+                                    KeyCode::Left => {
+                                        if app.input_cursor > 0 {
+                                            app.input_cursor -= 1;
+                                        }
+                                    }
+                                    KeyCode::Right => {
+                                        if app.input_cursor < app.input.len() {
+                                            app.input_cursor += 1;
+                                        }
+                                    }
+                                    KeyCode::Home => {
+                                        app.input_cursor = 0;
+                                    }
+                                    KeyCode::End => {
+                                        app.input_cursor = app.input.len();
+                                    }
+                                    KeyCode::Esc => {
+                                        app.input_mode = InputMode::Normal;
+                                    }
+                                    KeyCode::Tab => {
+                                        app.input.insert_str(app.input_cursor, "    ");
+                                        app.input_cursor += 4;
+                                    }
+                                    _ => {}
                                 }
                             }
-                            KeyCode::Char(c) => {
-                                app.input.insert(app.input_cursor, c);
-                                app.input_cursor += 1;
-                            }
-                            KeyCode::Backspace => {
-                                if app.input_cursor > 0 {
-                                    app.input_cursor -= 1;
-                                    app.input.remove(app.input_cursor);
-                                }
-                            }
-                            KeyCode::Delete => {
-                                if app.input_cursor < app.input.len() {
-                                    app.input.remove(app.input_cursor);
-                                }
-                            }
-                            KeyCode::Left => {
-                                if app.input_cursor > 0 { app.input_cursor -= 1; }
-                            }
-                            KeyCode::Right => {
-                                if app.input_cursor < app.input.len() { app.input_cursor += 1; }
-                            }
-                            KeyCode::Home => { app.input_cursor = 0; }
-                            KeyCode::End => { app.input_cursor = app.input.len(); }
-                            KeyCode::Esc => { app.input_mode = InputMode::Normal; }
-                            KeyCode::Tab => {
-                                app.input.insert_str(app.input_cursor, "    ");
-                                app.input_cursor += 4;
-                            }
-                            _ => {}
-                                }
-                            }
-                        },
+                        }
                     }
                 }
-                Event::Mouse(mouse) => {
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            match app.focus {
-                                FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_add(3); }
-                                FocusArea::CodeEditor => { app.editor.scroll((-3, 0)); }
-                                FocusArea::FileExplorer => {
-                                    if app.selected_file >= 3 { app.selected_file -= 3; }
-                                    else { app.selected_file = 0; }
-                                }
-                                FocusArea::FeatureNavigator => {
-                                    if app.feature_nav_selected >= 3 { app.feature_nav_selected -= 3; }
-                                    else { app.feature_nav_selected = 0; }
-                                }
-                                FocusArea::ProviderHealth => {
-                                    if app.provider_health_scroll >= 3 { app.provider_health_scroll -= 3; }
-                                    else { app.provider_health_scroll = 0; }
-                                }
-                                FocusArea::SecurityAuditor => {
-                                    if app.security_scroll >= 3 { app.security_scroll -= 3; }
-                                    else { app.security_scroll = 0; }
-                                }
-                                _ => {}
-                            }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => match app.focus {
+                        FocusArea::ChatInput => {
+                            app.chat_scroll = app.chat_scroll.saturating_add(3);
                         }
-                        MouseEventKind::ScrollDown => {
-                            match app.focus {
-                                FocusArea::ChatInput => { app.chat_scroll = app.chat_scroll.saturating_sub(3); }
-                                FocusArea::CodeEditor => { app.editor.scroll((3, 0)); }
-                                FocusArea::FileExplorer => {
-                                    app.selected_file = (app.selected_file + 3).min(app.file_tree.len().saturating_sub(1));
-                                }
-                                FocusArea::FeatureNavigator => {
-                                    app.feature_nav_selected = (app.feature_nav_selected + 3).min(FEATURE_LIST.len().saturating_sub(1));
-                                }
-                                FocusArea::ProviderHealth => { app.provider_health_scroll += 3; }
-                                FocusArea::SecurityAuditor => { app.security_scroll += 3; }
-                                _ => {}
-                            }
+                        FocusArea::CodeEditor => {
+                            app.editor.scroll((-3, 0));
                         }
-                        MouseEventKind::Down(MouseButton::Left) => {
-                            let term_width = terminal.size()?.width;
-                            let left_pane = term_width * 20 / 100;
-                            let center_pane = term_width * 70 / 100;
-                            
-                            if mouse.column < left_pane {
-                                app.focus = FocusArea::FileExplorer;
-                                let row = mouse.row.saturating_sub(2) as usize;
-                                if row < app.file_tree.len() {
-                                    app.selected_file = row;
-                                }
-                            } else if mouse.column < center_pane {
-                                app.focus = FocusArea::CodeEditor;
+                        FocusArea::FileExplorer => {
+                            if app.selected_file >= 3 {
+                                app.selected_file -= 3;
                             } else {
-                                app.focus = FocusArea::ChatInput;
+                                app.selected_file = 0;
+                            }
+                        }
+                        FocusArea::FeatureNavigator => {
+                            if app.feature_nav_selected >= 3 {
+                                app.feature_nav_selected -= 3;
+                            } else {
+                                app.feature_nav_selected = 0;
+                            }
+                        }
+                        FocusArea::ProviderHealth => {
+                            if app.provider_health_scroll >= 3 {
+                                app.provider_health_scroll -= 3;
+                            } else {
+                                app.provider_health_scroll = 0;
+                            }
+                        }
+                        FocusArea::SecurityAuditor => {
+                            if app.security_scroll >= 3 {
+                                app.security_scroll -= 3;
+                            } else {
+                                app.security_scroll = 0;
                             }
                         }
                         _ => {}
+                    },
+                    MouseEventKind::ScrollDown => match app.focus {
+                        FocusArea::ChatInput => {
+                            app.chat_scroll = app.chat_scroll.saturating_sub(3);
+                        }
+                        FocusArea::CodeEditor => {
+                            app.editor.scroll((3, 0));
+                        }
+                        FocusArea::FileExplorer => {
+                            app.selected_file =
+                                (app.selected_file + 3).min(app.file_tree.len().saturating_sub(1));
+                        }
+                        FocusArea::FeatureNavigator => {
+                            app.feature_nav_selected = (app.feature_nav_selected + 3)
+                                .min(FEATURE_LIST.len().saturating_sub(1));
+                        }
+                        FocusArea::ProviderHealth => {
+                            app.provider_health_scroll += 3;
+                        }
+                        FocusArea::SecurityAuditor => {
+                            app.security_scroll += 3;
+                        }
+                        _ => {}
+                    },
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        let term_width = terminal.size()?.width;
+                        let left_pane = term_width * 20 / 100;
+                        let center_pane = term_width * 70 / 100;
+
+                        if mouse.column < left_pane {
+                            app.focus = FocusArea::FileExplorer;
+                            let row = mouse.row.saturating_sub(2) as usize;
+                            if row < app.file_tree.len() {
+                                app.selected_file = row;
+                            }
+                        } else if mouse.column < center_pane {
+                            app.focus = FocusArea::CodeEditor;
+                        } else {
+                            app.focus = FocusArea::ChatInput;
+                        }
                     }
-                }
+                    _ => {}
+                },
                 Event::Resize(_, _) => {}
                 _ => {}
             }
         } else {
-            if app.is_generating || app.is_reviewing || app.health_check_in_progress
-                || app.bytebot_running || app.voice_active || app.collab_sync_status == "syncing"
-                || app.sec_scan_active || app.profiler_running {
+            if app.is_generating
+                || app.is_reviewing
+                || app.health_check_in_progress
+                || app.bytebot_running
+                || app.voice_active
+                || app.collab_sync_status == "syncing"
+                || app.sec_scan_active
+                || app.profiler_running
+            {
                 app.spinner_tick = app.spinner_tick.wrapping_add(1);
             }
         }

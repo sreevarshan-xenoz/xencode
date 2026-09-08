@@ -396,10 +396,7 @@ mod tests {
             stats: CacheStats::default(),
         };
         cache2.load_from_disk().unwrap();
-        assert_eq!(
-            cache2.get("prompt", "model"),
-            Some("response".to_string())
-        );
+        assert_eq!(cache2.get("prompt", "model"), Some("response".to_string()));
 
         fs::remove_dir_all(&dir).unwrap();
     }

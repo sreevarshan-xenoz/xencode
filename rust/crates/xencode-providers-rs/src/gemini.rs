@@ -94,7 +94,11 @@ impl GeminiProvider {
                     system_buffer.push_str(&msg.content);
                 }
                 "user" | "assistant" => {
-                    let gemini_role = if msg.role == "assistant" { "model" } else { "user" };
+                    let gemini_role = if msg.role == "assistant" {
+                        "model"
+                    } else {
+                        "user"
+                    };
                     let mut text = msg.content.clone();
 
                     // Prepend accumulated system messages to the first user message
@@ -120,10 +124,13 @@ impl GeminiProvider {
 
         // If there's leftover system content with no user message, create one
         if !system_buffer.is_empty() {
-            contents.insert(0, serde_json::json!({
-                "role": "user",
-                "parts": [{"text": system_buffer}]
-            }));
+            contents.insert(
+                0,
+                serde_json::json!({
+                    "role": "user",
+                    "parts": [{"text": system_buffer}]
+                }),
+            );
         }
 
         contents
@@ -175,7 +182,8 @@ impl GeminiProvider {
         );
         let payload = Self::build_payload(messages, max_tokens, temperature);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&payload)
@@ -239,7 +247,8 @@ impl GeminiProvider {
         );
         let payload = Self::build_payload(messages, max_tokens, temperature);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Content-Type", "application/json")
             .json(&payload)
@@ -304,7 +313,10 @@ mod tests {
     #[test]
     fn provider_creation() {
         let provider = GeminiProvider::new("AIza-test-123".to_string(), None);
-        assert_eq!(provider.base_url, "https://generativelanguage.googleapis.com/v1beta");
+        assert_eq!(
+            provider.base_url,
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
     }
 
     #[test]
@@ -319,8 +331,14 @@ mod tests {
     #[test]
     fn convert_messages_simple() {
         let messages = vec![
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
-            ChatMessage { role: "assistant".to_string(), content: "Hi there".to_string() },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "Hi there".to_string(),
+            },
         ];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 2);
@@ -333,8 +351,14 @@ mod tests {
     #[test]
     fn convert_messages_with_system() {
         let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "You are a helpful assistant.".to_string() },
-            ChatMessage { role: "user".to_string(), content: "Hello".to_string() },
+            ChatMessage {
+                role: "system".to_string(),
+                content: "You are a helpful assistant.".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+            },
         ];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 1);
@@ -347,9 +371,10 @@ mod tests {
 
     #[test]
     fn convert_messages_system_only() {
-        let messages = vec![
-            ChatMessage { role: "system".to_string(), content: "Be concise.".to_string() },
-        ];
+        let messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: "Be concise.".to_string(),
+        }];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 1);
         assert_eq!(contents[0]["role"], "user");
@@ -358,9 +383,10 @@ mod tests {
 
     #[test]
     fn convert_messages_unknown_role() {
-        let messages = vec![
-            ChatMessage { role: "unknown".to_string(), content: "test".to_string() },
-        ];
+        let messages = vec![ChatMessage {
+            role: "unknown".to_string(),
+            content: "test".to_string(),
+        }];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 1);
         assert_eq!(contents[0]["role"], "user");
