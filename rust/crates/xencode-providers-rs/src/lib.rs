@@ -1,10 +1,11 @@
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, OllamaClient};
+use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, OllamaClient};
 
 pub mod anthropic;
 pub mod gemini;
@@ -44,6 +45,23 @@ struct OllamaResponse {
     done: bool,
 }
 
+/// Extract the inner model identifier if `model` routes to the llama.cpp
+/// provider (prefixes `llamacpp:`, `llama.cpp:`, or `llama:`).
+///
+/// Returns `None` when the model does not target llama.cpp.
+fn llamacpp_target(model: &str) -> Option<&str> {
+    model
+        .strip_prefix("llamacpp:")
+        .or_else(|| model.strip_prefix("llama.cpp:"))
+        .or_else(|| {
+            if model.starts_with("llama:") {
+                model.strip_prefix("llama:")
+            } else {
+                None
+            }
+        })
+}
+
 /// ProviderManager abstracts over local and cloud models.
 ///
 /// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud), Gemini (cloud),
@@ -62,6 +80,8 @@ pub struct ProviderManager {
     anthropic_api_key: Option<String>,
     retry_config: RetryConfig,
     client: reqwest::Client,
+    /// Most recent llama.cpp generation timing (tokens + tok/s), if any.
+    llamacpp_timings: Mutex<Option<LlamaCppTimings>>,
 }
 
 impl ProviderManager {
@@ -82,6 +102,7 @@ impl ProviderManager {
             anthropic_api_key,
             retry_config: RetryConfig::default(),
             client,
+            llamacpp_timings: Mutex::new(None),
         }
     }
 
@@ -108,6 +129,7 @@ impl ProviderManager {
     /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
+    /// - `llamacpp:` / `llama.cpp:` / `llama:` → llama.cpp server
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
     ///
@@ -117,13 +139,34 @@ impl ProviderManager {
         model: &str,
         messages: &[ChatMessage],
     ) -> Result<String, ProviderError> {
+        self.generate_with_options(model, messages, None).await
+    }
+
+    /// [`generate`][Self::generate] with explicit llama.cpp sampling options.
+    pub async fn generate_with_options(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
+    ) -> Result<String, ProviderError> {
         let model_owned = model.to_string();
         let messages_owned = messages.to_vec();
 
         retry::retry_async(&self.retry_config, || async {
-            self.generate_inner(&model_owned, &messages_owned).await
+            self.generate_inner(&model_owned, &messages_owned, options)
+                .await
         })
         .await
+    }
+
+    /// Record token-usage timing observed from a llama.cpp completion.
+    fn record_llamacpp_timings(&self, tokens: u64, elapsed: f64) {
+        *self.llamacpp_timings.lock().unwrap() = Some(LlamaCppTimings::from_elapsed(tokens, elapsed));
+    }
+
+    /// Most recent llama.cpp generation timing (tokens generated + tok/s).
+    pub fn last_llamacpp_timings(&self) -> Option<LlamaCppTimings> {
+        self.llamacpp_timings.lock().unwrap().clone()
     }
 
     /// Inner generate without retry wrapping (used by retry logic).
@@ -131,6 +174,7 @@ impl ProviderManager {
         &self,
         model: &str,
         messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
     ) -> Result<String, ProviderError> {
         // Route based on model prefix
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
@@ -164,19 +208,8 @@ impl ProviderManager {
         }
 
         // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
-        let llamacpp_target = model
-            .strip_prefix("llamacpp:")
-            .or_else(|| model.strip_prefix("llama.cpp:"))
-            .or_else(|| {
-                if model.starts_with("llama:") {
-                    model.strip_prefix("llama:")
-                } else {
-                    None
-                }
-            });
-
-        if let Some(inner_model) = llamacpp_target {
-            return self.generate_llamacpp(inner_model, messages, None).await;
+        if let Some(inner_model) = llamacpp_target(model) {
+            return self.generate_llamacpp(inner_model, messages, options).await;
         }
 
         // OpenRouter route (models with a slash, e.g. "openai/gpt-4")
@@ -231,6 +264,22 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
+        self.generate_stream_with_options(model, messages, None, callback)
+            .await
+    }
+
+    /// [`generate_stream`][Self::generate_stream] with explicit llama.cpp
+    /// sampling options passed through to the `llama-server` request.
+    pub async fn generate_stream_with_options<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
+        callback: F,
+    ) -> Result<String, ProviderError>
+    where
+        F: FnMut(&str),
+    {
         let model_owned = model.to_string();
         let messages_owned = messages.to_vec();
 
@@ -249,7 +298,7 @@ impl ProviderManager {
             || async {
                 let cb_ref = &cb;
                 let emitted_ref = &emitted;
-                self.generate_stream_inner(&model_owned, &messages_owned, |token| {
+                self.generate_stream_inner(&model_owned, &messages_owned, options, |token| {
                     emitted_ref.store(true, Ordering::SeqCst);
                     let mut guard = cb_ref.lock().unwrap();
                     guard(token);
@@ -265,6 +314,7 @@ impl ProviderManager {
         &self,
         model: &str,
         messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
         callback: F,
     ) -> Result<String, ProviderError>
     where
@@ -308,20 +358,9 @@ impl ProviderManager {
         }
 
         // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
-        let llamacpp_target = model
-            .strip_prefix("llamacpp:")
-            .or_else(|| model.strip_prefix("llama.cpp:"))
-            .or_else(|| {
-                if model.starts_with("llama:") {
-                    model.strip_prefix("llama:")
-                } else {
-                    None
-                }
-            });
-
-        if let Some(inner_model) = llamacpp_target {
+        if let Some(inner_model) = llamacpp_target(model) {
             return self
-                .generate_stream_llamacpp(inner_model, messages, None, callback)
+                .generate_stream_llamacpp(inner_model, messages, options, callback)
                 .await;
         }
 
@@ -530,6 +569,7 @@ impl ProviderManager {
         messages: &[ChatMessage],
         options: Option<&LlamaCppOptions>,
     ) -> Result<String, ProviderError> {
+        let start = Instant::now();
         let base_url = match &self.llama_cpp_client {
             Some(client) => client.base_url(),
             None => "http://localhost:8080",
@@ -544,27 +584,7 @@ impl ProviderManager {
         });
 
         if let Some(opts) = options {
-            if let Some(ref grammar) = opts.grammar {
-                payload["grammar"] = serde_json::Value::String(grammar.clone());
-            }
-            if let Some(ref schema) = opts.json_schema {
-                payload["json_schema"] = schema.clone();
-            }
-            if let Some(min_p) = opts.min_p {
-                payload["min_p"] = serde_json::json!(min_p);
-            }
-            if let Some(top_k) = opts.top_k {
-                payload["top_k"] = serde_json::json!(top_k);
-            }
-            if let Some(mirostat) = opts.mirostat {
-                payload["mirostat"] = serde_json::json!(mirostat);
-            }
-            if let Some(temp) = opts.temperature {
-                payload["temperature"] = serde_json::json!(temp);
-            }
-            if let Some(max_tokens) = opts.max_tokens {
-                payload["max_tokens"] = serde_json::json!(max_tokens);
-            }
+            merge_llamacpp_options(&mut payload, opts);
         }
 
         let response = self
@@ -584,16 +604,28 @@ impl ProviderManager {
         #[derive(Deserialize)]
         struct LlamaCppResponse {
             choices: Vec<LlamaCppChoice>,
+            #[serde(default)]
+            usage: Option<LlamaCppUsage>,
         }
         #[derive(Deserialize)]
         struct LlamaCppChoice {
             message: ChatMessage,
+        }
+        #[derive(Deserialize)]
+        struct LlamaCppUsage {
+            #[serde(default)]
+            completion_tokens: u64,
         }
 
         let body: LlamaCppResponse = response
             .json()
             .await
             .map_err(|e| ProviderError::Parse(format!("llama.cpp parse error: {e}")))?;
+
+        let tokens = body.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+        if tokens > 0 {
+            self.record_llamacpp_timings(tokens, start.elapsed().as_secs_f64());
+        }
 
         body.choices
             .first()
@@ -612,6 +644,7 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
+        let start = Instant::now();
         let base_url = match &self.llama_cpp_client {
             Some(client) => client.base_url(),
             None => "http://localhost:8080",
@@ -626,27 +659,7 @@ impl ProviderManager {
         });
 
         if let Some(opts) = options {
-            if let Some(ref grammar) = opts.grammar {
-                payload["grammar"] = serde_json::Value::String(grammar.clone());
-            }
-            if let Some(ref schema) = opts.json_schema {
-                payload["json_schema"] = schema.clone();
-            }
-            if let Some(min_p) = opts.min_p {
-                payload["min_p"] = serde_json::json!(min_p);
-            }
-            if let Some(top_k) = opts.top_k {
-                payload["top_k"] = serde_json::json!(top_k);
-            }
-            if let Some(mirostat) = opts.mirostat {
-                payload["mirostat"] = serde_json::json!(mirostat);
-            }
-            if let Some(temp) = opts.temperature {
-                payload["temperature"] = serde_json::json!(temp);
-            }
-            if let Some(max_tokens) = opts.max_tokens {
-                payload["max_tokens"] = serde_json::json!(max_tokens);
-            }
+            merge_llamacpp_options(&mut payload, opts);
         }
 
         let response = self
@@ -665,6 +678,7 @@ impl ProviderManager {
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
+        let mut completion_tokens: u64 = 0;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result
@@ -677,6 +691,15 @@ impl ProviderManager {
                     }
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            // The final chunk carries usage (with an empty choices array).
+                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
+                                if let Some(t) = usage
+                                    .get("completion_tokens")
+                                    .and_then(|v| v.as_u64())
+                                {
+                                    completion_tokens = t;
+                                }
+                            }
                             if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
                                 if let Some(first) = choices.first() {
                                     if let Some(delta) = first.get("delta") {
@@ -695,7 +718,36 @@ impl ProviderManager {
             }
         }
 
+        if completion_tokens > 0 {
+            self.record_llamacpp_timings(completion_tokens, start.elapsed().as_secs_f64());
+        }
+
         Ok(full_response)
+    }
+}
+
+/// Merge llama.cpp sampling options into an OpenAI-compatible chat payload.
+fn merge_llamacpp_options(payload: &mut serde_json::Value, opts: &LlamaCppOptions) {
+    if let Some(ref grammar) = opts.grammar {
+        payload["grammar"] = serde_json::Value::String(grammar.clone());
+    }
+    if let Some(ref schema) = opts.json_schema {
+        payload["json_schema"] = schema.clone();
+    }
+    if let Some(min_p) = opts.min_p {
+        payload["min_p"] = serde_json::json!(min_p);
+    }
+    if let Some(top_k) = opts.top_k {
+        payload["top_k"] = serde_json::json!(top_k);
+    }
+    if let Some(mirostat) = opts.mirostat {
+        payload["mirostat"] = serde_json::json!(mirostat);
+    }
+    if let Some(temp) = opts.temperature {
+        payload["temperature"] = serde_json::json!(temp);
+    }
+    if let Some(max_tokens) = opts.max_tokens {
+        payload["max_tokens"] = serde_json::json!(max_tokens);
     }
 }
 
@@ -711,5 +763,41 @@ mod tests {
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"role":"user","content":"hello"}"#);
+    }
+
+    #[test]
+    fn llamacpp_target_matches_prefixes() {
+        assert_eq!(llamacpp_target("llamacpp:model.gguf"), Some("model.gguf"));
+        assert_eq!(llamacpp_target("llama.cpp:model"), Some("model"));
+        assert_eq!(llamacpp_target("llama:runner"), Some("runner"));
+        assert_eq!(llamacpp_target("qwen2.5:7b"), None);
+        assert_eq!(llamacpp_target("llama3.1:8b"), None);
+    }
+
+    #[test]
+    fn merge_options_populates_payload() {
+        let opts = LlamaCppOptions {
+            temperature: Some(0.7),
+            top_k: Some(40),
+            min_p: Some(0.05),
+            mirostat: Some(2),
+            max_tokens: Some(256),
+            grammar: None,
+            json_schema: None,
+        };
+        let mut payload = serde_json::json!({ "model": "m", "stream": true });
+        merge_llamacpp_options(&mut payload, &opts);
+        assert_eq!(payload["temperature"], 0.7);
+        assert_eq!(payload["top_k"], 40);
+        assert_eq!(payload["min_p"], 0.05);
+        assert_eq!(payload["mirostat"], 2);
+        assert_eq!(payload["max_tokens"], 256);
+        assert!(payload.get("grammar").is_none());
+    }
+
+    #[test]
+    fn llamacpp_target_rejects_slash_and_plain() {
+        assert_eq!(llamacpp_target("openai/gpt-4o"), None);
+        assert_eq!(llamacpp_target(""), None);
     }
 }
