@@ -442,7 +442,7 @@ class CustomModelManager(FeatureBase):
 
     def _generate_version(self) -> str:
         """Generate a version string"""
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
         return f"v{timestamp}"
 
     async def _load_models(self) -> None:
