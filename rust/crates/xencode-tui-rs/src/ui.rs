@@ -486,15 +486,12 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(app.theme.fg)
                 };
                 let prefix = if is_current { " ● " } else { "   " };
-                let badge = if model.contains('/') || model.starts_with("qwen-") {
-                    " [cloud]"
+                let (badge, badge_color) = if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") {
+                    (" [llamacpp]", ratatui::style::Color::Yellow)
+                } else if model.contains('/') || model.starts_with("qwen-") {
+                    (" [cloud]", ratatui::style::Color::Magenta)
                 } else {
-                    " [ollama]"
-                };
-                let badge_color = if badge == " [ollama]" {
-                    ratatui::style::Color::Cyan
-                } else {
-                    ratatui::style::Color::Magenta
+                    (" [ollama]", ratatui::style::Color::Cyan)
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{}{}", prefix, model), style),
@@ -567,10 +564,16 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let timeout_str = format!("{}s", app.config.response_timeout);
     let theme_str = format!("{}  [{}]", app.config.active_theme, theme_indicators);
 
-    let url_str = if app.settings_url_editing {
+    let ollama_url_str = if app.settings_url_editing && app.settings_cursor == 6 {
         format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
     } else {
         format!("{}  (Enter to edit)", app.config.ollama_url)
+    };
+
+    let llamacpp_url_str = if app.settings_url_editing && app.settings_cursor == 7 {
+        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        format!("{}  (Enter to edit)", app.config.llama_cpp_url)
     };
 
     let reset_label = if app.settings_reset_active {
@@ -579,14 +582,15 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         "⚠️  Reset to defaults (Enter to confirm)"
     };
 
-    let settings_values: [(&str, &str); 8] = [
+    let settings_values: [(&str, &str); 9] = [
         ("Theme           ", &theme_str),
         ("Cache Enabled   ", &cache_str),
         ("Memory Enabled  ", &memory_str),
         ("Max Cache Size  ", &cache_size_str),
         ("Memory Items    ", &memory_items_str),
         ("Response Timeout", &timeout_str),
-        ("Ollama URL      ", &url_str),
+        ("Ollama URL      ", &ollama_url_str),
+        ("Llama.cpp URL   ", &llamacpp_url_str),
         ("Factory Reset   ", reset_label),
     ];
 
@@ -594,8 +598,8 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         (0, 1, "  Display"),
         (1, 3, "  Performance"),
         (3, 6, "  Limits"),
-        (6, 7, "  Connection"),
-        (7, 8, "  Actions"),
+        (6, 8, "  Connection"),
+        (8, 9, "  Actions"),
     ];
 
     let mut settings_lines: Vec<Line> = Vec::new();
@@ -618,13 +622,13 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(app.theme.fg)
             };
             let pointer = if is_selected { " ▶ " } else { "   " };
-            let is_reset = idx == 7;
-            let is_url_item = idx == 6;
+            let is_reset = idx == 8;
+            let is_url_item = idx == 6 || idx == 7;
             let value_color = if is_reset && is_selected {
                 ratatui::style::Color::Red
             } else if is_reset {
                 app.theme.message_system
-            } else if is_url_item && app.settings_url_editing {
+            } else if is_url_item && app.settings_url_editing && is_selected {
                 ratatui::style::Color::Yellow
             } else {
                 app.theme.accent
@@ -652,8 +656,9 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     )));
     provider_lines.push(Line::from(""));
 
-    let checks: [(&str, bool, &str); 4] = [
+    let checks: [(&str, bool, &str); 5] = [
         ("Ollama   ", true, &app.config.ollama_url),
+        ("Llama.cpp ", true, &app.config.llama_cpp_url),
         (
             "OpenRouter",
             app.config.api_keys.openrouter_api_key.is_some(),
@@ -1035,6 +1040,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
     let provider_name = |provider: &str| -> String {
         match provider {
             "ollama" => format!("{} Ollama", "\u{1F916}"),
+            "llamacpp" => format!("{} llama.cpp", "\u{1F999}"),
             "openrouter" => format!("{} OpenRouter", "\u{1F310}"),
             _ => provider.to_string(),
         }
@@ -1101,8 +1107,12 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::UNDERLINED),
     )));
     lines.push(Line::from(format!(
-        "   Ollama URI:   {}",
+        "   Ollama URI:    {}",
         app.config.ollama_url
+    )));
+    lines.push(Line::from(format!(
+        "   Llama.cpp URI: {}",
+        app.config.llama_cpp_url
     )));
     lines.push(Line::from(format!(
         "   OpenRouter:   {}",

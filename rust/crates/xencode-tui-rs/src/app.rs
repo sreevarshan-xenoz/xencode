@@ -13,7 +13,7 @@ use tui_textarea::TextArea;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
-use xencode_models_rs::{current_timestamp, HealthStatus, OllamaClient};
+use xencode_models_rs::{current_timestamp, HealthStatus, LlamaCppClient, OllamaClient};
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 
 use crate::ui;
@@ -573,6 +573,10 @@ impl<'a> App<'a> {
                 },
             ),
         );
+        app.ollama_health_entries.insert(
+            "llamacpp".to_string(),
+            (HealthStatus::Unknown.to_string(), 0.0, None),
+        );
 
         for msg in app.memory.get_context(10) {
             app.messages.push(UiMessage {
@@ -732,6 +736,7 @@ impl<'a> App<'a> {
 
         let model = self.config.default_model.clone();
         let ollama_url = self.config.ollama_url.clone();
+        let llama_cpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
         let or_key = self.config.api_keys.openrouter_api_key.clone();
         let qwen_key = self.config.api_keys.qwen_api_key.clone();
@@ -739,7 +744,9 @@ impl<'a> App<'a> {
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
-            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
+            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
+            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
+                .with_llama_cpp(llama_client);
             let _ = manager
                 .generate_stream(&model, &context_messages, |token| {
                     let _ = tx.send(token.to_string());
@@ -1278,6 +1285,7 @@ impl<'a> App<'a> {
     /// Dynamically discover models installed by the user in Ollama and configured cloud models.
     pub fn refresh_models(&mut self, tx: mpsc::UnboundedSender<String>) {
         let ollama_url = self.config.ollama_url.clone();
+        let llama_cpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
         let has_openrouter = self.config.api_keys.openrouter_api_key.is_some();
         let has_gemini = self.config.api_keys.google_gemini_api_key.is_some();
@@ -1286,12 +1294,23 @@ impl<'a> App<'a> {
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout.min(5));
+            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout.min(5));
             let mut models = Vec::new();
 
             if let Ok(installed) = client.list_models().await {
                 for m in installed {
                     if !m.name.contains("embed") {
                         models.push(m.name);
+                    }
+                }
+            }
+
+            // llama.cpp server models
+            if let Ok(llama_models) = llama_client.list_models().await {
+                for m in llama_models {
+                    let prefixed = format!("llamacpp:{}", m.id);
+                    if !models.contains(&prefixed) {
+                        models.push(prefixed);
                     }
                 }
             }
@@ -1329,6 +1348,7 @@ impl<'a> App<'a> {
         self.health_check_in_progress = true;
 
         let ollama_url = self.config.ollama_url.clone();
+        let llama_cpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
         let openrouter_key = self.config.api_keys.openrouter_api_key.clone();
         let qwen_key = self.config.api_keys.qwen_api_key.clone();
@@ -1491,6 +1511,20 @@ impl<'a> App<'a> {
                 }
             }
 
+            // Check llama.cpp connectivity
+            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout.min(5));
+            match llama_client.ping().await {
+                Ok(resp_time) => {
+                    let _ = tx.send(format!(
+                        "[HEALTH]llamacpp|healthy|{}|",
+                        resp_time * 1000.0
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(format!("[HEALTH]llamacpp|unavailable|0|{}", e));
+                }
+            }
+
             let _ = tx.send("[HEALTH_DONE]".to_string());
         });
     }
@@ -1513,6 +1547,7 @@ impl<'a> App<'a> {
                 }];
                 let model = self.config.default_model.clone();
                 let ollama_url = self.config.ollama_url.clone();
+                let llama_cpp_url = self.config.llama_cpp_url.clone();
                 let timeout = self.config.response_timeout;
                 let or_key = self.config.api_keys.openrouter_api_key.clone();
                 let qwen_key = self.config.api_keys.qwen_api_key.clone();
@@ -1520,7 +1555,9 @@ impl<'a> App<'a> {
 
                 tokio::spawn(async move {
                     let client = OllamaClient::new(&ollama_url, timeout);
-                    let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None);
+                    let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
+                    let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
+                        .with_llama_cpp(llama_client);
                     let _ = manager
                         .generate_stream(&model, &messages, |token| {
                             let _ = tx.send(format!("[REVIEW]{}", token));
@@ -1954,7 +1991,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Down | KeyCode::Char('j') => {
                                 match app.focus {
                                     FocusArea::Settings => {
-                                        if app.settings_cursor + 1 < 8 {
+                                        if app.settings_cursor + 1 < 9 {
                                             app.settings_cursor += 1;
                                         }
                                     }
@@ -2094,8 +2131,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                     FocusArea::Settings => {
                                         if app.settings_url_editing {
-                                            // Commit URL edit
-                                            app.config.ollama_url = app.settings_url_buffer.clone();
+                                            // Commit URL edit depending on which item was selected
+                                            if app.settings_cursor == 6 {
+                                                app.config.ollama_url = app.settings_url_buffer.clone();
+                                            } else if app.settings_cursor == 7 {
+                                                app.config.llama_cpp_url = app.settings_url_buffer.clone();
+                                            }
                                             app.settings_url_editing = false;
                                             let _ = app.config.save();
                                             // Refresh models and health check with new URL
@@ -2107,7 +2148,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             app.settings_url_buffer = app.config.ollama_url.clone();
                                             app.settings_url_cursor = app.settings_url_buffer.len();
                                         } else if app.settings_cursor == 7 {
-                                            // Factory reset (idx 7)
+                                            // Start Llama.cpp URL editing (idx 7)
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app.config.llama_cpp_url.clone();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 8 {
+                                            // Factory reset (idx 8)
                                             let defaults = XencodeConfig::default();
                                             app.config = defaults;
                                             app.theme = ThemeColors::get(&app.config.active_theme);
@@ -2264,7 +2310,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Left => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && app.settings_cursor == 6
+                                        && (app.settings_cursor == 6 || app.settings_cursor == 7)
                                         && app.settings_url_cursor > 0
                                     {
                                         app.settings_url_cursor -= 1;
@@ -2347,7 +2393,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Right => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && app.settings_cursor == 6
+                                        && (app.settings_cursor == 6 || app.settings_cursor == 7)
                                         && app.settings_url_cursor < app.settings_url_buffer.len()
                                     {
                                         app.settings_url_cursor += 1;
