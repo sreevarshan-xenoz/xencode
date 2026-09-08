@@ -48,6 +48,37 @@ impl axum::response::IntoResponse for AuthError {
     }
 }
 
+/// Simple API key verification (production should use proper JWT).
+pub async fn verify_token(
+    axum::Json(req): axum::Json<VerifyRequest>,
+) -> Result<axum::Json<AuthResponse>, AuthError> {
+    if req.token.starts_with("xencode_") && req.token.len() > 20 {
+        Ok(axum::Json(AuthResponse {
+            valid: true,
+            username: "user".to_string(),
+            session_token: uuid::Uuid::new_v4().to_string(),
+        }))
+    } else {
+        Err(AuthError)
+    }
+}
+
+/// Login endpoint — issues a token given a username and optional API key.
+pub async fn login(
+    axum::Json(req): axum::Json<LoginRequest>,
+) -> Result<axum::Json<LoginResponse>, AuthError> {
+    let token = format!(
+        "xencode_{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")
+    );
+    let expires = chrono::Utc::now() + chrono::Duration::hours(24);
+    Ok(axum::Json(LoginResponse {
+        token,
+        username: req.username,
+        expires_at: expires.to_rfc3339(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,35 +204,4 @@ mod tests {
         assert_eq!(json["username"], "charlie");
         assert_eq!(json["session_token"], "uuid-here");
     }
-}
-
-/// Simple API key verification (production should use proper JWT).
-pub async fn verify_token(
-    axum::Json(req): axum::Json<VerifyRequest>,
-) -> Result<axum::Json<AuthResponse>, AuthError> {
-    if req.token.starts_with("xencode_") && req.token.len() > 20 {
-        Ok(axum::Json(AuthResponse {
-            valid: true,
-            username: "user".to_string(),
-            session_token: uuid::Uuid::new_v4().to_string(),
-        }))
-    } else {
-        Err(AuthError)
-    }
-}
-
-/// Login endpoint — issues a token given a username and optional API key.
-pub async fn login(
-    axum::Json(req): axum::Json<LoginRequest>,
-) -> Result<axum::Json<LoginResponse>, AuthError> {
-    let token = format!(
-        "xencode_{}",
-        uuid::Uuid::new_v4().to_string().replace('-', "")
-    );
-    let expires = chrono::Utc::now() + chrono::Duration::hours(24);
-    Ok(axum::Json(LoginResponse {
-        token,
-        username: req.username,
-        expires_at: expires.to_rfc3339(),
-    }))
 }

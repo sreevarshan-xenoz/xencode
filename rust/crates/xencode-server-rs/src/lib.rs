@@ -117,7 +117,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["token"].as_str().unwrap().starts_with("xencode_"));
         assert_eq!(json["username"], "alice");
-        assert!(json["expires_at"].as_str().unwrap().len() > 0);
+        assert!(!json["expires_at"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]

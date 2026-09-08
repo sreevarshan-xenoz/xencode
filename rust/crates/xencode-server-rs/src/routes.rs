@@ -110,6 +110,22 @@ async fn list_models() -> Json<serde_json::Value> {
     }))
 }
 
+/// Build the complete axum Router with all routes.
+pub fn build_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/", get(health_check))
+        .route("/sessions/create", post(create_session))
+        .route("/sessions/{id}", get(get_session))
+        .route("/ws/{session_id}/{username}", get(ws_handler))
+        .route("/auth/login", post(crate::auth::login))
+        .route("/auth/verify", post(crate::auth::verify_token))
+        .route("/api/config", get(get_config))
+        .route("/api/models", get(list_models))
+        .route("/api/status", get(server_status))
+        .layer(CorsLayer::permissive())
+        .with_state(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,20 +252,4 @@ mod tests {
         assert_eq!(json["members"], serde_json::json!(["alice", "bob"]));
         assert_eq!(json["created_at"], "2026-06-06T12:00:00+00:00");
     }
-}
-
-/// Build the complete axum Router with all routes.
-pub fn build_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/", get(health_check))
-        .route("/sessions/create", post(create_session))
-        .route("/sessions/{id}", get(get_session))
-        .route("/ws/{session_id}/{username}", get(ws_handler))
-        .route("/auth/login", post(crate::auth::login))
-        .route("/auth/verify", post(crate::auth::verify_token))
-        .route("/api/config", get(get_config))
-        .route("/api/models", get(list_models))
-        .route("/api/status", get(server_status))
-        .layer(CorsLayer::permissive())
-        .with_state(state)
 }

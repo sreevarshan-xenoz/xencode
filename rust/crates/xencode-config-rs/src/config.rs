@@ -212,8 +212,10 @@ mod tests {
         let dir = temp_dir();
         let path = dir.join("config.json");
 
-        let mut config = XencodeConfig::default();
-        config.default_model = "llama3.1:8b".to_string();
+        let mut config = XencodeConfig {
+            default_model: "llama3.1:8b".to_string(),
+            ..XencodeConfig::default()
+        };
         config.api_keys.openai_api_key = Some("sk-test-123".to_string());
 
         config.save_to(&path).unwrap();

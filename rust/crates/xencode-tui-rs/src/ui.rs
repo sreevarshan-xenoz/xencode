@@ -60,7 +60,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let file_count = app.attached_files.len();
     let git_count = app.git_status.len();
 
-    let left = format!(" ⚡ Xencode TUI ");
+    let left = " ⚡ Xencode TUI ".to_string();
     let right = format!(
         " {} │ {} │ 📎 {} │ Δ {} ",
         model, theme_name, file_count, git_count
@@ -590,8 +590,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         )));
         settings_lines.push(Line::from(""));
 
-        for idx in start..end {
-            let (label, value) = settings_values[idx];
+        for (idx, &(label, value)) in settings_values.iter().enumerate().take(end).skip(start) {
             let is_selected = app.settings_cursor == idx;
             let style = if is_selected {
                 Style::default()
