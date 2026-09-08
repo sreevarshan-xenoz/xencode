@@ -373,6 +373,30 @@ impl ProviderManager {
         }
     }
 
+    /// llama.cpp servers serve their single loaded model and ignore the
+    /// `model` field of chat completions when it differs. Make model switches
+    /// effective: if the requested model is not currently loaded, swap it in.
+    /// When the server cannot load the model, surface a clear error instead of
+    /// silently answering with the previously-loaded model.
+    async fn ensure_llamacpp_model_loaded(&self, model: &str) -> Result<(), ProviderError> {
+        let Some(client) = &self.llama_cpp_client else {
+            return Ok(());
+        };
+        match client.list_models().await {
+            Ok(loaded) => {
+                if loaded.iter().any(|m| m.id == model) {
+                    return Ok(());
+                }
+                client.load_model(model).await.map_err(|e| {
+                    ProviderError::Api(format!(
+                        "llama.cpp model '{model}' is not loaded and could not be swapped in: {e}"
+                    ))
+                })
+            }
+            Err(_) => Ok(()), // let the chat request surface connectivity errors
+        }
+    }
+
     async fn generate_stream_ollama<F>(
         &self,
         model: &str,
@@ -570,6 +594,7 @@ impl ProviderManager {
         options: Option<&LlamaCppOptions>,
     ) -> Result<String, ProviderError> {
         let start = Instant::now();
+        self.ensure_llamacpp_model_loaded(model).await?;
         let base_url = match &self.llama_cpp_client {
             Some(client) => client.base_url(),
             None => "http://localhost:8080",
@@ -645,6 +670,7 @@ impl ProviderManager {
         F: FnMut(&str),
     {
         let start = Instant::now();
+        self.ensure_llamacpp_model_loaded(model).await?;
         let base_url = match &self.llama_cpp_client {
             Some(client) => client.base_url(),
             None => "http://localhost:8080",
