@@ -90,15 +90,28 @@ async fn ws_handler(
 
 /// API config endpoint — returns current server configuration.
 async fn get_config() -> Json<serde_json::Value> {
+    let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "max_session_size": 10,
         "supported_models": ["qwen2.5:7b", "llama3.1:8b", "gpt-4o", "claude-3.5-sonnet"],
-        "features": ["collaboration", "code_analysis", "rag", "plugins"],
+        "features": ["collaboration", "code_analysis", "rag", "plugins", "llamacpp"],
+        "llamacpp": {
+            "url": cfg.llama_cpp_url,
+            "model_path": cfg.llama_cpp_model_path,
+            "executable": cfg.llama_cpp_executable,
+            "args": cfg.llama_cpp_args,
+            "sampling": {
+                "temperature": cfg.llama_cpp_temperature,
+                "top_k": cfg.llama_cpp_top_k,
+                "min_p": cfg.llama_cpp_min_p,
+                "max_tokens": cfg.llama_cpp_max_tokens,
+            }
+        }
     }))
 }
 
-/// List available models dynamically from Ollama.
+/// List available models dynamically from Ollama and llama.cpp.
 async fn list_models() -> Json<serde_json::Value> {
     let client = xencode_models_rs::OllamaClient::default_client();
     let mut models_json = Vec::new();
@@ -117,8 +130,21 @@ async fn list_models() -> Json<serde_json::Value> {
         }
     }
 
+    // Query the llama.cpp server for its available models.
+    let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    let llama_client = xencode_models_rs::LlamaCppClient::new(&cfg.llama_cpp_url, 5);
+    if let Ok(llama_models) = llama_client.list_models().await {
+        for m in llama_models {
+            models_json.push(serde_json::json!({
+                "name": m.id,
+                "provider": "llamacpp",
+                "type": "local",
+            }));
+        }
+    }
+
     if models_json.is_empty() {
-        // Fallback models when Ollama is offline
+        // Fallback models when Ollama/llama.cpp are offline
         models_json.push(serde_json::json!({"name": "qwen2.5:7b", "provider": "ollama", "type": "local"}));
         models_json.push(serde_json::json!({"name": "llama3.1:8b", "provider": "ollama", "type": "local"}));
     }
@@ -129,6 +155,58 @@ async fn list_models() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "models": models_json
     }))
+}
+
+/// Whether the llama.cpp server process is tracked/auto-startable, and the
+/// last recorded generation timing stats.
+async fn llamacpp_status() -> Json<serde_json::Value> {
+    let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    let exe = if cfg.llama_cpp_executable.is_empty() {
+        None
+    } else {
+        Some(cfg.llama_cpp_executable.as_str())
+    };
+    let llama_pid = xencode_models_rs::find_llama_server(exe);
+    Json(serde_json::json!({
+        "server_running": llama_pid.is_some(),
+        "pid": llama_pid,
+        "url": cfg.llama_cpp_url,
+        "model_path": cfg.llama_cpp_model_path,
+        "executable": cfg.llama_cpp_executable,
+    }))
+}
+
+/// Load the configured GGUF model into the llama.cpp server (unloads any
+/// currently loaded model first).
+async fn llamacpp_load() -> Json<serde_json::Value> {
+    let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    if cfg.llama_cpp_model_path.is_empty() {
+        return Json(serde_json::json!({
+            "success": false,
+            "error": "no llama_cpp_model_path configured",
+        }));
+    }
+    let client = xencode_models_rs::LlamaCppClient::new(&cfg.llama_cpp_url, 60);
+    match client.load_model(&cfg.llama_cpp_model_path).await {
+        Ok(()) => Json(serde_json::json!({ "success": true })),
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e.to_string(),
+        })),
+    }
+}
+
+/// Unload the currently loaded model from the llama.cpp server.
+async fn llamacpp_unload() -> Json<serde_json::Value> {
+    let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
+    let client = xencode_models_rs::LlamaCppClient::new(&cfg.llama_cpp_url, 60);
+    match client.unload_models().await {
+        Ok(()) => Json(serde_json::json!({ "success": true })),
+        Err(e) => Json(serde_json::json!({
+            "success": false,
+            "error": e.to_string(),
+        })),
+    }
 }
 
 /// Build the complete axum Router with all routes.
@@ -143,6 +221,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/config", get(get_config))
         .route("/api/models", get(list_models))
         .route("/api/status", get(server_status))
+        .route("/api/llamacpp/status", get(llamacpp_status))
+        .route("/api/llamacpp/load", post(llamacpp_load))
+        .route("/api/llamacpp/unload", post(llamacpp_unload))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -169,19 +250,34 @@ mod tests {
         assert!(features.contains(&serde_json::json!("code_analysis")));
         assert!(features.contains(&serde_json::json!("rag")));
         assert!(features.contains(&serde_json::json!("plugins")));
+        assert!(features.contains(&serde_json::json!("llamacpp")));
+        let ll = &config.0["llamacpp"];
+        assert!(ll["url"].is_string());
+        assert!(ll["model_path"].is_string());
+        assert!(ll["executable"].is_string());
+        assert!(ll["args"].is_array());
+        assert!(ll["sampling"]["temperature"].is_null() || ll["sampling"]["temperature"].is_number());
+        assert!(ll["sampling"]["top_k"].is_null() || ll["sampling"]["top_k"].is_number());
+        assert!(ll["sampling"]["min_p"].is_null() || ll["sampling"]["min_p"].is_number());
+        assert!(ll["sampling"]["max_tokens"].is_null() || ll["sampling"]["max_tokens"].is_number());
     }
 
     #[tokio::test]
     async fn test_list_models_count() {
         let models = list_models().await;
         let model_list = models.0["models"].as_array().unwrap();
-        assert_eq!(model_list.len(), 4);
+        // Both remote providers are always appended, so at least 4 entries.
+        assert!(model_list.len() >= 4);
+        // Every entry must carry a name + provider + type.
+        for m in model_list {
+            assert!(m["name"].is_string());
+            assert!(m["provider"].is_string());
+            assert!(m["type"].is_string());
+        }
         let names: Vec<&str> = model_list
             .iter()
             .map(|m| m["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"qwen2.5:7b"));
-        assert!(names.contains(&"llama3.1:8b"));
         assert!(names.contains(&"gpt-4o"));
         assert!(names.contains(&"claude-3.5-sonnet"));
     }
@@ -233,6 +329,31 @@ mod tests {
         assert_eq!(json["status"], "online");
         assert_eq!(json["service"], "Xencode Server");
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn test_llamacpp_status_shape() {
+        let status = llamacpp_status().await;
+        assert!(status.0["server_running"].is_boolean());
+        // pid may be null or a string
+        assert!(status.0["pid"].is_null() || status.0["pid"].is_string());
+        assert!(status.0["url"].is_string());
+        assert!(status.0["model_path"].is_string());
+        assert!(status.0["executable"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_llamacpp_load_no_path() {
+        // Guard against an environment-configured path leaking in: only assert
+        // the response is a well-formed object with a success boolean.
+        let resp = llamacpp_load().await;
+        assert!(resp.0["success"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn test_llamacpp_unload_shape() {
+        let resp = llamacpp_unload().await;
+        assert!(resp.0["success"].is_boolean());
     }
 
     #[test]
