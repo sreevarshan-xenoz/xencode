@@ -464,7 +464,7 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🧠 Select Model (↑↓ Enter, 'r' Refresh, Esc Close) ");
+        .title(" 🧠 Select Model (↑↓ Enter · 'r' Refresh · 'l' Load · 'u' Unload · Esc Close) ");
 
     let items: Vec<ListItem> = if app.available_models.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
@@ -507,6 +507,37 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.selected_model));
     }
     f.render_stateful_widget(list, popup_area, &mut state);
+
+    // Footer status: show llama.cpp model path / load-unload feedback
+    let footer_y = popup_area.bottom();
+    if footer_y < area.height {
+        let status = if !app.llamacpp_action_msg.is_empty() {
+            app.llamacpp_action_msg.clone()
+        } else if app.config.llama_cpp_model_path.is_empty() {
+            "Hint: set a GGUF path in Settings → Llama.cpp Model for 'l'/'u'".to_string()
+        } else {
+            format!("Llama.cpp GGUF: {}", app.config.llama_cpp_model_path)
+        };
+        let width = popup_area.width.saturating_sub(2).max(1) as usize;
+        let status = if status.chars().count() > width {
+            let s: String = status.chars().take(width).collect();
+            s + "..."
+        } else {
+            status
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                status,
+                Style::default().fg(app.theme.message_system),
+            )),
+            Rect::new(
+                popup_area.x,
+                footer_y,
+                popup_area.width,
+                1,
+            ),
+        );
+    }
 }
 
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
@@ -524,7 +555,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(17),
+            Constraint::Min(24),
             Constraint::Length(7),
             Constraint::Length(4),
         ])
@@ -576,30 +607,78 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         format!("{}  (Enter to edit)", app.config.llama_cpp_url)
     };
 
+    let llamacpp_model_path_str = if app.settings_url_editing && app.settings_cursor == 8 {
+        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else if app.config.llama_cpp_model_path.is_empty() {
+        "⚠️  Not set (Enter to edit)".to_string()
+    } else {
+        format!("{}  (Enter to edit)", app.config.llama_cpp_model_path)
+    };
+
+    let fmt_opt = |v: &Option<f64>| match v {
+        Some(x) => format!("{x}"),
+        None => "default".to_string(),
+    };
+    let fmt_opt_i32 = |v: &Option<i32>| match v {
+        Some(x) => format!("{x}"),
+        None => "default".to_string(),
+    };
+    let fmt_opt_u32 = |v: &Option<u32>| match v {
+        Some(x) => format!("{x}"),
+        None => "default".to_string(),
+    };
+
+    let llama_temp_str = if app.settings_url_editing && app.settings_cursor == 9 {
+        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        fmt_opt(&app.config.llama_cpp_temperature)
+    };
+    let llama_topk_str = if app.settings_url_editing && app.settings_cursor == 10 {
+        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        fmt_opt_i32(&app.config.llama_cpp_top_k)
+    };
+    let llama_minp_str = if app.settings_url_editing && app.settings_cursor == 11 {
+        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        fmt_opt(&app.config.llama_cpp_min_p)
+    };
+    let llama_maxtokens_str = if app.settings_url_editing && app.settings_cursor == 12 {
+        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+    } else {
+        fmt_opt_u32(&app.config.llama_cpp_max_tokens)
+    };
+
     let reset_label = if app.settings_reset_active {
         "✅ Reset to defaults!"
     } else {
         "⚠️  Reset to defaults (Enter to confirm)"
     };
 
-    let settings_values: [(&str, &str); 9] = [
-        ("Theme           ", &theme_str),
-        ("Cache Enabled   ", &cache_str),
-        ("Memory Enabled  ", &memory_str),
-        ("Max Cache Size  ", &cache_size_str),
-        ("Memory Items    ", &memory_items_str),
-        ("Response Timeout", &timeout_str),
-        ("Ollama URL      ", &ollama_url_str),
-        ("Llama.cpp URL   ", &llamacpp_url_str),
-        ("Factory Reset   ", reset_label),
+    let settings_values: [(&str, &str); 14] = [
+        ("Theme            ", &theme_str),
+        ("Cache Enabled    ", &cache_str),
+        ("Memory Enabled   ", &memory_str),
+        ("Max Cache Size   ", &cache_size_str),
+        ("Memory Items     ", &memory_items_str),
+        ("Response Timeout ", &timeout_str),
+        ("Ollama URL       ", &ollama_url_str),
+        ("Llama.cpp URL    ", &llamacpp_url_str),
+        ("Llama.cpp Model  ", &llamacpp_model_path_str),
+        ("Llama Temp       ", &llama_temp_str),
+        ("Llama Top-K      ", &llama_topk_str),
+        ("Llama Min-P      ", &llama_minp_str),
+        ("Llama Max Tokens ", &llama_maxtokens_str),
+        ("Factory Reset    ", reset_label),
     ];
 
-    let sections: [(usize, usize, &str); 5] = [
+    let sections: [(usize, usize, &str); 6] = [
         (0, 1, "  Display"),
         (1, 3, "  Performance"),
         (3, 6, "  Limits"),
         (6, 8, "  Connection"),
-        (8, 9, "  Actions"),
+        (8, 13, "  llama.cpp"),
+        (13, 14, "  Actions"),
     ];
 
     let mut settings_lines: Vec<Line> = Vec::new();
@@ -622,13 +701,14 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(app.theme.fg)
             };
             let pointer = if is_selected { " ▶ " } else { "   " };
-            let is_reset = idx == 8;
-            let is_url_item = idx == 6 || idx == 7;
+            let is_reset = idx == 13;
+            let is_url_item = idx == 6 || idx == 7 || idx == 8;
+            let is_num_item = idx == 9 || idx == 10 || idx == 11 || idx == 12;
             let value_color = if is_reset && is_selected {
                 ratatui::style::Color::Red
             } else if is_reset {
                 app.theme.message_system
-            } else if is_url_item && app.settings_url_editing && is_selected {
+            } else if (is_url_item || is_num_item) && app.settings_url_editing && is_selected {
                 ratatui::style::Color::Yellow
             } else {
                 app.theme.accent
@@ -1090,6 +1170,22 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(app.theme.fg),
             ),
         ]));
+        if provider == "llamacpp" {
+            if let Some(ts) = app.last_llamacpp_timings.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "        ⚡ {:.0} tok/s · {} tokens generated (last request)",
+                        ts.predicted_per_second, ts.tokens_generated
+                    ),
+                    Style::default().fg(ratatui::style::Color::Yellow),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "        ⚡ No generation stats yet",
+                    Style::default().fg(app.theme.message_system),
+                )));
+            }
+        }
         if !error_str.is_empty() {
             lines.push(Line::from(Span::styled(
                 format!("        {}", error_str),

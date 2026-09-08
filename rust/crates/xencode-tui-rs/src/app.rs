@@ -13,7 +13,10 @@ use tui_textarea::TextArea;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
-use xencode_models_rs::{current_timestamp, HealthStatus, LlamaCppClient, OllamaClient};
+use xencode_models_rs::{
+    current_timestamp, HealthStatus, LlamaCppClient, LlamaCppOptions, LlamaCppTimings,
+    OllamaClient,
+};
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 
 use crate::ui;
@@ -330,6 +333,20 @@ pub struct App<'a> {
     pub settings_url_editing: bool,
     pub settings_url_buffer: String,
     pub settings_url_cursor: usize,
+
+    // llama.cpp live-control state (model load/unload + sampling)
+    pub llamacpp_editing: bool,
+    pub llamacpp_path_buffer: String,
+    pub llamacpp_path_cursor: usize,
+    pub llamacpp_action_msg: String,
+    // llama.cpp sampling options (temperature, top-k, min-p, max-tokens)
+    pub sampling_temp_editing: bool,
+    pub sampling_temp_buffer: String,
+    pub sampling_int_editing: bool,
+    pub sampling_int_buffer: String,
+
+    // Last llama.cpp generation timings (tok/s) reported by the server
+    pub last_llamacpp_timings: Option<LlamaCppTimings>,
 }
 
 impl<'a> App<'a> {
@@ -518,6 +535,17 @@ impl<'a> App<'a> {
             settings_url_editing: false,
             settings_url_buffer: String::new(),
             settings_url_cursor: 0,
+
+            llamacpp_editing: false,
+            llamacpp_path_buffer: String::new(),
+            llamacpp_path_cursor: 0,
+            llamacpp_action_msg: String::new(),
+            sampling_temp_editing: false,
+            sampling_temp_buffer: String::new(),
+            sampling_int_editing: false,
+            sampling_int_buffer: String::new(),
+
+            last_llamacpp_timings: None,
         };
 
         // Seed initial health entries for configured providers
@@ -741,6 +769,15 @@ impl<'a> App<'a> {
         let or_key = self.config.api_keys.openrouter_api_key.clone();
         let qwen_key = self.config.api_keys.qwen_api_key.clone();
         let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+        let llama_opts = LlamaCppOptions {
+            temperature: self.config.llama_cpp_temperature,
+            top_k: self.config.llama_cpp_top_k,
+            min_p: self.config.llama_cpp_min_p,
+            max_tokens: self.config.llama_cpp_max_tokens,
+            grammar: None,
+            json_schema: None,
+            mirostat: None,
+        };
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
@@ -748,11 +785,54 @@ impl<'a> App<'a> {
             let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                 .with_llama_cpp(llama_client);
             let _ = manager
-                .generate_stream(&model, &context_messages, |token| {
+                .generate_stream_with_options(&model, &context_messages, Some(&llama_opts), |token| {
                     let _ = tx.send(token.to_string());
                 })
                 .await;
+            // Report llama.cpp tok/s stats if this was a llama.cpp request
+            if let Some(ts) = manager.last_llamacpp_timings() {
+                if let Ok(json) = serde_json::to_string(&ts) {
+                    let _ = tx.send(format!("[TIMINGS]{}", json));
+                }
+            }
             let _ = tx.send("[DONE]".to_string());
+        });
+    }
+
+    /// Send a load/unload command to the llama.cpp server and report the result
+    /// back through the channel.
+    pub fn llamacpp_control(&mut self, command: String, tx: mpsc::UnboundedSender<String>) {
+        let llamacpp_url = self.config.llama_cpp_url.clone();
+        let timeout = self.config.response_timeout;
+        self.llamacpp_action_msg = match command.as_str() {
+            "load" => {
+                if self.config.llama_cpp_model_path.is_empty() {
+                    "Set a GGUF model path first (Settings → Llama.cpp Model Path)".to_string()
+                } else {
+                    "Requesting model load...".to_string()
+                }
+            }
+            "unload" => "Requesting model unload...".to_string(),
+            _ => return,
+        };
+
+        let (url, path) = (llamacpp_url, self.config.llama_cpp_model_path.clone());
+        tokio::spawn(async move {
+            let client = LlamaCppClient::new(&url, timeout);
+            let result = if command == "load" {
+                client.load_model(&path).await
+            } else {
+                client.unload_models().await
+            };
+            let msg = match result {
+                Ok(()) => if command == "load" {
+                    "✅ Model loaded via llama.cpp".to_string()
+                } else {
+                    "✅ Model unloaded via llama.cpp".to_string()
+                },
+                Err(e) => format!("❌ llama.cpp: {e}"),
+            };
+            let _ = tx.send(format!("[LLAMACPP]{}", msg));
         });
     }
 
@@ -1552,6 +1632,15 @@ impl<'a> App<'a> {
                 let or_key = self.config.api_keys.openrouter_api_key.clone();
                 let qwen_key = self.config.api_keys.qwen_api_key.clone();
                 let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+                let llama_opts = LlamaCppOptions {
+                    temperature: self.config.llama_cpp_temperature,
+                    top_k: self.config.llama_cpp_top_k,
+                    min_p: self.config.llama_cpp_min_p,
+                    max_tokens: self.config.llama_cpp_max_tokens,
+                    grammar: None,
+                    json_schema: None,
+                    mirostat: None,
+                };
 
                 tokio::spawn(async move {
                     let client = OllamaClient::new(&ollama_url, timeout);
@@ -1559,10 +1648,20 @@ impl<'a> App<'a> {
                     let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                         .with_llama_cpp(llama_client);
                     let _ = manager
-                        .generate_stream(&model, &messages, |token| {
-                            let _ = tx.send(format!("[REVIEW]{}", token));
-                        })
+                        .generate_stream_with_options(
+                            &model,
+                            &messages,
+                            Some(&llama_opts),
+                            |token| {
+                                let _ = tx.send(format!("[REVIEW]{}", token));
+                            },
+                        )
                         .await;
+                    if let Some(ts) = manager.last_llamacpp_timings() {
+                        if let Ok(json) = serde_json::to_string(&ts) {
+                            let _ = tx.send(format!("[TIMINGS]{}", json));
+                        }
+                    }
                     let _ = tx.send("[REVIEW][DONE]".to_string());
                 });
             }
@@ -1795,6 +1894,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         }
                     }
                 }
+            } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
+                app.llamacpp_action_msg = body.to_string();
+            } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
+                if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
+                    app.last_llamacpp_timings = Some(ts);
+                }
             } else if token == "[HEALTH_DONE]" {
                 app.health_check_in_progress = false;
                 app.last_health_check = current_timestamp();
@@ -1991,7 +2096,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Down | KeyCode::Char('j') => {
                                 match app.focus {
                                     FocusArea::Settings => {
-                                        if app.settings_cursor + 1 < 9 {
+                                        if app.settings_cursor + 1 < 14 {
                                             app.settings_cursor += 1;
                                         }
                                     }
@@ -2131,29 +2236,112 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                     FocusArea::Settings => {
                                         if app.settings_url_editing {
-                                            // Commit URL edit depending on which item was selected
-                                            if app.settings_cursor == 6 {
-                                                app.config.ollama_url = app.settings_url_buffer.clone();
-                                            } else if app.settings_cursor == 7 {
-                                                app.config.llama_cpp_url = app.settings_url_buffer.clone();
+                                            // Commit edit depending on which item was selected
+                                            match app.settings_cursor {
+                                                6 => {
+                                                    app.config.ollama_url =
+                                                        app.settings_url_buffer.clone();
+                                                }
+                                                7 => {
+                                                    app.config.llama_cpp_url =
+                                                        app.settings_url_buffer.clone();
+                                                }
+                                                8 => {
+                                                    app.config.llama_cpp_model_path =
+                                                        app.settings_url_buffer.clone();
+                                                }
+                                                9 => {
+                                                    let v = app
+                                                        .settings_url_buffer
+                                                        .trim()
+                                                        .parse::<f64>()
+                                                        .ok()
+                                                        .filter(|x| x.is_finite());
+                                                    app.config.llama_cpp_temperature = v;
+                                                }
+                                                10 => {
+                                                    app.config.llama_cpp_top_k =
+                                                        app.settings_url_buffer.trim().parse().ok();
+                                                }
+                                                11 => {
+                                                    let v = app
+                                                        .settings_url_buffer
+                                                        .trim()
+                                                        .parse::<f64>()
+                                                        .ok()
+                                                        .filter(|x| x.is_finite());
+                                                    app.config.llama_cpp_min_p = v;
+                                                }
+                                                12 => {
+                                                    app.config.llama_cpp_max_tokens = app
+                                                        .settings_url_buffer
+                                                        .trim()
+                                                        .parse()
+                                                        .ok();
+                                                }
+                                                _ => {}
                                             }
                                             app.settings_url_editing = false;
                                             let _ = app.config.save();
-                                            // Refresh models and health check with new URL
-                                            app.refresh_models(tx.clone());
-                                            app.run_health_check(tx.clone());
+                                            // Refresh models and health check when a URL/model path changed
+                                            if app.settings_cursor <= 8 {
+                                                app.refresh_models(tx.clone());
+                                                app.run_health_check(tx.clone());
+                                            }
                                         } else if app.settings_cursor == 6 {
-                                            // Start Ollama URL editing (idx 6)
+                                            // Start Ollama URL editing
                                             app.settings_url_editing = true;
                                             app.settings_url_buffer = app.config.ollama_url.clone();
                                             app.settings_url_cursor = app.settings_url_buffer.len();
                                         } else if app.settings_cursor == 7 {
-                                            // Start Llama.cpp URL editing (idx 7)
+                                            // Start Llama.cpp URL editing
                                             app.settings_url_editing = true;
                                             app.settings_url_buffer = app.config.llama_cpp_url.clone();
                                             app.settings_url_cursor = app.settings_url_buffer.len();
                                         } else if app.settings_cursor == 8 {
-                                            // Factory reset (idx 8)
+                                            // Start Llama.cpp model path editing
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer =
+                                                app.config.llama_cpp_model_path.clone();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 9 {
+                                            // Temperature
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app
+                                                .config
+                                                .llama_cpp_temperature
+                                                .map(|v| v.to_string())
+                                                .unwrap_or_default();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 10 {
+                                            // Top-K
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app
+                                                .config
+                                                .llama_cpp_top_k
+                                                .map(|v| v.to_string())
+                                                .unwrap_or_default();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 11 {
+                                            // Min-P
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app
+                                                .config
+                                                .llama_cpp_min_p
+                                                .map(|v| v.to_string())
+                                                .unwrap_or_default();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 12 {
+                                            // Max tokens
+                                            app.settings_url_editing = true;
+                                            app.settings_url_buffer = app
+                                                .config
+                                                .llama_cpp_max_tokens
+                                                .map(|v| v.to_string())
+                                                .unwrap_or_default();
+                                            app.settings_url_cursor = app.settings_url_buffer.len();
+                                        } else if app.settings_cursor == 13 {
+                                            // Factory reset
                                             let defaults = XencodeConfig::default();
                                             app.config = defaults;
                                             app.theme = ThemeColors::get(&app.config.active_theme);
@@ -2230,6 +2418,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Char('r') if app.focus == FocusArea::ModelSelector => {
                                 app.refresh_models(tx.clone());
+                            }
+                            KeyCode::Char('l') if app.focus == FocusArea::ModelSelector => {
+                                // Load selected model via llama.cpp (needs a configured GGUF path)
+                                app.llamacpp_control("load".to_string(), tx.clone());
+                            }
+                            KeyCode::Char('u') if app.focus == FocusArea::ModelSelector => {
+                                app.llamacpp_control("unload".to_string(), tx.clone());
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => match app.focus {
@@ -2317,7 +2512,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Left => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && (app.settings_cursor == 6 || app.settings_cursor == 7)
+                                        && (6..=12).contains(&app.settings_cursor)
                                         && app.settings_url_cursor > 0
                                     {
                                         app.settings_url_cursor -= 1;
@@ -2400,7 +2595,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Right => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && (app.settings_cursor == 6 || app.settings_cursor == 7)
+                                        && (6..=12).contains(&app.settings_cursor)
                                         && app.settings_url_cursor < app.settings_url_buffer.len()
                                     {
                                         app.settings_url_cursor += 1;
