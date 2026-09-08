@@ -459,8 +459,9 @@ class TestVersionManagement:
 
         # List models
         models = await custom_models_feature.list_models()
-        multi_version_model = next(m for m in models if m['name'] == "multi-version")
+        multi_version_model = next((m for m in models if m['name'] == "multi-version"), None)
 
+        assert multi_version_model is not None
         assert len(multi_version_model['versions']) == 2
 
     @pytest.mark.asyncio
@@ -487,8 +488,9 @@ class TestVersionManagement:
 
         # Verify only one version remains
         models = await custom_models_feature.list_models()
-        version_test_model = next(m for m in models if m['name'] == "version-test")
+        version_test_model = next((m for m in models if m['name'] == "version-test"), None)
 
+        assert version_test_model is not None
         assert len(version_test_model['versions']) == 1
         assert version_test_model['versions'][0]['version'] == result2['version']
 
