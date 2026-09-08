@@ -799,37 +799,57 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Send a load/unload command to the llama.cpp server and report the result
-    /// back through the channel.
-    pub fn llamacpp_control(&mut self, command: String, tx: mpsc::UnboundedSender<String>) {
+    /// Send a load/unload/switch command to the llama.cpp server and report the
+    /// result back through the channel.
+    ///
+    /// Commands:
+    /// - "load"        : load `target` (a model id) or the configured GGUF path.
+    /// - "switch"      : swap to `target` (a model id) — unloads first if we can.
+    /// - "unload"      : unload whatever is loaded.
+    pub fn llamacpp_control(
+        &mut self,
+        command: &str,
+        target: Option<String>,
+        tx: mpsc::UnboundedSender<String>,
+    ) {
         let llamacpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
-        self.llamacpp_action_msg = match command.as_str() {
-            "load" => {
-                if self.config.llama_cpp_model_path.is_empty() {
-                    "Set a GGUF model path first (Settings → Llama.cpp Model Path)".to_string()
+        let load_target = if let Some(t) = target {
+            t
+        } else {
+            self.config.llama_cpp_model_path.clone()
+        };
+
+        self.llamacpp_action_msg = match command {
+            "load" | "switch" => {
+                if load_target.is_empty() {
+                    "Set a GGUF model path first (Settings → Llama.cpp Model Path), or pick a llama.cpp model".to_string()
                 } else {
-                    "Requesting model load...".to_string()
+                    "Requesting model switch...".to_string()
                 }
             }
             "unload" => "Requesting model unload...".to_string(),
             _ => return,
         };
 
-        let (url, path) = (llamacpp_url, self.config.llama_cpp_model_path.clone());
+        let (url, path) = (llamacpp_url, load_target.clone());
+        let is_unload = command == "unload";
         tokio::spawn(async move {
             let client = LlamaCppClient::new(&url, timeout);
-            let result = if command == "load" {
-                client.load_model(&path).await
-            } else {
+            let result = if is_unload {
                 client.unload_models().await
+            } else {
+                client.load_model(&path).await
             };
             let msg = match result {
-                Ok(()) => if command == "load" {
-                    "✅ Model loaded via llama.cpp".to_string()
-                } else {
-                    "✅ Model unloaded via llama.cpp".to_string()
-                },
+                Ok(()) => {
+                    let label = if is_unload {
+                        "model unloaded".to_string()
+                    } else {
+                        format!("model '{path}' loaded")
+                    };
+                    format!("✅ llama.cpp: {label}")
+                }
                 Err(e) => format!("❌ llama.cpp: {e}"),
             };
             let _ = tx.send(format!("[LLAMACPP]{}", msg));
@@ -1675,6 +1695,16 @@ impl<'a> Default for App<'a> {
     }
 }
 
+/// Extract the inner model id from a llama.cpp-prefixed model selector entry.
+fn llama_model_target(model: &str) -> Option<&str> {
+    for prefix in ["llamacpp:", "llama.cpp:", "llama:"] {
+        if let Some(rest) = model.strip_prefix(prefix) {
+            return Some(rest);
+        }
+    }
+    None
+}
+
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -2153,6 +2183,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         {
                                             app.config.default_model = model.clone();
                                             let _ = app.config.save();
+                                            // llama.cpp servers only serve their loaded
+                                            // model, so kick off a server-side swap so the
+                                            // next generation actually uses this model.
+                                            if let Some(inner) = llama_model_target(model) {
+                                                app.llamacpp_control(
+                                                    "switch",
+                                                    Some(inner.to_string()),
+                                                    tx.clone(),
+                                                );
+                                            }
                                             app.focus = FocusArea::ChatInput;
                                         }
                                     }
@@ -2420,11 +2460,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.refresh_models(tx.clone());
                             }
                             KeyCode::Char('l') if app.focus == FocusArea::ModelSelector => {
-                                // Load selected model via llama.cpp (needs a configured GGUF path)
-                                app.llamacpp_control("load".to_string(), tx.clone());
+                                // Load the selected model via llama.cpp
+                                let target = app
+                                    .available_models
+                                    .get(app.selected_model)
+                                    .and_then(|m| llama_model_target(m));
+                                app.llamacpp_control("load", target.map(|s| s.to_string()), tx.clone());
                             }
                             KeyCode::Char('u') if app.focus == FocusArea::ModelSelector => {
-                                app.llamacpp_control("unload".to_string(), tx.clone());
+                                app.llamacpp_control("unload", None, tx.clone());
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => match app.focus {
