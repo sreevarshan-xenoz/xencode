@@ -10,7 +10,7 @@ use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
-use xencode_models_rs::OllamaClient;
+use xencode_models_rs::{LlamaCppClient, OllamaClient};
 use xencode_plugin_rs::PluginRegistry;
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
@@ -54,7 +54,7 @@ enum Commands {
         action: ConfigAction,
     },
 
-    /// Ollama model management
+    /// Local model management (Ollama & llama.cpp)
     Models {
         #[command(subcommand)]
         action: ModelAction,
@@ -243,6 +243,7 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
             match key.as_str() {
                 "default_model" => config.default_model = value.clone(),
                 "ollama_url" => config.ollama_url = value.clone(),
+                "llama_cpp_url" => config.llama_cpp_url = value.clone(),
                 "max_cache_size" => {
                     config.max_cache_size = value
                         .parse()
@@ -284,40 +285,62 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
 }
 
 async fn run_models(action: ModelAction) -> Result<(), String> {
-    let mut client = OllamaClient::default_client();
+    let config = XencodeConfig::load().unwrap_or_default();
+    let mut client = OllamaClient::new(&config.ollama_url, config.response_timeout);
+    let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
 
     match action {
         ModelAction::List => {
-            let models = client.list_models().await.map_err(|e| e.to_string())?;
-            if models.is_empty() {
-                println!("No models installed.");
-                println!("Install one with: ollama pull qwen2.5:7b");
+            let ollama_models = client.list_models().await.unwrap_or_default();
+            let llama_models = llama_client.list_models().await.unwrap_or_default();
+
+            if ollama_models.is_empty() && llama_models.is_empty() {
+                println!("No local models installed or running.");
+                println!("For Ollama:   ollama pull qwen2.5:7b");
+                println!("For llama.cpp: start llama-server with your GGUF model");
                 return Ok(());
             }
-            println!("{:<30} {:>12} MODIFIED", "MODEL", "SIZE");
+
+            println!("{:<30} {:>12} PROVIDER", "MODEL", "SIZE");
             println!("{}", "-".repeat(60));
-            for model in &models {
+            for model in &ollama_models {
                 let size_mb = model.size as f64 / 1_048_576.0;
-                let modified = if model.modified_at.len() > 19 {
-                    &model.modified_at[..19]
-                } else {
-                    &model.modified_at
-                };
-                println!("{:<30} {:>9.1} MB {}", model.name, size_mb, modified);
+                println!("{:<30} {:>9.1} MB [ollama]", model.name, size_mb);
             }
-            println!("\n{} model(s) installed", models.len());
+            for model in &llama_models {
+                let display_name = format!("llamacpp:{}", model.id);
+                println!("{:<30} {:>12} [llama.cpp]", display_name, "N/A");
+            }
+            let total = ollama_models.len() + llama_models.len();
+            println!("\n{} model(s) available", total);
             Ok(())
         }
         ModelAction::Health { model } => {
             println!("Checking health of {model}...");
-            let health = client
-                .check_health(&model)
-                .await
-                .map_err(|e| e.to_string())?;
-            println!("  Status:        {}", health.status);
-            println!("  Response time: {:.3}s", health.response_time);
-            if let Some(ref err) = health.error_message {
-                println!("  Error:         {err}");
+            if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") || model.starts_with("llama:") {
+                match llama_client.ping().await {
+                    Ok(resp_time) => {
+                        println!("  Provider:      llama.cpp ({})", config.llama_cpp_url);
+                        println!("  Status:        healthy");
+                        println!("  Response time: {:.3}s", resp_time);
+                    }
+                    Err(e) => {
+                        println!("  Provider:      llama.cpp ({})", config.llama_cpp_url);
+                        println!("  Status:        unavailable");
+                        println!("  Error:         {e}");
+                    }
+                }
+            } else {
+                let health = client
+                    .check_health(&model)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("  Provider:      Ollama ({})", config.ollama_url);
+                println!("  Status:        {}", health.status);
+                println!("  Response time: {:.3}s", health.response_time);
+                if let Some(ref err) = health.error_message {
+                    println!("  Error:         {err}");
+                }
             }
             Ok(())
         }
@@ -451,13 +474,15 @@ async fn run_query(
     });
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
+    let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
     let provider = ProviderManager::new(
         client,
         config.api_keys.openrouter_api_key.clone(),
         config.api_keys.qwen_api_key.clone(),
         config.api_keys.google_gemini_api_key.clone(),
         None,
-    );
+    )
+    .with_llama_cpp(llama_client);
 
     let mut response_content = String::new();
     let result = provider
