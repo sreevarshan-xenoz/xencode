@@ -12,6 +12,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      HAS_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
 
     steps:
     - name: Checkout repository
@@ -40,7 +42,7 @@ jobs:
         twine check dist/*
 
     - name: Publish to PyPI
-      if: ${{ secrets.PYPI_API_TOKEN != '' }}
+      if: env.HAS_PYPI_TOKEN == 'true'
       uses: pypa/gh-action-pypi-publish@v1.14.2
       with:
         password: ${{ secrets.PYPI_API_TOKEN }}

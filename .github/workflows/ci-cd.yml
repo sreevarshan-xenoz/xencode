@@ -161,20 +161,24 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.ref == 'refs/heads/develop' && secrets.KUBE_CONFIG_STAGING != '' && secrets.DATABASE_URL_STAGING != '' && secrets.REDIS_URL_STAGING != '' && secrets.JWT_SECRET_KEY_STAGING != '' && secrets.POSTGRES_USERNAME_STAGING != '' && secrets.POSTGRES_PASSWORD_STAGING != ''
+    if: github.ref == 'refs/heads/develop'
     environment: staging
+    env:
+      HAS_STAGING_SECRETS: ${{ secrets.KUBE_CONFIG_STAGING != '' && secrets.DATABASE_URL_STAGING != '' && secrets.REDIS_URL_STAGING != '' && secrets.JWT_SECRET_KEY_STAGING != '' && secrets.POSTGRES_USERNAME_STAGING != '' && secrets.POSTGRES_PASSWORD_STAGING != '' }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7.0.1
 
     - name: Configure kubectl
+      if: env.HAS_STAGING_SECRETS == 'true'
       uses: azure/k8s-set-context@v5.0.1
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
 
     - name: Validate deployment secrets
+      if: env.HAS_STAGING_SECRETS == 'true'
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
         REDIS_URL: ${{ secrets.REDIS_URL_STAGING }}
@@ -185,6 +189,7 @@ jobs:
         python scripts/validate_deploy_secrets.py --environment staging
 
     - name: Render Kubernetes secrets
+      if: env.HAS_STAGING_SECRETS == 'true'
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
         REDIS_URL: ${{ secrets.REDIS_URL_STAGING }}
@@ -196,6 +201,7 @@ jobs:
         envsubst < k8s/secrets.template.yaml > k8s/secrets.generated.yaml
 
     - name: Deploy to staging
+      if: env.HAS_STAGING_SECRETS == 'true'
       run: |
         kubectl create namespace xencode --dry-run=client -o yaml | kubectl apply -f -
         kubectl apply -f k8s/secrets.generated.yaml
@@ -205,6 +211,7 @@ jobs:
         kubectl rollout status deployment/xencode-app -n xencode
 
     - name: Run smoke tests
+      if: env.HAS_STAGING_SECRETS == 'true'
       run: |
         kubectl wait --for=condition=ready pod -l app=xencode -n xencode --timeout=300s
         # Add smoke test commands here
@@ -212,20 +219,25 @@ jobs:
   deploy-production:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: github.ref == 'refs/heads/main' && secrets.KUBE_CONFIG_PRODUCTION != '' && secrets.DATABASE_URL_PRODUCTION != '' && secrets.REDIS_URL_PRODUCTION != '' && secrets.JWT_SECRET_KEY_PRODUCTION != '' && secrets.POSTGRES_USERNAME_PRODUCTION != '' && secrets.POSTGRES_PASSWORD_PRODUCTION != ''
+    if: github.ref == 'refs/heads/main'
     environment: production
+    env:
+      HAS_PRODUCTION_SECRETS: ${{ secrets.KUBE_CONFIG_PRODUCTION != '' && secrets.DATABASE_URL_PRODUCTION != '' && secrets.REDIS_URL_PRODUCTION != '' && secrets.JWT_SECRET_KEY_PRODUCTION != '' && secrets.POSTGRES_USERNAME_PRODUCTION != '' && secrets.POSTGRES_PASSWORD_PRODUCTION != '' }}
+      HAS_SLACK: ${{ secrets.SLACK_WEBHOOK != '' }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7.0.1
 
     - name: Configure kubectl
+      if: env.HAS_PRODUCTION_SECRETS == 'true'
       uses: azure/k8s-set-context@v5.0.1
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
 
     - name: Validate deployment secrets
+      if: env.HAS_PRODUCTION_SECRETS == 'true'
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
         REDIS_URL: ${{ secrets.REDIS_URL_PRODUCTION }}
@@ -236,6 +248,7 @@ jobs:
         python scripts/validate_deploy_secrets.py --environment production
 
     - name: Render Kubernetes secrets
+      if: env.HAS_PRODUCTION_SECRETS == 'true'
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
         REDIS_URL: ${{ secrets.REDIS_URL_PRODUCTION }}
@@ -247,6 +260,7 @@ jobs:
         envsubst < k8s/secrets.template.yaml > k8s/secrets.generated.yaml
 
     - name: Deploy to production
+      if: env.HAS_PRODUCTION_SECRETS == 'true'
       run: |
         kubectl create namespace xencode --dry-run=client -o yaml | kubectl apply -f -
         kubectl apply -f k8s/secrets.generated.yaml
@@ -256,6 +270,7 @@ jobs:
         kubectl rollout status deployment/xencode-app -n xencode
 
     - name: Run production health checks
+      if: env.HAS_PRODUCTION_SECRETS == 'true'
       run: |
         kubectl wait --for=condition=ready pod -l app=xencode -n xencode --timeout=300s
         # Add production health check commands here
@@ -266,7 +281,7 @@ jobs:
         status: ${{ job.status }}
         channel: '#deployments'
         webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-      if: always() && (secrets.SLACK_WEBHOOK != '')
+      if: always() && (env.HAS_SLACK == 'true')
 
   security-scan:
     runs-on: ubuntu-latest
