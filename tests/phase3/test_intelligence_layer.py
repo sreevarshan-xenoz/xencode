@@ -147,8 +147,8 @@ from typing import List
 
             symbols = indexer._extract_symbols(Path(f.name), test_code)
 
-            # Clean up
-            os.unlink(f.name)
+        # Clean up after closing the file handle (Windows keeps open files locked)
+        os.unlink(f.name)
 
         # Check symbols extracted
         assert len(symbols) > 0
@@ -482,13 +482,17 @@ class TestProjectProfiles:
 
     def test_profile_manager_config_summary(self):
         """Test configuration summary"""
-        manager = ProjectProfileManager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ProjectProfileManager(project_root=Path(tmpdir))
 
-        summary = manager.get_config_summary()
+            manager.create_default_config(profile_name='test')
+            manager.load_config()
 
-        assert 'status' in summary
-        assert 'profile_name' in summary
-        assert 'default_model' in summary
+            summary = manager.get_config_summary()
+
+            assert summary['status'] == 'loaded'
+            assert 'profile_name' in summary
+            assert 'default_model' in summary
 
     def test_environment_variable_substitution(self):
         """Test environment variable substitution"""
@@ -561,6 +565,11 @@ class Greeter:
             # Get stats
             index_stats = indexer.get_stats()
             assert index_stats['total_files'] > 0
+
+            # Close the vector store client so Windows can release the DB file
+            client = getattr(indexer.vector_store, 'client', None)
+            if client is not None:
+                client.close()
 
     def test_routing_with_context(self):
         """Test routing with context information"""

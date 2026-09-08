@@ -93,7 +93,9 @@ class VoiceStatusIndicator(Container):
         if new_status != 'idle':
             self.add_class(new_status)
 
-        # Update icon and text
+        # Update icon and text (skip when not yet composed)
+        if not self.is_mounted:
+            return
         icon_label = self.query_one("#status-icon", Label)
         text_label = self.query_one("#status-text", Label)
 
@@ -103,7 +105,7 @@ class VoiceStatusIndicator(Container):
     def set_status(self, status: str, message: str = None) -> None:
         """Set the current status"""
         self.status = status
-        if message:
+        if message and self.is_mounted:
             text_label = self.query_one("#status-text", Label)
             text_label.update(message)
 
@@ -271,6 +273,9 @@ class VoiceCommandHistory(Container):
     def update_history(self, commands: List[Dict[str, Any]]) -> None:
         """Update the command history"""
         self.commands = commands
+
+        if not self.is_mounted:
+            return
 
         history_list = self.query_one("#history-list", ScrollableContainer)
         history_list.remove_children()
@@ -563,7 +568,9 @@ class VoiceInterfacePanel(Container):
         """Show a specific tab"""
         self.current_tab = tab_name
 
-        # Update button styles
+        # Update button styles (skip when not yet composed)
+        if not self.is_mounted:
+            return
         for button in self.query(".tab-button"):
             if button.id == f"tab-{tab_name}":
                 button.add_class("active")
@@ -628,33 +635,44 @@ class VoiceInterfacePanel(Container):
 
     def update_status(self, status: str, message: str = None) -> None:
         """Update voice status"""
+        if not self.is_mounted:
+            return
         status_indicator = self.query_one("#vi-status", VoiceStatusIndicator)
         status_indicator.set_status(status, message)
 
     def update_audio_levels(self, current: float, peak: float, average: float, speaking: bool) -> None:
         """Update audio level meter"""
+        if not self.is_mounted:
+            return
         meter = self.query_one("#vi-meter", AudioLevelMeter)
         meter.update_levels(current, peak, average, speaking)
 
     def add_command(self, command: Dict[str, Any]) -> None:
         """Add a command to history"""
-        history_panel = self.query_one("#history-panel", VoiceCommandHistory)
-        history_panel.add_command(command)
+        if self.is_mounted:
+            history_panel = self.query_one("#history-panel", VoiceCommandHistory)
+            history_panel.add_command(command)
 
         # Post message for parent to handle
         self.post_message(self.VoiceCommand(command))
 
     def update_command_history(self, commands: List[Dict[str, Any]]) -> None:
         """Update command history"""
+        if not self.is_mounted:
+            return
         history_panel = self.query_one("#history-panel", VoiceCommandHistory)
         history_panel.update_history(commands)
 
     def get_settings(self) -> Dict[str, Any]:
         """Get current settings"""
-        settings_panel = self.query_one("#settings-panel", VoiceSettingsPanel)
-        return settings_panel.get_settings()
+        if self.is_mounted:
+            settings_panel = self.query_one("#settings-panel", VoiceSettingsPanel)
+            return settings_panel.get_settings()
+        return {}
 
     def update_settings(self, settings: Dict[str, Any]) -> None:
         """Update settings"""
+        if not self.is_mounted:
+            return
         settings_panel = self.query_one("#settings-panel", VoiceSettingsPanel)
         settings_panel.update_settings(settings)

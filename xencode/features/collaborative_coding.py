@@ -1524,7 +1524,7 @@ class CollaborativeCodingFeature(FeatureBase):
         session = self.manager.sessions[session_id]
         recent_changes = session.change_history[-10:]  # Last 10 changes
 
-        return await self.resolver.resolve_conflict(recent_changes, strategy)
+        return await self.resolver.resolve_conflict(recent_changes, strategy, session_id=session_id)
 
 
     async def get_edit_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:

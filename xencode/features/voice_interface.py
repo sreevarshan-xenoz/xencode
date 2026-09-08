@@ -757,7 +757,7 @@ class VoiceCommandProcessor:
                 'write', 'create', 'generate', 'code', 'function', 'class'
             ],
             CommandType.NAVIGATION: [
-                'go to', 'open', 'navigate', 'show', 'find'
+                'go to', 'open', 'navigate', 'show'
             ],
             CommandType.SEARCH: [
                 'search', 'find', 'look for', 'where is'
@@ -819,14 +819,27 @@ class VoiceCommandProcessor:
 
     def _detect_command_type(self, text: str) -> CommandType:
         """Detect command type from text"""
-        # Check each command type pattern
+        best_type = CommandType.QUERY
+        best_score = 0
+        best_position = len(text) + 1
+
+        # Score each command type; ties are broken by the earliest keyword position
         for cmd_type, patterns in self.command_patterns.items():
+            score = 0
+            first_position = len(text) + 1
             for pattern in patterns:
-                if pattern in text:
-                    return cmd_type
+                idx = text.find(pattern)
+                if idx != -1:
+                    score += 1
+                    first_position = min(first_position, idx)
+
+            if score > best_score or (score == best_score and first_position < best_position):
+                best_score = score
+                best_position = first_position
+                best_type = cmd_type
 
         # Default to query
-        return CommandType.QUERY
+        return best_type
 
     def _extract_parameters(self, text: str, command_type: CommandType) -> Dict[str, Any]:
         """Extract parameters from command text"""

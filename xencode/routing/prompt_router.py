@@ -175,7 +175,8 @@ class TaskClassifier:
     TASK_PATTERNS: Dict[TaskType, List[str]] = {
         TaskType.CODE_GENERATION: [
             r'\b(write|create|generate|implement)\s+(code|function|class|method|script)',
-            r'\bcode\s+(for|to)\b',
+            r'\b(write|create|generate|implement)\s+(a|an|the)?\s*\w+\s+(function|class|method|script|program)',
+            r'\b(write|create|generate|implement)\s+(this\s+)?(code|a\s+code)\s+(for|to)\b',
             r'\bimplement\s+(a|an|the)?\s*(feature|function|class)',
             r'\bbuild\s+(a|an|the)?\s*(app|application|component|module)',
         ],
@@ -196,6 +197,7 @@ class TaskClassifier:
             r'\berror\b.*\b(line|at|in)\b',
             r'\bexception\b.*\b(thrown|raised|occurred)\b',
             r'\btraceback\b',
+            r'\b\w*(Error|Exception)\b',
         ],
         TaskType.REFACTORING: [
             r'\b(refactor|optimize|improve|clean up)\s+(this\s+)?code',

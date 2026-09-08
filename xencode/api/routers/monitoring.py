@@ -7,6 +7,7 @@ and system health endpoints with comprehensive observability features.
 """
 
 import asyncio
+import math
 import os
 from datetime import datetime, timedelta
 from enum import Enum
@@ -1297,7 +1298,7 @@ async def get_latency_trends():
                 trends[provider.value] = {
                     "current_ms": health.latency.current_ms,
                     "avg_ms": health.latency.avg_ms,
-                    "min_ms": health.latency.min_ms,
+                    "min_ms": health.latency.min_ms if math.isfinite(health.latency.min_ms) else 0.0,
                     "max_ms": health.latency.max_ms,
                     "p50_ms": health.latency.p50_ms,
                     "p95_ms": health.latency.p95_ms,

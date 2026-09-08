@@ -21,7 +21,7 @@ def test_feature_status_indicator_renders_and_updates_class():
     indicator.status = "enabled"
     indicator.watch_status("enabled")
 
-    assert "DUMMY" in indicator.render()
+    assert "dummy" in indicator.render()
     assert "enabled" in indicator.classes
 
 
