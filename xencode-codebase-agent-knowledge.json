@@ -2,8 +2,9 @@
   "project": {
     "name": "Xencode",
     "version": "2.1.0",
-    "description": "AI-powered coding assistant platform with CLI/TUI/API interfaces, multi-model support, agentic system, and plugin architecture",
-    "languages": ["Python", "TypeScript", "Rust", "JavaScript"],
+    "description": "AI-powered coding assistant platform. MIGRATION NOTICE: Completely migrating to Rust. No new development in Python.",
+    "migration_status": "Complete migration to Rust in progress. All new development, fixes, features, and UI must be in Rust (rust/). Python is frozen/deprecated.",
+    "languages": ["Rust", "TypeScript", "JavaScript", "Python (deprecated)"],
     "python_version": "3.10+",
     "entry_points": {
       "primary": {

@@ -359,17 +359,12 @@ impl<'a> App<'a> {
             .map(|f| f.path.display().to_string())
             .collect();
 
-        let available_models = vec![
-            "qwen2.5:7b".to_string(),
-            "llama3.1:8b".to_string(),
-            "anthropic/claude-3.5-sonnet".to_string(),
-            "google/gemini-1.5-pro".to_string(),
-            "openai/gpt-4o".to_string(),
-        ];
-        let selected_model = available_models
-            .iter()
-            .position(|m| m == &config.default_model)
-            .unwrap_or(0);
+        let available_models = if !config.default_model.is_empty() {
+            vec![config.default_model.clone()]
+        } else {
+            vec!["qwen2.5:7b".to_string()]
+        };
+        let selected_model = 0;
         let theme = ThemeColors::get(&config.active_theme);
 
         let mut git_status = HashMap::new();
@@ -1280,7 +1275,53 @@ impl<'a> App<'a> {
         self.lang_translate_input = String::new();
         self.lang_translate_output = String::new();
     }
+    /// Dynamically discover models installed by the user in Ollama and configured cloud models.
+    pub fn refresh_models(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let ollama_url = self.config.ollama_url.clone();
+        let timeout = self.config.response_timeout;
+        let has_openrouter = self.config.api_keys.openrouter_api_key.is_some();
+        let has_gemini = self.config.api_keys.google_gemini_api_key.is_some();
+        let has_qwen = self.config.api_keys.qwen_api_key.is_some();
+        let current_default = self.config.default_model.clone();
 
+        tokio::spawn(async move {
+            let client = OllamaClient::new(&ollama_url, timeout.min(5));
+            let mut models = Vec::new();
+
+            if let Ok(installed) = client.list_models().await {
+                for m in installed {
+                    if !m.name.contains("embed") {
+                        models.push(m.name);
+                    }
+                }
+            }
+
+            // Cloud providers if keys are configured
+            if has_openrouter {
+                models.push("anthropic/claude-3.5-sonnet".to_string());
+                models.push("openai/gpt-4o".to_string());
+            }
+            if has_gemini {
+                models.push("google/gemini-1.5-pro".to_string());
+                models.push("google/gemini-1.5-flash".to_string());
+            }
+            if has_qwen {
+                models.push("qwen-max".to_string());
+                models.push("qwen-plus".to_string());
+            }
+
+            // Fallback if no models discovered
+            if models.is_empty() && !current_default.is_empty() {
+                models.push(current_default);
+            }
+
+            if let Ok(serialized) = serde_json::to_string(&models) {
+                let _ = tx.send(format!("[MODELS]{}", serialized));
+            }
+        });
+    }
+
+    /// Trigger background health checks across all configured providers.
     pub fn run_health_check(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.health_check_in_progress {
             return;
@@ -1295,41 +1336,72 @@ impl<'a> App<'a> {
         let default_model = self.config.default_model.clone();
 
         tokio::spawn(async move {
-            // Check Ollama health
-            let mut client = OllamaClient::new(&ollama_url, timeout);
+            // Check Ollama health by listing installed models
+            let mut client = OllamaClient::new(&ollama_url, timeout.min(5));
             let start = std::time::Instant::now();
 
-            if !default_model.contains('/') {
-                // Local model - run real health check
-                match client.check_health(&default_model).await {
-                    Ok(health) => {
+            match client.list_models().await {
+                Ok(installed_models) => {
+                    let latency = start.elapsed().as_secs_f64() * 1000.0;
+                    let chat_models: Vec<String> = installed_models
+                        .iter()
+                        .filter(|m| !m.name.contains("embed"))
+                        .map(|m| m.name.clone())
+                        .collect();
+
+                    if !chat_models.is_empty() {
+                        // Send refreshed model list to TUI
+                        let mut all_models = chat_models.clone();
+                        if openrouter_key.is_some() {
+                            all_models.push("anthropic/claude-3.5-sonnet".to_string());
+                            all_models.push("openai/gpt-4o".to_string());
+                        }
+                        if gemini_key.is_some() {
+                            all_models.push("google/gemini-1.5-pro".to_string());
+                            all_models.push("google/gemini-1.5-flash".to_string());
+                        }
+                        if qwen_key.is_some() {
+                            all_models.push("qwen-max".to_string());
+                            all_models.push("qwen-plus".to_string());
+                        }
                         let _ = tx.send(format!(
-                            "[HEALTH]ollama|{}|{}|{}",
-                            health.status,
-                            health.response_time * 1000.0, // ms
-                            health.error_message.unwrap_or_default()
+                            "[MODELS]{}",
+                            serde_json::to_string(&all_models).unwrap_or_default()
                         ));
-                    }
-                    Err(e) => {
-                        let latency = start.elapsed().as_secs_f64() * 1000.0;
-                        let _ = tx.send(format!("[HEALTH]ollama|error|{}|{}", latency, e));
+
+                        // Test health using actual default_model if local and installed, or first installed model
+                        let test_model = if chat_models.contains(&default_model) {
+                            &default_model
+                        } else {
+                            &chat_models[0]
+                        };
+
+                        match client.check_health(test_model).await {
+                            Ok(health) => {
+                                let _ = tx.send(format!(
+                                    "[HEALTH]ollama|{}|{}|{}",
+                                    health.status,
+                                    health.response_time * 1000.0,
+                                    health.error_message.unwrap_or_default()
+                                ));
+                            }
+                            Err(e) => {
+                                let _ = tx.send(format!(
+                                    "[HEALTH]ollama|healthy|{}|{}",
+                                    latency, e
+                                ));
+                            }
+                        }
+                    } else {
+                        let _ = tx.send(format!(
+                            "[HEALTH]ollama|healthy|{}|Running (0 models installed)",
+                            latency
+                        ));
                     }
                 }
-            } else {
-                // OpenRouter model - just check connectivity to Ollama
-                match client.check_health("llama3.2:3b").await {
-                    Ok(health) => {
-                        let _ = tx.send(format!(
-                            "[HEALTH]ollama|{}|{}|{}",
-                            health.status,
-                            health.response_time * 1000.0,
-                            health.error_message.unwrap_or_default()
-                        ));
-                    }
-                    Err(e) => {
-                        let latency = start.elapsed().as_secs_f64() * 1000.0;
-                        let _ = tx.send(format!("[HEALTH]ollama|error|{}|{}", latency, e));
-                    }
+                Err(e) => {
+                    let latency = start.elapsed().as_secs_f64() * 1000.0;
+                    let _ = tx.send(format!("[HEALTH]ollama|error|{}|{}", latency, e));
                 }
             }
 
@@ -1470,6 +1542,10 @@ impl<'a> Default for App<'a> {
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    // Query installed Ollama models and check provider health immediately on startup
+    app.refresh_models(tx.clone());
+    app.run_health_check(tx.clone());
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
@@ -1661,6 +1737,26 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     }
                 } else if body == "done" {
                     app.profiler_running = false;
+                }
+            } else if let Some(body) = token.strip_prefix("[MODELS]") {
+                if let Ok(models) = serde_json::from_str::<Vec<String>>(body) {
+                    if !models.is_empty() {
+                        app.available_models = models;
+                        if let Some(pos) = app
+                            .available_models
+                            .iter()
+                            .position(|m| m == &app.config.default_model)
+                        {
+                            app.selected_model = pos;
+                        } else {
+                            // If current default_model is not installed, select first installed model from Ollama
+                            if let Some(first) = app.available_models.first().cloned() {
+                                app.config.default_model = first;
+                                app.selected_model = 0;
+                                let _ = app.config.save();
+                            }
+                        }
+                    }
                 }
             } else if token == "[HEALTH_DONE]" {
                 app.health_check_in_progress = false;
@@ -2002,19 +2098,24 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             app.config.ollama_url = app.settings_url_buffer.clone();
                                             app.settings_url_editing = false;
                                             let _ = app.config.save();
-                                        } else if app.settings_cursor == 7 {
-                                            // Start URL editing
+                                            // Refresh models and health check with new URL
+                                            app.refresh_models(tx.clone());
+                                            app.run_health_check(tx.clone());
+                                        } else if app.settings_cursor == 6 {
+                                            // Start Ollama URL editing (idx 6)
                                             app.settings_url_editing = true;
                                             app.settings_url_buffer = app.config.ollama_url.clone();
                                             app.settings_url_cursor = app.settings_url_buffer.len();
-                                        } else if app.settings_cursor == 6 {
-                                            // Factory reset
+                                        } else if app.settings_cursor == 7 {
+                                            // Factory reset (idx 7)
                                             let defaults = XencodeConfig::default();
                                             app.config = defaults;
                                             app.theme = ThemeColors::get(&app.config.active_theme);
                                             app.settings_reset_active = true;
                                             app.settings_cursor = 0;
                                             let _ = app.config.save();
+                                            app.refresh_models(tx.clone());
+                                            app.run_health_check(tx.clone());
                                             app.focus = FocusArea::ChatInput;
                                         } else {
                                             let _ = app.config.save();
@@ -2070,8 +2171,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.focus = if app.focus == FocusArea::ModelSelector {
                                     FocusArea::ChatInput
                                 } else {
+                                    app.refresh_models(tx.clone());
                                     FocusArea::ModelSelector
                                 };
+                            }
+                            KeyCode::Char('r') if app.focus == FocusArea::ModelSelector => {
+                                app.refresh_models(tx.clone());
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => match app.focus {
@@ -2080,6 +2185,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         app.settings_url_editing = false;
                                     } else {
                                         app.settings_reset_active = false;
+                                        let _ = app.config.save();
                                         app.focus = FocusArea::ChatInput;
                                     }
                                 }
@@ -2158,7 +2264,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Left => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && app.settings_cursor == 7
+                                        && app.settings_cursor == 6
                                         && app.settings_url_cursor > 0
                                     {
                                         app.settings_url_cursor -= 1;
@@ -2183,38 +2289,35 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     .to_string();
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
+                                                    let _ = app.config.save();
                                                 }
                                             }
                                             1 => {
-                                                app.config.cache_enabled = !app.config.cache_enabled
+                                                app.config.cache_enabled = !app.config.cache_enabled;
+                                                let _ = app.config.save();
                                             }
                                             2 => {
                                                 app.config.memory_enabled =
-                                                    !app.config.memory_enabled
+                                                    !app.config.memory_enabled;
+                                                let _ = app.config.save();
                                             }
                                             3 => {
                                                 if app.config.max_cache_size >= 20 {
                                                     app.config.max_cache_size -= 10;
+                                                    let _ = app.config.save();
                                                 }
                                             }
                                             4 => {
                                                 if app.config.max_memory_items >= 10 {
                                                     app.config.max_memory_items -= 5;
+                                                    let _ = app.config.save();
                                                 }
                                             }
                                             5 => {
                                                 if app.config.response_timeout >= 10 {
                                                     app.config.response_timeout -= 5;
+                                                    let _ = app.config.save();
                                                 }
-                                            }
-                                            7 => {
-                                                let defaults = XencodeConfig::default();
-                                                app.config = defaults;
-                                                app.theme =
-                                                    ThemeColors::get(&app.config.active_theme);
-                                                app.settings_reset_active = true;
-                                                app.settings_url_editing = false;
-                                                app.settings_url_buffer.clear();
                                             }
                                             _ => {}
                                         }
@@ -2222,10 +2325,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0
                                 {
                                     app.commit_cursor -= 1;
+                                    app.commit_message.remove(app.commit_cursor);
                                 } else if app.focus == FocusArea::ByteBotPanel
                                     && app.bytebot_cursor > 0
                                 {
                                     app.bytebot_cursor -= 1;
+                                    app.bytebot_command.remove(app.bytebot_cursor);
                                 } else if app.focus == FocusArea::LearningMode
                                     && app.learn_quiz_active
                                     && !app.learn_quiz_answered
@@ -2242,7 +2347,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Right => {
                                 if app.focus == FocusArea::Settings {
                                     if app.settings_url_editing
-                                        && app.settings_cursor == 7
+                                        && app.settings_cursor == 6
                                         && app.settings_url_cursor < app.settings_url_buffer.len()
                                     {
                                         app.settings_url_cursor += 1;
@@ -2267,44 +2372,41 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     .to_string();
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
+                                                    let _ = app.config.save();
                                                 }
                                             }
                                             1 => {
-                                                app.config.cache_enabled = !app.config.cache_enabled
+                                                app.config.cache_enabled = !app.config.cache_enabled;
+                                                let _ = app.config.save();
                                             }
                                             2 => {
                                                 app.config.memory_enabled =
-                                                    !app.config.memory_enabled
+                                                    !app.config.memory_enabled;
+                                                let _ = app.config.save();
                                             }
                                             3 => {
                                                 app.config.max_cache_size = app
                                                     .config
                                                     .max_cache_size
                                                     .saturating_add(10)
-                                                    .min(1000)
+                                                    .min(1000);
+                                                let _ = app.config.save();
                                             }
                                             4 => {
                                                 app.config.max_memory_items = app
                                                     .config
                                                     .max_memory_items
                                                     .saturating_add(5)
-                                                    .min(500)
+                                                    .min(500);
+                                                let _ = app.config.save();
                                             }
                                             5 => {
                                                 app.config.response_timeout = app
                                                     .config
                                                     .response_timeout
                                                     .saturating_add(5)
-                                                    .min(300)
-                                            }
-                                            7 => {
-                                                let defaults = XencodeConfig::default();
-                                                app.config = defaults;
-                                                app.theme =
-                                                    ThemeColors::get(&app.config.active_theme);
-                                                app.settings_reset_active = true;
-                                                app.settings_url_editing = false;
-                                                app.settings_url_buffer.clear();
+                                                    .min(300);
+                                                let _ = app.config.save();
                                             }
                                             _ => {}
                                         }

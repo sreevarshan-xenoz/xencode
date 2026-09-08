@@ -98,15 +98,36 @@ async fn get_config() -> Json<serde_json::Value> {
     }))
 }
 
-/// List available models.
+/// List available models dynamically from Ollama.
 async fn list_models() -> Json<serde_json::Value> {
+    let client = xencode_models_rs::OllamaClient::default_client();
+    let mut models_json = Vec::new();
+
+    if let Ok(models) = client.list_models().await {
+        for m in models {
+            if !m.name.contains("embed") {
+                models_json.push(serde_json::json!({
+                    "name": m.name,
+                    "provider": "ollama",
+                    "type": "local",
+                    "size": m.size,
+                    "modified_at": m.modified_at,
+                }));
+            }
+        }
+    }
+
+    if models_json.is_empty() {
+        // Fallback models when Ollama is offline
+        models_json.push(serde_json::json!({"name": "qwen2.5:7b", "provider": "ollama", "type": "local"}));
+        models_json.push(serde_json::json!({"name": "llama3.1:8b", "provider": "ollama", "type": "local"}));
+    }
+
+    models_json.push(serde_json::json!({"name": "gpt-4o", "provider": "openai", "type": "remote"}));
+    models_json.push(serde_json::json!({"name": "claude-3.5-sonnet", "provider": "anthropic", "type": "remote"}));
+
     Json(serde_json::json!({
-        "models": [
-            {"name": "qwen2.5:7b", "provider": "ollama", "type": "local"},
-            {"name": "llama3.1:8b", "provider": "ollama", "type": "local"},
-            {"name": "gpt-4o", "provider": "openai", "type": "remote"},
-            {"name": "claude-3.5-sonnet", "provider": "anthropic", "type": "remote"},
-        ]
+        "models": models_json
     }))
 }
 

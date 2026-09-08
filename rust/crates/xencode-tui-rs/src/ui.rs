@@ -458,50 +458,68 @@ fn draw_terminal(f: &mut Frame, app: &App, area: Rect) {
 // ── Overlays ────────────────────────────────────────────────────────────────
 
 fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(50, 40, area);
+    let popup_area = centered_rect(55, 50, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🧠 Select Model (↑↓ Enter) ");
+        .title(" 🧠 Select Model (↑↓ Enter, 'r' Refresh, Esc Close) ");
 
-    let items: Vec<ListItem> = app
-        .available_models
-        .iter()
-        .enumerate()
-        .map(|(i, model)| {
-            let is_current = model == &app.config.default_model;
-            let style = if i == app.selected_model {
-                Style::default()
-                    .fg(app.theme.highlight_fg)
-                    .bg(app.theme.highlight)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(app.theme.fg)
-            };
-            let prefix = if is_current { " ● " } else { "   " };
-            ListItem::new(Line::from(Span::styled(
-                format!("{}{}", prefix, model),
-                style,
-            )))
-        })
-        .collect();
+    let items: Vec<ListItem> = if app.available_models.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "   ⚠️  No models detected. Ensure Ollama is running, or press 'r' to refresh.",
+            Style::default().fg(ratatui::style::Color::Yellow),
+        )))]
+    } else {
+        app.available_models
+            .iter()
+            .enumerate()
+            .map(|(i, model)| {
+                let is_current = model == &app.config.default_model;
+                let style = if i == app.selected_model {
+                    Style::default()
+                        .fg(app.theme.highlight_fg)
+                        .bg(app.theme.highlight)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.fg)
+                };
+                let prefix = if is_current { " ● " } else { "   " };
+                let badge = if model.contains('/') || model.starts_with("qwen-") {
+                    " [cloud]"
+                } else {
+                    " [ollama]"
+                };
+                let badge_color = if badge == " [ollama]" {
+                    ratatui::style::Color::Cyan
+                } else {
+                    ratatui::style::Color::Magenta
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{}{}", prefix, model), style),
+                    Span::styled(badge, Style::default().fg(badge_color)),
+                ]))
+            })
+            .collect()
+    };
 
     let list = List::new(items).block(block);
     let mut state = ListState::default();
-    state.select(Some(app.selected_model));
+    if !app.available_models.is_empty() {
+        state.select(Some(app.selected_model));
+    }
     f.render_stateful_widget(list, popup_area, &mut state);
 }
 
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(65, 75, area);
+    let popup_area = centered_rect(65, 80, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" ⚙️  Settings (↑↓ select, ←→ change, Enter save, Esc close) ");
+        .title(" ⚙️  Settings (↑↓ select, ←→ change, Enter edit/save, Esc close) ");
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -509,9 +527,9 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(15),
-            Constraint::Min(5),
-            Constraint::Length(8),
+            Constraint::Min(17),
+            Constraint::Length(7),
+            Constraint::Length(4),
         ])
         .split(inner);
 
@@ -550,15 +568,15 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let theme_str = format!("{}  [{}]", app.config.active_theme, theme_indicators);
 
     let url_str = if app.settings_url_editing {
-        format!("{}|", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
     } else {
-        app.config.ollama_url.clone()
+        format!("{}  (Enter to edit)", app.config.ollama_url)
     };
 
     let reset_label = if app.settings_reset_active {
         "✅ Reset to defaults!"
     } else {
-        "⚠️  Reset to defaults"
+        "⚠️  Reset to defaults (Enter to confirm)"
     };
 
     let settings_values: [(&str, &str); 8] = [
@@ -581,14 +599,13 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     ];
 
     let mut settings_lines: Vec<Line> = Vec::new();
-    for &(start, end, section_name) in &sections {
+    for (s_idx, &(start, end, section_name)) in sections.iter().enumerate() {
         settings_lines.push(Line::from(Span::styled(
             section_name,
             Style::default()
                 .fg(app.theme.fg)
                 .add_modifier(Modifier::UNDERLINED),
         )));
-        settings_lines.push(Line::from(""));
 
         for (idx, &(label, value)) in settings_values.iter().enumerate().take(end).skip(start) {
             let is_selected = app.settings_cursor == idx;
@@ -600,7 +617,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Style::default().fg(app.theme.fg)
             };
-            let pointer = if is_selected { " ▶" } else { "  " };
+            let pointer = if is_selected { " ▶ " } else { "   " };
             let is_reset = idx == 7;
             let is_url_item = idx == 6;
             let value_color = if is_reset && is_selected {
@@ -617,7 +634,9 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(value, Style::default().fg(value_color)),
             ]));
         }
-        settings_lines.push(Line::from(""));
+        if s_idx + 1 < sections.len() {
+            settings_lines.push(Line::from(""));
+        }
     }
 
     let settings_para = Paragraph::new(settings_lines).style(Style::default().fg(app.theme.fg));
