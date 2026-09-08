@@ -220,3 +220,43 @@ async fn openrouter_prefix_routes() {
         other => panic!("expected Network or Api error (tried OpenRouter), got: {other:?}"),
     }
 }
+
+// ── llama.cpp routing ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn llamacpp_prefix_routes_to_llamacpp() {
+    let manager = make_manager(None, None, None);
+
+    let result = manager
+        .generate("llamacpp:mistral-7b-instruct.Q4_K_M.gguf", &test_messages())
+        .await;
+
+    assert!(result.is_err(), "expected routing error to llama.cpp");
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("llama.cpp"),
+        "expected error mentioning 'llama.cpp', got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn llamacpp_with_custom_client() {
+    use xencode_models_rs::LlamaCppClient;
+
+    let manager = make_manager(None, None, None)
+        .with_llama_cpp(LlamaCppClient::new("http://127.0.0.1:9999", 2));
+
+    let result = manager
+        .generate("llama.cpp:qwen2.5-coder-7b.gguf", &test_messages())
+        .await;
+
+    assert!(result.is_err(), "expected error from custom llama.cpp client");
+    let err = result.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("llama.cpp"),
+        "expected error mentioning 'llama.cpp', got: {msg}"
+    );
+}
+
