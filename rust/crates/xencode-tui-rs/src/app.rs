@@ -2221,6 +2221,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::ModelSelector
                                 };
                             }
+                            KeyCode::Char('s') => {
+                                app.focus = if app.focus == FocusArea::Settings {
+                                    FocusArea::ChatInput
+                                } else {
+                                    FocusArea::Settings
+                                };
+                            }
                             KeyCode::Char('r') if app.focus == FocusArea::ModelSelector => {
                                 app.refresh_models(tx.clone());
                             }
