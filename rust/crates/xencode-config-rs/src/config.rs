@@ -37,6 +37,18 @@ pub struct XencodeConfig {
     #[serde(default = "default_llama_cpp_url")]
     pub llama_cpp_url: String,
 
+    /// Path to a GGUF model used when auto-starting / loading llama-server.
+    #[serde(default = "default_llama_cpp_model_path")]
+    pub llama_cpp_model_path: String,
+
+    /// Path to the llama-server executable (empty = resolved from PATH).
+    #[serde(default)]
+    pub llama_cpp_executable: String,
+
+    /// Extra CLI arguments to pass when auto-starting llama-server.
+    #[serde(default)]
+    pub llama_cpp_args: Vec<String>,
+
     /// Maximum cache size (number of entries).
     #[serde(default = "default_cache_size")]
     pub max_cache_size: usize,
@@ -78,6 +90,10 @@ fn default_llama_cpp_url() -> String {
     "http://localhost:8080".to_string()
 }
 
+fn default_llama_cpp_model_path() -> String {
+    String::new()
+}
+
 fn default_cache_size() -> usize {
     100
 }
@@ -101,6 +117,9 @@ impl Default for XencodeConfig {
             active_theme: default_theme(),
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
+            llama_cpp_model_path: default_llama_cpp_model_path(),
+            llama_cpp_executable: String::new(),
+            llama_cpp_args: Vec::new(),
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),
             cache_enabled: true,
@@ -210,6 +229,9 @@ mod tests {
         assert_eq!(config.default_model, "qwen2.5:7b");
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.llama_cpp_url, "http://localhost:8080");
+        assert_eq!(config.llama_cpp_model_path, "");
+        assert_eq!(config.llama_cpp_executable, "");
+        assert!(config.llama_cpp_args.is_empty());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
