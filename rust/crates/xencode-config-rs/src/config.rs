@@ -33,6 +33,10 @@ pub struct XencodeConfig {
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
 
+    /// llama.cpp server URL.
+    #[serde(default = "default_llama_cpp_url")]
+    pub llama_cpp_url: String,
+
     /// Maximum cache size (number of entries).
     #[serde(default = "default_cache_size")]
     pub max_cache_size: usize,
@@ -70,6 +74,10 @@ fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
 
+fn default_llama_cpp_url() -> String {
+    "http://localhost:8080".to_string()
+}
+
 fn default_cache_size() -> usize {
     100
 }
@@ -92,6 +100,7 @@ impl Default for XencodeConfig {
             default_model: default_model(),
             active_theme: default_theme(),
             ollama_url: default_ollama_url(),
+            llama_cpp_url: default_llama_cpp_url(),
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),
             cache_enabled: true,
@@ -200,6 +209,7 @@ mod tests {
         let config = XencodeConfig::default();
         assert_eq!(config.default_model, "qwen2.5:7b");
         assert_eq!(config.ollama_url, "http://localhost:11434");
+        assert_eq!(config.llama_cpp_url, "http://localhost:8080");
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
