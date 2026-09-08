@@ -26,8 +26,9 @@ enum OutputFormat {
 #[derive(Parser)]
 #[command(name = "xencode", version, about, long_about = None)]
 struct Cli {
+    /// Defaults to the TUI when omitted
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -182,7 +183,8 @@ enum MemoryAction {
 async fn main() {
     let cli = Cli::parse();
 
-    let result = match cli.command {
+    // Bare `xencode` launches the TUI, as documented in the README
+    let result = match cli.command.unwrap_or(Commands::Tui) {
         Commands::Scan {
             path,
             hidden,
