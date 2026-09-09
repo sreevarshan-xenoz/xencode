@@ -1,0 +1,45 @@
+{
+  "top_k": 5,
+  "items": [
+    {
+      "query": "retrieve files by score",
+      "expected": ["rust/crates/xencode-context-rs/src/retrieve.rs"]
+    },
+    {
+      "query": "budget token truncation for context tiers",
+      "expected": ["rust/crates/xencode-context-rs/src/budget.rs"]
+    },
+    {
+      "query": "context stable prefix kv cache reuse",
+      "expected": ["rust/crates/xencode-context-rs/src/context.rs"]
+    },
+    {
+      "query": "stale loaded hash detection tracker",
+      "expected": ["rust/crates/xencode-context-rs/src/stale.rs"]
+    },
+    {
+      "query": "command output compression summary raw",
+      "expected": ["rust/crates/xencode-context-rs/src/cmd_output.rs"]
+    },
+    {
+      "query": "compact decision marker soft hard",
+      "expected": ["rust/crates/xencode-context-rs/src/compact.rs"]
+    },
+    {
+      "query": "conversation transcript store archive",
+      "expected": ["rust/crates/xencode-context-rs/src/conversation.rs"]
+    },
+    {
+      "query": "app submit message interception input",
+      "expected": ["rust/crates/xencode-tui-rs/src/app.rs"]
+    },
+    {
+      "query": "scanner scan files manifest index",
+      "expected": ["rust/crates/xencode-context-rs/src/scanner.rs"]
+    },
+    {
+      "query": "symbols extract dependency edges graph",
+      "expected": ["rust/crates/xencode-context-rs/src/symbols.rs"]
+    }
+  ]
+}

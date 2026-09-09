@@ -17,6 +17,8 @@ pub mod cmd_output;
 pub mod compact;
 pub mod context;
 pub mod conversation;
+pub mod embed;
+pub mod eval;
 pub mod gitinfo;
 pub mod index;
 pub mod init;
@@ -36,9 +38,11 @@ pub use compact::{
     CompactionKind,
 };
 pub use context::{
-    assemble_prompt, git_summary_text, read_retrieved_bodies, RetrievedBlock, TierDoc,
+    assemble_prompt, git_summary_text, read_retrieved_bodies, RetrievedBlock, TierDoc, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
+pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
+pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
 pub use gitinfo::{changed_paths_between, current_git_info, dirty_paths, git_file_set, is_git_repo, GitInfo};
 pub use index::{write_atomic, write_str_atomic, FileEntry, FilesIndex, Manifest, VERSION};
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
