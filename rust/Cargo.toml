@@ -2,6 +2,7 @@
 members = [
     "crates/xencode-core-rs",
     "crates/xencode-config-rs",
+    "crates/xencode-context-rs",
     "crates/xencode-cache-rs",
     "crates/xencode-models-rs",
     "crates/xencode-memory-rs",
