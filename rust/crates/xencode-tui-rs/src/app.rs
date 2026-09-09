@@ -1357,6 +1357,77 @@ impl<'a> App<'a> {
                         .to_string(),
                 );
             }
+            Some("eval") => {
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let Some(index) = xencode_context_rs::RetrievalIndex::load(&xencode) else {
+                    let _ = tx.send("[CTX_START]".to_string());
+                    let _ = tx.send("[CTX]❌ No project index — run /init first.".to_string());
+                    return;
+                };
+                let gold = xencode_context_rs::gold_from_disk(&xencode);
+                let dirty: HashSet<String> =
+                    xencode_context_rs::dirty_paths(&root).into_iter().collect();
+                let k = 5;
+                let base = xencode_context_rs::evaluate(&index, &gold, k, &dirty, false);
+                let reranked = xencode_context_rs::evaluate(&index, &gold, k, &dirty, true);
+                let _ = tx.send("[CTX_START]".to_string());
+                let _ = tx.send(format!(
+                    "[CTX]🧪 Retrieval eval — {} gold queries, top-{} ({} gold file{})",
+                    base.queries,
+                    k,
+                    if gold.iter().all(|g| g.expected.is_empty()) { 0 } else { base.queries },
+                    if base.queries == 1 { "" } else { "s" }
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]   deterministic : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
+                    base.mrr,
+                    base.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                    base.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
+                    base.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]   + BM25 rerank : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
+                    reranked.mrr,
+                    reranked.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                    reranked.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
+                    reranked.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                ));
+                let delta = reranked.mrr - base.mrr;
+                let verdict = if (delta - base.mrr).abs() < f64::EPSILON && delta.abs() < 1e-6 {
+                    "no change"
+                } else if delta > 1e-6 {
+                    "rerank wins — enable by default"
+                } else {
+                    "rerank ties or hurts — keep deterministic baseline"
+                };
+                let _ = tx.send(format!(
+                    "[CTX]   ΔMRR {delta:+.3} → {verdict}",
+                ));
+                let _ = tx.send("[CTX]   Per query:".to_string());
+                for (query, expected, rank, ranked) in &base.hits {
+                    let rank_str = if *rank == usize::MAX {
+                        "miss".to_string()
+                    } else {
+                        format!("#{}", rank)
+                    };
+                    let _ = tx.send(format!(
+                        "[CTX]     {rank_str:>5}  {query}  → {}",
+                        expected.join(", ")
+                    ));
+                    if *rank == usize::MAX {
+                        let _ = tx.send(format!(
+                            "[CTX]          top: {}",
+                            ranked
+                                .iter()
+                                .take(3)
+                                .cloned()
+                                .collect::<Vec<String>>()
+                                .join(" · ")
+                        ));
+                    }
+                }
+            }
             Some("kv") => {
                 const PROFILE: xencode_context_rs::HardwareProfile =
                     xencode_context_rs::HardwareProfile::Balanced;
