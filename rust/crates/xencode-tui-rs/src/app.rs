@@ -24,6 +24,10 @@ use xencode_providers_rs::{ChatMessage, ProviderManager};
 
 use crate::ui;
 
+/// System block injected as tier 1 when previewing `/ctx` context assembly.
+const CTX_SYSTEM: &str =
+    "You are Xencode, a coding agent. Follow the project guidelines below exactly.";
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
     Normal,
@@ -729,6 +733,12 @@ impl<'a> App<'a> {
             return;
         }
 
+        // Context assembly interception (/ctx, /ctx status, /ctx track <path>)
+        if prompt.starts_with("/ctx") {
+            self.handle_ctx_command(&prompt, tx);
+            return;
+        }
+
         self.is_generating = true;
 
         // ByteBot interception
@@ -1240,6 +1250,193 @@ impl<'a> App<'a> {
                 }
             }
             let _ = tx.send("[INIT_DONE]".to_string());
+        });
+    }
+
+    /// Handle `/ctx` — context assembly: deterministic retrieval over the
+    /// project index, stale-file status, and pinning a file as "loaded".
+    fn handle_ctx_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let rest = prompt.strip_prefix("/ctx").unwrap_or("").trim();
+        let mut parts = rest.split_whitespace();
+        match parts.next() {
+            Some("status") => {
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
+                tracker.load_from_disk();
+                let _ = tx.send("[CTX_START]".to_string());
+                if tracker.state.is_empty() {
+                    let _ = tx.send(
+                        "[CTX]ℹ️ No tracked files — pin one with /ctx track src/foo.rs.".to_string(),
+                    );
+                    return;
+                }
+                let all = tracker.check_all(&root);
+                let stale: usize = all
+                    .iter()
+                    .filter(|t| t.state == xencode_context_rs::FileStateKind::Stale)
+                    .count();
+                let missing: usize = all
+                    .iter()
+                    .filter(|t| t.state == xencode_context_rs::FileStateKind::Missing)
+                    .count();
+                for t in &all {
+                    let mark = match t.state {
+                        xencode_context_rs::FileStateKind::Clean => "✔",
+                        xencode_context_rs::FileStateKind::Stale => "⚠",
+                        xencode_context_rs::FileStateKind::Missing => "✖",
+                    };
+                    let _ = tx.send(format!("[CTX]{mark} {} — {:?}", t.path, t.state));
+                }
+                let _ = tx.send(format!(
+                    "[CTX]📊 {} tracked — {stale} stale, {missing} missing.",
+                    all.len()
+                ));
+            }
+            Some("track") => {
+                let Some(path) = parts.next() else {
+                    let _ = tx.send("[CTX_START]".to_string());
+                    let _ = tx.send("[CTX]ℹ️ Usage: /ctx track <repo-relative-path>".to_string());
+                    return;
+                };
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
+                tracker.load_from_disk();
+                tracker.mark_loaded(&root, &[path]);
+                let _ = tx.send("[CTX_START]".to_string());
+                if tracker.save().is_ok() {
+                    let _ = tx.send(format!(
+                        "[CTX]🔖 Pinned \"{path}\" at load-time hash — /ctx status to check staleness."
+                    ));
+                } else {
+                    let _ = tx.send(
+                        "[CTX]❌ Could not persist the tracking state.".to_string(),
+                    );
+                }
+            }
+            _ => {
+                let query = if let Some(rest) = rest.strip_prefix("retrieve") {
+                    rest.trim().to_string()
+                } else {
+                    rest.to_string()
+                };
+                // Carry a small recent-message window for the assembly preview.
+                let mut recent: Vec<String> = self
+                    .messages
+                    .iter()
+                    .rev()
+                    .take(8)
+                    .map(|m| format!("{}: {}", m.role, m.content))
+                    .collect();
+                recent.reverse();
+                self.run_ctx_retrieval(query, recent.join("\n"), tx);
+            }
+        }
+    }
+
+    /// Run deterministic retrieval + a context-assembly preview in the
+    /// background, streaming results back through `[CTX]` chat lines.
+    fn run_ctx_retrieval(
+        &mut self,
+        query: String,
+        recent_text: String,
+        tx: mpsc::UnboundedSender<String>,
+    ) {
+        tokio::spawn(async move {
+            let _ = tx.send("[CTX_START]".to_string());
+            let root = xencode_context_rs::default_root();
+            let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+            let Some(index) = xencode_context_rs::RetrievalIndex::load(&xencode) else {
+                let _ = tx.send(
+                    "[CTX]❌ No project index — run /init first.".to_string(),
+                );
+                return;
+            };
+            let profile = xencode_context_rs::HardwareProfile::Balanced;
+            let opts = xencode_context_rs::RetrieveOptions {
+                top_k: profile.top_k(),
+                ..Default::default()
+            };
+            let changed: HashSet<String> =
+                xencode_context_rs::dirty_paths(&root).into_iter().collect();
+            let results = xencode_context_rs::retrieve(&query, &index, &changed, &opts);
+            if results.is_empty() {
+                let _ = tx.send(
+                    "[CTX]😶 Nothing above the score threshold — try a more specific query."
+                        .to_string(),
+                );
+                return;
+            }
+            let _ = tx.send(format!(
+                "[CTX]🎯 Retrieval ({} profile, top-{}):",
+                profile.name(),
+                results.len()
+            ));
+            for r in &results {
+                let _ = tx.send(format!(
+                    "[CTX]  {:>3}  {}  ·  {}",
+                    r.score,
+                    r.path,
+                    r.reasons.join(", ")
+                ));
+            }
+
+            let blocks = xencode_context_rs::read_retrieved_bodies(
+                &root,
+                &index.files,
+                &results,
+                profile.content_cap_chars(),
+            );
+            let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+            let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
+            let state = std::fs::read_to_string(xencode.join("state.md")).ok();
+            let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
+            let doc = xencode_context_rs::assemble_prompt(
+                profile,
+                CTX_SYSTEM,
+                agents.as_deref(),
+                anchor.as_deref(),
+                state.as_deref(),
+                &git,
+                blocks,
+                &recent_text,
+            );
+            let stable_tokens: u64 = doc.tiers.iter().take(3).map(|t| t.tokens).sum();
+            let _ = tx.send(format!(
+                "[CTX]📦 Assembled context ≈ {} / {} tokens target — {} / {} retrieved files in — stable prefix {} tokens",
+                doc.total_tokens,
+                doc.target_tokens,
+                doc.retrieved_included,
+                doc.retrieved_total,
+                stable_tokens
+            ));
+            if doc.truncated {
+                let _ = tx.send(
+                    "[CTX]⚠ Some retrieved files dropped to fit the budget.".to_string(),
+                );
+            }
+            if doc.soft_compaction_needed {
+                let _ = tx.send(
+                    "[CTX]⚠ Recent-message budget under 1 message — soft compaction should trigger before sending."
+                        .to_string(),
+                );
+            }
+
+            let mut m = xencode_context_rs::RequestMetrics::new(
+                profile.name(),
+                profile.ctx_tokens() as u32,
+            );
+            m.ts_unix_ms = (current_timestamp() * 1000.0) as u64;
+            m.prompt_tokens = doc.total_tokens.min(u32::MAX as u64) as u32;
+            m.retrieved_files = doc.retrieved_included.min(u8::MAX as usize) as u8;
+            m.context_usage = (doc.total_tokens as f32 / doc.target_tokens.max(1) as f32).min(1.0);
+            m.compaction = if doc.soft_compaction_needed {
+                xencode_context_rs::CompactAction::Soft
+            } else {
+                xencode_context_rs::CompactAction::None
+            };
+            let _ = xencode_context_rs::append_metrics(&xencode, &m);
         });
     }
 
@@ -1969,6 +2166,20 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 } else if body.starts_with("log:") {
                     if let Some(msg) = body.strip_prefix("log:") {
                         app.init_log.push(msg.to_string());
+                    }
+                }
+            } else if token == "[CTX_START]" {
+                app.messages.push(UiMessage {
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                });
+            } else if let Some(body) = token.strip_prefix("[CTX]") {
+                if let Some(last) = app.messages.last_mut() {
+                    if last.role == "assistant" {
+                        if !last.content.is_empty() {
+                            last.content.push('\n');
+                        }
+                        last.content.push_str(body);
                     }
                 }
             } else if let Some(body) = token.strip_prefix("[COLLAB]") {
