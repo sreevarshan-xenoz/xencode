@@ -69,6 +69,33 @@ impl HardwareProfile {
             HardwareProfile::High => (0.80, 0.90),
         }
     }
+
+    /// Default llama.cpp server args per profile (§13). KV quantization is a
+    /// profile setting, not a universal flag; LOW trades the value cache to
+    /// `q4_0` to fit small VRAM with the key cache, BALANCED/HIGH run both at
+    /// `q8_0`. `--parallel 1` keeps the KV slot count to one so cache reuse is
+    /// predictable.
+    pub fn llama_cpp_args(self) -> Vec<String> {
+        let mut args = vec![
+            "--flash-attn".to_string(),
+            "--cache-type-k".to_string(),
+            "q8_0".to_string(),
+            "--cache-type-v".to_string(),
+        ];
+        match self {
+            HardwareProfile::Low => args.push("q4_0".to_string()),
+            HardwareProfile::Balanced | HardwareProfile::High => {
+                args.push("q8_0".to_string())
+            }
+        }
+        args.push("--ctx-size".to_string());
+        args.push(self.ctx_tokens().to_string());
+        args.push("--n-predict".to_string());
+        args.push("1024".to_string());
+        args.push("--parallel".to_string());
+        args.push("1".to_string());
+        args
+    }
 }
 
 /// Deterministic token estimate: `ceil(chars / 4)` prose, `ceil(chars / 3)`
@@ -172,5 +199,31 @@ mod tests {
         );
         assert!(HardwareProfile::Low.top_k() < HardwareProfile::Balanced.top_k());
         assert_ne!(HardwareProfile::Balanced.top_k(), HardwareProfile::High.top_k());
+    }
+
+    #[test]
+    fn llama_cpp_args_match_profile_spec() {
+        assert_eq!(
+            HardwareProfile::Balanced.llama_cpp_args(),
+            vec![
+                "--flash-attn",
+                "--cache-type-k",
+                "q8_0",
+                "--cache-type-v",
+                "q8_0",
+                "--ctx-size",
+                "8192",
+                "--n-predict",
+                "1024",
+                "--parallel",
+                "1",
+            ]
+        );
+        let low = HardwareProfile::Low.llama_cpp_args();
+        assert!(low.contains(&"q4_0".to_string()));
+        assert!(low.contains(&"4096".to_string()));
+        let high = HardwareProfile::High.llama_cpp_args();
+        assert!(high.contains(&"16384".to_string()));
+        assert!(high.contains(&"q8_0".to_string()));
     }
 }
