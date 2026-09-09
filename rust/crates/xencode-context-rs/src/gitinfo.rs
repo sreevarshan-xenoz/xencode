@@ -119,6 +119,42 @@ pub fn changed_paths_between(root: &Path, old_head: &str, new_head: &str) -> Vec
         .unwrap_or_default()
 }
 
+/// Repo-relative paths with uncommitted changes (`/` separators): modified,
+/// staged or untracked. Parsed from `git status --porcelain`.
+pub fn dirty_paths(root: &Path) -> Vec<String> {
+    if !is_git_repo(root) {
+        return Vec::new();
+    }
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+        .ok();
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let mut paths = Vec::new();
+    for line in String::from_utf8(output.stdout).unwrap_or_default().lines() {
+        // Porcelain layout: <XY> <path> for normal entries, "XY  old -> new"
+        // for renames/copies.
+        let entry = if line.len() > 3 { &line[3..] } else { continue };
+        let path = match entry.split_once(" -> ") {
+            Some((_, new)) => new,
+            None => entry,
+        };
+        let path = path.trim().trim_matches('"').replace('\\', "/");
+        if !path.is_empty() {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
