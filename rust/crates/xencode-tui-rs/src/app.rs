@@ -17,8 +17,8 @@ use xencode_context_rs::init_project;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
-    current_timestamp, HealthStatus, LlamaCppClient, LlamaCppOptions, LlamaCppTimings,
-    OllamaClient,
+    current_timestamp, find_llama_server, start_llama_server, HealthStatus, LlamaCppClient,
+    LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 
@@ -238,6 +238,8 @@ pub struct App<'a> {
     pub ollama_health_entries: HashMap<String, (String, f64, Option<String>)>,
     pub last_health_check: f64,
     pub health_check_in_progress: bool,
+    /// Handle to a llama-server that the TUI auto-started this session (if any).
+    pub llama_process: Option<Arc<std::sync::Mutex<Option<LlamaServerProcess>>>>,
     pub total_llm_calls: u64,
     pub average_latency: f64,
 
@@ -573,6 +575,7 @@ impl<'a> App<'a> {
             sampling_int_buffer: String::new(),
 
             last_llamacpp_timings: None,
+            llama_process: None,
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
         };
@@ -2296,6 +2299,87 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Auto-start `llama-server` when xencode boots, per config docs
+    /// (`llama_cpp_model_path` / `llama_cpp_executable` / `llama_cpp_args`).
+    ///
+    /// Skips if the server is already answering on `llama_cpp_url`. The spawned
+    /// process keeps running after xencode exits (same contract as `xencode
+    /// llamacpp start`), so subsequent launches attach instead of respawning.
+    pub fn maybe_auto_start_llama(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let model_path = self.config.llama_cpp_model_path.clone();
+        if model_path.trim().is_empty() {
+            return; // nothing configured to host — nothing to auto-start
+        }
+        let exec = self.config.llama_cpp_executable.clone();
+        let url = self.config.llama_cpp_url.clone();
+        let args = self.config.llama_cpp_args.clone();
+
+        let shared = Arc::new(std::sync::Mutex::new(None));
+        self.llama_process = Some(shared.clone());
+        let err_tx = tx.clone();
+        let ok_tx = tx.clone();
+
+        tokio::spawn(async move {
+            // Already running? Attach silently.
+            let probe = LlamaCppClient::new(&url, 3);
+            if probe.ping().await.is_ok() {
+                return;
+            }
+
+            let Some(exe) = find_llama_server(if exec.trim().is_empty() {
+                None
+            } else {
+                Some(&exec)
+            }) else {
+                let _ = err_tx.send(format!(
+                    "[LLAMACPP_MSG]⚠️ auto-start skipped: llama-server not on PATH{}",
+                    if exec.trim().is_empty() {
+                        " (set config llama_cpp_executable)"
+                    } else {
+                        ""
+                    }
+                ));
+                return;
+            };
+
+            let port = parse_llama_port(&url);
+            let extra: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let mut server = match start_llama_server(&exe, &model_path, port, &extra) {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = err_tx.send(format!("[LLAMACPP_MSG]⚠️ auto-start failed: {e}"));
+                    return;
+                }
+            };
+
+            // Wait for the server to become healthy (model load can take a while).
+            let client = LlamaCppClient::new(&server.base_url, 3);
+            let mut ready = false;
+            for _ in 0..120 {
+                if client.ping().await.is_ok() {
+                    ready = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            if !ready {
+                let _ = server.stop();
+                let _ = err_tx.send(format!(
+                    "[LLAMACPP_MSG]⚠️ auto-started llama-server did not become ready in time"
+                ));
+                return;
+            }
+
+            let pid = server.pid();
+            *shared.lock().unwrap() = Some(server);
+            let _ = ok_tx.send(format!(
+                "[LLAMACPP_MSG]✅ auto-started llama-server on {} (PID {pid})",
+                url
+            ));
+            let _ = ok_tx.send("[HEALTH]llamacpp|healthy|0|auto-started".to_string());
+        });
+    }
+
     pub fn submit_review(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.is_reviewing {
             return;
@@ -2372,6 +2456,22 @@ fn llama_model_target(model: &str) -> Option<&str> {
     None
 }
 
+/// Extract the port from a llama.cpp base URL, e.g. `http://127.0.0.1:8080` → `8080`.
+pub fn parse_llama_port(url: &str) -> u16 {
+    let without_scheme = url
+        .trim()
+        .strip_prefix("http://")
+        .or_else(|| url.trim().strip_prefix("https://"))
+        .unwrap_or(url.trim());
+    let host_and_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    host_and_port
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|p| *p > 0)
+        .unwrap_or(8080)
+}
+
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -2379,6 +2479,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     // Query installed Ollama models and check provider health immediately on startup
     app.refresh_models(tx.clone());
     app.run_health_check(tx.clone());
+    // If llama.cpp is configured but not running, spawn it (attaches if it is).
+    app.maybe_auto_start_llama(tx.clone());
 
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
@@ -2503,6 +2605,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         app.average_latency = if count > 0.0 { total / count } else { 0.0 };
                     }
                 }
+            } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
+                app.llamacpp_action_msg = body.to_string();
             } else if let Some(body) = token.strip_prefix("[VOICE]") {
                 if body.starts_with("status:") {
                     if let Some(s) = body.strip_prefix("status:") {
@@ -3617,5 +3721,20 @@ match key.code {
         {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_llama_port;
+
+    #[test]
+    fn parse_llama_port_handles_common_urls() {
+        assert_eq!(parse_llama_port("http://localhost:8080"), 8080);
+        assert_eq!(parse_llama_port("http://127.0.0.1:8080/"), 8080);
+        assert_eq!(parse_llama_port("https://host.example:11434/v1"), 11434);
+        assert_eq!(parse_llama_port("http://localhost"), 8080);
+        assert_eq!(parse_llama_port("8080"), 8080);
+        assert_eq!(parse_llama_port(""), 8080);
     }
 }
