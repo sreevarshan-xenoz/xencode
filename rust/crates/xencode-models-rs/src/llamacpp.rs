@@ -492,6 +492,114 @@ fn lookup_in_path(name: &str) -> bool {
     false
 }
 
+/// Home-based directories that plausibly hold GGUF models, in preference order.
+fn candidate_model_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    dirs.push(home.join(".cache").join("llama.cpp"));
+    dirs.push(home.join(".llama").join("models"));
+    dirs.push(home.join(".local").join("share").join("llama.cpp").join("models"));
+    dirs.push(home.join("models"));
+    dirs.push(home.join("models").join("llama.cpp"));
+    dirs.push(std::path::PathBuf::from("models"));
+    dirs
+}
+
+/// The user's home directory, tolerating missing env vars.
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            Some(std::path::PathBuf::from(drive.to_string_lossy().into_owned())
+                .join(path.to_string_lossy().into_owned()))
+        })
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
+}
+
+/// Discover a GGUF model file to host when `llama_cpp_model_path` is empty.
+///
+/// Prefers an explicit path; otherwise scans the standard llama.cpp model
+/// locations. `hint_name` (e.g. the `qwen3-4b` part of a `llamacpp:qwen3-4b`
+/// model id) disambiguates when several GGUFs are present.
+pub fn resolve_gguf_model(explicit: Option<&str>, hint_name: Option<&str>) -> Option<String> {
+    let dirs = home_dir()
+        .map(|h| candidate_model_dirs(&h))
+        .unwrap_or_default();
+    resolve_gguf_model_in(explicit, hint_name, &dirs)
+}
+
+/// Core of [`resolve_gguf_model`], parameterised over candidate directories so
+/// it is testable without touching the real home directory.
+fn resolve_gguf_model_in(
+    explicit: Option<&str>,
+    hint_name: Option<&str>,
+    dirs: &[std::path::PathBuf],
+) -> Option<String> {
+    if let Some(explicit) = explicit {
+        if !explicit.trim().is_empty() {
+            return Some(explicit.trim().to_string());
+        }
+    }
+
+    // Collect *.gguf files from each candidate dir, plus one level of subdirs
+    // (common layout: `models/<model-name>/<model>.gguf`). The match key keeps
+    // the containing folder name so a hint can match on either.
+    let mut found: Vec<(std::path::PathBuf, String)> = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_gguf = |p: &std::path::Path| {
+                p.is_file()
+                    && p.extension()
+                        .map(|e| e.eq_ignore_ascii_case("gguf"))
+                        .unwrap_or(false)
+            };
+            if is_gguf(&path) {
+                let key = path.file_stem().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                found.push((path, key));
+                continue;
+            }
+            if path.is_dir() {
+                let folder_key = path.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                if let Ok(inner) = std::fs::read_dir(&path) {
+                    for child in inner.flatten() {
+                        let child_path = child.path();
+                        if is_gguf(&child_path) {
+                            let stem = child_path.file_stem().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                            let key = if folder_key.contains(&stem) || stem.contains(&folder_key) {
+                                folder_key.clone()
+                            } else {
+                                format!("{folder_key}/{stem}")
+                            };
+                            found.push((child_path, key));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if found.is_empty() {
+        return None;
+    }
+    if let Some(hint) = hint_name {
+        let hint_lower = hint.to_ascii_lowercase();
+        if let Some(matched) = found
+            .iter()
+            .find(|(_, key)| key.contains(&hint_lower))
+        {
+            return Some(matched.0.to_string_lossy().into_owned());
+        }
+    }
+    if found.len() == 1 {
+        return Some(found[0].0.to_string_lossy().into_owned());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -538,6 +646,76 @@ mod tests {
         // Whitespace-only explicit path behaves exactly like no explicit path —
         // independent of whether llama-server happens to be present on PATH.
         assert_eq!(find_llama_server(Some("  ")), find_llama_server(None));
+    }
+
+    #[test]
+    fn resolve_gguf_prefers_explicit_path() {
+        assert_eq!(
+            resolve_gguf_model_in(
+                Some("D:\\models\\qwen3-4b.gguf"),
+                None,
+                &[std::path::PathBuf::from("C:\\nonesuch")]
+            ),
+            Some("D:\\models\\qwen3-4b.gguf".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_gguf_hint_disambiguates_multiple_files() {
+        let dir = std::env::temp_dir().join(format!("xencode-gguf-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("llama3.2.gguf"), b"x").unwrap();
+        std::fs::write(dir.join("qwen3-4b.gguf"), b"x").unwrap();
+
+        let found = resolve_gguf_model_in(None, Some("qwen3-4b"), &[dir.clone()]);
+        assert_eq!(
+            found,
+            Some(dir.join("qwen3-4b.gguf").to_string_lossy().into_owned())
+        );
+
+        // No hint + multiple candidates is ambiguous.
+        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_gguf_hint_matches_nested_model_folder() {
+        // Mirrors the real layout: `~/models/<model>/<model>.gguf`.
+        let dir = std::env::temp_dir().join(format!("xencode-gguf-nest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("llama3.2")).unwrap();
+        std::fs::create_dir_all(dir.join("qwen3-4b")).unwrap();
+        std::fs::write(dir.join("llama3.2").join("llama3.2-Q4_K_M.gguf"), b"x").unwrap();
+        std::fs::write(dir.join("qwen3-4b").join("Qwen3-4B-Q4_K_M.gguf"), b"x").unwrap();
+
+        assert_eq!(
+            resolve_gguf_model_in(None, Some("qwen3-4b"), &[dir.clone()]),
+            Some(dir.join("qwen3-4b").join("Qwen3-4B-Q4_K_M.gguf").to_string_lossy().into_owned())
+        );
+        // Ambiguous without a hint (one flat file + two nested families found).
+        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_gguf_single_file_without_hint() {
+        let dir = std::env::temp_dir().join(format!("xencode-gguf-single-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("only.gguf"), b"x").unwrap();
+
+        assert_eq!(
+            resolve_gguf_model_in(None, None, &[dir.clone()]),
+            Some(dir.join("only.gguf").to_string_lossy().into_owned())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_gguf_no_files_returns_none() {
+        let dir = std::env::temp_dir().join(format!("xencode-gguf-empty-{}", std::process::id()));
+        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
     }
 
     #[test]
