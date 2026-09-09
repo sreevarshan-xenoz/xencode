@@ -362,6 +362,12 @@ pub struct App<'a> {
 
     // Last llama.cpp generation timings (tok/s) reported by the server
     pub last_llamacpp_timings: Option<LlamaCppTimings>,
+
+    /// Total prompt tokens of the last `/ctx` assembly preview — used to derive
+    /// `cached_tokens` from llama.cpp `tokens_evaluated` (§13).
+    pub last_ctx_total_tokens: u64,
+    /// Retrieved files in the last assembly (recorded into metrics row).
+    pub last_ctx_retrieved_files: u8,
 }
 
 impl<'a> App<'a> {
@@ -567,6 +573,8 @@ impl<'a> App<'a> {
             sampling_int_buffer: String::new(),
 
             last_llamacpp_timings: None,
+            last_ctx_total_tokens: 0,
+            last_ctx_retrieved_files: 0,
         };
 
         // Seed initial health entries for configured providers
@@ -1349,6 +1357,98 @@ impl<'a> App<'a> {
                         .to_string(),
                 );
             }
+            Some("kv") => {
+                const PROFILE: xencode_context_rs::HardwareProfile =
+                    xencode_context_rs::HardwareProfile::Balanced;
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+                let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
+                let state = xencode_context_rs::ContextState::from_disk(&xencode)
+                    .map(|s| s.to_markdown());
+                let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
+                let recent_a = "user: how does auth work?\nassistant: it uses the auth module";
+                let recent_b = "user: why is startup slow?\nassistant: profile the init path";
+                // Different recent windows (and git text) must NOT disturb the
+                // byte-stable head — that's the KV-reuse contract (§13).
+                let doc_a = xencode_context_rs::assemble_prompt(
+                    PROFILE,
+                    CTX_SYSTEM,
+                    agents.as_deref(),
+                    anchor.as_deref(),
+                    state.as_deref(),
+                    &git,
+                    Vec::new(),
+                    recent_a,
+                );
+                let doc_b = xencode_context_rs::assemble_prompt(
+                    PROFILE,
+                    CTX_SYSTEM,
+                    agents.as_deref(),
+                    anchor.as_deref(),
+                    state.as_deref(),
+                    &git,
+                    Vec::new(),
+                    recent_b,
+                );
+                let stable_ok = doc_a.stable_prefix == doc_b.stable_prefix;
+                let _ = tx.send("[CTX_START]".to_string());
+                let _ = tx.send(format!(
+                    "[CTX]🗂 Profile {} — ctx {} · utilization {}% · top-k {}",
+                    PROFILE.name(),
+                    PROFILE.ctx_tokens(),
+                    (PROFILE.utilization() * 100.0) as u64,
+                    PROFILE.top_k(),
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]⚙️ llama.cpp args: {}",
+                    PROFILE.llama_cpp_args().join(" ")
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]🧱 Stable prefix {} bytes — sha256 {} · cross-request identical: {}",
+                    doc_a.stable_prefix.len(),
+                    doc_a.stable_prefix_sha256(),
+                    if stable_ok { "✅ yes" } else { "❌ NO — KV reuse is broken" }
+                ));
+
+                let rows = xencode_context_rs::read_metrics(&xencode);
+                if rows.is_empty() {
+                    let _ = tx.send("[CTX]📈 No metrics yet — run /ctx <query> then a llama.cpp generation to see KV reuse.".to_string());
+                } else {
+                    let _ = tx.send("[CTX]📈 Latest KV-cache rows per profile:".to_string());
+                    for r in xencode_context_rs::RequestMetrics::latest_per_profile(&rows) {
+                        let _ = tx.send(format!(
+                            "[CTX]   {} — prompt {} · cached {} · reuse {}% · {} tok/s",
+                            r.profile,
+                            r.prompt_tokens,
+                            r.cached_tokens,
+                            (r.kv_reuse_ratio() * 100.0) as u64,
+                            r.generation_tok_s
+                        ));
+                    }
+                    // Interpret §13: large stable prefix + ~0 cached = prefix drift bug.
+                    let latest = xencode_context_rs::RequestMetrics::latest_per_profile(&rows)
+                        .first()
+                        .cloned();
+                    if let Some(r) = latest {
+                        if r.prompt_tokens > 2000 && r.kv_reuse_ratio() < 0.05 {
+                            let _ = tx.send(
+                                "[CTX]🚨 Large prompt but ~0 cached tokens — something breaks prefix stability; check for dynamic tiers above the stable head."
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                if let Some(ts) = &self.last_llamacpp_timings {
+                    let _ = tx.send(format!(
+                        "[CTX]⚡ Last llama.cpp run — evaluated {} · generated {} · {} tok/s gen · {} tok/s prompt",
+                        ts.tokens_evaluated,
+                        ts.tokens_generated,
+                        (ts.predicted_per_second as u64),
+                        (ts.prompt_per_second as u64)
+                    ));
+                }
+            }
             Some("archive") => {
                 let (t, appended) = self.canonical_transcript();
                 let root = xencode_context_rs::default_root();
@@ -1495,6 +1595,12 @@ impl<'a> App<'a> {
                 doc.retrieved_included,
                 doc.retrieved_total,
                 stable_tokens
+            ));
+            // Capture for the KV-reuse metrics on the next llama.cpp timings.
+            let _ = tx.send(format!(
+                "[CTXSTATS]{}|{}",
+                doc.total_tokens.min(u32::MAX as u64),
+                doc.retrieved_included.min(u8::MAX as usize)
             ));
             if doc.truncated {
                 let _ = tx.send(
@@ -2449,11 +2555,35 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         }
                     }
                 }
+            } else if let Some(body) = token.strip_prefix("[CTXSTATS]") {
+                let parts: Vec<&str> = body.splitn(2, '|').collect();
+                if parts.len() == 2 {
+                    app.last_ctx_total_tokens = parts[0].parse().unwrap_or(0);
+                    app.last_ctx_retrieved_files = parts[1].parse().unwrap_or(0);
+                }
             } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
                 app.llamacpp_action_msg = body.to_string();
             } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
                 if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
-                    app.last_llamacpp_timings = Some(ts);
+                    app.last_llamacpp_timings = Some(ts.clone());
+                    // Record a §13 metrics row: cached = prompt_total − actually
+                    // evaluated. prompt_total comes from the last /ctx assembly,
+                    // evaluated from llama.cpp — a ~0 cached_tokens with a large
+                    // stable prefix means prefix stability broke somewhere.
+                    let root = xencode_context_rs::default_root();
+                    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                    let profile = xencode_context_rs::HardwareProfile::Balanced;
+                    let m = xencode_context_rs::RequestMetrics::from_timings(
+                        profile.name(),
+                        profile.ctx_tokens() as u32,
+                        app.last_ctx_total_tokens.min(u32::MAX as u64) as u32,
+                        ts.tokens_evaluated.min(u32::MAX as u64) as u32,
+                        ts.tokens_generated.min(u32::MAX as u64) as u32,
+                        ts.predicted_per_second as f32,
+                        ts.prompt_per_second as f32,
+                        app.last_ctx_retrieved_files,
+                    );
+                    let _ = xencode_context_rs::append_metrics(&xencode, &m);
                 }
             } else if token == "[HEALTH_DONE]" {
                 app.health_check_in_progress = false;
