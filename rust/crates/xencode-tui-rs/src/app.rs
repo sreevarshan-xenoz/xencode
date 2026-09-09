@@ -1315,6 +1315,65 @@ impl<'a> App<'a> {
                     );
                 }
             }
+            Some("compact") => {
+                let (mut t, appended) = self.canonical_transcript();
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let path = xencode_context_rs::Transcript::current_path(&xencode);
+                let snap = t.snapshot(&xencode).unwrap_or_default();
+                let report = xencode_context_rs::soft_compact(&mut t, 0.70);
+                let _ = t.save_to(&path);
+                self.messages = t
+                    .entries
+                    .iter()
+                    .map(|e| UiMessage {
+                        role: e.role.clone(),
+                        content: e.content.clone(),
+                    })
+                    .collect();
+                let _ = tx.send("[CTX_START]".to_string());
+                let _ = tx.send(format!(
+                    "[CTX]📚 Canonical transcript synced (+{appended} new) → {} entries",
+                    t.entries.len()
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]🗜️ Soft compaction {} → {} entries (dropped {}), decisions kept: {}",
+                    report.before, report.after, report.dropped, report.retained_decisions
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]💾 Pre-rewrite snapshot → {}",
+                    snap.display()
+                ));
+                let _ = tx.send(
+                    "[CTX]✅ Deterministic, no LLM call — state.md only changes when the model flags it. Chat now shows the working projection."
+                        .to_string(),
+                );
+            }
+            Some("archive") => {
+                let (t, appended) = self.canonical_transcript();
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let state =
+                    xencode_context_rs::ContextState::from_disk(&xencode).unwrap_or_default();
+                let snap = t.snapshot(&xencode).unwrap_or_default();
+                let prompt = xencode_context_rs::hard_compact_prompt(&state, &t);
+                let _ = tx.send("[CTX_START]".to_string());
+                let _ = tx.send(format!(
+                    "[CTX]📚 Canonical transcript synced (+{appended} new) → {} entries",
+                    t.entries.len()
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]💾 Archived snapshot → {} — raw history is safe.",
+                    snap.display()
+                ));
+                let _ = tx.send(format!(
+                    "[CTX]🧠 Hard-compaction fold prompt ({} tokens):",
+                    xencode_context_rs::est_tokens(prompt.len(), true)
+                ));
+                for line in prompt.lines() {
+                    let _ = tx.send(format!("[CTX]    {line}"));
+                }
+            }
             _ => {
                 let query = if let Some(rest) = rest.strip_prefix("retrieve") {
                     rest.trim().to_string()
@@ -1333,6 +1392,32 @@ impl<'a> App<'a> {
                 self.run_ctx_retrieval(query, recent.join("\n"), tx);
             }
         }
+    }
+
+    /// Sync the in-memory conversation into the canonical transcript store.
+    /// Appends only messages that aren't already at the tail, so repeated
+    /// `/ctx compact|archive` runs never double-count history.
+    fn canonical_transcript(&mut self) -> (xencode_context_rs::Transcript, usize) {
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let path = xencode_context_rs::Transcript::current_path(&xencode);
+        let mut t = xencode_context_rs::Transcript::from_disk(&path)
+            .unwrap_or_else(|| xencode_context_rs::Transcript::new("tui"));
+        let mem = self.memory.get_context(100_000);
+        let mut appended = 0usize;
+        for m in &mem {
+            let dup = t
+                .entries
+                .last()
+                .map(|e| e.role == m.role && e.content == m.content)
+                .unwrap_or(false);
+            if dup {
+                continue;
+            }
+            t.add(&m.role, &m.content);
+            appended += 1;
+        }
+        (t, appended)
     }
 
     /// Run deterministic retrieval + a context-assembly preview in the
@@ -3175,11 +3260,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         InputMode::Editing => {
                             // If editor is focused, forward input to textarea
                             if app.focus == FocusArea::CodeEditor {
-                                match key.code {
-                                    KeyCode::Esc => {
-                                        app.input_mode = InputMode::Normal;
-                                    }
-                                    _ => {
+match key.code {
+                                     KeyCode::Esc => {
+                                         app.input_mode = InputMode::Normal;
+                                     }
+                                     _ => {
                                         app.editor.input(key);
                                         app.editor_dirty = true;
                                     }
