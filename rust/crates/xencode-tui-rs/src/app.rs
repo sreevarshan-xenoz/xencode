@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{
@@ -11,6 +13,7 @@ use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
 use xencode_config_rs::XencodeConfig;
+use xencode_context_rs::init_project;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
@@ -243,6 +246,14 @@ pub struct App<'a> {
     pub bytebot_log: Vec<String>,
     pub bytebot_history: Vec<String>, // previously executed commands
 
+    // Project context (M0) state
+    pub init_running: bool,
+    pub init_progress: f64,
+    pub init_steps: Vec<(String, String)>, // (step_name, status)
+    pub init_log: Vec<String>,
+    pub init_visible: bool,
+    pub init_cancel: Arc<AtomicBool>,
+
     // Collaboration Hub state
     pub collab_session_active: bool,
     pub collab_session_id: String,
@@ -455,6 +466,12 @@ impl<'a> App<'a> {
             bytebot_running: false,
             bytebot_log: Vec::new(),
             bytebot_history: Vec::new(),
+            init_running: false,
+            init_progress: 0.0,
+            init_steps: Vec::new(),
+            init_log: Vec::new(),
+            init_visible: false,
+            init_cancel: Arc::new(AtomicBool::new(false)),
             collab_session_active: false,
             collab_session_id: String::new(),
             collab_members: Vec::new(),
@@ -705,6 +722,13 @@ impl<'a> App<'a> {
             content: prompt.clone(),
         });
         self.memory.add_message("user", &prompt, None);
+
+        // Project context engine interception (/init, /init abort, /init status)
+        if prompt.starts_with("/init") {
+            self.handle_init_command(&prompt, tx);
+            return;
+        }
+
         self.is_generating = true;
 
         // ByteBot interception
@@ -1032,6 +1056,183 @@ impl<'a> App<'a> {
 
             let _ = tx.send("[BYTEBOT]log:✅ ByteBot execution complete.".to_string());
             let _ = tx.send("[BYTEBOT_DONE]".to_string());
+        });
+    }
+
+    /// Handle `/init`, `/init abort` and `/init status` chat commands.
+    fn handle_init_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let command = prompt.strip_prefix("/init").unwrap_or("").trim();
+        match command {
+            "abort" => {
+                if self.init_running {
+                    self.init_cancel.store(true, Ordering::Relaxed);
+                    let _ = tx.send(
+                        "[INIT]log:⏹️ Abort requested — finishing the current step…".to_string(),
+                    );
+                } else {
+                    let _ = tx.send("[INIT]log:ℹ️ No /init job is running.".to_string());
+                }
+            }
+            "status" => {
+                let done = self
+                    .init_steps
+                    .iter()
+                    .filter(|(_, s)| s == "done")
+                    .count();
+                let line = if self.init_running {
+                    format!(
+                        "⏳ init running — {done}/{} steps, {}%. Use /init abort to stop.",
+                        self.init_steps.len(),
+                        (self.init_progress * 100.0) as u64
+                    )
+                } else if self.init_visible || !self.init_log.is_empty() {
+                    format!(
+                        "🗂  Last /init run: {} step(s), {} log line(s). Type /init to re-run.",
+                        done,
+                        self.init_log.len()
+                    )
+                } else {
+                    "No project index built yet — type /init to scan and create it.".to_string()
+                };
+                let _ = tx.send(format!("[INIT]log:{}", line));
+            }
+            "" => {
+                if self.init_running {
+                    let _ = tx.send(
+                        "[INIT]log:⚠️ An init job is already running — use /init abort to stop it."
+                            .to_string(),
+                    );
+                } else {
+                    self.init_cancel.store(false, Ordering::Relaxed);
+                    self.run_project_init(tx);
+                }
+            }
+            other => {
+                let _ = tx.send(format!(
+                    "[INIT]log:ℹ️ Unknown /init subcommand '{other}' — use /init, /init abort, or /init status."
+                ));
+            }
+        }
+    }
+
+    /// Run the deterministic structural `/init` pass in the background.
+    /// Progress and log lines stream back through `[INIT]` channel tokens.
+    pub fn run_project_init(&mut self, tx: mpsc::UnboundedSender<String>) {
+        if self.init_running {
+            return;
+        }
+        const PHASES: [&str; 6] = [
+            "Create .xencode directory",
+            "Resume check",
+            "Git snapshot",
+            "Scan repository",
+            "Analyze languages & sizes",
+            "Write index files",
+        ];
+
+        self.init_running = true;
+        self.init_progress = 0.0;
+        self.init_visible = true;
+        self.init_steps = PHASES
+            .iter()
+            .map(|name| (name.to_string(), "pending".to_string()))
+            .collect();
+        self.init_log.clear();
+        self.init_log
+            .push("⏺️ Initializing project context (structural pass) — zero LLM calls.".to_string());
+
+        let cancel = self.init_cancel.clone();
+        let root = xencode_context_rs::default_root();
+
+        tokio::spawn(async move {
+            let tx_progress = tx.clone();
+            let progress = move |line: &str| {
+                if let Some(name) = line.strip_prefix("phase_start:") {
+                    if let Some(idx) = PHASES.iter().position(|p| *p == name) {
+                        let _ = tx_progress
+                            .send(format!("[INIT]step:{idx}:running:{name}"));
+                        let _ = tx_progress
+                            .send(format!("[INIT]progress:{:.2}", idx as f64 / PHASES.len() as f64));
+                    }
+                } else if let Some(name) = line.strip_prefix("phase_done:") {
+                    if let Some(idx) = PHASES.iter().position(|p| *p == name) {
+                        let _ = tx_progress
+                            .send(format!("[INIT]step:{idx}:done:{name}"));
+                        let _ = tx_progress.send(format!(
+                            "[INIT]progress:{:.2}",
+                            (idx as f64 + 1.0) / PHASES.len() as f64
+                        ));
+                    }
+                } else if let Some(msg) = line.strip_prefix("log:") {
+                    let _ = tx_progress.send(format!("[INIT]log:{msg}"));
+                }
+            };
+
+            let result = tokio::task::spawn_blocking(move || {
+                init_project(&root, cancel, progress)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(summary)) => {
+                    if summary.fresh {
+                        let _ = tx.send(
+                            "[INIT]log:✅ Project context is already up to date — nothing rewritten."
+                                .to_string(),
+                        );
+                    } else {
+                        let skipped = if summary.skipped > 0 {
+                            format!(" ({} ignored/excluded)", summary.skipped)
+                        } else {
+                            String::new()
+                        };
+                        let _ = tx.send(format!(
+                            "[INIT]log:✅ Indexed {} files{skipped} across {} language(s) — {} LOC.",
+                            summary.files_scanned,
+                            summary.languages.len(),
+                            summary.total_loc
+                        ));
+                        if !summary.secret_files.is_empty() {
+                            let _ = tx.send(format!(
+                                "[INIT]log:🔒 {} secret-detected file(s) listed, not read.",
+                                summary.secret_files.len()
+                            ));
+                        }
+                        if !summary.binary_files.is_empty() {
+                            let _ = tx.send(format!(
+                                "[INIT]log:🧊 {} binary file(s) listed, not read.",
+                                summary.binary_files.len()
+                            ));
+                        }
+                        if let Some(g) = &summary.git {
+                            let head = if g.head.len() > 8 {
+                                g.head[..8].to_string()
+                            } else {
+                                g.head.clone()
+                            };
+                            let _ = tx.send(format!(
+                                "[INIT]log:🎋 {} @ {head} — {} dirty file(s)",
+                                g.branch, g.dirty
+                            ));
+                        }
+                        let _ = tx.send(format!(
+                            "[INIT]log:🗂  files.json + manifest.json — {} bytes",
+                            summary.index_bytes
+                        ));
+                    }
+                    let _ = tx.send(
+                        "[INIT]log:💡 Index refreshes automatically on git changes. /init status shows the last run."
+                            .to_string(),
+                    );
+                }
+                Ok(Err(err)) => {
+                    let _ = tx.send(format!("[INIT]log:❌ init failed: {err}"));
+                }
+                Err(join_err) => {
+                    let _ = tx.send(format!("[INIT]log:❌ init task panicked: {join_err}"));
+                }
+            }
+            let _ = tx.send("[INIT_DONE]".to_string());
         });
     }
 
@@ -1742,6 +1943,27 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if token == "[BYTEBOT_DONE]" {
                 app.bytebot_running = false;
                 app.bytebot_progress = 1.0;
+            } else if token == "[INIT_DONE]" {
+                app.init_running = false;
+                app.init_progress = 1.0;
+            } else if let Some(body) = token.strip_prefix("[INIT]") {
+                if body.starts_with("step:") {
+                    let parts: Vec<&str> = body.splitn(4, ':').collect();
+                    if parts.len() >= 4 {
+                        let idx = parts[1].parse::<usize>().unwrap_or(0);
+                        if idx < app.init_steps.len() {
+                            app.init_steps[idx].1 = parts[2].to_string();
+                        }
+                    }
+                } else if body.starts_with("progress:") {
+                    if let Some(pct) = body.strip_prefix("progress:") {
+                        app.init_progress = pct.trim().parse::<f64>().unwrap_or(0.0);
+                    }
+                } else if body.starts_with("log:") {
+                    if let Some(msg) = body.strip_prefix("log:") {
+                        app.init_log.push(msg.to_string());
+                    }
+                }
             } else if let Some(body) = token.strip_prefix("[COLLAB]") {
                 if body.starts_with("status:") {
                     if let Some(s) = body.strip_prefix("status:") {
@@ -2471,7 +2693,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.llamacpp_control("unload", None, tx.clone());
                             }
                             KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Esc => match app.focus {
+                            KeyCode::Esc => {
+                                if app.init_visible {
+                                    app.init_visible = false;
+                                } else {
+                                    match app.focus {
                                 FocusArea::Settings => {
                                     if app.settings_url_editing {
                                         app.settings_url_editing = false;
@@ -2503,6 +2729,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     app.input_mode = InputMode::Normal;
                                 }
                                 _ => {}
+                                }
+                                }
                             },
                             KeyCode::Char(c) => {
                                 if app.focus == FocusArea::Settings && app.settings_url_editing {
