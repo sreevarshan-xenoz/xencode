@@ -1,15 +1,17 @@
-//! `/init` orchestration — the deterministic structural pass (M0).
+//! `/init` orchestration — the deterministic structural passes (M0 + M1).
 //!
-//! [`init_project`] runs Pass 1 of the context engine end to end:
+//! [`init_project`] runs the structural passes of the context engine:
 //!   1. scaffold `.xencode/` (+ auto-gitignore)
 //!   2. git snapshot (branch/HEAD/dirty + ignored-file set)
 //!   3. full repository scan
 //!   4. language/size analytics
-//!   5. atomic writes of `files.json` and `manifest.json`
+//!   5. symbol extraction + dependency graph (`symbols.json`, `deps.json`)
+//!   6. atomic writes of `files.json` and `manifest.json`
 //!
 //! Re-running against an unchanged workspace returns a `fresh` summary
 //! without rewriting anything (mtime + git-HEAD based resume).
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::gitinfo::{current_git_info, git_file_set, is_git_repo, GitInfo};
 use crate::index::{write_atomic, FileEntry, FilesIndex, Manifest};
 use crate::scanner::{scan_tree, ScanOptions};
+use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols};
 
 /// Directory name of the context engine inside a project.
 pub const XENCODE_DIR: &str = ".xencode";
@@ -66,8 +69,12 @@ pub struct InitSummary {
     pub binary_files: Vec<String>,
     /// Files outside the git filter set (ignored by .gitignore or excluded).
     pub skipped: u64,
-    /// Combined byte size of the two index files on disk.
+    /// Combined byte size of the four index files on disk.
     pub index_bytes: u64,
+    /// Rust files that yielded at least one extracted symbol.
+    pub symbol_files: u64,
+    /// Resolved file→file dependency edges written to `deps.json`.
+    pub dep_edges: u64,
     /// Present only when the workspace is a git repository.
     pub git: Option<GitInfo>,
 }
@@ -115,7 +122,12 @@ pub fn init_project(
 
     let prior_files =
         crate::index::read_json::<FilesIndex>(&crate::index::file_index_path(&xencode));
-    if let (Some(m), Some(f)) = (prior_manifest, prior_files) {
+    let prior_symbols = crate::index::read_json::<BTreeMap<String, PerFileSymbols>>(
+        &crate::index::symbols_json_path(&xencode),
+    );
+    let prior_deps = crate::index::read_json::<Vec<DepEdge>>(&crate::index::deps_json_path(&xencode));
+    if let (Some(m), Some(f), Some(s), Some(d)) = (prior_manifest, prior_files, prior_symbols, prior_deps)
+    {
         if m.version == crate::index::VERSION
             && m.git_head == current_head
             && manifest_mtimes_fresh(&root, &m, &f)
@@ -125,7 +137,7 @@ pub fn init_project(
                 "log:✓ Index is up to date — no changes since last run.",
             );
             emit(&mut progress, "phase_done:Resume check");
-            return Ok(summary_from_existing(&f, m.skipped));
+            return Ok(summary_from_existing(&f, m.skipped, s.len() as u64, d.len() as u64));
         }
     }
     emit(&mut progress, "phase_done:Resume check");
@@ -223,7 +235,39 @@ pub fn init_project(
     emit(&mut progress, "phase_done:Analyze languages & sizes");
     check_abort(&cancel)?;
 
-    // ── Phase 6: write index ───────────────────────────────────────────────
+    // ── Phase 6: symbols & dependency graph ───────────────────────────────
+    emit(&mut progress, "phase_start:Extract symbols & dependencies");
+    let rust_files: Vec<String> = scan
+        .files
+        .iter()
+        .filter(|e| e.ext == "rs" && !e.is_secret && !e.is_binary)
+        .map(|e| e.path.clone())
+        .collect();
+    let symbols = extract_repo_symbols(&root, &rust_files)?;
+    let graph = build_graph(&rust_files, &symbols);
+    if !rust_files.is_empty() {
+        let symbol_count: usize = symbols
+            .values()
+            .map(|s| s.structs.len() + s.functions.len() + s.imports.len() + s.exports.len())
+            .sum();
+        emit(
+            &mut progress,
+            &format!(
+                "log:🧩 {} Rust file(s) → {} symbol(s), {} dependency edge(s)",
+                rust_files.len(),
+                symbol_count,
+                graph.len()
+            ),
+        );
+    } else {
+        emit(&mut progress, "log:🧩 No Rust files — symbols/deps skipped.");
+    }
+    write_atomic(&crate::index::symbols_json_path(&xencode), &symbols)?;
+    write_atomic(&crate::index::deps_json_path(&xencode), &graph)?;
+    emit(&mut progress, "phase_done:Extract symbols & dependencies");
+    check_abort(&cancel)?;
+
+    // ── Phase 7: write files index + manifest ─────────────────────────────
     emit(&mut progress, "phase_start:Write index files");
     let indexed_at = now_millis();
     let files_index = FilesIndex {
@@ -257,7 +301,9 @@ pub fn init_project(
     let index_bytes = index_on_disk_bytes(&xencode);
     emit(
         &mut progress,
-        &format!("log:🗂  files.json + manifest.json written ({index_bytes} bytes)"),
+        &format!(
+            "log:🗂  files.json + manifest.json + symbols.json + deps.json written ({index_bytes} bytes)"
+        ),
     );
     emit(&mut progress, "phase_done:Write index files");
 
@@ -270,12 +316,40 @@ pub fn init_project(
         binary_files: scan.binary_files.clone(),
         skipped: scan.skipped,
         index_bytes,
+        symbol_files: symbols.len() as u64,
+        dep_edges: graph.len() as u64,
         git,
     })
 }
 
+/// Read every Rust file and extract its symbol inventory. Secret and binary
+/// files were already filtered out upstream; unreadable files are skipped.
+fn extract_repo_symbols(
+    root: &Path,
+    rust_files: &[String],
+) -> Result<BTreeMap<String, PerFileSymbols>, ContextError> {
+    let mut symbols = BTreeMap::new();
+    for path in rust_files {
+        let full = root.join(path);
+        let content = std::fs::read_to_string(&full).map_err(|source| ContextError::Io {
+            path: full.clone(),
+            source,
+        })?;
+        symbols.insert(
+            path.clone(),
+            extract_rust_symbols(&content),
+        );
+    }
+    Ok(symbols)
+}
+
 /// Rebuild a `fresh` summary straight from an existing untouched index.
-fn summary_from_existing(files: &FilesIndex, skipped: u64) -> InitSummary {
+fn summary_from_existing(
+    files: &FilesIndex,
+    skipped: u64,
+    symbol_files: u64,
+    dep_edges: u64,
+) -> InitSummary {
     let mut languages: std::collections::BTreeMap<String, u64> = Default::default();
     let mut total_loc = 0u64;
     for f in &files.files {
@@ -293,6 +367,8 @@ fn summary_from_existing(files: &FilesIndex, skipped: u64) -> InitSummary {
         binary_files: Vec::new(),
         skipped,
         index_bytes: 0,
+        symbol_files,
+        dep_edges,
         git: None,
     }
 }
@@ -385,13 +461,16 @@ fn auto_gitignore_index_dir(root: &Path) -> Result<(), ContextError> {
 }
 
 fn index_on_disk_bytes(xencode: &Path) -> u64 {
-    let files = std::fs::metadata(crate::index::file_index_path(xencode))
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let manifest = std::fs::metadata(crate::index::manifest_path(xencode))
-        .map(|m| m.len())
-        .unwrap_or(0);
-    files + manifest
+    let mut total = 0;
+    for path in [
+        crate::index::file_index_path(xencode),
+        crate::index::manifest_path(xencode),
+        crate::index::symbols_json_path(xencode),
+        crate::index::deps_json_path(xencode),
+    ] {
+        total += std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    }
+    total
 }
 
 #[cfg(test)]
@@ -423,7 +502,7 @@ mod tests {
     fn scaffolds_index_and_returns_summary() {
         let root = temp_workspace();
         fs::create_dir_all(root.join("src")).unwrap();
-        File::create(root.join("src/main.rs")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
         File::create(root.join("Cargo.toml")).unwrap();
 
         let (result, lines) = run(&root);
@@ -432,14 +511,21 @@ mod tests {
         assert!(root.join(XENCODE_DIR).is_dir());
         assert!(root.join(XENCODE_DIR).join("index/files.json").is_file());
         assert!(root.join(XENCODE_DIR).join("index/manifest.json").is_file());
+        assert!(root.join(XENCODE_DIR).join("index/symbols.json").is_file());
+        assert!(root.join(XENCODE_DIR).join("index/deps.json").is_file());
         assert!(root.join(XENCODE_DIR).join("summaries").is_dir());
         assert!(root.join(XENCODE_DIR).join("cache/cmd").is_dir());
 
         assert!(!summary.fresh);
         assert_eq!(summary.files_scanned, 2);
         assert!(summary.languages.contains(&("rust".to_string(), 1)));
+        assert_eq!(summary.symbol_files, 1);
+        assert_eq!(summary.dep_edges, 0);
 
         assert_eq!(lines[0], "phase_start:Create .xencode directory");
+        assert!(lines
+            .iter()
+            .any(|l| l == "phase_done:Extract symbols & dependencies"));
         assert!(lines.iter().any(|l| l == "phase_done:Write index files"));
 
         fs::remove_dir_all(root).unwrap();

@@ -1121,12 +1121,13 @@ impl<'a> App<'a> {
         if self.init_running {
             return;
         }
-        const PHASES: [&str; 6] = [
+        const PHASES: [&str; 7] = [
             "Create .xencode directory",
             "Resume check",
             "Git snapshot",
             "Scan repository",
             "Analyze languages & sizes",
+            "Extract symbols & dependencies",
             "Write index files",
         ];
 
@@ -1192,6 +1193,12 @@ impl<'a> App<'a> {
                             summary.languages.len(),
                             summary.total_loc
                         ));
+                        if summary.dep_edges > 0 || summary.symbol_files > 0 {
+                            let _ = tx.send(format!(
+                                "[INIT]log:🧩 {} file(s) with symbols · {} dependency edge(s)",
+                                summary.symbol_files, summary.dep_edges
+                            ));
+                        }
                         if !summary.secret_files.is_empty() {
                             let _ = tx.send(format!(
                                 "[INIT]log:🔒 {} secret-detected file(s) listed, not read.",
@@ -1216,7 +1223,7 @@ impl<'a> App<'a> {
                             ));
                         }
                         let _ = tx.send(format!(
-                            "[INIT]log:🗂  files.json + manifest.json — {} bytes",
+                            "[INIT]log:🗂  index + symbols + deps — {} bytes",
                             summary.index_bytes
                         ));
                     }

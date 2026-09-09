@@ -86,6 +86,14 @@ pub fn manifest_path(xencode_dir: &Path) -> std::path::PathBuf {
     xencode_dir.join("index").join("manifest.json")
 }
 
+pub fn symbols_json_path(xencode_dir: &Path) -> std::path::PathBuf {
+    xencode_dir.join("index").join("symbols.json")
+}
+
+pub fn deps_json_path(xencode_dir: &Path) -> std::path::PathBuf {
+    xencode_dir.join("index").join("deps.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
