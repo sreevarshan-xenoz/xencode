@@ -43,6 +43,10 @@ pub struct Manifest {
     pub git_head: Option<String>,
     pub branch: Option<String>,
     pub dirty: u64,
+    /// Files that existed at scan time but were skipped (ignored/excluded).
+    /// Persisted so a fresh resume can report an accurate count.
+    #[serde(default)]
+    pub skipped: u64,
     /// Relative path (`/` separators) → modified time (epoch millis).
     pub mtime_map: BTreeMap<String, u64>,
     pub indexed_at: u64,

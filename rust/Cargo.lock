@@ -2875,6 +2875,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-context-rs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "xencode-core-rs"
 version = "0.1.0"
 
@@ -2955,6 +2964,7 @@ dependencies = [
  "tokio",
  "tui-textarea",
  "xencode-config-rs",
+ "xencode-context-rs",
  "xencode-core-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
