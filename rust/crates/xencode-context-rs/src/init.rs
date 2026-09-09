@@ -120,13 +120,12 @@ pub fn init_project(
             && m.git_head == current_head
             && manifest_mtimes_fresh(&root, &m, &f)
         {
-            let summary = summary_from_existing(&f, m.skipped_total());
             emit(
                 &mut progress,
                 "log:✓ Index is up to date — no changes since last run.",
             );
             emit(&mut progress, "phase_done:Resume check");
-            return Ok(summary);
+            return Ok(summary_from_existing(&f, m.skipped));
         }
     }
     emit(&mut progress, "phase_done:Resume check");
@@ -248,6 +247,7 @@ pub fn init_project(
         }),
         branch: git.as_ref().map(|g| g.branch.clone()),
         dirty: git.as_ref().map(|g| g.dirty).unwrap_or(0),
+        skipped: scan.skipped,
         mtime_map,
         indexed_at,
     };
@@ -294,14 +294,6 @@ fn summary_from_existing(files: &FilesIndex, skipped: u64) -> InitSummary {
         skipped,
         index_bytes: 0,
         git: None,
-    }
-}
-
-impl Manifest {
-    /// Number of files in the mtime map (used for the fresh-summary total
-    /// of skipped/"ignored" accounting in absence of a live scan).
-    fn skipped_total(&self) -> u64 {
-        self.mtime_map.len() as u64
     }
 }
 
@@ -496,6 +488,69 @@ mod tests {
         let summary = second.expect("ok");
         assert!(!summary.fresh);
         assert_eq!(summary.files_scanned, 1);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fresh_resume_reports_persisted_skipped_count() {
+        let root = temp_workspace();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join(".gitignore"), "ignored.tmp\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn a() {}\n").unwrap();
+        fs::write(root.join("new.py"), "print(1)\n").unwrap();
+        fs::write(root.join("ignored.tmp"), "x\n").unwrap();
+
+        let git_ok = std::process::Command::new("git")
+            .args(["--version"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !git_ok {
+            fs::remove_dir_all(root).unwrap();
+            return;
+        }
+        std::process::Command::new("git")
+            .args(["-C", root.to_string_lossy().as_ref(), "init", "-q"])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "config",
+                "user.email",
+                "test@xencode.local",
+            ])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-C",
+                root.to_string_lossy().as_ref(),
+                "config",
+                "user.name",
+                "Xencode Test",
+            ])
+            .status()
+            .unwrap();
+
+        let (first, _) = run(&root);
+        let first = first.expect("ok");
+        assert!(!first.fresh);
+        // .gitignore + src/main.rs + untracked-not-ignored new.py are all indexed;
+        // the gitignored ignored.tmp is filtered out and counted as skipped.
+        assert_eq!(first.files_scanned, 3);
+        assert_eq!(first.skipped, 1, "gitignored file must be counted as skipped");
+
+        let (second, _) = run(&root);
+        let second = second.expect("ok");
+        assert!(second.fresh);
+        assert_eq!(
+            second.skipped, first.skipped,
+            "fresh resume must report the skipped count from the manifest, not the file count"
+        );
+        assert_ne!(second.skipped, second.files_scanned);
 
         fs::remove_dir_all(root).unwrap();
     }
