@@ -71,6 +71,14 @@ pub fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), std::io:
     Ok(())
 }
 
+/// Write a plain-text string atomically (used by `state.md`).
+pub fn write_str_atomic(path: &Path, text: &str) -> Result<(), std::io::Error> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, text.as_bytes())?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 /// Deserialize `path` as JSON; `None` when missing or corrupt.
 pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     let bytes = fs::read(path).ok()?;
