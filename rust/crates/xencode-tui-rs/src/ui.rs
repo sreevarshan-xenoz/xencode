@@ -50,6 +50,11 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::MultiLanguage => draw_multi_language(f, app, f.area()),
         _ => {}
     }
+
+    // Project context overlay (driven from chat via /init), always on top.
+    if app.init_visible {
+        draw_project_init_panel(f, app, f.area());
+    }
 }
 
 // ── Header ──────────────────────────────────────────────────────────────────
@@ -62,8 +67,12 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     let left = " ⚡ Xencode TUI ".to_string();
     let right = format!(
-        " {} │ {} │ 📎 {} │ Δ {} ",
-        model, theme_name, file_count, git_count
+        " {} │ {} │ 📎 {} │ Δ {} {}",
+        model,
+        theme_name,
+        file_count,
+        git_count,
+        if app.init_running { " ⏳init " } else { "" }
     );
 
     // Display width, not byte length: the header holds multi-byte glyphs.
@@ -1644,6 +1653,125 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         let hist_para = Paragraph::new(history_lines).style(Style::default().fg(app.theme.fg));
         f.render_widget(hist_para, inner_hist);
     }
+}
+
+// ── Project Context (/init) Overlay ────────────────────────────────────────
+
+fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(72, 62, area);
+    f.render_widget(Clear, popup_area);
+
+    let status_icon: String = if app.init_running {
+        let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}',
+            '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+        frames[app.spinner_tick % frames.len()].to_string()
+    } else {
+        "\u{2705}".to_string()
+    };
+    let status = if app.init_running { " Running" } else { " Done" };
+
+    let title = format!(
+        " \u{26A1} Project Context /init [{}]{}  (Esc:close, /init abort) ",
+        status_icon, status
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(title);
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    // Steps (40%) + log (60%)
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(chunks[0]);
+
+    let mut steps_lines: Vec<Line> = Vec::new();
+    steps_lines.push(Line::from(Span::styled(
+        " Structural pass 1 — zero LLM calls",
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
+    )));
+    steps_lines.push(Line::from(""));
+    for (name, status) in &app.init_steps {
+        let (icon, color) = match status.as_str() {
+            "done" => ("\u{2705}".to_string(), ratatui::style::Color::Green),
+            "running" => ("\u{23F3}".to_string(), ratatui::style::Color::Yellow),
+            "failed" => ("\u{274C}".to_string(), ratatui::style::Color::Red),
+            _ => ("\u{25CB}".to_string(), app.theme.message_system),
+        };
+        steps_lines.push(Line::from(vec![
+            Span::styled(format!(" {} ", icon), Style::default().fg(color)),
+            Span::styled(name.clone(), Style::default().fg(app.theme.fg)),
+        ]));
+    }
+
+    let steps_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border))
+        .title(" Steps ");
+    f.render_widget(
+        Paragraph::new(steps_lines)
+            .block(steps_block)
+            .style(Style::default().fg(app.theme.fg)),
+        body[0],
+    );
+
+    // Log lines, most recent at the bottom.
+    let max_lines = body[1].height.saturating_sub(2) as usize;
+    let count = std::cmp::min(max_lines, app.init_log.len());
+    let start = app.init_log.len() - count;
+    let log_lines: Vec<Line> = app.init_log[start..]
+        .iter()
+        .map(|entry| {
+            let color = if entry.contains('\u{274C}') {
+                ratatui::style::Color::Red
+            } else if entry.contains('\u{2705}') {
+                ratatui::style::Color::Green
+            } else {
+                app.theme.fg
+            };
+            Line::from(Span::styled(
+                format!("  {}", entry),
+                Style::default().fg(color),
+            ))
+        })
+        .collect();
+    let log_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.border))
+        .title(" Log ");
+    f.render_widget(
+        Paragraph::new(log_lines)
+            .block(log_block)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false }),
+        body[1],
+    );
+
+    // Progress bar.
+    let bar_width = chunks[1].width.saturating_sub(2);
+    let filled = ((app.init_progress * bar_width as f64) as u16).min(bar_width);
+    let mut bar = String::new();
+    for _ in 0..filled {
+        bar.push('\u{2588}');
+    }
+    for _ in filled..bar_width {
+        bar.push(' ');
+    }
+    let pct = (app.init_progress * 100.0).round() as u64;
+    let progress_para = Paragraph::new(Span::styled(
+        format!(" {bar} ({pct}%)"),
+        Style::default().fg(app.theme.accent),
+    ));
+    f.render_widget(progress_para, chunks[1]);
 }
 
 // ── Collaboration Hub Panel ────────────────────────────────────────────────

@@ -14,6 +14,7 @@ xencode-providers-rs = { path = "../xencode-providers-rs" }
 xencode-memory-rs = { path = "../xencode-memory-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
+xencode-context-rs = { path = "../xencode-context-rs" }
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.28"
 ratatui = "0.29"
