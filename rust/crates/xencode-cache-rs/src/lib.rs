@@ -12,7 +12,15 @@ struct CacheEntry {
     response: String,
     model: String,
     prompt_hash: String,
+    /// When the entry was written. Drives TTL expiry, so it is never refreshed
+    /// on read — otherwise a frequently-read entry would never expire.
     timestamp: f64,
+    /// When the entry was last written or read. Drives eviction order.
+    ///
+    /// Defaults on load so entries written before this field existed still
+    /// deserialize; `load_from_disk` seeds those from `timestamp`.
+    #[serde(default)]
+    last_accessed: f64,
     hit_count: u64,
 }
 
@@ -122,6 +130,9 @@ impl ResponseCache {
 
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.hit_count += 1;
+            // A read is a use: this is what makes eviction least-*recently-used*
+            // rather than oldest-inserted.
+            entry.last_accessed = now;
             self.stats.hits += 1;
             return Some(entry.response.clone());
         }
@@ -132,17 +143,22 @@ impl ResponseCache {
 
     /// Store a response in the cache.
     pub fn set(&mut self, prompt: &str, model: &str, response: &str) {
-        // Evict if at capacity (remove least-recently-used)
-        if self.entries.len() >= self.max_size {
+        let key = Self::cache_key(prompt, model);
+
+        // Evict only when this is a new key. Overwriting an existing entry does
+        // not grow the cache, so evicting for it would discard an unrelated
+        // entry and leave the cache one under capacity.
+        if self.entries.len() >= self.max_size && !self.entries.contains_key(&key) {
             self.evict_lru();
         }
 
-        let key = Self::cache_key(prompt, model);
+        let now = current_timestamp();
         let entry = CacheEntry {
             response: response.to_string(),
             model: model.to_string(),
             prompt_hash: key.clone(),
-            timestamp: current_timestamp(),
+            timestamp: now,
+            last_accessed: now,
             hit_count: 0,
         };
 
@@ -189,14 +205,14 @@ impl ResponseCache {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Evict the least-recently-used entry (oldest timestamp with lowest hit_count).
+    /// Evict the entry that was least recently used — read or written.
     fn evict_lru(&mut self) {
         if let Some(key) = self
             .entries
             .iter()
             .min_by(|a, b| {
-                a.1.timestamp
-                    .partial_cmp(&b.1.timestamp)
+                a.1.last_accessed
+                    .partial_cmp(&b.1.last_accessed)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(k, _)| k.clone())
@@ -237,9 +253,16 @@ impl ResponseCache {
                 if path.extension().is_some_and(|ext| ext == "json") {
                     match std::fs::read_to_string(&path) {
                         Ok(content) => {
-                            if let Ok(cached) = serde_json::from_str::<CacheEntry>(&content) {
+                            if let Ok(mut cached) = serde_json::from_str::<CacheEntry>(&content) {
                                 // Skip expired entries
                                 if now - cached.timestamp <= self.ttl_seconds {
+                                    // Entries written before `last_accessed`
+                                    // existed default to 0.0, which would make
+                                    // them all look infinitely stale and evict
+                                    // first. Seed them from their write time.
+                                    if cached.last_accessed == 0.0 {
+                                        cached.last_accessed = cached.timestamp;
+                                    }
                                     let key = path
                                         .file_stem()
                                         .unwrap_or_default()
@@ -256,6 +279,15 @@ impl ResponseCache {
                     }
                 }
             }
+
+            // The directory can hold more entries than this cache is sized for
+            // — it may have been written by a larger cache, or `max_size` may
+            // have been lowered since. Trim to capacity rather than starting
+            // life over it.
+            while self.entries.len() > self.max_size {
+                self.evict_lru();
+            }
+
             self.stats.entries = self.entries.len();
         }
         Ok(())
@@ -397,6 +429,140 @@ mod tests {
         };
         cache2.load_from_disk().unwrap();
         assert_eq!(cache2.get("prompt", "model"), Some("response".to_string()));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Force a known access order without sleeping: `last_accessed` is what
+    /// eviction reads, so setting it directly is both faster and exact.
+    fn touch(cache: &mut ResponseCache, prompt: &str, model: &str, at: f64) {
+        let key = ResponseCache::cache_key(prompt, model);
+        cache.entries.get_mut(&key).unwrap().last_accessed = at;
+    }
+
+    /// The regression: reading an entry must protect it from eviction. Under
+    /// the old code eviction used the insert time, so the first-inserted entry
+    /// was dropped no matter how often it had been read.
+    #[test]
+    fn eviction_keeps_the_recently_read_entry_and_drops_the_idle_one() {
+        let mut cache = ResponseCache::new(2, 3600.0);
+        cache.set("old-but-hot", "m", "a");
+        cache.set("new-but-cold", "m", "b");
+
+        // Inserted first, but read most recently.
+        touch(&mut cache, "old-but-hot", "m", 100.0);
+        touch(&mut cache, "new-but-cold", "m", 50.0);
+        assert_eq!(cache.get("old-but-hot", "m"), Some("a".to_string()));
+
+        // At capacity: inserting a third must evict the idle one.
+        cache.set("newcomer", "m", "c");
+
+        assert_eq!(
+            cache.get("old-but-hot", "m"),
+            Some("a".to_string()),
+            "the recently-read entry was evicted"
+        );
+        assert_eq!(cache.get("new-but-cold", "m"), None);
+        assert_eq!(cache.get("newcomer", "m"), Some("c".to_string()));
+    }
+
+    #[test]
+    fn reading_an_entry_updates_last_accessed_but_not_its_ttl_clock() {
+        let mut cache = ResponseCache::new(4, 3600.0);
+        cache.set("p", "m", "v");
+
+        let key = ResponseCache::cache_key("p", "m");
+        let written_at = cache.entries[&key].timestamp;
+        touch(&mut cache, "p", "m", 0.0);
+
+        assert_eq!(cache.get("p", "m"), Some("v".to_string()));
+
+        let entry = &cache.entries[&key];
+        assert!(
+            entry.last_accessed > 0.0,
+            "read did not refresh last_accessed"
+        );
+        assert_eq!(
+            entry.timestamp, written_at,
+            "read moved the TTL clock; a hot entry would never expire"
+        );
+    }
+
+    /// Overwriting an existing key does not grow the cache, so it must not
+    /// evict anything.
+    #[test]
+    fn overwriting_at_capacity_does_not_evict_an_unrelated_entry() {
+        let mut cache = ResponseCache::new(2, 3600.0);
+        cache.set("first", "m", "a");
+        cache.set("second", "m", "b");
+
+        cache.set("second", "m", "b-updated");
+
+        assert_eq!(cache.get("first", "m"), Some("a".to_string()));
+        assert_eq!(cache.get("second", "m"), Some("b-updated".to_string()));
+        assert_eq!(cache.stats().evictions, 0);
+        assert_eq!(cache.entries.len(), 2);
+    }
+
+    #[test]
+    fn loading_from_disk_trims_to_capacity() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        // Write five entries with a cache that has room for them.
+        let mut writer = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 10,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(cache_dir.clone()),
+            stats: CacheStats::default(),
+        };
+        for i in 0..5 {
+            writer.set(&format!("prompt-{i}"), "m", "v");
+        }
+
+        // Load them into a cache sized for two.
+        let mut smaller = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 2,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(cache_dir),
+            stats: CacheStats::default(),
+        };
+        smaller.load_from_disk().unwrap();
+
+        assert_eq!(smaller.entries.len(), 2, "cache started over capacity");
+        assert_eq!(smaller.stats().entries, 2);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Entries written before `last_accessed` existed must still load, and must
+    /// not all look infinitely stale.
+    #[test]
+    fn legacy_entries_without_last_accessed_are_seeded_from_their_write_time() {
+        let dir = temp_dir();
+        let cache_dir = dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let written_at = current_timestamp();
+        let legacy = format!(
+            r#"{{"response":"v","model":"m","prompt_hash":"k","timestamp":{written_at},"hit_count":3}}"#
+        );
+        fs::write(cache_dir.join("k.json"), legacy).unwrap();
+
+        let mut cache = ResponseCache {
+            entries: HashMap::new(),
+            max_size: 10,
+            ttl_seconds: 3600.0,
+            cache_dir: Some(cache_dir),
+            stats: CacheStats::default(),
+        };
+        cache.load_from_disk().unwrap();
+
+        let entry = cache.entries.get("k").expect("legacy entry failed to load");
+        assert_eq!(entry.last_accessed, written_at);
 
         fs::remove_dir_all(&dir).unwrap();
     }
