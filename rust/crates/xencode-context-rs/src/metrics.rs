@@ -58,6 +58,57 @@ impl RequestMetrics {
             compaction: CompactAction::None,
         }
     }
+
+    /// Fill in the llama.cpp-driven counters in one call (§13). `cached_tokens`
+    /// is the KV-cache win: total prompt tokens minus what was actually
+    /// re-evaluated this request.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_timings(
+        profile: &str,
+        context_limit: u32,
+        prompt_tokens: u32,
+        tokens_evaluated: u32,
+        completion_tokens: u32,
+        generation_tok_s: f32,
+        prompt_tok_s: f32,
+        retrieved_files: u8,
+    ) -> Self {
+        let mut m = Self::new(profile, context_limit);
+        m.ts_unix_ms = crate::conversation::now_millis();
+        m.prompt_tokens = prompt_tokens;
+        m.cached_tokens = prompt_tokens.saturating_sub(tokens_evaluated);
+        m.completion_tokens = completion_tokens;
+        m.context_usage = if context_limit > 0 {
+            (prompt_tokens as f32 / context_limit as f32).min(1.0)
+        } else {
+            0.0
+        };
+        m.generation_tok_s = generation_tok_s;
+        m.prompt_tok_s = prompt_tok_s;
+        m.retrieved_files = retrieved_files;
+        m
+    }
+
+    /// 0.0..=1.0 — fraction of the prompt served from the KV cache.
+    pub fn kv_reuse_ratio(&self) -> f32 {
+        if self.prompt_tokens == 0 {
+            0.0
+        } else {
+            (self.cached_tokens as f32 / self.prompt_tokens as f32).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Last row recorded for each profile, most recent win (metrics already
+    /// arrive in append order).
+    pub fn latest_per_profile(rows: &[RequestMetrics]) -> Vec<&RequestMetrics> {
+        let mut out: Vec<&RequestMetrics> = Vec::new();
+        for row in rows.iter().rev() {
+            if !out.iter().any(|r| r.profile == row.profile) {
+                out.push(row);
+            }
+        }
+        out
+    }
 }
 
 pub fn metrics_path(xencode_dir: &Path) -> std::path::PathBuf {
@@ -135,5 +186,34 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         assert!(read_metrics(&dir.join(".xencode")).is_empty());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn from_timings_derives_cached_tokens_and_kv_reuse() {
+        let m = RequestMetrics::from_timings("BALANCED", 8192, 5760, 848, 130, 12.3, 400.0, 5);
+        assert_eq!(m.cached_tokens, 4912);
+        assert!((m.kv_reuse_ratio() - 4912.0 / 5760.0).abs() < 1e-5);
+        assert!((m.context_usage - 5760.0 / 8192.0).abs() < 1e-5);
+        assert_eq!(m.generation_tok_s, 12.3);
+        assert_eq!(m.completion_tokens, 130);
+
+        let cold = RequestMetrics::from_timings("LOW", 4096, 2048, 2048, 0, 0.0, 0.0, 0);
+        assert_eq!(cold.kv_reuse_ratio(), 0.0);
+        assert_eq!(cold.cached_tokens, 0);
+    }
+
+    #[test]
+    fn latest_per_profile_prefers_most_recent() {
+        let mut a = RequestMetrics::new("BALANCED", 8192);
+        a.cached_tokens = 100;
+        let mut b = RequestMetrics::new("BALANCED", 8192);
+        b.cached_tokens = 300;
+        let mut c = RequestMetrics::new("LOW", 4096);
+        c.cached_tokens = 50;
+        let rows = vec![a, b, c];
+        let latest = RequestMetrics::latest_per_profile(&rows);
+        assert_eq!(latest.len(), 2);
+        let bal = latest.iter().find(|r| r.profile == "BALANCED").unwrap();
+        assert_eq!(bal.cached_tokens, 300);
     }
 }

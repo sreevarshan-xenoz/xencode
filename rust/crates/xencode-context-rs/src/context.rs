@@ -14,6 +14,7 @@ use crate::budget::{
 use crate::gitinfo::{current_git_info, dirty_paths};
 use crate::index::FileEntry;
 use crate::retrieve::RetrievedFile;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// Per-tier token caps (§10).
@@ -61,6 +62,18 @@ pub struct ContextDoc {
     pub soft_compaction_needed: bool,
     pub retrieved_included: usize,
     pub retrieved_total: usize,
+}
+
+impl ContextDoc {
+    /// The KV-reuse contract (§13): `SYSTEM + AGENTS.md + anchor.md` (the
+    /// stable prefix) must be byte-identical across requests and precede every
+    /// dynamic tier. Returns the SHA-256 of that head so a drift turns into a
+    /// loud comparison failure instead of a silent KV-cache miss.
+    pub fn stable_prefix_sha256(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.stable_prefix.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
 }
 
 /// Build the promoted-tier prompt per §10.

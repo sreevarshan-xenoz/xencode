@@ -13,6 +13,7 @@
 //! The single entry point is [`init_project`].
 
 pub mod budget;
+pub mod cmd_output;
 pub mod compact;
 pub mod context;
 pub mod conversation;
@@ -27,6 +28,9 @@ pub mod state;
 pub mod symbols;
 
 pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
+pub use cmd_output::{
+    capture_output, deduce_files, read_raw, render_summary, CmdIndex, CmdRecord, DETAIL_LINES_CAP,
+};
 pub use compact::{
     hard_compact_prompt, parse_hard_compact_reply, should_compact, soft_compact, CompactReport,
     CompactionKind,
