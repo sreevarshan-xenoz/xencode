@@ -240,6 +240,9 @@ pub struct App<'a> {
     pub health_check_in_progress: bool,
     /// Handle to a llama-server that the TUI auto-started this session (if any).
     pub llama_process: Option<Arc<std::sync::Mutex<Option<LlamaServerProcess>>>>,
+    /// Set when xencode exits so a still-loading auto-start aborts instead of
+    /// orphaning a server behind the app.
+    pub llama_cancel: Arc<AtomicBool>,
     pub total_llm_calls: u64,
     pub average_latency: f64,
 
@@ -576,6 +579,7 @@ impl<'a> App<'a> {
 
             last_llamacpp_timings: None,
             llama_process: None,
+            llama_cancel: Arc::new(AtomicBool::new(false)),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
         };
@@ -2305,9 +2309,9 @@ impl<'a> App<'a> {
     /// Skips if the server is already answering on `llama_cpp_url`. If no model
     /// path is configured, falls back to discovering a GGUF on disk (see
     /// [`resolve_gguf_model`]), so a `llamacpp:<alias>` default model works out
-    /// of the box. The spawned process keeps running after xencode exits (same
-    /// contract as `xencode llamacpp start`), so subsequent launches attach
-    /// instead of respawning.
+    /// of the box. The spawned process is session-scoped: it is stopped when
+    /// xencode exits (see `Drop for App`), and aborted cleanly if the user
+    /// quits before the model finishes loading.
     pub fn maybe_auto_start_llama(&mut self, tx: mpsc::UnboundedSender<String>) {
         // Model alias from the default model id (e.g. `qwen3-4b` from
         // `llamacpp:qwen3-4b`) — used for discovery + `--alias`.
@@ -2332,6 +2336,7 @@ impl<'a> App<'a> {
 
         let shared = Arc::new(std::sync::Mutex::new(None));
         self.llama_process = Some(shared.clone());
+        let cancel = self.llama_cancel.clone();
         let err_tx = tx.clone();
         let ok_tx = tx.clone();
 
@@ -2392,6 +2397,10 @@ impl<'a> App<'a> {
             let client = LlamaCppClient::new(&server.base_url, 3);
             let mut ready = false;
             for _ in 0..120 {
+                if cancel.load(Ordering::Relaxed) {
+                    let _ = server.stop();
+                    return; // xencode already exited — don't orphan the server
+                }
                 if client.ping().await.is_ok() {
                     ready = true;
                     break;
@@ -2405,6 +2414,10 @@ impl<'a> App<'a> {
                 ));
                 return;
             }
+            if cancel.load(Ordering::Relaxed) {
+                let _ = server.stop();
+                return;
+            }
 
             let pid = server.pid();
             *shared.lock().unwrap() = Some(server);
@@ -2413,6 +2426,9 @@ impl<'a> App<'a> {
                 url, model_path
             ));
             let _ = ok_tx.send("[HEALTH]llamacpp|healthy|0|auto-started".to_string());
+            // A new model just came online — refresh the picker so
+            // `llamacpp:<name>` shows up without an explicit 'r' press.
+            let _ = ok_tx.send("[REFRESH_MODELS]".to_string());
         });
     }
 
@@ -2490,6 +2506,20 @@ fn llama_model_target(model: &str) -> Option<&str> {
         }
     }
     None
+}
+
+/// Stops the session-scoped llama-server when xencode exits. Runs on every
+/// teardown path (quitting via `q`, `Ctrl+C`, or an error return), and aborts a
+/// still-loading auto-start so it can't orphan a process behind the app.
+impl<'a> Drop for App<'a> {
+    fn drop(&mut self) {
+        self.llama_cancel.store(true, Ordering::Relaxed);
+        if let Some(shared) = self.llama_process.take() {
+            if let Some(mut server) = shared.lock().unwrap().take() {
+                let _ = server.stop();
+            }
+        }
+    }
 }
 
 /// Extract the port from a llama.cpp base URL, e.g. `http://127.0.0.1:8080` → `8080`.
@@ -2641,6 +2671,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         app.average_latency = if count > 0.0 { total / count } else { 0.0 };
                     }
                 }
+            } else if token == "[REFRESH_MODELS]" {
+                app.refresh_models(tx.clone());
             } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
                 app.llamacpp_action_msg = body.to_string();
             } else if let Some(body) = token.strip_prefix("[VOICE]") {
