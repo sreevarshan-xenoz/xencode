@@ -1525,11 +1525,8 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
             let filled = filled.min(bar_width);
             let empty = bar_width.saturating_sub(filled);
             let pct = (app.bytebot_progress * 100.0).round();
-            let bar_str = format!(
-                "  {} {:.0}%",
-                format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty)),
-                pct,
-            );
+            let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
+            let bar_str = format!("  {} {:.0}%", bar, pct);
             steps_lines.push(Line::from(Span::styled(
                 bar_str,
                 Style::default().fg(app.theme.accent),
@@ -2047,9 +2044,10 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let filled = (app.voice_level * bar_width as f64).round() as usize;
     let filled = filled.min(bar_width);
     let empty = bar_width.saturating_sub(filled);
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
     let meter = format!(
         " Level: [{}] {:.0}%\n Status: {} {}",
-        format!("{}{}", "█".repeat(filled), "░".repeat(empty)),
+        bar,
         app.voice_level * 100.0,
         status_icon,
         app.voice_status,

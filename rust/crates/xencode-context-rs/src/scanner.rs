@@ -360,7 +360,7 @@ fn walk_dir(
 
     for child in read_dir {
         *walked += 1;
-        if *walked % 128 == 0 && options.cancel.load(Ordering::Relaxed) {
+        if (*walked).is_multiple_of(128) && options.cancel.load(Ordering::Relaxed) {
             return Err(StopScan("scan cancelled".to_string()));
         }
 

@@ -103,7 +103,7 @@ pub fn assemble_prompt(
         AGENTS_CAP_TOKENS,
         false,
     );
-    let truncated_agents = agents_md.map_or(false, |a| a.len() > agents_head.len());
+    let truncated_agents = agents_md.is_some_and(|a| a.len() > agents_head.len());
     tiers.push(TierDoc { name: "agents.md", tokens: agents_tok });
 
     let (anchor_head, anchor_tok) = truncate_to_tokens(
@@ -111,7 +111,7 @@ pub fn assemble_prompt(
         ANCHOR_CAP_TOKENS,
         false,
     );
-    let truncated_anchor = anchor_md.map_or(false, |a| a.len() > anchor_head.len());
+    let truncated_anchor = anchor_md.is_some_and(|a| a.len() > anchor_head.len());
     tiers.push(TierDoc { name: "anchor.md", tokens: anchor_tok });
 
     let mut stable_parts: Vec<&str> = Vec::new();
@@ -282,7 +282,6 @@ mod tests {
     const SYSTEM: &str = "You are a coding agent. Be concise.";
     const AGENTS: &str = "# Rules\n- Rust first\n- commit each change\n";
     const ANCHOR: &str = "# Project Anchor\n\nArchitecture: CLI → core → providers.\n";
-    const RECENT: &str = "[u] fix auth\n[a] checking router.rs\ndatabase.rs edited\n";
 
     fn sample_retrieved() -> Vec<RetrievedBlock> {
         vec![
