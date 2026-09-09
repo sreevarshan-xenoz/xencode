@@ -16,11 +16,16 @@ pub mod gitinfo;
 pub mod index;
 pub mod init;
 pub mod scanner;
+pub mod symbols;
 
 pub use gitinfo::{changed_paths_between, current_git_info, git_file_set, is_git_repo, GitInfo};
 pub use index::{write_atomic, FileEntry, FilesIndex, Manifest, VERSION};
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use scanner::{scan_tree, Language, ScanOutcome, ScanOptions};
+pub use symbols::{
+    build_graph, dependency_map, dependent_map, expand_dependencies, extract_rust_symbols,
+    rank_files, resolve_import, DepEdge, PerFileSymbols,
+};
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
