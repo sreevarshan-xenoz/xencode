@@ -17,8 +17,8 @@ use xencode_context_rs::init_project;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
-    current_timestamp, find_llama_server, start_llama_server, HealthStatus, LlamaCppClient,
-    LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
+    current_timestamp, find_llama_server, resolve_gguf_model, start_llama_server, HealthStatus,
+    LlamaCppClient, LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 
@@ -2302,17 +2302,33 @@ impl<'a> App<'a> {
     /// Auto-start `llama-server` when xencode boots, per config docs
     /// (`llama_cpp_model_path` / `llama_cpp_executable` / `llama_cpp_args`).
     ///
-    /// Skips if the server is already answering on `llama_cpp_url`. The spawned
-    /// process keeps running after xencode exits (same contract as `xencode
-    /// llamacpp start`), so subsequent launches attach instead of respawning.
+    /// Skips if the server is already answering on `llama_cpp_url`. If no model
+    /// path is configured, falls back to discovering a GGUF on disk (see
+    /// [`resolve_gguf_model`]), so a `llamacpp:<alias>` default model works out
+    /// of the box. The spawned process keeps running after xencode exits (same
+    /// contract as `xencode llamacpp start`), so subsequent launches attach
+    /// instead of respawning.
     pub fn maybe_auto_start_llama(&mut self, tx: mpsc::UnboundedSender<String>) {
+        // Model alias from the default model id (e.g. `qwen3-4b` from
+        // `llamacpp:qwen3-4b`) — used for discovery + `--alias`.
+        let alias = self
+            .config
+            .default_model
+            .strip_prefix("llamacpp:")
+            .or_else(|| self.config.default_model.strip_prefix("llama.cpp:"))
+            .or_else(|| self.config.default_model.strip_prefix("llama:"))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         let model_path = self.config.llama_cpp_model_path.clone();
-        if model_path.trim().is_empty() {
-            return; // nothing configured to host — nothing to auto-start
-        }
         let exec = self.config.llama_cpp_executable.clone();
         let url = self.config.llama_cpp_url.clone();
-        let args = self.config.llama_cpp_args.clone();
+        let mut args = self.config.llama_cpp_args.clone();
+        if let Some(alias) = &alias {
+            if !args.iter().any(|a| a == "--alias") {
+                args.push("--alias".to_string());
+                args.push(alias.clone());
+            }
+        }
 
         let shared = Arc::new(std::sync::Mutex::new(None));
         self.llama_process = Some(shared.clone());
@@ -2339,6 +2355,26 @@ impl<'a> App<'a> {
                         ""
                     }
                 ));
+                return;
+            };
+
+            // Resolve the GGUF to host (explicit path first, then discovery).
+            let explicit = if model_path.trim().is_empty() {
+                None
+            } else {
+                Some(model_path.as_str())
+            };
+            let resolved = resolve_gguf_model(explicit, alias.as_deref());
+            let Some(model_path) = resolved else {
+                let _ = err_tx.send(format!(
+                    "[LLAMACPP_MSG]⚠️ auto-start skipped: no GGUF model found{}",
+                    alias
+                        .map(|a| format!(" for `{a}`"))
+                        .unwrap_or_default()
+                ));
+                let _ = err_tx.send(
+                    "[LLAMACPP_MSG]💡 set config llama_cpp_model_path (xencode config set llama_cpp_model_path <path>) or drop the .gguf into ~/.cache/llama.cpp".to_string(),
+                );
                 return;
             };
 
@@ -2373,8 +2409,8 @@ impl<'a> App<'a> {
             let pid = server.pid();
             *shared.lock().unwrap() = Some(server);
             let _ = ok_tx.send(format!(
-                "[LLAMACPP_MSG]✅ auto-started llama-server on {} (PID {pid})",
-                url
+                "[LLAMACPP_MSG]✅ auto-started llama-server on {} (PID {pid}, model {})",
+                url, model_path
             ));
             let _ = ok_tx.send("[HEALTH]llamacpp|healthy|0|auto-started".to_string());
         });
