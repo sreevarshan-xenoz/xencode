@@ -535,7 +535,9 @@ mod tests {
             find_llama_server(Some("C:\\tools\\llama-server.exe")),
             Some("C:\\tools\\llama-server.exe".to_string())
         );
-        assert_eq!(find_llama_server(Some("  ")), None);
+        // Whitespace-only explicit path behaves exactly like no explicit path —
+        // independent of whether llama-server happens to be present on PATH.
+        assert_eq!(find_llama_server(Some("  ")), find_llama_server(None));
     }
 
     #[test]
