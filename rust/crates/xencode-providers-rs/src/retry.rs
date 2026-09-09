@@ -70,25 +70,61 @@ impl RetryConfig {
 pub fn is_retriable(err: &ProviderError) -> bool {
     match err {
         // Network errors are always retriable
-        ProviderError::Network(msg) => {
-            // Don't retry if the message suggests a permanent DNS failure,
-            // but retry everything else (timeouts, connection resets, etc.)
-            !msg.contains("dns error")
-                && !msg.contains("dns")
-                && !msg.contains("Name or service not known")
-        }
-        // API errors: retry 429 (rate limit), 5xx (server errors), 503 (unavailable)
-        ProviderError::Api(msg) => {
-            msg.contains("429")         // rate limited
-                || msg.contains("500")  // internal server error
-                || msg.contains("502")  // bad gateway
-                || msg.contains("503")  // service unavailable
-                || msg.contains("504")  // gateway timeout
-                || msg.contains("529") // rate limited (Anthropic-specific)
-        }
+        ProviderError::Network(msg) => !is_name_resolution_failure(msg),
+        // Decided on the status, not on the text of the body. Searching the
+        // message for "500" retried permanent 4xx responses whose body merely
+        // mentioned the digits.
+        ProviderError::Api { status, .. } => match status {
+            Some(429) | Some(500) | Some(502) | Some(503) | Some(504) => true,
+            // 529 is Anthropic's "overloaded".
+            Some(529) => true,
+            Some(_) => false,
+            // No HTTP status behind it — a missing key, an unusable response
+            // shape. Retrying cannot change the outcome.
+            None => false,
+        },
         // Parse errors are not retriable — the response came back but couldn't be parsed
         ProviderError::Parse(_) => false,
     }
+}
+
+/// Whether a network error message describes a name that will not resolve.
+///
+/// Still string matching, because `ProviderError::Network` carries only the
+/// formatted message, but at least it covers the platforms we run on: the
+/// previous check tested `"Name or service not known"` (glibc) and would not
+/// match macOS, so permanent DNS failures there burned the whole retry
+/// schedule. `"dns error"` was also redundant with `"dns"`.
+fn is_name_resolution_failure(msg: &str) -> bool {
+    let msg = msg.to_ascii_lowercase();
+    msg.contains("dns")
+        || msg.contains("name or service not known")      // glibc
+        || msg.contains("nodename nor servname provided") // macOS
+        || msg.contains("no such host")                   // Windows / hyper
+        || msg.contains("failed to lookup address")
+}
+
+/// Spread a backoff delay over `[delay/2, delay]` ("equal jitter").
+///
+/// Without this, clients that hit the same rate limit at the same moment all
+/// back off by the identical amount and retry in lockstep, re-triggering it.
+/// Half the delay is kept fixed so a retry still waits a sensible minimum.
+///
+/// Entropy comes from the clock's sub-millisecond noise rather than a new
+/// dependency — decorrelating retries does not need a good RNG.
+fn jittered(delay: Duration) -> Duration {
+    let half = delay / 2;
+    let span = delay - half;
+    if span.is_zero() {
+        return delay;
+    }
+    let noise = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.subsec_nanos() as u64)
+        .unwrap_or(0);
+    // Nanosecond arithmetic, not milliseconds: rounding to whole milliseconds
+    // lands below `delay / 2` for delays under 2ms.
+    half + Duration::from_nanos(noise % (span.as_nanos() as u64 + 1))
 }
 
 /// Execute an async operation with retry logic.
@@ -157,8 +193,7 @@ where
                     break;
                 }
 
-                let delay = config.delay_for_attempt(attempt);
-                sleep(delay).await;
+                sleep(jittered(config.delay_for_attempt(attempt))).await;
             }
         }
     }
@@ -212,26 +247,108 @@ mod tests {
 
     #[test]
     fn is_retriable_429() {
-        let err = ProviderError::Api("429 Too Many Requests".to_string());
+        let err = ProviderError::api("Test", 429u16, "Too Many Requests");
         assert!(is_retriable(&err));
     }
 
     #[test]
     fn is_retriable_503() {
-        let err = ProviderError::Api("503 Service Unavailable".to_string());
+        let err = ProviderError::api("Test", 503u16, "Service Unavailable");
         assert!(is_retriable(&err));
     }
 
     #[test]
     fn is_not_retriable_400() {
-        let err = ProviderError::Api("400 Bad Request: invalid model".to_string());
+        let err = ProviderError::api("Test", 400u16, "Bad Request: invalid model");
         assert!(!is_retriable(&err));
     }
 
     #[test]
     fn is_not_retriable_401() {
-        let err = ProviderError::Api("401 Unauthorized: bad key".to_string());
+        let err = ProviderError::api("Test", 401u16, "Unauthorized: bad key");
         assert!(!is_retriable(&err));
+    }
+
+    /// The regression: retriability was decided by searching the message for
+    /// status digits, so a permanent 4xx whose body merely mentioned them was
+    /// retried three times with backoff before surfacing the same error.
+    #[test]
+    fn a_permanent_error_is_not_retried_because_its_body_mentions_a_5xx_number() {
+        for body in [
+            "max_tokens: 500 exceeds the model's limit",
+            "model gpt-4-0502 not found",
+            "you have 503 credits remaining",
+            "request_id req_429ab3c1 was rejected",
+            "invalid value for parameter 'top_k': 504",
+        ] {
+            let err = ProviderError::api("Test", 400u16, body);
+            assert!(
+                !is_retriable(&err),
+                "retried a permanent 400 because its body said: {body}"
+            );
+        }
+    }
+
+    /// The mirror image: a genuine server error whose body happens not to
+    /// repeat the status must still be retried.
+    #[test]
+    fn a_server_error_is_retried_even_when_its_body_omits_the_status() {
+        let err = ProviderError::api("Test", 502u16, "upstream connect failure");
+        assert!(is_retriable(&err));
+    }
+
+    #[test]
+    fn an_api_error_with_no_status_is_not_retriable() {
+        // A missing key, an unusable response shape — retrying changes nothing.
+        let err = ProviderError::api_message("Anthropic API key not configured");
+        assert!(!is_retriable(&err));
+    }
+
+    #[test]
+    fn name_resolution_failures_are_not_retried_on_any_platform() {
+        for msg in [
+            "error trying to connect: dns error: failed to lookup address information",
+            "failed to lookup address information: Name or service not known", // glibc
+            "nodename nor servname provided, or not known",                    // macOS
+            "no such host is known",                                           // Windows
+        ] {
+            let err = ProviderError::Network(msg.to_string());
+            assert!(
+                !is_retriable(&err),
+                "retried a permanent DNS failure: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn transient_network_failures_are_still_retried() {
+        for msg in [
+            "connection reset by peer",
+            "operation timed out",
+            "connection refused",
+        ] {
+            let err = ProviderError::Network(msg.to_string());
+            assert!(is_retriable(&err), "did not retry a transient error: {msg}");
+        }
+    }
+
+    #[test]
+    fn jitter_stays_within_half_the_delay_and_the_delay() {
+        for millis in [1u64, 2, 100, 500, 10_000] {
+            let base = Duration::from_millis(millis);
+            for _ in 0..200 {
+                let got = jittered(base);
+                assert!(
+                    got >= base / 2 && got <= base,
+                    "jittered({millis}ms) = {got:?}, outside [half, full]"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn jitter_leaves_a_zero_delay_alone() {
+        assert_eq!(jittered(Duration::ZERO), Duration::ZERO);
     }
 
     #[test]
@@ -252,7 +369,7 @@ mod tests {
     async fn retry_fails_fast_on_non_retriable() {
         let cfg = RetryConfig::default();
         let result: Result<String, ProviderError> = retry_async(&cfg, || async {
-            Err::<String, ProviderError>(ProviderError::Api("400 Bad Request".to_string()))
+            Err::<String, ProviderError>(ProviderError::api("Test", 400u16, "Bad Request"))
         })
         .await;
         assert!(result.is_err());

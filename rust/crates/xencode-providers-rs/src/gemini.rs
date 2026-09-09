@@ -194,7 +194,7 @@ impl GeminiProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Gemini {} - {body}", status)));
+            return Err(ProviderError::api("Gemini", status, body));
         }
 
         let body: GeminiResponse = response
@@ -205,7 +205,7 @@ impl GeminiProvider {
         // Check for blocking
         if let Some(feedback) = &body.prompt_feedback {
             if let Some(ref reason) = feedback.block_reason {
-                return Err(ProviderError::Api(format!(
+                return Err(ProviderError::api_message(format!(
                     "Gemini request blocked: {reason}"
                 )));
             }
@@ -259,7 +259,7 @@ impl GeminiProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Gemini {} - {body}", status)));
+            return Err(ProviderError::api("Gemini", status, body));
         }
 
         let mut stream = response.bytes_stream();

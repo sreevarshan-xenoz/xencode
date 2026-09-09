@@ -94,7 +94,7 @@ async fn qwen_generate_http_error() {
 
     assert!(result.is_err(), "expected error for 401 response");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(msg.contains("401"), "expected 401 in error: {msg}");
         }
         other => panic!("expected Api error, got: {other:?}"),
@@ -218,7 +218,7 @@ async fn qwen_stream_http_error() {
 
     assert!(result.is_err(), "expected error for 429");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(msg.contains("429"), "expected 429 in error: {msg}");
         }
         other => panic!("expected Api error, got: {other:?}"),
