@@ -416,7 +416,10 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
         }
         ModelAction::Health { model } => {
             println!("Checking health of {model}...");
-            if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") || model.starts_with("llama:") {
+            if model.starts_with("llamacpp:")
+                || model.starts_with("llama.cpp:")
+                || model.starts_with("llama:")
+            {
                 match llama_client.ping().await {
                     Ok(resp_time) => {
                         println!("  Provider:      llama.cpp ({})", config.llama_cpp_url);
@@ -536,20 +539,22 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
         }
         LlamacppAction::Start { model, port, exec } => {
             let mut config = XencodeConfig::load().unwrap_or_default();
-            let model_path = model.clone().unwrap_or_else(|| config.llama_cpp_model_path.clone());
+            let model_path = model
+                .clone()
+                .unwrap_or_else(|| config.llama_cpp_model_path.clone());
             if model_path.trim().is_empty() {
                 return Err(
                     "no GGUF model path set (use --model or `xencode config set llama_cpp_model_path <path>`)"
                         .to_string(),
                 );
             }
-            let exe = find_llama_server(
-                exec.as_deref().or(if config.llama_cpp_executable.is_empty() {
+            let exe = find_llama_server(exec.as_deref().or(
+                if config.llama_cpp_executable.is_empty() {
                     None
                 } else {
                     Some(config.llama_cpp_executable.as_str())
-                }),
-            );
+                },
+            ));
             let exe = exe.ok_or_else(|| {
                 "could not find llama-server on PATH (set config llama_cpp_executable)".to_string()
             })?;
@@ -559,8 +564,8 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             println!("  port:  {port}");
 
             let extra: Vec<&str> = config.llama_cpp_args.iter().map(|s| s.as_str()).collect();
-            let mut server = start_llama_server(&exe, &model_path, port, &extra)
-                .map_err(|e| e.to_string())?;
+            let mut server =
+                start_llama_server(&exe, &model_path, port, &extra).map_err(|e| e.to_string())?;
 
             // Save PID so `xencode llamacpp stop` can terminate it later.
             let _ = write_pid_file(&pid_file(), server.pid());
@@ -713,7 +718,9 @@ async fn run_query(
         None => {
             if !config.default_model.contains('/') {
                 if let Ok(installed) = client.list_models().await {
-                    if !installed.is_empty() && !installed.iter().any(|m| m.name == config.default_model) {
+                    if !installed.is_empty()
+                        && !installed.iter().any(|m| m.name == config.default_model)
+                    {
                         // Configured default is not installed; use smart default or first installed
                         if let Ok(Some(smart)) = client.get_smart_default().await {
                             smart

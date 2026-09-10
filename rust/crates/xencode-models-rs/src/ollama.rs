@@ -112,9 +112,12 @@ impl OllamaClient {
         } else {
             // Fallback to tags endpoint if /api/version isn't available
             let tags_url = format!("{}/api/tags", self.base_url);
-            let resp2 = self.client.get(&tags_url).send().await.map_err(|e| {
-                OllamaError::Api(e.to_string())
-            })?;
+            let resp2 = self
+                .client
+                .get(&tags_url)
+                .send()
+                .await
+                .map_err(|e| OllamaError::Api(e.to_string()))?;
             if resp2.status().is_success() {
                 Ok(start.elapsed().as_secs_f64())
             } else {

@@ -14,15 +14,15 @@
 //! - `Embedder` is the trait an Ollama/llama.cpp embeddings endpoint will
 //!   implement in a later pass; `None` keeps the engine purely lexical.
 
-use crate::retrieve::{RetrievedFile, RetrievalIndex};
+use crate::retrieve::{RetrievalIndex, RetrievedFile};
 use std::collections::HashMap;
 
 /// Very small stop list. The pseudo-docs are already tiny (paths + symbols),
 /// so we only strip high-frequency structural noise.
 const STOP: &[&str] = &[
-    "the", "and", "for", "with", "use", "using", "when", "how", "why", "what", "does",
-    "file", "files", "fn", "struct", "let", "pub", "src", "lib", "mod", "rs", "py", "ts",
-    "json", "xencode", "context", "module", "impl",
+    "the", "and", "for", "with", "use", "using", "when", "how", "why", "what", "does", "file",
+    "files", "fn", "struct", "let", "pub", "src", "lib", "mod", "rs", "py", "ts", "json",
+    "xencode", "context", "module", "impl",
 ];
 
 const K1: f64 = 1.2;
@@ -109,7 +109,10 @@ impl Bm25 {
 
         for file in &index.files {
             let syms = index.symbols.get(&file.path);
-            let toks = pseudo_document(&file.path, syms.unwrap_or(&crate::symbols::PerFileSymbols::default()));
+            let toks = pseudo_document(
+                &file.path,
+                syms.unwrap_or(&crate::symbols::PerFileSymbols::default()),
+            );
             let mut tf: HashMap<String, u32> = HashMap::new();
             for t in &toks {
                 let count = tf.entry(t.clone()).or_insert(0);
@@ -130,7 +133,12 @@ impl Bm25 {
             idf.insert(term, (1.0 + (n - d + 0.5) / (d + 0.5)).ln());
         }
 
-        Self { idf, tfs, lens, avg_dl }
+        Self {
+            idf,
+            tfs,
+            lens,
+            avg_dl,
+        }
     }
 
     /// BM25 score of document `doc_idx` for `query_terms`.
@@ -141,8 +149,12 @@ impl Bm25 {
         let len = self.lens[doc_idx] as f64;
         let mut s = 0.0;
         for term in query_terms {
-            let Some(&tf) = tf_map.get(term) else { continue };
-            let Some(idf) = self.idf.get(term) else { continue };
+            let Some(&tf) = tf_map.get(term) else {
+                continue;
+            };
+            let Some(idf) = self.idf.get(term) else {
+                continue;
+            };
             let tf = tf as f64;
             let denom = tf + K1 * (1.0 - B + B * len / self.avg_dl.max(1e-3));
             s += idf * (tf * (K1 + 1.0) / denom);
@@ -151,14 +163,20 @@ impl Bm25 {
     }
 
     pub fn max_score_per_doc(&self, query_terms: &[String]) -> Vec<f64> {
-        (0..self.tfs.len()).map(|i| self.score(i, query_terms)).collect()
+        (0..self.tfs.len())
+            .map(|i| self.score(i, query_terms))
+            .collect()
     }
 }
 
 /// Reorder structural top-K with a BM25 boost (hybrid). The structural score
 /// stays the ceiling — BM25 only reorders within `results` — so a strong
 /// symbol/path hit cannot be displaced by a keyword-only match.
-pub fn hybrid_rerank(index: &RetrievalIndex, results: &[RetrievedFile], query: &str) -> Vec<RetrievedFile> {
+pub fn hybrid_rerank(
+    index: &RetrievalIndex,
+    results: &[RetrievedFile],
+    query: &str,
+) -> Vec<RetrievedFile> {
     let terms = tokenize(query);
     let bm25 = Bm25::build(index);
     // Map result ordinal → BM25 score.
@@ -168,7 +186,10 @@ pub fn hybrid_rerank(index: &RetrievalIndex, results: &[RetrievedFile], query: &
         doc_idxs.insert(f.path.clone(), i);
     }
     for r in results {
-        let b = doc_idxs.get(&r.path).map(|&i| bm25.score(i, &terms)).unwrap_or(0.0);
+        let b = doc_idxs
+            .get(&r.path)
+            .map(|&i| bm25.score(i, &terms))
+            .unwrap_or(0.0);
         // +8 × bm25 keeps values on a comparable scale to the structural table.
         let combined = r.score + (b * 8.0).round() as u64;
         let mut reasons = r.reasons.clone();
@@ -178,7 +199,11 @@ pub fn hybrid_rerank(index: &RetrievalIndex, results: &[RetrievedFile], query: &
     boosted.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     boosted
         .into_iter()
-        .map(|(score, path, reasons)| RetrievedFile { path, score, reasons })
+        .map(|(score, path, reasons)| RetrievedFile {
+            path,
+            score,
+            reasons,
+        })
         .collect()
 }
 
@@ -243,17 +268,30 @@ mod tests {
         };
         idx.symbols.insert(
             "web/static/style.css".to_string(),
-            PerFileSymbols { structs: vec![], functions: vec!["layout()".to_string()], imports: vec![], exports: vec![] },
+            PerFileSymbols {
+                structs: vec![],
+                functions: vec!["layout()".to_string()],
+                imports: vec![],
+                exports: vec![],
+            },
         );
         idx.symbols.insert(
             "src/auth.rs".to_string(),
-            PerFileSymbols { structs: vec!["LoginPage".to_string()], functions: vec!["authenticate()".to_string(), "sessions()".to_string()], imports: vec![], exports: vec![] },
+            PerFileSymbols {
+                structs: vec!["LoginPage".to_string()],
+                functions: vec!["authenticate()".to_string(), "sessions()".to_string()],
+                imports: vec![],
+                exports: vec![],
+            },
         );
         let bm25 = Bm25::build(&idx);
         let terms = tokenize("login page authenticate");
         let css = bm25.score(0, &terms);
         let auth = bm25.score(1, &terms);
-        assert!(auth > css, "auth file should beat the css file on semantic signal: {css} vs {auth}");
+        assert!(
+            auth > css,
+            "auth file should beat the css file on semantic signal: {css} vs {auth}"
+        );
     }
 
     #[test]
@@ -264,17 +302,35 @@ mod tests {
         };
         idx.symbols.insert(
             "web/style/login.ts".to_string(),
-            PerFileSymbols { structs: vec![], functions: vec![], imports: vec![], exports: vec![] },
+            PerFileSymbols {
+                structs: vec![],
+                functions: vec![],
+                imports: vec![],
+                exports: vec![],
+            },
         );
         idx.symbols.insert(
             "src/login.rs".to_string(),
-            PerFileSymbols { structs: vec![], functions: vec!["perform_login()".to_string()], imports: vec![], exports: vec![] },
+            PerFileSymbols {
+                structs: vec![],
+                functions: vec!["perform_login()".to_string()],
+                imports: vec![],
+                exports: vec![],
+            },
         );
         // Structural scores are equal (both filename exactly "login"); rerank
         // must promote the file that actually performs the login.
         let results = vec![
-            RetrievedFile { path: "web/style/login.ts".to_string(), score: 10, reasons: vec![] },
-            RetrievedFile { path: "src/login.rs".to_string(), score: 10, reasons: vec![] },
+            RetrievedFile {
+                path: "web/style/login.ts".to_string(),
+                score: 10,
+                reasons: vec![],
+            },
+            RetrievedFile {
+                path: "src/login.rs".to_string(),
+                score: 10,
+                reasons: vec![],
+            },
         ];
         let reranked = hybrid_rerank(&idx, &results, "login perform login");
         assert_eq!(reranked[0].path, "src/login.rs");

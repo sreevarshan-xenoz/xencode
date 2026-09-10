@@ -309,17 +309,12 @@ impl Default for ScanOptions {
 }
 
 /// Recursively scan `root` and return enriched entries for every file.
-pub fn scan_tree(
-    root: &Path,
-    options: &ScanOptions,
-) -> Result<ScanOutcome, StopScan> {
+pub fn scan_tree(root: &Path, options: &ScanOptions) -> Result<ScanOutcome, StopScan> {
     if !root.exists() {
         return Err(StopScan("workspace root does not exist".to_string()));
     }
     if !root.is_dir() {
-        return Err(StopScan(
-            "workspace root is not a directory".to_string(),
-        ));
+        return Err(StopScan("workspace root is not a directory".to_string()));
     }
 
     let mut outcome = ScanOutcome {
@@ -354,9 +349,8 @@ fn walk_dir(
     outcome: &mut ScanOutcome,
     walked: &mut u64,
 ) -> Result<(), StopScan> {
-    let read_dir = fs::read_dir(current).map_err(|e| {
-        StopScan(format!("cannot list {}: {}", current.display(), e))
-    })?;
+    let read_dir = fs::read_dir(current)
+        .map_err(|e| StopScan(format!("cannot list {}: {}", current.display(), e)))?;
 
     for child in read_dir {
         *walked += 1;
@@ -364,13 +358,8 @@ fn walk_dir(
             return Err(StopScan("scan cancelled".to_string()));
         }
 
-        let child = child.map_err(|e| {
-            StopScan(format!(
-                "cannot read entry in {}: {}",
-                current.display(),
-                e
-            ))
-        })?;
+        let child = child
+            .map_err(|e| StopScan(format!("cannot read entry in {}: {}", current.display(), e)))?;
         let path = child.path();
         let name = child.file_name().to_string_lossy().to_string();
 
@@ -423,13 +412,18 @@ fn walk_dir(
             path: relative.clone(),
             language: detect_language(&path),
             size: metadata.len(),
-            loc: if is_secret || binary { 0 } else { count_loc(&path) },
+            loc: if is_secret || binary {
+                0
+            } else {
+                count_loc(&path)
+            },
             important: is_important_file(&name),
             is_secret,
             is_binary: binary,
         };
 
-        *outcome.languages
+        *outcome
+            .languages
             .entry(entry.language.as_str().to_string())
             .or_insert(0) += 1;
         outcome.total_loc += entry.loc;
@@ -449,8 +443,7 @@ fn should_skip_dir(name: &str) -> bool {
     if EXCLUDED_DIRS.contains(&name) {
         return true;
     }
-    (name.starts_with('.') && !HIDDEN_DIR_ALLOWLIST.contains(&name))
-        || name == "node_modules"
+    (name.starts_with('.') && !HIDDEN_DIR_ALLOWLIST.contains(&name)) || name == "node_modules"
 }
 
 #[cfg(test)]

@@ -158,12 +158,17 @@ async fn list_models() -> Json<serde_json::Value> {
 
     if models_json.is_empty() {
         // Fallback models when Ollama/llama.cpp are offline
-        models_json.push(serde_json::json!({"name": "qwen2.5:7b", "provider": "ollama", "type": "local"}));
-        models_json.push(serde_json::json!({"name": "llama3.1:8b", "provider": "ollama", "type": "local"}));
+        models_json
+            .push(serde_json::json!({"name": "qwen2.5:7b", "provider": "ollama", "type": "local"}));
+        models_json.push(
+            serde_json::json!({"name": "llama3.1:8b", "provider": "ollama", "type": "local"}),
+        );
     }
 
     models_json.push(serde_json::json!({"name": "gpt-4o", "provider": "openai", "type": "remote"}));
-    models_json.push(serde_json::json!({"name": "claude-3.5-sonnet", "provider": "anthropic", "type": "remote"}));
+    models_json.push(
+        serde_json::json!({"name": "claude-3.5-sonnet", "provider": "anthropic", "type": "remote"}),
+    );
 
     Json(serde_json::json!({
         "models": models_json
@@ -269,7 +274,9 @@ mod tests {
         assert!(ll["model_path"].is_string());
         assert!(ll["executable"].is_string());
         assert!(ll["args"].is_array());
-        assert!(ll["sampling"]["temperature"].is_null() || ll["sampling"]["temperature"].is_number());
+        assert!(
+            ll["sampling"]["temperature"].is_null() || ll["sampling"]["temperature"].is_number()
+        );
         assert!(ll["sampling"]["top_k"].is_null() || ll["sampling"]["top_k"].is_number());
         assert!(ll["sampling"]["min_p"].is_null() || ll["sampling"]["min_p"].is_number());
         assert!(ll["sampling"]["max_tokens"].is_null() || ll["sampling"]["max_tokens"].is_number());

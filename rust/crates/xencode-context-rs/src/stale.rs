@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
-/// `Clean` = hash unchanged since load · `Stale` = changed · 
+/// `Clean` = hash unchanged since load · `Stale` = changed ·
 /// `Missing` = never tracked or gone from disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStateKind {
@@ -199,9 +199,7 @@ mod tests {
 
         // untouched → clean
         let all_clean = tracker.check(&root, &["src/a.rs", "src/b.rs"]);
-        assert!(all_clean
-            .iter()
-            .all(|t| t.state == FileStateKind::Clean));
+        assert!(all_clean.iter().all(|t| t.state == FileStateKind::Clean));
 
         // edit a.rs → stale
         fs::write(root.join("src/a.rs"), "v2").unwrap();

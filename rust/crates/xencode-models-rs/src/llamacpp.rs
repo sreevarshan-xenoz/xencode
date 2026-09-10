@@ -289,15 +289,21 @@ impl LlamaCppClient {
         let url = format!("{}/v1/models/load", self.base_url);
         let payload = serde_json::json!({ "model": path });
 
-        let mut resp = self.client.post(&url).json(&payload).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlamaCppError::NotRunning(e.to_string())
-            } else if e.is_timeout() {
-                LlamaCppError::Timeout(e.to_string())
-            } else {
-                LlamaCppError::Api(e.to_string())
-            }
-        })?;
+        let mut resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    LlamaCppError::NotRunning(e.to_string())
+                } else if e.is_timeout() {
+                    LlamaCppError::Timeout(e.to_string())
+                } else {
+                    LlamaCppError::Api(e.to_string())
+                }
+            })?;
 
         if resp.status().is_success() {
             return Ok(());
@@ -356,7 +362,9 @@ impl LlamaCppClient {
 
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        Err(LlamaCppError::Api(format!("unload failed HTTP {status} - {body}")))
+        Err(LlamaCppError::Api(format!(
+            "unload failed HTTP {status} - {body}"
+        )))
     }
 
     /// Inline request to swap the loaded model. Convenience wrapper around
@@ -386,10 +394,7 @@ impl LlamaCppClient {
             .get("default_generation_settings")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let n_predict = dgs
-            .get("n_predict")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let n_predict = dgs.get("n_predict").and_then(|v| v.as_u64()).unwrap_or(0);
         Ok(Some(LlamaCppTimings {
             tokens_generated: n_predict,
             ..LlamaCppTimings::default()
@@ -515,8 +520,10 @@ fn home_dir() -> Option<std::path::PathBuf> {
         .or_else(|| {
             let drive = std::env::var_os("HOMEDRIVE")?;
             let path = std::env::var_os("HOMEPATH")?;
-            Some(std::path::PathBuf::from(drive.to_string_lossy().into_owned())
-                .join(path.to_string_lossy().into_owned()))
+            Some(
+                std::path::PathBuf::from(drive.to_string_lossy().into_owned())
+                    .join(path.to_string_lossy().into_owned()),
+            )
         })
         .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
 }
@@ -563,17 +570,29 @@ fn resolve_gguf_model_in(
                         .unwrap_or(false)
             };
             if is_gguf(&path) {
-                let key = path.file_stem().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                let key = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
                 found.push((path, key));
                 continue;
             }
             if path.is_dir() {
-                let folder_key = path.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                let folder_key = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
                 if let Ok(inner) = std::fs::read_dir(&path) {
                     for child in inner.flatten() {
                         let child_path = child.path();
                         if is_gguf(&child_path) {
-                            let stem = child_path.file_stem().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                            let stem = child_path
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_ascii_lowercase();
                             let key = if folder_key.contains(&stem) || stem.contains(&folder_key) {
                                 folder_key.clone()
                             } else {
@@ -591,10 +610,7 @@ fn resolve_gguf_model_in(
     }
     if let Some(hint) = hint_name {
         let hint_lower = hint.to_ascii_lowercase();
-        if let Some(matched) = found
-            .iter()
-            .find(|(_, key)| key.contains(&hint_lower))
-        {
+        if let Some(matched) = found.iter().find(|(_, key)| key.contains(&hint_lower)) {
             return Some(matched.0.to_string_lossy().into_owned());
         }
     }
@@ -698,7 +714,12 @@ mod tests {
 
         assert_eq!(
             resolve_gguf_model_in(None, Some("qwen3-4b"), std::slice::from_ref(&dir)),
-            Some(dir.join("qwen3-4b").join("Qwen3-4B-Q4_K_M.gguf").to_string_lossy().into_owned())
+            Some(
+                dir.join("qwen3-4b")
+                    .join("Qwen3-4B-Q4_K_M.gguf")
+                    .to_string_lossy()
+                    .into_owned()
+            )
         );
         // Ambiguous without a hint (one flat file + two nested families found).
         assert_eq!(

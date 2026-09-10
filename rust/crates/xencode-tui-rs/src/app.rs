@@ -860,9 +860,14 @@ impl<'a> App<'a> {
             let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                 .with_llama_cpp(llama_client);
             let _ = manager
-                .generate_stream_with_options(&model, &context_messages, Some(&llama_opts), |token| {
-                    let _ = tx.send(token.to_string());
-                })
+                .generate_stream_with_options(
+                    &model,
+                    &context_messages,
+                    Some(&llama_opts),
+                    |token| {
+                        let _ = tx.send(token.to_string());
+                    },
+                )
                 .await;
             // Report llama.cpp tok/s stats if this was a llama.cpp request
             if let Some(ts) = manager.last_llamacpp_timings() {
@@ -1125,11 +1130,7 @@ impl<'a> App<'a> {
                 }
             }
             "status" => {
-                let done = self
-                    .init_steps
-                    .iter()
-                    .filter(|(_, s)| s == "done")
-                    .count();
+                let done = self.init_steps.iter().filter(|(_, s)| s == "done").count();
                 let line = if self.init_running {
                     format!(
                         "⏳ init running — {done}/{} steps, {}%. Use /init abort to stop.",
@@ -1190,8 +1191,9 @@ impl<'a> App<'a> {
             .map(|name| (name.to_string(), "pending".to_string()))
             .collect();
         self.init_log.clear();
-        self.init_log
-            .push("⏺️ Initializing project context (structural pass) — zero LLM calls.".to_string());
+        self.init_log.push(
+            "⏺️ Initializing project context (structural pass) — zero LLM calls.".to_string(),
+        );
 
         let cancel = self.init_cancel.clone();
         let root = xencode_context_rs::default_root();
@@ -1201,15 +1203,15 @@ impl<'a> App<'a> {
             let progress = move |line: &str| {
                 if let Some(name) = line.strip_prefix("phase_start:") {
                     if let Some(idx) = PHASES.iter().position(|p| *p == name) {
-                        let _ = tx_progress
-                            .send(format!("[INIT]step:{idx}:running:{name}"));
-                        let _ = tx_progress
-                            .send(format!("[INIT]progress:{:.2}", idx as f64 / PHASES.len() as f64));
+                        let _ = tx_progress.send(format!("[INIT]step:{idx}:running:{name}"));
+                        let _ = tx_progress.send(format!(
+                            "[INIT]progress:{:.2}",
+                            idx as f64 / PHASES.len() as f64
+                        ));
                     }
                 } else if let Some(name) = line.strip_prefix("phase_done:") {
                     if let Some(idx) = PHASES.iter().position(|p| *p == name) {
-                        let _ = tx_progress
-                            .send(format!("[INIT]step:{idx}:done:{name}"));
+                        let _ = tx_progress.send(format!("[INIT]step:{idx}:done:{name}"));
                         let _ = tx_progress.send(format!(
                             "[INIT]progress:{:.2}",
                             (idx as f64 + 1.0) / PHASES.len() as f64
@@ -1220,10 +1222,8 @@ impl<'a> App<'a> {
                 }
             };
 
-            let result = tokio::task::spawn_blocking(move || {
-                init_project(&root, cancel, progress)
-            })
-            .await;
+            let result =
+                tokio::task::spawn_blocking(move || init_project(&root, cancel, progress)).await;
 
             match result {
                 Ok(Ok(summary)) => {
@@ -1308,7 +1308,8 @@ impl<'a> App<'a> {
                 let _ = tx.send("[CTX_START]".to_string());
                 if tracker.state.is_empty() {
                     let _ = tx.send(
-                        "[CTX]ℹ️ No tracked files — pin one with /ctx track src/foo.rs.".to_string(),
+                        "[CTX]ℹ️ No tracked files — pin one with /ctx track src/foo.rs."
+                            .to_string(),
                     );
                     return;
                 }
@@ -1351,9 +1352,7 @@ impl<'a> App<'a> {
                         "[CTX]🔖 Pinned \"{path}\" at load-time hash — /ctx status to check staleness."
                     ));
                 } else {
-                    let _ = tx.send(
-                        "[CTX]❌ Could not persist the tracking state.".to_string(),
-                    );
+                    let _ = tx.send("[CTX]❌ Could not persist the tracking state.".to_string());
                 }
             }
             Some("compact") => {
@@ -1381,10 +1380,7 @@ impl<'a> App<'a> {
                     "[CTX]🗜️ Soft compaction {} → {} entries (dropped {}), decisions kept: {}",
                     report.before, report.after, report.dropped, report.retained_decisions
                 ));
-                let _ = tx.send(format!(
-                    "[CTX]💾 Pre-rewrite snapshot → {}",
-                    snap.display()
-                ));
+                let _ = tx.send(format!("[CTX]💾 Pre-rewrite snapshot → {}", snap.display()));
                 let _ = tx.send(
                     "[CTX]✅ Deterministic, no LLM call — state.md only changes when the model flags it. Chat now shows the working projection."
                         .to_string(),
@@ -1409,7 +1405,11 @@ impl<'a> App<'a> {
                     "[CTX]🧪 Retrieval eval — {} gold queries, top-{} ({} gold file{})",
                     base.queries,
                     k,
-                    if gold.iter().all(|g| g.expected.is_empty()) { 0 } else { base.queries },
+                    if gold.iter().all(|g| g.expected.is_empty()) {
+                        0
+                    } else {
+                        base.queries
+                    },
                     if base.queries == 1 { "" } else { "s" }
                 ));
                 let _ = tx.send(format!(
@@ -1434,9 +1434,7 @@ impl<'a> App<'a> {
                 } else {
                     "rerank ties or hurts — keep deterministic baseline"
                 };
-                let _ = tx.send(format!(
-                    "[CTX]   ΔMRR {delta:+.3} → {verdict}",
-                ));
+                let _ = tx.send(format!("[CTX]   ΔMRR {delta:+.3} → {verdict}",));
                 let _ = tx.send("[CTX]   Per query:".to_string());
                 for (query, expected, rank, ranked) in &base.hits {
                     let rank_str = if *rank == usize::MAX {
@@ -1468,8 +1466,8 @@ impl<'a> App<'a> {
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
                 let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
-                let state = xencode_context_rs::ContextState::from_disk(&xencode)
-                    .map(|s| s.to_markdown());
+                let state =
+                    xencode_context_rs::ContextState::from_disk(&xencode).map(|s| s.to_markdown());
                 let git = xencode_context_rs::git_summary_text(&root).unwrap_or_default();
                 let recent_a = "user: how does auth work?\nassistant: it uses the auth module";
                 let recent_b = "user: why is startup slow?\nassistant: profile the init path";
@@ -1512,7 +1510,11 @@ impl<'a> App<'a> {
                     "[CTX]🧱 Stable prefix {} bytes — sha256 {} · cross-request identical: {}",
                     doc_a.stable_prefix.len(),
                     doc_a.stable_prefix_sha256(),
-                    if stable_ok { "✅ yes" } else { "❌ NO — KV reuse is broken" }
+                    if stable_ok {
+                        "✅ yes"
+                    } else {
+                        "❌ NO — KV reuse is broken"
+                    }
                 ));
 
                 let rows = xencode_context_rs::read_metrics(&xencode);
@@ -1637,9 +1639,7 @@ impl<'a> App<'a> {
             let root = xencode_context_rs::default_root();
             let xencode = root.join(xencode_context_rs::XENCODE_DIR);
             let Some(index) = xencode_context_rs::RetrievalIndex::load(&xencode) else {
-                let _ = tx.send(
-                    "[CTX]❌ No project index — run /init first.".to_string(),
-                );
+                let _ = tx.send("[CTX]❌ No project index — run /init first.".to_string());
                 return;
             };
             let profile = xencode_context_rs::HardwareProfile::Balanced;
@@ -1707,9 +1707,8 @@ impl<'a> App<'a> {
                 doc.retrieved_included.min(u8::MAX as usize)
             ));
             if doc.truncated {
-                let _ = tx.send(
-                    "[CTX]⚠ Some retrieved files dropped to fit the budget.".to_string(),
-                );
+                let _ =
+                    tx.send("[CTX]⚠ Some retrieved files dropped to fit the budget.".to_string());
             }
             if doc.soft_compaction_needed {
                 let _ = tx.send(
@@ -2206,10 +2205,8 @@ impl<'a> App<'a> {
                                 ));
                             }
                             Err(e) => {
-                                let _ = tx.send(format!(
-                                    "[HEALTH]ollama|healthy|{}|{}",
-                                    latency, e
-                                ));
+                                let _ =
+                                    tx.send(format!("[HEALTH]ollama|healthy|{}|{}", latency, e));
                             }
                         }
                     } else {
@@ -2315,10 +2312,7 @@ impl<'a> App<'a> {
             let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout.min(5));
             match llama_client.ping().await {
                 Ok(resp_time) => {
-                    let _ = tx.send(format!(
-                        "[HEALTH]llamacpp|healthy|{}|",
-                        resp_time * 1000.0
-                    ));
+                    let _ = tx.send(format!("[HEALTH]llamacpp|healthy|{}|", resp_time * 1000.0));
                 }
                 Err(e) => {
                     let _ = tx.send(format!("[HEALTH]llamacpp|unavailable|0|{}", e));
@@ -2399,9 +2393,7 @@ impl<'a> App<'a> {
             let Some(model_path) = resolved else {
                 let _ = err_tx.send(format!(
                     "[LLAMACPP_MSG]⚠️ auto-start skipped: no GGUF model found{}",
-                    alias
-                        .map(|a| format!(" for `{a}`"))
-                        .unwrap_or_default()
+                    alias.map(|a| format!(" for `{a}`")).unwrap_or_default()
                 ));
                 let _ = err_tx.send(
                     "[LLAMACPP_MSG]💡 set config llama_cpp_model_path (xencode config set llama_cpp_model_path <path>) or drop the .gguf into ~/.cache/llama.cpp".to_string(),
@@ -3238,11 +3230,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     app.config.llama_cpp_min_p = v;
                                                 }
                                                 12 => {
-                                                    app.config.llama_cpp_max_tokens = app
-                                                        .settings_url_buffer
-                                                        .trim()
-                                                        .parse()
-                                                        .ok();
+                                                    app.config.llama_cpp_max_tokens =
+                                                        app.settings_url_buffer.trim().parse().ok();
                                                 }
                                                 _ => {}
                                             }
@@ -3261,7 +3250,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         } else if app.settings_cursor == 7 {
                                             // Start Llama.cpp URL editing
                                             app.settings_url_editing = true;
-                                            app.settings_url_buffer = app.config.llama_cpp_url.clone();
+                                            app.settings_url_buffer =
+                                                app.config.llama_cpp_url.clone();
                                             app.settings_url_cursor = app.settings_url_buffer.len();
                                         } else if app.settings_cursor == 8 {
                                             // Start Llama.cpp model path editing
@@ -3390,7 +3380,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     .available_models
                                     .get(app.selected_model)
                                     .and_then(|m| llama_model_target(m));
-                                app.llamacpp_control("load", target.map(|s| s.to_string()), tx.clone());
+                                app.llamacpp_control(
+                                    "load",
+                                    target.map(|s| s.to_string()),
+                                    tx.clone(),
+                                );
                             }
                             KeyCode::Char('u') if app.focus == FocusArea::ModelSelector => {
                                 app.llamacpp_control("unload", None, tx.clone());
@@ -3401,40 +3395,40 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     app.init_visible = false;
                                 } else {
                                     match app.focus {
-                                FocusArea::Settings => {
-                                    if app.settings_url_editing {
-                                        app.settings_url_editing = false;
-                                    } else {
-                                        app.settings_reset_active = false;
-                                        let _ = app.config.save();
-                                        app.focus = FocusArea::ChatInput;
+                                        FocusArea::Settings => {
+                                            if app.settings_url_editing {
+                                                app.settings_url_editing = false;
+                                            } else {
+                                                app.settings_reset_active = false;
+                                                let _ = app.config.save();
+                                                app.focus = FocusArea::ChatInput;
+                                            }
+                                        }
+                                        FocusArea::ModelSelector
+                                        | FocusArea::CodeReview
+                                        | FocusArea::PerformanceDashboard
+                                        | FocusArea::ProviderHealth
+                                        | FocusArea::ProjectAnalyzer
+                                        | FocusArea::GitCommit
+                                        | FocusArea::FeatureNavigator
+                                        | FocusArea::ByteBotPanel
+                                        | FocusArea::CollaborationHub
+                                        | FocusArea::VoiceInterface
+                                        | FocusArea::TerminalAssistant
+                                        | FocusArea::SecurityAuditor
+                                        | FocusArea::PerformanceProfiler
+                                        | FocusArea::CustomModels
+                                        | FocusArea::LearningMode
+                                        | FocusArea::MultiLanguage => {
+                                            app.focus = FocusArea::ChatInput;
+                                        }
+                                        FocusArea::CodeEditor => {
+                                            app.input_mode = InputMode::Normal;
+                                        }
+                                        _ => {}
                                     }
                                 }
-                                FocusArea::ModelSelector
-                                | FocusArea::CodeReview
-                                | FocusArea::PerformanceDashboard
-                                | FocusArea::ProviderHealth
-                                | FocusArea::ProjectAnalyzer
-                                | FocusArea::GitCommit
-                                | FocusArea::FeatureNavigator
-                                | FocusArea::ByteBotPanel
-                                | FocusArea::CollaborationHub
-                                | FocusArea::VoiceInterface
-                                | FocusArea::TerminalAssistant
-                                | FocusArea::SecurityAuditor
-                                | FocusArea::PerformanceProfiler
-                                | FocusArea::CustomModels
-                                | FocusArea::LearningMode
-                                | FocusArea::MultiLanguage => {
-                                    app.focus = FocusArea::ChatInput;
-                                }
-                                FocusArea::CodeEditor => {
-                                    app.input_mode = InputMode::Normal;
-                                }
-                                _ => {}
-                                }
-                                }
-                            },
+                            }
                             KeyCode::Char(c) => {
                                 if app.focus == FocusArea::Settings && app.settings_url_editing {
                                     app.settings_url_buffer.insert(app.settings_url_cursor, c);
@@ -3516,7 +3510,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                 }
                                             }
                                             1 => {
-                                                app.config.cache_enabled = !app.config.cache_enabled;
+                                                app.config.cache_enabled =
+                                                    !app.config.cache_enabled;
                                                 let _ = app.config.save();
                                             }
                                             2 => {
@@ -3597,7 +3592,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                 }
                                             }
                                             1 => {
-                                                app.config.cache_enabled = !app.config.cache_enabled;
+                                                app.config.cache_enabled =
+                                                    !app.config.cache_enabled;
                                                 let _ = app.config.save();
                                             }
                                             2 => {
@@ -3658,11 +3654,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         InputMode::Editing => {
                             // If editor is focused, forward input to textarea
                             if app.focus == FocusArea::CodeEditor {
-match key.code {
-                                     KeyCode::Esc => {
-                                         app.input_mode = InputMode::Normal;
-                                     }
-                                     _ => {
+                                match key.code {
+                                    KeyCode::Esc => {
+                                        app.input_mode = InputMode::Normal;
+                                    }
+                                    _ => {
                                         app.editor.input(key);
                                         app.editor_dirty = true;
                                     }

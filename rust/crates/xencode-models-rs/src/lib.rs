@@ -8,4 +8,3 @@ pub use llamacpp::{
     LlamaCppModelInfo, LlamaCppOptions, LlamaCppTimings, LlamaServerProcess,
 };
 pub use ollama::{ModelInfo, OllamaClient, OllamaError};
-

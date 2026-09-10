@@ -17,7 +17,12 @@ pub struct GitInfo {
 
 pub fn is_git_repo(root: &Path) -> bool {
     Command::new("git")
-        .args(["-C", root.to_string_lossy().as_ref(), "rev-parse", "--git-dir"])
+        .args([
+            "-C",
+            root.to_string_lossy().as_ref(),
+            "rev-parse",
+            "--git-dir",
+        ])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -63,7 +68,12 @@ pub fn current_git_info(root: &Path) -> Option<GitInfo> {
         return None;
     }
     let branch = Command::new("git")
-        .args(["-C", root.to_string_lossy().as_ref(), "branch", "--show-current"])
+        .args([
+            "-C",
+            root.to_string_lossy().as_ref(),
+            "branch",
+            "--show-current",
+        ])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
