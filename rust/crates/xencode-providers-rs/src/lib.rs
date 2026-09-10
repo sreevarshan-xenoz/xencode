@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, OllamaClient};
 
 pub mod anthropic;
+pub mod capabilities;
 pub mod compatible;
 pub mod gemini;
 pub mod qwen;
@@ -16,6 +17,7 @@ pub mod tools;
 
 use retry::RetryConfig;
 
+pub use capabilities::{capabilities_for, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
 pub use tools::{AgentStep, AgentTurn, ToolCall, ToolDefinition};
 
