@@ -78,11 +78,7 @@ pub fn soft_compact(transcript: &mut Transcript, keep_fraction: f32) -> CompactR
         before,
         after,
         dropped: before.saturating_sub(after),
-        retained_decisions: transcript
-            .entries
-            .iter()
-            .filter(|e| e.is_decision)
-            .count(),
+        retained_decisions: transcript.entries.iter().filter(|e| e.is_decision).count(),
         snapshot: None,
         state_rebuilt: false,
     }
@@ -110,7 +106,11 @@ Return ONLY this exact markdown shape:\n\n\
 ## decisions\n- <decision [d]>\n\n\
 ## unresolved\n- <item>\n\n\
 ## recent (last 6 messages, verbatim)\n{recent}",
-        if state.present() { state.to_markdown() } else { "(empty)".to_string() },
+        if state.present() {
+            state.to_markdown()
+        } else {
+            "(empty)".to_string()
+        },
         TRANSCRIPT_TAIL = transcript_tail(transcript),
     )
 }

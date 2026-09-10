@@ -84,9 +84,7 @@ impl HardwareProfile {
         ];
         match self {
             HardwareProfile::Low => args.push("q4_0".to_string()),
-            HardwareProfile::Balanced | HardwareProfile::High => {
-                args.push("q8_0".to_string())
-            }
+            HardwareProfile::Balanced | HardwareProfile::High => args.push("q8_0".to_string()),
         }
         args.push("--ctx-size".to_string());
         args.push(self.ctx_tokens().to_string());
@@ -162,7 +160,7 @@ mod tests {
         assert_eq!(est_tokens(3, true), 1);
     }
 
-#[test]
+    #[test]
     fn truncate_cuts_at_line_boundary_and_under_cap() {
         let text = "aaaaaa\nbbbbbb\ncccccc\nddddd\n";
         let (kept, tokens) = truncate_to_tokens(text, 3, false);
@@ -194,11 +192,12 @@ mod tests {
     #[test]
     fn profiles_have_monotonic_resources() {
         assert!(HardwareProfile::Low.ctx_tokens() < HardwareProfile::Balanced.ctx_tokens());
-        assert!(
-            HardwareProfile::Balanced.ctx_tokens() < HardwareProfile::High.ctx_tokens()
-        );
+        assert!(HardwareProfile::Balanced.ctx_tokens() < HardwareProfile::High.ctx_tokens());
         assert!(HardwareProfile::Low.top_k() < HardwareProfile::Balanced.top_k());
-        assert_ne!(HardwareProfile::Balanced.top_k(), HardwareProfile::High.top_k());
+        assert_ne!(
+            HardwareProfile::Balanced.top_k(),
+            HardwareProfile::High.top_k()
+        );
     }
 
     #[test]

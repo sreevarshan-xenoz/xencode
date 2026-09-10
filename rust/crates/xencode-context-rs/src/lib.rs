@@ -38,17 +38,20 @@ pub use compact::{
     CompactionKind,
 };
 pub use context::{
-    assemble_prompt, git_summary_text, read_retrieved_bodies, RetrievedBlock, TierDoc, STABLE_END_MARKER,
+    assemble_prompt, git_summary_text, read_retrieved_bodies, RetrievedBlock, TierDoc,
+    STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
 pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
 pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
-pub use gitinfo::{changed_paths_between, current_git_info, dirty_paths, git_file_set, is_git_repo, GitInfo};
+pub use gitinfo::{
+    changed_paths_between, current_git_info, dirty_paths, git_file_set, is_git_repo, GitInfo,
+};
 pub use index::{write_atomic, write_str_atomic, FileEntry, FilesIndex, Manifest, VERSION};
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use metrics::{append_metrics, read_metrics, CompactAction, RequestMetrics};
-pub use retrieve::{retrieve, word_tokens, RetrievedFile, RetrieveOptions, RetrievalIndex};
-pub use scanner::{scan_tree, Language, ScanOutcome, ScanOptions};
+pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
+pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
 pub use symbols::{

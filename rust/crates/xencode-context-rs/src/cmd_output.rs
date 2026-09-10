@@ -107,7 +107,10 @@ pub fn capture_output(
 
 /// Re-read the raw blob on demand (`RAW: cmd/<hash>.txt`).
 pub fn read_raw(xencode_dir: &Path, log_sha256: &str) -> Option<String> {
-    let path = xencode_dir.join("cache").join("cmd").join(format!("{log_sha256}.txt"));
+    let path = xencode_dir
+        .join("cache")
+        .join("cmd")
+        .join(format!("{log_sha256}.txt"));
     fs::read_to_string(path).ok()
 }
 
@@ -196,7 +199,8 @@ mod tests {
     fn captures_dedupes_and_re_reads_raw() {
         let dir = temp_dir();
         let xencode = dir.join(".xencode");
-        let out = "error[E0308]: mismatched types\n  --> src/auth.rs:42:10\n  --> src/router.rs:9:3\n";
+        let out =
+            "error[E0308]: mismatched types\n  --> src/auth.rs:42:10\n  --> src/router.rs:9:3\n";
         let files = deduce_files(out, 5);
         assert_eq!(files, vec!["src/auth.rs:42:10", "src/router.rs:9:3"]);
 
@@ -227,8 +231,13 @@ mod tests {
     fn empty_output_is_not_retained() {
         let dir = temp_dir();
         let xencode = dir.join(".xencode");
-        assert!(capture_output(&xencode, "cargo fmt", "", "", &[]).unwrap().is_none());
-        assert!(!index_path(&xencode).exists() || CmdIndex::from_disk(&xencode).unwrap().blobs.is_empty());
+        assert!(capture_output(&xencode, "cargo fmt", "", "", &[])
+            .unwrap()
+            .is_none());
+        assert!(
+            !index_path(&xencode).exists()
+                || CmdIndex::from_disk(&xencode).unwrap().blobs.is_empty()
+        );
         if dir.exists() {
             fs::remove_dir_all(dir).unwrap();
         }

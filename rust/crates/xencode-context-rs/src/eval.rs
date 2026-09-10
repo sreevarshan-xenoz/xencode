@@ -11,7 +11,7 @@
 //! Gold sets: `.xencode/eval/gold.json` (overrides the built-in sample, which
 //! is aimed at the Xencode repo itself).
 
-use crate::retrieve::{retrieve, RetrievedFile, RetrieveOptions, RetrievalIndex};
+use crate::retrieve::{retrieve, RetrievalIndex, RetrieveOptions, RetrievedFile};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -83,7 +83,13 @@ pub fn gold_from_disk(xencode_dir: &std::path::Path) -> Vec<EvalItem> {
 
 /// Run the gold set through retrieval, optionally through the BM25 rerank
 /// stage, and measure recall@k / precision@k / MRR.
-pub fn evaluate(index: &RetrievalIndex, gold: &[EvalItem], top_k: usize, dirty: &HashSet<String>, rerank: bool) -> EvalReport {
+pub fn evaluate(
+    index: &RetrievalIndex,
+    gold: &[EvalItem],
+    top_k: usize,
+    dirty: &HashSet<String>,
+    rerank: bool,
+) -> EvalReport {
     let opts = RetrieveOptions {
         top_k,
         ..Default::default()
@@ -103,7 +109,12 @@ pub fn evaluate(index: &RetrievalIndex, gold: &[EvalItem], top_k: usize, dirty: 
         };
         let ranked_paths: Vec<String> = ranked.iter().map(|r| r.path.clone()).collect();
         if item.expected.is_empty() {
-            hits.push((item.query.clone(), item.expected.clone(), EvalReport::first_hit_rank(&item.expected, &ranked), ranked_paths));
+            hits.push((
+                item.query.clone(),
+                item.expected.clone(),
+                EvalReport::first_hit_rank(&item.expected, &ranked),
+                ranked_paths,
+            ));
             continue;
         }
         // recall@k / precision@k: a query's expectation is satisfied if any
@@ -123,11 +134,20 @@ pub fn evaluate(index: &RetrievalIndex, gold: &[EvalItem], top_k: usize, dirty: 
         if rank != usize::MAX {
             mrr_numer += 1.0 / rank as f64;
         }
-        hits.push((item.query.clone(), item.expected.clone(), rank, ranked_paths));
+        hits.push((
+            item.query.clone(),
+            item.expected.clone(),
+            rank,
+            ranked_paths,
+        ));
     }
 
     let n = gold.len().max(1) as f64;
-    let with_expected = gold.iter().filter(|g| !g.expected.is_empty()).count().max(1) as f64;
+    let with_expected = gold
+        .iter()
+        .filter(|g| !g.expected.is_empty())
+        .count()
+        .max(1) as f64;
     EvalReport {
         queries: gold.len(),
         top_k,
@@ -172,24 +192,35 @@ mod tests {
             ],
             ..Default::default()
         };
-        idx.symbols
-            .insert("crates/xencode-context-rs/src/retrieve.rs".into(), PerFileSymbols {
-                structs: vec!["RetrievalIndex".into(), "RetrieveOptions".into(), "RetrievedFile".into()],
+        idx.symbols.insert(
+            "crates/xencode-context-rs/src/retrieve.rs".into(),
+            PerFileSymbols {
+                structs: vec![
+                    "RetrievalIndex".into(),
+                    "RetrieveOptions".into(),
+                    "RetrievedFile".into(),
+                ],
                 functions: vec!["retrieve".into(), "word_tokens".into()],
-                imports: vec![], exports: vec![],
-            });
-        idx.symbols
-            .insert("crates/xencode-context-rs/src/budget.rs".into(), PerFileSymbols {
+                imports: vec![],
+                exports: vec![],
+            },
+        );
+        idx.symbols.insert(
+            "crates/xencode-context-rs/src/budget.rs".into(),
+            PerFileSymbols {
                 structs: vec!["HardwareProfile".into()],
                 functions: vec!["est_tokens".into(), "truncate_to_tokens".into()],
-                imports: vec![], exports: vec![],
-            });
+                imports: vec![],
+                exports: vec![],
+            },
+        );
         idx.symbols.insert(
             "crates/xencode-tui-rs/src/app.rs".into(),
             PerFileSymbols {
                 structs: vec!["App".into()],
                 functions: vec!["submit_message".into()],
-                imports: vec![], exports: vec![],
+                imports: vec![],
+                exports: vec![],
             },
         );
         idx

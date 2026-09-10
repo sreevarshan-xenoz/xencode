@@ -497,13 +497,14 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(app.theme.fg)
                 };
                 let prefix = if is_current { " ● " } else { "   " };
-                let (badge, badge_color) = if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") {
-                    (" [llamacpp]", ratatui::style::Color::Yellow)
-                } else if model.contains('/') || model.starts_with("qwen-") {
-                    (" [cloud]", ratatui::style::Color::Magenta)
-                } else {
-                    (" [ollama]", ratatui::style::Color::Cyan)
-                };
+                let (badge, badge_color) =
+                    if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") {
+                        (" [llamacpp]", ratatui::style::Color::Yellow)
+                    } else if model.contains('/') || model.starts_with("qwen-") {
+                        (" [cloud]", ratatui::style::Color::Magenta)
+                    } else {
+                        (" [ollama]", ratatui::style::Color::Cyan)
+                    };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{}{}", prefix, model), style),
                     Span::styled(badge, Style::default().fg(badge_color)),
@@ -541,12 +542,7 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 status,
                 Style::default().fg(app.theme.message_system),
             )),
-            Rect::new(
-                popup_area.x,
-                footer_y,
-                popup_area.width,
-                1,
-            ),
+            Rect::new(popup_area.x, footer_y, popup_area.width, 1),
         );
     }
 }
@@ -607,19 +603,28 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let theme_str = format!("{}  [{}]", app.config.active_theme, theme_indicators);
 
     let ollama_url_str = if app.settings_url_editing && app.settings_cursor == 6 {
-        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (type to edit, Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         format!("{}  (Enter to edit)", app.config.ollama_url)
     };
 
     let llamacpp_url_str = if app.settings_url_editing && app.settings_cursor == 7 {
-        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (type to edit, Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         format!("{}  (Enter to edit)", app.config.llama_cpp_url)
     };
 
     let llamacpp_model_path_str = if app.settings_url_editing && app.settings_cursor == 8 {
-        format!("{}| (type to edit, Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (type to edit, Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else if app.config.llama_cpp_model_path.is_empty() {
         "⚠️  Not set (Enter to edit)".to_string()
     } else {
@@ -640,22 +645,34 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let llama_temp_str = if app.settings_url_editing && app.settings_cursor == 9 {
-        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         fmt_opt(&app.config.llama_cpp_temperature)
     };
     let llama_topk_str = if app.settings_url_editing && app.settings_cursor == 10 {
-        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         fmt_opt_i32(&app.config.llama_cpp_top_k)
     };
     let llama_minp_str = if app.settings_url_editing && app.settings_cursor == 11 {
-        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         fmt_opt(&app.config.llama_cpp_min_p)
     };
     let llama_maxtokens_str = if app.settings_url_editing && app.settings_cursor == 12 {
-        format!("{}| (Enter to confirm)", &app.settings_url_buffer[..app.settings_url_cursor])
+        format!(
+            "{}| (Enter to confirm)",
+            &app.settings_url_buffer[..app.settings_url_cursor]
+        )
     } else {
         fmt_opt_u32(&app.config.llama_cpp_max_tokens)
     };
@@ -1661,13 +1678,19 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let status_icon: String = if app.init_running {
-        let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}',
-            '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+        let frames = [
+            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
+            '\u{2827}', '\u{2807}', '\u{280F}',
+        ];
         frames[app.spinner_tick % frames.len()].to_string()
     } else {
         "\u{2705}".to_string()
     };
-    let status = if app.init_running { " Running" } else { " Done" };
+    let status = if app.init_running {
+        " Running"
+    } else {
+        " Done"
+    };
 
     let title = format!(
         " \u{26A1} Project Context /init [{}]{}  (Esc:close, /init abort) ",

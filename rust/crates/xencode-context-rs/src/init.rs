@@ -26,7 +26,10 @@ pub const XENCODE_DIR: &str = ".xencode";
 
 #[derive(Debug)]
 pub enum ContextError {
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     Scan(String),
     Cancelled,
 }
@@ -91,12 +94,10 @@ pub fn init_project(
 ) -> Result<InitSummary, ContextError> {
     check_abort(&cancel)?;
 
-    let root = root
-        .canonicalize()
-        .map_err(|source| ContextError::Io {
-            path: root.to_path_buf(),
-            source,
-        })?;
+    let root = root.canonicalize().map_err(|source| ContextError::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
     if !root.is_dir() {
         return Err(ContextError::Scan(format!(
             "workspace root is not a directory: {}",
@@ -117,7 +118,8 @@ pub fn init_project(
 
     // ── Phase 2: resume check ──────────────────────────────────────────────
     emit(&mut progress, "phase_start:Resume check");
-    let prior_manifest = crate::index::read_json::<Manifest>(&crate::index::manifest_path(&xencode));
+    let prior_manifest =
+        crate::index::read_json::<Manifest>(&crate::index::manifest_path(&xencode));
     let current_head = current_git_info(&root).map(|g| g.head);
 
     let prior_files =
@@ -125,8 +127,10 @@ pub fn init_project(
     let prior_symbols = crate::index::read_json::<BTreeMap<String, PerFileSymbols>>(
         &crate::index::symbols_json_path(&xencode),
     );
-    let prior_deps = crate::index::read_json::<Vec<DepEdge>>(&crate::index::deps_json_path(&xencode));
-    if let (Some(m), Some(f), Some(s), Some(d)) = (prior_manifest, prior_files, prior_symbols, prior_deps)
+    let prior_deps =
+        crate::index::read_json::<Vec<DepEdge>>(&crate::index::deps_json_path(&xencode));
+    if let (Some(m), Some(f), Some(s), Some(d)) =
+        (prior_manifest, prior_files, prior_symbols, prior_deps)
     {
         if m.version == crate::index::VERSION
             && m.git_head == current_head
@@ -137,7 +141,12 @@ pub fn init_project(
                 "log:✓ Index is up to date — no changes since last run.",
             );
             emit(&mut progress, "phase_done:Resume check");
-            return Ok(summary_from_existing(&f, m.skipped, s.len() as u64, d.len() as u64));
+            return Ok(summary_from_existing(
+                &f,
+                m.skipped,
+                s.len() as u64,
+                d.len() as u64,
+            ));
         }
     }
     emit(&mut progress, "phase_done:Resume check");
@@ -260,7 +269,10 @@ pub fn init_project(
             ),
         );
     } else {
-        emit(&mut progress, "log:🧩 No Rust files — symbols/deps skipped.");
+        emit(
+            &mut progress,
+            "log:🧩 No Rust files — symbols/deps skipped.",
+        );
     }
     write_atomic(&crate::index::symbols_json_path(&xencode), &symbols)?;
     write_atomic(&crate::index::deps_json_path(&xencode), &graph)?;
@@ -335,10 +347,7 @@ fn extract_repo_symbols(
             path: full.clone(),
             source,
         })?;
-        symbols.insert(
-            path.clone(),
-            extract_rust_symbols(&content),
-        );
+        symbols.insert(path.clone(), extract_rust_symbols(&content));
     }
     Ok(symbols)
 }
@@ -495,11 +504,9 @@ mod tests {
 
     fn run(root: &Path) -> (Result<InitSummary, ContextError>, Vec<String>) {
         let mut lines = Vec::new();
-        let result = init_project(
-            root,
-            Arc::new(AtomicBool::new(false)),
-            |line| lines.push(line.to_string()),
-        );
+        let result = init_project(root, Arc::new(AtomicBool::new(false)), |line| {
+            lines.push(line.to_string())
+        });
         (result, lines)
     }
 
@@ -632,7 +639,10 @@ mod tests {
         // .gitignore + src/main.rs + untracked-not-ignored new.py are all indexed;
         // the gitignored ignored.tmp is filtered out and counted as skipped.
         assert_eq!(first.files_scanned, 3);
-        assert_eq!(first.skipped, 1, "gitignored file must be counted as skipped");
+        assert_eq!(
+            first.skipped, 1,
+            "gitignored file must be counted as skipped"
+        );
 
         let (second, _) = run(&root);
         let second = second.expect("ok");
@@ -691,7 +701,10 @@ mod tests {
         let _ = run(&root);
 
         let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert!(ignore.contains(".xencode/"), "expected .xencode gitignored, got: {ignore}");
+        assert!(
+            ignore.contains(".xencode/"),
+            "expected .xencode gitignored, got: {ignore}"
+        );
 
         // Second run must not duplicate the entry.
         let _ = run(&root);

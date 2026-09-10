@@ -8,9 +8,7 @@
 //! Pure/disk-free (`assemble_prompt` takes strings and pre-built fenced
 //! blocks), which keeps the budget logic unit-testable without a repository.
 
-use crate::budget::{
-    est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile,
-};
+use crate::budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
 use crate::gitinfo::{current_git_info, dirty_paths};
 use crate::index::FileEntry;
 use crate::retrieve::RetrievedFile;
@@ -96,23 +94,26 @@ pub fn assemble_prompt(
 
     // ── Tiers 1–3: stable prefix ─────────────────────────────────────────
     let system_tok = est_tokens(system.len(), false);
-    tiers.push(TierDoc { name: "system", tokens: system_tok });
+    tiers.push(TierDoc {
+        name: "system",
+        tokens: system_tok,
+    });
 
-    let (agents_head, agents_tok) = truncate_to_tokens(
-        agents_md.unwrap_or(""),
-        AGENTS_CAP_TOKENS,
-        false,
-    );
+    let (agents_head, agents_tok) =
+        truncate_to_tokens(agents_md.unwrap_or(""), AGENTS_CAP_TOKENS, false);
     let truncated_agents = agents_md.is_some_and(|a| a.len() > agents_head.len());
-    tiers.push(TierDoc { name: "agents.md", tokens: agents_tok });
+    tiers.push(TierDoc {
+        name: "agents.md",
+        tokens: agents_tok,
+    });
 
-    let (anchor_head, anchor_tok) = truncate_to_tokens(
-        anchor_md.unwrap_or(""),
-        ANCHOR_CAP_TOKENS,
-        false,
-    );
+    let (anchor_head, anchor_tok) =
+        truncate_to_tokens(anchor_md.unwrap_or(""), ANCHOR_CAP_TOKENS, false);
     let truncated_anchor = anchor_md.is_some_and(|a| a.len() > anchor_head.len());
-    tiers.push(TierDoc { name: "anchor.md", tokens: anchor_tok });
+    tiers.push(TierDoc {
+        name: "anchor.md",
+        tokens: anchor_tok,
+    });
 
     let mut stable_parts: Vec<&str> = Vec::new();
     if !system.is_empty() {
@@ -131,20 +132,23 @@ pub fn assemble_prompt(
     truncated |= truncated_agents || truncated_anchor || stable_tokens > target;
 
     // ── Tier 4: state.md ─────────────────────────────────────────────────
-    let (state_head, state_tok) = truncate_to_tokens(
-        state_md.unwrap_or(""),
-        STATE_CAP_TOKENS,
-        false,
-    );
+    let (state_head, state_tok) =
+        truncate_to_tokens(state_md.unwrap_or(""), STATE_CAP_TOKENS, false);
     if !state_head.is_empty() && remaining >= MARGIN_TOKENS {
-        tiers.push(TierDoc { name: "state.md", tokens: state_tok });
+        tiers.push(TierDoc {
+            name: "state.md",
+            tokens: state_tok,
+        });
         remaining = remaining.saturating_sub(state_tok);
     }
 
     // ── Tier 5: git summary ──────────────────────────────────────────────
     let (git_head, git_tok) = truncate_to_tokens(git_summary, GIT_CAP_TOKENS, false);
     if !git_head.is_empty() && remaining >= MARGIN_TOKENS {
-        tiers.push(TierDoc { name: "git", tokens: git_tok });
+        tiers.push(TierDoc {
+            name: "git",
+            tokens: git_tok,
+        });
         remaining = remaining.saturating_sub(git_tok);
     }
 
@@ -160,7 +164,10 @@ pub fn assemble_prompt(
         }
         remaining = remaining.saturating_sub(block_tok);
         retrieved_included += 1;
-        tiers.push(TierDoc { name: "retrieved", tokens: block_tok });
+        tiers.push(TierDoc {
+            name: "retrieved",
+            tokens: block_tok,
+        });
         retrieved_head.push(block);
     }
 
@@ -172,7 +179,10 @@ pub fn assemble_prompt(
         (String::new(), 0)
     };
     if !recent_head.is_empty() {
-        tiers.push(TierDoc { name: "recent", tokens: recent_tok });
+        tiers.push(TierDoc {
+            name: "recent",
+            tokens: recent_tok,
+        });
     }
 
     // ── Assemble ─────────────────────────────────────────────────────────
@@ -187,10 +197,7 @@ pub fn assemble_prompt(
     }
     if !retrieved_head.is_empty() {
         text.push_str("\n\n## Retrieval\n\n");
-        let blocks: Vec<String> = retrieved_head
-            .iter()
-            .map(|b| b.body.clone())
-            .collect();
+        let blocks: Vec<String> = retrieved_head.iter().map(|b| b.body.clone()).collect();
         text.push_str(&blocks.join("\n\n"));
     }
     if !recent_head.is_empty() {
@@ -324,7 +331,9 @@ mod tests {
     fn budget_fills_all_tiers_within_target() {
         // A long enough recent window so tier 7 clears the soft-compaction
         // floor (~40 tokens) on the Balanced profile.
-        let recent: String = (0..40).map(|i| format!("[m{i}] user: fix the auth flow now please\n")).collect();
+        let recent: String = (0..40)
+            .map(|i| format!("[m{i}] user: fix the auth flow now please\n"))
+            .collect();
         let doc = assemble_prompt(
             HardwareProfile::Balanced,
             SYSTEM,
@@ -350,7 +359,10 @@ mod tests {
             .map(|i| RetrievedBlock {
                 path: format!("src/f{i}.rs"),
                 score: 10 + i as u64,
-                body: format!("File: src/f{i}.rs\n```rust\n{}\n```", "pub fn x(i: u64) -> u64 { i * 2 }\n".repeat(8)),
+                body: format!(
+                    "File: src/f{i}.rs\n```rust\n{}\n```",
+                    "pub fn x(i: u64) -> u64 { i * 2 }\n".repeat(8)
+                ),
             })
             .collect();
         let doc = assemble_prompt(

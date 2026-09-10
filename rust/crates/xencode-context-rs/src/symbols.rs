@@ -361,7 +361,8 @@ pub fn rank_files(graph: &[DepEdge], files: &[String]) -> Vec<(String, u64)> {
     let mut ranked: Vec<(String, u64)> = files
         .iter()
         .map(|f| {
-            let score = in_cnt.get(f.as_str()).unwrap_or(&0) * 2 + out_cnt.get(f.as_str()).unwrap_or(&0);
+            let score =
+                in_cnt.get(f.as_str()).unwrap_or(&0) * 2 + out_cnt.get(f.as_str()).unwrap_or(&0);
             (f.clone(), score)
         })
         .collect();
@@ -371,11 +372,7 @@ pub fn rank_files(graph: &[DepEdge], files: &[String]) -> Vec<(String, u64)> {
 
 /// BFS over forward dependency edges from `seeds`, up to `max_hops` deep.
 /// Returns every reachable file (excluding the seeds), sorted.
-pub fn expand_dependencies(
-    graph: &[DepEdge],
-    seeds: &[&str],
-    max_hops: usize,
-) -> BTreeSet<String> {
+pub fn expand_dependencies(graph: &[DepEdge], seeds: &[&str], max_hops: usize) -> BTreeSet<String> {
     let fwd = dependency_map(graph);
     let mut visited: BTreeSet<String> = BTreeSet::new();
     let mut current: Vec<String> = seeds.iter().map(|s| s.to_string()).collect();
@@ -438,7 +435,11 @@ fn helper() {}
         assert_eq!(sym.structs, vec!["Session".to_string(), "User".to_string()]);
         assert_eq!(
             sym.functions,
-            vec!["connect".to_string(), "helper".to_string(), "refresh".to_string()]
+            vec![
+                "connect".to_string(),
+                "helper".to_string(),
+                "refresh".to_string()
+            ]
         );
         assert_eq!(
             sym.imports,
@@ -617,10 +618,7 @@ fn helper() {}
         assert_eq!(by_path["api/models.rs"], 3);
         assert_eq!(by_path["lib.rs"], 0);
         // Ranking order: highest score first; ties by path.
-        let order: Vec<String> = ranked_again
-            .into_iter()
-            .map(|(p, _)| p)
-            .collect();
+        let order: Vec<String> = ranked_again.into_iter().map(|(p, _)| p).collect();
         assert_eq!(order[0], "api/models.rs".to_string());
         assert_eq!(order[1], "db/conn.rs".to_string());
     }
@@ -649,15 +647,9 @@ fn helper() {}
         );
 
         let deps = dependent_map(&graph);
-        assert_eq!(
-            deps["c.rs"],
-            vec!["b.rs".to_string()]
-        );
+        assert_eq!(deps["c.rs"], vec!["b.rs".to_string()]);
         let fwd = dependency_map(&graph);
-        assert_eq!(
-            fwd["b.rs"],
-            vec!["c.rs".to_string()]
-        );
+        assert_eq!(fwd["b.rs"], vec!["c.rs".to_string()]);
     }
 
     #[test]
