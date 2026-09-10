@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, OllamaClient};
 
 pub mod anthropic;
+pub mod compatible;
 pub mod gemini;
 pub mod qwen;
 pub mod retry;
@@ -15,6 +16,7 @@ pub mod tools;
 
 use retry::RetryConfig;
 
+pub use compatible::OpenAICompatibleProvider;
 pub use tools::{AgentStep, AgentTurn, ToolCall, ToolDefinition};
 
 #[derive(Debug)]
@@ -979,11 +981,13 @@ impl ProviderManager {
         history: &[AgentTurn],
         tools: &[ToolDefinition],
         options: Option<&LlamaCppOptions>,
-        mut callback: F,
+        callback: F,
     ) -> Result<AgentStep, ProviderError>
     where
         F: FnMut(&str),
     {
+        // Local-only behavior stays here: model-swap guard, sampling-opts
+        // merge, and tok/s timings. HTTP+SSE is the shared adapter core.
         let start = Instant::now();
         self.ensure_llamacpp_model_loaded(model).await?;
         let base_url = match &self.llama_cpp_client {
@@ -992,10 +996,11 @@ impl ProviderManager {
         };
 
         let url = format!("{}/v1/chat/completions", base_url);
+        let rendered = tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
 
         let mut payload = serde_json::json!({
             "model": model,
-            "messages": tools::render_history(messages, history, tools::HistoryStyle::OpenAI),
+            "messages": rendered,
             "stream": true
         });
         if !tools.is_empty() {
@@ -1007,128 +1012,47 @@ impl ProviderManager {
             merge_llamacpp_options(&mut payload, opts);
         }
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| ProviderError::Network(format!("llama.cpp request failed: {e}")))?;
+        let outcome = compatible::post_sse_stream(
+            &self.client,
+            &url,
+            None,
+            &[],
+            &payload,
+            "llama.cpp",
+            callback,
+        )
+        .await?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::api("llama.cpp", status, msg));
+        if outcome.completion_tokens > 0 {
+            self.record_llamacpp_timings(outcome.completion_tokens, start.elapsed().as_secs_f64());
         }
 
-        let mut stream = response.bytes_stream();
-        let mut text = String::new();
-        let mut completion_tokens: u64 = 0;
-        let mut acc = tools::ToolCallAccumulator::default();
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result
-                .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
-            if let Ok(raw) = std::str::from_utf8(&chunk) {
-                for line in raw.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            // The final chunk carries usage (with an empty choices array).
-                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-                                if let Some(t) =
-                                    usage.get("completion_tokens").and_then(|v| v.as_u64())
-                                {
-                                    completion_tokens = t;
-                                }
-                            }
-                            tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
-                        }
-                    }
-                }
-            }
-        }
-
-        if completion_tokens > 0 {
-            self.record_llamacpp_timings(completion_tokens, start.elapsed().as_secs_f64());
-        }
-
-        Ok(AgentStep {
-            text,
-            tool_calls: acc.finish(),
-        })
+        Ok(outcome.step)
     }
 
     /// Streaming OpenRouter request with tool definitions (agentic loop).
+    /// Thin alias over the generic OpenAI-compatible adapter.
     async fn generate_stream_openrouter_with_tools<F>(
         &self,
         model: &str,
         messages: &[ChatMessage],
         history: &[AgentTurn],
         tools: &[ToolDefinition],
-        mut callback: F,
+        callback: F,
     ) -> Result<AgentStep, ProviderError>
     where
         F: FnMut(&str),
     {
-        let url = "https://openrouter.ai/api/v1/chat/completions";
-        let api_key = self.openrouter_api_key.as_ref().unwrap();
-
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": tools::render_history(messages, history, tools::HistoryStyle::OpenAI),
-            "stream": true
-        });
-        if !tools.is_empty() {
-            payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
-            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
-        }
-
-        let response = self
-            .client
-            .post(url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("HTTP-Referer", "http://localhost")
-            .header("X-Title", "Xencode")
-            .json(&payload)
-            .send()
+        let provider = compatible::OpenAICompatibleProvider::new(
+            "https://openrouter.ai/api/v1",
+            self.openrouter_api_key.clone(),
+        )
+        .header("HTTP-Referer", "http://localhost")
+        .header("X-Title", "Xencode");
+        let rendered = tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
+        provider
+            .generate_stream_with_tools(model, &rendered, tools, "OpenRouter", callback)
             .await
-            .map_err(|e| ProviderError::Network(e.to_string()))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::api("OpenRouter", status, msg));
-        }
-
-        let mut stream = response.bytes_stream();
-        let mut text = String::new();
-        let mut acc = tools::ToolCallAccumulator::default();
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(raw) = std::str::from_utf8(&chunk) {
-                for line in raw.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(AgentStep {
-            text,
-            tool_calls: acc.finish(),
-        })
     }
 }
 

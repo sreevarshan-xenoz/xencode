@@ -3,7 +3,7 @@ use std::fmt;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use crate::{tools, AgentStep, ChatMessage, ProviderError, ToolDefinition};
+use crate::{AgentStep, ChatMessage, ProviderError, ToolDefinition};
 
 /// Qwen AI model provider using the OpenAI-compatible chat API.
 ///
@@ -163,6 +163,7 @@ impl QwenProvider {
     }
 
     /// Streaming response with tool definitions (agentic loop).
+    /// Thin alias over the generic OpenAI-compatible adapter.
     /// `rendered_messages` must already include any [`crate::AgentTurn`]
     /// history (see `tools::render_history`).
     pub async fn generate_stream_with_tools<F>(
@@ -170,64 +171,16 @@ impl QwenProvider {
         model: &str,
         rendered_messages: &serde_json::Value,
         tools: &[ToolDefinition],
-        mut callback: F,
+        callback: F,
     ) -> Result<AgentStep, ProviderError>
     where
         F: FnMut(&str),
     {
-        let url = format!("{}/chat/completions", self.base_url);
-
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": rendered_messages,
-            "stream": true,
-        });
-        if !tools.is_empty() {
-            payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
-            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
-        }
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
+        let provider =
+            crate::OpenAICompatibleProvider::new(self.base_url.clone(), Some(self.api_key.clone()));
+        provider
+            .generate_stream_with_tools(model, rendered_messages, tools, "Qwen", callback)
             .await
-            .map_err(|e| ProviderError::Network(format!("Qwen stream request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::api("Qwen", status, body));
-        }
-
-        let mut stream = response.bytes_stream();
-        let mut text = String::new();
-        let mut acc = tools::ToolCallAccumulator::default();
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(raw) = std::str::from_utf8(&chunk) {
-                for line in raw.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(AgentStep {
-            text,
-            tool_calls: acc.finish(),
-        })
     }
 }
 
