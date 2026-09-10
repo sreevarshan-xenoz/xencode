@@ -282,6 +282,10 @@ pub const HISTORY_TURN_OVERHEAD_TOKENS: u64 = 4;
 #[derive(Debug, Clone)]
 pub struct ChatInput<'a> {
     pub profile: HardwareProfile,
+    /// Real model context window in tokens (from `ModelCapabilities`).
+    /// `None` = unknown → the hardware profile default governs. Utilization
+    /// and all other policy knobs always come from `profile`.
+    pub context_window: Option<u32>,
     pub system: &'a str,
     pub agents_md: Option<&'a str>,
     pub anchor_md: Option<&'a str>,
@@ -326,7 +330,12 @@ pub struct ChatAssembly {
 /// byte-stable system head, so KV-prefix reuse (§13) applies to every
 /// generation, not just `/ctx` previews.
 pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
-    let target = (input.profile.ctx_tokens() as f64 * input.profile.utilization()).floor() as u64;
+    // The model's real window when known (Step 3 capabilities); the profile
+    // only supplies the default window plus the fill/utilization policy.
+    let window = input
+        .context_window
+        .unwrap_or(input.profile.ctx_tokens() as u32);
+    let target = (window as f64 * input.profile.utilization()).floor() as u64;
     let mut tiers: Vec<TierDoc> = Vec::new();
     let mut truncated = false;
 
@@ -729,6 +738,7 @@ mod tests {
     ) -> ChatInput<'a> {
         ChatInput {
             profile: HardwareProfile::Balanced,
+            context_window: None,
             system: SYSTEM,
             agents_md: Some(AGENTS),
             anchor_md: Some(ANCHOR),
@@ -866,6 +876,31 @@ mod tests {
     }
 
     #[test]
+    fn chat_uses_real_model_window_when_known() {
+        let history = sample_history();
+        let base = sample_chat_input(sample_retrieved(), &history);
+        let profiled = assemble_chat(base.clone());
+        assert_eq!(
+            profiled.target_tokens,
+            (HardwareProfile::Balanced.ctx_tokens() as f64
+                * HardwareProfile::Balanced.utilization()) as u64
+        );
+        // A 128k model on the same profile: same utilization policy, but the
+        // budgeter now knows the real room — nothing gets trimmed.
+        let wide = assemble_chat(ChatInput {
+            context_window: Some(128_000),
+            ..base
+        });
+        assert_eq!(
+            wide.target_tokens,
+            (128_000f64 * HardwareProfile::Balanced.utilization()) as u64
+        );
+        assert!(wide.target_tokens > profiled.target_tokens);
+        assert_eq!(wide.history_kept, wide.history_total);
+        assert!(!wide.truncated);
+    }
+
+    #[test]
     fn live_context_without_index_reports_missing() {
         let dir = fixture_project("plain");
         let live = collect_live_context(&dir, "authenticate", HardwareProfile::Balanced);
@@ -874,6 +909,7 @@ mod tests {
         // The model still gets identity + guidelines + the question.
         let chat = assemble_chat(ChatInput {
             profile: HardwareProfile::Balanced,
+            context_window: None,
             system: SYSTEM,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
