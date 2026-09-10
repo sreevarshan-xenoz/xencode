@@ -79,7 +79,10 @@ impl Transcript {
 
     /// Canonical location: `.xencode/cache/transcript/current.json`.
     pub fn current_path(xencode_dir: &Path) -> std::path::PathBuf {
-        xencode_dir.join("cache").join("transcript").join("current.json")
+        xencode_dir
+            .join("cache")
+            .join("transcript")
+            .join("current.json")
     }
 
     /// Copy the canonical store to a timestamped snapshot
@@ -147,7 +150,9 @@ mod tests {
         let recent = t.recent(3);
         assert_eq!(recent.len(), 3);
         assert!(recent[0].content.contains("8"));
-        assert_every(recent, |e| e.content.contains("8") || e.content.contains("9"));
+        assert_every(recent, |e| {
+            e.content.contains("8") || e.content.contains("9")
+        });
     }
 
     #[test]

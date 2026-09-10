@@ -71,11 +71,14 @@ pub struct RetrievalIndex {
 impl RetrievalIndex {
     /// Load the retrieval index from `.xencode/` (missing/corrupt → `None`).
     pub fn load(xencode_dir: &Path) -> Option<RetrievalIndex> {
-        let files: FilesIndex = crate::index::read_json(&crate::index::file_index_path(xencode_dir))?;
+        let files: FilesIndex =
+            crate::index::read_json(&crate::index::file_index_path(xencode_dir))?;
         let symbols: BTreeMap<String, PerFileSymbols> =
             crate::index::read_json(&crate::index::symbols_json_path(xencode_dir))?;
-        let deps: Vec<DepEdge> = crate::index::read_json(&crate::index::deps_json_path(xencode_dir))?;
-        let manifest: Manifest = crate::index::read_json(&crate::index::manifest_path(xencode_dir))?;
+        let deps: Vec<DepEdge> =
+            crate::index::read_json(&crate::index::deps_json_path(xencode_dir))?;
+        let manifest: Manifest =
+            crate::index::read_json(&crate::index::manifest_path(xencode_dir))?;
         Some(RetrievalIndex {
             files: files.files,
             symbols,
@@ -136,13 +139,15 @@ pub fn retrieve(
     // touched (by manifest mtime).
     let forced_seeds: Vec<String> = if query_words.is_empty() {
         let mut seeds: Vec<String> = changed.iter().cloned().collect();
-        let mut recent: Vec<(String, u64)> = index
-            .mtimes
-            .iter()
-            .map(|(p, t)| (p.clone(), *t))
-            .collect();
+        let mut recent: Vec<(String, u64)> =
+            index.mtimes.iter().map(|(p, t)| (p.clone(), *t)).collect();
         recent.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        seeds.extend(recent.into_iter().take(options.empty_query_seeds).map(|(p, _)| p));
+        seeds.extend(
+            recent
+                .into_iter()
+                .take(options.empty_query_seeds)
+                .map(|(p, _)| p),
+        );
         seeds.sort();
         seeds.dedup();
         seeds
@@ -180,7 +185,9 @@ pub fn retrieve(
                 if dep == &file {
                     continue;
                 }
-                let score = scores.entry(dep.clone()).or_insert_with(|| Score::new(0, vec![]));
+                let score = scores
+                    .entry(dep.clone())
+                    .or_insert_with(|| Score::new(0, vec![]));
                 score.total += 3;
                 score.reasons.push(format!("dep hop {hop} via {file}"));
                 if seen.insert(dep.clone()) {
@@ -200,11 +207,7 @@ pub fn retrieve(
             reasons: s.reasons,
         })
         .collect();
-    results.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
     results.truncate(options.top_k);
     results
 }
@@ -253,14 +256,14 @@ fn score_file(
     }
     // filename substring (+6)
     if !reasons.iter().any(|r| r == "filename exact")
-        && query_words.iter().any(|w| name.contains(w)) {
-            total += 6;
-            reasons.push("filename substring".to_string());
-        }
+        && query_words.iter().any(|w| name.contains(w))
+    {
+        total += 6;
+        reasons.push("filename substring".to_string());
+    }
     // path segment match (+5)
     if query_words.iter().any(|w| {
-        path
-            .split('/')
+        path.split('/')
             .any(|seg| seg.to_ascii_lowercase().contains(w))
     }) {
         total += 5;
@@ -359,8 +362,16 @@ mod tests {
                 }),
             ]),
             deps: vec![
-                DepEdge { from: "src/auth.rs".into(), to: "src/database.rs".into(), via: "crate::database".into() },
-                DepEdge { from: "src/auth.rs".into(), to: "src/jwt.rs".into(), via: "crate::jwt".into() },
+                DepEdge {
+                    from: "src/auth.rs".into(),
+                    to: "src/database.rs".into(),
+                    via: "crate::database".into(),
+                },
+                DepEdge {
+                    from: "src/auth.rs".into(),
+                    to: "src/jwt.rs".into(),
+                    via: "crate::jwt".into(),
+                },
             ],
             mtimes: BTreeMap::new(),
         }
@@ -368,9 +379,18 @@ mod tests {
 
     #[test]
     fn word_tokens_split_camels_and_snakes() {
-        assert_eq!(word_tokens("UserService"), vec!["user".to_string(), "service".to_string()]);
-        assert_eq!(word_tokens("refresh_token"), vec!["refresh".to_string(), "token".to_string()]);
-        assert_eq!(word_tokens("auth.rs::Connect"), vec!["auth".to_string(), "rs".to_string(), "connect".to_string()]);
+        assert_eq!(
+            word_tokens("UserService"),
+            vec!["user".to_string(), "service".to_string()]
+        );
+        assert_eq!(
+            word_tokens("refresh_token"),
+            vec!["refresh".to_string(), "token".to_string()]
+        );
+        assert_eq!(
+            word_tokens("auth.rs::Connect"),
+            vec!["auth".to_string(), "rs".to_string(), "connect".to_string()]
+        );
     }
 
     #[test]
@@ -429,12 +449,7 @@ mod tests {
             deps: vec![],
             mtimes: BTreeMap::new(),
         };
-        let results = retrieve(
-            "style",
-            &idx,
-            &HashSet::new(),
-            &RetrieveOptions::default(),
-        );
+        let results = retrieve("style", &idx, &HashSet::new(), &RetrieveOptions::default());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "web/static/style.css");
         // filename exact (+10) + path segment contain "style" (+5).

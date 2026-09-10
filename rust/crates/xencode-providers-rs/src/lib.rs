@@ -682,7 +682,11 @@ impl ProviderManager {
             .await
             .map_err(|e| ProviderError::Parse(format!("llama.cpp parse error: {e}")))?;
 
-        let tokens = body.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+        let tokens = body
+            .usage
+            .as_ref()
+            .map(|u| u.completion_tokens)
+            .unwrap_or(0);
         if tokens > 0 {
             self.record_llamacpp_timings(tokens, start.elapsed().as_secs_f64());
         }
@@ -754,9 +758,8 @@ impl ProviderManager {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                             // The final chunk carries usage (with an empty choices array).
                             if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-                                if let Some(t) = usage
-                                    .get("completion_tokens")
-                                    .and_then(|v| v.as_u64())
+                                if let Some(t) =
+                                    usage.get("completion_tokens").and_then(|v| v.as_u64())
                                 {
                                     completion_tokens = t;
                                 }
