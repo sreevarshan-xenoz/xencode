@@ -17,15 +17,55 @@ use retry::RetryConfig;
 #[derive(Debug)]
 pub enum ProviderError {
     Network(String),
-    Api(String),
+    /// An error response from a provider.
+    ///
+    /// `status` carries the HTTP status as data. It used to be recoverable only
+    /// by searching `message` for the digits, which meant a permanent 400 whose
+    /// body happened to mention "500" — a token limit, a request id, a model
+    /// name — was retried as if it were a server error.
+    Api {
+        status: Option<u16>,
+        message: String,
+    },
     Parse(String),
+}
+
+impl ProviderError {
+    /// An error response carrying an HTTP status.
+    ///
+    /// Formats the message as `"{provider} {status} - {body}"`, the convention
+    /// already used across the providers.
+    pub fn api(provider: &str, status: impl Into<u16>, body: impl fmt::Display) -> Self {
+        let status = status.into();
+        ProviderError::Api {
+            status: Some(status),
+            message: format!("{provider} {status} - {body}"),
+        }
+    }
+
+    /// An API-level error with no HTTP status behind it — a missing key, an
+    /// unusable response shape. Never retriable.
+    pub fn api_message(message: impl Into<String>) -> Self {
+        ProviderError::Api {
+            status: None,
+            message: message.into(),
+        }
+    }
+
+    /// The HTTP status, when this error came from an HTTP response.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            ProviderError::Api { status, .. } => *status,
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProviderError::Network(msg) => write!(f, "network error: {msg}"),
-            ProviderError::Api(msg) => write!(f, "API error: {msg}"),
+            ProviderError::Api { message, .. } => write!(f, "API error: {message}"),
             ProviderError::Parse(msg) => write!(f, "parse error: {msg}"),
         }
     }
@@ -161,7 +201,8 @@ impl ProviderManager {
 
     /// Record token-usage timing observed from a llama.cpp completion.
     fn record_llamacpp_timings(&self, tokens: u64, elapsed: f64) {
-        *self.llamacpp_timings.lock().unwrap() = Some(LlamaCppTimings::from_elapsed(tokens, elapsed));
+        *self.llamacpp_timings.lock().unwrap() =
+            Some(LlamaCppTimings::from_elapsed(tokens, elapsed));
     }
 
     /// Most recent llama.cpp generation timing (tokens generated + tok/s).
@@ -182,7 +223,7 @@ impl ProviderManager {
                 let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
                 return provider.generate(inner_model, messages, None).await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Anthropic API key not configured".to_string(),
             ));
         }
@@ -192,7 +233,7 @@ impl ProviderManager {
                 let provider = qwen::QwenProvider::new(key.clone(), None);
                 return provider.generate(inner_model, messages).await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Qwen API key not configured".to_string(),
             ));
         }
@@ -202,7 +243,7 @@ impl ProviderManager {
                 let provider = gemini::GeminiProvider::new(key.clone(), None);
                 return provider.generate(inner_model, messages, None, None).await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Google Gemini API key not configured".to_string(),
             ));
         }
@@ -328,7 +369,7 @@ impl ProviderManager {
                     .generate_stream(inner_model, messages, None, callback)
                     .await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Anthropic API key not configured".to_string(),
             ));
         }
@@ -340,7 +381,7 @@ impl ProviderManager {
                     .generate_stream(inner_model, messages, callback)
                     .await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Qwen API key not configured".to_string(),
             ));
         }
@@ -352,7 +393,7 @@ impl ProviderManager {
                     .generate_stream(inner_model, messages, None, None, callback)
                     .await;
             }
-            return Err(ProviderError::Api(
+            return Err(ProviderError::api_message(
                 "Google Gemini API key not configured".to_string(),
             ));
         }
@@ -388,7 +429,7 @@ impl ProviderManager {
                     return Ok(());
                 }
                 client.load_model(model).await.map_err(|e| {
-                    ProviderError::Api(format!(
+                    ProviderError::api_message(format!(
                         "llama.cpp model '{model}' is not loaded and could not be swapped in: {e}"
                     ))
                 })
@@ -428,7 +469,7 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Ollama {} - {}", status, msg)));
+            return Err(ProviderError::api("Ollama", status, msg));
         }
 
         let mut stream = response.bytes_stream();
@@ -484,10 +525,7 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!(
-                "OpenRouter {} - {}",
-                status, msg
-            )));
+            return Err(ProviderError::api("OpenRouter", status, msg));
         }
 
         #[derive(Deserialize)]
@@ -546,10 +584,7 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!(
-                "OpenRouter {} - {}",
-                status, msg
-            )));
+            return Err(ProviderError::api("OpenRouter", status, msg));
         }
 
         let mut stream = response.bytes_stream();
@@ -623,7 +658,7 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("llama.cpp {} - {}", status, msg)));
+            return Err(ProviderError::api("llama.cpp", status, msg));
         }
 
         #[derive(Deserialize)]
@@ -699,7 +734,7 @@ impl ProviderManager {
         if !response.status().is_success() {
             let status = response.status();
             let msg = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("llama.cpp {} - {}", status, msg)));
+            return Err(ProviderError::api("llama.cpp", status, msg));
         }
 
         let mut stream = response.bytes_stream();

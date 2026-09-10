@@ -169,10 +169,7 @@ impl AnthropicProvider {
                 .and_then(|e| e.message)
                 .unwrap_or(body_text);
 
-            return Err(ProviderError::Api(format!(
-                "Anthropic {} - {detail}",
-                status
-            )));
+            return Err(ProviderError::api("Anthropic", status, detail));
         }
 
         let body: AnthropicResponse = response
@@ -231,7 +228,7 @@ impl AnthropicProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Anthropic {} - {body}", status)));
+            return Err(ProviderError::api("Anthropic", status, body));
         }
 
         let mut stream = response.bytes_stream();

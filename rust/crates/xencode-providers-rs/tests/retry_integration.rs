@@ -135,7 +135,7 @@ async fn retry_400_fails_fast() {
 
     assert!(result.is_err(), "expected error for 400");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(msg.contains("400"), "expected 400 in error: {msg}");
         }
         other => panic!("expected Api error, got: {other:?}"),

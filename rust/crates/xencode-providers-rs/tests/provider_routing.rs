@@ -66,7 +66,7 @@ async fn qwen_missing_key_returns_error() {
 
     assert!(result.is_err(), "expected error for missing Qwen key");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(
                 msg.contains("Qwen API key"),
                 "expected 'Qwen API key' error: {msg}"
@@ -106,7 +106,7 @@ async fn gemini_missing_key_returns_error() {
 
     assert!(result.is_err(), "expected error for missing Gemini key");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(
                 msg.contains("Gemini API key"),
                 "expected 'Gemini API key' error: {msg}"
@@ -146,7 +146,7 @@ async fn anthropic_missing_key_returns_error() {
 
     assert!(result.is_err(), "expected error for missing Anthropic key");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(
                 msg.contains("Anthropic API key"),
                 "expected 'Anthropic API key' error: {msg}"
@@ -211,7 +211,7 @@ async fn openrouter_prefix_routes() {
                 "expected network error from OpenRouter: {msg}"
             );
         }
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(
                 msg.contains("OpenRouter"),
                 "expected OpenRouter error: {msg}"
@@ -251,7 +251,10 @@ async fn llamacpp_with_custom_client() {
         .generate("llama.cpp:qwen2.5-coder-7b.gguf", &test_messages())
         .await;
 
-    assert!(result.is_err(), "expected error from custom llama.cpp client");
+    assert!(
+        result.is_err(),
+        "expected error from custom llama.cpp client"
+    );
     let err = result.unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -259,4 +262,3 @@ async fn llamacpp_with_custom_client() {
         "expected error mentioning 'llama.cpp', got: {msg}"
     );
 }
-
