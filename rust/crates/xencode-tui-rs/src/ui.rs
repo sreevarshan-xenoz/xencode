@@ -445,7 +445,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     if is_editing && !app.is_generating {
         let cursor_x = area.x + 1 + app.input_cursor as u16;
         let cursor_y = area.y + 1;
-        if cursor_x < area.x + area.width - 1 {
+        if cursor_x < area.x + area.width.saturating_sub(1) {
             f.set_cursor_position((cursor_x, cursor_y));
         }
     }
@@ -1461,7 +1461,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     if cmd_focused {
         let cursor_x = chunks[0].x + 1 + app.bytebot_cursor as u16;
         let cursor_y = chunks[0].y + 1;
-        if cursor_x < chunks[0].x + chunks[0].width - 1 {
+        if cursor_x < chunks[0].x + chunks[0].width.saturating_sub(1) {
             f.set_cursor_position((cursor_x, cursor_y));
         }
     }
@@ -1631,8 +1631,10 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         ]
     };
 
-    // Add history as a small section below the split panels if there's room
-    if bottom[1].height > 8 {
+    // Add history as a small section below the split panels if there's room.
+    // Guard on `popup_area` itself — the arithmetic below is in its coordinate
+    // space, and a narrow popup would underflow `width - 2`.
+    if bottom[1].height > 8 && popup_area.height > 7 && popup_area.width > 2 {
         let hist_bottom_y = popup_area.y + popup_area.height - 7;
         let hist_area = Rect {
             x: popup_area.x + 1,
