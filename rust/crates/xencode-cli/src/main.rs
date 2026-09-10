@@ -773,20 +773,51 @@ async fn run_query(
         }
     }
 
-    let mut context_messages = Vec::new();
-    if let Some(ref mem) = memory {
-        for msg in mem.get_context(10) {
-            context_messages.push(ChatMessage {
-                role: msg.role.clone(),
-                content: msg.content.clone(),
-            });
-        }
-    }
-
-    context_messages.push(ChatMessage {
-        role: "user".to_string(),
-        content: prompt.clone(),
+    // Project context injection, same engine as the TUI live path: a
+    // byte-stable system head (KV-cacheable) + budgeted history turns +
+    // retrieval/state/git riding in the final user turn (§10 tiers).
+    // Memory is persisted after the generation below, so this snapshot holds
+    // prior turns only — the current prompt arrives separately and unsqueezable.
+    let history: Vec<(String, String)> = memory
+        .as_ref()
+        .map(|mem| {
+            mem.get_context(25)
+                .into_iter()
+                .map(|m| (m.role, m.content))
+                .collect()
+        })
+        .unwrap_or_default();
+    let root = xencode_context_rs::default_root();
+    let live = xencode_context_rs::collect_live_context(
+        &root,
+        &prompt,
+        xencode_context_rs::HardwareProfile::Balanced,
+    );
+    let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
+        profile: xencode_context_rs::HardwareProfile::Balanced,
+        system: xencode_context_rs::AGENT_SYSTEM_PROMPT,
+        agents_md: live.agents_md.as_deref(),
+        anchor_md: live.anchor_md.as_deref(),
+        state_md: live.state_md.as_deref(),
+        git_summary: &live.git_summary,
+        retrieved: live.blocks,
+        attached_block: "",
+        history: &history,
+        prompt: &prompt,
     });
+    if !live.index_present {
+        eprintln!(
+            "hint: run `xencode` → /init once for project-aware answers (continuing with guidelines + history only)."
+        );
+    }
+    let context_messages: Vec<ChatMessage> = assembly
+        .turns
+        .into_iter()
+        .map(|t| ChatMessage {
+            role: t.role,
+            content: t.content,
+        })
+        .collect();
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
     let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);

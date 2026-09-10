@@ -2845,6 +2845,7 @@ dependencies = [
  "xencode-cache-rs",
  "xencode-collaboration-rs",
  "xencode-config-rs",
+ "xencode-context-rs",
  "xencode-core-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
