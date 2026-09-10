@@ -105,14 +105,19 @@ pub fn deps_json_path(xencode_dir: &Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
     fn temp_dir() -> std::path::PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("xencode-index-test-{stamp}"))
+        // A process-wide counter, not a timestamp. Tests in one binary run in
+        // parallel threads and can read the same nanosecond, which had them share
+        // a directory and clobber each other's assertions.
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        );
+        std::env::temp_dir().join(format!("xencode-index-test-{unique}"))
     }
 
     #[test]

@@ -188,14 +188,54 @@ fn should_skip(name: &str, options: &ScanOptions) -> bool {
 mod tests {
     use super::*;
     use std::fs::{self, File};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
     fn temp_workspace() -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("xencode-core-rs-test-{stamp}"))
+        // A process-wide counter, not a timestamp. Tests in one binary run in
+        // parallel threads and can read the same nanosecond, which had them share
+        // a directory and clobber each other's assertions.
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        );
+        std::env::temp_dir().join(format!("xencode-core-rs-test-{unique}"))
+    }
+
+    /// The property the flakiness came down to. These helpers used to name
+    /// their directory from `SystemTime::now().as_nanos()`; tests in one binary
+    /// run in parallel threads, and two that read the same nanosecond got the
+    /// same directory, wrote conflicting trees into it, and then deleted it out
+    /// from under each other.
+    #[test]
+    fn temp_workspace_paths_are_unique_under_concurrency() {
+        const THREADS: usize = 8;
+        const PER_THREAD: usize = 256;
+
+        let paths: std::collections::HashSet<PathBuf> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    scope.spawn(|| {
+                        (0..PER_THREAD)
+                            .map(|_| temp_workspace())
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap())
+                .collect()
+        });
+
+        assert_eq!(
+            paths.len(),
+            THREADS * PER_THREAD,
+            "temp dir names collided: {} unique out of {}",
+            paths.len(),
+            THREADS * PER_THREAD
+        );
     }
 
     #[test]
