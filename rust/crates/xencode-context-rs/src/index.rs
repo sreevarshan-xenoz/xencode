@@ -159,9 +159,11 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("manifest.json");
 
-        let mut m = Manifest::default();
-        m.version = VERSION;
-        m.git_head = Some("abc123".to_string());
+        let mut m = Manifest {
+            version: VERSION,
+            git_head: Some("abc123".to_string()),
+            ..Default::default()
+        };
         m.mtime_map.insert("a.rs".to_string(), 111);
         m.mtime_map.insert("b.rs".to_string(), 222);
         write_atomic(&path, &m).unwrap();

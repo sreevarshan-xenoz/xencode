@@ -102,7 +102,7 @@ impl HardwareProfile {
 /// for code bodies (§10).
 pub fn est_tokens(chars: usize, is_code: bool) -> u64 {
     let divisor = if is_code { 3 } else { 4 };
-    ((chars + divisor - 1) / divisor) as u64
+    chars.div_ceil(divisor) as u64
 }
 
 /// Take the head of `text` up to `max_tokens`, cutting at a line boundary, and

@@ -210,7 +210,7 @@ pub fn init_project(
     // ── Phase 5: analytics ─────────────────────────────────────────────────
     emit(&mut progress, "phase_start:Analyze languages & sizes");
     let mut languages: Vec<(String, u64)> = scan.languages.into_iter().collect();
-    languages.sort_by(|a, b| b.1.cmp(&a.1));
+    languages.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     for (lang, count) in &languages {
         emit(&mut progress, &format!("log:  ▸ {lang}: {count} file(s)"));
     }
@@ -357,7 +357,7 @@ fn summary_from_existing(
         total_loc += f.loc;
     }
     let mut languages: Vec<(String, u64)> = languages.into_iter().collect();
-    languages.sort_by(|a, b| b.1.cmp(&a.1));
+    languages.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     InitSummary {
         fresh: true,
         files_scanned: files.files.len() as u64,
