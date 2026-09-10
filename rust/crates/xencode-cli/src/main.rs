@@ -793,8 +793,12 @@ async fn run_query(
         &prompt,
         xencode_context_rs::HardwareProfile::Balanced,
     );
+    // The model's real window when known (Step 3 capabilities); unknown
+    // routes defer to the profile default.
+    let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
     let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
         profile: xencode_context_rs::HardwareProfile::Balanced,
+        context_window,
         system: xencode_context_rs::AGENT_SYSTEM_PROMPT,
         agents_md: live.agents_md.as_deref(),
         anchor_md: live.anchor_md.as_deref(),
