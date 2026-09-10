@@ -11,8 +11,9 @@
 use crate::budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
 use crate::gitinfo::{current_git_info, dirty_paths};
 use crate::index::FileEntry;
-use crate::retrieve::RetrievedFile;
+use crate::retrieve::{retrieve, RetrievalIndex, RetrieveOptions, RetrievedFile};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Per-tier token caps (§10).
@@ -27,6 +28,10 @@ pub const RECENT_MIN_TOKENS: u64 = 40;
 
 /// The marker that closes the stable prefix (byte-identical every request).
 pub const STABLE_END_MARKER: &str = "<!-- xencode:stable-prefix-end -->";
+
+/// Frozen identity line every model request starts with (tier 1 head).
+pub const AGENT_SYSTEM_PROMPT: &str =
+    "You are Xencode, a coding agent. Follow the project guidelines below exactly.";
 
 /// A retrieved file's fenced body, ready to inject.
 #[derive(Debug, Clone)]
@@ -74,6 +79,63 @@ impl ContextDoc {
     }
 }
 
+/// Tiers 1–3 (§10): SYSTEM + AGENTS.md + anchor.md + end marker.
+///
+/// Shared by the `/ctx` text preview ([`assemble_prompt`]) and the live chat
+/// assembly ([`assemble_chat`]) so both emit a byte-identical head — the
+/// precondition for llama.cpp KV-prefix reuse (§13).
+struct StableHead {
+    prefix: String,
+    tokens: u64,
+    system_tokens: u64,
+    agents_tokens: u64,
+    anchor_tokens: u64,
+    truncated: bool,
+}
+
+fn stable_head(system: &str, agents_md: Option<&str>, anchor_md: Option<&str>) -> StableHead {
+    let system_tokens = est_tokens(system.len(), false);
+    let (agents_head, agents_tokens) =
+        truncate_to_tokens(agents_md.unwrap_or(""), AGENTS_CAP_TOKENS, false);
+    let truncated_agents = agents_md.is_some_and(|a| a.len() > agents_head.len());
+    let (anchor_head, anchor_tokens) =
+        truncate_to_tokens(anchor_md.unwrap_or(""), ANCHOR_CAP_TOKENS, false);
+    let truncated_anchor = anchor_md.is_some_and(|a| a.len() > anchor_head.len());
+
+    let mut parts: Vec<&str> = Vec::new();
+    if !system.is_empty() {
+        parts.push(system);
+    }
+    if !agents_head.is_empty() {
+        parts.push(&agents_head);
+    }
+    if !anchor_head.is_empty() {
+        parts.push(&anchor_head);
+    }
+    parts.push(STABLE_END_MARKER);
+    StableHead {
+        prefix: parts.join("\n\n"),
+        tokens: system_tokens + agents_tokens + anchor_tokens,
+        system_tokens,
+        agents_tokens,
+        anchor_tokens,
+        truncated: truncated_agents || truncated_anchor,
+    }
+}
+
+/// The frozen identity block every model request starts with: system prompt +
+/// project guidelines + anchor, closed by [`STABLE_END_MARKER`].
+///
+/// Byte-identical to the head [`assemble_chat`] sends as its `system` turn,
+/// so single-purpose calls (e.g. code review) reuse the same cached prefix.
+pub fn stable_system_text(
+    system: &str,
+    agents_md: Option<&str>,
+    anchor_md: Option<&str>,
+) -> String {
+    stable_head(system, agents_md, anchor_md).prefix
+}
+
 /// Build the promoted-tier prompt per §10.
 ///
 /// `retrieved` must already be sorted best-first; the budgeter trims from the
@@ -93,43 +155,23 @@ pub fn assemble_prompt(
     let mut truncated = false;
 
     // ── Tiers 1–3: stable prefix ─────────────────────────────────────────
-    let system_tok = est_tokens(system.len(), false);
+    let stable = stable_head(system, agents_md, anchor_md);
     tiers.push(TierDoc {
         name: "system",
-        tokens: system_tok,
+        tokens: stable.system_tokens,
     });
-
-    let (agents_head, agents_tok) =
-        truncate_to_tokens(agents_md.unwrap_or(""), AGENTS_CAP_TOKENS, false);
-    let truncated_agents = agents_md.is_some_and(|a| a.len() > agents_head.len());
     tiers.push(TierDoc {
         name: "agents.md",
-        tokens: agents_tok,
+        tokens: stable.agents_tokens,
     });
-
-    let (anchor_head, anchor_tok) =
-        truncate_to_tokens(anchor_md.unwrap_or(""), ANCHOR_CAP_TOKENS, false);
-    let truncated_anchor = anchor_md.is_some_and(|a| a.len() > anchor_head.len());
     tiers.push(TierDoc {
         name: "anchor.md",
-        tokens: anchor_tok,
+        tokens: stable.anchor_tokens,
     });
 
-    let mut stable_parts: Vec<&str> = Vec::new();
-    if !system.is_empty() {
-        stable_parts.push(system);
-    }
-    if !agents_head.is_empty() {
-        stable_parts.push(&agents_head);
-    }
-    if !anchor_head.is_empty() {
-        stable_parts.push(&anchor_head);
-    }
-    stable_parts.push(STABLE_END_MARKER);
-    let stable_prefix = stable_parts.join("\n\n");
-    let stable_tokens = system_tok + agents_tok + anchor_tok;
-    let mut remaining = target.saturating_sub(stable_tokens);
-    truncated |= truncated_agents || truncated_anchor || stable_tokens > target;
+    let stable_prefix = stable.prefix;
+    let mut remaining = target.saturating_sub(stable.tokens);
+    truncated |= stable.truncated || stable.tokens > target;
 
     // ── Tier 4: state.md ─────────────────────────────────────────────────
     let (state_head, state_tok) =
@@ -221,6 +263,277 @@ pub fn assemble_prompt(
     }
 }
 
+/// One chat turn produced by [`assemble_chat`]. Roles are the provider-native
+/// `"system"` / `"user"` / `"assistant"` strings, so turns map 1:1 onto the
+/// provider `ChatMessage` without a translation layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatTurn {
+    pub role: String,
+    pub content: String,
+}
+
+/// Framing overhead counted per history turn (role tags the chat template
+/// adds around each message). Small, deterministic, and deliberately
+/// pessimistic so history can never silently overflow the budget.
+pub const HISTORY_TURN_OVERHEAD_TOKENS: u64 = 4;
+
+/// All inputs for [`assemble_chat`] in one struct — the chat counterpart of
+/// [`assemble_prompt`]'s eight positional arguments.
+#[derive(Debug, Clone)]
+pub struct ChatInput<'a> {
+    pub profile: HardwareProfile,
+    pub system: &'a str,
+    pub agents_md: Option<&'a str>,
+    pub anchor_md: Option<&'a str>,
+    pub state_md: Option<&'a str>,
+    pub git_summary: &'a str,
+    /// Best-first retrieved blocks; the budgeter trims from the bottom.
+    pub retrieved: Vec<RetrievedBlock>,
+    /// Pre-rendered explicitly-attached files (e.g. `<file path=…>` blocks).
+    /// Sacred like the prompt: always included whole, never trimmed.
+    pub attached_block: &'a str,
+    /// Prior conversation, oldest-first `(role, content)` pairs. The current
+    /// user prompt is NOT part of history — it arrives as `prompt` so the
+    /// budgeter can never squeeze the actual question out.
+    pub history: &'a [(String, String)],
+    pub prompt: &'a str,
+}
+
+/// Result of [`assemble_chat`]: ready-to-send turns plus the same budget
+/// telemetry [`ContextDoc`] carries, so `/ctx` previews and real generations
+/// report comparable numbers.
+#[derive(Debug, Clone)]
+pub struct ChatAssembly {
+    pub turns: Vec<ChatTurn>,
+    pub target_tokens: u64,
+    pub total_tokens: u64,
+    pub tiers: Vec<TierDoc>,
+    pub truncated: bool,
+    pub soft_compaction_needed: bool,
+    pub retrieved_included: usize,
+    pub retrieved_total: usize,
+    pub history_kept: usize,
+    pub history_total: usize,
+}
+
+/// Build the per-turn chat messages the model actually receives.
+///
+/// Same §10 tier discipline as [`assemble_prompt`], but conversation history
+/// stays structured (real `user`/`assistant` turns, newest wins) instead of
+/// being flattened into text, and the retrieved/state/git context rides along
+/// inside the final user turn — the layout hosted chat APIs and llama.cpp's
+/// `/v1/chat/completions` both consume natively. Turn 0 is always the
+/// byte-stable system head, so KV-prefix reuse (§13) applies to every
+/// generation, not just `/ctx` previews.
+pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
+    let target = (input.profile.ctx_tokens() as f64 * input.profile.utilization()).floor() as u64;
+    let mut tiers: Vec<TierDoc> = Vec::new();
+    let mut truncated = false;
+
+    // ── Tiers 1–3: stable system head ────────────────────────────────────
+    let stable = stable_head(input.system, input.agents_md, input.anchor_md);
+    tiers.push(TierDoc {
+        name: "system",
+        tokens: stable.system_tokens,
+    });
+    tiers.push(TierDoc {
+        name: "agents.md",
+        tokens: stable.agents_tokens,
+    });
+    tiers.push(TierDoc {
+        name: "anchor.md",
+        tokens: stable.anchor_tokens,
+    });
+    let mut remaining = target.saturating_sub(stable.tokens);
+    truncated |= stable.truncated || stable.tokens > target;
+
+    // ── Sacred content: current prompt + explicitly attached files ───────
+    // Reserved up front and always included whole; if they alone overflow
+    // the budget everything else is dropped and the overflow is flagged.
+    let sacred_tok =
+        est_tokens(input.prompt.len(), false) + est_tokens(input.attached_block.len(), false);
+    if sacred_tok >= remaining {
+        truncated = true;
+    }
+    remaining = remaining.saturating_sub(sacred_tok);
+
+    // ── Tier 4: state.md ─────────────────────────────────────────────────
+    let (state_head, state_tok) =
+        truncate_to_tokens(input.state_md.unwrap_or(""), STATE_CAP_TOKENS, false);
+    if !state_head.is_empty() && remaining >= MARGIN_TOKENS {
+        tiers.push(TierDoc {
+            name: "state.md",
+            tokens: state_tok,
+        });
+        remaining = remaining.saturating_sub(state_tok);
+    }
+
+    // ── Tier 5: git summary ──────────────────────────────────────────────
+    let (git_head, git_tok) = truncate_to_tokens(input.git_summary, GIT_CAP_TOKENS, false);
+    if !git_head.is_empty() && remaining >= MARGIN_TOKENS {
+        tiers.push(TierDoc {
+            name: "git",
+            tokens: git_tok,
+        });
+        remaining = remaining.saturating_sub(git_tok);
+    }
+
+    // ── Tier 6: retrieved files ──────────────────────────────────────────
+    let retrieved_total = input.retrieved.len();
+    let mut retrieved_included = 0usize;
+    let mut retrieved_head: Vec<RetrievedBlock> = Vec::new();
+    for block in input.retrieved {
+        let block_tok = est_tokens(block.body.len(), true);
+        if remaining < MARGIN_TOKENS + block_tok {
+            truncated = true;
+            break;
+        }
+        remaining = remaining.saturating_sub(block_tok);
+        retrieved_included += 1;
+        tiers.push(TierDoc {
+            name: "retrieved",
+            tokens: block_tok,
+        });
+        retrieved_head.push(block);
+    }
+
+    // ── Tier 7: structured history (most recent wins) ────────────────────
+    let history_total = input.history.len();
+    let mut kept: Vec<(String, String)> = Vec::new();
+    let mut history_tok = 0u64;
+    if remaining >= RECENT_MIN_TOKENS {
+        for (role, content) in input.history.iter().rev() {
+            let turn_tok =
+                est_tokens(role.len() + content.len(), false) + HISTORY_TURN_OVERHEAD_TOKENS;
+            if remaining < turn_tok {
+                truncated = true;
+                break;
+            }
+            remaining = remaining.saturating_sub(turn_tok);
+            history_tok += turn_tok;
+            kept.push((role.clone(), content.clone()));
+        }
+        kept.reverse();
+    } else if history_total > 0 {
+        truncated = true;
+    }
+    if !kept.is_empty() {
+        tiers.push(TierDoc {
+            name: "history",
+            tokens: history_tok,
+        });
+    }
+
+    // ── Assemble turns ───────────────────────────────────────────────────
+    let history_kept = kept.len();
+    let mut turns = Vec::with_capacity(history_kept + 2);
+    turns.push(ChatTurn {
+        role: "system".to_string(),
+        content: stable.prefix,
+    });
+    for (role, content) in kept {
+        turns.push(ChatTurn { role, content });
+    }
+    let mut user_turn = String::new();
+    if !state_head.is_empty() {
+        user_turn.push_str("## Current Task State\n\n");
+        user_turn.push_str(&state_head);
+        user_turn.push_str("\n\n");
+    }
+    if !git_head.is_empty() {
+        user_turn.push_str("## Git\n\n");
+        user_turn.push_str(&git_head);
+        user_turn.push_str("\n\n");
+    }
+    if !retrieved_head.is_empty() {
+        user_turn.push_str("## Retrieval\n\n");
+        let blocks: Vec<String> = retrieved_head.iter().map(|b| b.body.clone()).collect();
+        user_turn.push_str(&blocks.join("\n\n"));
+        user_turn.push_str("\n\n");
+    }
+    if !input.attached_block.trim().is_empty() {
+        user_turn.push_str("## Attached Files\n\n");
+        user_turn.push_str(input.attached_block.trim());
+        user_turn.push_str("\n\n");
+    }
+    user_turn.push_str(input.prompt);
+    turns.push(ChatTurn {
+        role: "user".to_string(),
+        content: user_turn,
+    });
+
+    let total_tokens = target.saturating_sub(remaining);
+    // Compaction is actionable only when real history was lost: unlike the
+    // text preview (where a short `recent_text` trips the 40-token floor on
+    // every fresh conversation), dropping zero turns must never suggest it.
+    let soft_compaction_needed = history_total > history_kept;
+
+    ChatAssembly {
+        turns,
+        target_tokens: target,
+        total_tokens,
+        tiers,
+        truncated: truncated || soft_compaction_needed,
+        soft_compaction_needed,
+        retrieved_included,
+        retrieved_total,
+        history_kept,
+        history_total,
+    }
+}
+
+/// Everything the live chat path needs from disk for one user turn.
+#[derive(Debug, Clone)]
+pub struct LiveContext {
+    pub agents_md: Option<String>,
+    pub anchor_md: Option<String>,
+    pub state_md: Option<String>,
+    pub git_summary: String,
+    pub blocks: Vec<RetrievedBlock>,
+    /// Whether `.xencode/` holds a usable retrieval index. `false` means the
+    /// model still gets identity + guidelines + history, just no file bodies —
+    /// callers should nudge toward `/init` once per session.
+    pub index_present: bool,
+    /// Retrieval candidates before unreadable-file filtering.
+    pub retrieved_total: usize,
+}
+
+/// Gather project context for one user query: stable-layer files, git summary,
+/// and deterministic retrieval against the `/init` index when present.
+///
+/// Never fails — every source degrades to empty independently, so a missing
+/// index or unreadable file can never break a generation.
+pub fn collect_live_context(root: &Path, query: &str, profile: HardwareProfile) -> LiveContext {
+    let xencode = root.join(crate::XENCODE_DIR);
+    let agents_md = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+    let anchor_md = std::fs::read_to_string(xencode.join("anchor.md")).ok();
+    let state_md = std::fs::read_to_string(xencode.join("state.md")).ok();
+    let git_summary = git_summary_text(root).unwrap_or_default();
+    let mut blocks = Vec::new();
+    let mut index_present = false;
+    let mut retrieved_total = 0;
+    if let Some(index) = RetrievalIndex::load(&xencode) {
+        index_present = true;
+        let changed: HashSet<String> = dirty_paths(root).into_iter().collect();
+        let opts = RetrieveOptions {
+            top_k: profile.top_k(),
+            ..Default::default()
+        };
+        let results = retrieve(query, &index, &changed, &opts);
+        retrieved_total = results.len();
+        blocks = read_retrieved_bodies(root, &index.files, &results, profile.content_cap_chars());
+    }
+    LiveContext {
+        agents_md,
+        anchor_md,
+        state_md,
+        git_summary,
+        blocks,
+        index_present,
+        retrieved_total,
+    }
+}
+
 /// Build the tier-5 git summary text: `🎋 branch @ head — N dirty file(s)`
 /// plus the changed-file list (capped to `GIT_CAP_TOKENS` downstream).
 pub fn git_summary_text(root: &Path) -> Option<String> {
@@ -285,6 +598,7 @@ pub fn read_retrieved_bodies(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::init::init_project;
 
     const SYSTEM: &str = "You are a coding agent. Be concise.";
     const AGENTS: &str = "# Rules\n- Rust first\n- commit each change\n";
@@ -397,6 +711,182 @@ mod tests {
         assert!(!doc.text.is_empty());
         assert!(doc.text.contains(STABLE_END_MARKER));
         assert_eq!(doc.retrieved_total, 0);
+    }
+
+    fn sample_history() -> Vec<(String, String)> {
+        vec![
+            ("user".to_string(), "how does auth work?".to_string()),
+            (
+                "assistant".to_string(),
+                "it uses the auth module".to_string(),
+            ),
+        ]
+    }
+
+    fn sample_chat_input<'a>(
+        retrieved: Vec<RetrievedBlock>,
+        history: &'a [(String, String)],
+    ) -> ChatInput<'a> {
+        ChatInput {
+            profile: HardwareProfile::Balanced,
+            system: SYSTEM,
+            agents_md: Some(AGENTS),
+            anchor_md: Some(ANCHOR),
+            state_md: Some("# state: fixing auth"),
+            git_summary: "main @ abc1234",
+            retrieved,
+            attached_block: "",
+            history,
+            prompt: "where is the login handler?",
+        }
+    }
+
+    #[test]
+    fn chat_system_turn_matches_preview_stable_prefix() {
+        let history = sample_history();
+        let chat = assemble_chat(sample_chat_input(sample_retrieved(), &history));
+        let preview = assemble_prompt(
+            HardwareProfile::Balanced,
+            SYSTEM,
+            Some(AGENTS),
+            Some(ANCHOR),
+            Some("# state: fixing auth"),
+            "main @ abc1234",
+            sample_retrieved(),
+            "",
+        );
+        assert_eq!(chat.turns[0].role, "system");
+        // Byte-identical to the /ctx preview head: same bytes hit the model,
+        // so llama.cpp KV-prefix reuse applies to real generations too.
+        assert_eq!(chat.turns[0].content, preview.stable_prefix);
+        assert_eq!(
+            chat.turns[0].content,
+            stable_system_text(SYSTEM, Some(AGENTS), Some(ANCHOR))
+        );
+    }
+
+    #[test]
+    fn chat_final_turn_carries_retrieval_and_prompt() {
+        let history = sample_history();
+        let chat = assemble_chat(sample_chat_input(sample_retrieved(), &history));
+        // system + 2 history turns + 1 final user turn.
+        assert_eq!(chat.turns.len(), 4);
+        let last = chat.turns.last().unwrap();
+        assert_eq!(last.role, "user");
+        assert!(last.content.contains("pub fn authenticate() {}"));
+        assert!(last.content.contains("where is the login handler?"));
+        // History keeps its roles (not flattened into one blob).
+        assert_eq!(chat.turns[1].role, "user");
+        assert_eq!(chat.turns[2].role, "assistant");
+        assert_eq!(chat.retrieved_included, 2);
+        assert_eq!(chat.history_kept, 2);
+        assert_eq!(chat.history_total, 2);
+        assert!(chat.total_tokens <= chat.target_tokens);
+        assert!(!chat.truncated);
+    }
+
+    #[test]
+    fn chat_history_prefers_newest_under_tight_budget() {
+        // ~70 tokens/turn × 40 ≈ 2800 > LOW target (2457), so the oldest
+        // turns must give way while the newest survive.
+        let history: Vec<(String, String)> = (0..40)
+            .map(|i| {
+                (
+                    "user".to_string(),
+                    format!(
+                        "question number {i} about the codebase routines and helpers. {}",
+                        "please explain the surrounding module in detail. ".repeat(4)
+                    ),
+                )
+            })
+            .collect();
+        let input = ChatInput {
+            profile: HardwareProfile::Low,
+            ..sample_chat_input(Vec::new(), &history)
+        };
+        let chat = assemble_chat(input);
+        assert_eq!(chat.history_total, 40);
+        assert!(chat.history_kept > 0);
+        assert!(chat.history_kept < chat.history_total);
+        assert!(chat.truncated);
+        // Newest-first: the last history turn survives, the oldest is dropped.
+        let kept: Vec<&str> = chat.turns[1..chat.turns.len() - 1]
+            .iter()
+            .map(|t| t.content.as_str())
+            .collect();
+        assert!(kept.iter().any(|c| c.contains("question number 39")));
+        assert!(!kept.iter().any(|c| c.contains("question number 0")));
+    }
+
+    #[test]
+    fn chat_builds_without_any_optional_inputs() {
+        let chat = assemble_chat(sample_chat_input(Vec::new(), &[]));
+        assert_eq!(chat.turns.len(), 2);
+        assert_eq!(chat.turns[0].role, "system");
+        assert_eq!(chat.turns[1].role, "user");
+        assert!(chat.turns[1]
+            .content
+            .contains("where is the login handler?"));
+        assert_eq!(chat.retrieved_included, 0);
+        assert_eq!(chat.history_kept, 0);
+    }
+
+    fn fixture_project(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-chat-{}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst),
+            tag
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("src").join("authenticate.rs"),
+            "pub fn authenticate_user(name: &str) -> bool {\n    !name.is_empty()\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("AGENTS.md"), "# Rules\n- Rust first\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn live_context_collects_index_and_bodies() {
+        let dir = fixture_project("indexed");
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        init_project(&dir, cancel, |_| {}).expect("fixture /init must succeed");
+        let live = collect_live_context(&dir, "authenticate", HardwareProfile::Balanced);
+        assert!(live.index_present);
+        assert!(live.retrieved_total > 0);
+        assert!(!live.blocks.is_empty());
+        assert!(live.blocks[0].body.contains("authenticate_user"));
+        assert!(live.agents_md.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_context_without_index_reports_missing() {
+        let dir = fixture_project("plain");
+        let live = collect_live_context(&dir, "authenticate", HardwareProfile::Balanced);
+        assert!(!live.index_present);
+        assert!(live.blocks.is_empty());
+        // The model still gets identity + guidelines + the question.
+        let chat = assemble_chat(ChatInput {
+            profile: HardwareProfile::Balanced,
+            system: SYSTEM,
+            agents_md: live.agents_md.as_deref(),
+            anchor_md: live.anchor_md.as_deref(),
+            state_md: live.state_md.as_deref(),
+            git_summary: &live.git_summary,
+            retrieved: live.blocks,
+            attached_block: "",
+            history: &[],
+            prompt: "authenticate?",
+        });
+        assert_eq!(chat.turns.len(), 2);
+        assert!(chat.turns[1].content.contains("authenticate?"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
