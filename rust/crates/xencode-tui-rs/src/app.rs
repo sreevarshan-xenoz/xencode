@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
 use xencode_config_rs::XencodeConfig;
-use xencode_context_rs::init_project;
+use xencode_context_rs::{init_project, HardwareProfile};
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
@@ -25,8 +25,11 @@ use xencode_providers_rs::{ChatMessage, ProviderManager};
 use crate::ui;
 
 /// System block injected as tier 1 when previewing `/ctx` context assembly.
-const CTX_SYSTEM: &str =
-    "You are Xencode, a coding agent. Follow the project guidelines below exactly.";
+const CTX_SYSTEM: &str = xencode_context_rs::AGENT_SYSTEM_PROMPT;
+
+/// Hardware profile the live chat path budgets against. Must stay in sync
+/// with the llama.cpp `--ctx-size` the auto-start uses for this profile.
+const CTX_PROFILE: HardwareProfile = HardwareProfile::Balanced;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
@@ -306,6 +309,9 @@ pub struct App<'a> {
     pub bytebot_history: Vec<String>, // previously executed commands
 
     // Project context (M0) state
+    /// Whether the "run /init" hint was already shown this session, so a
+    /// missing project index nudges once instead of on every message.
+    pub context_hint_shown: bool,
     pub init_running: bool,
     pub init_progress: f64,
     pub init_steps: Vec<(String, String)>, // (step_name, status)
@@ -519,6 +525,7 @@ impl<'a> App<'a> {
             bytebot_running: false,
             bytebot_log: Vec::new(),
             bytebot_history: Vec::new(),
+            context_hint_shown: false,
             init_running: false,
             init_progress: 0.0,
             init_steps: Vec::new(),
@@ -809,33 +816,80 @@ impl<'a> App<'a> {
             return;
         }
 
-        // Normal LLM generation
-        let mut context_messages = Vec::new();
-        for msg in self.memory.get_context(10) {
-            context_messages.push(ChatMessage {
-                role: msg.role,
-                content: msg.content,
-            });
+        // Normal LLM generation — project context is injected on every turn:
+        // a byte-stable system head (KV-cacheable) + budgeted history turns +
+        // retrieval/state/git riding in the final user turn (§10 tiers).
+        //
+        // The current prompt was just appended to memory above, so the tail
+        // entry is popped back off: history holds prior turns only, and the
+        // assembler places the prompt itself (unsqueezable) last.
+        let mut history: Vec<(String, String)> = self
+            .memory
+            .get_context(26)
+            .into_iter()
+            .map(|m| (m.role, m.content))
+            .collect();
+        if history
+            .last()
+            .is_some_and(|(role, content)| role == "user" && content == &prompt)
+        {
+            history.pop();
         }
-
-        let mut attached_context = String::new();
-        for path in &self.attached_files {
+        let root = xencode_context_rs::default_root();
+        let live = xencode_context_rs::collect_live_context(&root, &prompt, CTX_PROFILE);
+        // Sorted for a deterministic prompt (and KV prefix) across turns.
+        let mut attached_paths: Vec<&String> = self.attached_files.iter().collect();
+        attached_paths.sort();
+        let mut attached_block = String::new();
+        for path in attached_paths {
             if let Ok(content) = std::fs::read_to_string(path) {
-                attached_context.push_str(&format!(
-                    "<file path=\"{}\">\n{}\n</file>\n\n",
-                    path, content
-                ));
+                attached_block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
             }
         }
-        if !attached_context.is_empty() {
-            context_messages.insert(
-                0,
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Attached files:\n{}", attached_context),
-                },
-            );
+        let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
+            profile: CTX_PROFILE,
+            system: CTX_SYSTEM,
+            agents_md: live.agents_md.as_deref(),
+            anchor_md: live.anchor_md.as_deref(),
+            state_md: live.state_md.as_deref(),
+            git_summary: &live.git_summary,
+            retrieved: live.blocks,
+            attached_block: &attached_block,
+            history: &history,
+            prompt: &prompt,
+        });
+        if !live.index_present && !self.context_hint_shown {
+            self.context_hint_shown = true;
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
+            });
         }
+        let context_messages: Vec<ChatMessage> = assembly
+            .turns
+            .into_iter()
+            .map(|t| ChatMessage {
+                role: t.role,
+                content: t.content,
+            })
+            .collect();
+
+        // Metrics for this real generation (reaches `/ctx kv` via [CTXSTATS]
+        // in the drain loop, next to the llama.cpp [TIMINGS]).
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        Self::record_ctx_metrics(
+            &xencode,
+            CTX_PROFILE,
+            assembly.total_tokens,
+            assembly.target_tokens,
+            assembly.retrieved_included,
+            assembly.soft_compaction_needed,
+        );
+        let _ = tx.send(format!(
+            "[CTXSTATS]{}|{}",
+            assembly.total_tokens.min(u32::MAX as u64),
+            assembly.retrieved_included.min(u8::MAX as usize)
+        ));
 
         let model = self.config.default_model.clone();
         let ollama_url = self.config.ollama_url.clone();
@@ -1626,6 +1680,30 @@ impl<'a> App<'a> {
         (t, appended)
     }
 
+    /// Append one §13 metrics row for an assembled context. Shared by the
+    /// `/ctx` preview and real generations so both report comparable numbers.
+    fn record_ctx_metrics(
+        xencode: &std::path::Path,
+        profile: HardwareProfile,
+        total_tokens: u64,
+        target_tokens: u64,
+        retrieved_included: usize,
+        soft_compaction_needed: bool,
+    ) {
+        let mut m =
+            xencode_context_rs::RequestMetrics::new(profile.name(), profile.ctx_tokens() as u32);
+        m.ts_unix_ms = (current_timestamp() * 1000.0) as u64;
+        m.prompt_tokens = total_tokens.min(u32::MAX as u64) as u32;
+        m.retrieved_files = retrieved_included.min(u8::MAX as usize) as u8;
+        m.context_usage = (total_tokens as f32 / target_tokens.max(1) as f32).min(1.0);
+        m.compaction = if soft_compaction_needed {
+            xencode_context_rs::CompactAction::Soft
+        } else {
+            xencode_context_rs::CompactAction::None
+        };
+        let _ = xencode_context_rs::append_metrics(xencode, &m);
+    }
+
     /// Run deterministic retrieval + a context-assembly preview in the
     /// background, streaming results back through `[CTX]` chat lines.
     fn run_ctx_retrieval(
@@ -1717,20 +1795,14 @@ impl<'a> App<'a> {
                 );
             }
 
-            let mut m = xencode_context_rs::RequestMetrics::new(
-                profile.name(),
-                profile.ctx_tokens() as u32,
+            Self::record_ctx_metrics(
+                &xencode,
+                profile,
+                doc.total_tokens,
+                doc.target_tokens,
+                doc.retrieved_included,
+                doc.soft_compaction_needed,
             );
-            m.ts_unix_ms = (current_timestamp() * 1000.0) as u64;
-            m.prompt_tokens = doc.total_tokens.min(u32::MAX as u64) as u32;
-            m.retrieved_files = doc.retrieved_included.min(u8::MAX as usize) as u8;
-            m.context_usage = (doc.total_tokens as f32 / doc.target_tokens.max(1) as f32).min(1.0);
-            m.compaction = if doc.soft_compaction_needed {
-                xencode_context_rs::CompactAction::Soft
-            } else {
-                xencode_context_rs::CompactAction::None
-            };
-            let _ = xencode_context_rs::append_metrics(&xencode, &m);
         });
     }
 
@@ -2463,10 +2535,28 @@ impl<'a> App<'a> {
                     "Code review of {}. Identify bugs, security issues, and performance bottlenecks.\n\n```\n{}\n```",
                     file_path, content
                 );
-                let messages = vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: prompt,
-                }];
+                // Same frozen system head as chat turns so reviews follow the
+                // project guidelines and reuse the cached prefix.
+                let root = xencode_context_rs::default_root();
+                let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+                let anchor = std::fs::read_to_string(
+                    root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md"),
+                )
+                .ok();
+                let messages = vec![
+                    ChatMessage {
+                        role: "system".to_string(),
+                        content: xencode_context_rs::stable_system_text(
+                            CTX_SYSTEM,
+                            agents.as_deref(),
+                            anchor.as_deref(),
+                        ),
+                    },
+                    ChatMessage {
+                        role: "user".to_string(),
+                        content: prompt,
+                    },
+                ];
                 let model = self.config.default_model.clone();
                 let ollama_url = self.config.ollama_url.clone();
                 let llama_cpp_url = self.config.llama_cpp_url.clone();
