@@ -51,10 +51,23 @@ async fn server_status(State(state): State<Arc<AppState>>) -> Json<StatusRespons
 }
 
 /// Create a new collaboration session.
-async fn create_session(State(_state): State<Arc<AppState>>) -> Json<SessionInfo> {
-    let id = uuid::Uuid::new_v4().to_string();
+async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionInfo> {
+    let mut sessions = state.sessions.lock().await;
+
+    // The id is a truncated UUID, so it carries only 32 bits. That was harmless
+    // while nothing was stored under it; now that it is a map key, a collision
+    // would merge two unrelated sessions — so pick one that is actually free.
+    let id = loop {
+        let candidate = format!("xencode-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        if !sessions.contains_key(&candidate) {
+            break candidate;
+        }
+    };
+
+    sessions.insert(id.clone(), Vec::new());
+
     Json(SessionInfo {
-        id: format!("xencode-{}", &id[..8]),
+        id,
         members: Vec::new(),
         created_at: chrono::Utc::now().to_rfc3339(),
     })
@@ -297,6 +310,96 @@ mod tests {
         assert!(session.id.starts_with("xencode-"));
         assert!(session.members.is_empty());
         assert!(!session.created_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_session_records_the_session_in_state() {
+        let state = Arc::new(AppState::new());
+        let session = create_session(State(state.clone())).await;
+
+        let sessions = state.sessions.lock().await;
+        assert!(
+            sessions.contains_key(&session.id),
+            "created session {} is not in state; state holds {:?}",
+            session.id,
+            sessions.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(sessions[&session.id], Vec::<String>::new());
+    }
+
+    /// Round-trip check only. It cannot detect the bug this change fixes:
+    /// `get_session` uses `unwrap_or_default()`, so a session that was never
+    /// recorded is indistinguishable from one recorded with no members. Making
+    /// the two distinguishable means returning 404 for the former, which is an
+    /// API change worth deciding on its own.
+    #[tokio::test]
+    async fn get_session_round_trips_a_created_session() {
+        let state = Arc::new(AppState::new());
+        let created = create_session(State(state.clone())).await;
+
+        let fetched = get_session(Path(created.id.clone()), State(state)).await;
+        assert_eq!(fetched.id, created.id);
+        assert!(fetched.members.is_empty());
+    }
+
+    /// A member joining through the WebSocket path must be visible on the
+    /// session that `create_session` handed out — the two must agree on the key.
+    #[tokio::test]
+    async fn a_member_joining_a_created_session_is_visible_on_it() {
+        let state = Arc::new(AppState::new());
+        let created = create_session(State(state.clone())).await;
+
+        // What handle_socket does when a peer joins.
+        state
+            .sessions
+            .lock()
+            .await
+            .entry(created.id.clone())
+            .or_default()
+            .push("alice".to_string());
+
+        let fetched = get_session(Path(created.id.clone()), State(state.clone())).await;
+        assert_eq!(fetched.members, vec!["alice".to_string()]);
+        // Joining must not have created a second, parallel session entry.
+        assert_eq!(state.sessions.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn created_sessions_are_counted_by_server_status() {
+        let state = Arc::new(AppState::new());
+        assert_eq!(server_status(State(state.clone())).await.sessions, 0);
+
+        create_session(State(state.clone())).await;
+        create_session(State(state.clone())).await;
+
+        assert_eq!(server_status(State(state)).await.sessions, 2);
+    }
+
+    #[tokio::test]
+    async fn create_session_issues_distinct_ids() {
+        let state = Arc::new(AppState::new());
+        let mut ids = std::collections::HashSet::new();
+        for _ in 0..50 {
+            ids.insert(create_session(State(state.clone())).await.0.id.clone());
+        }
+        assert_eq!(ids.len(), 50);
+        assert_eq!(state.sessions.lock().await.len(), 50);
+    }
+
+    #[tokio::test]
+    async fn create_session_never_overwrites_an_existing_session() {
+        let state = Arc::new(AppState::new());
+        // A session that already has members, as a live one would.
+        state
+            .sessions
+            .lock()
+            .await
+            .insert("xencode-existing".to_string(), vec!["alice".to_string()]);
+
+        create_session(State(state.clone())).await;
+
+        let sessions = state.sessions.lock().await;
+        assert_eq!(sessions["xencode-existing"], vec!["alice".to_string()]);
     }
 
     #[tokio::test]
