@@ -138,7 +138,7 @@ async fn gemini_generate_http_error() {
 
     assert!(result.is_err(), "expected error for 403");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(msg.contains("403"), "expected 403 in error: {msg}");
         }
         other => panic!("expected Api error, got: {other:?}"),
@@ -173,7 +173,7 @@ async fn gemini_generate_blocked_response() {
 
     assert!(result.is_err(), "expected error for blocked request");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(
                 msg.contains("blocked") || msg.contains("SAFETY"),
                 "expected blocked error: {msg}"
@@ -300,7 +300,7 @@ async fn gemini_stream_http_error() {
 
     assert!(result.is_err(), "expected error for 500");
     match result.unwrap_err() {
-        ProviderError::Api(msg) => {
+        ProviderError::Api { message: msg, .. } => {
             assert!(msg.contains("500"), "expected 500 in error: {msg}");
         }
         other => panic!("expected Api error, got: {other:?}"),

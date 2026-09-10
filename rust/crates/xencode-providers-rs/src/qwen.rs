@@ -86,7 +86,7 @@ impl QwenProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Qwen {} - {body}", status)));
+            return Err(ProviderError::api("Qwen", status, body));
         }
 
         let body: QwenResponse = response
@@ -131,7 +131,7 @@ impl QwenProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::Api(format!("Qwen {} - {body}", status)));
+            return Err(ProviderError::api("Qwen", status, body));
         }
 
         let mut stream = response.bytes_stream();
