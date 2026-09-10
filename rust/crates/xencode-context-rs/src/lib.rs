@@ -38,8 +38,9 @@ pub use compact::{
     CompactionKind,
 };
 pub use context::{
-    assemble_prompt, git_summary_text, read_retrieved_bodies, RetrievedBlock, TierDoc,
-    STABLE_END_MARKER,
+    assemble_chat, assemble_prompt, collect_live_context, git_summary_text, read_retrieved_bodies,
+    stable_system_text, ChatAssembly, ChatInput, ChatTurn, LiveContext, RetrievedBlock, TierDoc,
+    AGENT_SYSTEM_PROMPT, HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
 pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
