@@ -210,7 +210,7 @@ pub fn init_project(
     // ── Phase 5: analytics ─────────────────────────────────────────────────
     emit(&mut progress, "phase_start:Analyze languages & sizes");
     let mut languages: Vec<(String, u64)> = scan.languages.into_iter().collect();
-    languages.sort_by(|a, b| b.1.cmp(&a.1));
+    languages.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     for (lang, count) in &languages {
         emit(&mut progress, &format!("log:  ▸ {lang}: {count} file(s)"));
     }
@@ -357,7 +357,7 @@ fn summary_from_existing(
         total_loc += f.loc;
     }
     let mut languages: Vec<(String, u64)> = languages.into_iter().collect();
-    languages.sort_by(|a, b| b.1.cmp(&a.1));
+    languages.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
     InitSummary {
         fresh: true,
         files_scanned: files.files.len() as u64,
@@ -477,15 +477,20 @@ fn index_on_disk_bytes(xencode: &Path) -> u64 {
 mod tests {
     use super::*;
     use std::fs::{self, File};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Arc;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_workspace() -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("xencode-init-test-{stamp}"))
+        // A process-wide counter, not a timestamp. Tests in one binary run in
+        // parallel threads and can read the same nanosecond, which had them share
+        // a directory and clobber each other's assertions.
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        );
+        std::env::temp_dir().join(format!("xencode-init-test-{unique}"))
     }
 
     fn run(root: &Path) -> (Result<InitSummary, ContextError>, Vec<String>) {
