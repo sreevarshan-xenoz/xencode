@@ -18,15 +18,34 @@ impl<T: Clone> LWWRegister<T> {
         }
     }
 
-    /// Set a new value with the current timestamp.
-    pub fn set(&mut self, value: T) {
+    /// Set a new value on behalf of `peer_id`.
+    ///
+    /// The writer must be named. `peer_id` is the register's *last writer*, and
+    /// `merge` overwrites it with whoever won — so after merging a value from
+    /// another peer, the field no longer identifies this replica. A `set` that
+    /// left it alone would attribute this write to that other peer, and the
+    /// equal-timestamp tie-break would then compare the wrong identity and let
+    /// two replicas settle on different values.
+    pub fn set(&mut self, value: T, peer_id: &str) {
         self.value = value;
-        self.timestamp = current_time();
+        self.timestamp = self.next_timestamp();
+        self.peer_id = peer_id.to_string();
     }
 
     /// Get the current value.
     pub fn get(&self) -> &T {
         &self.value
+    }
+
+    /// A timestamp strictly greater than this register's current one.
+    ///
+    /// Wall-clock alone is not enough: `merge` may have adopted a timestamp
+    /// from a peer whose clock runs ahead, and a local write made *after*
+    /// observing that value must still order after it. Taking the max with
+    /// `timestamp + 1` keeps writes causally ordered regardless of skew, while
+    /// staying a readable millisecond clock in the common case.
+    fn next_timestamp(&self) -> u64 {
+        current_time().max(self.timestamp + 1)
     }
 
     /// LWW merge rule: the value with the higher timestamp wins.
@@ -107,7 +126,7 @@ mod tests {
         let mut reg = LWWRegister::new("hello".to_string(), "alice");
         assert_eq!(*reg.get(), "hello");
 
-        reg.set("world".to_string());
+        reg.set("world".to_string(), "alice");
         assert_eq!(*reg.get(), "world");
     }
 
@@ -121,6 +140,65 @@ mod tests {
         let bob_later = LWWRegister::new("bob_later".to_string(), "bob");
         alice.merge(&bob_later);
         assert_eq!(*alice.get(), "bob_later");
+    }
+
+    /// The regression: after merging bob's value, alice's register carries
+    /// `peer_id: "bob"`. A `set` that doesn't reclaim it attributes alice's
+    /// own write to bob.
+    #[test]
+    fn set_reclaims_authorship_after_a_merge_from_another_peer() {
+        let mut alice = LWWRegister::new("a".to_string(), "alice");
+        let mut bob = LWWRegister::new("b".to_string(), "bob");
+        bob.timestamp = alice.timestamp + 10;
+
+        alice.merge(&bob);
+        assert_eq!(alice.peer_id, "bob", "merge should adopt the winner's id");
+
+        alice.set("a2".to_string(), "alice");
+        assert_eq!(
+            alice.peer_id, "alice",
+            "alice's own write is still attributed to bob"
+        );
+    }
+
+    /// A local write made after observing a peer's value must order after it,
+    /// even when that peer's clock is far ahead of ours.
+    #[test]
+    fn a_write_after_a_merge_wins_despite_a_peer_clock_running_ahead() {
+        let mut alice = LWWRegister::new("a".to_string(), "alice");
+
+        // Bob's clock is an hour fast.
+        let mut bob = LWWRegister::new("b".to_string(), "bob");
+        bob.timestamp = current_time() + 3_600_000;
+
+        alice.merge(&bob);
+        assert_eq!(*alice.get(), "b");
+
+        // Alice now writes, having seen bob's value. Her write is later in
+        // real time, so it must win — a bare wall-clock stamp would lose.
+        alice.set("a2".to_string(), "alice");
+        assert!(
+            alice.timestamp > bob.timestamp,
+            "local write did not order after the value it observed"
+        );
+
+        // And it survives a re-merge of bob's older value.
+        alice.merge(&bob);
+        assert_eq!(*alice.get(), "a2");
+    }
+
+    #[test]
+    fn successive_writes_strictly_increase_the_timestamp() {
+        let mut reg = LWWRegister::new(0u32, "alice");
+        let mut last = reg.timestamp;
+        for i in 1..100 {
+            reg.set(i, "alice");
+            assert!(
+                reg.timestamp > last,
+                "timestamp did not advance on write {i}"
+            );
+            last = reg.timestamp;
+        }
     }
 
     #[test]
