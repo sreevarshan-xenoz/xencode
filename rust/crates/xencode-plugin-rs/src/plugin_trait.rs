@@ -6,6 +6,8 @@ use thiserror::Error;
 pub enum PluginError {
     #[error("Plugin not found: {0}")]
     NotFound(String),
+    #[error("Invalid plugin name: {0}")]
+    InvalidName(String),
     #[error("Plugin already registered: {0}")]
     AlreadyRegistered(String),
     #[error("Plugin initialization failed: {0}")]
