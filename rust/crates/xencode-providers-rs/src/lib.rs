@@ -11,8 +11,11 @@ pub mod anthropic;
 pub mod gemini;
 pub mod qwen;
 pub mod retry;
+pub mod tools;
 
 use retry::RetryConfig;
+
+pub use tools::{AgentStep, AgentTurn, ToolCall, ToolDefinition};
 
 #[derive(Debug)]
 pub enum ProviderError {
@@ -350,6 +353,101 @@ impl ProviderManager {
         .await
     }
 
+    /// Streaming generation with tool definitions for the agentic loop.
+    ///
+    /// Returns the visible text plus any model-requested tool calls; the
+    /// caller executes them and continues the loop with [`AgentTurn`]
+    /// history. `tools` may be empty (plain step, no `tools` key is sent).
+    ///
+    /// Backends without a natively plumbed tool schema (Gemini, Anthropic)
+    /// degrade to single-shot text — no tool calls, no error.
+    ///
+    /// Unlike [`generate_stream_with_options`], this path never retries:
+    /// re-running a step could double-execute tools.
+    pub async fn generate_stream_with_tools<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        history: &[AgentTurn],
+        tools: &[ToolDefinition],
+        options: Option<&LlamaCppOptions>,
+        callback: F,
+    ) -> Result<AgentStep, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        if let Some(inner_model) = model.strip_prefix("anthropic:") {
+            if let Some(ref key) = self.anthropic_api_key {
+                let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
+                let text = provider
+                    .generate_stream(inner_model, messages, None, callback)
+                    .await?;
+                return Ok(AgentStep {
+                    text,
+                    tool_calls: Vec::new(),
+                });
+            }
+            return Err(ProviderError::api_message(
+                "Anthropic API key not configured".to_string(),
+            ));
+        }
+
+        if let Some(inner_model) = model.strip_prefix("qwen:") {
+            if let Some(ref key) = self.qwen_api_key {
+                let provider = qwen::QwenProvider::new(key.clone(), None);
+                let rendered =
+                    tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
+                return provider
+                    .generate_stream_with_tools(inner_model, &rendered, tools, callback)
+                    .await;
+            }
+            return Err(ProviderError::api_message(
+                "Qwen API key not configured".to_string(),
+            ));
+        }
+
+        if let Some(inner_model) = model.strip_prefix("google_gemini:") {
+            if let Some(ref key) = self.gemini_api_key {
+                let provider = gemini::GeminiProvider::new(key.clone(), None);
+                let text = provider
+                    .generate_stream(inner_model, messages, None, None, callback)
+                    .await?;
+                return Ok(AgentStep {
+                    text,
+                    tool_calls: Vec::new(),
+                });
+            }
+            return Err(ProviderError::api_message(
+                "Google Gemini API key not configured".to_string(),
+            ));
+        }
+
+        // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
+        if let Some(inner_model) = llamacpp_target(model) {
+            return self
+                .generate_stream_llamacpp_with_tools(
+                    inner_model,
+                    messages,
+                    history,
+                    tools,
+                    options,
+                    callback,
+                )
+                .await;
+        }
+
+        // OpenRouter route
+        if model.contains('/') && self.openrouter_api_key.is_some() {
+            return self
+                .generate_stream_openrouter_with_tools(model, messages, history, tools, callback)
+                .await;
+        }
+
+        // Default: local Ollama
+        self.generate_stream_ollama_with_tools(model, messages, history, tools, callback)
+            .await
+    }
+
     /// Inner stream generate without retry wrapping.
     async fn generate_stream_inner<F>(
         &self,
@@ -494,6 +592,89 @@ impl ProviderManager {
         }
 
         Ok(full_response)
+    }
+
+    /// Ollama `/api/chat` streaming with tool definitions.
+    ///
+    /// Ollama sends complete `message.tool_calls[]` arrays per NDJSON line
+    /// (no delta fragments), so the last non-empty set wins.
+    async fn generate_stream_ollama_with_tools<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        history: &[AgentTurn],
+        tools: &[ToolDefinition],
+        mut callback: F,
+    ) -> Result<AgentStep, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        let url = format!("{}/api/chat", self.ollama_client.base_url());
+
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": tools::render_history(messages, history, tools::HistoryStyle::Ollama),
+            "stream": true
+        });
+        if !tools.is_empty() {
+            payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::api("Ollama", status, msg));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut text = String::new();
+        let mut calls: Vec<ToolCall> = Vec::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            if let Ok(raw) = std::str::from_utf8(&chunk) {
+                for line in raw.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                        if let Some(message) = json.get("message") {
+                            if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                                if !content.is_empty() {
+                                    callback(content);
+                                    text.push_str(content);
+                                }
+                            }
+                            if let Some(tc) = message.get("tool_calls") {
+                                let parsed = tools::parse_ollama_calls(tc, "call_");
+                                if !parsed.is_empty() {
+                                    calls = parsed;
+                                }
+                            }
+                        }
+                        if json.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                            return Ok(AgentStep {
+                                text,
+                                tool_calls: calls,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(AgentStep {
+            text,
+            tool_calls: calls,
+        })
     }
 
     /// Non-streaming OpenRouter request (called from `generate()`).
@@ -787,6 +968,167 @@ impl ProviderManager {
         }
 
         Ok(full_response)
+    }
+
+    /// Streaming llama.cpp request with tool definitions (agentic loop).
+    /// `history` carries prior assistant/tool turns rendered OpenAI-style.
+    async fn generate_stream_llamacpp_with_tools<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        history: &[AgentTurn],
+        tools: &[ToolDefinition],
+        options: Option<&LlamaCppOptions>,
+        mut callback: F,
+    ) -> Result<AgentStep, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        let start = Instant::now();
+        self.ensure_llamacpp_model_loaded(model).await?;
+        let base_url = match &self.llama_cpp_client {
+            Some(client) => client.base_url(),
+            None => "http://localhost:8080",
+        };
+
+        let url = format!("{}/v1/chat/completions", base_url);
+
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": tools::render_history(messages, history, tools::HistoryStyle::OpenAI),
+            "stream": true
+        });
+        if !tools.is_empty() {
+            payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
+            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
+        }
+
+        if let Some(opts) = options {
+            merge_llamacpp_options(&mut payload, opts);
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(format!("llama.cpp request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::api("llama.cpp", status, msg));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut text = String::new();
+        let mut completion_tokens: u64 = 0;
+        let mut acc = tools::ToolCallAccumulator::default();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result
+                .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
+            if let Ok(raw) = std::str::from_utf8(&chunk) {
+                for line in raw.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line == "data: [DONE]" {
+                        continue;
+                    }
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            // The final chunk carries usage (with an empty choices array).
+                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
+                                if let Some(t) =
+                                    usage.get("completion_tokens").and_then(|v| v.as_u64())
+                                {
+                                    completion_tokens = t;
+                                }
+                            }
+                            tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
+                        }
+                    }
+                }
+            }
+        }
+
+        if completion_tokens > 0 {
+            self.record_llamacpp_timings(completion_tokens, start.elapsed().as_secs_f64());
+        }
+
+        Ok(AgentStep {
+            text,
+            tool_calls: acc.finish(),
+        })
+    }
+
+    /// Streaming OpenRouter request with tool definitions (agentic loop).
+    async fn generate_stream_openrouter_with_tools<F>(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        history: &[AgentTurn],
+        tools: &[ToolDefinition],
+        mut callback: F,
+    ) -> Result<AgentStep, ProviderError>
+    where
+        F: FnMut(&str),
+    {
+        let url = "https://openrouter.ai/api/v1/chat/completions";
+        let api_key = self.openrouter_api_key.as_ref().unwrap();
+
+        let mut payload = serde_json::json!({
+            "model": model,
+            "messages": tools::render_history(messages, history, tools::HistoryStyle::OpenAI),
+            "stream": true
+        });
+        if !tools.is_empty() {
+            payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
+            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
+        }
+
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("HTTP-Referer", "http://localhost")
+            .header("X-Title", "Xencode")
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let msg = response.text().await.unwrap_or_default();
+            return Err(ProviderError::api("OpenRouter", status, msg));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut text = String::new();
+        let mut acc = tools::ToolCallAccumulator::default();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            if let Ok(raw) = std::str::from_utf8(&chunk) {
+                for line in raw.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line == "data: [DONE]" {
+                        continue;
+                    }
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(AgentStep {
+            text,
+            tool_calls: acc.finish(),
+        })
     }
 }
 
