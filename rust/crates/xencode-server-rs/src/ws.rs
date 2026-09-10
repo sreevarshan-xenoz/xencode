@@ -1,6 +1,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
@@ -12,11 +13,35 @@ use tracing::{info, warn};
 /// a generous allowance for a client that is merely slow.
 const PEER_SEND_BUFFER: usize = 256;
 
+/// Identifies one WebSocket connection, so a broadcast can skip the connection
+/// it came from.
+///
+/// Deliberately per-connection rather than per-user: a user with the editor
+/// open in two tabs must still see their own edits arrive in the other tab, so
+/// the username is too coarse to exclude on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerId(u64);
+
+static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(0);
+
+impl PeerId {
+    fn next() -> Self {
+        Self(NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+/// One connected peer: the channel its writer task drains, tagged with the
+/// connection's id.
+pub struct Peer {
+    pub id: PeerId,
+    tx: mpsc::Sender<Message>,
+}
+
 /// Each peer is addressed through its own channel, drained by a dedicated
 /// writer task that owns the socket's sink. Broadcasting therefore never waits
 /// on a socket, only on the channel, which is what keeps one stalled client
 /// from holding up every other session.
-pub type PeerMap = Arc<Mutex<HashMap<String, Vec<mpsc::Sender<Message>>>>>;
+pub type PeerMap = Arc<Mutex<HashMap<String, Vec<Peer>>>>;
 
 pub struct AppState {
     pub peers: PeerMap,
@@ -63,9 +88,13 @@ pub async fn handle_socket(
     });
 
     // Register the peer
+    let peer_id = PeerId::next();
     {
         let mut peers = state.peers.lock().await;
-        peers.entry(session_id.clone()).or_default().push(tx);
+        peers
+            .entry(session_id.clone())
+            .or_default()
+            .push(Peer { id: peer_id, tx });
     }
     {
         let mut sessions = state.sessions.lock().await;
@@ -93,7 +122,7 @@ pub async fn handle_socket(
     // Forward messages from this peer to others
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Text(text) = msg {
-            broadcast_to_session(&state, &session_id, &text, Some(&username)).await;
+            broadcast_to_session(&state, &session_id, &text, Some(peer_id)).await;
         }
     }
 
@@ -114,27 +143,35 @@ pub async fn handle_socket(
     .await;
 }
 
-/// Broadcast a message to all peers in a session, optionally excluding a sender.
+/// Broadcast a message to every peer in a session, skipping `exclude` if given.
+///
+/// `exclude` is the connection a message arrived on, so the sender is not sent
+/// its own message back.
 async fn broadcast_to_session(
     state: &AppState,
     session_id: &str,
     message: &str,
-    _exclude: Option<&str>,
+    exclude: Option<PeerId>,
 ) {
     let msg = Message::Text(message.to_string().into());
     let mut peers = state.peers.lock().await;
-    if let Some(senders) = peers.get_mut(session_id) {
+    if let Some(session_peers) = peers.get_mut(session_id) {
         // `try_send` never waits, so the lock is not held across a socket write.
         // A peer is dropped when its receiver is gone (disconnected) or its
         // buffer is full (not keeping up) — in both cases there is nothing
-        // useful left to do with it.
-        senders.retain(|tx| match tx.try_send(msg.clone()) {
-            Ok(()) => true,
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                warn!("Dropping peer in session {session_id}: send buffer full");
-                false
+        // useful left to do with it. An excluded peer is skipped, not dropped.
+        session_peers.retain(|peer| {
+            if Some(peer.id) == exclude {
+                return true;
             }
-            Err(mpsc::error::TrySendError::Closed(_)) => false,
+            match peer.tx.try_send(msg.clone()) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    warn!("Dropping peer in session {session_id}: send buffer full");
+                    false
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => false,
+            }
         });
     }
 }
@@ -238,21 +275,107 @@ mod tests {
         }
     }
 
+    /// A peer with its own id, plus the receiver its writer task would drain.
+    fn test_peer(capacity: usize) -> (Peer, mpsc::Receiver<Message>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let peer = Peer {
+            id: PeerId::next(),
+            tx,
+        };
+        (peer, rx)
+    }
+
     #[tokio::test]
     async fn broadcast_reaches_every_peer_in_the_session() {
         let state = Arc::new(AppState::new());
-        let (tx_a, mut rx_a) = mpsc::channel(8);
-        let (tx_b, mut rx_b) = mpsc::channel(8);
+        let (peer_a, mut rx_a) = test_peer(8);
+        let (peer_b, mut rx_b) = test_peer(8);
         state
             .peers
             .lock()
             .await
-            .insert("s".to_string(), vec![tx_a, tx_b]);
+            .insert("s".to_string(), vec![peer_a, peer_b]);
 
         broadcast_to_session(&state, "s", "hello", None).await;
 
         assert_eq!(text_of(&rx_a.recv().await.unwrap()), "hello");
         assert_eq!(text_of(&rx_b.recv().await.unwrap()), "hello");
+    }
+
+    /// The regression this guards: the sending connection must not be sent its
+    /// own message back.
+    #[tokio::test]
+    async fn broadcast_skips_the_excluded_connection() {
+        let state = Arc::new(AppState::new());
+        let (sender, mut sender_rx) = test_peer(8);
+        let (other, mut other_rx) = test_peer(8);
+        let sender_id = sender.id;
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![sender, other]);
+
+        broadcast_to_session(&state, "s", "hello", Some(sender_id)).await;
+
+        assert_eq!(text_of(&other_rx.recv().await.unwrap()), "hello");
+        assert!(
+            sender_rx.try_recv().is_err(),
+            "the sending connection was echoed its own message"
+        );
+    }
+
+    /// Exclusion is per-connection, not per-user: a second tab belonging to the
+    /// same person is a different connection and must still receive the message.
+    #[tokio::test]
+    async fn broadcast_still_reaches_the_senders_other_connections() {
+        let state = Arc::new(AppState::new());
+        let (first_tab, mut first_rx) = test_peer(8);
+        let (second_tab, mut second_rx) = test_peer(8);
+        let first_id = first_tab.id;
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![first_tab, second_tab]);
+
+        broadcast_to_session(&state, "s", "hello", Some(first_id)).await;
+
+        assert_eq!(text_of(&second_rx.recv().await.unwrap()), "hello");
+        assert!(first_rx.try_recv().is_err());
+    }
+
+    /// An excluded peer is skipped, not sent to — so a full buffer must not
+    /// get it pruned. (A test that merely checks an excluded peer survives a
+    /// broadcast would pass without the fix too, since a peer with room is
+    /// never pruned either way; the full buffer is what makes this discriminate.)
+    #[tokio::test]
+    async fn an_excluded_peer_with_a_full_buffer_is_kept() {
+        let state = Arc::new(AppState::new());
+        let (stalled, _stalled_rx) = test_peer(1);
+        stalled
+            .tx
+            .send(Message::Text("filler".into()))
+            .await
+            .unwrap();
+        let stalled_id = stalled.id;
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![stalled]);
+
+        broadcast_to_session(&state, "s", "hello", Some(stalled_id)).await;
+
+        let peers = state.peers.lock().await;
+        assert_eq!(peers["s"].len(), 1);
+        assert_eq!(peers["s"][0].id, stalled_id);
+    }
+
+    #[tokio::test]
+    async fn peer_ids_are_unique() {
+        let ids: std::collections::HashSet<u64> = (0..1000).map(|_| PeerId::next().0).collect();
+        assert_eq!(ids.len(), 1000);
     }
 
     /// The regression this guards: a peer that has stopped reading must not
@@ -264,18 +387,19 @@ mod tests {
         // A peer whose receiver exists but is never drained, with its buffer
         // already full — the state a client in this position reaches once it
         // stops reading from its socket.
-        let (stalled_tx, _stalled_rx) = mpsc::channel::<Message>(1);
-        stalled_tx
+        let (stalled, _stalled_rx) = test_peer(1);
+        stalled
+            .tx
             .send(Message::Text("filler".into()))
             .await
             .unwrap();
 
-        let (healthy_tx, mut healthy_rx) = mpsc::channel(8);
+        let (healthy, mut healthy_rx) = test_peer(8);
         state
             .peers
             .lock()
             .await
-            .insert("s".to_string(), vec![stalled_tx, healthy_tx]);
+            .insert("s".to_string(), vec![stalled, healthy]);
 
         // Completes without waiting on the stalled peer.
         tokio::time::timeout(
@@ -294,14 +418,14 @@ mod tests {
     #[tokio::test]
     async fn broadcast_drops_a_disconnected_peer() {
         let state = Arc::new(AppState::new());
-        let (gone_tx, gone_rx) = mpsc::channel::<Message>(8);
+        let (gone, gone_rx) = test_peer(8);
         drop(gone_rx); // peer disconnected, its writer task is finished
-        let (live_tx, _live_rx) = mpsc::channel::<Message>(8);
+        let (live, _live_rx) = test_peer(8);
         state
             .peers
             .lock()
             .await
-            .insert("s".to_string(), vec![gone_tx, live_tx]);
+            .insert("s".to_string(), vec![gone, live]);
 
         broadcast_to_session(&state, "s", "hello", None).await;
 
@@ -315,17 +439,18 @@ mod tests {
     async fn a_stalled_peer_does_not_block_a_different_session() {
         let state = Arc::new(AppState::new());
 
-        let (stalled_tx, _stalled_rx) = mpsc::channel::<Message>(1);
-        stalled_tx
+        let (stalled, _stalled_rx) = test_peer(1);
+        stalled
+            .tx
             .send(Message::Text("filler".into()))
             .await
             .unwrap();
-        let (other_tx, mut other_rx) = mpsc::channel(8);
+        let (other, mut other_rx) = test_peer(8);
 
         {
             let mut peers = state.peers.lock().await;
-            peers.insert("stalled-session".to_string(), vec![stalled_tx]);
-            peers.insert("other-session".to_string(), vec![other_tx]);
+            peers.insert("stalled-session".to_string(), vec![stalled]);
+            peers.insert("other-session".to_string(), vec![other]);
         }
 
         broadcast_to_session(&state, "stalled-session", "a", None).await;
