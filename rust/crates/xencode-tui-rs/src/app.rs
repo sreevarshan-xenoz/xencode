@@ -203,6 +203,56 @@ pub struct UiMessage {
     pub content: String,
 }
 
+/// Read `git status` into a map keyed exactly as `file_tree` is.
+///
+/// `file_tree` comes from `scan_workspace`, which stores each entry's path
+/// relative to the root with no prefix (`src/main.rs`) — the same shape git
+/// reports — so the path is used verbatim as the key.
+///
+/// `-z` rather than plain `--porcelain`: it emits paths NUL-terminated and
+/// unquoted, so a name with non-ASCII or special characters arrives verbatim
+/// instead of quoted and octal-escaped, and a rename's two paths are separate
+/// fields instead of being joined by a literal " -> ".
+fn git_status_map() -> HashMap<String, String> {
+    let Ok(output) = Command::new("git")
+        .args(["status", "--porcelain", "-z"])
+        .output()
+    else {
+        return HashMap::new();
+    };
+    parse_porcelain_z(&output.stdout)
+}
+
+/// Parse the output of `git status --porcelain -z`.
+///
+/// Split out from [`git_status_map`] so it can be tested without a repository.
+fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
+    let mut status = HashMap::new();
+    let mut fields = stdout.split(|&byte| byte == 0);
+    while let Some(entry) = fields.next() {
+        // Each entry is `XY <path>`; anything shorter is the trailing empty
+        // field left by the final NUL.
+        if entry.len() < 4 {
+            continue;
+        }
+        let (code, path) = entry.split_at(3);
+
+        // A rename or copy is followed by its original path as a separate
+        // field. Consume it, or every subsequent entry is misread. The new
+        // path comes first, and that is the one on disk, so it is the one to
+        // key on.
+        if matches!(code[0], b'R' | b'C') {
+            fields.next();
+        }
+
+        status.insert(
+            String::from_utf8_lossy(path).into_owned(),
+            String::from_utf8_lossy(&code[..2]).trim().to_string(),
+        );
+    }
+    status
+}
+
 pub struct App<'a> {
     pub focus: FocusArea,
     pub input: String,
@@ -410,19 +460,7 @@ impl<'a> App<'a> {
         let selected_model = 0;
         let theme = ThemeColors::get(&config.active_theme);
 
-        let mut git_status = HashMap::new();
-        if let Ok(output) = Command::new("git").args(["status", "--porcelain"]).output() {
-            if let Ok(s) = String::from_utf8(output.stdout) {
-                for line in s.lines() {
-                    if line.len() > 3 {
-                        let code = &line[0..2];
-                        let path = &line[3..];
-                        let fp = format!(".\\{}", path.replace("/", "\\"));
-                        git_status.insert(fp, code.trim().to_string());
-                    }
-                }
-            }
-        }
+        let git_status = git_status_map();
         let git_branch = Command::new("git")
             .args(["branch", "--show-current"])
             .output()
@@ -702,19 +740,7 @@ impl<'a> App<'a> {
     }
 
     pub fn refresh_git(&mut self) {
-        self.git_status.clear();
-        if let Ok(output) = Command::new("git").args(["status", "--porcelain"]).output() {
-            if let Ok(s) = String::from_utf8(output.stdout) {
-                for line in s.lines() {
-                    if line.len() > 3 {
-                        let code = &line[0..2];
-                        let path = &line[3..];
-                        let fp = format!(".\\{}", path.replace("/", "\\"));
-                        self.git_status.insert(fp, code.trim().to_string());
-                    }
-                }
-            }
-        }
+        self.git_status = git_status_map();
         if let Ok(output) = Command::new("git")
             .args(["branch", "--show-current"])
             .output()
@@ -3793,7 +3819,8 @@ match key.code {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_llama_port;
+    use super::{parse_llama_port, parse_porcelain_z};
+    use xencode_core_rs::{scan_workspace, ScanOptions};
 
     #[test]
     fn parse_llama_port_handles_common_urls() {
@@ -3803,5 +3830,105 @@ mod tests {
         assert_eq!(parse_llama_port("http://localhost"), 8080);
         assert_eq!(parse_llama_port("8080"), 8080);
         assert_eq!(parse_llama_port(""), 8080);
+    }
+
+    /// Build `git status --porcelain -z` output: NUL after every field.
+    fn porcelain_z(fields: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for field in fields {
+            out.extend_from_slice(field.as_bytes());
+            out.push(0);
+        }
+        out
+    }
+
+    /// The keys must match what `scan_workspace` puts in `file_tree`: a path
+    /// relative to the root, no prefix, forward slashes. This is the bug —
+    /// keys used to be built as `.\src\main.rs` and never matched.
+    #[test]
+    fn porcelain_keys_match_the_file_tree_path_shape() {
+        let status = parse_porcelain_z(&porcelain_z(&[" M src/main.rs", "?? notes.txt"]));
+
+        assert_eq!(status.get("src/main.rs"), Some(&"M".to_string()));
+        assert_eq!(status.get("notes.txt"), Some(&"??".to_string()));
+        assert!(status.keys().all(|k| !k.contains('\\')), "{status:?}");
+        assert!(status.keys().all(|k| !k.starts_with("./")), "{status:?}");
+    }
+
+    #[test]
+    fn porcelain_trims_the_status_code() {
+        let status = parse_porcelain_z(&porcelain_z(&[
+            " M modified.rs",
+            "A  added.rs",
+            "MM both.rs",
+            " D deleted.rs",
+        ]));
+
+        assert_eq!(status.get("modified.rs"), Some(&"M".to_string()));
+        assert_eq!(status.get("added.rs"), Some(&"A".to_string()));
+        assert_eq!(status.get("both.rs"), Some(&"MM".to_string()));
+        assert_eq!(status.get("deleted.rs"), Some(&"D".to_string()));
+    }
+
+    /// A rename carries its original path as an extra field. If that field is
+    /// not consumed, it is misread as the next entry and every entry after a
+    /// rename is wrong.
+    #[test]
+    fn porcelain_handles_a_rename_without_desyncing() {
+        let status = parse_porcelain_z(&porcelain_z(&[
+            "R  new_name.rs",
+            "old_name.rs", // the rename's original path
+            " M after_the_rename.rs",
+        ]));
+
+        assert_eq!(status.get("new_name.rs"), Some(&"R".to_string()));
+        // The entry after the rename must still be read correctly.
+        assert_eq!(status.get("after_the_rename.rs"), Some(&"M".to_string()));
+        // The original path is not a status entry of its own.
+        assert!(!status.contains_key("old_name.rs"), "{status:?}");
+        assert_eq!(status.len(), 2, "{status:?}");
+    }
+
+    #[test]
+    fn porcelain_keeps_non_ascii_paths_verbatim() {
+        // With -z these arrive unquoted and unescaped, unlike plain --porcelain
+        // which would render this as "src/caf\303\251.rs" including the quotes.
+        let status = parse_porcelain_z(&porcelain_z(&[" M src/café.rs", "?? 日本語.md"]));
+
+        assert_eq!(status.get("src/café.rs"), Some(&"M".to_string()));
+        assert_eq!(status.get("日本語.md"), Some(&"??".to_string()));
+    }
+
+    #[test]
+    fn porcelain_handles_empty_and_truncated_input() {
+        assert!(parse_porcelain_z(b"").is_empty());
+        assert!(parse_porcelain_z(b"\0").is_empty());
+        // Too short to be `XY <path>`.
+        assert!(parse_porcelain_z(&porcelain_z(&["M"])).is_empty());
+    }
+
+    /// Pins the contract the parser targets: `scan_workspace` yields paths
+    /// relative to the root with no `./` prefix, which is why the git path is
+    /// used as the key verbatim.
+    #[test]
+    fn scan_workspace_paths_have_no_prefix() {
+        let tmp = std::env::temp_dir().join(format!(
+            "xencode-tui-gitkey-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join("src")).unwrap();
+        std::fs::write(tmp.join("src").join("main.rs"), "").unwrap();
+
+        let entries = scan_workspace(&tmp, &ScanOptions::default()).unwrap();
+        let paths: Vec<String> = entries
+            .iter()
+            .map(|e| e.path.display().to_string().replace('\\', "/"))
+            .collect();
+
+        std::fs::remove_dir_all(&tmp).ok();
+        assert!(paths.contains(&"src/main.rs".to_string()), "{paths:?}");
     }
 }
