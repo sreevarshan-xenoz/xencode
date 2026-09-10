@@ -846,8 +846,14 @@ impl<'a> App<'a> {
                 attached_block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
             }
         }
+        // The model's real window when known (Step 3 capabilities); unknown
+        // routes defer to the profile default. The `/ctx` preview always
+        // shows profile-default budgeting.
+        let model = self.config.default_model.clone();
+        let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
+            context_window,
             system: CTX_SYSTEM,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
@@ -891,7 +897,6 @@ impl<'a> App<'a> {
             assembly.retrieved_included.min(u8::MAX as usize)
         ));
 
-        let model = self.config.default_model.clone();
         let ollama_url = self.config.ollama_url.clone();
         let llama_cpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
