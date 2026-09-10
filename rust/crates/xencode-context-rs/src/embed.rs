@@ -216,10 +216,6 @@ mod tests {
     use crate::index::FileEntry;
     use crate::symbols::PerFileSymbols;
 
-    fn empty_syms() -> PerFileSymbols {
-        PerFileSymbols { structs: vec![], functions: vec![], imports: vec![], exports: vec![] }
-    }
-
     fn file(path: &str) -> FileEntry {
         FileEntry {
             path: path.to_string(),

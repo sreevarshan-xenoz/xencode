@@ -224,11 +224,11 @@ fn module_base(file: &str, qual: &Qualifier) -> String {
 
 /// Resolve an import inside `file` to a concrete repo-relative file path.
 /// Returns `(path, via)` where `via` is the canonical module path resolved.
-pub fn resolve_import<'a>(
+pub fn resolve_import(
     file: &str,
     import: &str,
     crate_root: Option<&str>,
-    files: &HashSet<&'a str>,
+    files: &HashSet<&str>,
 ) -> Option<(String, String)> {
     let (qual, segs) = parse_import(import)?;
     let base = match &qual {
@@ -621,8 +621,8 @@ fn helper() {}
             .into_iter()
             .map(|(p, _)| p)
             .collect();
-        assert_eq!(order[0], "api/models.rs".min("db/conn.rs").to_string());
-        assert_eq!(order[1], "api/models.rs".max("db/conn.rs").to_string());
+        assert_eq!(order[0], "api/models.rs".to_string());
+        assert_eq!(order[1], "db/conn.rs".to_string());
     }
 
     #[test]

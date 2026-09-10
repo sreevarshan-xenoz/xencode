@@ -2409,9 +2409,10 @@ impl<'a> App<'a> {
             }
             if !ready {
                 let _ = server.stop();
-                let _ = err_tx.send(format!(
+                let _ = err_tx.send(
                     "[LLAMACPP_MSG]⚠️ auto-started llama-server did not become ready in time"
-                ));
+                        .to_string(),
+                );
                 return;
             }
             if cancel.load(Ordering::Relaxed) {
@@ -3509,11 +3510,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     let _ = app.config.save();
                                                 }
                                             }
-                                            5 => {
-                                                if app.config.response_timeout >= 10 {
-                                                    app.config.response_timeout -= 5;
-                                                    let _ = app.config.save();
-                                                }
+                                            5 if app.config.response_timeout >= 10 => {
+                                                app.config.response_timeout -= 5;
+                                                let _ = app.config.save();
                                             }
                                             _ => {}
                                         }

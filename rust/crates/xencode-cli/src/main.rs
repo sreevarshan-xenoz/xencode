@@ -577,7 +577,7 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             }
             if !ready {
                 let _ = server.stop();
-                let _ = std::fs::remove_file(&pid_file());
+                let _ = std::fs::remove_file(pid_file());
                 return Err("llama-server did not become ready in time".to_string());
             }
 
@@ -596,7 +596,7 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             });
             let _ = tokio::signal::ctrl_c().await;
             let _ = server.stop();
-            let _ = std::fs::remove_file(&pid_file());
+            let _ = std::fs::remove_file(pid_file());
             Ok(())
         }
         LlamacppAction::Stop => {
@@ -605,7 +605,7 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
                     println!("Stopping llama-server (PID {pid})...");
                     match kill_pid(pid) {
                         Ok(()) => {
-                            let _ = std::fs::remove_file(&pid_file());
+                            let _ = std::fs::remove_file(pid_file());
                             println!("Stopped");
                         }
                         Err(e) => eprintln!("Failed to stop PID {pid}: {e}"),

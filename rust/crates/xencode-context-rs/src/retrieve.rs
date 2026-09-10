@@ -156,7 +156,7 @@ pub fn retrieve(
         if entry.secret || entry.binary {
             continue;
         }
-        let (total, reasons) = score_file(entry, &query_words, &index, changed, &forced_seeds);
+        let (total, reasons) = score_file(entry, &query_words, index, changed, &forced_seeds);
         if total >= MIN_SCORE {
             scores.insert(entry.path.clone(), Score::new(total, reasons));
         }
@@ -252,12 +252,11 @@ fn score_file(
         reasons.push("filename exact".to_string());
     }
     // filename substring (+6)
-    if !reasons.iter().any(|r| r == "filename exact") {
-        if query_words.iter().any(|w| name.contains(w)) {
+    if !reasons.iter().any(|r| r == "filename exact")
+        && query_words.iter().any(|w| name.contains(w)) {
             total += 6;
             reasons.push("filename substring".to_string());
         }
-    }
     // path segment match (+5)
     if query_words.iter().any(|w| {
         path
@@ -412,8 +411,10 @@ mod tests {
     fn empty_query_seeds_from_changed_and_recent() {
         let idx = sample_index();
         let changed = HashSet::from(["src/session.rs".to_string()]);
-        let mut opts = RetrieveOptions::default();
-        opts.top_k = 10;
+        let opts = RetrieveOptions {
+            top_k: 10,
+            ..Default::default()
+        };
 
         let results = retrieve("", &idx, &changed, &opts);
         let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();

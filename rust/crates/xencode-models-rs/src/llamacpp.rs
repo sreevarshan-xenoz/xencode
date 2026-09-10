@@ -255,7 +255,7 @@ impl LlamaCppClient {
                             let model_name = model_val
                                 .replace('\\', "/")
                                 .split('/')
-                                .last()
+                                .next_back()
                                 .unwrap_or(model_val)
                                 .to_string();
                             return Ok(vec![LlamaCppModelInfo {
@@ -494,10 +494,14 @@ fn lookup_in_path(name: &str) -> bool {
 
 /// Home-based directories that plausibly hold GGUF models, in preference order.
 fn candidate_model_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let mut dirs = Vec::new();
-    dirs.push(home.join(".cache").join("llama.cpp"));
-    dirs.push(home.join(".llama").join("models"));
-    dirs.push(home.join(".local").join("share").join("llama.cpp").join("models"));
+    let mut dirs = vec![
+        home.join(".cache").join("llama.cpp"),
+        home.join(".llama").join("models"),
+        home.join(".local")
+            .join("share")
+            .join("llama.cpp")
+            .join("models"),
+    ];
     dirs.push(home.join("models"));
     dirs.push(home.join("models").join("llama.cpp"));
     dirs.push(std::path::PathBuf::from("models"));
@@ -668,14 +672,17 @@ mod tests {
         std::fs::write(dir.join("llama3.2.gguf"), b"x").unwrap();
         std::fs::write(dir.join("qwen3-4b.gguf"), b"x").unwrap();
 
-        let found = resolve_gguf_model_in(None, Some("qwen3-4b"), &[dir.clone()]);
+        let found = resolve_gguf_model_in(None, Some("qwen3-4b"), std::slice::from_ref(&dir));
         assert_eq!(
             found,
             Some(dir.join("qwen3-4b.gguf").to_string_lossy().into_owned())
         );
 
         // No hint + multiple candidates is ambiguous.
-        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
+        assert_eq!(
+            resolve_gguf_model_in(None, None, std::slice::from_ref(&dir)),
+            None
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -690,11 +697,14 @@ mod tests {
         std::fs::write(dir.join("qwen3-4b").join("Qwen3-4B-Q4_K_M.gguf"), b"x").unwrap();
 
         assert_eq!(
-            resolve_gguf_model_in(None, Some("qwen3-4b"), &[dir.clone()]),
+            resolve_gguf_model_in(None, Some("qwen3-4b"), std::slice::from_ref(&dir)),
             Some(dir.join("qwen3-4b").join("Qwen3-4B-Q4_K_M.gguf").to_string_lossy().into_owned())
         );
         // Ambiguous without a hint (one flat file + two nested families found).
-        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
+        assert_eq!(
+            resolve_gguf_model_in(None, None, std::slice::from_ref(&dir)),
+            None
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -706,7 +716,7 @@ mod tests {
         std::fs::write(dir.join("only.gguf"), b"x").unwrap();
 
         assert_eq!(
-            resolve_gguf_model_in(None, None, &[dir.clone()]),
+            resolve_gguf_model_in(None, None, std::slice::from_ref(&dir)),
             Some(dir.join("only.gguf").to_string_lossy().into_owned())
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -715,7 +725,10 @@ mod tests {
     #[test]
     fn resolve_gguf_no_files_returns_none() {
         let dir = std::env::temp_dir().join(format!("xencode-gguf-empty-{}", std::process::id()));
-        assert_eq!(resolve_gguf_model_in(None, None, &[dir.clone()]), None);
+        assert_eq!(
+            resolve_gguf_model_in(None, None, std::slice::from_ref(&dir)),
+            None
+        );
     }
 
     #[test]
