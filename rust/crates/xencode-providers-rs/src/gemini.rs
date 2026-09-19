@@ -3,7 +3,7 @@ use std::fmt;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use crate::{ChatMessage, ProviderError};
+use crate::{split_data_url, ChatMessage, ContentPart, MessageContent, ProviderError};
 
 /// Google Gemini model provider.
 ///
@@ -91,7 +91,7 @@ impl GeminiProvider {
                     if !system_buffer.is_empty() {
                         system_buffer.push_str("\n\n");
                     }
-                    system_buffer.push_str(&msg.content);
+                    system_buffer.push_str(&msg.text_content());
                 }
                 "user" | "assistant" => {
                     let gemini_role = if msg.role == "assistant" {
@@ -99,7 +99,7 @@ impl GeminiProvider {
                     } else {
                         "user"
                     };
-                    let mut text = msg.content.clone();
+                    let mut text = msg.text_content();
 
                     // Prepend accumulated system messages to the first user message
                     if gemini_role == "user" && !system_buffer.is_empty() {
@@ -109,14 +109,14 @@ impl GeminiProvider {
 
                     contents.push(serde_json::json!({
                         "role": gemini_role,
-                        "parts": [{"text": text}]
+                        "parts": gemini_parts(msg, &text)
                     }));
                 }
                 _ => {
                     // Unknown role — treat as user
                     contents.push(serde_json::json!({
                         "role": "user",
-                        "parts": [{"text": msg.content}]
+                        "parts": gemini_parts(msg, &msg.text_content())
                     }));
                 }
             }
@@ -298,6 +298,27 @@ impl GeminiProvider {
     }
 }
 
+/// Gemini `parts`: a single text part for text-only messages (the shape sent
+/// before images existed), or the merged text plus one `inline_data` part per
+/// image. Non-data URLs fall back to a text part carrying the raw URL —
+/// visible, never silently dropped.
+fn gemini_parts(msg: &ChatMessage, text: &str) -> Vec<serde_json::Value> {
+    let mut parts = vec![serde_json::json!({"text": text})];
+    if let MessageContent::Parts(items) = &msg.content {
+        for item in items {
+            if let ContentPart::ImageUrl { image_url } = item {
+                match split_data_url(&image_url.url) {
+                    Some((mime, data)) => parts.push(serde_json::json!({
+                        "inline_data": {"mime_type": mime, "data": data}
+                    })),
+                    None => parts.push(serde_json::json!({"text": image_url.url})),
+                }
+            }
+        }
+    }
+    parts
+}
+
 impl fmt::Debug for GeminiProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GeminiProvider")
@@ -316,8 +337,7 @@ mod tests {
         assert_eq!(
             provider.base_url,
             "https://generativelanguage.googleapis.com/v1beta"
-        );
-    }
+        );    }
 
     #[test]
     fn custom_base_url() {
@@ -333,11 +353,11 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             },
             ChatMessage {
                 role: "assistant".to_string(),
-                content: "Hi there".to_string(),
+                content: "Hi there".into(),
             },
         ];
         let contents = GeminiProvider::convert_messages(&messages);
@@ -353,11 +373,11 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: "You are a helpful assistant.".to_string(),
+                content: "You are a helpful assistant.".into(),
             },
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             },
         ];
         let contents = GeminiProvider::convert_messages(&messages);
@@ -373,7 +393,7 @@ mod tests {
     fn convert_messages_system_only() {
         let messages = vec![ChatMessage {
             role: "system".to_string(),
-            content: "Be concise.".to_string(),
+            content: "Be concise.".into(),
         }];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 1);
@@ -385,10 +405,35 @@ mod tests {
     fn convert_messages_unknown_role() {
         let messages = vec![ChatMessage {
             role: "unknown".to_string(),
-            content: "test".to_string(),
+            content: "test".into(),
         }];
         let contents = GeminiProvider::convert_messages(&messages);
         assert_eq!(contents.len(), 1);
         assert_eq!(contents[0]["role"], "user");
+    }
+
+    #[test]
+    fn text_only_parts_stay_single_text_part() {
+        assert_eq!(
+            super::gemini_parts(&ChatMessage::text("user", "Hi"), "Hi"),
+            vec![serde_json::json!({"text": "Hi"})]
+        );
+    }
+
+    #[test]
+    fn image_message_appends_inline_data_parts() {
+        let msg = ChatMessage::user_with_images(
+            "look",
+            vec!["data:image/jpeg;base64,/9j/".to_string()],
+        );
+        assert_eq!(
+            super::gemini_parts(&msg, "look"),
+            vec![
+                serde_json::json!({"text": "look"}),
+                serde_json::json!({"inline_data": {
+                    "mime_type": "image/jpeg", "data": "/9j/"
+                }}),
+            ]
+        );
     }
 }

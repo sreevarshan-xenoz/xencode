@@ -104,7 +104,13 @@ pub(crate) fn render_history(
 ) -> serde_json::Value {
     let mut out: Vec<serde_json::Value> = base
         .iter()
-        .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+        .map(|m| match style {
+            // OpenAI-family backends take content blocks natively; the
+            // untagged enum serializes text as a bare string.
+            HistoryStyle::OpenAI => serde_json::json!({"role": m.role, "content": m.content}),
+            // Ollama wants text plus a top-level `images` array instead.
+            HistoryStyle::Ollama => crate::to_ollama_value(m),
+        })
         .collect();
     for turn in extra {
         match turn {
@@ -334,7 +340,7 @@ mod tests {
     fn render_openai_history_pairs_ids() {
         let base = vec![crate::ChatMessage {
             role: "user".to_string(),
-            content: "hi".to_string(),
+            content: "hi".into(),
         }];
         let extra = vec![
             AgentTurn::Assistant {
@@ -347,7 +353,7 @@ mod tests {
             },
             AgentTurn::ToolResult {
                 id: "a1".to_string(),
-                content: "contents".to_string(),
+                content: "contents".into(),
             },
         ];
         let v = render_history(&base, &extra, HistoryStyle::OpenAI);
@@ -362,8 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn render_ollama_history_keeps_object_args_without_ids() {
-        let extra = vec![AgentTurn::Assistant {
+    fn render_ollama_history_keeps_object_args_without_ids() {        let extra = vec![AgentTurn::Assistant {
             text: "".to_string(),
             calls: vec![ToolCall {
                 id: "call_0".to_string(),
@@ -374,5 +379,24 @@ mod tests {
         let v = render_history(&[], &extra, HistoryStyle::Ollama);
         assert_eq!(v[0]["tool_calls"][0]["function"]["arguments"]["path"], "x");
         assert!(v[0]["tool_calls"][0].get("id").is_none());
+    }
+
+    #[test]
+    fn render_history_maps_images_per_backend_style() {
+        let base = vec![crate::ChatMessage::user_with_images(
+            "see",
+            vec!["data:image/png;base64,AAAA".to_string()],
+        )];
+        let openai = render_history(&base, &[], HistoryStyle::OpenAI);
+        assert_eq!(
+            openai[0]["content"],
+            serde_json::json!([
+                {"type": "text", "text": "see"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ])
+        );
+        let ollama = render_history(&base, &[], HistoryStyle::Ollama);
+        assert_eq!(ollama[0]["content"], "see");
+        assert_eq!(ollama[0]["images"], serde_json::json!(["AAAA"]));
     }
 }

@@ -26,7 +26,7 @@ use xencode_providers_rs::{ChatMessage, ProviderError};
 fn test_messages() -> Vec<ChatMessage> {
     vec![ChatMessage {
         role: "user".to_string(),
-        content: "Hello".to_string(),
+        content: "Hello".into(),
     }]
 }
 

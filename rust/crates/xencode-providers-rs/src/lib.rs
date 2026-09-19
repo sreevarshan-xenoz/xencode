@@ -80,10 +80,146 @@ impl fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: MessageContent,
+}
+
+/// Message body: plain text, or OpenAI-style content parts mixing text with
+/// image URLs (data URLs from the analysis crate's `to_data_url`).
+///
+/// `untagged` keeps the wire shape backward compatible: `Text` serializes as
+/// a bare string — every text-only payload is byte-identical to before —
+/// while `Parts` serializes as the `[{"type":"text",...},
+/// {"type":"image_url",...}]` array OpenAI-compatible endpoints accept.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum MessageContent {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+/// One element of a multi-part message body.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlPart },
+}
+
+/// Image payload. `url` is a `data:{mime};base64,{data}` URL (see
+/// `to_data_url`); raw base64 without the prefix is also accepted by the
+/// Ollama renderer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImageUrlPart {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub detail: Option<String>,
+}
+
+impl From<String> for MessageContent {
+    fn from(s: String) -> Self {
+        MessageContent::Text(s)
+    }
+}
+
+impl From<&str> for MessageContent {
+    fn from(s: &str) -> Self {
+        MessageContent::Text(s.to_string())
+    }
+}
+
+impl ChatMessage {
+    /// Plain-text message. Every existing `content: string_value` call site
+    /// keeps compiling unchanged via `From<String>`.
+    pub fn text(role: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: MessageContent::Text(text.into()),
+        }
+    }
+
+    /// User message carrying one text part plus an image part per URL.
+    /// Contract: URLs are data URLs from the image intake pipeline.
+    pub fn user_with_images(text: impl Into<String>, urls: Vec<String>) -> Self {
+        let text = text.into();
+        let mut parts = Vec::with_capacity(urls.len() + 1);
+        if !text.is_empty() {
+            parts.push(ContentPart::Text { text });
+        }
+        parts.extend(urls.into_iter().map(|url| ContentPart::ImageUrl {
+            image_url: ImageUrlPart { url, detail: None },
+        }));
+        Self {
+            role: "user".to_string(),
+            content: MessageContent::Parts(parts),
+        }
+    }
+
+    /// Concatenated text parts (the whole body for `Text`). What text-only
+    /// backends and response parsing consume.
+    pub fn text_content(&self) -> String {
+        match &self.content {
+            MessageContent::Text(s) => s.clone(),
+            MessageContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    ContentPart::ImageUrl { .. } => None,
+                })
+                .collect(),
+        }
+    }
+
+    /// Image URLs in part order; empty for text-only messages.
+    pub fn image_urls(&self) -> Vec<&str> {
+        match &self.content {
+            MessageContent::Text(_) => Vec::new(),
+            MessageContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::ImageUrl { image_url } => Some(image_url.url.as_str()),
+                    ContentPart::Text { .. } => None,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn has_images(&self) -> bool {
+        match &self.content {
+            MessageContent::Text(_) => false,
+            MessageContent::Parts(parts) => parts
+                .iter()
+                .any(|p| matches!(p, ContentPart::ImageUrl { .. })),
+        }
+    }
+}
+
+/// Split a `data:{mime};base64,{data}` URL. Returns `None` for anything else
+/// (raw base64, http URLs), letting each renderer choose its fallback.
+pub fn split_data_url(url: &str) -> Option<(&str, &str)> {
+    url.strip_prefix("data:")?.split_once(";base64,")
+}
+
+/// Ollama `/api/chat` message: text content plus a top-level `images` array
+/// of raw base64 (Ollama does not take OpenAI content blocks or data-URL
+/// prefixes). The `images` key is omitted for text-only messages, so those
+/// payloads are byte-identical to before.
+pub(crate) fn to_ollama_value(msg: &ChatMessage) -> serde_json::Value {
+    let mut value =
+        serde_json::json!({"role": msg.role, "content": msg.text_content()});
+    let images: Vec<&str> = msg
+        .image_urls()
+        .into_iter()
+        .map(|u| split_data_url(u).map(|(_, data)| data).unwrap_or(u))
+        .collect();
+    if !images.is_empty() {
+        value["images"] = serde_json::Value::Array(
+            images.into_iter().map(serde_json::Value::from).collect(),
+        );
+    }
+    value
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,7 +406,7 @@ impl ProviderManager {
 
         let payload = serde_json::json!({
             "model": model,
-            "messages": messages,
+            "messages": messages.iter().map(to_ollama_value).collect::<Vec<_>>(),
             "stream": false
         });
 
@@ -287,7 +423,7 @@ impl ProviderManager {
             .await
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-        Ok(body.message.content)
+        Ok(body.message.text_content())
     }
 
     /// Generate a response and stream it token-by-token.
@@ -553,7 +689,7 @@ impl ProviderManager {
 
         let payload = serde_json::json!({
             "model": model,
-            "messages": messages,
+            "messages": messages.iter().map(to_ollama_value).collect::<Vec<_>>(),
             "stream": true
         });
 
@@ -585,8 +721,9 @@ impl ProviderManager {
                         continue;
                     }
                     if let Ok(parsed) = serde_json::from_str::<OllamaResponse>(line) {
-                        callback(&parsed.message.content);
-                        full_response.push_str(&parsed.message.content);
+                        let text = parsed.message.text_content();
+                        callback(&text);
+                        full_response.push_str(&text);
                         if parsed.done {
                             return Ok(full_response);
                         }
@@ -693,7 +830,7 @@ impl ProviderManager {
         let payload = serde_json::json!({
             "model": model,
             "messages": messages,
-            "stream": false
+            "stream": true
         });
 
         let response = self
@@ -878,7 +1015,7 @@ impl ProviderManager {
 
         body.choices
             .first()
-            .map(|c| c.message.content.clone())
+            .map(|c| c.message.text_content())
             .ok_or_else(|| ProviderError::Parse("llama.cpp: empty choices".to_string()))
     }
 
@@ -1091,10 +1228,73 @@ mod tests {
     fn serialize_chat_message() {
         let msg = ChatMessage {
             role: "user".to_string(),
-            content: "hello".to_string(),
+            content: "hello".into(),
         };
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"role":"user","content":"hello"}"#);
+    }
+
+    #[test]
+    fn text_content_round_trips_through_json() {
+        let msg = ChatMessage::text("user", "hello");
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.content, MessageContent::Text("hello".to_string()));
+        assert_eq!(back.text_content(), "hello");
+        assert!(!back.has_images());
+        assert!(back.image_urls().is_empty());
+    }
+
+    #[test]
+    fn parts_serialize_as_openai_content_blocks() {
+        let msg = ChatMessage::user_with_images(
+            "what is this?",
+            vec!["data:image/png;base64,iVBORw0KGgo=".to_string()],
+        );
+        assert!(msg.has_images());
+        assert_eq!(msg.image_urls(), vec!["data:image/png;base64,iVBORw0KGgo="]);
+        assert_eq!(msg.text_content(), "what is this?");
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            json["content"],
+            serde_json::json!([
+                {"type": "text", "text": "what is this?"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+            ])
+        );
+        // And back again — providers returning blocks deserialize too.
+        let back: ChatMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(back, msg);
+    }
+
+    #[test]
+    fn split_data_url_parts_mime_and_data() {
+        assert_eq!(
+            split_data_url("data:image/jpeg;base64,/9j/4AA="),
+            Some(("image/jpeg", "/9j/4AA="))
+        );
+        assert_eq!(split_data_url("aGVsbG8="), None);
+        assert_eq!(split_data_url("https://x/y.png"), None);
+    }
+
+    #[test]
+    fn ollama_value_omits_images_key_for_text() {
+        let value = to_ollama_value(&ChatMessage::text("user", "hi"));
+        assert_eq!(value, serde_json::json!({"role": "user", "content": "hi"}));
+    }
+
+    #[test]
+    fn ollama_value_strips_data_url_prefix() {
+        let msg = ChatMessage::user_with_images(
+            "see",
+            vec![
+                "data:image/png;base64,AAAA".to_string(),
+                "rawbase64==".to_string(),
+            ],
+        );
+        let value = to_ollama_value(&msg);
+        assert_eq!(value["content"], "see");
+        assert_eq!(value["images"], serde_json::json!(["AAAA", "rawbase64=="]));
     }
 
     #[test]
