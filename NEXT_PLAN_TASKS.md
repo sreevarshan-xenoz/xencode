@@ -2,37 +2,41 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Verified 2026-09-19.
 
-## Phase 3+ Intelligence
+## Rust Migration — Complete ✅
 
-- [ ] Repo-wide context indexing (vector store + graph store, `xencode/rag/`)
-- [ ] Routing intelligence: prompt router + provider health awareness
-- [ ] Real-time file watcher with proactive warnings
-- [ ] Live refactor suggestions
+- [x] Port core, config, cache, memory crates — `xencode-core-rs`, `-config-rs`, `-cache-rs`, `-memory-rs`
+- [x] TUI foundation (ratatui, `rust/crates/xencode-tui-rs/`)
+- [x] Model providers with retries (`rust/crates/xencode-providers-rs/`)
+- [x] Repo-wide context / RAG — `xencode-context-rs` (index, embed, retrieve, budget)
+- [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
+- [x] Analysis + security scanning — `xencode-analysis-rs`
+- [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
+- [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
+- [x] Workspace gates green — 13 crates, 331 tests passing, zero warnings
 
-## Fallback Governance
+## Real-Time Intelligence (Phase 3+)
 
-- [ ] Provider health dashboard/panel (TUI)
-- [ ] Retry budget policies per provider (`xencode/routing/retry_budget.py`)
-- [ ] Fallback policy configuration UX (`xencode/routing/fallback_config.py`)
+- [ ] Real-time file watcher with proactive warnings (`rust/crates/xencode-context-rs/`, new watcher module)
+- [ ] Live refactor suggestions on the symbol graph
+- [ ] Proactive bug warnings ("you just introduced a bug")
 
 ## Multimodal UX
 
-- [ ] Image input pipeline (`xencode/multimodal/image_analyzer.py`)
-- [ ] Document parsing into context (`xencode/multimodal/document_parser.py`)
-- [ ] Web extraction for research (`xencode/multimodal/web_extractor.py`)
+- [ ] Image input pipeline (`rust/crates/xencode-analysis-rs/` or a new `-multimodal` crate)
+- [ ] Document parsing into context (`rust/crates/xencode-context-rs/`)
+- [ ] Web extraction for research
 
 ## Secure Team Mode
 
-- [ ] Workspace RBAC hardening (`xencode/workspace/workspace_security.py`)
-- [ ] Collaboration session security (`xencode/collaboration/rbac.py`)
-- [ ] Audit log coverage for team actions (`xencode/audit/`)
+- [ ] Audit log coverage for team actions (`rust/crates/xencode-server-rs/` or `-collaboration-rs/`)
+- [ ] Workspace RBAC hardening (`rust/crates/xencode-collaboration-rs/workspace.rs`)
+- [ ] Collaboration session security review and polish
 
-## Rust Migration
+## Git Loop Completion
 
-- [ ] Port cache, config, memory crates (in progress, `rust/`)
-- [ ] TUI foundation (ratatui, `rust/crates/xencode-tui-rs/`)
-- [ ] Provider transport with retries (`rust/crates/xencode-providers-rs/`)
-- [ ] Server/analysis/collaboration/plugin crates
+- [ ] PR review dashboard / PR-level review browsing in the TUI
+  (per-file Code Review panel exists in `rust/crates/xencode-tui-rs/`)
 
-> Status legend: `[x]` done, `[ ]` todo, `[/]` in progress.
+> Status legend: `[x]` done, `[ ]` todo.
