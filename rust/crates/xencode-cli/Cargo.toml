@@ -27,5 +27,5 @@ tokio = { version = "1", features = ["full", "rt-multi-thread"] }
 crossterm = "0.28"
 ratatui = "0.29"
 walkdir = "2"
-dirs = "5"
+dirs = "6"
 axum = "0.8"
