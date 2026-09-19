@@ -4,52 +4,73 @@ Branch: `main`
 
 ## Current Status: All Phases Complete & Multi-Provider Architecture Shipped
 
-All planned Rust migration phases and multi-provider architecture enhancements are now complete. The Rust workspace contains 12 crates covering the full Xencode feature set with 176+ unit and integration tests passing.
+All planned Rust migration phases and multi-provider architecture enhancements are
+**complete**. The Rust workspace now contains **13 crates** covering the full
+Xencode feature set with **331 tests passing (0 failing, 3 ignored, 0 warnings)
+as of 2026-09-19**. Legacy Python development is frozen per `AGENTS.md` — the Rust
+workspace under `rust/` is the only locus of active development.
 
 ## Migration Summary
 
 ### Phases 0–4: Core, Providers & TUI ✅
-| Crate | Files | Tests |
-|-------|-------|-------|
-| `xencode-core-rs` | lib, scan, types | 4 |
-| `xencode-config-rs` | lib, config | 8 |
-| `xencode-cache-rs` | lib, cache | 11 |
-| `xencode-memory-rs` | lib, session | 10 |
-| `xencode-models-rs` | lib, ollama | 2 |
-| `xencode-providers-rs` | lib, manager, anthropic, gemini, qwen, openrouter, retry | 75 |
-| `xencode-tui-rs` | lib, app, ui, widgets, theme, focus, channel, input | 9 |
-| `xencode-cli` | main | 4 |
+| Crate | Modules | Tests |
+|-------|---------|-------|
+| `xencode-core-rs` | lib, workspace | 3 |
+| `xencode-config-rs` | config, files | 10 |
+| `xencode-cache-rs` | cache | 13 |
+| `xencode-memory-rs` | session | 4 |
+| `xencode-models-rs` | ollama, llamacpp, health | 18 (3 ignored) |
+| `xencode-providers-rs` | manager, anthropic, gemini, qwen, compatible, capabilities, retry, tools | 56 |
+| `xencode-tui-rs` | app, ui, widgets, theme, focus, channel, input | 16 |
+| `xencode-cli` | main | 0 (see integration suites) |
 
-- `xencode-providers-rs`: Provider trait, ProviderManager, multi-cloud routing (Anthropic, Gemini, Qwen, OpenRouter) and Ollama fallback. Exponential backoff retry middleware with emission guard (avoids duplicate tokens on mid-stream failures).
-- `xencode-tui-rs`: Full Ratatui terminal UI with 17 feature panels and overlay views, Braille spinner and ASCII gauge widgets, and full keyboard navigation.
+- `xencode-providers-rs`: `Provider` trait, `ProviderManager`, multi-cloud routing
+  (Anthropic, Gemini, Qwen, OpenRouter, OpenAI-compatible), Ollama + llama.cpp
+  fallback. Exponential-backoff retry middleware with emission guard (no duplicate
+  tokens on mid-stream failures) and status-code-driven retriability.
+- `xencode-models-rs`: Ollama + llama.cpp model clients with health checks and an
+  offline `ModelCapabilities` lookup (known context windows, tool routes).
+- `xencode-tui-rs`: Ratatui terminal UI with 20 focus areas/panels (ChatInput,
+  CodeEditor, FileExplorer, ModelSelector, Settings, CodeReview,
+  PerformanceDashboard, ProviderHealth, ProjectAnalyzer, GitCommit,
+  FeatureNavigator, ByteBot, CollaborationHub, VoiceInterface, TerminalAssistant,
+  SecurityAuditor, PerformanceProfiler, CustomModels, LearningMode, MultiLanguage),
+  Braille spinner and ASCII gauge widgets, full keyboard navigation.
 
 ### Phase 5: Analysis & RAG ✅
-| Crate | Files | Tests |
-|-------|-------|-------|
-| `xencode-analysis-rs` | analyzer, security, indexer, embeddings, vector_store | 4 |
+| Crate | Modules | Tests |
+|-------|---------|-------|
+| `xencode-analysis-rs` | analyzer, issues, security, indexer, embeddings, vector_store | 4 |
+| `xencode-context-rs` | context, conversation, budget, compact, scanner, index, embed, retrieve, symbols, cmd_output, gitinfo, metrics | 80 |
 
-- `CodeAnalyzer` — Language-aware code analysis for Python, JS/TS, Rust, and generic files
-- `VulnerabilityScanner` — OWASP-focused pattern-based vulnerability scanner (hardcoded secrets, SQL injection, command injection, weak crypto, path traversal, SSRF)
-- `ChunkIndexer` — Semantic file chunking at function/class boundaries with line-based fallback
-- `EmbeddingClient` — Ollama API client for nomic-embed-text embeddings
-- `VectorStore` — In-memory vector store with cosine similarity search
+- `CodeAnalyzer` — language-aware analysis for Python, JS/TS, Rust, and generic files
+- `VulnerabilityScanner` — OWASP-focused pattern scanning (hardcoded secrets, SQL
+  injection, command injection, weak crypto, path traversal, SSRF)
+- `ChunkIndexer` — semantic file chunking at function/class boundaries
+- `EmbeddingClient` — Ollama `nomic-embed-text` embeddings HTTP client
+- `VectorStore` — in-memory vector store with cosine similarity search
+- `xencode-context-rs` — repo-wide context indexing, live conversation assembly,
+  context-window budgeting, compaction, retrieval, and terminal-command output
+  capture; injected into every generation via `assemble_chat` + `collect_live_context`
 
 ### Phase 6: Server & Collaboration ✅
-| Crate | Files | Tests |
-|-------|-------|-------|
-| `xencode-server-rs` | routes, auth, ws | 5 |
-| `xencode-collaboration-rs` | workspace, crdt, sync | 11 |
+| Crate | Modules | Tests |
+|-------|---------|-------|
+| `xencode-server-rs` | routes, auth, ws | 66 |
+| `xencode-collaboration-rs` | workspace, crdt, sync | 14 |
 
-- **Server**: axum HTTP/WebSocket server with health, session management, auth, config, and model listing endpoints
-- **WebSocket**: Peer broadcast with connection lifecycle management
-- **Collaboration**: WorkspaceManager (create, members, roles), LWWRegister + GSet CRDTs, SyncCoordinator for session management
+- **Server**: axum HTTP/WebSocket server — health, session, auth, config, model-list
+  endpoints
+- **WebSocket**: peer broadcast with connection-lifecycle management
+- **Collaboration**: `WorkspaceManager` (create, members, roles), LWWRegister + GSet
+  CRDTs, `SyncCoordinator` for session management
 
 ### Phase 7: Plugin System ✅
-| Crate | Files | Tests |
-|-------|-------|-------|
-| `xencode-plugin-rs` | plugin_trait, manifest, host, registry | 5 |
+| Crate | Modules | Tests |
+|-------|---------|-------|
+| `xencode-plugin-rs` | plugin_trait, manifest, host, registry | 10 |
 
-- `XencodePlugin` trait with lifecycle (init, shutdown, handle_event)
+- `XencodePlugin` trait with lifecycle (`init`, `shutdown`, `handle_event`)
 - `PluginManifest` with JSON serde, file loading, version compatibility
 - `PluginHost` with event queue and plugin routing
 - `PluginRegistry` for directory-based plugin discovery
@@ -58,41 +79,35 @@ All planned Rust migration phases and multi-provider architecture enhancements a
 | Feature | Status |
 |---------|--------|
 | `xencode server --port 8765` | ✅ |
-| `xencode analyze <path>` | ✅ |
+| `xencode analyze <path> [--format]` | ✅ |
 | `xencode plugin list/install/remove` | ✅ |
+| `xencode llamacpp status/start/stop/load/unload` | ✅ |
 | `scripts/build-release.ps1` | ✅ |
 | `scripts/smoke-test.sh` | ✅ |
-| `scripts/parity_benchmark_comparison.py` | ✅ |
 
-### TUI Feature Panels (Phases 8-9) ✅
-| Panel | Status |
-|-------|--------|
-| Performance Dashboard | ✅ Rich overlay with file breakdown, session stats |
-| Provider Health | ✅ Health checks with status icons |
-| Project Analyzer | ✅ Workspace file type breakdown |
-| Git Commit | ✅ Commit message input with cursor |
-| Feature Navigator | ✅ 13-feature list with navigation |
-| **ByteBot Agent** | ✅ Step execution, progress bar, log panel |
-| **Collaboration Hub** | ✅ Session sharing, member status, sync indicators |
-| **Voice Interface** | ✅ Audio meter, commands, transcript |
-| **Terminal Assistant** | ✅ Command suggestions, risk badges |
-| **Security Auditor** | ✅ Severity bars, findings list, scan log |
-| **Performance Profiler** | ✅ Gauges, function table, hot path detection |
-| **Custom Models** | ✅ Profile list, parameter sliders |
-| **Learning Mode** | ✅ Lesson viewer, code examples, exercises |
-| **Multi-Language** | ✅ Language detection, translation |
+## Integration Test Suites ✅
+| Suite | Scope | Tests |
+|-------|-------|-------|
+| `provider_routing.rs` | cross-provider routing/fallback | 10 |
+| `gemini_integration.rs` | Gemini provider behavior | 9 |
+| `qwen_integration.rs` | Qwen provider behavior | 7 |
+| `retry_integration.rs` | retry/emission-guard behavior | 7 |
+| `stream_behavior.rs` | streaming semantics | 3 |
+| `small_terminal_render.rs` | TUI render smoke test | 1 |
 
 ## Build Status
 
-- **Crates**: 12 workspace members
-- **Total Tests**: 176 passing (0 failing, 4 ignored)
-- **Compilation**: Zero errors, zero warnings
+- **Crates**: 13 workspace members
+- **Total Tests**: 331 passing (0 failing, 3 ignored)
+- **Compilation**: Zero errors, zero warnings (`cargo check --workspace`)
+- **Migration**: Complete — see `AGENTS.md` (Rust-first directive) and
+  `NEXT_PLAN_TASKS.md` for the remaining Rust feature backlog
 
 ## CLI Usage
 
 ```bash
-# Launch TUI
-xencode tui
+# Launch TUI (default)
+xencode
 
 # Start collaboration server
 xencode server --port 8765
@@ -110,4 +125,8 @@ xencode plugin remove my-plugin
 xencode scan . --max-depth 2
 xencode models list
 xencode config show
+xencode memory list
+xencode cache stats
+xencode query "explain async" --model qwen3:4b
+xencode llamacpp status
 ```

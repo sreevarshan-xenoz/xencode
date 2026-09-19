@@ -7,7 +7,11 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-### Phase 1: � The Foundation (✅ FROZEN / COMPLETE)
+> **Verified against the tree on 2026-09-19.** All features below are now
+> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 331 tests) —
+> see [docs/RUST_MIGRATION_STATUS.md](RUST_MIGRATION_STATUS.md).
+
+### Phase 1: The Foundation (✅ FROZEN / COMPLETE)
 *Core infrastructure is feature-complete. No further expansion here.*
 - [x] **Multi-model conversations** - Switch models mid-chat ✨
 - [x] **Context-aware responses** - Use conversation history intelligently ✨
@@ -18,19 +22,20 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ---
 
-### Phase 2:  The Perfect Git Loop (Current Focus)
+### Phase 2: The Perfect Git Loop (✅ Mostly Complete)
 *Goal: The world's best AI-powered Git assistant. "Developers never commit manually again."*
 
 #### 1. ✅ Smart Commit & Review (The Core Loop)
-- [/] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
+- [x] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
 - [x] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
 - [x] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
 - [x] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
 
-#### 2. ️ TUI Centricity (Git Interface)
+#### 2. TUI Centricity (Git Interface)
 - [x] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
 - [x] **Commit Wizard** - Interactive TUI flow for generated messages
-- [ ] **Review Dashboard** - TUI for browsing PR review comments
+- [x] **Code Review panel** - per-file AI review in the TUI (`xencode-tui-rs`)
+- [/] **Review Dashboard** - PR-level review-comment browsing (not yet built)
 
 ---
 
@@ -44,8 +49,8 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ### 📦 Icebox / Long-Term Vision
 *Great ideas saved for later to maintain laser focus.*
-- **Voice Input/Output** (Companion Mode)
-- **Plugin System** (Hooks only for now)
+- ~~**Voice Input/Output**~~ — done in Rust (Voice Interface panel)
+- ~~**Plugin System**~~ — done in Rust (`xencode-plugin-rs`)
 - **Agent Orchestration** (Multi-agent debugging)
 - **VS Code Extension** (Separate product)
 - **Web Interface** (Separate product)
@@ -54,7 +59,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ### Current Architecture
 ```
-xencode.sh → xencode_core.py → Ollama API
+xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemini / Qwen / OpenRouter
 ```
 
 ### Target Architecture
@@ -62,13 +67,13 @@ xencode.sh → xencode_core.py → Ollama API
 ┌─────────────────────────────────────────────────────────┐
 │                    Xencode Ecosystem                    │
 ├─────────────────────────────────────────────────────────┤
-│  CLI Interface  │  Web UI  │  VS Code  │  API Server   │
+│  CLI Interface  │  TUI (ratatui)  │  API Server (axum)  │
 ├─────────────────────────────────────────────────────────┤
-│           Core Engine (xencode_core.py)                 │
+│        Core Engine (rust/crates/xencode-core-rs)        │
 ├─────────────────────────────────────────────────────────┤
-│  Memory  │  Cache  │  Models  │  Plugins  │  Analytics │
+│ Context │ Cache │ Models │ Providers │ Plugins │ Memory │
 ├─────────────────────────────────────────────────────────┤
-│   Ollama   │   OpenAI   │   Local   │   Custom Models │
+│    Ollama   │   llama.cpp   │   Cloud Providers   │ RAG │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -80,23 +85,17 @@ xencode.sh → xencode_core.py → Ollama API
 3. **Code analysis mode** - Comprehensive code review system
 4. **Enhanced classes** - ConversationMemory, ResponseCache, ModelManager
 
-### 🚀 Current Focus (Phase 2 & 3)
-1. **Interactive TUI** - Polishing the terminal interface
-2. **Git integration** - Completing PR reviews and branch management
-3. **Agentic Capabilities** - Orchestration and ensemble models
-4. **Collaboration Features** - Session sharing and workspaces
+### 🚀 Current Focus (Phase 3)
+1. **Real-time file watcher** - workspace watching + proactive warnings (not yet built)
+2. **Refactor suggestions** - live improvement tips over the context symbol graph
+3. **Multimodal inputs** - image/document input paths (not yet built)
+4. **Team-mode hardening** - RBAC + audit logs over the collaboration crate
 
-### 📋 Next Priorities (Phase 2 Continued)
-1. **Voice input/output** basic implementation
-2. **Plugin system** foundation
-3. **VS Code extension** development
-4. **Web interface** prototype
-
-### Medium Term
-1. **VS Code extension** development
-2. **Web interface** creation
-3. **API server** implementation
-4. **Advanced analytics**
+### 📋 Completed (was "Next Priorities")
+1. ✅ **Voice input/output** - Voice Interface panel (Rust TUI)
+2. ✅ **Plugin system** - `xencode-plugin-rs` with registry/host/manifest
+3. ✅ **Collaboration features** - HTTP/WebSocket server + CRDT sync
+4. ✅ **API server** - axum routes/auth/ws in `xencode-server-rs`
 
 ## 📊 Success Metrics & Current Status
 
@@ -114,19 +113,25 @@ xencode.sh → xencode_core.py → Ollama API
 - **Performance**: All systems respond in <1 second
 - **Integration Ready**: Modular design for easy integration
 
-### 📈 Current Metrics
-- **Features Implemented**: 8/12 Phase 1 features (67% complete)
-- **Code Quality**: Automated detection of syntax, style, security issues
-- **Context Awareness**: Project-level understanding and file relevance
-- **Model Intelligence**: Smart model selection based on query analysis
+### 📈 Current Metrics (2026-09-19)
+- **Rust Migration**: 13/13 crates ported — complete
+- **Test Suite**: 331 passing, 0 failing, 3 ignored
+- **Compilation**: clean `cargo check` across the workspace (zero warnings)
+- **Code Quality**: AST/pattern analysis for syntax, style, and security issues (`xencode-analysis-rs`)
+- **Context Awareness**: repo-wide indexing + per-turn retrieval (`xencode-context-rs`)
+- **Model Intelligence**: offline `ModelCapabilities` + status-driven fallback routing
 
 ## 🚀 Let's Build the Future of AI Development!
 
-Ready to transform how developers work with AI? Let's start with Phase 1! 🔥
-## 🔥 Pha
-se 1 Implementation Details
+Ready to transform how developers work with AI? Next up: Phase 3 (file watcher,
+refactor suggestions, multimodal, team-mode hardening) — see
+[NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md). 🔥
+## 🔥 Phase 1 Implementation Details
 
-### ✅ Multi-Model System (`multi_model_system.py`)
+> Historical notes from the original Python implementation. All of this is
+> superseded by the Rust workspace — see [docs/RUST_MIGRATION_STATUS.md](RUST_MIGRATION_STATUS.md).
+
+### ✅ Multi-Model System (`multi_model_system.py` — historical)
 **Features:**
 - Query type detection using keyword analysis
 - Model capability mapping with performance scores
