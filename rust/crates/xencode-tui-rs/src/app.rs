@@ -3920,22 +3920,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     } else if !app.settings_url_editing {
                                         match app.settings_cursor {
                                             0 => {
-                                                let themes = [
-                                                    "ocean",
-                                                    "midnight",
-                                                    "forest",
-                                                    "terminal",
-                                                    "dracula",
-                                                    "solarized",
-                                                    "nord",
-                                                ];
-                                                if let Some(pos) = themes
-                                                    .iter()
-                                                    .position(|t| *t == app.config.active_theme)
+                                                if let Some(next) =
+                                                    crate::theme::cycle_theme(
+                                                        &app.config.active_theme,
+                                                        false,
+                                                    )
                                                 {
-                                                    app.config.active_theme = themes
-                                                        [(pos + themes.len() - 1) % themes.len()]
-                                                    .to_string();
+                                                    app.config.active_theme = next;
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
                                                     let _ = app.config.save();
@@ -4002,22 +3993,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     } else if !app.settings_url_editing {
                                         match app.settings_cursor {
                                             0 => {
-                                                let themes = [
-                                                    "ocean",
-                                                    "midnight",
-                                                    "forest",
-                                                    "terminal",
-                                                    "dracula",
-                                                    "solarized",
-                                                    "nord",
-                                                ];
-                                                if let Some(pos) = themes
-                                                    .iter()
-                                                    .position(|t| *t == app.config.active_theme)
+                                                if let Some(next) =
+                                                    crate::theme::cycle_theme(
+                                                        &app.config.active_theme,
+                                                        true,
+                                                    )
                                                 {
-                                                    app.config.active_theme = themes
-                                                        [(pos + 1) % themes.len()]
-                                                    .to_string();
+                                                    app.config.active_theme = next;
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
                                                     let _ = app.config.save();

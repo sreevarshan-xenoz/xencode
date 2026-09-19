@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
+
 ### Changed
 - Every panel color renders through new semantic `ThemeColors` slots (`success`/`warning`/`danger`/`info`/`accent_secondary`): 63 hardcoded ANSI constants in the renderer are gone, so themes can actually restyle severities, diffs and status badges (Milestone E4)
 - Body panel layout has one source of truth: `ui::body_chunks` feeds both the renderer and mouse focus hit-testing (`ui::body_hit_test`), replacing the duplicated 20%/70% magic numbers in the event loop (Milestone E4)

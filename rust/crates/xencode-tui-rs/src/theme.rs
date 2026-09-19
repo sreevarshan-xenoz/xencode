@@ -1,7 +1,32 @@
 //! Theme color definitions for the TUI.
 //!
-//! Extracted from `app.rs` (Step 0 of the foundation refactor). Pure code move —
-//! no behavior change. Holds the `ThemeColors` struct and the 7 named themes.
+//! Holds the `ThemeColors` struct, the named theme palettes, and the shared
+//! `THEME_NAMES`/`cycle_theme` used by the settings panel and key handler.
+
+/// Themes available in the picker, in cycle order (←/→ on the Theme row).
+pub const THEME_NAMES: &[&str] = &[
+    "ocean",
+    "midnight",
+    "forest",
+    "terminal",
+    "dracula",
+    "solarized",
+    "nord",
+    "light",
+];
+
+/// Next theme name when cycling by one step (`forward`), or `None` if the
+/// active theme is unknown (nothing sensible to cycle to).
+pub fn cycle_theme(active: &str, forward: bool) -> Option<String> {
+    let len = THEME_NAMES.len();
+    let pos = THEME_NAMES.iter().position(|t| *t == active)?;
+    let next = if forward {
+        (pos + 1) % len
+    } else {
+        (pos + len - 1) % len
+    };
+    Some(THEME_NAMES[next].to_string())
+}
 
 #[derive(Clone, Copy)]
 pub struct ThemeColors {
@@ -143,6 +168,25 @@ impl ThemeColors {
                 info: ratatui::style::Color::Cyan,
                 accent_secondary: ratatui::style::Color::Magenta,
             },
+            "light" => Self {
+                bg: ratatui::style::Color::Rgb(255, 255, 255),
+                fg: ratatui::style::Color::Rgb(35, 35, 35),
+                accent: ratatui::style::Color::Rgb(0, 0, 139),
+                border: ratatui::style::Color::Rgb(205, 205, 205),
+                border_active: ratatui::style::Color::Rgb(0, 0, 139),
+                highlight: ratatui::style::Color::Rgb(215, 228, 245),
+                highlight_fg: ratatui::style::Color::Rgb(20, 30, 55),
+                message_user: ratatui::style::Color::Rgb(0, 0, 139),
+                message_assistant: ratatui::style::Color::Rgb(0, 100, 0),
+                message_system: ratatui::style::Color::DarkGray,
+                status_bg: ratatui::style::Color::Rgb(232, 232, 236),
+                status_fg: ratatui::style::Color::Rgb(45, 45, 55),
+                success: ratatui::style::Color::Rgb(0, 100, 0),
+                warning: ratatui::style::Color::Rgb(160, 120, 0),
+                danger: ratatui::style::Color::Rgb(139, 0, 0),
+                info: ratatui::style::Color::Rgb(0, 110, 110),
+                accent_secondary: ratatui::style::Color::Rgb(120, 40, 120),
+            },
             // "ocean" and default
             _ => Self {
                 bg: ratatui::style::Color::Rgb(11, 27, 43),
@@ -164,5 +208,45 @@ impl ThemeColors {
                 accent_secondary: ratatui::style::Color::Magenta,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cycle_theme, ThemeColors, THEME_NAMES};
+    use ratatui::style::Color;
+
+    #[test]
+    fn cycle_wraps_both_directions() {
+        assert_eq!(cycle_theme("ocean", true).as_deref(), Some("midnight"));
+        assert_eq!(cycle_theme("ocean", false).as_deref(), Some("light"));
+        assert_eq!(cycle_theme("light", true).as_deref(), Some("ocean"));
+        assert_eq!(cycle_theme("not-a-theme", true), None);
+    }
+
+    #[test]
+    fn every_named_theme_resolves_to_its_own_palette() {
+        // A misspelled arm in `ThemeColors::get` would silently fall through
+        // to the ocean default; distinct (bg, accent) pairs catch that.
+        let palettes: Vec<(Color, Color)> = THEME_NAMES
+            .iter()
+            .map(|name| {
+                let t = ThemeColors::get(name);
+                (t.bg, t.accent)
+            })
+            .collect();
+        for (i, a) in palettes.iter().enumerate() {
+            for (j, b) in palettes.iter().enumerate() {
+                if i != j {
+                    assert_ne!(
+                        a, b,
+                        "themes {:?} and {:?} share a palette",
+                        THEME_NAMES[i], THEME_NAMES[j]
+                    );
+                }
+            }
+        }
+        // Unknown names still fall back to ocean (documented behavior).
+        assert_eq!(ThemeColors::get("bogus").bg, ThemeColors::get("ocean").bg);
     }
 }
