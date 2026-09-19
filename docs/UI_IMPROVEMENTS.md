@@ -3,6 +3,8 @@
 > Inventory of `rust/crates/xencode-tui-rs/` verified against the tree on
 > 2026-09-19. Every item cites `file:line` — re-verify before starting work,
 > as these line numbers drift. Grouped by theme, rough priority top → bottom.
+> Fix plan: **Milestone E** in [../NEXT_PLAN_TASKS.md](../NEXT_PLAN_TASKS.md) —
+> check entries off here as the corresponding E-tasks land.
 
 ## 1. Dead / drifted modules (do first — everything else builds on these)
 

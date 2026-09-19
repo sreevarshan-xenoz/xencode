@@ -86,4 +86,83 @@
 - [ ] D4-01 Docs sweep: README structure + CLI_GUIDE subcommands, NEXT_PLAN.md counts,
   CHANGELOG entry; `cargo test --workspace` count recorded.
 
+## Milestone E — UI Systematic Fixes (drafted 2026-09-19)
+
+> Source of findings: [docs/UI_IMPROVEMENTS.md](docs/UI_IMPROVEMENTS.md) — check off
+> entries there as each task lands. Same ground rules as Milestone D (Rust-only,
+> tests per task, zero warnings, atomic commits, docs in close-out).
+> Dependency note: E2-02 (non-blocking git commit) is trivial on its own but becomes
+> free if Milestone D's D1-01 task core lands first — sequence accordingly.
+
+### E1 — Reconcile dead modules (UI doc §1) — foundation for everything else
+
+- [ ] E1-01 Single source of truth for focus/feature list: move the live
+  `FocusArea`/`InputMode`/`FEATURE_LIST`/`navigate_feature` from `app.rs:42-66`
+  into `focus.rs` (already has the drifted 13-entry copy — delete that), import
+  from one place. Add `ReviewDashboard` to Feature Navigator.
+- [ ] E1-02 Single theme source: delete the verbatim duplicate at `app.rs:85-205`,
+  use `theme.rs`; all panels read `ThemeColors` slots.
+- [ ] E1-03 Adopt `widgets/`: replace the 11 inline spinner frame arrays in
+  `ui.rs` with `widgets::spinner`, and the local `bar` closure (`ui.rs:1055`) with
+  `widgets::gauge`. Delete `channel.rs` and `input.rs` (unused; multiline input
+  arrives in E5 via `tui_textarea` instead) unless a use surfaces first.
+- [ ] E1-04 Gate: no dead modules remain — every file in `src/` is imported and
+  used, or deleted.
+
+### E2 — Correctness bugs (UI doc §2)
+
+- [ ] E2-01 ByteBot Enter executes the typed command instead of replacing it with
+  history (`app.rs:3659-3667`); add regression test.
+- [ ] E2-02 Git commit off the UI thread (`app.rs:3650-3652`) — spawn task, report
+  result as a chat line; TUI must stay responsive on slow repos.
+- [ ] E2-03 Remove dead `FocusArea::Terminal` + its "coming soon" stub
+  (`app.rs:3463`, `ui.rs:464-465`) or wire it — decide: remove (the Ctrl+T strip
+  already exists).
+- [ ] E2-04 Scroll fixes: use or delete `file_scroll_offset` (`app.rs:272`); clamp
+  provider-health/security scroll to row count (`app.rs:3591, 3594`); make
+  CodeReview diff output scrollable (`ui.rs:917-921`).
+- [ ] E2-05 Mouse wheel support for the remaining focus areas (currently 7 of 18;
+  `_ => {}` at `app.rs:4293`).
+
+### E3 — High-impact UX (UI doc §4, first half)
+
+- [ ] E3-01 Markdown rendering in chat: block/heading/inline-code/URL splitter
+  rendered as styled `Line`s (no new deps unless justified); code fences visually
+  distinct while streaming. Headless render tests.
+- [ ] E3-02 Help overlay (`F1` or `?`): keybindings per current focus area,
+  generated from the real key handler — no fiction.
+- [ ] E3-03 Toast/notification layer: file-watch warnings become transient overlays
+  (`app.rs:440-449`), not fake system chat lines.
+
+### E4 — Theme & layout consistency (UI doc §3)
+
+- [ ] E4-01 Funnel ~63 raw `Color::` uses in `ui.rs` through `ThemeColors` slots
+  (add slots as needed: diff add/remove, severity levels, panel border dim).
+- [ ] E4-02 One layout function feeding both render and mouse-hit testing — kill
+  the duplicated 20%/50%/30% and 20%/70% magic numbers (`ui.rs:178-210`,
+  `app.rs:4322-4324`).
+- [ ] E4-03 Settings nav bound from the actual row list, not the hardcoded `14`
+  (`app.rs:3565` vs `ui.rs:687`).
+- [ ] E4-04 Light theme + config toggle; dedupe the triplicated theme-cycle lists
+  (`ui.rs:574`, `app.rs:4026, 4108`).
+
+### E5 — Input UX (UI doc §4, second half)
+
+- [ ] E5-01 Multiline chat input via `tui_textarea` (already a dep for the editor),
+  Alt+Enter sends newline, Enter submits; keep single-line feel by default.
+- [ ] E5-02 Input history recall (e.g. Alt+Up/Down; plain Up/Down keep scrolling
+  chat) + slash-command autocomplete on `/`.
+
+### E6 — Structure (UI doc §5) — ride along, last
+
+- [ ] E6-01 Split the 887-line key `match` (`app.rs:3366-4252`) into per-focus
+  `handle_key` fns + a global chord table; pure move, no behavior change, tests
+  pin existing bindings first.
+- [ ] E6-02 Clamp scroll offsets on `Event::Resize` shrink (`app.rs:4340`).
+
+### E7 — Close-out
+
+- [ ] E7-01 Docs: CHANGELOG entries as items land; `CLI_GUIDE.md`/`USER_MANUAL.md`
+  TUI keys section updated for help overlay + new input behavior; counts refreshed.
+
 > Status legend: `[x]` done, `[ ]` todo.
