@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use xencode_analysis_rs::analyzer::CodeAnalyzer;
 use xencode_analysis_rs::images::{analyze_image, is_image_path, ImageMeta};
+use xencode_analysis_rs::issues::CodeIssue;
 use xencode_analysis_rs::security::VulnerabilityScanner;
 use xencode_analysis_rs::web::{fetch_url, FetchedPage};
 use xencode_cache_rs::ResponseCache;
@@ -147,6 +148,17 @@ enum Commands {
     Fetch {
         /// URL to fetch (http/https only)
         url: String,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Review the diff between a base branch and HEAD, file by file
+    Review {
+        /// Base branch, tag, commit — or HEAD for uncommitted changes
+        #[arg(long, default_value = "main")]
+        base: String,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -312,6 +324,7 @@ async fn main() {
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
+        Commands::Review { base, format } => run_review(base, format),
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Tui => run_tui().await,
@@ -1030,6 +1043,133 @@ async fn run_fetch(url: String, format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
+/// One file in a review: diff stats plus working-tree analysis. `note` is
+/// set instead of `issues` when the file cannot be analyzed (deleted,
+/// binary, unreadable, oversized image) — visible, never silent.
+#[derive(Debug)]
+struct ReviewedFile {
+    path: String,
+    added: Option<u64>,
+    deleted: Option<u64>,
+    issues: Vec<CodeIssue>,
+    note: Option<String>,
+}
+
+/// Review one diff entry against the working tree.
+fn review_file(root: &std::path::Path, diff: &xencode_context_rs::DiffFile) -> ReviewedFile {
+    let full = root.join(&diff.path);
+    let mut file = ReviewedFile {
+        path: diff.path.clone(),
+        added: diff.added,
+        deleted: diff.deleted,
+        issues: Vec::new(),
+        note: None,
+    };
+    if is_image_path(&full) {
+        match analyze_image(&full) {
+            Ok(meta) => file.note = Some(format_image_text(&meta)),
+            Err(e) => file.note = Some(format!("image not readable: {e}")),
+        }
+        return file;
+    }
+    match CodeAnalyzer::analyze_file(&full) {
+        Ok(issues) => file.issues = issues,
+        Err(e) => file.note = Some(format!("not analyzed: {e}")),
+    }
+    file
+}
+
+/// PR-level triage view: per-file stats plus issue counts. Pure — unit-tested.
+fn format_review_text(base: &str, files: &[ReviewedFile]) -> String {
+    let mut out = format!("Review of diff {base}...HEAD ({} files)\n", files.len());
+    for file in files {
+        let stats = match (file.added, file.deleted) {
+            (Some(a), Some(d)) => format!("+{a} -{d}"),
+            _ => "binary".to_string(),
+        };
+        out.push_str(&format!("\n  {} ({})", file.path, stats));
+        if let Some(note) = &file.note {
+            out.push_str(&format!("\n    {note}"));
+        }
+        if !file.issues.is_empty() {
+            out.push_str(&format!("\n    {} issue(s)", file.issues.len()));
+        }
+    }
+    out
+}
+
+/// Repo root for diff paths: the enclosing git toplevel when inside a
+/// repo (diff paths are repo-relative), else the working directory.
+/// Pure over `cwd` — unit-tested with a temp repo.
+fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
+    let toplevel = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    toplevel
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+fn run_review(base: String, format: OutputFormat) -> Result<(), String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let root = resolve_review_root(&cwd);
+    let diffs = xencode_context_rs::git_diff_numstat(&root, &base)?;
+    let files: Vec<ReviewedFile> = diffs.iter().map(|d| review_file(&root, d)).collect();
+    match format {
+        OutputFormat::Json => {
+            let arr: Vec<serde_json::Value> = files
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "path": f.path,
+                        "added": f.added,
+                        "deleted": f.deleted,
+                        "issues": f.issues,
+                        "note": f.note,
+                    })
+                })
+                .collect();
+            let output = serde_json::json!({
+                "base": base,
+                "files_changed": files.len(),
+                "files": arr,
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
+            );
+        }
+        OutputFormat::Text => {
+            println!("{}", format_review_text(&base, &files));
+            for file in &files {
+                for issue in &file.issues {
+                    let icon = match issue.severity.label() {
+                        "critical" | "high" => "R",
+                        "medium" => "Y",
+                        _ => "G",
+                    };
+                    println!(
+                        "    {} [{}] {} Ln{}: {} -- {}",
+                        icon,
+                        issue.severity.label(),
+                        file.path,
+                        issue.line_number,
+                        issue.message,
+                        issue.suggestion
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
     if path.is_dir() {
         // Full-tree walk: no depth cap (an explicit user action), junk dirs
@@ -1371,5 +1511,110 @@ mod tests {
         assert_eq!(super::parse_json_schema(None).unwrap(), None);
         let err = super::parse_json_schema(Some("{broken".to_string())).unwrap_err();
         assert!(err.contains("invalid --json-schema"), "{err}");
+    }
+
+    #[test]
+    fn review_text_summarizes_files_and_notes() {
+        let files = vec![
+            super::ReviewedFile {
+                path: "src/a.rs".to_string(),
+                added: Some(10),
+                deleted: Some(2),
+                issues: vec![],
+                note: None,
+            },
+            super::ReviewedFile {
+                path: "assets/logo.png".to_string(),
+                added: None,
+                deleted: None,
+                issues: vec![],
+                note: Some("binary".to_string()),
+            },
+        ];
+        let out = super::format_review_text("main", &files);
+        assert!(
+            out.contains("Review of diff main...HEAD (2 files)"),
+            "{out}"
+        );
+        assert!(out.contains("src/a.rs (+10 -2)"), "{out}");
+        assert!(out.contains("assets/logo.png (binary)"), "{out}");
+    }
+
+    #[test]
+    fn review_file_notes_missing_and_binary() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-cli-review-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Deleted from the working tree: note, not silence, not panic.
+        let gone = super::review_file(
+            &dir,
+            &xencode_context_rs::DiffFile {
+                path: "gone.rs".to_string(),
+                added: Some(1),
+                deleted: Some(1),
+            },
+        );
+        assert!(gone.note.is_some(), "{gone:?}");
+        // Binary content: analyzer cannot read it → note.
+        std::fs::write(dir.join("blob.o"), [0xFF, 0xFE, 0x00]).unwrap();
+        let bin = super::review_file(
+            &dir,
+            &xencode_context_rs::DiffFile {
+                path: "blob.o".to_string(),
+                added: None,
+                deleted: None,
+            },
+        );
+        assert!(bin.note.is_some(), "{bin:?}");
+        // Plain code analyzes.
+        std::fs::write(dir.join("ok.rs"), "pub fn f() {}\n").unwrap();
+        let ok = super::review_file(
+            &dir,
+            &xencode_context_rs::DiffFile {
+                path: "ok.rs".to_string(),
+                added: Some(1),
+                deleted: Some(0),
+            },
+        );
+        assert!(ok.note.is_none(), "{ok:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn review_root_prefers_git_toplevel() {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-cli-root-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        // Outside any repo: falls back to cwd itself.
+        assert_eq!(
+            super::resolve_review_root(&dir.join("sub")),
+            dir.join("sub")
+        );
+        assert_eq!(super::resolve_review_root(&dir), dir);
+        // Inside a repo: the toplevel, even from a subdirectory.
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q"]);
+        let toplevel = super::resolve_review_root(&dir.join("sub"));
+        let canon = |p: std::path::PathBuf| p.canonicalize().unwrap();
+        assert_eq!(canon(toplevel), canon(dir.clone()));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
