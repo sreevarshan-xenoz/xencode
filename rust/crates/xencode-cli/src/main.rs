@@ -739,7 +739,6 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
 /// Parse `--json-schema` strictly: invalid JSON is a user error, not a
 /// string to send. Pure — unit-tested.
 fn parse_json_schema(schema: Option<String>) -> Result<Option<serde_json::Value>, String> {
@@ -751,6 +750,7 @@ fn parse_json_schema(schema: Option<String>) -> Result<Option<serde_json::Value>
         .transpose()
 }
 
+#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
 async fn run_query(
     prompt: String,
     model_override: Option<String>,
