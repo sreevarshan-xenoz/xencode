@@ -261,6 +261,10 @@ pub struct ProviderManager {
     anthropic_api_key: Option<String>,
     retry_config: RetryConfig,
     client: reqwest::Client,
+    /// Per-request silence bound (seconds). Streaming responses get a
+    /// time-to-first-token cap, then run unbounded once tokens flow;
+    /// non-streaming calls get a total cap. `0` disables both.
+    request_timeout_secs: u64,
     /// Most recent llama.cpp generation timing (tokens + tok/s), if any.
     llamacpp_timings: Mutex<Option<LlamaCppTimings>>,
 }
@@ -283,6 +287,7 @@ impl ProviderManager {
             anthropic_api_key,
             retry_config: RetryConfig::default(),
             client,
+            request_timeout_secs: 0,
             llamacpp_timings: Mutex::new(None),
         }
     }
@@ -296,6 +301,15 @@ impl ProviderManager {
     /// Set a custom retry configuration.
     pub fn with_retry_config(mut self, config: RetryConfig) -> Self {
         self.retry_config = config;
+        self
+    }
+
+    /// Bound silence at `secs` seconds per attempt (each try gets the full
+    /// budget; timeouts surface as retriable network errors). Non-streaming
+    /// calls get a total cap; streams get a time-to-first-token cap, then
+    /// run unbounded once tokens flow. `0` disables both.
+    pub fn with_request_timeout(mut self, secs: u64) -> Self {
+        self.request_timeout_secs = secs;
         self
     }
 
@@ -332,10 +346,25 @@ impl ProviderManager {
     ) -> Result<String, ProviderError> {
         let model_owned = model.to_string();
         let messages_owned = messages.to_vec();
+        let timeout_secs = self.request_timeout_secs;
 
         retry::retry_async(&self.retry_config, || async {
-            self.generate_inner(&model_owned, &messages_owned, options)
+            if timeout_secs == 0 {
+                self.generate_inner(&model_owned, &messages_owned, options)
+                    .await
+            } else {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    self.generate_inner(&model_owned, &messages_owned, options),
+                )
                 .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(ProviderError::Network(format!(
+                        "request timed out after {timeout_secs}s"
+                    ))),
+                }
+            }
         })
         .await
     }
@@ -480,12 +509,40 @@ impl ProviderManager {
             || async {
                 let cb_ref = &cb;
                 let emitted_ref = &emitted;
-                self.generate_stream_inner(&model_owned, &messages_owned, options, |token| {
+                let take_token = |token: &str| {
                     emitted_ref.store(true, Ordering::SeqCst);
                     let mut guard = cb_ref.lock().unwrap();
                     guard(token);
-                })
-                .await
+                };
+                // Bound silence, not duration: a hung server that never sends
+                // a first token fails fast (retriable — nothing was emitted);
+                // once tokens flow the attempt runs unbounded to completion.
+                if self.request_timeout_secs == 0 {
+                    return self
+                        .generate_stream_inner(&model_owned, &messages_owned, options, take_token)
+                        .await;
+                }
+                let mut attempt = Box::pin(self.generate_stream_inner(
+                    &model_owned,
+                    &messages_owned,
+                    options,
+                    take_token,
+                ));
+                tokio::select! {
+                    result = &mut attempt => result,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(
+                        self.request_timeout_secs,
+                    )) => {
+                        if emitted_ref.load(Ordering::SeqCst) {
+                            attempt.await
+                        } else {
+                            Err(ProviderError::Network(format!(
+                                "no response within {}s",
+                                self.request_timeout_secs
+                            )))
+                        }
+                    }
+                }
             },
         )
         .await

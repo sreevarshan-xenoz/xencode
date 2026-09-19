@@ -1188,7 +1188,8 @@ impl<'a> App<'a> {
             let client = OllamaClient::new(&ollama_url, timeout);
             let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
             let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
-                .with_llama_cpp(llama_client);
+                .with_llama_cpp(llama_client)
+                .with_request_timeout(timeout);
             let _ = manager
                 .generate_stream_with_options(
                     &model,

@@ -898,7 +898,8 @@ async fn run_query(
         config.api_keys.google_gemini_api_key.clone(),
         None,
     )
-    .with_llama_cpp(llama_client);
+    .with_llama_cpp(llama_client)
+    .with_request_timeout(config.response_timeout);
 
     let mut response_content = String::new();
     let result = provider
