@@ -367,7 +367,7 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
                 match status.as_str() {
                     "M" | "MM" => app.theme.message_user,      // Modified
                     "A" | "AM" => app.theme.message_assistant, // Added
-                    "D" => ratatui::style::Color::Red,         // Deleted
+                    "D" => app.theme.danger,         // Deleted
                     _ => app.theme.fg,                         // Untracked etc
                 }
             } else {
@@ -561,7 +561,7 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = if app.available_models.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "   ⚠️  No models detected. Ensure Ollama is running, or press 'r' to refresh.",
-            Style::default().fg(ratatui::style::Color::Yellow),
+            Style::default().fg(app.theme.warning),
         )))]
     } else {
         app.available_models
@@ -580,11 +580,11 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
                 let prefix = if is_current { " ● " } else { "   " };
                 let (badge, badge_color) =
                     if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") {
-                        (" [llamacpp]", ratatui::style::Color::Yellow)
+                        (" [llamacpp]", app.theme.warning)
                     } else if model.contains('/') || model.starts_with("qwen-") {
-                        (" [cloud]", ratatui::style::Color::Magenta)
+                        (" [cloud]", app.theme.accent_secondary)
                     } else {
-                        (" [ollama]", ratatui::style::Color::Cyan)
+                        (" [ollama]", app.theme.info)
                     };
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("{}{}", prefix, model), style),
@@ -825,11 +825,11 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
             let is_url_item = idx == 6 || idx == 7 || idx == 8;
             let is_num_item = idx == 9 || idx == 10 || idx == 11 || idx == 12;
             let value_color = if is_reset && is_selected {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else if is_reset {
                 app.theme.message_system
             } else if (is_url_item || is_num_item) && app.settings_url_editing && is_selected {
-                ratatui::style::Color::Yellow
+                app.theme.warning
             } else {
                 app.theme.accent
             };
@@ -891,9 +891,9 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     for &(name, configured, detail) in &checks {
         let icon = if configured { "✅" } else { "❌" };
         let color = if configured {
-            ratatui::style::Color::Green
+            app.theme.success
         } else {
-            ratatui::style::Color::Red
+            app.theme.danger
         };
         provider_lines.push(Line::from(vec![
             Span::styled(format!("  {}  {}", icon, name), Style::default().fg(color)),
@@ -1338,8 +1338,8 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
             _ => "\u{2753}",
         };
         let status_color = match status.as_str() {
-            "healthy" => ratatui::style::Color::Green,
-            "error" | "unavailable" => ratatui::style::Color::Red,
+            "healthy" => app.theme.success,
+            "error" | "unavailable" => app.theme.danger,
             _ => app.theme.message_system,
         };
         let latency_str = if *latency > 0.0 {
@@ -1382,7 +1382,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
                         "        ⚡ {:.0} tok/s · {} tokens generated (last request)",
                         ts.predicted_per_second, ts.tokens_generated
                     ),
-                    Style::default().fg(ratatui::style::Color::Yellow),
+                    Style::default().fg(app.theme.warning),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
@@ -1394,7 +1394,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         if !error_str.is_empty() {
             lines.push(Line::from(Span::styled(
                 format!("        {}", error_str),
-                Style::default().fg(ratatui::style::Color::Red),
+                Style::default().fg(app.theme.danger),
             )));
         }
         lines.push(Line::from(""));
@@ -1687,16 +1687,16 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
 
         for (i, (step_name, status)) in app.bytebot_steps.iter().enumerate() {
             let (icon, color) = match status.as_str() {
-                "done" => ("\u{2705}".to_string(), ratatui::style::Color::Green),
+                "done" => ("\u{2705}".to_string(), app.theme.success),
                 "running" => {
                     let running_icon: String = if app.bytebot_running {
                         spinner::frame(app.spinner_tick).to_string()
                     } else {
                         "\u{23F3}".to_string()
                     };
-                    (running_icon, ratatui::style::Color::Yellow)
+                    (running_icon, app.theme.warning)
                 }
-                "failed" => ("\u{274C}".to_string(), ratatui::style::Color::Red),
+                "failed" => ("\u{274C}".to_string(), app.theme.danger),
                 _ => ("\u{25CB}".to_string(), app.theme.message_system), // pending / unknown
             };
             steps_lines.push(Line::from(vec![
@@ -1766,9 +1766,9 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         for entry in &app.bytebot_log {
             // Color based on content prefix
             let color = if entry.starts_with('✅') {
-                ratatui::style::Color::Green
+                app.theme.success
             } else if entry.starts_with('❌') || entry.starts_with("failed") {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else {
                 app.theme.fg
             };
@@ -1895,9 +1895,9 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
     steps_lines.push(Line::from(""));
     for (name, status) in &app.init_steps {
         let (icon, color) = match status.as_str() {
-            "done" => ("\u{2705}".to_string(), ratatui::style::Color::Green),
-            "running" => ("\u{23F3}".to_string(), ratatui::style::Color::Yellow),
-            "failed" => ("\u{274C}".to_string(), ratatui::style::Color::Red),
+            "done" => ("\u{2705}".to_string(), app.theme.success),
+            "running" => ("\u{23F3}".to_string(), app.theme.warning),
+            "failed" => ("\u{274C}".to_string(), app.theme.danger),
             _ => ("\u{25CB}".to_string(), app.theme.message_system),
         };
         steps_lines.push(Line::from(vec![
@@ -1925,9 +1925,9 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|entry| {
             let color = if entry.contains('\u{274C}') {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else if entry.contains('\u{2705}') {
-                ratatui::style::Color::Green
+                app.theme.success
             } else {
                 app.theme.fg
             };
@@ -2060,9 +2060,9 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
 
         for (name, status, connection) in &app.collab_members {
             let (status_icon, status_color) = match status.as_str() {
-                "online" => ("\u{25CF}", ratatui::style::Color::Green),
-                "away" => ("\u{25CB}", ratatui::style::Color::Yellow),
-                "busy" => ("\u{25A0}", ratatui::style::Color::Red),
+                "online" => ("\u{25CF}", app.theme.success),
+                "away" => ("\u{25CB}", app.theme.warning),
+                "busy" => ("\u{25A0}", app.theme.danger),
                 _ => ("?", app.theme.message_system),
             };
             let role_badge = match name.as_str() {
@@ -2144,13 +2144,13 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for entry in &app.collab_activity_log {
             let color = if entry.starts_with('\u{2705}') || entry.starts_with('\u{1F504}') {
-                ratatui::style::Color::Green
+                app.theme.success
             } else if entry.starts_with('\u{274C}') || entry.starts_with('\u{26A0}') {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else if entry.starts_with('\u{1F4E4}') || entry.starts_with('\u{1F4E5}') {
-                ratatui::style::Color::Cyan
+                app.theme.info
             } else if entry.starts_with('\u{1F464}') {
-                ratatui::style::Color::Yellow
+                app.theme.warning
             } else {
                 app.theme.fg
             };
@@ -2290,9 +2290,9 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for entry in &app.voice_transcript {
             let color = if entry.starts_with('✅') {
-                ratatui::style::Color::Green
+                app.theme.success
             } else if entry.starts_with('❌') {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else {
                 app.theme.fg
             };
@@ -2373,9 +2373,9 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for suggestion in &app.term_asst_suggestions {
             let color = if suggestion.starts_with("✅") {
-                ratatui::style::Color::Green
+                app.theme.success
             } else if suggestion.starts_with("⚠️") {
-                ratatui::style::Color::Yellow
+                app.theme.warning
             } else {
                 app.theme.fg
             };
@@ -2460,10 +2460,10 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        severity_bar(critical, max_sev, ratatui::style::Color::Red),
-        severity_bar(high, max_sev, ratatui::style::Color::Yellow),
-        severity_bar(medium, max_sev, ratatui::style::Color::Cyan),
-        severity_bar(low, max_sev, ratatui::style::Color::Green),
+        severity_bar(critical, max_sev, app.theme.danger),
+        severity_bar(high, max_sev, app.theme.warning),
+        severity_bar(medium, max_sev, app.theme.info),
+        severity_bar(low, max_sev, app.theme.success),
     ];
 
     let summary_block = Block::default()
@@ -2495,10 +2495,10 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for (severity, category, location) in &app.sec_scan_results {
             let (icon, color) = match severity.as_str() {
-                "Critical" => ("🔴", ratatui::style::Color::Red),
-                "High" => ("🟡", ratatui::style::Color::Yellow),
-                "Medium" => ("🔵", ratatui::style::Color::Cyan),
-                _ => ("🟢", ratatui::style::Color::Green),
+                "Critical" => ("🔴", app.theme.danger),
+                "High" => ("🟡", app.theme.warning),
+                "Medium" => ("🔵", app.theme.info),
+                _ => ("🟢", app.theme.success),
             };
             find_lines.push(Line::from(vec![
                 Span::styled(format!(" {} ", icon), Style::default().fg(color)),
@@ -2523,11 +2523,11 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
         )));
         for entry in app.sec_scan_log.iter().rev().take(5) {
             let color = if entry.starts_with('❌') {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else if entry.starts_with('⚠') {
-                ratatui::style::Color::Yellow
+                app.theme.warning
             } else if entry.starts_with('🚨') {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else {
                 app.theme.fg
             };
@@ -2617,19 +2617,19 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
             "CPU     ",
             app.profiler_gauge_cpu,
             100.0,
-            ratatui::style::Color::Cyan,
+            app.theme.info,
         ),
         gauge_block(
             "Memory  ",
             app.profiler_gauge_mem,
             100.0,
-            ratatui::style::Color::Magenta,
+            app.theme.accent_secondary,
         ),
         gauge_block(
             "Latency ",
             app.profiler_gauge_latency,
             500.0,
-            ratatui::style::Color::Yellow,
+            app.theme.warning,
         ),
     ];
 
@@ -2685,7 +2685,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
         for (name, time_ms, mem_mb, calls) in &app.profiler_functions {
             let hot = *time_ms > 200.0;
             let color = if hot {
-                ratatui::style::Color::Red
+                app.theme.danger
             } else {
                 app.theme.fg
             };
@@ -2929,7 +2929,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
             for line in app.learn_code_example.lines() {
                 content_lines.push(Line::from(Span::styled(
                     format!("    {}", line),
-                    Style::default().fg(ratatui::style::Color::Green),
+                    Style::default().fg(app.theme.success),
                 )));
             }
             content_lines.push(Line::from(""));
@@ -2940,12 +2940,12 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
             content_lines.push(Line::from(Span::styled(
                 "  Exercise:",
                 Style::default()
-                    .fg(ratatui::style::Color::Yellow)
+                    .fg(app.theme.warning)
                     .add_modifier(Modifier::BOLD),
             )));
             content_lines.push(Line::from(Span::styled(
                 format!("    {}", app.learn_exercise),
-                Style::default().fg(ratatui::style::Color::Yellow),
+                Style::default().fg(app.theme.warning),
             )));
         }
 
@@ -2975,9 +2975,9 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                         .fg(app.theme.highlight_fg)
                         .bg(app.theme.highlight)
                 } else if app.learn_quiz_answered && i == 0 {
-                    Style::default().fg(ratatui::style::Color::Green)
+                    Style::default().fg(app.theme.success)
                 } else if app.learn_quiz_answered && is_selected && !app.learn_quiz_correct {
-                    Style::default().fg(ratatui::style::Color::Red)
+                    Style::default().fg(app.theme.danger)
                 } else {
                     Style::default().fg(app.theme.fg)
                 };
@@ -2991,12 +2991,12 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                 if app.learn_quiz_correct {
                     content_lines.push(Line::from(Span::styled(
                         "  Correct! +20% progress",
-                        Style::default().fg(ratatui::style::Color::Green),
+                        Style::default().fg(app.theme.success),
                     )));
                 } else {
                     content_lines.push(Line::from(Span::styled(
                         "  Not quite. Try again next time!",
-                        Style::default().fg(ratatui::style::Color::Yellow),
+                        Style::default().fg(app.theme.warning),
                     )));
                 }
             } else {
@@ -3062,9 +3062,9 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     } else {
         for (file, lang, conf) in &app.lang_detection_results {
             let color = match conf.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) {
-                c if c >= 99.0 => ratatui::style::Color::Green,
-                c if c >= 90.0 => ratatui::style::Color::Cyan,
-                _ => ratatui::style::Color::Yellow,
+                c if c >= 99.0 => app.theme.success,
+                c if c >= 90.0 => app.theme.info,
+                _ => app.theme.warning,
             };
             detect_lines.push(Line::from(vec![
                 Span::styled(format!("  {:<15}", file), Style::default().fg(app.theme.fg)),
@@ -3086,9 +3086,9 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let mut supp_lines: Vec<Line> = Vec::new();
     for (lang, status) in &app.lang_supported {
         let color = match status.as_str() {
-            "✅" => ratatui::style::Color::Green,
-            "🔄" => ratatui::style::Color::Yellow,
-            _ => ratatui::style::Color::Red,
+            "✅" => app.theme.success,
+            "🔄" => app.theme.warning,
+            _ => app.theme.danger,
         };
         supp_lines.push(Line::from(vec![
             Span::styled(format!("  {} ", status), Style::default().fg(color)),
@@ -3141,7 +3141,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
         trans_lines.push(Line::from(""));
         trans_lines.push(Line::from(Span::styled(
             format!("  Output: {}", app.lang_translate_output),
-            Style::default().fg(ratatui::style::Color::Green),
+            Style::default().fg(app.theme.success),
         )));
     }
     let trans_para = Paragraph::new(trans_lines)

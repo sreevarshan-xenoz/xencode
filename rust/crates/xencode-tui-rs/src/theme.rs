@@ -17,6 +17,13 @@ pub struct ThemeColors {
     pub message_system: ratatui::style::Color,
     pub status_bg: ratatui::style::Color,
     pub status_fg: ratatui::style::Color,
+    /// Semantic status colors — the palette panels use instead of raw ANSI
+    /// constants (diff add/remove, severities, ok/fail states).
+    pub success: ratatui::style::Color,
+    pub warning: ratatui::style::Color,
+    pub danger: ratatui::style::Color,
+    pub info: ratatui::style::Color,
+    pub accent_secondary: ratatui::style::Color,
 }
 
 impl ThemeColors {
@@ -35,6 +42,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::DarkGray,
                 status_bg: ratatui::style::Color::Rgb(30, 30, 50),
                 status_fg: ratatui::style::Color::Rgb(200, 200, 220),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             "forest" => Self {
                 bg: ratatui::style::Color::Rgb(15, 29, 20),
@@ -49,6 +61,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::DarkGray,
                 status_bg: ratatui::style::Color::Rgb(20, 40, 25),
                 status_fg: ratatui::style::Color::Rgb(200, 230, 200),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             "terminal" => Self {
                 bg: ratatui::style::Color::Rgb(0, 17, 0),
@@ -63,6 +80,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::Rgb(0, 128, 0),
                 status_bg: ratatui::style::Color::Rgb(0, 30, 0),
                 status_fg: ratatui::style::Color::Rgb(128, 255, 128),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             "dracula" => Self {
                 bg: ratatui::style::Color::Rgb(40, 42, 54),
@@ -77,6 +99,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::Rgb(98, 114, 164),
                 status_bg: ratatui::style::Color::Rgb(30, 31, 41),
                 status_fg: ratatui::style::Color::Rgb(248, 248, 242),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             "solarized" => Self {
                 bg: ratatui::style::Color::Rgb(0, 43, 54),
@@ -91,6 +118,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::Rgb(88, 110, 117),
                 status_bg: ratatui::style::Color::Rgb(0, 30, 38),
                 status_fg: ratatui::style::Color::Rgb(147, 161, 161),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             "nord" => Self {
                 bg: ratatui::style::Color::Rgb(46, 52, 64),
@@ -105,6 +137,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::Rgb(97, 108, 135),
                 status_bg: ratatui::style::Color::Rgb(36, 41, 51),
                 status_fg: ratatui::style::Color::Rgb(216, 222, 233),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
             // "ocean" and default
             _ => Self {
@@ -120,6 +157,11 @@ impl ThemeColors {
                 message_system: ratatui::style::Color::DarkGray,
                 status_bg: ratatui::style::Color::Rgb(18, 40, 60),
                 status_fg: ratatui::style::Color::Rgb(200, 220, 240),
+                success: ratatui::style::Color::Green,
+                warning: ratatui::style::Color::Yellow,
+                danger: ratatui::style::Color::Red,
+                info: ratatui::style::Color::Cyan,
+                accent_secondary: ratatui::style::Color::Magenta,
             },
         }
     }

@@ -163,8 +163,15 @@
 
 ### E4 — Theme & layout consistency (UI doc §3)
 
-- [ ] E4-01 Funnel ~63 raw `Color::` uses in `ui.rs` through `ThemeColors` slots
-  (add slots as needed: diff add/remove, severity levels, panel border dim).
+- [x] E4-01 All raw `Color::` uses in `ui.rs` (exactly 63) funneled through new
+  semantic `ThemeColors` slots: `success`/`warning`/`danger`/`info`/
+  `accent_secondary` (diff markers, severities, ok/fail states, provider
+  badges). Slots are initialized to the same ANSI colors in all 7 themes, so
+  this is behavior-identical — themes (incl. the E4-04 light theme) now have
+  real knobs to override. `ui.rs` now contains zero `Color::` constants (all
+  `Color::Rgb` literals live in `theme.rs`); the only other raw constants are
+  two `DarkGray` editor line-number styles in `app.rs` `App::new`/file-open
+  (set before any theme is applied).
 - [x] E4-02 One layout function feeding both render and mouse-hit testing:
   `ui::body_chunks` now owns the File Explorer/Code Editor/Chat split (20/50/30),
   `draw_body` renders its rects and the click handler focuses panels via
