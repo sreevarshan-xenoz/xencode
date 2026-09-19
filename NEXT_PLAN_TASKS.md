@@ -100,8 +100,8 @@
   `FocusArea`/`InputMode`/`FEATURE_LIST`/`navigate_feature` from `app.rs` into
   `focus.rs` (deleted the drifted 13-entry copy); `app.rs` re-exports, `ReviewDashboard`
   already reachable via Feature Navigator.
-- [ ] E1-02 Single theme source: delete the verbatim duplicate at `app.rs:85-205`,
-  use `theme.rs`; all panels read `ThemeColors` slots.
+- [x] E1-02 Single theme source: deleted the verbatim duplicate in `app.rs`
+  (byte-identical diff verified first), `app.rs` now re-exports `theme::ThemeColors`.
 - [ ] E1-03 Adopt `widgets/`: replace the 11 inline spinner frame arrays in
   `ui.rs` with `widgets::spinner`, and the local `bar` closure (`ui.rs:1055`) with
   `widgets::gauge`. Delete `channel.rs` and `input.rs` (unused; multiline input
