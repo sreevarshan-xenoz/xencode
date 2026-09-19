@@ -119,9 +119,11 @@
 - [x] E2-02 Git commit off the UI thread (`app.rs:3650-3652`) — `tokio::process`
   spawn; result reported as a `[GIT_COMMIT_OK/ERR]` system chat line via the existing
   event channel, then `refresh_git()`. Helper `first_output_line` unit-tested.
-- [ ] E2-03 Remove dead `FocusArea::Terminal` + its "coming soon" stub
-  (`app.rs:3463`, `ui.rs:464-465`) or wire it — decide: remove (the Ctrl+T strip
-  already exists).
+- [x] E2-03 Removed dead `FocusArea::Terminal` (never assigned): enum variant
+  (`focus.rs`), dead close-strip focus reset (`app.rs` Ctrl+T arm), and the
+  `small_terminal_render` FOCI entry. The Ctrl+T terminal strip pane itself is
+  untouched (driven by `show_terminal`, not focus). That test's FOCI list also gained
+  the missing `ReviewDashboard` entry — verified it renders at all swept sizes.
 - [ ] E2-04 Scroll fixes: use or delete `file_scroll_offset` (`app.rs:272`); clamp
   provider-health/security scroll to row count (`app.rs:3591, 3594`); make
   CodeReview diff output scrollable (`ui.rs:917-921`).

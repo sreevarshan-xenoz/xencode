@@ -3294,9 +3294,6 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Char('t') => {
                                 app.show_terminal = !app.show_terminal;
-                                if !app.show_terminal && app.focus == FocusArea::Terminal {
-                                    app.focus = FocusArea::ChatInput;
-                                }
                                 continue;
                             }
                             KeyCode::Char('h') if ctrl => {

@@ -16,7 +16,6 @@ pub enum FocusArea {
     ModelSelector,
     Settings,
     CodeReview,
-    Terminal,
     PerformanceDashboard,
     ProviderHealth,
     ProjectAnalyzer,

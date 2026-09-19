@@ -18,7 +18,6 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("ModelSelector", FocusArea::ModelSelector),
     ("Settings", FocusArea::Settings),
     ("CodeReview", FocusArea::CodeReview),
-    ("Terminal", FocusArea::Terminal),
     ("PerformanceDashboard", FocusArea::PerformanceDashboard),
     ("ProviderHealth", FocusArea::ProviderHealth),
     ("ProjectAnalyzer", FocusArea::ProjectAnalyzer),
@@ -33,6 +32,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("CustomModels", FocusArea::CustomModels),
     ("LearningMode", FocusArea::LearningMode),
     ("MultiLanguage", FocusArea::MultiLanguage),
+    ("ReviewDashboard", FocusArea::ReviewDashboard),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
