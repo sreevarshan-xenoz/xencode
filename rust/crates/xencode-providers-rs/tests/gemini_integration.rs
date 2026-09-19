@@ -60,7 +60,7 @@ async fn gemini_generate_basic() {
 
     Mock::given(method("POST"))
         .and(path("/v1beta/models/gemini-pro:generateContent"))
-        .and(query_param("key", "test-gemini-key"))
+        .and(header("x-goog-api-key", "test-gemini-key"))
         .and(header("Content-Type", "application/json"))
         .and(body_json(expected_body()))
         .respond_with(ResponseTemplate::new(200).set_body_json(success_response(
@@ -96,7 +96,7 @@ async fn gemini_generate_with_max_tokens() {
 
     Mock::given(method("POST"))
         .and(path("/v1beta/models/gemini-pro:generateContent"))
-        .and(query_param("key", "test-key"))
+        .and(header("x-goog-api-key", "test-key"))
         .and(body_json(custom_body))
         .respond_with(ResponseTemplate::new(200).set_body_json(success_response("Short answer.")))
         .expect(1)
@@ -246,7 +246,7 @@ async fn gemini_stream_basic() {
     Mock::given(method("POST"))
         .and(path("/v1beta/models/gemini-pro:streamGenerateContent"))
         .and(query_param("alt", "sse"))
-        .and(query_param("key", "test-key"))
+        .and(header("x-goog-api-key", "test-key"))
         .and(body_json(expected_body()))
         .respond_with(ResponseTemplate::new(200).set_body_string(
             "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Rust\"}]}}]}\n\
