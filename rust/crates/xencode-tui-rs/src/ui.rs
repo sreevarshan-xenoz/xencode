@@ -209,7 +209,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::ReviewDashboard => "↑↓:file  u/d:scroll  b:base  Enter:reload  Esc:close",
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
-            FocusArea::ProviderHealth => "h:refresh  Esc:close",
+            FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
             FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
             FocusArea::GitCommit | FocusArea::CollaborationHub |
             FocusArea::VoiceInterface | FocusArea::TerminalAssistant |

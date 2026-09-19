@@ -252,7 +252,16 @@
 
 ### E7 — Close-out
 
-- [ ] E7-01 Docs: CHANGELOG entries as items land; `CLI_GUIDE.md`/`USER_MANUAL.md`
-  TUI keys section updated for help overlay + new input behavior; counts refreshed.
+- [x] E7-01 Close-out sweep: CHANGELOG has an entry per E-item; counts
+  refreshed to the live 455-test total. Fiction removed from the manuals:
+  QUICK_START's `/help` `/models` `/model` `/clear` `/exit` don't exist in
+  the TUI (only `/init` `/ctx` `/advise` `/bytebot` are intercepted — that
+  list, plus the new editing keys, is what it now shows), USER_MANUAL's
+  shortcut table was rewritten from the actual `keymap.rs` bindings
+  (`Ctrl+H` runs a check, it doesn't open a dashboard; `i`/`e` semantics
+  corrected; help overlay + multiline/history/Tab-completion keys added),
+  the stale `h:refresh` status-bar hint for ProviderHealth (unbound key)
+  fixed to `Ctrl+H`, README panel count corrected 17 → 21 (the actual
+  `FocusArea` enum size).
 
 > Status legend: `[x]` done, `[ ]` todo.

@@ -41,7 +41,7 @@ and fix your code — driven entirely from your terminal.
 - **🧠 Offline-first AI** — local Ollama models by default; cloud fallback only when you opt in.
 - **🤖 Agentic coding loop** — bounded `plan → edit → test → fix` cycles with error classification and targeted fixes.
 - **⚖️ Ensemble reasoning** — combine multiple models via vote, weighted, consensus, or hybrid strategies.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (17 panels): agent, collaboration, audit, profiler, git, models, and more.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (21 panels): agent, collaboration, audit, profiler, git, models, and more.
 - **🔒 Secure by design** — token-authenticated collaboration server and OWASP-based security scanning.
 - **🔌 Extensible platform** — plugin trait system, feature flags, and lifecycle management.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with CRDT sync, plus Docker, Compose, and Kubernetes assets.
@@ -105,7 +105,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Session export/replay for reproducible execution history.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 17 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
+- **Rust ratatui TUI** (primary) — 21 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
 - Code analysis with language-aware AST parsing (Python, JavaScript/TypeScript, Rust).
 - Side-by-side diff inspection and hunk-level review flows.
 - Rich CLI with `server`, `analyze`, and `plugin` subcommands.
@@ -184,7 +184,7 @@ xencode server --port 8765
 xencode plugin list
 ```
 
-**TUI shortcuts:** `Tab` cycles panels · `Esc` closes overlays · `Ctrl+F` opens the Feature Navigator.
+**TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+F` opens the Feature Navigator.
 
 ---
 
