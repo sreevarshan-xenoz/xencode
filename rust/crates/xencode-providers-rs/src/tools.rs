@@ -322,9 +322,102 @@ pub(crate) fn ingest_oai_chunk(
     }
 }
 
+/// Tool surface for the background task registry (Milestone D, D1-02).
+///
+/// Schemas only — execution lives with the caller that owns a
+/// [`xencode_core_rs::TaskManager`](../xencode_core_rs/struct.TaskManager.html),
+/// so one approval policy covers every provider.
+pub fn background_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "background_start".to_string(),
+            description: "Start a shell command as a background task and return its \
+                          task id immediately, without waiting for it to finish. Use \
+                          for long-running work (builds, tests, servers)."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Short label shown in the task list"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command line, run through sh -c"
+                    }
+                },
+                "required": ["command"]
+            }),
+        },
+        ToolDefinition {
+            name: "background_poll".to_string(),
+            description: "Check a background task: its status (running, exited with a \
+                          code, or killed) plus the most recent output lines."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "Task id returned by background_start"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
+            name: "background_stop".to_string(),
+            description: "Kill a running background task. Finishing a task this way \
+                          is permanent; the record can then be removed."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "Task id returned by background_start"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_tools_are_valid_openai_function_schemas() {
+        let tools = background_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["background_start", "background_poll", "background_stop"]
+        );
+        for tool in &tools {
+            let value = tool.to_api_value();
+            assert_eq!(value["type"], "function");
+            assert_eq!(value["function"]["name"], tool.name.as_str());
+            let params = &value["function"]["parameters"];
+            assert_eq!(params["type"], "object");
+            assert!(
+                params["properties"].is_object()
+                    && !params["properties"].as_object().unwrap().is_empty()
+            );
+            assert!(!tool.description.is_empty());
+        }
+        // Only `background_start` has an optional argument.
+        let start = &tools[0].parameters["required"];
+        assert_eq!(start.as_array().unwrap().len(), 1);
+        for tool in &tools[1..] {
+            let required = tool.parameters["required"].as_array().unwrap().clone();
+            assert_eq!(required.len(), 1);
+            assert_eq!(required[0], "id");
+        }
+    }
 
     #[test]
     fn definition_renders_openai_function_schema() {

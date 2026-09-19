@@ -19,7 +19,7 @@ use retry::RetryConfig;
 
 pub use capabilities::{capabilities_for, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
-pub use tools::{AgentStep, AgentTurn, ToolCall, ToolDefinition};
+pub use tools::{background_tools, AgentStep, AgentTurn, ToolCall, ToolDefinition};
 
 #[derive(Debug)]
 pub enum ProviderError {
