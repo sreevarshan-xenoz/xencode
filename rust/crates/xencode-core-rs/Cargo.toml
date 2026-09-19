@@ -7,3 +7,7 @@ license.workspace = true
 [lib]
 name = "xencode_core_rs"
 path = "src/lib.rs"
+
+[dependencies]
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "macros", "process", "io-util", "time"] }

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 455 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 466 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -51,10 +51,15 @@
 
 ### D1 — Background task core
 
-- [ ] D1-01 `tasks` module in `xencode-core-rs`: `TaskRecord` (id, name, command, pid,
+- [x] D1-01 `tasks` module in `xencode-core-rs`: `TaskRecord` (id, name, command, pid,
   status Running/Exited(s)/Killed, capped output tail), tokio-backed spawn, registry
   with `start`/`poll`/`stop`/`list`/`remove`. Pure state transitions unit-testable
-  without real processes.
+  without real processes. Shipped as two layers: `TaskStore`/`TaskRecord` (pure, 6
+  unit tests) and `TaskManager` (owns `tokio::process` children, stdout+stderr drained
+  by reader tasks into a 500-line cap; `remove` refuses Running *before* touching the
+  child map so `kill_on_drop` can't silent-kill a live task). 5 `#[tokio::test]`
+  lifecycle tests cover echo→Exited(0)+output, `exit 3`, sleep→stop→Killed→rm, and
+  NotFound/AlreadyFinished paths.
 - [ ] D1-02 Tool surface: `background_start`/`background_poll`/`background_stop` as
   `ToolDefinition`s in `xencode-providers-rs/tools.rs` shapes, and wire tool-call
   **execution** into the agent turn loop (`generate_stream_with_tools` exists in the
