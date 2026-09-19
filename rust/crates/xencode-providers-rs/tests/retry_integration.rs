@@ -282,3 +282,44 @@ async fn provider_manager_ollama_success_no_retry() {
     assert!(result.is_ok(), "expected success: {:?}", result.err());
     assert_eq!(result.unwrap(), "Hello from Ollama!");
 }
+
+// ── request timeout fires on a stalled server ───────────────────────────
+//
+// The mock delays 30s; the manager allows 1s with no retries. Without the
+// timeout the test would hang — the timeout error proves the bound works.
+
+#[tokio::test]
+async fn request_timeout_fires_on_stalled_response() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(30))
+                .set_body_string(
+                    r#"{"message":{"role":"assistant","content":"late"},"done":true}"#,
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let uri = mock_server.uri();
+    let llm_client = xencode_models_rs::OllamaClient::new(&uri, 60);
+
+    use xencode_providers_rs::ProviderManager;
+
+    let manager = ProviderManager::new(llm_client, None, None, None, None)
+        .with_retry_config(RetryConfig {
+            max_retries: 0,
+            ..fast_retry()
+        })
+        .with_request_timeout(1);
+
+    let result = manager.generate("llama3.1:8b", &test_messages()).await;
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("timed out"),
+        "expected timeout error, got: {err}"
+    );
+}
