@@ -740,6 +740,17 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
 }
 
 #[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
+/// Parse `--json-schema` strictly: invalid JSON is a user error, not a
+/// string to send. Pure — unit-tested.
+fn parse_json_schema(schema: Option<String>) -> Result<Option<serde_json::Value>, String> {
+    schema
+        .map(|s| {
+            serde_json::from_str(&s)
+                .map_err(|e| format!("invalid --json-schema (must be JSON): {e}"))
+        })
+        .transpose()
+}
+
 async fn run_query(
     prompt: String,
     model_override: Option<String>,
@@ -877,8 +888,7 @@ async fn run_query(
         mirostat,
         max_tokens,
         grammar,
-        json_schema: json_schema
-            .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))),
+        json_schema: parse_json_schema(json_schema)?,
     };
 
     let provider = ProviderManager::new(
@@ -1351,5 +1361,14 @@ mod tests {
         assert!(out.contains("…[truncated to"), "{out}");
         assert!(out.contains("--format json"), "{out}");
         assert!(!out.contains(&"z".repeat(super::FETCH_TEXT_CAP_CHARS + 10)));
+    }
+
+    #[test]
+    fn json_schema_rejects_invalid_json() {
+        let ok = super::parse_json_schema(Some(r#"{"type":"object"}"#.to_string())).unwrap();
+        assert_eq!(ok, Some(serde_json::json!({"type": "object"})));
+        assert_eq!(super::parse_json_schema(None).unwrap(), None);
+        let err = super::parse_json_schema(Some("{broken".to_string())).unwrap_err();
+        assert!(err.contains("invalid --json-schema"), "{err}");
     }
 }
