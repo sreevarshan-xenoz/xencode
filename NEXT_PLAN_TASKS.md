@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 439 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 442 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -211,8 +211,17 @@
   with a scroll-adjusted cursor. Input title + help overlay document the
   chords. 1 unit test: multiline submit keeps `\n` in the prompt and clears
   the box.
-- [ ] E5-02 Input history recall (e.g. Alt+Up/Down; plain Up/Down keep scrolling
-  chat) + slash-command autocomplete on `/`.
+- [x] E5-02 Input history + slash autocomplete. Sent prompts land in
+  `App::input_history` (200-entry cap, adjacent duplicates skipped); Alt+Up/
+  Down recalls them while editing (clamps at both ends, restores the stashed
+  draft when returning past the newest), while plain Up/Down still scroll the
+  chat in normal mode and navigate lines while editing. Tab on a lone `/...`
+  first line completes the command via pure `complete_slash_token` (longest
+  common prefix over `SLASH_COMMANDS` = the four commands `submit_message`
+  actually intercepts; Tab on `/` toasts the list); anywhere else Tab still
+  inserts 4 spaces. Help overlay gained a Slash-commands section (test pins it
+  against SLASH_COMMANDS). 3 new tests (completion matrix, recall walk +
+  dedup, help sync).
 
 ### E6 — Structure (UI doc §5) — ride along, last
 

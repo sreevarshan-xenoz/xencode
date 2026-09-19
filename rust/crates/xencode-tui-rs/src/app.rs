@@ -10,7 +10,7 @@ use crossterm::event::{
 };
 use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
-use tui_textarea::TextArea;
+use tui_textarea::{CursorMove, TextArea};
 
 use xencode_config_rs::XencodeConfig;
 use xencode_context_rs::{init_project, DocError, DocText, HardwareProfile};
@@ -91,6 +91,40 @@ fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
     status
 }
 
+/// Max recalled prompts kept per session.
+const INPUT_HISTORY_LIMIT: usize = 200;
+
+/// Slash commands intercepted by `submit_message`, in handler order.
+pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot"];
+
+/// Complete a partially typed command token against `SLASH_COMMANDS`.
+/// Returns the longest common prefix when it extends the token (pure —
+/// unit-tested); None when ambiguous or already complete.
+pub fn complete_slash_token(token: &str) -> Option<String> {
+    if token.len() < 2 || !token.starts_with('/') {
+        return None;
+    }
+    let matches: Vec<&'static str> = SLASH_COMMANDS
+        .iter()
+        .copied()
+        .filter(|c| c.starts_with(token))
+        .collect();
+    if matches.is_empty() {
+        return None;
+    }
+    let mut lcp = matches[0].to_string();
+    for m in &matches[1..] {
+        let keep = lcp
+            .chars()
+            .zip(m.chars())
+            .take_while(|(a, b)| a == b)
+            .map(|(a, _)| a)
+            .collect::<String>();
+        lcp = keep;
+    }
+    (lcp.len() > token.len()).then_some(lcp)
+}
+
 pub struct App<'a> {
     pub focus: FocusArea,
     /// Chat input box (multiline-capable; Enter submits, Alt+Enter/Ctrl+J
@@ -99,6 +133,10 @@ pub struct App<'a> {
     pub input_mode: InputMode,
     pub messages: Vec<UiMessage>,
     pub chat_scroll: u16,
+    /// Sent prompts, oldest first (chat input recall, Alt+Up/Down).
+    pub input_history: Vec<String>,
+    history_index: Option<usize>,
+    history_draft: String,
     pub file_tree: Vec<String>,
     pub selected_file: usize,
     pub attached_files: HashSet<String>,
@@ -573,6 +611,9 @@ impl<'a> App<'a> {
             input_mode: InputMode::Normal,
             messages: Vec::new(),
             chat_scroll: 0,
+            input_history: Vec::new(),
+            history_index: None,
+            history_draft: String::new(),
             file_tree,
             selected_file: 0,
             attached_files: HashSet::new(),
@@ -859,12 +900,84 @@ impl<'a> App<'a> {
         self.style_chat_input();
     }
 
+    /// Replace the whole draft (history recall / slash completion).
+    fn set_chat_text(&mut self, text: &str) {
+        let lines: Vec<String> = if text.is_empty() {
+            vec![String::new()]
+        } else {
+            text.lines().map(String::from).collect()
+        };
+        self.chat_input = TextArea::from(lines);
+        self.style_chat_input();
+        self.chat_input.move_cursor(CursorMove::Bottom);
+        self.chat_input.move_cursor(CursorMove::End);
+    }
+
+    /// Alt+Up/Down: walk sent prompts; index past the ends restores the
+    /// stashed draft. Plain Up/Down while editing stay textarea navigation.
+    fn recall_history(&mut self, dir: i32) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        let len = self.input_history.len() as i32;
+        let current = self.history_index.map(|i| i as i32).unwrap_or(len);
+        let next = (current + dir).clamp(0, len);
+        if next == len {
+            let draft = std::mem::take(&mut self.history_draft);
+            self.history_index = None;
+            self.set_chat_text(&draft);
+        } else {
+            if self.history_index.is_none() {
+                self.history_draft = self.chat_input.lines().join("\n");
+            }
+            self.history_index = Some(next as usize);
+            let text = self.input_history[next as usize].clone();
+            self.set_chat_text(&text);
+        }
+    }
+
+    fn push_toast(&mut self, kind: crate::toast::ToastKind, message: String) {
+        crate::toast::push(&mut self.toasts, message, kind, current_timestamp());
+    }
+
+    /// Tab on a `/...` first line: complete the command token. Returns the
+    /// completed token, or None when nothing can be completed (the caller
+    /// then falls back to inserting spaces).
+    fn complete_slash_draft(&mut self) -> bool {
+        let draft = self.chat_input.lines().join("\n");
+        if draft.lines().count() > 1 || !draft.starts_with('/') || draft.contains(' ') {
+            return false;
+        }
+        if draft == "/" {
+            self.push_toast(
+                crate::toast::ToastKind::Info,
+                "Commands: /init  /ctx  /advise  /bytebot (Tab completes)".to_string(),
+            );
+            return true;
+        }
+        match complete_slash_token(&draft) {
+            Some(done) => {
+                self.set_chat_text(&format!("{done} "));
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn submit_message(&mut self, tx: mpsc::UnboundedSender<String>) {
         let prompt = self.chat_input.lines().join("\n");
         if prompt.trim().is_empty() {
             return;
         }
         self.reset_chat_input();
+        if self.input_history.last().is_none_or(|last| *last != prompt) {
+            self.input_history.push(prompt.clone());
+            if self.input_history.len() > INPUT_HISTORY_LIMIT {
+                self.input_history.remove(0);
+            }
+        }
+        self.history_index = None;
+        self.history_draft.clear();
 
         self.messages.push(UiMessage {
             role: "user".to_string(),
@@ -4118,8 +4231,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     KeyCode::Esc => {
                                         app.input_mode = InputMode::Normal;
                                     }
+                                    KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+                                        app.recall_history(-1);
+                                    }
+                                    KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+                                        app.recall_history(1);
+                                    }
                                     KeyCode::Tab => {
-                                        app.chat_input.insert_str("    ");
+                                        if !app.complete_slash_draft() {
+                                            app.chat_input.insert_str("    ");
+                                        }
                                     }
                                     _ => {
                                         app.chat_input.input(key);
@@ -4820,5 +4941,42 @@ mod tests {
         let last = app.messages.last().expect("message pushed");
         assert_eq!(last.content, "/init abort\nsecond line");
         assert_eq!(app.chat_input.lines().join("\n"), "");
+    }
+
+    #[test]
+    fn slash_completion_extends_unique_prefixes_only() {
+        use super::complete_slash_token;
+        assert_eq!(complete_slash_token("/ini").as_deref(), Some("/init"));
+        assert_eq!(complete_slash_token("/c").as_deref(), Some("/ctx"));
+        assert_eq!(complete_slash_token("/b").as_deref(), Some("/bytebot"));
+        assert_eq!(complete_slash_token("/init").as_deref(), None); // complete
+        assert_eq!(complete_slash_token("/x").as_deref(), None); // no match
+        assert_eq!(complete_slash_token("/").as_deref(), None); // listing case
+        assert_eq!(complete_slash_token("hello").as_deref(), None);
+    }
+
+    #[tokio::test]
+    async fn history_recall_walks_entries_and_restores_draft() {
+        let mut app = App::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.chat_input.insert_str("/init abort");
+        app.submit_message(tx.clone());
+        app.chat_input.insert_str("/ctx status");
+        app.submit_message(tx.clone());
+        app.chat_input.insert_str("/ctx status");
+        app.submit_message(tx.clone()); // adjacent duplicate → not stored twice
+        app.chat_input.insert_str("current draft");
+
+        app.recall_history(-1);
+        assert_eq!(app.chat_input.lines().join("\n"), "/ctx status");
+        app.recall_history(-1);
+        assert_eq!(app.chat_input.lines().join("\n"), "/init abort");
+        app.recall_history(-1); // clamps at oldest
+        assert_eq!(app.chat_input.lines().join("\n"), "/init abort");
+        app.recall_history(1);
+        assert_eq!(app.chat_input.lines().join("\n"), "/ctx status");
+        app.recall_history(1); // past newest → stashed draft returns
+        assert_eq!(app.chat_input.lines().join("\n"), "current draft");
+        assert_eq!(app.input_history.len(), 2, "dedup keeps one copy per prompt");
     }
 }
