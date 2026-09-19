@@ -57,7 +57,8 @@ pub use documents::{
 pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
 pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
 pub use gitinfo::{
-    changed_paths_between, current_git_info, dirty_paths, git_file_set, is_git_repo, GitInfo,
+    changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
+    git_file_set, is_git_repo, parse_numstat, DiffFile, GitInfo, MAX_DIFF_CHARS,
 };
 pub use index::{
     deps_json_path, file_index_path, read_json, symbols_json_path, write_atomic, write_str_atomic,
