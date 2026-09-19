@@ -4373,7 +4373,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     }
                     _ => {}
                 },
-                Event::Resize(_, _) => {}
+                Event::Resize(width, height) => {
+                    ui::clamp_scrolls_on_resize(&mut app, width, height);
+                }
                 _ => {}
             }
         } else if app.is_generating

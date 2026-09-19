@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 442 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 443 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -230,7 +230,15 @@
   pin existing bindings first. Resolve the `s` conflict here: `s` opens Settings
   globally, so SecurityAuditor sort-toggle and CustomModels-save `s` branches are
   unreachable (E2-06).
-- [ ] E6-02 Clamp scroll offsets on `Event::Resize` shrink (`app.rs:4340`).
+- [x] E6-02 Clamp scroll offsets on `Event::Resize`: `ui::clamp_scrolls_on_resize`
+  now runs on every Resize event. Panels already clamped at render time, but the
+  *stored* offsets stayed oversized and re-exposed blank scroll-past-the-end when
+  the terminal grew back. Chat/CodeReview/ProviderHealth/SecurityAuditor/Help
+  offsets are all recomputed against the same geometry the draw functions use —
+  via the shared line builders (`chat_lines`, `review_display_text`,
+  `provider_health_lines` and the new `security_findings_lines` extraction), so
+  clamp and render can no longer disagree. Unit test pins shrink-clamps, never
+  re-inflates on grow, and reaches 0 when everything fits.
 
 ### E7 — Close-out
 

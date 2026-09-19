@@ -410,7 +410,9 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Chat Messages ───────────────────────────────────────────────────────────
 
-fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
+/// The chat transcript as rendered lines. Shared by `draw_messages` and the
+/// resize clamp so both agree on the content length.
+fn chat_lines(app: &App) -> Vec<Line<'static>> {
     let mut text = Vec::new();
 
     if app.messages.is_empty() {
@@ -461,6 +463,11 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(app.theme.accent),
         )));
     }
+    text
+}
+
+fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
+    let text = chat_lines(app);
 
     let is_focused = app.focus == FocusArea::ChatInput && app.input_mode == InputMode::Normal;
     let border_style = if is_focused {
@@ -970,6 +977,20 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(shortcuts_para, chunks[2]);
 }
 
+/// The code-review popup body text; shared with the resize clamp.
+fn review_display_text(app: &App) -> String {
+    if !app.code_review_output.is_empty() {
+        app.code_review_output.clone()
+    } else if let Some(fp) = app.file_tree.get(app.selected_file) {
+        format!(
+            "\n  Selected file: {}\n\n  Press Enter to start AI code review.",
+            fp
+        )
+    } else {
+        "  Select a file in the File Explorer first.".to_string()
+    }
+}
+
 fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(80, 80, area);
     f.render_widget(Clear, popup_area);
@@ -986,17 +1007,7 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
 
-    let review_text = if !app.code_review_output.is_empty() {
-        app.code_review_output.clone()
-    } else if let Some(fp) = app.file_tree.get(app.selected_file) {
-        format!(
-            "\n  Selected file: {}\n\n  Press Enter to start AI code review.",
-            fp
-        )
-    } else {
-        "  Select a file in the File Explorer first.".to_string()
-    };
-
+    let review_text = review_display_text(app);
     let review_rows = review_text.lines().count();
     let text = Paragraph::new(review_text)
         .block(block)
@@ -1305,15 +1316,8 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(para, popup_area);
 }
 
-fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(70, 55, area);
-    f.render_widget(Clear, popup_area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🏥 Provider Health (Esc to close · h to refresh) ");
-
+/// The provider-health popup content; shared with the resize clamp.
+fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
     // Helper: format a health status line with color
@@ -1449,7 +1453,19 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(app.theme.accent),
         )));
     }
+    lines
+}
 
+fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(70, 55, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 🏥 Provider Health (Esc to close · h to refresh) ");
+
+    let lines = provider_health_lines(app);
     let lines_len = lines.len();
     let para = Paragraph::new(lines)
         .block(block)
@@ -1551,6 +1567,70 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Re-clamp every stored scroll offset against the new terminal size.
+/// Panels already clamp at render time, but the *stored* values would stay
+/// oversized and re-expose blank scroll-past-the-end when the terminal grows
+/// back. Geometry mirrors the draw functions exactly (E6-02).
+pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
+    let area = Rect::new(0, 0, width, height);
+
+    // Chat pane: outer [header 1 | body | status 1], body col 3 split by
+    // whether the embedded terminal is visible.
+    let body = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(area)[1];
+    let chat_col = body_chunks(body)[2];
+    let chat_area = if app.show_terminal {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(6),
+                Constraint::Length(8),
+                Constraint::Length(3),
+            ])
+            .split(chat_col)[0]
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .split(chat_col)[0]
+    };
+    app.chat_scroll = app
+        .chat_scroll
+        .min(clamp_scroll(chat_lines(app).len(), chat_area.height));
+
+    // Code Review popup.
+    let review_area = centered_rect(80, 80, area);
+    let review_rows = review_display_text(app).lines().count();
+    app.review_scroll = app.review_scroll.min(clamp_scroll(review_rows, review_area.height));
+
+    // Provider Health popup.
+    let health_area = centered_rect(70, 55, area);
+    app.provider_health_scroll = app.provider_health_scroll
+        .min(clamp_scroll(provider_health_lines(app).len(), health_area.height));
+
+    // Security Auditor findings list (inner column, below the summary cards).
+    let sec_inner = Block::default()
+        .borders(Borders::ALL)
+        .inner(centered_rect(75, 70, area));
+    let sec_list = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(5), Constraint::Min(1)])
+        .split(sec_inner)[1];
+    app.security_scroll = app.security_scroll
+        .min(clamp_scroll(security_findings_lines(app).len(), sec_list.height));
+
+    // Help overlay.
+    let help_area = centered_rect(70, 85, area);
+    app.help_scroll = app.help_scroll
+        .min(clamp_scroll(crate::help::help_lines(app.focus, &app.theme).len(), help_area.height));
 }
 
 fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {
@@ -2403,6 +2483,68 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Security Auditor Panel ──────────────────────────────────────────────────
 
+/// The security-auditor findings list (findings + scan-log tail); shared by
+/// `draw_security_auditor` and the resize clamp.
+fn security_findings_lines(app: &App) -> Vec<Line<'static>> {
+    let mut find_lines: Vec<Line> = Vec::new();
+    if app.sec_scan_results.is_empty() && !app.sec_scan_active {
+        find_lines.push(Line::from(Span::styled(
+            "  Press Enter to start a vulnerability scan.",
+            Style::default().fg(app.theme.message_system),
+        )));
+    } else if app.sec_scan_results.is_empty() && app.sec_scan_active {
+        find_lines.push(Line::from(Span::styled(
+            "  Scanning...",
+            Style::default().fg(app.theme.accent),
+        )));
+    } else {
+        for (severity, category, location) in &app.sec_scan_results {
+            let (icon, color) = match severity.as_str() {
+                "Critical" => ("🔴", app.theme.danger),
+                "High" => ("🟡", app.theme.warning),
+                "Medium" => ("🔵", app.theme.info),
+                _ => ("🟢", app.theme.success),
+            };
+            find_lines.push(Line::from(vec![
+                Span::styled(format!(" {} ", icon), Style::default().fg(color)),
+                Span::styled(
+                    format!("[{}] {} — {}", severity, category, location),
+                    Style::default()
+                        .fg(app.theme.fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+    }
+
+    // Log entries at bottom of findings
+    if !app.sec_scan_log.is_empty() {
+        find_lines.push(Line::from(""));
+        find_lines.push(Line::from(Span::styled(
+            " Scan Log",
+            Style::default()
+                .fg(app.theme.message_system)
+                .add_modifier(Modifier::UNDERLINED),
+        )));
+        for entry in app.sec_scan_log.iter().rev().take(5) {
+            let color = if entry.starts_with('❌') {
+                app.theme.danger
+            } else if entry.starts_with('⚠') {
+                app.theme.warning
+            } else if entry.starts_with('🚨') {
+                app.theme.danger
+            } else {
+                app.theme.fg
+            };
+            find_lines.push(Line::from(Span::styled(
+                format!("  {}", entry),
+                Style::default().fg(color),
+            )));
+        }
+    }
+    find_lines
+}
+
 fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(75, 70, area);
     f.render_widget(Clear, popup_area);
@@ -2476,63 +2618,7 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔎 Findings ");
 
-    let mut find_lines: Vec<Line> = Vec::new();
-    if app.sec_scan_results.is_empty() && !app.sec_scan_active {
-        find_lines.push(Line::from(Span::styled(
-            "  Press Enter to start a vulnerability scan.",
-            Style::default().fg(app.theme.message_system),
-        )));
-    } else if app.sec_scan_results.is_empty() && app.sec_scan_active {
-        find_lines.push(Line::from(Span::styled(
-            "  Scanning...",
-            Style::default().fg(app.theme.accent),
-        )));
-    } else {
-        for (severity, category, location) in &app.sec_scan_results {
-            let (icon, color) = match severity.as_str() {
-                "Critical" => ("🔴", app.theme.danger),
-                "High" => ("🟡", app.theme.warning),
-                "Medium" => ("🔵", app.theme.info),
-                _ => ("🟢", app.theme.success),
-            };
-            find_lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", icon), Style::default().fg(color)),
-                Span::styled(
-                    format!("[{}] {} — {}", severity, category, location),
-                    Style::default()
-                        .fg(app.theme.fg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]));
-        }
-    }
-
-    // Log entries at bottom of findings
-    if !app.sec_scan_log.is_empty() {
-        find_lines.push(Line::from(""));
-        find_lines.push(Line::from(Span::styled(
-            " Scan Log",
-            Style::default()
-                .fg(app.theme.message_system)
-                .add_modifier(Modifier::UNDERLINED),
-        )));
-        for entry in app.sec_scan_log.iter().rev().take(5) {
-            let color = if entry.starts_with('❌') {
-                app.theme.danger
-            } else if entry.starts_with('⚠') {
-                app.theme.warning
-            } else if entry.starts_with('🚨') {
-                app.theme.danger
-            } else {
-                app.theme.fg
-            };
-            find_lines.push(Line::from(Span::styled(
-                format!("  {}", entry),
-                Style::default().fg(color),
-            )));
-        }
-    }
-
+    let find_lines = security_findings_lines(app);
     let find_len = find_lines.len();
     let find_para = Paragraph::new(find_lines)
         .block(find_block)
@@ -3147,7 +3233,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::clamp_scroll;
+    use super::{clamp_scroll, App};
 
     #[test]
     fn clamp_scroll_bounds_to_scrollable_rows() {
@@ -3191,5 +3277,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn resize_clamp_shrinks_stored_scrolls_and_never_inflates() {
+        use super::clamp_scrolls_on_resize;
+        use crate::app::UiMessage;
+
+        let mut app = App::new();
+        for i in 0..20 {
+            app.messages.push(UiMessage {
+                role: "user".to_string(),
+                content: format!("line {i}"),
+            });
+        }
+        app.chat_scroll = 9999;
+        app.review_scroll = 9999;
+        app.provider_health_scroll = 9999;
+        app.security_scroll = 9999;
+        app.help_scroll = 9999;
+
+        let scrolls = |app: &App| {
+            [
+                app.chat_scroll,
+                app.review_scroll,
+                app.provider_health_scroll,
+                app.security_scroll,
+                app.help_scroll,
+            ]
+        };
+
+        clamp_scrolls_on_resize(&mut app, 60, 12);
+        let shrunk = scrolls(&app);
+        for v in shrunk.iter() {
+            assert!(*v < 9999, "oversized scroll survived a shrink");
+        }
+        // The 60-line transcript overflows a 12-row terminal, so the chat
+        // offset must clamp to a positive maximum rather than vanish to 0.
+        assert!(shrunk[0] > 0);
+
+        clamp_scrolls_on_resize(&mut app, 200, 100);
+        let grown = scrolls(&app);
+        for (before, after) in shrunk.iter().zip(grown.iter()) {
+            assert!(*after <= *before, "re-inflated on grow");
+        }
+        // Everything fits in a 200x100 terminal.
+        assert_eq!(grown, [0; 5]);
     }
 }
