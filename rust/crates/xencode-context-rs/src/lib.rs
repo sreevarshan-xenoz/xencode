@@ -53,7 +53,10 @@ pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, Eva
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_file_set, is_git_repo, GitInfo,
 };
-pub use index::{write_atomic, write_str_atomic, FileEntry, FilesIndex, Manifest, VERSION};
+pub use index::{
+    deps_json_path, read_json, symbols_json_path, write_atomic, write_str_atomic, FileEntry,
+    FilesIndex, Manifest, VERSION,
+};
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use metrics::{append_metrics, read_metrics, CompactAction, RequestMetrics};
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
