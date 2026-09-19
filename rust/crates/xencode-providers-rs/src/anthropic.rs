@@ -137,22 +137,20 @@ impl AnthropicProvider {
                     ContentPart::Text { text } => {
                         serde_json::json!({"type": "text", "text": text})
                     }
-                    ContentPart::ImageUrl { image_url } => {
-                        match split_data_url(&image_url.url) {
-                            Some((mime, data)) => serde_json::json!({
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": mime,
-                                    "data": data
-                                }
-                            }),
-                            None => serde_json::json!({
-                                "type": "text",
-                                "text": image_url.url
-                            }),
-                        }
-                    }
+                    ContentPart::ImageUrl { image_url } => match split_data_url(&image_url.url) {
+                        Some((mime, data)) => serde_json::json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime,
+                                "data": data
+                            }
+                        }),
+                        None => serde_json::json!({
+                            "type": "text",
+                            "text": image_url.url
+                        }),
+                    },
                 })
                 .collect(),
         };
@@ -374,10 +372,7 @@ mod tests {
 
     #[test]
     fn non_data_url_falls_back_to_text_part() {
-        let msg = ChatMessage::user_with_images(
-            "",
-            vec!["https://example.com/a.png".to_string()],
-        );
+        let msg = ChatMessage::user_with_images("", vec!["https://example.com/a.png".to_string()]);
         assert_eq!(
             AnthropicProvider::anthropic_content(&msg),
             serde_json::json!([

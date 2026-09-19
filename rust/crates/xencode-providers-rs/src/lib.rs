@@ -207,17 +207,15 @@ pub fn split_data_url(url: &str) -> Option<(&str, &str)> {
 /// prefixes). The `images` key is omitted for text-only messages, so those
 /// payloads are byte-identical to before.
 pub(crate) fn to_ollama_value(msg: &ChatMessage) -> serde_json::Value {
-    let mut value =
-        serde_json::json!({"role": msg.role, "content": msg.text_content()});
+    let mut value = serde_json::json!({"role": msg.role, "content": msg.text_content()});
     let images: Vec<&str> = msg
         .image_urls()
         .into_iter()
         .map(|u| split_data_url(u).map(|(_, data)| data).unwrap_or(u))
         .collect();
     if !images.is_empty() {
-        value["images"] = serde_json::Value::Array(
-            images.into_iter().map(serde_json::Value::from).collect(),
-        );
+        value["images"] =
+            serde_json::Value::Array(images.into_iter().map(serde_json::Value::from).collect());
     }
     value
 }

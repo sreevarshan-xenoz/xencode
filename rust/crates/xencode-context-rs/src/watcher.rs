@@ -69,7 +69,8 @@ pub fn should_ignore(path: &str, excluded: &[impl AsRef<str>]) -> bool {
     if excluded.is_empty() {
         return false;
     }
-    path.split('/').any(|seg| excluded.iter().any(|d| d.as_ref() == seg))
+    path.split('/')
+        .any(|seg| excluded.iter().any(|d| d.as_ref() == seg))
 }
 
 /// Debounce accumulator. Raw events are merged by path until the channel goes
@@ -137,12 +138,12 @@ pub struct WorkspaceWatcher {
 impl WorkspaceWatcher {
     /// Start watching `root` recursively. `excluded` defaults to
     /// [`DEFAULT_EXCLUDED_DIRS`] when empty.
-    pub fn spawn(
-        root: &Path,
-        excluded: &[&str],
-    ) -> Result<WorkspaceWatcher, notify::Error> {
+    pub fn spawn(root: &Path, excluded: &[&str]) -> Result<WorkspaceWatcher, notify::Error> {
         let excluded: Vec<String> = if excluded.is_empty() {
-            DEFAULT_EXCLUDED_DIRS.iter().map(|s| s.to_string()).collect()
+            DEFAULT_EXCLUDED_DIRS
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
         } else {
             excluded.iter().map(|s| s.to_string()).collect()
         };
@@ -151,21 +152,22 @@ impl WorkspaceWatcher {
         let tx_root = root.clone();
         let tx_excluded = excluded.clone();
 
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let Ok(event) = res else { return };
-            let Some(path) = event
-                .paths
-                .iter()
-                .map(|p| p.strip_prefix(&tx_root).unwrap_or(p))
-                .find(|rel| !should_ignore(&rel.to_string_lossy(), &tx_excluded))
-            else {
-                return;
-            };
-            let _ = tx.send(WatchEvent {
-                path: path.to_string_lossy().replace('\\', "/"),
-                kind: map_kind(&event.kind),
-            });
-        })?;
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                let Ok(event) = res else { return };
+                let Some(path) = event
+                    .paths
+                    .iter()
+                    .map(|p| p.strip_prefix(&tx_root).unwrap_or(p))
+                    .find(|rel| !should_ignore(&rel.to_string_lossy(), &tx_excluded))
+                else {
+                    return;
+                };
+                let _ = tx.send(WatchEvent {
+                    path: path.to_string_lossy().replace('\\', "/"),
+                    kind: map_kind(&event.kind),
+                });
+            })?;
         watcher.watch(&root, RecursiveMode::Recursive)?;
 
         Ok(WorkspaceWatcher {
@@ -210,7 +212,9 @@ mod tests {
             WatchKind::Created
         );
         assert_eq!(
-            map_kind(&EventKind::Modify(ModifyKind::Name(notify::event::RenameMode::Any))),
+            map_kind(&EventKind::Modify(ModifyKind::Name(
+                notify::event::RenameMode::Any
+            ))),
             WatchKind::Modified
         );
         assert_eq!(
@@ -279,7 +283,10 @@ mod tests {
             if !batch.is_empty() {
                 break batch;
             }
-            assert!(Instant::now() < deadline, "watcher never delivered an event");
+            assert!(
+                Instant::now() < deadline,
+                "watcher never delivered an event"
+            );
             std::thread::sleep(Duration::from_millis(20));
         };
 

@@ -140,6 +140,7 @@ pub fn stable_system_text(
 ///
 /// `retrieved` must already be sorted best-first; the budgeter trims from the
 /// bottom. `recent_text` should be the rolling message window, oldest first.
+#[allow(clippy::too_many_arguments)] // eight positional args are the documented contract (§10 tiers)
 pub fn assemble_prompt(
     profile: HardwareProfile,
     system: &str,

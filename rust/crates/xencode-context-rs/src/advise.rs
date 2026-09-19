@@ -51,7 +51,9 @@ pub fn find_cycles(graph: &[DepEdge]) -> Vec<Vec<String>> {
         if e.from == e.to {
             continue;
         }
-        adj.entry(e.from.as_str()).or_default().insert(e.to.as_str());
+        adj.entry(e.from.as_str())
+            .or_default()
+            .insert(e.to.as_str());
         adj.entry(e.to.as_str()).or_default();
     }
     // Iterative DFS with gray/black coloring. Each back edge (to a gray node)
@@ -128,12 +130,7 @@ pub fn orphan_files(files: &[String], graph: &[DepEdge]) -> Vec<String> {
     let mut orphans: Vec<String> = files
         .iter()
         .filter(|f| !touched.contains(f.as_str()))
-        .filter(|f| {
-            !matches!(
-                f.rsplit('/').next(),
-                Some("lib.rs" | "main.rs" | "mod.rs")
-            )
-        })
+        .filter(|f| !matches!(f.rsplit('/').next(), Some("lib.rs" | "main.rs" | "mod.rs")))
         .cloned()
         .collect();
     orphans.sort();
@@ -330,10 +327,7 @@ mod tests {
                 via: "crate::d0".into(),
             }])
             .collect();
-        assert_eq!(
-            hub_files(&edges, 8),
-            vec![("src/hub.rs".to_string(), 9)]
-        );
+        assert_eq!(hub_files(&edges, 8), vec![("src/hub.rs".to_string(), 9)]);
         assert!(hub_files(&edges, 10).is_empty());
     }
 
@@ -365,14 +359,8 @@ mod tests {
         let syms = symbols_from(&files);
         let broken = broken_imports(&paths, &syms);
         assert_eq!(broken.len(), 2);
-        assert!(broken.contains(&(
-            "src/a.rs".to_string(),
-            "crate::gone::Thing".to_string()
-        )));
-        assert!(broken.contains(&(
-            "src/a.rs".to_string(),
-            "super::also_gone::x".to_string()
-        )));
+        assert!(broken.contains(&("src/a.rs".to_string(), "crate::gone::Thing".to_string())));
+        assert!(broken.contains(&("src/a.rs".to_string(), "super::also_gone::x".to_string())));
         assert!(!broken.iter().any(|(_, i)| i.contains("serde")));
     }
 
@@ -398,10 +386,7 @@ mod tests {
         );
         // Hop limit respected: 1 hop from c reaches only b.
         let near = affected_dependents(&edges, &["src/c.rs"], 1);
-        assert_eq!(
-            near.get("src/c.rs"),
-            Some(&vec!["src/b.rs".to_string()])
-        );
+        assert_eq!(near.get("src/c.rs"), Some(&vec!["src/b.rs".to_string()]));
         // A file nobody depends on is absent.
         assert!(affected_dependents(&edges, &["src/a.rs"], 3).is_empty());
     }
