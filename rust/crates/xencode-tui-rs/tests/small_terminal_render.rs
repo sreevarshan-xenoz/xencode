@@ -53,6 +53,12 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.bytebot_history.push("run tests".into());
     app.attached_files.insert("./src/main.rs".into());
     app.input = "some input text that is fairly long".into();
+    // Keep the toast overlay exercised in every panel/size combination too.
+    app.toasts.push(xencode_tui_rs::toast::Toast {
+        message: "src/x.rs changed on disk — affects main.rs".into(),
+        kind: xencode_tui_rs::toast::ToastKind::Warning,
+        expires: f64::MAX,
+    });
     app
 }
 

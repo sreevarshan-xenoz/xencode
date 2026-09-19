@@ -154,6 +154,8 @@ pub struct App<'a> {
     pub init_visible: bool,
     pub help_visible: bool,
     pub help_scroll: u16,
+    /// Transient notifications (file-watch warnings etc.), see `toast` module.
+    pub toasts: Vec<crate::toast::Toast>,
     pub init_cancel: Arc<AtomicBool>,
 
     // Collaboration Hub state
@@ -298,9 +300,9 @@ pub fn format_watch_warning(path: &str, kind: &str) -> String {
 ///
 /// `attached`/`opened`/`tracked` are the session's context sets;
 /// `dependents` are the files transitively importing `path` (from the
-/// last `/init` snapshot); `last_system_msg` is the chat tail when it is
-/// a system message, used to suppress repeat warnings for a path the
-/// user was already told about.
+/// last `/init` snapshot); `last_notice` is the newest visible warning
+/// toast, used to suppress repeat warnings for a path the user was
+/// already told about.
 pub fn watch_warning_for(
     path: &str,
     kind: &str,
@@ -308,7 +310,7 @@ pub fn watch_warning_for(
     opened: Option<&str>,
     tracked: &HashSet<String>,
     dependents: &[String],
-    last_system_msg: Option<&str>,
+    last_notice: Option<&str>,
 ) -> Option<String> {
     if !(attached.contains(path) || opened == Some(path) || tracked.contains(path)) {
         return None;
@@ -318,7 +320,7 @@ pub fn watch_warning_for(
     // dependents list itself, and a kind change (modified → removed) must
     // re-warn because the head text differs.
     let head = format_watch_warning(path, kind);
-    if last_system_msg.is_some_and(|m| m.contains(&head)) {
+    if last_notice.is_some_and(|m| m.contains(&head)) {
         return None;
     }
     let mut warning = head;
@@ -614,6 +616,7 @@ impl<'a> App<'a> {
             init_visible: false,
             help_visible: false,
             help_scroll: 0,
+            toasts: Vec::new(),
             init_cancel: Arc::new(AtomicBool::new(false)),
             collab_session_active: false,
             collab_session_id: String::new(),
@@ -1170,11 +1173,11 @@ impl<'a> App<'a> {
             xencode_context_rs::AFFECTED_MAX_HOPS,
         );
         let dependents: &[String] = affected.get(path).map(Vec::as_slice).unwrap_or(&[]);
-        let last_system = self
-            .messages
-            .last()
-            .filter(|m| m.role == "system")
-            .map(|m| m.content.as_str());
+        // Dedup against the last visible warning toast, not chat history (E3-03).
+        let last_warning = crate::toast::last_of_kind(
+            &self.toasts,
+            crate::toast::ToastKind::Warning,
+        );
         if let Some(warning) = watch_warning_for(
             path,
             kind,
@@ -1182,12 +1185,14 @@ impl<'a> App<'a> {
             self.opened_file.as_deref(),
             &tracked,
             dependents,
-            last_system,
+            last_warning,
         ) {
-            self.messages.push(UiMessage {
-                role: "system".to_string(),
-                content: warning,
-            });
+            crate::toast::push(
+                &mut self.toasts,
+                warning,
+                crate::toast::ToastKind::Warning,
+                current_timestamp(),
+            );
         }
     }
 
@@ -2897,6 +2902,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 
     loop {
+        crate::toast::prune(&mut app.toasts, current_timestamp());
         terminal.draw(|f| ui::draw(f, &app))?;
 
         // Drain async messages

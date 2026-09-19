@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 430 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 433 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -155,8 +155,11 @@
   audited inventory of the actual `run_app` handler (no fiction). Modal: Esc/`?`/`F1`
   close, ↑↓/jk scroll (`help_scroll`, render-clamped), all other keys swallowed.
   `?:help` added to the default status hint. 2 unit tests + a help-overlay render sweep.
-- [ ] E3-03 Toast/notification layer: file-watch warnings become transient overlays
-  (`app.rs:440-449`), not fake system chat lines.
+- [x] E3-03 Toast/notification layer: new `toast.rs` — file-watch warnings now push a
+  transient top-right overlay (`Toast`, 6s TTL, dedup-refreshed, render-capped to 4)
+  instead of being injected as fake system chat lines. Pruned each loop tick; the
+  repeat-suppression in `watch_warning_for` now compares the last visible warning toast.
+  3 unit tests + a toast-exercised render sweep.
 
 ### E4 — Theme & layout consistency (UI doc §3)
 
