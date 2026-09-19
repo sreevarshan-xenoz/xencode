@@ -33,6 +33,29 @@ pub enum FocusArea {
     ReviewDashboard,
 }
 
+/// Rows of the Settings panel in display order; the index is
+/// `app.settings_cursor`. Navigation bounds derive from this list — adding
+/// a row here makes it reachable without touching the key handler.
+pub const SETTINGS_ROWS: &[&str] = &[
+    "Theme",
+    "Cache Enabled",
+    "Memory Enabled",
+    "Max Cache Size",
+    "Memory Items",
+    "Response Timeout",
+    "Ollama URL",
+    "Llama.cpp URL",
+    "Llama.cpp Model",
+    "Llama Temp",
+    "Llama Top-K",
+    "Llama Min-P",
+    "Llama Max Tokens",
+    "Factory Reset",
+];
+
+/// Column width the Settings panel pads its labels to.
+pub const SETTINGS_LABEL_WIDTH: usize = 17;
+
 pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("📊 Performance Dashboard", "Session stats & metrics"),
     ("🏥 Provider Health", "API connection status"),

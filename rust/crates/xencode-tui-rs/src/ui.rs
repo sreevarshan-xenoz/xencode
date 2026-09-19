@@ -9,7 +9,7 @@ use ratatui::{
 use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
-use crate::focus::{FocusArea, InputMode, FEATURE_LIST};
+use crate::focus::{FocusArea, InputMode, FEATURE_LIST, SETTINGS_LABEL_WIDTH, SETTINGS_ROWS};
 use crate::widgets::{gauge, spinner};
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -744,30 +744,41 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         "⚠️  Reset to defaults (Enter to confirm)"
     };
 
-    let settings_values: [(&str, &str); 14] = [
-        ("Theme            ", &theme_str),
-        ("Cache Enabled    ", &cache_str),
-        ("Memory Enabled   ", &memory_str),
-        ("Max Cache Size   ", &cache_size_str),
-        ("Memory Items     ", &memory_items_str),
-        ("Response Timeout ", &timeout_str),
-        ("Ollama URL       ", &ollama_url_str),
-        ("Llama.cpp URL    ", &llamacpp_url_str),
-        ("Llama.cpp Model  ", &llamacpp_model_path_str),
-        ("Llama Temp       ", &llama_temp_str),
-        ("Llama Top-K      ", &llama_topk_str),
-        ("Llama Min-P      ", &llama_minp_str),
-        ("Llama Max Tokens ", &llama_maxtokens_str),
-        ("Factory Reset    ", reset_label),
+    let value_strs: [&str; SETTINGS_ROWS.len()] = [
+        &theme_str,
+        &cache_str,
+        &memory_str,
+        &cache_size_str,
+        &memory_items_str,
+        &timeout_str,
+        &ollama_url_str,
+        &llamacpp_url_str,
+        &llamacpp_model_path_str,
+        &llama_temp_str,
+        &llama_topk_str,
+        &llama_minp_str,
+        &llama_maxtokens_str,
+        reset_label,
     ];
+    let width = SETTINGS_LABEL_WIDTH;
+    let settings_labels: Vec<String> = SETTINGS_ROWS
+        .iter()
+        .map(|label| format!("{label:<width$}"))
+        .collect();
+    let settings_values: Vec<(&str, &str)> = settings_labels
+        .iter()
+        .map(String::as_str)
+        .zip(value_strs)
+        .collect();
 
+    let last_row = SETTINGS_ROWS.len() - 1;
     let sections: [(usize, usize, &str); 6] = [
         (0, 1, "  Display"),
         (1, 3, "  Performance"),
         (3, 6, "  Limits"),
         (6, 8, "  Connection"),
-        (8, 13, "  llama.cpp"),
-        (13, 14, "  Actions"),
+        (8, last_row, "  llama.cpp"),
+        (last_row, SETTINGS_ROWS.len(), "  Actions"),
     ];
 
     let mut settings_lines: Vec<Line> = Vec::new();
@@ -790,7 +801,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(app.theme.fg)
             };
             let pointer = if is_selected { " ▶ " } else { "   " };
-            let is_reset = idx == 13;
+            let is_reset = idx == last_row;
             let is_url_item = idx == 6 || idx == 7 || idx == 8;
             let is_num_item = idx == 9 || idx == 10 || idx == 11 || idx == 12;
             let value_color = if is_reset && is_selected {

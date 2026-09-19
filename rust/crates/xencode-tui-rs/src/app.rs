@@ -3434,7 +3434,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Down | KeyCode::Char('j') => {
                                 match app.focus {
                                     FocusArea::Settings => {
-                                        if app.settings_cursor + 1 < 14 {
+                                        if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {
                                             app.settings_cursor += 1;
                                         }
                                     }
@@ -4235,7 +4235,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             app.review_dash.scroll_by(3);
                         }
                         FocusArea::Settings => {
-                            if app.settings_cursor + 1 < 14 {
+                            if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {
                                 app.settings_cursor += 1;
                             }
                         }
