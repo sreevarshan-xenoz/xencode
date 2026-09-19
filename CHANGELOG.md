@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Image input pipeline: magic-byte format detect, header dimensions, data URLs (`analysis-rs` images module), `analyze` CLI inventory, `MessageContent` parts with per-backend rendering (Ollama/Anthropic/Gemini/OpenAI-compatible), TUI attach sends images as message parts
 - Web extraction for research: timeout/capped fetch with content-type gate, pure HTML→text (scripts/styles stripped, entities decoded), `FetchedPage` record, `fetch` CLI subcommand
+- PR-level diff triage: rename-aware numstat parsing and capped per-file diffs (`gitinfo`), `review` CLI command with working-tree analysis and documented JSON
 - Document parsing into context: PDF (pdf-extract) and DOCX (zip + w:t runs) text extraction with size/char caps, TUI attach inlines extracted text with explicit skip notes
 - Workspace RBAC + audit log: Admin-gated membership, self-leave, last-admin guard, sequenced audit events including denials
 

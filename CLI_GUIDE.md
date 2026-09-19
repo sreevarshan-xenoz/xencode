@@ -146,6 +146,17 @@ Text output caps at 30k chars with a truncation trailer; `--format json`
 returns the full body. Invalid `--json-schema` values are rejected up
 front instead of degrading silently.
 
+### `xencode review [--base main] [--format text|json]`
+PR-level diff triage: files changed between the base and HEAD with line
+counts, plus working-tree analysis per file (code issues, image
+inventory). `--base HEAD` reviews uncommitted changes. Unanalyzable files
+(deleted, binary) get visible notes, never silence.
+
+```bash
+xencode review --base main
+xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
+```
+
 ## 🎯 Usage Examples
 
 ### Development Workflow

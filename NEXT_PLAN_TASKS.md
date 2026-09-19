@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 407 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 412 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -37,6 +37,8 @@
 ## Git Loop Completion
 
 - [ ] PR review dashboard / PR-level review browsing in the TUI
-  (per-file Code Review panel exists in `rust/crates/xencode-tui-rs/`)
+  (per-file Code Review panel exists in `rust/crates/xencode-tui-rs/`;
+  CLI triage shipped: `review` command over rename-aware diff helpers;
+  TUI per-file diff browsing still open)
 
 > Status legend: `[x]` done, `[ ]` todo.
