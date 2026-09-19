@@ -376,7 +376,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         assert_eq!(server_status(State(state.clone())).await.sessions, 0);
 
-        create_session(State(state.clone())).await;
+        let _ = create_session(State(state.clone())).await;
         let _ = create_session(State(state.clone())).await;
 
         assert_eq!(server_status(State(state)).await.sessions, 2);
