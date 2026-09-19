@@ -10,6 +10,7 @@ use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
 use crate::focus::{FocusArea, InputMode, FEATURE_LIST};
+use crate::widgets::{gauge, spinner};
 
 pub fn draw(f: &mut Frame, app: &App) {
     // Full-screen themed background
@@ -374,8 +375,7 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
 
     // Spinner at bottom when generating
     if app.is_generating {
-        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let frame = frames[app.spinner_tick % frames.len()];
+        let frame = spinner::frame(app.spinner_tick);
         text.push(Line::from(Span::styled(
             format!("  {} Generating...", frame),
             Style::default().fg(app.theme.accent),
@@ -420,8 +420,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.is_generating {
-        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let frame = frames[app.spinner_tick % frames.len()];
+        let frame = spinner::frame(app.spinner_tick);
         format!(" {} Thinking... ", frame)
     } else if is_editing {
         " ✏️  Type your message (Enter to send) ".to_string()
@@ -891,8 +890,7 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let title = if app.is_reviewing {
-        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let frame = frames[app.spinner_tick % frames.len()];
+        let frame = spinner::frame(app.spinner_tick);
         format!(" {} Code Review (analyzing...) ", frame)
     } else {
         " 🔍 Code Review (Enter to review, Esc to close) ".to_string()
@@ -1053,15 +1051,7 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     };
 
     // Bar chart helper (simple ASCII)
-    fn bar(value: u64, max: u64, width: usize) -> String {
-        if max == 0 {
-            return " ".repeat(width);
-        }
-        let filled = ((value as f64 / max as f64) * width as f64).round() as usize;
-        let filled = filled.min(width);
-        let empty = width.saturating_sub(filled);
-        format!("{}{}", "█".repeat(filled), "░".repeat(empty))
-    }
+    let bar = gauge::bar;
 
     let msg_count = app.messages.len() as u64;
     let bar_width = 20usize;
@@ -1362,11 +1352,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
     if app.health_check_in_progress {
-        let frames = [
-            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-            '\u{2827}', '\u{2807}', '\u{280F}',
-        ];
-        let frame = frames[app.spinner_tick % frames.len()];
+        let frame = spinner::frame(app.spinner_tick);
         lines.push(Line::from(Span::styled(
             format!(" {} Checking provider status...", frame),
             Style::default().fg(app.theme.accent),
@@ -1507,11 +1493,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let status_icon = if app.bytebot_running {
-        let frames = [
-            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-            '\u{2827}', '\u{2807}', '\u{280F}',
-        ];
-        frames[app.spinner_tick % frames.len()]
+        spinner::frame(app.spinner_tick)
     } else {
         '\u{25C9}'
     };
@@ -1599,11 +1581,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
                 "done" => ("\u{2705}".to_string(), ratatui::style::Color::Green),
                 "running" => {
                     let running_icon: String = if app.bytebot_running {
-                        let frames = [
-                            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}',
-                            '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}',
-                        ];
-                        frames[app.spinner_tick % frames.len()].to_string()
+                        spinner::frame(app.spinner_tick).to_string()
                     } else {
                         "\u{23F3}".to_string()
                     };
@@ -1629,11 +1607,8 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         if app.bytebot_running || app.bytebot_progress > 0.0 {
             steps_lines.push(Line::from(""));
             let bar_width = 20usize;
-            let filled = (app.bytebot_progress * bar_width as f64).round() as usize;
-            let filled = filled.min(bar_width);
-            let empty = bar_width.saturating_sub(filled);
             let pct = (app.bytebot_progress * 100.0).round();
-            let bar = format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty));
+            let bar = gauge::bar((app.bytebot_progress * 100.0).round() as u64, 100, bar_width);
             let bar_str = format!("  {} {:.0}%", bar, pct);
             steps_lines.push(Line::from(Span::styled(
                 bar_str,
@@ -1769,11 +1744,7 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let status_icon: String = if app.init_running {
-        let frames = [
-            '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-            '\u{2827}', '\u{2807}', '\u{280F}',
-        ];
-        frames[app.spinner_tick % frames.len()].to_string()
+        spinner::frame(app.spinner_tick).to_string()
     } else {
         "\u{2705}".to_string()
     };
@@ -1896,8 +1867,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     let status_icon: String = match app.collab_sync_status.as_str() {
         "connected" | "synced" => "✅".to_string(),
         "syncing" | "connecting" => {
-            let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-            frames[app.spinner_tick % frames.len()].to_string()
+            spinner::frame(app.spinner_tick).to_string()
         }
         "error" | "disconnected" => "❌".to_string(),
         _ => "❓".to_string(),
@@ -2084,11 +2054,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         // Sync status indicator at bottom
         if app.collab_sync_status == "syncing" || app.collab_sync_status == "connecting" {
             activity_lines.push(Line::from(""));
-            let frames = [
-                '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-                '\u{2827}', '\u{2807}', '\u{280F}',
-            ];
-            let frame = frames[app.spinner_tick % frames.len()];
+            let frame = spinner::frame(app.spinner_tick);
             activity_lines.push(Line::from(Span::styled(
                 format!(" {} Synchronizing...", frame),
                 Style::default().fg(app.theme.accent),
@@ -2116,8 +2082,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let status_icon = match app.voice_status.as_str() {
         "listening" => "🎤",
         "processing" => {
-            let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-            let idx = app.spinner_tick % frames.len();
+            let idx = app.spinner_tick % spinner::SPINNER_FRAMES.len();
             // Return as &str slice
             if idx < 5 {
                 "🔄"
@@ -2157,10 +2122,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
         .title(" 📡 Audio Input ");
 
     let bar_width = 30usize;
-    let filled = (app.voice_level * bar_width as f64).round() as usize;
-    let filled = filled.min(bar_width);
-    let empty = bar_width.saturating_sub(filled);
-    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+    let bar = gauge::bar((app.voice_level * 100.0).round() as u64, 100, bar_width);
     let meter = format!(
         " Level: [{}] {:.0}%\n Status: {} {}",
         bar,
@@ -2482,8 +2444,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let status_indicator = if app.profiler_running {
-        let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        frames[app.spinner_tick % frames.len()]
+        spinner::frame(app.spinner_tick)
     } else {
         '●'
     };
