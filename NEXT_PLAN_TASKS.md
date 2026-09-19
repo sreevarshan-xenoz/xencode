@@ -124,9 +124,11 @@
   `small_terminal_render` FOCI entry. The Ctrl+T terminal strip pane itself is
   untouched (driven by `show_terminal`, not focus). That test's FOCI list also gained
   the missing `ReviewDashboard` entry — verified it renders at all swept sizes.
-- [ ] E2-04 Scroll fixes: use or delete `file_scroll_offset` (`app.rs:272`); clamp
-  provider-health/security scroll to row count (`app.rs:3591, 3594`); make
-  CodeReview diff output scrollable (`ui.rs:917-921`).
+- [x] E2-04 Scroll fixes: deleted never-read `file_scroll_offset` (explorer list
+  already auto-scrolls to selection via `ListState`); provider-health/security/code-review
+  paragraphs clamp their stored scroll at render time with `ui::clamp_scroll`
+  (unit-tested) so scrolling past the end no longer renders blank; CodeReview output
+  is now scrollable via `review_scroll` + ↑/↓, reset on each new review.
 - [ ] E2-05 Mouse wheel support for the remaining focus areas (currently 7 of 18;
   `_ => {}` at `app.rs:4293`).
 
