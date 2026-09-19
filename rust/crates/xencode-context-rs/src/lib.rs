@@ -28,6 +28,7 @@ pub mod scanner;
 pub mod stale;
 pub mod state;
 pub mod symbols;
+pub mod watcher;
 
 pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
 pub use cmd_output::{
@@ -58,6 +59,10 @@ pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
     build_graph, dependency_map, dependent_map, expand_dependencies, extract_rust_symbols,
     rank_files, resolve_import, DepEdge, PerFileSymbols,
+};
+pub use watcher::{
+    map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,
+    DEFAULT_DEBOUNCE, DEFAULT_EXCLUDED_DIRS,
 };
 
 use std::path::Path;
