@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 429 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 430 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -133,6 +133,14 @@
   Settings/ModelSelector/CustomModels cursors and the (new, E2-04) CodeReview scroll
   joined the existing 7. Remaining areas are single-screen panels with no scrollable
   content — wheel is a deliberate no-op there.
+- [x] E2-06 (found while auditing keys for E3-02) Text fields were untypable: the
+  universal `space`/`i`/`/`/`m`/`s`/`q`/`?` arms fired before the char-insert arm, so
+  GitCommit/ByteBot/settings-URL buffers couldn't contain a space or those letters, and
+  `q` quit mid-message. Guarded by a new `App::text_entry_active()` (unit-tested); also
+  fixed Left-arrow *deleting* (it now moves the cursor back — Backspace is the delete key)
+  and made the VoiceInterface `m`-mute reachable. Still open: `s` remains a Settings
+  shortcut globally, so the SecurityAuditor/CustomModels `s` branches stay unreachable —
+  a real binding conflict left for E6 (keymap-table refactor), not silently hacked.
 
 ### E3 — High-impact UX (UI doc §4, first half)
 
@@ -173,7 +181,9 @@
 
 - [ ] E6-01 Split the 887-line key `match` (`app.rs:3366-4252`) into per-focus
   `handle_key` fns + a global chord table; pure move, no behavior change, tests
-  pin existing bindings first.
+  pin existing bindings first. Resolve the `s` conflict here: `s` opens Settings
+  globally, so SecurityAuditor sort-toggle and CustomModels-save `s` branches are
+  unreachable (E2-06).
 - [ ] E6-02 Clamp scroll offsets on `Event::Resize` shrink (`app.rs:4340`).
 
 ### E7 — Close-out

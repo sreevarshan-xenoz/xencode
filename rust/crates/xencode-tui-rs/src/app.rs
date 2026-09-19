@@ -817,6 +817,16 @@ impl<'a> App<'a> {
         }
     }
 
+    /// True when a Normal-mode text field owns the keyboard (GitCommit message,
+    /// ByteBot command, settings URL buffer). Universal single-key shortcuts
+    /// must not swallow the input itself (E2-06).
+    pub fn text_entry_active(&self) -> bool {
+        matches!(
+            self.focus,
+            FocusArea::GitCommit | FocusArea::ByteBotPanel
+        ) || (self.focus == FocusArea::Settings && self.settings_url_editing)
+    }
+
     pub fn refresh_git(&mut self) {
         self.git_status = git_status_map();
         if let Ok(output) = Command::new("git")
@@ -3713,7 +3723,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     _ => {}
                                 }
                             }
-                            KeyCode::Char(' ') => {
+                            KeyCode::Char(' ') if !app.text_entry_active() => {
                                 if app.focus == FocusArea::FileExplorer {
                                     if let Some(fp) = app.file_tree.get(app.selected_file) {
                                         let fp = fp.clone();
@@ -3747,11 +3757,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     app.voice_muted = !app.voice_muted;
                                 }
                             }
-                            KeyCode::Char('i') | KeyCode::Char('/') => {
+                            KeyCode::Char('i') | KeyCode::Char('/')
+                                if !app.text_entry_active() =>
+                            {
                                 app.input_mode = InputMode::Editing;
                                 app.focus = FocusArea::ChatInput;
                             }
-                            KeyCode::Char('m') => {
+                            KeyCode::Char('m')
+                                if !app.text_entry_active()
+                                    && app.focus != FocusArea::VoiceInterface =>
+                            {
                                 app.focus = if app.focus == FocusArea::ModelSelector {
                                     FocusArea::ChatInput
                                 } else {
@@ -3759,7 +3774,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     FocusArea::ModelSelector
                                 };
                             }
-                            KeyCode::Char('s') => {
+                            KeyCode::Char('s') if !app.text_entry_active() => {
                                 app.focus = if app.focus == FocusArea::Settings {
                                     FocusArea::ChatInput
                                 } else {
@@ -3784,11 +3799,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             KeyCode::Char('u') if app.focus == FocusArea::ModelSelector => {
                                 app.llamacpp_control("unload", None, tx.clone());
                             }
-                            KeyCode::Char('?') | KeyCode::F(1) => {
+                            KeyCode::Char('?') | KeyCode::F(1)
+                                if !app.text_entry_active() =>
+                            {
                                 app.help_visible = true;
                                 app.help_scroll = 0;
                             }
-                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('q') if !app.text_entry_active() => return Ok(()),
                             KeyCode::Esc => {
                                 if app.init_visible {
                                     app.init_visible = false;
@@ -3947,15 +3964,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             _ => {}
                                         }
                                     }
-                                } else if app.focus == FocusArea::GitCommit && app.commit_cursor > 0
+                                } else if app.focus == FocusArea::GitCommit
+                                    && app.commit_cursor > 0
                                 {
+                                    // Move cursor left; Backspace is the delete key.
                                     app.commit_cursor -= 1;
-                                    app.commit_message.remove(app.commit_cursor);
                                 } else if app.focus == FocusArea::ByteBotPanel
                                     && app.bytebot_cursor > 0
                                 {
                                     app.bytebot_cursor -= 1;
-                                    app.bytebot_command.remove(app.bytebot_cursor);
                                 } else if app.focus == FocusArea::LearningMode
                                     && app.learn_quiz_active
                                     && !app.learn_quiz_answered
@@ -4271,7 +4288,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 mod tests {
     use super::{
         first_output_line, format_advise_report, format_watch_warning, parse_llama_port,
-        parse_porcelain_z, watch_warning_for,
+        parse_porcelain_z, watch_warning_for, FocusArea,
     };
     use std::collections::HashSet;
     use xencode_core_rs::{scan_workspace, ScanOptions};
@@ -4402,6 +4419,22 @@ mod tests {
         assert_eq!(first_output_line(b"\n\n  real  \nx"), "real");
         assert_eq!(first_output_line(b""), "(no output)");
         assert_eq!(first_output_line(b"   \n"), "(no output)");
+    }
+
+    #[test]
+    fn text_entry_active_only_for_text_fields() {
+        let mut app = super::App::new();
+        app.focus = FocusArea::ChatInput;
+        assert!(!app.text_entry_active());
+        app.focus = FocusArea::GitCommit;
+        assert!(app.text_entry_active());
+        app.focus = FocusArea::ByteBotPanel;
+        assert!(app.text_entry_active());
+        app.focus = FocusArea::Settings;
+        app.settings_url_editing = false;
+        assert!(!app.text_entry_active());
+        app.settings_url_editing = true;
+        assert!(app.text_entry_active());
     }
 
     #[test]
