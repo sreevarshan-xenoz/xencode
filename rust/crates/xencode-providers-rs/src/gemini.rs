@@ -337,7 +337,8 @@ mod tests {
         assert_eq!(
             provider.base_url,
             "https://generativelanguage.googleapis.com/v1beta"
-        );    }
+        );
+    }
 
     #[test]
     fn custom_base_url() {
@@ -422,10 +423,8 @@ mod tests {
 
     #[test]
     fn image_message_appends_inline_data_parts() {
-        let msg = ChatMessage::user_with_images(
-            "look",
-            vec!["data:image/jpeg;base64,/9j/".to_string()],
-        );
+        let msg =
+            ChatMessage::user_with_images("look", vec!["data:image/jpeg;base64,/9j/".to_string()]);
         assert_eq!(
             super::gemini_parts(&msg, "look"),
             vec![

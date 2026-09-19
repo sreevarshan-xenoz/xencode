@@ -697,6 +697,7 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
 async fn run_query(
     prompt: String,
     model_override: Option<String>,
@@ -944,7 +945,8 @@ fn format_image_text(meta: &ImageMeta) -> String {
     )
 }
 
-fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {    if path.is_dir() {
+fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
+    if path.is_dir() {
         // Scan directory
         let mut all_issue_lists = Vec::new();
         // Image inventory rides alongside: intake metadata, not code issues,

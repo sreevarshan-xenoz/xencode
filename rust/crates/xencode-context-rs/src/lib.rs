@@ -13,7 +13,8 @@
 //! The single entry point is [`init_project`].
 
 pub mod advise;
-pub mod budget;pub mod cmd_output;
+pub mod budget;
+pub mod cmd_output;
 pub mod compact;
 pub mod context;
 pub mod conversation;
@@ -31,8 +32,8 @@ pub mod symbols;
 pub mod watcher;
 
 pub use advise::{
-    advise, affected_dependents, broken_imports, find_cycles, hub_files, orphan_files,
-    Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
+    advise, affected_dependents, broken_imports, find_cycles, hub_files, orphan_files, Advice,
+    AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
 pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
 pub use cmd_output::{

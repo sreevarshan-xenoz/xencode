@@ -206,10 +206,24 @@ fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         // SOF0–SOF15 except DHT (C4), JPG (C8), DAC (CC).
         if matches!(
             marker,
-            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF
+            0xC0 | 0xC1
+                | 0xC2
+                | 0xC3
+                | 0xC5
+                | 0xC6
+                | 0xC7
+                | 0xC9
+                | 0xCA
+                | 0xCB
+                | 0xCD
+                | 0xCE
+                | 0xCF
         ) && len >= 7
         {
-            return Some((u16be(&bytes[i + 5..i + 7]) as u32, u16be(&bytes[i + 3..i + 5]) as u32));
+            return Some((
+                u16be(&bytes[i + 5..i + 7]) as u32,
+                u16be(&bytes[i + 3..i + 5]) as u32,
+            ));
         }
         i += len;
     }
@@ -245,14 +259,8 @@ fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
         }
         b"VP8X" => {
             if bytes.len() >= 30 {
-                let w = ((bytes[24] as u32) << 16
-                    | (bytes[25] as u32) << 8
-                    | bytes[26] as u32)
-                    + 1;
-                let h = ((bytes[27] as u32) << 16
-                    | (bytes[28] as u32) << 8
-                    | bytes[29] as u32)
-                    + 1;
+                let w = ((bytes[24] as u32) << 16 | (bytes[25] as u32) << 8 | bytes[26] as u32) + 1;
+                let h = ((bytes[27] as u32) << 16 | (bytes[28] as u32) << 8 | bytes[29] as u32) + 1;
                 Some((w, h))
             } else {
                 None
@@ -264,8 +272,7 @@ fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// Classify `bytes` into an [`ImageMeta`] for `path`. Pure — unit-tested.
 pub fn inspect_bytes(path: &str, bytes: &[u8]) -> Result<ImageMeta, ImageError> {
-    let format =
-        detect_format(bytes).ok_or_else(|| ImageError::UnknownFormat(path.to_string()))?;
+    let format = detect_format(bytes).ok_or_else(|| ImageError::UnknownFormat(path.to_string()))?;
     let (width, height) = dimensions(bytes, format).unzip();
     Ok(ImageMeta {
         path: path.to_string(),

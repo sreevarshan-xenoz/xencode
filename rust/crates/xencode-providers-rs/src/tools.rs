@@ -368,7 +368,8 @@ mod tests {
     }
 
     #[test]
-    fn render_ollama_history_keeps_object_args_without_ids() {        let extra = vec![AgentTurn::Assistant {
+    fn render_ollama_history_keeps_object_args_without_ids() {
+        let extra = vec![AgentTurn::Assistant {
             text: "".to_string(),
             calls: vec![ToolCall {
                 id: "call_0".to_string(),

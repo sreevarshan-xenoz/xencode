@@ -436,9 +436,9 @@ pub struct App<'a> {
 /// Format the proactive warning for a watched path. Pure — unit-tested.
 pub fn format_watch_warning(path: &str, kind: &str) -> String {
     match kind {
-        "removed" => format!(
-            "⚠ {path} was removed from disk — re-add or restore it before relying on it."
-        ),
+        "removed" => {
+            format!("⚠ {path} was removed from disk — re-add or restore it before relying on it.")
+        }
         "created" => format!("⚠ {path} was created on disk — it may affect your plan."),
         _ => format!(
             "⚠ {path} changed on disk — re-read it before relying on the version in context."
@@ -550,7 +550,7 @@ pub fn format_advise_report(
     }
     let shown: Vec<&xencode_context_rs::Advice> = all
         .iter()
-        .filter(|a| filter.map_or(true, |f| a.file.contains(f)))
+        .filter(|a| filter.is_none_or(|f| a.file.contains(f)))
         .collect();
     if shown.is_empty() {
         return vec![format!(
@@ -3017,12 +3017,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         app.init_log.push(msg.to_string());
                     }
                 }
-            } else if token == "[CTX_START]" {
-                app.messages.push(UiMessage {
-                    role: "assistant".to_string(),
-                    content: String::new(),
-                });
-            } else if token == "[ADVISE_START]" {
+            } else if token == "[CTX_START]" || token == "[ADVISE_START]" {
+                // Both open a fresh assistant message that the matching
+                // [CTX]/[ADVISE] tokens populate line by line.
                 app.messages.push(UiMessage {
                     role: "assistant".to_string(),
                     content: String::new(),
@@ -4550,8 +4547,8 @@ mod tests {
         std::fs::write(&fake, b"not an image").unwrap();
         let err = super::encode_attached_image(fake.to_str().unwrap()).unwrap_err();
         assert_eq!(err, "not a recognized image");
-        let missing = super::encode_attached_image(dir.join("gone.png").to_str().unwrap())
-            .unwrap_err();
+        let missing =
+            super::encode_attached_image(dir.join("gone.png").to_str().unwrap()).unwrap_err();
         assert!(missing.starts_with("cannot read file:"), "{missing}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
