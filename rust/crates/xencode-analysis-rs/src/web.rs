@@ -95,7 +95,10 @@ pub async fn fetch_url(url: &str) -> Result<FetchedPage, FetchError> {
 /// Empty (server sent none) is treated as HTML — most origins serve pages.
 fn is_textual_content(content_type: &str) -> bool {
     let mime = content_type.split(';').next().unwrap_or("").trim();
-    mime.is_empty() || mime == "text/html" || mime == "text/plain" || mime == "application/xhtml+xml"
+    mime.is_empty()
+        || mime == "text/html"
+        || mime == "text/plain"
+        || mime == "application/xhtml+xml"
 }
 
 /// Reduce an HTML (or plain-text) document to `(title, text)`. Pure —

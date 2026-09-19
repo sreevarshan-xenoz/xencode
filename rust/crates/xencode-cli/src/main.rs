@@ -7,6 +7,7 @@ use std::sync::Arc;
 use xencode_analysis_rs::analyzer::CodeAnalyzer;
 use xencode_analysis_rs::images::{analyze_image, is_image_path, ImageMeta};
 use xencode_analysis_rs::security::VulnerabilityScanner;
+use xencode_analysis_rs::web::{fetch_url, FetchedPage};
 use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
@@ -132,6 +133,16 @@ enum Commands {
     Analyze {
         /// Path to analyze (file or directory)
         path: std::path::PathBuf,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
+    /// Fetch a web page and extract research-ready text
+    Fetch {
+        /// URL to fetch (http/https only)
+        url: String,
 
         /// Output format
         #[arg(long, default_value = "text")]
@@ -295,6 +306,7 @@ async fn main() {
         Commands::Memory { action } => run_memory(action),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
+        Commands::Fetch { url, format } => run_fetch(url, format).await,
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Tui => run_tui().await,
@@ -945,6 +957,31 @@ fn format_image_text(meta: &ImageMeta) -> String {
     )
 }
 
+/// One-screen research summary for a fetched page. Pure — unit-tested.
+fn format_fetch_text(page: &FetchedPage) -> String {
+    let title = page.title.as_deref().unwrap_or("(no title)");
+    format!(
+        "{}\n{} ({} bytes)\n\n{}",
+        page.url, title, page.bytes, page.text
+    )
+}
+
+async fn run_fetch(url: String, format: OutputFormat) -> Result<(), String> {
+    let page = fetch_url(&url).await.map_err(|e| e.to_string())?;
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&page).map_err(|e| e.to_string())?
+            );
+        }
+        OutputFormat::Text => {
+            println!("{}", format_fetch_text(&page));
+        }
+    }
+    Ok(())
+}
+
 fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
     if path.is_dir() {
         // Scan directory
@@ -1213,5 +1250,25 @@ mod tests {
             format_image_text(&meta),
             "assets/icon.svg — image/svg+xml vector · 512 bytes"
         );
+    }
+
+    #[test]
+    fn fetch_text_line_shows_url_title_and_body() {
+        use xencode_analysis_rs::web::FetchedPage;
+        let page = FetchedPage {
+            url: "https://example.com/a".to_string(),
+            title: Some("Example".to_string()),
+            text: "hello web".to_string(),
+            bytes: 128,
+        };
+        assert_eq!(
+            super::format_fetch_text(&page),
+            "https://example.com/a\nExample (128 bytes)\n\nhello web"
+        );
+        let untitled = FetchedPage {
+            title: None,
+            ..page
+        };
+        assert!(super::format_fetch_text(&untitled).contains("(no title)"));
     }
 }
