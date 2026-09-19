@@ -59,10 +59,42 @@ pub fn draw(f: &mut Frame, app: &App) {
         draw_project_init_panel(f, app, f.area());
     }
 
+    // Transient toasts (file-watch warnings) float over the body (E3-03).
+    if !app.toasts.is_empty() {
+        draw_toasts(f, app, outer[1]);
+    }
+
     // Help overlay is modal and topmost.
     if app.help_visible {
         draw_help_overlay(f, app, f.area());
     }
+}
+
+fn draw_toasts(f: &mut Frame, app: &App, area: Rect) {
+    let lines = crate::toast::render_lines(&app.toasts, &app.theme);
+    if lines.is_empty() || area.width < 12 || area.height < 3 {
+        return;
+    }
+    let text_w = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
+    let width = (text_w + 2).min(area.width.saturating_sub(2));
+    let height = lines.len() as u16 + 2;
+    let popup = Rect {
+        x: area.x + area.width.saturating_sub(width + 1),
+        y: area.y + 1,
+        width,
+        height,
+    }
+    .intersection(area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" 📣 ");
+    f.render_widget(Clear, popup);
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    f.render_widget(para, popup);
 }
 
 fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {

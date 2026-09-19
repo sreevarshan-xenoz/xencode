@@ -4,6 +4,7 @@ pub mod help;
 pub mod markdown;
 pub mod review;
 pub mod theme;
+pub mod toast;
 pub mod ui;
 pub mod widgets;
 
