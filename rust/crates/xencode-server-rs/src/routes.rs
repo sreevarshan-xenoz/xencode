@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(server_status(State(state.clone())).await.sessions, 0);
 
         create_session(State(state.clone())).await;
-        create_session(State(state.clone())).await;
+        let _ = create_session(State(state.clone())).await;
 
         assert_eq!(server_status(State(state)).await.sessions, 2);
     }
@@ -403,7 +403,7 @@ mod tests {
             .await
             .insert("xencode-existing".to_string(), vec!["alice".to_string()]);
 
-        create_session(State(state.clone())).await;
+        let _ = create_session(State(state.clone())).await;
 
         let sessions = state.sessions.lock().await;
         assert_eq!(sessions["xencode-existing"], vec!["alice".to_string()]);
