@@ -174,7 +174,7 @@ mod tests {
     fn minimal_pdf(pages: &[&str]) -> Vec<u8> {
         let mut pdf = b"%PDF-1.4\n".to_vec();
         let mut offsets = Vec::new();
-        let mut emit = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
+        let emit = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, body: &[u8]| {
             offsets.push(pdf.len());
             pdf.extend_from_slice(body);
         };
@@ -188,7 +188,7 @@ mod tests {
         emit(
             &mut pdf,
             &mut offsets,
-            format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n").as_bytes(),
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
         );
         emit(
             &mut pdf,
