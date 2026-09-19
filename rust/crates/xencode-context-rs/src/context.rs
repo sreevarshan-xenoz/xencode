@@ -175,9 +175,13 @@ pub fn assemble_prompt(
     truncated |= stable.truncated || stable.tokens > target;
 
     // ── Tier 4: state.md ─────────────────────────────────────────────────
+    // Admitted only with margin to spare; the emit below follows the same
+    // flag so text and budget can never diverge (unemitted text would bust
+    // the margin the gate protects).
     let (state_head, state_tok) =
         truncate_to_tokens(state_md.unwrap_or(""), STATE_CAP_TOKENS, false);
-    if !state_head.is_empty() && remaining >= MARGIN_TOKENS {
+    let state_included = !state_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if state_included {
         tiers.push(TierDoc {
             name: "state.md",
             tokens: state_tok,
@@ -187,7 +191,8 @@ pub fn assemble_prompt(
 
     // ── Tier 5: git summary ──────────────────────────────────────────────
     let (git_head, git_tok) = truncate_to_tokens(git_summary, GIT_CAP_TOKENS, false);
-    if !git_head.is_empty() && remaining >= MARGIN_TOKENS {
+    let git_included = !git_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if git_included {
         tiers.push(TierDoc {
             name: "git",
             tokens: git_tok,
@@ -230,11 +235,11 @@ pub fn assemble_prompt(
 
     // ── Assemble ─────────────────────────────────────────────────────────
     let mut text = stable_prefix.clone();
-    if !state_head.is_empty() {
+    if state_included {
         text.push_str("\n\n## Current Task State\n\n");
         text.push_str(&state_head);
     }
-    if !git_head.is_empty() {
+    if git_included {
         text.push_str("\n\n## Git\n\n");
         text.push_str(&git_head);
     }
@@ -370,7 +375,8 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     // ── Tier 4: state.md ─────────────────────────────────────────────────
     let (state_head, state_tok) =
         truncate_to_tokens(input.state_md.unwrap_or(""), STATE_CAP_TOKENS, false);
-    if !state_head.is_empty() && remaining >= MARGIN_TOKENS {
+    let state_included = !state_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if state_included {
         tiers.push(TierDoc {
             name: "state.md",
             tokens: state_tok,
@@ -380,7 +386,8 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
 
     // ── Tier 5: git summary ──────────────────────────────────────────────
     let (git_head, git_tok) = truncate_to_tokens(input.git_summary, GIT_CAP_TOKENS, false);
-    if !git_head.is_empty() && remaining >= MARGIN_TOKENS {
+    let git_included = !git_head.is_empty() && remaining >= MARGIN_TOKENS;
+    if git_included {
         tiers.push(TierDoc {
             name: "git",
             tokens: git_tok,
@@ -445,12 +452,12 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         turns.push(ChatTurn { role, content });
     }
     let mut user_turn = String::new();
-    if !state_head.is_empty() {
+    if state_included {
         user_turn.push_str("## Current Task State\n\n");
         user_turn.push_str(&state_head);
         user_turn.push_str("\n\n");
     }
-    if !git_head.is_empty() {
+    if git_included {
         user_turn.push_str("## Git\n\n");
         user_turn.push_str(&git_head);
         user_turn.push_str("\n\n");
@@ -630,8 +637,28 @@ mod tests {
     }
 
     #[test]
-    fn stable_prefix_honors_fixed_order_and_marker() {
+    fn margin_gate_excludes_state_from_text_and_budget() {
+        // Stable prefix overflows the whole Low budget, so remaining is 0 at
+        // tier 4: the margin gate fails and the state tier must be absent
+        // from BOTH the text and the tier list (never emitted-but-uncounted).
+        let sys = "s\n".repeat(9000);
+        let state = "st\n".repeat(2000);
         let doc = assemble_prompt(
+            HardwareProfile::Low,
+            &sys,
+            None,
+            None,
+            Some(&state),
+            "",
+            vec![],
+            "",
+        );
+        assert!(!doc.text.contains("## Current Task State"));
+        assert!(!doc.tiers.iter().any(|t| t.name == "state.md"));
+    }
+
+    #[test]
+    fn stable_prefix_honors_fixed_order_and_marker() {        let doc = assemble_prompt(
             HardwareProfile::Balanced,
             SYSTEM,
             Some(AGENTS),
