@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -487,6 +487,72 @@ pub fn watch_warning_for(
     Some(warning)
 }
 
+/// Maximum finding lines per `/advise` report before an overflow note.
+pub const ADVISE_LINE_CAP: usize = 50;
+
+/// Render the `/advise` report: a summary head line plus one line per
+/// finding, optionally narrowed to files containing `filter`. Pure —
+/// unit-tested.
+pub fn format_advise_report(
+    all: &[xencode_context_rs::Advice],
+    filter: Option<&str>,
+) -> Vec<String> {
+    if all.is_empty() {
+        return vec![
+            "🔍 No findings — no cycles, hubs, orphans, or broken imports in the snapshot."
+                .to_string(),
+        ];
+    }
+    let shown: Vec<&xencode_context_rs::Advice> = all
+        .iter()
+        .filter(|a| filter.map_or(true, |f| a.file.contains(f)))
+        .collect();
+    if shown.is_empty() {
+        return vec![format!(
+            "🔍 No findings matching `{}` ({} total — drop the filter to see all).",
+            filter.unwrap_or(""),
+            all.len()
+        )];
+    }
+    let mut broken = 0usize;
+    let mut cycles = 0usize;
+    let mut hubs = 0usize;
+    let mut orphans = 0usize;
+    for a in all {
+        match a.kind {
+            xencode_context_rs::AdviceKind::BrokenImport => broken += 1,
+            xencode_context_rs::AdviceKind::Cycle => cycles += 1,
+            xencode_context_rs::AdviceKind::AffectedDependent => {}
+            xencode_context_rs::AdviceKind::Hub => hubs += 1,
+            xencode_context_rs::AdviceKind::Orphan => orphans += 1,
+        }
+    }
+    let pl = |n: usize| if n == 1 { "" } else { "s" };
+    let mut out = vec![format!(
+        "🔍 {} finding{} — {} broken import{}, {} cycle{}, {} hub{}, {} orphan{}:",
+        all.len(),
+        pl(all.len()),
+        broken,
+        pl(broken),
+        cycles,
+        pl(cycles),
+        hubs,
+        pl(hubs),
+        orphans,
+        pl(orphans),
+    )];
+    for a in shown.iter().take(ADVISE_LINE_CAP) {
+        out.push(a.message.clone());
+    }
+    if shown.len() > ADVISE_LINE_CAP {
+        out.push(format!(
+            "… +{} more (narrow with /advise <path>).",
+            shown.len() - ADVISE_LINE_CAP
+        ));
+    }
+    out
+}
+
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
@@ -840,6 +906,12 @@ impl<'a> App<'a> {
         // Context assembly interception (/ctx, /ctx status, /ctx track <path>)
         if prompt.starts_with("/ctx") {
             self.handle_ctx_command(&prompt, tx);
+            return;
+        }
+
+        // Repository insights (/advise [filter])
+        if prompt.starts_with("/advise") {
+            self.handle_advise_command(&prompt, tx);
             return;
         }
 
@@ -1762,8 +1834,49 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Sync the in-memory conversation into the canonical transcript store.
-    /// Appends only messages that aren't already at the tail, so repeated
+    /// Repository insights (`/advise [filter]`) — deterministic refactor
+    /// suggestions + bug warnings from the last `/init` snapshot, streamed
+    /// back through `[ADVISE]` chat lines. An optional substring narrows the
+    /// report to matching files (e.g. `/advise router`).
+    fn handle_advise_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let filter = prompt.strip_prefix("/advise").unwrap_or("").trim();
+        let filter = if filter.is_empty() {
+            None
+        } else {
+            Some(filter)
+        };
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
+            xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
+                .unwrap_or_default();
+        if symbols.is_empty() {
+            let _ = tx.send("[ADVISE_START]".to_string());
+            let _ = tx.send("[ADVISE]❌ No project index — run /init first.".to_string());
+            return;
+        }
+        let graph: Vec<xencode_context_rs::DepEdge> =
+            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
+                .unwrap_or_default();
+        let index: Option<xencode_context_rs::FilesIndex> =
+            xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
+        let rust_files: Vec<String> = index
+            .map(|i| {
+                i.files
+                    .into_iter()
+                    .filter(|f| f.language == "rust")
+                    .map(|f| f.path)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let all = xencode_context_rs::advise(&rust_files, &symbols, &graph);
+        let _ = tx.send("[ADVISE_START]".to_string());
+        for line in format_advise_report(&all, filter) {
+            let _ = tx.send(format!("[ADVISE]{line}"));
+        }
+    }
+
+    /// Sync the in-memory conversation into the canonical transcript store.    /// Appends only messages that aren't already at the tail, so repeated
     /// `/ctx compact|archive` runs never double-count history.
     fn canonical_transcript(&mut self) -> (xencode_context_rs::Transcript, usize) {
         let root = xencode_context_rs::default_root();
@@ -2850,6 +2963,20 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     role: "assistant".to_string(),
                     content: String::new(),
                 });
+            } else if token == "[ADVISE_START]" {
+                app.messages.push(UiMessage {
+                    role: "assistant".to_string(),
+                    content: String::new(),
+                });
+            } else if let Some(body) = token.strip_prefix("[ADVISE]") {
+                if let Some(last) = app.messages.last_mut() {
+                    if last.role == "assistant" {
+                        if !last.content.is_empty() {
+                            last.content.push('\n');
+                        }
+                        last.content.push_str(body);
+                    }
+                }
             } else if let Some(body) = token.strip_prefix("[CTX]") {
                 if let Some(last) = app.messages.last_mut() {
                     if last.role == "assistant" {
@@ -4045,7 +4172,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_watch_warning, parse_llama_port, parse_porcelain_z, watch_warning_for};
+    use super::{
+        format_advise_report, format_watch_warning, parse_llama_port, parse_porcelain_z,
+        watch_warning_for,
+    };
     use std::collections::HashSet;
     use xencode_core_rs::{scan_workspace, ScanOptions};
 
@@ -4262,5 +4392,62 @@ mod tests {
         .unwrap();
         assert!(long.contains("(+2 more)"), "{long}");
         assert!(!long.contains("src/d5.rs"), "{long}");
+    }
+
+    fn advise_of(kind: xencode_context_rs::AdviceKind, file: &str) -> xencode_context_rs::Advice {
+        xencode_context_rs::Advice {
+            file: file.to_string(),
+            kind,
+            message: format!("{file} — test finding"),
+        }
+    }
+
+    #[test]
+    fn advise_report_summarizes_counts() {
+        use xencode_context_rs::AdviceKind;
+        let all = vec![
+            advise_of(AdviceKind::BrokenImport, "src/a.rs"),
+            advise_of(AdviceKind::Cycle, "src/a.rs"),
+            advise_of(AdviceKind::Cycle, "src/b.rs"),
+            advise_of(AdviceKind::Orphan, "src/z.rs"),
+        ];
+        let report = format_advise_report(&all, None);
+        assert_eq!(report.len(), 5, "{report:?}");
+        assert!(
+            report[0].contains("4 findings")
+                && report[0].contains("1 broken import")
+                && report[0].contains("2 cycles")
+                && report[0].contains("1 orphan"),
+            "{}",
+            report[0]
+        );
+    }
+
+    #[test]
+    fn advise_report_filters_caps_and_handles_empty() {
+        use xencode_context_rs::AdviceKind;
+        let all = vec![
+            advise_of(AdviceKind::Hub, "src/router.rs"),
+            advise_of(AdviceKind::Orphan, "src/old.rs"),
+        ];
+        let filtered = format_advise_report(&all, Some("router"));
+        assert_eq!(filtered.len(), 2, "{filtered:?}");
+        assert!(filtered[1].contains("src/router.rs"), "{filtered:?}");
+
+        let missed = format_advise_report(&all, Some("nothing-matches"));
+        assert_eq!(missed.len(), 1);
+        assert!(missed[0].contains("No findings matching"), "{}", missed[0]);
+
+        let empty = format_advise_report(&[], None);
+        assert_eq!(empty.len(), 1);
+        assert!(empty[0].contains("No findings"), "{}", empty[0]);
+
+        // Overflow past the cap collapses into a narrow-hint line.
+        let many: Vec<xencode_context_rs::Advice> = (0..(super::ADVISE_LINE_CAP + 3))
+            .map(|i| advise_of(AdviceKind::Orphan, &format!("src/f{i:03}.rs")))
+            .collect();
+        let capped = format_advise_report(&many, None);
+        assert_eq!(capped.len(), super::ADVISE_LINE_CAP + 2, "{capped:?}");
+        assert!(capped.last().unwrap().contains("+3 more"), "{capped:?}");
     }
 }
