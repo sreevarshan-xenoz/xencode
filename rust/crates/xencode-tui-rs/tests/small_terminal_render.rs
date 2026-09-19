@@ -87,3 +87,24 @@ fn renders_at_any_terminal_size() {
         failures.len()
     );
 }
+
+/// The help overlay is topmost and modal; it must survive the same size sweep.
+#[test]
+fn renders_help_overlay_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    let mut app = populated(FocusArea::ChatInput);
+    app.help_visible = true;
+    app.help_scroll = 5; // exercise the clamped scroll path
+    for &width in WIDTHS {
+        for &height in HEIGHTS {
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &app)).unwrap();
+            }));
+            if rendered.is_err() {
+                failures.push(format!("help at {width}x{height}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
