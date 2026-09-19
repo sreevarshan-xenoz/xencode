@@ -4255,20 +4255,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         _ => {}
                     },
                     MouseEventKind::Down(MouseButton::Left) => {
-                        let term_width = terminal.size()?.width;
-                        let left_pane = term_width * 20 / 100;
-                        let center_pane = term_width * 70 / 100;
-
-                        if mouse.column < left_pane {
-                            app.focus = FocusArea::FileExplorer;
-                            let row = mouse.row.saturating_sub(2) as usize;
-                            if row < app.file_tree.len() {
-                                app.selected_file = row;
+                        let size = terminal.size()?;
+                        let body_area =
+                            ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        match ui::body_hit_test(body_area, mouse.column) {
+                            FocusArea::FileExplorer => {
+                                app.focus = FocusArea::FileExplorer;
+                                let row = mouse.row.saturating_sub(2) as usize;
+                                if row < app.file_tree.len() {
+                                    app.selected_file = row;
+                                }
                             }
-                        } else if mouse.column < center_pane {
-                            app.focus = FocusArea::CodeEditor;
-                        } else {
-                            app.focus = FocusArea::ChatInput;
+                            target => app.focus = target,
                         }
                     }
                     _ => {}

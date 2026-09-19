@@ -231,8 +231,11 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Body (file explorer + chat + input) ─────────────────────────────────────
 
-fn draw_body(f: &mut Frame, app: &App, area: Rect) {
-    let main_chunks = Layout::default()
+/// The body column split (File Explorer | Code Editor | Chat). Single source
+/// of truth: `draw_body` renders these rects and the mouse handler hit-tests
+/// them, so the two can no longer disagree about where the panels are.
+pub fn body_chunks(area: Rect) -> [Rect; 3] {
+    let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(20), // File Explorer
@@ -240,6 +243,23 @@ fn draw_body(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Percentage(30), // Chat
         ])
         .split(area);
+    [chunks[0], chunks[1], chunks[2]]
+}
+
+/// Which body panel owns terminal column `column` at this area's width?
+pub fn body_hit_test(area: Rect, column: u16) -> FocusArea {
+    let chunks = body_chunks(area);
+    if column < chunks[0].right() {
+        FocusArea::FileExplorer
+    } else if column < chunks[1].right() {
+        FocusArea::CodeEditor
+    } else {
+        FocusArea::ChatInput
+    }
+}
+
+fn draw_body(f: &mut Frame, app: &App, area: Rect) {
+    let main_chunks = body_chunks(area);
 
     draw_file_explorer(f, app, main_chunks[0]);
     draw_code_editor(f, app, main_chunks[1]);
@@ -3143,5 +3163,38 @@ mod tests {
         // Degenerate heights must not underflow.
         assert_eq!(clamp_scroll(5, 0), 5);
         assert_eq!(clamp_scroll(0, 24), 0);
+    }
+
+    #[test]
+    fn body_hit_test_follows_body_layout() {
+        use super::{body_chunks, body_hit_test};
+        use super::FocusArea;
+        use ratatui::layout::Rect;
+
+        for width in [1u16, 7, 20, 33, 61, 80, 100, 120, 240] {
+            let area = Rect::new(0, 0, width, 24);
+            let chunks = body_chunks(area);
+            // The three panes tile the full width: no dead columns, no overlap.
+            assert_eq!(chunks[0].x, 0);
+            assert_eq!(chunks[1].x, chunks[0].right());
+            assert_eq!(chunks[2].x, chunks[1].right());
+            assert_eq!(chunks[2].right(), area.right());
+
+            // Every column hits exactly the pane rendered under it.
+            for col in 0..width {
+                let expected = if col < chunks[0].right() {
+                    FocusArea::FileExplorer
+                } else if col < chunks[1].right() {
+                    FocusArea::CodeEditor
+                } else {
+                    FocusArea::ChatInput
+                };
+                assert_eq!(
+                    body_hit_test(area, col),
+                    expected,
+                    "width {width} col {col}"
+                );
+            }
+        }
     }
 }
