@@ -254,7 +254,11 @@ pub fn assemble_prompt(
     }
 
     let total_tokens = target.saturating_sub(remaining);
-    let soft_compaction_needed = recent_tok < RECENT_MIN_TOKENS;
+    // Actionable only when recent content was actually dropped: like the
+    // chat assembler (`history_total > history_kept`), a short-or-empty
+    // history on a fresh conversation must never suggest compaction.
+    let soft_compaction_needed =
+        !recent_text.is_empty() && recent_head.len() < recent_text.len();
 
     ContextDoc {
         text,
@@ -637,8 +641,52 @@ mod tests {
     }
 
     #[test]
-    fn margin_gate_excludes_state_from_text_and_budget() {
-        // Stable prefix overflows the whole Low budget, so remaining is 0 at
+    fn preview_compaction_flag_only_when_content_dropped() {
+        // Fresh conversation: empty recent text must not suggest compaction.
+        let fresh = assemble_prompt(
+            HardwareProfile::Balanced,
+            SYSTEM,
+            Some(AGENTS),
+            Some(ANCHOR),
+            None,
+            "",
+            vec![],
+            "",
+        );
+        assert!(!fresh.soft_compaction_needed);
+        assert!(!fresh.truncated);
+
+        // Recent content that fits is kept whole: no flag.
+        let kept = assemble_prompt(
+            HardwareProfile::Balanced,
+            SYSTEM,
+            Some(AGENTS),
+            Some(ANCHOR),
+            None,
+            "",
+            vec![],
+            "user: hello",
+        );
+        assert!(!kept.soft_compaction_needed);
+
+        // Recent content cut by a blown stable prefix: flag on.
+        let sys = "s\n".repeat(20000);
+        let recent = "user: hello\n".repeat(500);
+        let cut = assemble_prompt(
+            HardwareProfile::Low,
+            &sys,
+            None,
+            None,
+            None,
+            "",
+            vec![],
+            &recent,
+        );
+        assert!(cut.soft_compaction_needed);
+    }
+
+    #[test]
+    fn margin_gate_excludes_state_from_text_and_budget() {        // Stable prefix overflows the whole Low budget, so remaining is 0 at
         // tier 4: the margin gate fails and the state tier must be absent
         // from BOTH the text and the tier list (never emitted-but-uncounted).
         let sys = "s\n".repeat(9000);
