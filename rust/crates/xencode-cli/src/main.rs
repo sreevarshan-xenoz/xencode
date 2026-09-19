@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use std::sync::Arc;
 use xencode_analysis_rs::analyzer::CodeAnalyzer;
+use xencode_analysis_rs::images::{analyze_image, is_image_path, ImageMeta};
 use xencode_analysis_rs::security::VulnerabilityScanner;
 use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
@@ -928,10 +929,28 @@ async fn run_server(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
-    if path.is_dir() {
+/// One-line image inventory for text output. Pure — unit-tested.
+fn format_image_text(meta: &ImageMeta) -> String {
+    let dims = match (meta.width, meta.height) {
+        (Some(w), Some(h)) => format!("{w}x{h}"),
+        _ => "vector".to_string(),
+    };
+    format!(
+        "{} — {} {} · {} bytes",
+        meta.path,
+        meta.format.mime(),
+        dims,
+        meta.bytes
+    )
+}
+
+fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {    if path.is_dir() {
         // Scan directory
         let mut all_issue_lists = Vec::new();
+        // Image inventory rides alongside: intake metadata, not code issues,
+        // so it stays out of the JSON issues array (which keeps its shape)
+        // and is reported in text mode plus single-file JSON.
+        let mut image_metas: Vec<ImageMeta> = Vec::new();
         let walker = walkdir::WalkDir::new(&path)
             .max_depth(3)
             .into_iter()
@@ -956,7 +975,14 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    if is_image_path(fp) {
+                        match analyze_image(fp) {
+                            Ok(meta) => image_metas.push(meta),
+                            Err(e) => eprintln!("  Skipping {}: {}", fp.display(), e),
+                        }
+                    }
+                }
             }
         }
 
@@ -972,6 +998,10 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
                 println!("Results for: {}", path.display());
                 println!("   Files analyzed: {}", all_issue_lists.len());
                 println!("   Total issues:   {}", total);
+                println!("   Images:         {}", image_metas.len());
+                for meta in &image_metas {
+                    println!("\n  {}", format_image_text(meta));
+                }
                 for (file_path, issues) in &all_issue_lists {
                     if !issues.is_empty() {
                         println!(
@@ -1000,7 +1030,23 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
             }
         }
     } else {
-        // Single file
+        // Single file — images take the intake path (metadata, not issues).
+        if is_image_path(&path) {
+            let meta = analyze_image(&path).map_err(|e| e.to_string())?;
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?
+                    );
+                }
+                OutputFormat::Text => {
+                    println!("Image: {}", path.display());
+                    println!("   {}", format_image_text(&meta));
+                }
+            }
+            return Ok(());
+        }
         let issues = CodeAnalyzer::analyze_file(&path).map_err(|e| e.to_string())?;
 
         match format {
@@ -1130,4 +1176,40 @@ async fn run_tui() -> Result<(), String> {
     terminal.show_cursor().map_err(|e| e.to_string())?;
 
     res.map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_image_text;
+    use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+
+    #[test]
+    fn image_text_line_shows_mime_dimensions_and_bytes() {
+        let meta = ImageMeta {
+            path: "assets/logo.png".to_string(),
+            format: ImageFormat::Png,
+            width: Some(800),
+            height: Some(600),
+            bytes: 12345,
+        };
+        assert_eq!(
+            format_image_text(&meta),
+            "assets/logo.png — image/png 800x600 · 12345 bytes"
+        );
+    }
+
+    #[test]
+    fn image_text_line_marks_vector_without_dimensions() {
+        let meta = ImageMeta {
+            path: "assets/icon.svg".to_string(),
+            format: ImageFormat::Svg,
+            width: None,
+            height: None,
+            bytes: 512,
+        };
+        assert_eq!(
+            format_image_text(&meta),
+            "assets/icon.svg — image/svg+xml vector · 512 bytes"
+        );
+    }
 }
