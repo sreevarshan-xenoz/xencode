@@ -58,6 +58,29 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.init_visible {
         draw_project_init_panel(f, app, f.area());
     }
+
+    // Help overlay is modal and topmost.
+    if app.help_visible {
+        draw_help_overlay(f, app, f.area());
+    }
+}
+
+fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(70, 85, area);
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" ⌨ Keybindings — Esc or ? to close ");
+
+    let all = crate::help::help_lines(app.focus, &app.theme);
+    let max_scroll = clamp_scroll(all.len(), popup_area.height);
+    let para = Paragraph::new(all)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((app.help_scroll.min(max_scroll), 0));
+    f.render_widget(para, popup_area);
 }
 
 // ── Header ──────────────────────────────────────────────────────────────────
@@ -160,7 +183,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
             FocusArea::CustomModels | FocusArea::LearningMode |
             FocusArea::MultiLanguage => "Enter:start  Esc:close",
-            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
+            _ => "i:edit  m:models  s:settings  ?:help  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
         }
     };
 

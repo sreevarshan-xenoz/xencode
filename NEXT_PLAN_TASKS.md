@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 426 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 429 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -142,8 +142,11 @@
   `code`/**bold**/*italic* as styled `Line`s; unclosed inline markers stay literal.
   Assistant messages in `draw_messages` use it; user/system stay plain. 6 unit tests
   + the small-terminal render sweep cover it.
-- [ ] E3-02 Help overlay (`F1` or `?`): keybindings per current focus area,
-  generated from the real key handler — no fiction.
+- [x] E3-02 Help overlay (`?` or `F1`): new `help.rs` lists real keybindings —
+  the current panel's keys, plus universal/global/editing sections — from an
+  audited inventory of the actual `run_app` handler (no fiction). Modal: Esc/`?`/`F1`
+  close, ↑↓/jk scroll (`help_scroll`, render-clamped), all other keys swallowed.
+  `?:help` added to the default status hint. 2 unit tests + a help-overlay render sweep.
 - [ ] E3-03 Toast/notification layer: file-watch warnings become transient overlays
   (`app.rs:440-449`), not fake system chat lines.
 

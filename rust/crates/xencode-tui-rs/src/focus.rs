@@ -8,7 +8,7 @@ pub enum InputMode {
     Editing,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FocusArea {
     ChatInput,
     FileExplorer,

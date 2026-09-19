@@ -152,6 +152,8 @@ pub struct App<'a> {
     pub init_steps: Vec<(String, String)>, // (step_name, status)
     pub init_log: Vec<String>,
     pub init_visible: bool,
+    pub help_visible: bool,
+    pub help_scroll: u16,
     pub init_cancel: Arc<AtomicBool>,
 
     // Collaboration Hub state
@@ -610,6 +612,8 @@ impl<'a> App<'a> {
             init_steps: Vec::new(),
             init_log: Vec::new(),
             init_visible: false,
+            help_visible: false,
+            help_scroll: 0,
             init_cancel: Arc::new(AtomicBool::new(false)),
             collab_session_active: false,
             collab_session_id: String::new(),
@@ -3199,6 +3203,23 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         if event::poll(Duration::from_millis(33))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // The help overlay is modal: Esc/?/F1 close it, every other
+                    // key is swallowed while it is open.
+                    if app.help_visible {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('?') | KeyCode::F(1) => {
+                                app.help_visible = false;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.help_scroll = app.help_scroll.saturating_sub(1);
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.help_scroll += 1;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
                     // Global shortcuts (work in ALL modes)
                     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                     if ctrl {
@@ -3762,6 +3783,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                             KeyCode::Char('u') if app.focus == FocusArea::ModelSelector => {
                                 app.llamacpp_control("unload", None, tx.clone());
+                            }
+                            KeyCode::Char('?') | KeyCode::F(1) => {
+                                app.help_visible = true;
+                                app.help_scroll = 0;
                             }
                             KeyCode::Char('q') => return Ok(()),
                             KeyCode::Esc => {
