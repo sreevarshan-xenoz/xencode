@@ -4644,4 +4644,28 @@ mod tests {
         assert!(block2.contains(&bin.display().to_string()), "{block2}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    /// Regression for E2-01: Enter in the ByteBot panel used to overwrite the
+    /// typed command with the last history entry instead of executing it.
+    #[tokio::test]
+    async fn bytebot_enter_executes_typed_command_not_history() {
+        use tokio::sync::mpsc;
+        let mut app = super::App::new();
+        app.bytebot_history = vec!["previous command".to_string()];
+        app.bytebot_command = "fix flaky tests".to_string();
+        app.bytebot_cursor = app.bytebot_command.len();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.run_bytebot(tx);
+        assert!(app.bytebot_running, "typed command must start executing");
+        assert!(app.bytebot_command.is_empty());
+        assert!(app
+            .bytebot_log
+            .iter()
+            .any(|l| l.contains("fix flaky tests")));
+        assert_eq!(
+            app.bytebot_history,
+            vec!["previous command".to_string()],
+            "history must not be recalled on Enter"
+        );
+    }
 }

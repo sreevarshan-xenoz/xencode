@@ -113,8 +113,9 @@
 
 ### E2 — Correctness bugs (UI doc §2)
 
-- [ ] E2-01 ByteBot Enter executes the typed command instead of replacing it with
-  history (`app.rs:3659-3667`); add regression test.
+- [x] E2-01 ByteBot Enter executes the typed command instead of replacing it with
+  history (`app.rs:3659-3667`); regression test `bytebot_enter_executes_typed_command_not_history`.
+  Fix landed in `8956914`.
 - [ ] E2-02 Git commit off the UI thread (`app.rs:3650-3652`) — spawn task, report
   result as a chat line; TUI must stay responsive on slow repos.
 - [ ] E2-03 Remove dead `FocusArea::Terminal` + its "coming soon" stub
