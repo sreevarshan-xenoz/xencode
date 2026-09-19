@@ -88,8 +88,9 @@
 
 ## Milestone E — UI Systematic Fixes (drafted 2026-09-19)
 
-> Source of findings: [docs/UI_IMPROVEMENTS.md](docs/UI_IMPROVEMENTS.md) — check off
-> entries there as each task lands. Same ground rules as Milestone D (Rust-only,
+> Findings were audited 2026-09-19 and are inlined in each E-task below with
+> file:line citations (the standalone `docs/UI_IMPROVEMENTS.md` backlog was
+> removed by request in `5fcf571`; recoverable from history if ever needed). Same ground rules as Milestone D (Rust-only,
 > tests per task, zero warnings, atomic commits, docs in close-out).
 > Dependency note: E2-02 (non-blocking git commit) is trivial on its own but becomes
 > free if Milestone D's D1-01 task core lands first — sequence accordingly.

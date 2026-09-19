@@ -41,4 +41,3 @@
 ## Task Breakdown
 
 Day-to-day task tracking lives in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md).
-TUI UI improvement backlog (verified 2026-09-19): [docs/UI_IMPROVEMENTS.md](docs/UI_IMPROVEMENTS.md).
