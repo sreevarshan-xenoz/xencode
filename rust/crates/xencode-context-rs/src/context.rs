@@ -257,8 +257,7 @@ pub fn assemble_prompt(
     // Actionable only when recent content was actually dropped: like the
     // chat assembler (`history_total > history_kept`), a short-or-empty
     // history on a fresh conversation must never suggest compaction.
-    let soft_compaction_needed =
-        !recent_text.is_empty() && recent_head.len() < recent_text.len();
+    let soft_compaction_needed = !recent_text.is_empty() && recent_head.len() < recent_text.len();
 
     ContextDoc {
         text,
@@ -686,7 +685,8 @@ mod tests {
     }
 
     #[test]
-    fn margin_gate_excludes_state_from_text_and_budget() {        // Stable prefix overflows the whole Low budget, so remaining is 0 at
+    fn margin_gate_excludes_state_from_text_and_budget() {
+        // Stable prefix overflows the whole Low budget, so remaining is 0 at
         // tier 4: the margin gate fails and the state tier must be absent
         // from BOTH the text and the tier list (never emitted-but-uncounted).
         let sys = "s\n".repeat(9000);
@@ -706,7 +706,8 @@ mod tests {
     }
 
     #[test]
-    fn stable_prefix_honors_fixed_order_and_marker() {        let doc = assemble_prompt(
+    fn stable_prefix_honors_fixed_order_and_marker() {
+        let doc = assemble_prompt(
             HardwareProfile::Balanced,
             SYSTEM,
             Some(AGENTS),
