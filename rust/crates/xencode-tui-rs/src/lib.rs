@@ -1,7 +1,5 @@
 pub mod app;
-pub mod channel;
 pub mod focus;
-pub mod input;
 pub mod review;
 pub mod theme;
 pub mod ui;

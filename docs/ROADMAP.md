@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19.** All features below are now
-> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 421 tests).
+> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 417 tests).
 
 ### Phase 1: The Foundation (✅ FROZEN / COMPLETE)
 *Core infrastructure is feature-complete. No further expansion here.*

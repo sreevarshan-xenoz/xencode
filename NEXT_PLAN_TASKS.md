@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 421 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 417 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -103,12 +103,13 @@
   already reachable via Feature Navigator.
 - [x] E1-02 Single theme source: deleted the verbatim duplicate in `app.rs`
   (byte-identical diff verified first), `app.rs` now re-exports `theme::ThemeColors`.
-- [ ] E1-03 Adopt `widgets/`: replace the 11 inline spinner frame arrays in
-  `ui.rs` with `widgets::spinner`, and the local `bar` closure (`ui.rs:1055`) with
-  `widgets::gauge`. Delete `channel.rs` and `input.rs` (unused; multiline input
-  arrives in E5 via `tui_textarea` instead) unless a use surfaces first.
-- [ ] E1-04 Gate: no dead modules remain — every file in `src/` is imported and
-  used, or deleted.
+- [x] E1-03 Adopt `widgets/`: all 11 inline spinner frame arrays in `ui.rs` now use
+  `widgets::spinner::frame`/`SPINNER_FRAMES`; the `bar` closure and the bytebot/voice
+  gauge duplicates now use `widgets::gauge::bar`. Bars with different shapes
+  (profiler ticks, learning gauges) intentionally left per `gauge.rs` doc note.
+- [x] E1-04 Gate: dead modules deleted — `channel.rs`, `input.rs` (zero references
+  verified). `src/` is now: app, focus, review, theme, ui, widgets — all live.
+  Workspace after deletion: 417 passed, 0 failed, zero warnings (README counts synced).
 
 ### E2 — Correctness bugs (UI doc §2)
 
