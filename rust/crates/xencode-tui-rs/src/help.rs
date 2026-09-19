@@ -1,7 +1,7 @@
 //! Keybinding help data (E3-02) for the `?`/`F1` overlay.
 //!
-//! Every entry here mirrors a real arm in `run_app`'s key handler — when you
-//! change a binding there, change it here. The unit test guards the format.
+//! Every entry here mirrors a real arm in `keymap.rs` — when you change a
+//! binding there, change it here. The unit test guards the format.
 
 use crate::focus::FocusArea;
 use crate::theme::ThemeColors;
@@ -34,7 +34,7 @@ const UNIVERSAL: &[Binding] = &[
     ("i or /", "edit chat input"),
     ("e", "edit code editor"),
     ("m", "model selector (r refresh, l load, u unload)"),
-    ("s", "settings"),
+    ("s", "settings (panels that bind s keep it)"),
     ("Esc", "close popup / leave edit mode"),
     ("? / F1", "this help"),
 ];
@@ -87,7 +87,15 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "start review"),
         ],
         PerformanceDashboard | ProjectAnalyzer | CollaborationHub | PerformanceProfiler
-        | MultiLanguage | TerminalAssistant | VoiceInterface => &[("Enter", "start / continue")],
+        | MultiLanguage => &[("Enter", "start / continue")],
+        VoiceInterface => &[
+            ("Enter", "start voice session"),
+            ("Space / m", "toggle mute"),
+        ],
+        TerminalAssistant => &[
+            ("Enter", "start assistant"),
+            ("Space", "cycle risk filter"),
+        ],
         GitCommit => &[
             ("type", "commit message"),
             ("Enter", "git commit -am (async)"),
@@ -110,10 +118,12 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("↑ ↓ / j k", "scroll"),
             ("Enter", "start scan"),
             ("Space", "cycle severity filter"),
+            ("s", "toggle sort severity ↔ category"),
         ],
         CustomModels => &[
             ("↑ ↓ / ← →", "select profile"),
             ("Enter", "open profile editor"),
+            ("s", "save profile (while editing)"),
         ],
         LearningMode => &[
             ("Enter", "start lesson / answer quiz"),

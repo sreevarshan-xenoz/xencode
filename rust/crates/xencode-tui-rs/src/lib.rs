@@ -1,6 +1,7 @@
 pub mod app;
 pub mod focus;
 pub mod help;
+pub mod keymap;
 pub mod markdown;
 pub mod review;
 pub mod theme;
