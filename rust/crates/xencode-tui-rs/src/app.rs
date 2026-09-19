@@ -3468,14 +3468,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         }
                                     }
                                     FocusArea::ByteBotPanel => {
-                                        if !app.bytebot_running {
-                                            // ↑ recalls last command from history
-                                            if !app.bytebot_history.is_empty() {
-                                                app.bytebot_command =
-                                                    app.bytebot_history.last().unwrap().clone();
-                                                app.bytebot_cursor = app.bytebot_command.len();
-                                            }
-                                        }
+                                        // Executes what's typed; history recall is ↑.
+                                        app.run_bytebot(tx.clone());
                                     }
                                     FocusArea::CollaborationHub => {
                                         if !app.collab_session_active {
