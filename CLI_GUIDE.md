@@ -62,16 +62,22 @@ Analyze a file or directory for code issues and vulnerabilities. Image
 files take the intake path: format, dimensions, and byte size are reported
 (`--format json` returns the `ImageMeta` for a single image).
 
+Directory mode walks the full tree (junk dirs like `target/` skipped),
+analyzes every non-image file, and reports skip counts. Directory JSON is
+a documented object — single-file shapes are unchanged:
+
 ```bash
 xencode analyze ./src
 xencode analyze ./assets/logo.png --format json
+xencode analyze ./src --format json | jq '{issues: (.issues|length), images: (.images|length), skipped}'
 ```
 
-### `xencode scan [path] [--hidden] [--max-depth N]`
-List workspace entries (kind, size, path).
+### `xencode scan [path] [--hidden] [--max-depth N] [--format text|json]`
+List workspace entries (kind, size, path) as TSV or JSON.
 
 ```bash
 xencode scan . --max-depth 2
+xencode scan . --format json | jq '.[].path'
 ```
 
 ### `xencode models <action>`
@@ -136,6 +142,9 @@ and markup stripped). `--format json` returns the full `FetchedPage`.
 xencode fetch https://example.com
 xencode fetch https://example.com --format json | jq .title
 ```
+Text output caps at 30k chars with a truncation trailer; `--format json`
+returns the full body. Invalid `--json-schema` values are rejected up
+front instead of degrading silently.
 
 ## 🎯 Usage Examples
 

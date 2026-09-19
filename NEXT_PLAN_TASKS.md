@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 391 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 407 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -30,8 +30,8 @@
 
 ## Secure Team Mode
 
-- [ ] Audit log coverage for team actions (`rust/crates/xencode-server-rs/` or `-collaboration-rs/`)
-- [ ] Workspace RBAC hardening (`rust/crates/xencode-collaboration-rs/workspace.rs`)
+- [x] Audit log coverage for team actions (`workspace` manager: sequenced `AuditEvent`s incl. denials, `audit_log`/`events_for`)
+- [x] Workspace RBAC hardening (`rust/crates/xencode-collaboration-rs/workspace.rs`: Admin-gated membership, self-leave, last-admin guard)
 - [ ] Collaboration session security review and polish
 
 ## Git Loop Completion
