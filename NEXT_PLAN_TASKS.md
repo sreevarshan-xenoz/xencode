@@ -116,8 +116,9 @@
 - [x] E2-01 ByteBot Enter executes the typed command instead of replacing it with
   history (`app.rs:3659-3667`); regression test `bytebot_enter_executes_typed_command_not_history`.
   Fix landed in `8956914`.
-- [ ] E2-02 Git commit off the UI thread (`app.rs:3650-3652`) — spawn task, report
-  result as a chat line; TUI must stay responsive on slow repos.
+- [x] E2-02 Git commit off the UI thread (`app.rs:3650-3652`) — `tokio::process`
+  spawn; result reported as a `[GIT_COMMIT_OK/ERR]` system chat line via the existing
+  event channel, then `refresh_git()`. Helper `first_output_line` unit-tested.
 - [ ] E2-03 Remove dead `FocusArea::Terminal` + its "coming soon" stub
   (`app.rs:3463`, `ui.rs:464-465`) or wire it — decide: remove (the Ctrl+T strip
   already exists).
