@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 443 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 455 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -138,9 +138,10 @@
   GitCommit/ByteBot/settings-URL buffers couldn't contain a space or those letters, and
   `q` quit mid-message. Guarded by a new `App::text_entry_active()` (unit-tested); also
   fixed Left-arrow *deleting* (it now moves the cursor back — Backspace is the delete key)
-  and made the VoiceInterface `m`-mute reachable. Still open: `s` remains a Settings
-  shortcut globally, so the SecurityAuditor/CustomModels `s` branches stay unreachable —
-  a real binding conflict left for E6 (keymap-table refactor), not silently hacked.
+  and made the VoiceInterface `m`-mute reachable. Was still open at the time:
+  `s` remained a Settings shortcut globally, so the SecurityAuditor/CustomModels
+  `s` branches stayed unreachable — the binding conflict (plus the missed `j`/`k`
+  swallowing in text fields) was resolved in E6-01 via focus-first dispatch.
 
 ### E3 — High-impact UX (UI doc §4, first half)
 
@@ -225,11 +226,20 @@
 
 ### E6 — Structure (UI doc §5) — ride along, last
 
-- [ ] E6-01 Split the 887-line key `match` (`app.rs:3366-4252`) into per-focus
-  `handle_key` fns + a global chord table; pure move, no behavior change, tests
-  pin existing bindings first. Resolve the `s` conflict here: `s` opens Settings
-  globally, so SecurityAuditor sort-toggle and CustomModels-save `s` branches are
-  unreachable (E2-06).
+- [x] E6-01 The ~900-line key `match` is gone from `run_app`: new `keymap.rs`
+  holds `handle_key` = modal-help guard → global Ctrl chord table → per-focus
+  `key_*` handlers (`key_settings`, `key_git_commit`, `key_security`, …19 of
+  them) → remaining universal chords (`i / m s ? q`). Not a pure move — three
+  deliberate, tested behavior changes came out of the restructure:
+  (1) the E2-06 `s` conflict is resolved — focus handlers run before the global
+  `s`, so SecurityAuditor sort-toggle and CustomModels save-profile are live
+  (`s` still opens Settings everywhere else);
+  (2) text fields are now 100% typable: `j`/`k` no longer move row cursors or
+  recall history while typing in GitCommit/ByteBot/Settings URL editing (they
+  insert — the old Up|`k`/Down|`j` arms swallowed them; ByteBot recall is ↑
+  only now);
+  (3) Settings ↑/↓ still navigate rows while editing, but `j`/`k` go to the
+  buffer. 12 pin-tests in `keymap::tests` + help overlay entries updated.
 - [x] E6-02 Clamp scroll offsets on `Event::Resize`: `ui::clamp_scrolls_on_resize`
   now runs on every Resize event. Panels already clamped at render time, but the
   *stored* offsets stayed oversized and re-exposed blank scroll-past-the-end when

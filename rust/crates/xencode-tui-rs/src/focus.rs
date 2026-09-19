@@ -2,7 +2,7 @@
 //!
 //! Single source of truth: `app.rs` and `ui.rs` import these from here.
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum InputMode {
     Normal,
     Editing,
