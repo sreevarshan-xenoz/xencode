@@ -466,10 +466,15 @@ pub fn watch_warning_for(
     if !(attached.contains(path) || opened == Some(path) || tracked.contains(path)) {
         return None;
     }
-    if last_system_msg.is_some_and(|m| m.contains(path)) {
+    // Suppress only the exact warning already shown: a substring match
+    // misfires on sibling paths (src/log.rs vs src/blog.rs) and on the
+    // dependents list itself, and a kind change (modified → removed) must
+    // re-warn because the head text differs.
+    let head = format_watch_warning(path, kind);
+    if last_system_msg.is_some_and(|m| m.contains(&head)) {
         return None;
     }
-    let mut warning = format_watch_warning(path, kind);
+    let mut warning = head;
     if !dependents.is_empty() {
         const SHOW: usize = 5;
         let shown = dependents
@@ -616,20 +621,26 @@ pub fn format_advise_report(
     let mut cycles = 0usize;
     let mut hubs = 0usize;
     let mut orphans = 0usize;
-    for a in all {
+    let mut affected = 0usize;
+    for a in &shown {
         match a.kind {
             xencode_context_rs::AdviceKind::BrokenImport => broken += 1,
             xencode_context_rs::AdviceKind::Cycle => cycles += 1,
-            xencode_context_rs::AdviceKind::AffectedDependent => {}
+            xencode_context_rs::AdviceKind::AffectedDependent => affected += 1,
             xencode_context_rs::AdviceKind::Hub => hubs += 1,
             xencode_context_rs::AdviceKind::Orphan => orphans += 1,
         }
     }
     let pl = |n: usize| if n == 1 { "" } else { "s" };
+    let scope = if shown.len() == all.len() {
+        String::new()
+    } else {
+        format!(" ({} total — drop the filter to see all)", all.len())
+    };
     let mut out = vec![format!(
-        "🔍 {} finding{} — {} broken import{}, {} cycle{}, {} hub{}, {} orphan{}:",
-        all.len(),
-        pl(all.len()),
+        "🔍 {} finding{} — {} broken import{}, {} cycle{}, {} hub{}, {} orphan{}, {} affected dependent{}{}:",
+        shown.len(),
+        pl(shown.len()),
         broken,
         pl(broken),
         cycles,
@@ -638,6 +649,9 @@ pub fn format_advise_report(
         pl(hubs),
         orphans,
         pl(orphans),
+        affected,
+        pl(affected),
+        scope,
     )];
     for a in shown.iter().take(ADVISE_LINE_CAP) {
         out.push(a.message.clone());
@@ -941,8 +955,14 @@ impl<'a> App<'a> {
     pub fn save_editor(&mut self) {
         if let Some(ref fp) = self.opened_file {
             let content: String = self.editor.lines().join("\n");
-            if std::fs::write(fp, &content).is_ok() {
-                self.editor_dirty = false;
+            match std::fs::write(fp, &content) {
+                Ok(()) => self.editor_dirty = false,
+                Err(e) => self.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "⚠ Could not save {fp}: {e} — your edits are still in the editor."
+                    ),
+                }),
             }
         }
     }
@@ -1281,7 +1301,8 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Proactive warning from the real-time watcher (`[WATCH]<path>|<kind>`).
+    /// Proactive warning from the real-time watcher (`[WATCH]<kind>|<path>`).
+    /// Kind first: kinds never contain `|`, paths legally can.
     ///
     /// Only files the session is actually reasoning about get a chat warning:
     /// ones pinned via `/ctx track`, `/attach`ed, or open in the editor. The
@@ -1290,7 +1311,7 @@ impl<'a> App<'a> {
     /// without threading state into the watcher task. No index yet → the
     /// warning still fires, just without the re-check list.
     fn handle_watch_event(&mut self, body: &str) {
-        let Some((path, kind)) = body.split_once('|') else {
+        let Some((kind, path)) = body.split_once('|') else {
             return;
         };
         let root = xencode_context_rs::default_root();
@@ -3003,7 +3024,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     app.maybe_auto_start_llama(tx.clone());
 
     // Real-time file watcher: every non-ignored change is reported as a
-    // `[WATCH]<path>|<kind>` token. The drain loop only surfaces warnings for
+    // `[WATCH]<kind>|<path>` token. The drain loop only surfaces warnings for
     // files the session actually cares about (tracked/attached/open), so a
     // large workspace does not spam the chat.
     {
@@ -3024,7 +3045,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         xencode_context_rs::WatchKind::Modified => "modified",
                         xencode_context_rs::WatchKind::Removed => "removed",
                     };
-                    if tx.send(format!("[WATCH]{}|{}", ev.path, kind)).is_err() {
+                    if tx.send(format!("[WATCH]{}|{}", kind, ev.path)).is_err() {
                         return;
                     }
                 }
@@ -4515,6 +4536,56 @@ mod tests {
         assert!(!long.contains("src/d5.rs"), "{long}");
     }
 
+    #[test]
+    fn watch_dedup_matches_exact_head_not_substrings() {
+        let (attached, tracked) = watch_sets();
+        // A dependents list mentioning a SIBLING path must not suppress this
+        // path's warning: suppression keys on the exact warning head.
+        let sibling_deps = vec!["src/attached.rs.bak".to_string()];
+        assert!(watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &sibling_deps,
+            Some("earlier note about src/attached.rs.bak here"),
+        )
+        .is_some());
+        // Same kind + path already shown → suppressed…
+        let warning = watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            None,
+        )
+        .unwrap();
+        assert!(watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            Some(&warning),
+        )
+        .is_none());
+        // …but a kind change re-warns.
+        assert!(watch_warning_for(
+            "src/attached.rs",
+            "removed",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            Some(&warning),
+        )
+        .is_some());
+    }
+
     fn advise_of(kind: xencode_context_rs::AdviceKind, file: &str) -> xencode_context_rs::Advice {
         xencode_context_rs::Advice {
             file: file.to_string(),
@@ -4531,17 +4602,23 @@ mod tests {
             advise_of(AdviceKind::Cycle, "src/a.rs"),
             advise_of(AdviceKind::Cycle, "src/b.rs"),
             advise_of(AdviceKind::Orphan, "src/z.rs"),
+            advise_of(AdviceKind::AffectedDependent, "src/c.rs"),
         ];
         let report = format_advise_report(&all, None);
-        assert_eq!(report.len(), 5, "{report:?}");
+        assert_eq!(report.len(), 6, "{report:?}");
         assert!(
-            report[0].contains("4 findings")
+            report[0].contains("5 findings")
                 && report[0].contains("1 broken import")
                 && report[0].contains("2 cycles")
-                && report[0].contains("1 orphan"),
+                && report[0].contains("1 orphan")
+                && report[0].contains("1 affected dependent"),
             "{}",
             report[0]
         );
+        // A filter narrows the header to what is shown, naming the total.
+        let filtered = format_advise_report(&all, Some("src/a.rs"));
+        assert!(filtered[0].contains("2 findings"), "{}", filtered[0]);
+        assert!(filtered[0].contains("5 total"), "{}", filtered[0]);
     }
 
     #[test]
@@ -4686,7 +4763,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_attached_document_reports_garbage_and_missing() {        let dir = image_test_dir("doc");
+    fn parse_attached_document_reports_garbage_and_missing() {
+        let dir = image_test_dir("doc");
         let fake = dir.join("fake.pdf");
         std::fs::write(&fake, b"not a pdf at all").unwrap();
         let err = super::parse_attached_document(fake.to_str().unwrap()).unwrap_err();
