@@ -96,10 +96,10 @@
 
 ### E1 — Reconcile dead modules (UI doc §1) — foundation for everything else
 
-- [ ] E1-01 Single source of truth for focus/feature list: move the live
-  `FocusArea`/`InputMode`/`FEATURE_LIST`/`navigate_feature` from `app.rs:42-66`
-  into `focus.rs` (already has the drifted 13-entry copy — delete that), import
-  from one place. Add `ReviewDashboard` to Feature Navigator.
+- [x] E1-01 Single source of truth for focus/feature list: moved the live
+  `FocusArea`/`InputMode`/`FEATURE_LIST`/`navigate_feature` from `app.rs` into
+  `focus.rs` (deleted the drifted 13-entry copy); `app.rs` re-exports, `ReviewDashboard`
+  already reachable via Feature Navigator.
 - [ ] E1-02 Single theme source: delete the verbatim duplicate at `app.rs:85-205`,
   use `theme.rs`; all panels read `ThemeColors` slots.
 - [ ] E1-03 Adopt `widgets/`: replace the 11 inline spinner frame arrays in

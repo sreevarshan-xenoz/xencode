@@ -24,6 +24,7 @@ use xencode_providers_rs::{
     ChatMessage, ContentPart, ImageUrlPart, MessageContent, ProviderManager,
 };
 
+pub use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
 use crate::ui;
 
 /// System block injected as tier 1 when previewing `/ctx` context assembly.
@@ -32,55 +33,6 @@ const CTX_SYSTEM: &str = xencode_context_rs::AGENT_SYSTEM_PROMPT;
 /// Hardware profile the live chat path budgets against. Must stay in sync
 /// with the llama.cpp `--ctx-size` the auto-start uses for this profile.
 const CTX_PROFILE: HardwareProfile = HardwareProfile::Balanced;
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum InputMode {
-    Normal,
-    Editing,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum FocusArea {
-    ChatInput,
-    FileExplorer,
-    CodeEditor,
-    ModelSelector,
-    Settings,
-    CodeReview,
-    Terminal,
-    PerformanceDashboard,
-    ProviderHealth,
-    ProjectAnalyzer,
-    GitCommit,
-    FeatureNavigator,
-    ByteBotPanel,
-    CollaborationHub,
-    VoiceInterface,
-    TerminalAssistant,
-    SecurityAuditor,
-    PerformanceProfiler,
-    CustomModels,
-    LearningMode,
-    MultiLanguage,
-    ReviewDashboard,
-}
-
-pub const FEATURE_LIST: &[(&str, &str)] = &[
-    ("📊 Performance Dashboard", "Session stats & metrics"),
-    ("🏥 Provider Health", "API connection status"),
-    ("📈 Project Analyzer", "Workspace file breakdown"),
-    ("📝 Git Commit", "Stage and commit changes"),
-    ("🤖 ByteBot Agent", "Autonomous task execution"),
-    ("👥 Collaboration Hub", "Team collaboration tools"),
-    ("🎙️ Voice Interface", "Voice-to-code commands"),
-    ("💡 Terminal Assistant", "AI-powered shell helper"),
-    ("🛡️ Security Auditor", "Vulnerability scanning"),
-    ("⚡ Performance Profiler", "Code profiling tools"),
-    ("🧩 Custom Models", "Model configuration & tuning"),
-    ("📚 Learning Mode", "Interactive code tutorials"),
-    ("🌐 Multi-Language", "Language detection & tools"),
-    ("🔍 PR Review", "Per-file diff browsing"),
-];
 
 #[derive(Clone, Copy)]
 pub struct ThemeColors {
@@ -968,26 +920,6 @@ impl<'a> App<'a> {
                     ),
                 }),
             }
-        }
-    }
-
-    pub fn navigate_feature(&self, idx: usize) -> FocusArea {
-        match idx {
-            0 => FocusArea::PerformanceDashboard,
-            1 => FocusArea::ProviderHealth,
-            2 => FocusArea::ProjectAnalyzer,
-            3 => FocusArea::GitCommit,
-            4 => FocusArea::ByteBotPanel,
-            5 => FocusArea::CollaborationHub,
-            6 => FocusArea::VoiceInterface,
-            7 => FocusArea::TerminalAssistant,
-            8 => FocusArea::SecurityAuditor,
-            9 => FocusArea::PerformanceProfiler,
-            10 => FocusArea::CustomModels,
-            11 => FocusArea::LearningMode,
-            12 => FocusArea::MultiLanguage,
-            13 => FocusArea::ReviewDashboard,
-            _ => FocusArea::ChatInput,
         }
     }
 
@@ -3837,7 +3769,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         }
                                     }
                                     FocusArea::FeatureNavigator => {
-                                        let target = app.navigate_feature(app.feature_nav_selected);
+                                        let target = navigate_feature(app.feature_nav_selected);
                                         app.focus = target;
                                     }
                                     _ => {}

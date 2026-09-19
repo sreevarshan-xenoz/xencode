@@ -12,8 +12,9 @@
   `channel.rs`, `input.rs`, `focus.rs`, `theme.rs` are declared in `lib.rs`
   but imported by nothing (only live imports: `app.rs:27→ui`, `ui.rs:924→review`,
   `app.rs:284→review`). Either wire them in or delete them.
-- [ ] **focus.rs has drifted from app.rs**: missing `ReviewDashboard`, 13 vs 14
+- [x] **focus.rs has drifted from app.rs**: missing `ReviewDashboard`, 13 vs 14
   `FEATURE_LIST` entries (`focus.rs:14-36` vs `app.rs:42-66`). Single source of truth.
+  — FIXED (E1-01): `focus.rs` is now the source; `app.rs` re-exports.
 - [ ] **Theme duplicated verbatim**: `theme.rs:6-125` vs `app.rs:85-205`.
 - [ ] **Inline spinners/gauges duplicate widgets/**: 11 hardcoded frame arrays in
   `ui.rs` (376, 422, 893, 1367, 1512, 1604, 1774, 1898, 2089, 2118, 2484) and a

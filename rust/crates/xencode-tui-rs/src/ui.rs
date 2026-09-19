@@ -8,7 +8,8 @@ use ratatui::{
 
 use xencode_models_rs::current_timestamp;
 
-use crate::app::{App, FocusArea, InputMode, FEATURE_LIST};
+use crate::app::App;
+use crate::focus::{FocusArea, InputMode, FEATURE_LIST};
 
 pub fn draw(f: &mut Frame, app: &App) {
     // Full-screen themed background
