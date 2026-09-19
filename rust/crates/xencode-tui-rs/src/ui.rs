@@ -912,10 +912,16 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
         "  Select a file in the File Explorer first.".to_string()
     };
 
+    let review_rows = review_text.lines().count();
     let text = Paragraph::new(review_text)
         .block(block)
         .style(Style::default().fg(app.theme.fg))
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((
+            app.review_scroll
+                .min(clamp_scroll(review_rows, popup_area.height)),
+            0,
+        ));
     f.render_widget(text, popup_area);
 }
 
@@ -1359,10 +1365,15 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
+    let lines_len = lines.len();
     let para = Paragraph::new(lines)
         .block(block)
         .style(Style::default().fg(app.theme.fg))
-        .scroll((app.provider_health_scroll, 0));
+        .scroll((
+            app.provider_health_scroll
+                .min(clamp_scroll(lines_len, popup_area.height)),
+            0,
+        ));
     f.render_widget(para, popup_area);
 }
 
@@ -1428,6 +1439,14 @@ fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
     let cursor_x = popup_area.x + 4 + app.commit_cursor as u16;
     let cursor_y = popup_area.y + 5;
     f.set_cursor_position((cursor_x, cursor_y));
+}
+
+/// Max useful vertical scroll (in lines) for `rows` of content inside a
+/// bordered area of height `area_height`. Scrolling past this renders blank
+/// space, so render sites clamp the stored offset with it (E2-04).
+fn clamp_scroll(rows: usize, area_height: u16) -> u16 {
+    let visible = (area_height as usize).saturating_sub(2); // borders
+    rows.saturating_sub(visible).min(u16::MAX as usize) as u16
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -2429,11 +2448,15 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    let find_len = find_lines.len();
     let find_para = Paragraph::new(find_lines)
         .block(find_block)
         .style(Style::default().fg(app.theme.fg))
         .wrap(Wrap { trim: false })
-        .scroll((app.security_scroll, 0));
+        .scroll((
+            app.security_scroll.min(clamp_scroll(find_len, chunks[1].height)),
+            0,
+        ));
     f.render_widget(find_para, chunks[1]);
 }
 
@@ -3035,4 +3058,20 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
         .block(trans_block)
         .style(Style::default().fg(app.theme.fg));
     f.render_widget(trans_para, right[0]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_scroll;
+
+    #[test]
+    fn clamp_scroll_bounds_to_scrollable_rows() {
+        // 10 rows in a 12-tall bordered area: everything fits, no scroll.
+        assert_eq!(clamp_scroll(10, 12), 0);
+        // 20 rows in a 10-tall area: 10 scrollable lines past the 8 visible.
+        assert_eq!(clamp_scroll(20, 10), 12);
+        // Degenerate heights must not underflow.
+        assert_eq!(clamp_scroll(5, 0), 5);
+        assert_eq!(clamp_scroll(0, 24), 0);
+    }
 }

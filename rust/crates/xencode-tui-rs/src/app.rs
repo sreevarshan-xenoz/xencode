@@ -100,7 +100,6 @@ pub struct App<'a> {
     pub chat_scroll: u16,
     pub file_tree: Vec<String>,
     pub selected_file: usize,
-    pub file_scroll_offset: usize,
     pub attached_files: HashSet<String>,
     pub opened_file: Option<String>,
     pub editor: TextArea<'a>,
@@ -238,6 +237,7 @@ pub struct App<'a> {
     // Panel scroll state
     pub provider_health_scroll: u16,
     pub security_scroll: u16,
+    pub review_scroll: u16,
 
     // Settings interactive state
     pub settings_cursor: usize,
@@ -571,7 +571,6 @@ impl<'a> App<'a> {
             chat_scroll: 0,
             file_tree,
             selected_file: 0,
-            file_scroll_offset: 0,
             attached_files: HashSet::new(),
             opened_file: None,
             editor,
@@ -686,6 +685,7 @@ impl<'a> App<'a> {
 
             provider_health_scroll: 0,
             security_scroll: 0,
+            review_scroll: 0,
 
             settings_cursor: 0,
             settings_reset_active: false,
@@ -2724,6 +2724,7 @@ impl<'a> App<'a> {
             if let Ok(content) = std::fs::read_to_string(file_path) {
                 self.is_reviewing = true;
                 self.code_review_output = format!("📝 Reviewing: {}\n\n", file_path);
+                self.review_scroll = 0;
                 let prompt = format!(
                     "Code review of {}. Identify bugs, security issues, and performance bottlenecks.\n\n```\n{}\n```",
                     file_path, content
@@ -3373,6 +3374,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         app.security_scroll -= 1;
                                     }
                                 }
+                                FocusArea::CodeReview => {
+                                    app.review_scroll = app.review_scroll.saturating_sub(1);
+                                }
                                 FocusArea::CodeEditor => {
                                     app.editor.scroll((-1, 0));
                                 }
@@ -3423,6 +3427,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                     FocusArea::SecurityAuditor => {
                                         app.security_scroll += 1;
+                                    }
+                                    FocusArea::CodeReview => {
+                                        app.review_scroll += 1;
                                     }
                                     FocusArea::CodeEditor => {
                                         app.editor.scroll((1, 0));
