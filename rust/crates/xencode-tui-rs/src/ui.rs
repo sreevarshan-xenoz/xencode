@@ -10,6 +10,7 @@ use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
 use crate::focus::{FocusArea, InputMode, FEATURE_LIST, SETTINGS_LABEL_WIDTH, SETTINGS_ROWS};
+use crate::theme::THEME_NAMES;
 use crate::widgets::{gauge, spinner};
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -650,20 +651,11 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     // ── Settings List ──────────────────────────────────────────────────────
-    let themes = [
-        "ocean",
-        "midnight",
-        "forest",
-        "terminal",
-        "dracula",
-        "solarized",
-        "nord",
-    ];
-    let theme_pos = themes
+    let theme_pos = THEME_NAMES
         .iter()
         .position(|t| *t == app.config.active_theme)
         .unwrap_or(0);
-    let theme_indicators: String = (0..4)
+    let theme_indicators: String = (0..THEME_NAMES.len())
         .map(|i| if i == theme_pos { "●" } else { "○" })
         .collect::<Vec<_>>()
         .join(" ");

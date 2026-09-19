@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 435 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 438 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -186,8 +186,16 @@
   ranges and the reset-row check derive from it too. Both nav bounds in `app.rs`
   (↓ key and wheel-down) use `SETTINGS_ROWS.len()`. One render test walks the
   cursor over every row.
-- [ ] E4-04 Light theme + config toggle; dedupe the triplicated theme-cycle lists
-  (`ui.rs:574`, `app.rs:4026, 4108`).
+- [x] E4-04 Light theme + dedupe of the theme-cycle lists. `theme::THEME_NAMES`
+  (now 8 entries incl. `light`) is the single list: the duplicated 7-theme arrays
+  in `draw_settings` and both Settings ←/→ key arms are gone, replaced by a pure
+  `theme::cycle_theme(active, forward)` helper (unit-tested, wraps both ways,
+  unknown names no-op). The light theme overrides every `ThemeColors` slot
+  (white bg, dark accents, `Dark*`-style RGB status colors) and is settable via
+  the existing `active_theme` config string — no whitelist in config-rs to
+  update. Fixed a pre-existing display bug while there: the settings Theme row
+  showed only 4 of the theme dots (`0..4` hardcoded). 2 theme unit tests +
+  a light-theme render sweep over all panels.
 
 ### E5 — Input UX (UI doc §4, second half)
 

@@ -126,3 +126,17 @@ fn settings_panel_renders_with_cursor_on_every_row() {
         terminal.draw(|f| draw(f, &app)).unwrap();
     }
 }
+
+/// E4-04: the light theme must drive every panel without panicking.
+#[test]
+fn every_panel_renders_with_light_theme() {
+    for (name, focus) in FOCI {
+        let mut app = populated(*focus);
+        app.theme = xencode_tui_rs::app::ThemeColors::get("light");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|f| draw(f, &app)).unwrap();
+        }));
+        assert!(result.is_ok(), "{name} failed under light theme");
+    }
+}
