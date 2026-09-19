@@ -9,7 +9,7 @@
 - ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, vault, smoke gate)
 - ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
-- ✅ **Rust migration complete**: 13 crates, 420 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 13 crates, 426 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🚧 **Active backlog**: real-time intelligence (file watcher), multimodal UX, team-mode hardening, PR review dashboard
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
