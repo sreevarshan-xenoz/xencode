@@ -62,6 +62,7 @@ pub enum FocusArea {
     CustomModels,
     LearningMode,
     MultiLanguage,
+    ReviewDashboard,
 }
 
 pub const FEATURE_LIST: &[(&str, &str)] = &[
@@ -78,6 +79,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("🧩 Custom Models", "Model configuration & tuning"),
     ("📚 Learning Mode", "Interactive code tutorials"),
     ("🌐 Multi-Language", "Language detection & tools"),
+    ("🔍 PR Review", "Per-file diff browsing"),
 ];
 
 #[derive(Clone, Copy)]
@@ -279,6 +281,7 @@ pub struct App<'a> {
     pub is_generating: bool,
     pub is_reviewing: bool,
     pub code_review_output: String,
+    pub review_dash: crate::review::ReviewDashboard,
     pub commit_message: String,
     pub commit_cursor: usize,
     pub spinner_tick: usize,
@@ -738,6 +741,7 @@ impl<'a> App<'a> {
             is_generating: false,
             is_reviewing: false,
             code_review_output: String::new(),
+            review_dash: crate::review::ReviewDashboard::new(),
             commit_message: String::new(),
             commit_cursor: 0,
             spinner_tick: 0,
@@ -982,6 +986,7 @@ impl<'a> App<'a> {
             10 => FocusArea::CustomModels,
             11 => FocusArea::LearningMode,
             12 => FocusArea::MultiLanguage,
+            13 => FocusArea::ReviewDashboard,
             _ => FocusArea::ChatInput,
         }
     }
@@ -3425,6 +3430,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     | FocusArea::ProjectAnalyzer
                                     | FocusArea::GitCommit
                                     | FocusArea::CodeReview
+                                    | FocusArea::ReviewDashboard
                                     | FocusArea::FeatureNavigator
                                     | FocusArea::ModelSelector
                                     | FocusArea::Settings => {
@@ -3440,6 +3446,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 } else {
                                     FocusArea::CodeReview
                                 };
+                                continue;
+                            }
+                            KeyCode::Char('y') => {
+                                if app.focus == FocusArea::ReviewDashboard {
+                                    app.focus = FocusArea::ChatInput;
+                                } else {
+                                    let base = app.review_dash.base.clone();
+                                    app.review_dash.open(&base);
+                                    app.focus = FocusArea::ReviewDashboard;
+                                }
                                 continue;
                             }
                             KeyCode::Char('t') => {
@@ -3513,6 +3529,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         app.feature_nav_selected -= 1;
                                     }
                                 }
+                                FocusArea::ReviewDashboard => {
+                                    app.review_dash.move_selection(-1);
+                                }
                                 FocusArea::ProviderHealth => {
                                     if app.provider_health_scroll > 0 {
                                         app.provider_health_scroll -= 1;
@@ -3564,6 +3583,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         if app.feature_nav_selected + 1 < FEATURE_LIST.len() {
                                             app.feature_nav_selected += 1;
                                         }
+                                    }
+                                    FocusArea::ReviewDashboard => {
+                                        app.review_dash.move_selection(1);
                                     }
                                     FocusArea::ProviderHealth => {
                                         app.provider_health_scroll += 1;
@@ -3617,6 +3639,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         if !app.is_reviewing {
                                             app.submit_review(tx.clone());
                                         }
+                                    }
+                                    FocusArea::ReviewDashboard => {
+                                        app.review_dash.reload();
                                     }
                                     FocusArea::GitCommit => {
                                         if !app.commit_message.trim().is_empty() {
@@ -3919,7 +3944,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                         | FocusArea::PerformanceProfiler
                                         | FocusArea::CustomModels
                                         | FocusArea::LearningMode
-                                        | FocusArea::MultiLanguage => {
+                                        | FocusArea::MultiLanguage
+                                        | FocusArea::ReviewDashboard => {
                                             app.focus = FocusArea::ChatInput;
                                         }
                                         FocusArea::CodeEditor => {
@@ -3958,6 +3984,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     app.models_test_output = "Profile saved!".to_string();
                                 } else if c == 'e' && app.focus == FocusArea::CodeEditor {
                                     app.input_mode = InputMode::Editing;
+                                } else if app.focus == FocusArea::ReviewDashboard {
+                                    match c {
+                                        // Toggle diff base: working tree <-> main.
+                                        'b' => app.review_dash.toggle_base(),
+                                        // Scroll the diff pane.
+                                        'u' => app.review_dash.scroll_by(-10),
+                                        'd' => app.review_dash.scroll_by(10),
+                                        _ => {}
+                                    }
                                 }
                             }
                             KeyCode::Backspace => {
@@ -4252,6 +4287,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                 app.security_scroll = 0;
                             }
                         }
+                        FocusArea::ReviewDashboard => {
+                            app.review_dash.scroll_by(-3);
+                        }
                         _ => {}
                     },
                     MouseEventKind::ScrollDown => match app.focus {
@@ -4274,6 +4312,9 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         }
                         FocusArea::SecurityAuditor => {
                             app.security_scroll += 3;
+                        }
+                        FocusArea::ReviewDashboard => {
+                            app.review_dash.scroll_by(3);
                         }
                         _ => {}
                     },
