@@ -431,6 +431,62 @@ pub struct App<'a> {
     pub last_ctx_retrieved_files: u8,
 }
 
+/// Format the proactive warning for a watched path. Pure — unit-tested.
+pub fn format_watch_warning(path: &str, kind: &str) -> String {
+    match kind {
+        "removed" => format!(
+            "⚠ {path} was removed from disk — re-add or restore it before relying on it."
+        ),
+        "created" => format!("⚠ {path} was created on disk — it may affect your plan."),
+        _ => format!(
+            "⚠ {path} changed on disk — re-read it before relying on the version in context."
+        ),
+    }
+}
+
+/// Decide whether a watched path deserves a proactive warning. Pure —
+/// unit-tested.
+///
+/// `attached`/`opened`/`tracked` are the session's context sets;
+/// `dependents` are the files transitively importing `path` (from the
+/// last `/init` snapshot); `last_system_msg` is the chat tail when it is
+/// a system message, used to suppress repeat warnings for a path the
+/// user was already told about.
+pub fn watch_warning_for(
+    path: &str,
+    kind: &str,
+    attached: &HashSet<String>,
+    opened: Option<&str>,
+    tracked: &HashSet<String>,
+    dependents: &[String],
+    last_system_msg: Option<&str>,
+) -> Option<String> {
+    if !(attached.contains(path) || opened == Some(path) || tracked.contains(path)) {
+        return None;
+    }
+    if last_system_msg.is_some_and(|m| m.contains(path)) {
+        return None;
+    }
+    let mut warning = format_watch_warning(path, kind);
+    if !dependents.is_empty() {
+        const SHOW: usize = 5;
+        let shown = dependents
+            .iter()
+            .take(SHOW)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rest = dependents.len().saturating_sub(SHOW);
+        let more = if rest > 0 {
+            format!(" (+{rest} more)")
+        } else {
+            String::new()
+        };
+        warning.push_str(&format!("\n↳ Dependents to re-check: {shown}{more}"));
+    }
+    Some(warning)
+}
+
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
@@ -1034,45 +1090,47 @@ impl<'a> App<'a> {
     ///
     /// Only files the session is actually reasoning about get a chat warning:
     /// ones pinned via `/ctx track`, `/attach`ed, or open in the editor. The
-    /// `FileContextTracker` is re-read from disk each time so concurrent
-    /// `/ctx track` updates are honored without threading state into the
-    /// watcher task.
+    /// `FileContextTracker` and the `deps.json` snapshot are re-read from disk
+    /// each time so concurrent `/ctx track` and `/init` updates are honored
+    /// without threading state into the watcher task. No index yet → the
+    /// warning still fires, just without the re-check list.
     fn handle_watch_event(&mut self, body: &str) {
         let Some((path, kind)) = body.split_once('|') else {
             return;
         };
-        let tracked = self.attached_files.contains(path)
-            || self.opened_file.as_deref() == Some(path)
-            || {
-                let root = xencode_context_rs::default_root();
-                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
-                tracker.load_from_disk();
-                tracker.state.files.contains_key(path)
-            };
-        if !tracked {
-            return;
-        }
-        if self
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
+        tracker.load_from_disk();
+        let tracked: HashSet<String> = tracker.state.files.keys().cloned().collect();
+        let graph: Vec<xencode_context_rs::DepEdge> =
+            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
+                .unwrap_or_default();
+        let affected = xencode_context_rs::affected_dependents(
+            &graph,
+            &[path],
+            xencode_context_rs::AFFECTED_MAX_HOPS,
+        );
+        let dependents: &[String] = affected.get(path).map(Vec::as_slice).unwrap_or(&[]);
+        let last_system = self
             .messages
             .last()
-            .is_some_and(|m| m.role == "system" && m.content.contains(path))
-        {
-            return;
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str());
+        if let Some(warning) = watch_warning_for(
+            path,
+            kind,
+            &self.attached_files,
+            self.opened_file.as_deref(),
+            &tracked,
+            dependents,
+            last_system,
+        ) {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: warning,
+            });
         }
-        let warning = match kind {
-            "removed" => format!(
-                "⚠ {path} was removed from disk — re-add or restore it before relying on it."
-            ),
-            "created" => format!("⚠ {path} was created on disk — it may affect your plan."),
-            _ => format!(
-                "⚠ {path} changed on disk — re-read it before relying on the version in context."
-            ),
-        };
-        self.messages.push(UiMessage {
-            role: "system".to_string(),
-            content: warning,
-        });
     }
 
     /// Run asynchronous health checks for all configured providers.
@@ -3987,7 +4045,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_llama_port, parse_porcelain_z};
+    use super::{format_watch_warning, parse_llama_port, parse_porcelain_z, watch_warning_for};
+    use std::collections::HashSet;
     use xencode_core_rs::{scan_workspace, ScanOptions};
 
     #[test]
@@ -4098,5 +4157,110 @@ mod tests {
 
         std::fs::remove_dir_all(&tmp).ok();
         assert!(paths.contains(&"src/main.rs".to_string()), "{paths:?}");
+    }
+
+    fn watch_sets() -> (HashSet<String>, HashSet<String>) {
+        (
+            ["src/attached.rs".to_string()].into_iter().collect(),
+            ["src/tracked.rs".to_string()].into_iter().collect(),
+        )
+    }
+
+    #[test]
+    fn watch_warning_formats_per_kind() {
+        assert!(format_watch_warning("src/a.rs", "removed").contains("removed from disk"));
+        assert!(format_watch_warning("src/a.rs", "created").contains("created on disk"));
+        assert!(format_watch_warning("src/a.rs", "modified").contains("changed on disk"));
+        // Unknown kinds fall back to the generic changed text.
+        assert!(format_watch_warning("src/a.rs", "renamed").contains("changed on disk"));
+    }
+
+    #[test]
+    fn watch_warning_fires_for_context_files_only() {
+        let (attached, tracked) = watch_sets();
+        let deps: Vec<String> = vec!["src/dep.rs".to_string()];
+        assert!(watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &deps,
+            None
+        )
+        .unwrap()
+        .contains("Dependents to re-check: src/dep.rs"));
+        assert!(watch_warning_for(
+            "src/open.rs",
+            "modified",
+            &attached,
+            Some("src/open.rs"),
+            &tracked,
+            &[],
+            None
+        )
+        .is_some());
+        assert!(watch_warning_for(
+            "src/tracked.rs",
+            "removed",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            None
+        )
+        .unwrap()
+        .contains("removed from disk"));
+        // Unrelated file → no warning, even with dependents.
+        assert!(watch_warning_for(
+            "src/other.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &deps,
+            None
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn watch_warning_dedupes_and_truncates() {
+        let (attached, tracked) = watch_sets();
+        let warning = watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            None,
+        )
+        .unwrap();
+        // Same path already the last system message → suppressed.
+        assert!(watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &[],
+            Some(&warning)
+        )
+        .is_none());
+        // Long dependent lists show 5 names plus an overflow count.
+        let many: Vec<String> = (0..7).map(|i| format!("src/d{i}.rs")).collect();
+        let long = watch_warning_for(
+            "src/attached.rs",
+            "modified",
+            &attached,
+            None,
+            &tracked,
+            &many,
+            None,
+        )
+        .unwrap();
+        assert!(long.contains("(+2 more)"), "{long}");
+        assert!(!long.contains("src/d5.rs"), "{long}");
     }
 }
