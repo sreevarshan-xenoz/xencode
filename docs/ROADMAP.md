@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19.** All features below are now
-> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 331 tests).
+> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 421 tests).
 
 ### Phase 1: The Foundation (✅ FROZEN / COMPLETE)
 *Core infrastructure is feature-complete. No further expansion here.*
@@ -114,7 +114,7 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemi
 
 ### 📈 Current Metrics (2026-09-19)
 - **Rust Migration**: 13/13 crates ported — complete
-- **Test Suite**: 331 passing, 0 failing, 3 ignored
+- **Test Suite**: 421 passing, 0 failing, 4 ignored
 - **Compilation**: clean `cargo check` across the workspace (zero warnings)
 - **Code Quality**: AST/pattern analysis for syntax, style, and security issues (`xencode-analysis-rs`)
 - **Context Awareness**: repo-wide indexing + per-turn retrieval (`xencode-context-rs`)
