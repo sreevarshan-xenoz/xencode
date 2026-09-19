@@ -266,18 +266,18 @@ $ xencode analyze src/
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📄 main.py
-  ⚠️ [MEDIUM] Unused variable: 'result' on line 42
-     Suggestion: Remove or use the variable
-  ⚠️ [LOW] Line too long (120 chars) on line 15
-     Suggestion: Break into multiple lines
+  ⚠️ [MEDIUM] Bare except clause on line 23
+     Suggestion: Use 'except Exception:' to catch only expected exceptions
+  ⚠️ [LOW] Line too long (>100 chars) on line 15
+     Suggestion: Break line into multiple lines
 
 📄 utils.py
   🔴 [CRITICAL] Hardcoded API key on line 5
-     Suggestion: Use environment variable instead
-  ⚠️ [MEDIUM] Bare except clause on line 23
-     Suggestion: Catch specific exceptions
+     Suggestion: Remove the hardcoded value and use environment variables or a vault service
+  🔴 [HIGH] Mutable default argument on line 8
+     Suggestion: Use None as default and initialize inside the function
 
-📊 Summary: 4 issues found (1 critical, 2 medium, 1 low)
+📊 Summary: 4 issues found (1 critical, 1 high, 1 medium, 1 low)
 ```
 
 ### Example 2: Collaboration Server
