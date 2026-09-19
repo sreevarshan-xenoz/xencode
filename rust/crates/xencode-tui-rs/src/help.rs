@@ -42,10 +42,22 @@ const UNIVERSAL: &[Binding] = &[
 const EDITING: &[Binding] = &[
     ("Enter", "send message"),
     ("Alt+Enter / Ctrl+J", "insert newline"),
+    ("Alt+Up / Alt+Down", "recall previous / next prompt"),
     ("Esc", "back to normal mode"),
-    ("Tab", "insert 4 spaces"),
+    ("Tab", "complete /command · else 4 spaces"),
     ("← → ↑ ↓ Home End", "move cursor"),
     ("Backspace/Del", "delete"),
+];
+
+/// Commands intercepted by `submit_message` — keep in sync with SLASH_COMMANDS.
+const COMMANDS: &[Binding] = &[
+    ("/init [abort|status]", "generate & control project docs"),
+    (
+        "/ctx …",
+        "context engine: status/track/compact/eval/kv/archive",
+    ),
+    ("/advise [filter]", "repository insights"),
+    ("/bytebot <task>", "autonomous task execution"),
 ];
 
 fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
@@ -123,6 +135,7 @@ pub fn help_lines(focus: FocusArea, theme: &ThemeColors) -> Vec<Line<'static>> {
     section(&mut lines, "Universal", UNIVERSAL, theme);
     section(&mut lines, "Global (Ctrl)", GLOBAL, theme);
     section(&mut lines, "While editing chat", EDITING, theme);
+    section(&mut lines, "Slash commands", COMMANDS, theme);
     lines
 }
 
@@ -180,6 +193,16 @@ mod tests {
     }
 
     #[test]
+    fn commands_section_lists_every_slash_command() {
+        for cmd in crate::app::SLASH_COMMANDS {
+            assert!(
+                COMMANDS.iter().any(|(key, _)| key.starts_with(cmd)),
+                "{cmd} missing from the help commands section"
+            );
+        }
+    }
+
+    #[test]
     fn help_screen_has_all_sections() {
         let lines = help_lines(FocusArea::ChatInput, &ThemeColors::get("ocean"));
         let text: String = lines
@@ -193,7 +216,13 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        for section in ["This panel", "Universal", "Global (Ctrl)", "While editing chat"] {
+        for section in [
+            "This panel",
+            "Universal",
+            "Global (Ctrl)",
+            "While editing chat",
+            "Slash commands",
+        ] {
             assert!(text.contains(section), "missing {section}");
         }
         assert!(text.contains("Ctrl+Y"));
