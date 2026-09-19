@@ -141,8 +141,10 @@ pub fn truncate_tail_to_tokens(text: &str, max_tokens: u64, is_code: bool) -> (S
         start += 1;
     }
     let tail = &text[start..];
-    // Back up to a line boundary for a cleaner cut when possible.
-    let cut = tail.find('\n').map(|i| i + 1).unwrap_or(tail.len());
+    // Back up to a line boundary for a cleaner cut when possible; with no
+    // newline in the window keep the whole window (a mid-line cut still
+    // beats dropping everything).
+    let cut = tail.find('\n').map(|i| i + 1).unwrap_or(0);
     let tail = &tail[cut.min(tail.len())..];
     (tail.to_string(), est_tokens(tail.len(), is_code))
 }
@@ -187,6 +189,16 @@ mod tests {
         // Short text passes through whole.
         let (kept, _) = truncate_tail_to_tokens(text, 100, false);
         assert_eq!(kept, text);
+    }
+
+    #[test]
+    fn truncate_tail_single_line_hard_cuts_instead_of_empty() {
+        let text = "x".repeat(200);
+        let (kept, tokens) = truncate_tail_to_tokens(&text, 3, false);
+        // 3 tokens prose = 12-char window; no newline, so the whole window
+        // survives as a mid-line cut — never an empty string.
+        assert_eq!(kept, "x".repeat(12));
+        assert_eq!(tokens, est_tokens(12, false));
     }
 
     #[test]
