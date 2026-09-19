@@ -4,12 +4,8 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'xencode/**'
-      - 'tests/**'
-      - 'crates/**'
+      - 'rust/**'
       - 'Dockerfile'
-      - 'requirements*.txt'
-      - 'pyproject.toml'
       - 'scripts/**'
       - 'k8s/**'
       - '.github/workflows/ci-cd.yml'
@@ -21,122 +17,43 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  collect-only:
+  rust:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v7.0.0
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
       with:
-        python-version: "3.11"
-        cache: 'pip'
+        components: rustfmt, clippy
 
-    - name: Install test dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-asyncio
-
-    - name: Collect tests
-      run: |
-        python -m pytest tests --collect-only -q -p no:cacheprovider
-
-  quality:
-    runs-on: ubuntu-latest
-    needs: collect-only
-
-    steps:
-    - uses: actions/checkout@v7.0.1
-
-    - name: Set up Python
-      uses: actions/setup-python@v7.0.0
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v6.1.0
       with:
-        python-version: "3.11"
-        cache: 'pip'
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
 
-    - name: Install quality dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install bandit pip-audit
-        pip install ruff
+    - name: Check formatting
+      run: cargo fmt --check
+      working-directory: rust
 
-    - name: Validate version consistency
-      run: |
-        python scripts/check_version_consistency.py
+    - name: Run clippy lints
+      run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+      working-directory: rust
 
-    - name: Run linting
-      run: |
-        ruff check xencode/ tests/
-
-    - name: Run security checks
-      run: |
-        bandit -r xencode/ -f json -o bandit-report.json || true
-        pip-audit -r requirements.txt || true
-
-  marker-tests:
-    runs-on: ubuntu-latest
-    needs: quality
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11"]
-        marker: [unit, integration, e2e, security, perf]
-
-    steps:
-    - uses: actions/checkout@v7.0.1
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v7.0.0
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
-
-    - name: Install test dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-asyncio
-
-    - name: Collect marker tests
-      id: collect-marker
-      shell: bash
-      run: |
-        set +e
-        python -m pytest tests -m "${{ matrix.marker }}" --collect-only -q -p no:cacheprovider
-        status=$?
-        set -e
-
-        if [ "$status" -eq 5 ]; then
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-          echo "No tests found for marker '${{ matrix.marker }}'. Skipping execution."
-          exit 0
-        fi
-
-        if [ "$status" -ne 0 ]; then
-          echo "Marker collection failed for '${{ matrix.marker }}'"
-          exit "$status"
-        fi
-
-        echo "skip=false" >> "$GITHUB_OUTPUT"
-
-    - name: Run marker tests
-      if: steps.collect-marker.outputs.skip == 'false'
-      run: |
-        python -m pytest tests -m "${{ matrix.marker }}" -v --cov=xencode --cov-report=xml -p no:cacheprovider
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v7.0.0
-      with:
-        files: ./coverage.xml
-        flags: ${{ matrix.marker }}
-        name: codecov-umbrella
+    - name: Run cargo test
+      run: cargo test --workspace --verbose
+      working-directory: rust
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: marker-tests
+    needs: rust
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     permissions:
       contents: read
@@ -205,7 +122,10 @@ jobs:
         POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_STAGING }}
         POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_STAGING }}
       run: |
-        python scripts/validate_deploy_secrets.py --environment staging
+        for v in DATABASE_URL REDIS_URL JWT_SECRET_KEY POSTGRES_USERNAME POSTGRES_PASSWORD; do
+          test -n "${!v}" || { echo "❌ $v is empty"; exit 1; }
+        done
+        echo "✅ staging secrets present"
 
     - name: Render Kubernetes secrets
       if: env.HAS_STAGING_SECRETS == 'true'
@@ -264,7 +184,10 @@ jobs:
         POSTGRES_USERNAME: ${{ secrets.POSTGRES_USERNAME_PRODUCTION }}
         POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD_PRODUCTION }}
       run: |
-        python scripts/validate_deploy_secrets.py --environment production
+        for v in DATABASE_URL REDIS_URL JWT_SECRET_KEY POSTGRES_USERNAME POSTGRES_PASSWORD; do
+          test -n "${!v}" || { echo "❌ $v is empty"; exit 1; }
+        done
+        echo "✅ production secrets present"
 
     - name: Render Kubernetes secrets
       if: env.HAS_PRODUCTION_SECRETS == 'true'
