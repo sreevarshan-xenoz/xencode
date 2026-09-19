@@ -365,7 +365,6 @@ xencode/
 │       ├── xencode-server-rs# Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs # Code analysis + security scanner + image intake
 │       └── ...
-├── bin/xencode.js           # Node.js CLI wrapper
 ├── k8s/                     # Kubernetes manifests
 ├── monitoring/              # Prometheus + analytics
 ├── scripts/                 # Build/smoke-test scripts (Rust)
@@ -437,8 +436,7 @@ The Rust migration (all 8 phases, 13 crates) is **complete**. Near-term directio
 - Multimodal inputs and secure team workflows
 - Multi-model arena mode · git autopilot agent · workspace RAG · session replay
 
-Track progress in [docs/ROADMAP.md](docs/ROADMAP.md) and
-[docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md).
+Track progress in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 

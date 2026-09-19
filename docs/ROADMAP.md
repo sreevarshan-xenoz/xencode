@@ -8,8 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19.** All features below are now
-> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 331 tests) —
-> see [docs/RUST_MIGRATION_STATUS.md](RUST_MIGRATION_STATUS.md).
+> implemented in the Rust workspace (`rust/crates/*`, 13 crates, 331 tests).
 
 ### Phase 1: The Foundation (✅ FROZEN / COMPLETE)
 *Core infrastructure is feature-complete. No further expansion here.*
@@ -129,7 +128,7 @@ refactor suggestions, multimodal, team-mode hardening) — see
 ## 🔥 Phase 1 Implementation Details
 
 > Historical notes from the original Python implementation. All of this is
-> superseded by the Rust workspace — see [docs/RUST_MIGRATION_STATUS.md](RUST_MIGRATION_STATUS.md).
+> superseded by the Rust workspace (`rust/crates/*`).
 
 ### ✅ Multi-Model System (`multi_model_system.py` — historical)
 **Features:**
