@@ -158,17 +158,23 @@ pub fn broken_imports(
         };
         let root = crate::symbols::crate_root_for(file, &roots);
         for import in &sym.imports {
-            let anchored = matches!(
-                crate::symbols::parse_import(import),
-                Some((
-                    Qualifier::Crate | Qualifier::SelfMod | Qualifier::Super { .. },
-                    _
-                ))
-            );
-            if !anchored {
+            let pairs = crate::symbols::parse_import(import);
+            let anchored: Vec<_> = pairs
+                .iter()
+                .filter(|(q, _)| {
+                    matches!(
+                        q,
+                        Qualifier::Crate | Qualifier::SelfMod | Qualifier::Super { .. }
+                    )
+                })
+                .collect();
+            if anchored.is_empty() {
                 continue;
             }
-            if crate::symbols::resolve_import(file, import, root, &file_set).is_none() {
+            let broken = anchored.iter().any(|(q, segs)| {
+                crate::symbols::resolve_pair(file, q, segs, root, &file_set).is_none()
+            });
+            if broken {
                 out.push((file.clone(), import.clone()));
             }
         }

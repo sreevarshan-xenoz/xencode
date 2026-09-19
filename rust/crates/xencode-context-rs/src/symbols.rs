@@ -122,39 +122,60 @@ pub(crate) enum Qualifier {
 }
 
 /// Parse a raw `use`-statement text (already stripped of `use` / `;`)
-/// into a qualifier + remaining path segments.
-pub(crate) fn parse_import(raw: &str) -> Option<(Qualifier, Vec<String>)> {
+/// into qualifier + segment pairs. Brace groups expand one level:
+/// `crate::ui::{a, b::c}` yields the `crate::ui::a` and `crate::ui::b::c`
+/// pairs. Globs and nested groups cannot resolve statically and are
+/// skipped — never guessed.
+pub(crate) fn parse_import(raw: &str) -> Vec<(Qualifier, Vec<String>)> {
     let mut s = raw.trim();
-    if s.is_empty() || s.contains('{') || s.contains('}') || s.contains('*') {
-        return None;
+    if s.is_empty() || s.contains('*') {
+        return Vec::new();
     }
     if let Some(ix) = s.find(" as ") {
         s = s[..ix].trim();
     }
-    s = s.trim();
     if s.is_empty() {
-        return None;
+        return Vec::new();
     }
+    if let Some((head, tail)) = s.split_once('{') {
+        let Some((items, _)) = tail.split_once('}') else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for item in items.split(',') {
+            let item = item.trim();
+            if item.is_empty() || item.contains('{') || item.contains('}') || item.contains('*') {
+                continue;
+            }
+            out.extend(single_import(&format!("{head}{item}")));
+        }
+        return out;
+    }
+    single_import(s)
+}
+
+/// Parse one qualifier path (no braces) into a single pair.
+fn single_import(s: &str) -> Vec<(Qualifier, Vec<String>)> {
     let mut segs: Vec<String> = s
         .split("::")
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
         .collect();
     if segs.is_empty() {
-        return None;
+        return Vec::new();
     }
     match segs[0].as_str() {
         "crate" => {
             if segs.len() < 2 {
-                return None;
+                return Vec::new();
             }
-            Some((Qualifier::Crate, segs.split_off(1)))
+            vec![(Qualifier::Crate, segs.split_off(1))]
         }
         "self" => {
             if segs.len() < 2 {
-                return None;
+                return Vec::new();
             }
-            Some((Qualifier::SelfMod, segs.split_off(1)))
+            vec![(Qualifier::SelfMod, segs.split_off(1))]
         }
         "super" => {
             let mut up = 0usize;
@@ -163,11 +184,11 @@ pub(crate) fn parse_import(raw: &str) -> Option<(Qualifier, Vec<String>)> {
                 up += 1;
             }
             if segs.is_empty() {
-                return None;
+                return Vec::new();
             }
-            Some((Qualifier::Super { up }, segs))
+            vec![(Qualifier::Super { up }, segs)]
         }
-        _ => Some((Qualifier::Plain, segs)),
+        _ => vec![(Qualifier::Plain, segs)],
     }
 }
 
@@ -224,28 +245,72 @@ fn module_base(file: &str, qual: &Qualifier) -> String {
 
 /// Resolve an import inside `file` to a concrete repo-relative file path.
 /// Returns `(path, via)` where `via` is the canonical module path resolved.
+/// Brace groups try each pair in order; bare (`Plain`) paths try the file's
+/// own dir first, then the crate root (Rust 2018 uniform paths) — a match
+/// only counts when a real file exists, so external crates never resolve.
 pub fn resolve_import(
     file: &str,
     import: &str,
     crate_root: Option<&str>,
     files: &HashSet<&str>,
 ) -> Option<(String, String)> {
-    let (qual, segs) = parse_import(import)?;
-    let base = match &qual {
+    let pairs = parse_import(import);
+    if pairs.is_empty() {
+        return None;
+    }
+    for (qual, segs) in &pairs {
+        if let Some(hit) = resolve_pair(file, qual, segs, crate_root, files) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+/// Resolve one qualifier pair against a base dir, then (for bare paths) the
+/// crate root. Factored out so `broken_imports` can check pairs individually.
+pub(crate) fn resolve_pair(
+    file: &str,
+    qual: &Qualifier,
+    segs: &[String],
+    crate_root: Option<&str>,
+    files: &HashSet<&str>,
+) -> Option<(String, String)> {
+    let base = match qual {
         Qualifier::Crate => crate_root?.to_string(),
         other => module_base(file, other),
     };
     if base.is_empty() && crate_root.is_none() {
         return None;
     }
+    if let Some(hit) = try_base(&base, qual, segs, files) {
+        return Some(hit);
+    }
+    if matches!(qual, Qualifier::Plain) {
+        if let Some(root) = crate_root {
+            if root != base {
+                return try_base(root, qual, segs, files);
+            }
+        }
+    }
+    None
+}
+
+/// Try longest-prefix file matches (`a/b/Item` → `a/b.rs` before `a.rs`)
+/// under one base dir.
+fn try_base(
+    base: &str,
+    qual: &Qualifier,
+    segs: &[String],
+    files: &HashSet<&str>,
+) -> Option<(String, String)> {
     for i in (1..=segs.len()).rev() {
         let mod_path = segs[..i].join("/");
         if mod_path.is_empty() {
             continue;
         }
         for candidate in [
-            join_rel(&base, &mod_path, false),
-            join_rel(&base, &mod_path, true),
+            join_rel(base, &mod_path, false),
+            join_rel(base, &mod_path, true),
         ] {
             if files.contains(candidate.as_str()) {
                 let via = match &qual {
@@ -586,6 +651,46 @@ fn helper() {}
         // Longest module prefix wins: `app::other` resolves through the
         // existing `src/app/other.rs` module file.
         assert_eq!(graph[0].via, "crate::app::other");
+    }
+
+    #[test]
+    fn expands_brace_groups_and_falls_back_to_crate_root() {
+        let files = [
+            ("src/main.rs", "fn main() {}\n"),
+            (
+                "src/app/bar.rs",
+                "use models::Foo;\nuse crate::ui::{Theme, Widget};\nuse serde::Deserialize;\nuse foo::*;\npub fn bar() {}\n",
+            ),
+            ("src/models.rs", "pub struct Foo {}\n"),
+            ("src/ui.rs", "pub struct Theme {}\n"),
+        ];
+        let rust_files = rust_paths(&files);
+        let symbols = symbols_from(&files);
+        let file_set: HashSet<&str> = rust_files.iter().map(|s| s.as_str()).collect();
+        let roots = crate_roots(&rust_files);
+        let root = crate_root_for("src/app/bar.rs", &roots);
+        assert_eq!(root, Some("src"));
+
+        // 2018 sibling import: dir-relative miss, crate-root hit.
+        let hit = resolve_import("src/app/bar.rs", "models::Foo", root, &file_set);
+        assert_eq!(hit.map(|(to, _)| to).as_deref(), Some("src/models.rs"));
+        // Brace group: both pairs resolve through the ui.rs prefix.
+        let brace = resolve_import(
+            "src/app/bar.rs",
+            "crate::ui::{Theme, Widget}",
+            root,
+            &file_set,
+        );
+        assert_eq!(brace.map(|(to, _)| to).as_deref(), Some("src/ui.rs"));
+        // External crate and glob: no file match, no edge.
+        assert!(resolve_import("src/app/bar.rs", "serde::Deserialize", root, &file_set).is_none());
+        assert!(resolve_import("src/app/bar.rs", "foo::*", root, &file_set).is_none());
+
+        // End to end: the new edges appear in the graph.
+        let graph = build_graph(&rust_files, &symbols);
+        let tos: Vec<&str> = graph.iter().map(|e| e.to.as_str()).collect();
+        assert!(tos.contains(&"src/models.rs"), "{tos:?}");
+        assert!(tos.contains(&"src/ui.rs"), "{tos:?}");
     }
 
     #[test]
