@@ -37,6 +37,16 @@ xencode --version
 ### `xencode` / `xencode tui`
 Launch the immersive terminal UI (default when no subcommand is given).
 
+TUI keys — press `?` (or `F1`) in the TUI for the live, panel-aware
+keybinding overlay; the authoritative list lives there. Essentials:
+`Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
+`Alt+Enter`/`Ctrl+J` newline, `Alt+↑/↓` history, `Tab` completes `/`
+commands) · `m` model selector · `s` settings · `e` edit focused file ·
+`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+B` ByteBot ·
+`Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
+`Ctrl+C` or `q` quit. Slash commands: `/init`, `/ctx`, `/advise`,
+`/bytebot`.
+
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
 

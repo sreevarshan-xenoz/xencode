@@ -56,14 +56,14 @@ Code issues + security findings, plus an inventory of any images found.
 
 ### In the TUI
 ```
-/help       - Show all commands
-/models     - Show available models
-/model <name> - Switch model
-/init       - Index the current project
-/ctx        - Retrieve project context
-/advise     - Repository insights (cycles, hubs, orphans, broken imports)
-/clear      - Clear conversation
+/init [abort|status]  - Generate & control project docs
+/ctx <sub>            - Context engine (status/track/compact/eval/kv/archive)
+/advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
+/bytebot <task>       - Delegate a task to the autonomous agent
 ```
+Those are the only slash commands. Tab completes them; typing a lone `/`
+and pressing Tab lists them. Press `?` (or `F1`) any time for the full
+keybinding help overlay.
 
 ## Examples
 
@@ -74,21 +74,17 @@ $ xencode
 You › what is recursion?
 Xencode › [streams answer in real-time]
 
-You › /exit
+Ctrl+C (or q) quits.
 ```
 
 ### Example 2: Switch Models
 ```bash
 $ xencode
 
-You › /models
-[Shows all models with health status]
-
-You › /model qwen2.5:7b
-✅ Model switched!
-
+Press m              # opens the model selector (refreshes the list)
+↑ ↓ to pick qwen2.5:7b, Enter to set it as default (r re-refreshes)
 You › explain async/await
-Xencode › [uses new model]
+Xencode › [uses the new model]
 ```
 
 ### Example 3: Project Context
@@ -107,9 +103,9 @@ Xencode › [includes project context in response]
 
 1. **Maximize terminal** for best experience
 2. **Install multiple models** for flexibility
-3. **Use `/models`** to check health
+3. **Press Ctrl+H** to run a provider health check
 4. **Run `/init`** in each project directory for auto-context
-5. **Type `/help`** to see all commands
+5. **Press `?`** for the keybinding help overlay; `m` opens the model selector
 
 ## Troubleshooting
 
@@ -126,9 +122,8 @@ ollama pull qwen3:4b
 ```
 
 ### Slow Responses
-```
-/model phi3:mini  # Switch to faster model
-```
+Press `m` in the TUI, select a smaller model (e.g. `phi3:mini`) and hit
+Enter — the selection is saved as the default.
 
 ## That's It!
 

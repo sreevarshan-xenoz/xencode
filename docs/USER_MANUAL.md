@@ -96,7 +96,7 @@ Launch the interactive TUI with `xencode tui`:
 ```
 ┌─────────────────┬──────────────────────────────────────┬──────────────────┐
 │  File Explorer   │          Code Editor                  │    Chat Panel    │
-│  (Ctrl+Tab)     │                                       │   (Ctrl+Tab)    │
+│    (Tab)        │                                       │    (Tab)        │
 │                 │                                       │                  │
 │ src/            │   // Edit your code here             │  You > Hello!    │
 │   main.rs      │                                        │                  │
@@ -108,17 +108,48 @@ Launch the interactive TUI with `xencode tui`:
 
 **TUI keyboard shortcuts:**
 
+Global (work in every panel, any mode):
+
 | Key | Action |
 |-----|--------|
-| `Tab` | Cycle focus between panels |
-| `Esc` | Close overlay / go back |
-| `Ctrl+F` | Open Feature Navigator (14 panels) |
-| `Ctrl+H` | Open Provider Health Dashboard |
-| `Enter` | Activate / select |
-| `i` | Enter insert mode (editor) |
-| `e` | Enter normal mode (editor) |
-| `Up/Down` | Navigate lists |
-| Mouse scroll | Scroll panels |
+| `Ctrl+C` | Quit |
+| `Ctrl+G` | Refresh git status |
+| `Ctrl+E` | File explorer |
+| `Ctrl+S` | Save editor / Git commit panel |
+| `Ctrl+R` | AI code review (current file) |
+| `Ctrl+Y` | PR review dashboard |
+| `Ctrl+F` | Feature Navigator (14 panels) |
+| `Ctrl+D` | Performance dashboard |
+| `Ctrl+P` | Project analyzer |
+| `Ctrl+B` | ByteBot agent panel |
+| `Ctrl+H` | Run provider health check |
+| `Ctrl+T` | Toggle embedded terminal strip |
+| `Ctrl+W` | Close panel → chat |
+| `Ctrl+,` | Settings |
+
+Panel-independent (Normal mode):
+
+| Key | Action |
+|-----|--------|
+| `?` / `F1` | Keybinding help overlay (lists the focused panel's keys) |
+| `Tab` | Cycle explorer → editor → chat |
+| `Esc` | Close popup / leave edit mode |
+| `i` or `/` | Edit the chat input |
+| `m` | Model selector (`r` refresh, `l`/`u` llama.cpp load/unload) |
+| `s` | Settings (except in panels that bind `s` themselves: Security Auditor sort, Custom Models save) |
+| `q` | Quit |
+| `e` | Code editor: start typing edits |
+| `↑ ↓` / `j k` | Scroll or move selection (all scrollable panels) |
+| Mouse wheel | Scroll the panel under the cursor |
+
+Chat editing (after `i`):
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Alt+Enter` / `Ctrl+J` | Insert newline (multiline prompts) |
+| `Alt+↑` / `Alt+↓` | Recall previous / next sent prompt |
+| `Tab` | Complete a `/` command, else insert 4 spaces |
 
 **Feature Navigator panels (Ctrl+F → select → Enter):**
 
