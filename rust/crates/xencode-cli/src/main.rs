@@ -820,7 +820,7 @@ async fn run_query(
         .into_iter()
         .map(|t| ChatMessage {
             role: t.role,
-            content: t.content,
+            content: t.content.into(),
         })
         .collect();
 

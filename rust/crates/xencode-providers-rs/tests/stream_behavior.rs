@@ -32,7 +32,7 @@ fn fast_config() -> RetryConfig {
 fn messages() -> Vec<ChatMessage> {
     vec![ChatMessage {
         role: "user".to_string(),
-        content: "hi".to_string(),
+        content: "hi".into(),
     }]
 }
 

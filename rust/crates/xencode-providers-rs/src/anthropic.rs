@@ -3,7 +3,7 @@ use std::fmt;
 use futures_util::StreamExt;
 use serde::Deserialize;
 
-use crate::{ChatMessage, ProviderError};
+use crate::{split_data_url, ChatMessage, ContentPart, MessageContent, ProviderError};
 
 /// Anthropic (Claude) model provider using the Messages API.
 ///
@@ -99,25 +99,64 @@ impl AnthropicProvider {
                     if !existing.is_empty() {
                         existing.push_str("\n\n");
                     }
-                    existing.push_str(&msg.content);
+                    existing.push_str(&msg.text_content());
                 }
                 "user" | "assistant" => {
                     converted.push(serde_json::json!({
                         "role": msg.role,
-                        "content": msg.content
+                        "content": Self::anthropic_content(msg)
                     }));
                 }
                 _ => {
                     // Unknown role — treat as user
                     converted.push(serde_json::json!({
                         "role": "user",
-                        "content": msg.content
+                        "content": Self::anthropic_content(msg)
                     }));
                 }
             }
         }
 
         (system_prompt, converted)
+    }
+
+    /// Anthropic `content`: a bare string for text-only messages (the shape
+    /// sent before images existed), or a blocks array mixing `text` with
+    /// `image`/`source`/`base64` blocks. A non-data URL has no mime to send,
+    /// so it falls back to a text part carrying the raw URL — visible to the
+    /// model and the caller, never silently dropped.
+    fn anthropic_content(msg: &ChatMessage) -> serde_json::Value {
+        if !msg.has_images() {
+            return serde_json::Value::String(msg.text_content());
+        }
+        let blocks: Vec<serde_json::Value> = match &msg.content {
+            MessageContent::Text(s) => vec![serde_json::json!({"type": "text", "text": s})],
+            MessageContent::Parts(parts) => parts
+                .iter()
+                .map(|p| match p {
+                    ContentPart::Text { text } => {
+                        serde_json::json!({"type": "text", "text": text})
+                    }
+                    ContentPart::ImageUrl { image_url } => {
+                        match split_data_url(&image_url.url) {
+                            Some((mime, data)) => serde_json::json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": data
+                                }
+                            }),
+                            None => serde_json::json!({
+                                "type": "text",
+                                "text": image_url.url
+                            }),
+                        }
+                    }
+                })
+                .collect(),
+        };
+        serde_json::Value::Array(blocks)
     }
 
     /// Build the request payload for the Anthropic Messages API.
@@ -308,6 +347,46 @@ mod tests {
     }
 
     #[test]
+    fn text_only_content_stays_a_bare_string() {
+        let msg = ChatMessage::text("user", "Hello");
+        assert_eq!(
+            AnthropicProvider::anthropic_content(&msg),
+            serde_json::Value::String("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn image_content_becomes_text_plus_base64_blocks() {
+        let msg = ChatMessage::user_with_images(
+            "describe",
+            vec!["data:image/png;base64,AAAA".to_string()],
+        );
+        assert_eq!(
+            AnthropicProvider::anthropic_content(&msg),
+            serde_json::json!([
+                {"type": "text", "text": "describe"},
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": "AAAA"
+                }}
+            ])
+        );
+    }
+
+    #[test]
+    fn non_data_url_falls_back_to_text_part() {
+        let msg = ChatMessage::user_with_images(
+            "",
+            vec!["https://example.com/a.png".to_string()],
+        );
+        assert_eq!(
+            AnthropicProvider::anthropic_content(&msg),
+            serde_json::json!([
+                {"type": "text", "text": "https://example.com/a.png"}
+            ])
+        );
+    }
+
+    #[test]
     fn custom_base_url_and_version() {
         let provider = AnthropicProvider::new(
             "sk-ant-test".to_string(),
@@ -323,11 +402,11 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             },
             ChatMessage {
                 role: "assistant".to_string(),
-                content: "Hi there".to_string(),
+                content: "Hi there".into(),
             },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
@@ -344,11 +423,11 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: "You are a helpful assistant.".to_string(),
+                content: "You are a helpful assistant.".into(),
             },
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
@@ -361,7 +440,7 @@ mod tests {
     fn convert_messages_system_only() {
         let messages = vec![ChatMessage {
             role: "system".to_string(),
-            content: "Be concise.".to_string(),
+            content: "Be concise.".into(),
         }];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert_eq!(system.unwrap(), "Be concise.");
@@ -373,15 +452,15 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: "Be helpful.".to_string(),
+                content: "Be helpful.".into(),
             },
             ChatMessage {
                 role: "system".to_string(),
-                content: "Be concise.".to_string(),
+                content: "Be concise.".into(),
             },
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             },
         ];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
@@ -395,7 +474,7 @@ mod tests {
     fn convert_messages_unknown_role() {
         let messages = vec![ChatMessage {
             role: "unknown".to_string(),
-            content: "test".to_string(),
+            content: "test".into(),
         }];
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert!(system.is_none());
@@ -408,11 +487,11 @@ mod tests {
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: "You are Claude.".to_string(),
+                content: "You are Claude.".into(),
             },
             ChatMessage {
                 role: "user".to_string(),
-                content: "Hi".to_string(),
+                content: "Hi".into(),
             },
         ];
         let payload =
@@ -427,7 +506,7 @@ mod tests {
     fn build_payload_no_system() {
         let messages = vec![ChatMessage {
             role: "user".to_string(),
-            content: "Hello".to_string(),
+            content: "Hello".into(),
         }];
         let payload = AnthropicProvider::build_payload("claude-3-haiku-20240307", &messages, 512);
         assert_eq!(payload["model"], "claude-3-haiku-20240307");

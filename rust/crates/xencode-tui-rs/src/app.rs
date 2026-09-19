@@ -1004,7 +1004,7 @@ impl<'a> App<'a> {
             .into_iter()
             .map(|t| ChatMessage {
                 role: t.role,
-                content: t.content,
+                content: t.content.into(),
             })
             .collect();
 
@@ -2771,11 +2771,12 @@ impl<'a> App<'a> {
                             CTX_SYSTEM,
                             agents.as_deref(),
                             anchor.as_deref(),
-                        ),
+                        )
+                        .into(),
                     },
                     ChatMessage {
                         role: "user".to_string(),
-                        content: prompt,
+                        content: prompt.into(),
                     },
                 ];
                 let model = self.config.default_model.clone();
