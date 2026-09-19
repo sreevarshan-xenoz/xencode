@@ -1,8 +1,6 @@
 //! Focus-area enum, input-mode enum, feature list, and feature navigation.
 //!
-//! Extracted from `app.rs` (Step 0 of the foundation refactor). Pure code move —
-//! `navigate_feature` was an `&self` method on `App` but used no `App` state, so
-//! it became a free function here.
+//! Single source of truth: `app.rs` and `ui.rs` import these from here.
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum InputMode {
@@ -33,6 +31,7 @@ pub enum FocusArea {
     CustomModels,
     LearningMode,
     MultiLanguage,
+    ReviewDashboard,
 }
 
 pub const FEATURE_LIST: &[(&str, &str)] = &[
@@ -49,6 +48,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("🧩 Custom Models", "Model configuration & tuning"),
     ("📚 Learning Mode", "Interactive code tutorials"),
     ("🌐 Multi-Language", "Language detection & tools"),
+    ("🔍 PR Review", "Per-file diff browsing"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -67,6 +67,7 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         10 => FocusArea::CustomModels,
         11 => FocusArea::LearningMode,
         12 => FocusArea::MultiLanguage,
+        13 => FocusArea::ReviewDashboard,
         _ => FocusArea::ChatInput,
     }
 }
