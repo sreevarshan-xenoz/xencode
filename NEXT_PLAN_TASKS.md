@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 438 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 439 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -199,8 +199,18 @@
 
 ### E5 — Input UX (UI doc §4, second half)
 
-- [ ] E5-01 Multiline chat input via `tui_textarea` (already a dep for the editor),
-  Alt+Enter sends newline, Enter submits; keep single-line feel by default.
+- [x] E5-01 Multiline chat input: `App::input` String + manual byte cursor
+  (which corrupted the cursor on non-ASCII input) replaced by `App::chat_input`,
+  a `tui_textarea::TextArea` (already the editor's dep). Enter submits,
+  Alt+Enter inserts a newline, Ctrl+J works on terminals that mangle Alt
+  (crossterm reports it as LF, which the textarea turns into a newline). All
+  manual insert/backspace/arrow/Home/End handling deleted — the textarea owns
+  editing, and arrow keys move between lines while editing while plain
+  Up/Down in normal mode still scroll chat (unchanged). Tab still inserts 4
+  spaces; box renders theme-styled (restyled on theme change/factory reset)
+  with a scroll-adjusted cursor. Input title + help overlay document the
+  chords. 1 unit test: multiline submit keeps `\n` in the prompt and clears
+  the box.
 - [ ] E5-02 Input history recall (e.g. Alt+Up/Down; plain Up/Down keep scrolling
   chat) + slash-command autocomplete on `/`.
 

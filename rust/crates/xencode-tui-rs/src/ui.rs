@@ -503,7 +503,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         let frame = spinner::frame(app.spinner_tick);
         format!(" {} Thinking... ", frame)
     } else if is_editing {
-        " ✏️  Type your message (Enter to send) ".to_string()
+        " ✏️  Enter to send · Alt+Enter (or Ctrl+J) for newline ".to_string()
     } else {
         " Press 'i' to start typing ".to_string()
     };
@@ -513,22 +513,25 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         .border_style(border_style)
         .title(title);
 
-    let display_text = if app.is_generating {
-        "Please wait..."
+    if app.is_generating {
+        let paragraph =
+            Paragraph::new("Please wait...")
+                .block(block)
+                .style(Style::default().fg(app.theme.fg));
+        f.render_widget(paragraph, area);
     } else {
-        &app.input
-    };
-    let paragraph = Paragraph::new(display_text)
-        .block(block)
-        .style(Style::default().fg(app.theme.fg));
-    f.render_widget(paragraph, area);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        f.render_widget(&app.chat_input, inner);
 
-    // Show cursor
-    if is_editing && !app.is_generating {
-        let cursor_x = area.x + 1 + app.input_cursor as u16;
-        let cursor_y = area.y + 1;
-        if cursor_x < area.x + area.width.saturating_sub(1) {
-            f.set_cursor_position((cursor_x, cursor_y));
+        // Show cursor (position is scroll-adjusted by the textarea).
+        if is_editing {
+            let (row, col) = app.chat_input.cursor();
+            let x = inner.x + col as u16;
+            let y = inner.y + row as u16;
+            if x < inner.x + inner.width && y < inner.y + inner.height {
+                f.set_cursor_position((x, y));
+            }
         }
     }
 }
