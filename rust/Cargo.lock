@@ -3070,6 +3070,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tui-textarea",
+ "xencode-analysis-rs",
  "xencode-config-rs",
  "xencode-context-rs",
  "xencode-core-rs",
