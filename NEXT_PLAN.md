@@ -14,6 +14,9 @@
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 
+0. **Milestone D — Background tasks & worktree support** — drafted 2026-09-19:
+   a background-task registry + TUI task panel + `tasks`/`worktree` CLI, and git
+   worktree creation/browsing so agent runs can be isolated per task.
 1. **Real-time file watcher + proactive warnings** — watch the workspace and surface
    warnings/refactor hints as files change (new capability; no watcher exists today).
 2. **Refactor suggestions** — build on the `xencode-context-rs` index/symbol graph
