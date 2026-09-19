@@ -88,7 +88,9 @@ impl GeminiProvider {
         for msg in messages {
             match msg.role.as_str() {
                 "system" => {
-                    // Accumulate system messages to prepend to the first user message
+                    // Accumulate system messages to prepend to the first user message.
+                    // The prepend is text-only: image parts in a system turn
+                    // do not cross — attach images to user turns instead.
                     if !system_buffer.is_empty() {
                         system_buffer.push_str("\n\n");
                     }
@@ -298,12 +300,15 @@ impl GeminiProvider {
     }
 }
 
-/// Gemini `parts`: a single text part for text-only messages (the shape sent
-/// before images existed), or the merged text plus one `inline_data` part per
+/// Gemini `parts`: the merged text (skipped when empty so image-only turns
+/// don't ship a rejectable empty text part) plus one `inline_data` part per
 /// image. Non-data URLs fall back to a text part carrying the raw URL —
 /// visible, never silently dropped.
 fn gemini_parts(msg: &ChatMessage, text: &str) -> Vec<serde_json::Value> {
-    let mut parts = vec![serde_json::json!({"text": text})];
+    let mut parts = Vec::new();
+    if !text.is_empty() {
+        parts.push(serde_json::json!({"text": text}));
+    }
     if let MessageContent::Parts(items) = &msg.content {
         for item in items {
             if let ContentPart::ImageUrl { image_url } = item {
@@ -315,6 +320,9 @@ fn gemini_parts(msg: &ChatMessage, text: &str) -> Vec<serde_json::Value> {
                 }
             }
         }
+    }
+    if parts.is_empty() {
+        parts.push(serde_json::json!({"text": text}));
     }
     parts
 }
@@ -433,6 +441,18 @@ mod tests {
                     "mime_type": "image/jpeg", "data": "/9j/"
                 }}),
             ]
+        );
+    }
+
+    #[test]
+    fn image_only_message_omits_empty_text_part() {
+        let msg = ChatMessage::user_with_images("", vec!["data:image/png;base64,AAAA".to_string()]);
+        let parts = super::gemini_parts(&msg, "");
+        assert_eq!(
+            parts,
+            vec![serde_json::json!({"inline_data": {
+                "mime_type": "image/png", "data": "AAAA"
+            }})]
         );
     }
 }

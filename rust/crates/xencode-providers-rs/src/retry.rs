@@ -91,13 +91,12 @@ pub fn is_retriable(err: &ProviderError) -> bool {
 /// Whether a network error message describes a name that will not resolve.
 ///
 /// Still string matching, because `ProviderError::Network` carries only the
-/// formatted message, but at least it covers the platforms we run on: the
-/// previous check tested `"Name or service not known"` (glibc) and would not
-/// match macOS, so permanent DNS failures there burned the whole retry
-/// schedule. `"dns error"` was also redundant with `"dns"`.
+/// formatted message, but the arms are NXDOMAIN-class only: a bare `"dns"`
+/// substring also matched transient failures (`dns error: temporary failure
+/// in name resolution`, EAI_AGAIN) and wrongly skipped their retries.
 fn is_name_resolution_failure(msg: &str) -> bool {
     let msg = msg.to_ascii_lowercase();
-    msg.contains("dns")
+    msg.contains("nxdomain")
         || msg.contains("name or service not known")      // glibc
         || msg.contains("nodename nor servname provided") // macOS
         || msg.contains("no such host")                   // Windows / hyper
@@ -326,6 +325,8 @@ mod tests {
             "connection reset by peer",
             "operation timed out",
             "connection refused",
+            // EAI_AGAIN: the resolver may succeed next attempt.
+            "dns error: temporary failure in name resolution",
         ] {
             let err = ProviderError::Network(msg.to_string());
             assert!(is_retriable(&err), "did not retry a transient error: {msg}");

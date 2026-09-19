@@ -200,18 +200,58 @@ struct PartialCall {
 
 /// Accumulates streaming `delta.tool_calls[]` fragments keyed by `index`.
 /// The model sends the id/name first and the arguments JSON in pieces.
+/// Entries without an explicit index (some proxies omit it) join the slot
+/// of the same call id, else the in-progress anonymous slot, else a fresh
+/// slot — parallel calls never melt into one garbled call.
 #[derive(Debug, Default)]
 pub(crate) struct ToolCallAccumulator {
     partial: HashMap<u32, PartialCall>,
+    last_slot: Option<u32>,
 }
 
 impl ToolCallAccumulator {
+    /// Slot for one delta entry: explicit index wins; otherwise id-match,
+    /// anonymous continuation, or a fresh slot past every seen index.
+    fn slot_for(&mut self, entry: &serde_json::Value) -> u32 {
+        if let Some(i) = entry.get("index").and_then(|v| v.as_u64()) {
+            let key = i as u32;
+            self.last_slot = Some(key);
+            return key;
+        }
+        let id = entry
+            .get("id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        if let Some(id) = id {
+            if let Some((&key, _)) = self
+                .partial
+                .iter()
+                .find(|(_, part)| part.id.as_deref() == Some(id))
+            {
+                self.last_slot = Some(key);
+                return key;
+            }
+        } else if let Some(key) = self.last_slot {
+            if self.partial.get(&key).is_some_and(|part| part.id.is_none()) {
+                return key;
+            }
+        }
+        let key = self
+            .partial
+            .keys()
+            .max()
+            .map(|m| m.saturating_add(1))
+            .unwrap_or(0);
+        self.last_slot = Some(key);
+        key
+    }
+
     pub(crate) fn ingest(&mut self, value: &serde_json::Value) {
         let Some(arr) = value.as_array() else {
             return;
         };
         for entry in arr {
-            let index = entry.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let index = self.slot_for(entry);
             let part = self.partial.entry(index).or_default();
             if part.id.is_none() {
                 part.id = entry
@@ -334,6 +374,25 @@ mod tests {
         assert_eq!(calls[0].id, "a1");
         assert_eq!(calls[0].arguments_json(), "{\"path\":\"x\"}");
         assert_eq!(calls[1].id, "a2");
+    }
+
+    #[test]
+    fn accumulator_demuxes_index_less_parallel_calls() {
+        // Proxies that omit `index`: same-id fragments join, distinct calls
+        // stay separate instead of melting into one garbled call.
+        let mut acc = ToolCallAccumulator::default();
+        acc.ingest(&serde_json::json!([
+            {"id": "a1", "function": {"name": "read_file", "arguments": "{\"pa"}},
+            {"id": "a2", "function": {"name": "grep_search", "arguments": "{}"}},
+        ]));
+        acc.ingest(&serde_json::json!([
+            {"id": "a1", "function": {"arguments": "th\":\"x\"}"}},
+        ]));
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 2);
+        let a1 = calls.iter().find(|c| c.id == "a1").unwrap();
+        assert_eq!(a1.arguments_json(), "{\"path\":\"x\"}");
+        assert!(calls.iter().any(|c| c.id == "a2"));
     }
 
     #[test]
