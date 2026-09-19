@@ -50,6 +50,10 @@ enum Commands {
         /// Maximum directory depth to traverse
         #[arg(long)]
         max_depth: Option<usize>,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
     },
 
     /// Configuration management
@@ -271,7 +275,8 @@ async fn main() {
             path,
             hidden,
             max_depth,
-        } => run_scan(path, hidden, max_depth),
+            format,
+        } => run_scan(path, hidden, max_depth, format),
         Commands::Config { action } => run_config(action),
         Commands::Models { action } => run_models(action).await,
         Commands::Cache { action } => run_cache(action),
@@ -318,7 +323,12 @@ async fn main() {
     }
 }
 
-fn run_scan(root: PathBuf, include_hidden: bool, max_depth: Option<usize>) -> Result<(), String> {
+fn run_scan(
+    root: PathBuf,
+    include_hidden: bool,
+    max_depth: Option<usize>,
+    format: OutputFormat,
+) -> Result<(), String> {
     let options = ScanOptions {
         max_depth,
         include_hidden,
@@ -326,12 +336,32 @@ fn run_scan(root: PathBuf, include_hidden: bool, max_depth: Option<usize>) -> Re
     };
 
     let entries = scan_workspace(root, &options).map_err(|e| e.to_string())?;
-    for entry in entries {
-        let bytes = entry
-            .bytes
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        println!("{}\t{}\t{}", entry.kind, bytes, entry.path.display());
+    match format {
+        OutputFormat::Json => {
+            let arr: Vec<serde_json::Value> = entries
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "kind": e.kind.to_string(),
+                        "bytes": e.bytes,
+                        "path": e.path.display().to_string(),
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&arr).map_err(|e| e.to_string())?
+            );
+        }
+        OutputFormat::Text => {
+            for entry in entries {
+                let bytes = entry
+                    .bytes
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                println!("{}\t{}\t{}", entry.kind, bytes, entry.path.display());
+            }
+        }
     }
     Ok(())
 }
@@ -957,13 +987,20 @@ fn format_image_text(meta: &ImageMeta) -> String {
     )
 }
 
+/// Cap for `--format text` page dumps: JSON keeps the whole body, but an
+/// unbounded terminal dump helps nobody. The trailer says how much was cut.
+pub const FETCH_TEXT_CAP_CHARS: usize = 30_000;
+
 /// One-screen research summary for a fetched page. Pure — unit-tested.
 fn format_fetch_text(page: &FetchedPage) -> String {
     let title = page.title.as_deref().unwrap_or("(no title)");
-    format!(
-        "{}\n{} ({} bytes)\n\n{}",
-        page.url, title, page.bytes, page.text
-    )
+    let body = if page.text.chars().count() > FETCH_TEXT_CAP_CHARS {
+        let kept: String = page.text.chars().take(FETCH_TEXT_CAP_CHARS).collect();
+        format!("{kept}\n…[truncated to {FETCH_TEXT_CAP_CHARS} chars — use --format json for the full text]")
+    } else {
+        page.text.clone()
+    };
+    format!("{}\n{} ({} bytes)\n\n{}", page.url, title, page.bytes, body)
 }
 
 async fn run_fetch(url: String, format: OutputFormat) -> Result<(), String> {
@@ -984,52 +1021,80 @@ async fn run_fetch(url: String, format: OutputFormat) -> Result<(), String> {
 
 fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
     if path.is_dir() {
-        // Scan directory
+        // Full-tree walk: no depth cap (an explicit user action), junk dirs
+        // (target/, node_modules/, .git/…) skipped like `scan`, and every
+        // failure reported on stderr instead of silently dropped.
         let mut all_issue_lists = Vec::new();
-        // Image inventory rides alongside: intake metadata, not code issues,
-        // so it stays out of the JSON issues array (which keeps its shape)
-        // and is reported in text mode plus single-file JSON.
         let mut image_metas: Vec<ImageMeta> = Vec::new();
-        let walker = walkdir::WalkDir::new(&path)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file());
+        let mut skipped = 0usize;
+        let excluded = ScanOptions::default().excluded_dirs;
+        let walker = walkdir::WalkDir::new(&path).into_iter();
 
         for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("  Skipping unreadable entry: {e}");
+                    skipped += 1;
+                    continue;
+                }
+            };
+            if !entry.file_type().is_file() {
+                continue;
+            }
             let fp = entry.path();
-            let ext = fp.extension().and_then(|e| e.to_str()).unwrap_or("");
-            match ext {
-                "py" | "rs" | "ts" | "js" | "tsx" | "jsx" | "go" | "rb" | "java" => {
-                    match CodeAnalyzer::analyze_file(fp) {
-                        Ok(issues) => {
-                            all_issue_lists.push((fp.display().to_string(), issues));
-                        }
-                        Err(e) => eprintln!("  Skipping {}: {}", fp.display(), e),
-                    }
-                    // Run security scan
-                    if let Ok(findings) = VulnerabilityScanner::scan_file(fp) {
-                        if !findings.is_empty() {
-                            println!("  Security: {} issues in {}", findings.len(), fp.display());
-                        }
+            let in_junk = fp.components().any(|c| match c {
+                std::path::Component::Normal(name) => {
+                    excluded.iter().any(|x| name == std::ffi::OsStr::new(x))
+                }
+                _ => false,
+            });
+            if in_junk {
+                continue;
+            }
+            if is_image_path(fp) {
+                match analyze_image(fp) {
+                    Ok(meta) => image_metas.push(meta),
+                    Err(e) => {
+                        eprintln!("  Skipping {}: {}", fp.display(), e);
+                        skipped += 1;
                     }
                 }
-                _ => {
-                    if is_image_path(fp) {
-                        match analyze_image(fp) {
-                            Ok(meta) => image_metas.push(meta),
-                            Err(e) => eprintln!("  Skipping {}: {}", fp.display(), e),
-                        }
-                    }
+                continue;
+            }
+            // Every other file goes through analysis: unknown extensions
+            // fall back to generic checks; unreadable (binary) files count
+            // as skipped, visibly.
+            match CodeAnalyzer::analyze_file(fp) {
+                Ok(issues) => {
+                    all_issue_lists.push((fp.display().to_string(), issues));
+                }
+                Err(e) => {
+                    eprintln!("  Skipping {}: {}", fp.display(), e);
+                    skipped += 1;
+                    continue;
+                }
+            }
+            // Run security scan (stderr: stdout stays valid JSON).
+            if let Ok(findings) = VulnerabilityScanner::scan_file(fp) {
+                if !findings.is_empty() {
+                    eprintln!("  Security: {} issues in {}", findings.len(), fp.display());
                 }
             }
         }
 
         match format {
             OutputFormat::Json => {
+                // Documented dir schema: issues pairs, image inventory, and
+                // the skip count. Single-file shapes below are unchanged.
+                let output = serde_json::json!({
+                    "issues": all_issue_lists,
+                    "images": image_metas,
+                    "skipped": skipped,
+                });
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&all_issue_lists).map_err(|e| e.to_string())?
+                    serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
                 );
             }
             OutputFormat::Text => {
@@ -1038,6 +1103,7 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
                 println!("   Files analyzed: {}", all_issue_lists.len());
                 println!("   Total issues:   {}", total);
                 println!("   Images:         {}", image_metas.len());
+                println!("   Skipped:        {}", skipped);
                 for meta in &image_metas {
                     println!("\n  {}", format_image_text(meta));
                 }
@@ -1270,5 +1336,20 @@ mod tests {
             ..page
         };
         assert!(super::format_fetch_text(&untitled).contains("(no title)"));
+    }
+
+    #[test]
+    fn fetch_text_truncates_huge_pages_with_notice() {
+        use xencode_analysis_rs::web::FetchedPage;
+        let page = FetchedPage {
+            url: "https://example.com/big".to_string(),
+            title: Some("Big".to_string()),
+            text: "z".repeat(super::FETCH_TEXT_CAP_CHARS + 10),
+            bytes: 99999,
+        };
+        let out = super::format_fetch_text(&page);
+        assert!(out.contains("…[truncated to"), "{out}");
+        assert!(out.contains("--format json"), "{out}");
+        assert!(!out.contains(&"z".repeat(super::FETCH_TEXT_CAP_CHARS + 10)));
     }
 }
