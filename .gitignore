@@ -108,3 +108,7 @@ secrets/
 
 # Jupyter
 *.ipynb_checkpoints
+
+# Local agent/session state
+.qoder/
+session-ses_*.md
