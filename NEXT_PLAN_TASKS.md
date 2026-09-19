@@ -18,7 +18,7 @@
 
 ## Real-Time Intelligence (Phase 3+)
 
-- [ ] Real-time file watcher with proactive warnings (`rust/crates/xencode-context-rs/`, new watcher module)
+- [x] Real-time file watcher with proactive warnings (`rust/crates/xencode-context-rs/`, new watcher module) — `WorkspaceWatcher` on `notify`, debounced; TUI surfaces warnings for tracked/attached/open files
 - [ ] Live refactor suggestions on the symbol graph
 - [ ] Proactive bug warnings ("you just introduced a bug")
 
