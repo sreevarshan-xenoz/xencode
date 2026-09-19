@@ -5,67 +5,80 @@
 ```bash
 # Already installed? Skip to Usage!
 
-# If not, clone and setup:
+# If not, clone and run the installer:
 git clone <your-repo>
 cd xencode
-chmod +x xencode.sh test_fixes.sh
-pip install -r requirements.txt
+./install.sh        # Linux/macOS — builds the Rust binary, checks Ollama
 ```
+
+Windows (PowerShell): `.\install.ps1`
+
+**What happens:**
+1. ✅ Checks Rust toolchain, curl, git
+2. ✅ Builds the release binary (`cargo build --release -p xencode-cli`)
+3. ✅ Checks Ollama (installs + starts it if missing)
+4. ✅ Pulls the starter model (`qwen3:4b`)
+5. ✅ Smoke-tests the binary and installs the `xencode` command
 
 ## First Run
 
 ```bash
-./xencode.sh
+xencode
 ```
 
-**What happens:**
-1. ✅ Checks Ollama
-2. ✅ Detects models
-3. ✅ Offers to install if none found
-4. ✅ Starts immersive chat
+Launches the immersive TUI. Run `/init` once per project for project-aware
+answers, then just ask.
 
 ## Usage
 
-### Chat Mode (Immersive)
+### TUI (default experience)
 ```bash
-./xencode.sh
+xencode
 ```
-Takes over your terminal with full-screen experience!
+Full-screen terminal UI: chat, file explorer (Space attaches files —
+including images, which the model actually sees), `/ctx` retrieval,
+`/advise` repo insights, model picker, and more.
 
-### Inline Mode (Quick Query)
+### One-shot query
 ```bash
-./xencode.sh "what is python?"
+xencode query "what is recursion?"
 ```
-Get instant answer without entering chat mode.
+Get an instant answer without entering the TUI.
+
+### Analyze a path
+```bash
+xencode analyze ./src
+```
+Code issues + security findings, plus an inventory of any images found.
 
 ## Commands
 
-### In Chat Mode
+### In the TUI
 ```
 /help       - Show all commands
 /models     - Show available models
 /model <name> - Switch model
-/project    - Show project context
-/status     - System status
+/init       - Index the current project
+/ctx        - Retrieve project context
+/advise     - Repository insights (cycles, hubs, orphans, broken imports)
 /clear      - Clear conversation
-exit        - Exit chat
 ```
 
 ## Examples
 
 ### Example 1: Basic Chat
 ```bash
-$ ./xencode.sh
+$ xencode
 
 You › what is recursion?
 Xencode › [streams answer in real-time]
 
-You › exit
+You › /exit
 ```
 
 ### Example 2: Switch Models
 ```bash
-$ ./xencode.sh
+$ xencode
 
 You › /models
 [Shows all models with health status]
@@ -80,10 +93,10 @@ Xencode › [uses new model]
 ### Example 3: Project Context
 ```bash
 $ cd /path/to/your/project
-$ ./xencode.sh
+$ xencode
 
-You › /project
-[Shows project type, git status, files, dependencies]
+You › /init
+[Indexes the project]
 
 You › how can I improve this code?
 Xencode › [includes project context in response]
@@ -94,7 +107,7 @@ Xencode › [includes project context in response]
 1. **Maximize terminal** for best experience
 2. **Install multiple models** for flexibility
 3. **Use `/models`** to check health
-4. **Work in project directory** for auto-context
+4. **Run `/init`** in each project directory for auto-context
 5. **Type `/help`** to see all commands
 
 ## Troubleshooting
@@ -108,7 +121,7 @@ systemctl start ollama
 
 ### No Models
 ```bash
-ollama pull qwen2.5:3b
+ollama pull qwen3:4b
 ```
 
 ### Slow Responses
@@ -121,7 +134,7 @@ ollama pull qwen2.5:3b
 **You're ready to use Xencode!** 🎉
 
 ```bash
-./xencode.sh
+xencode
 ```
 
 **Your immersive AI assistant awaits!** 🤖✨

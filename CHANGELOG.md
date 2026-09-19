@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Image input pipeline: magic-byte format detect, header dimensions, data URLs (`analysis-rs` images module), `analyze` CLI inventory, `MessageContent` parts with per-backend rendering (Ollama/Anthropic/Gemini/OpenAI-compatible), TUI attach sends images as message parts
+- Real-time workspace watcher with debounced proactive warnings for tracked/attached/open files
+- Repository insights: dependency cycles, hub files, orphans, broken imports, affected dependents (`advise` module + `/advise` TUI command with dependents in watch warnings)
+- Rust CI gates (fmt, clippy `-D warnings`, full workspace suite), Rust binary GitHub Releases, Rust Docker/runtime and installers
 - Enhanced Security Scanning with Bandit Integration
 - Comprehensive vulnerability database with CVE patterns
 - OWASP Top 10 vulnerability detection
@@ -18,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Async security scanning for performance
 - Demo application for security scanning capabilities
 - Comprehensive test suite (21 tests) for security features
+
+### Removed
+- Legacy Python stack: `xencode/` package, pytest suite, examples, benchmarks, deployment helpers, packaging configs, and the local venv (Rust workspace under `rust/` is the product)
+- Python install paths (pip/venv/PyInstaller) from `install.sh`/`install.ps1`, the Python Dockerfile stages, and pytest/ruff/bandit CI jobs
 
 ### Enhanced
 - Security analyzer with multiple scanning methods
