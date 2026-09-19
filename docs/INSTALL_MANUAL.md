@@ -4,7 +4,7 @@ Xencode has a **dual-stack architecture** — a Rust binary (primary) and a Pyth
 
 ---
 
-## Option A: Install Rust Binary (Recommended)
+## Install the Rust Binary
 
 The Rust binary is a single-file executable with no Python dependency. It provides the TUI, CLI, server, analysis, and plugin management.
 
@@ -39,19 +39,9 @@ xencode scan . --max-depth 1
 
 ---
 
-## Option B: Install Python Stack (Legacy / Plugin Development)
+## Ollama & Model Setup
 
-### 1. Install Python Dependencies
-
-```bash
-# On Arch Linux (Recommended)
-sudo pacman -S python-requests python-rich
-
-# On other systems or with pip
-pip3 install --user requests rich
-```
-
-### 2. Install Ollama
+### 1. Install Ollama
 
 ```bash
 # On Arch Linux
@@ -60,7 +50,7 @@ sudo pacman -S ollama
 # Or download from https://ollama.ai/download
 ```
 
-### 3. Start Ollama Service
+### 2. Start Ollama Service
 
 ```bash
 # Check if already running
@@ -77,17 +67,11 @@ ollama serve
 nohup ollama serve > /dev/null 2>&1 &
 ```
 
-### 4. Pull the Model
+### 3. Pull the Model
 
 ```bash
 # Wait for Ollama to start, then pull model
 ollama pull qwen3:4b
-```
-
-### 5. Test Installation
-
-```bash
-./test.sh
 ```
 
 ---
@@ -99,13 +83,7 @@ ollama pull qwen3:4b
 - Try manual start: `ollama serve` in a separate terminal
 - Check port 11434 is not blocked: `curl http://localhost:11434/api/tags`
 
-### Python import errors
-- Verify Python 3 is installed: `python3 --version`
-- Check if packages are installed: `python3 -c "import requests, rich"`
-- Try installing in user space: `pip3 install --user requests rich`
-
 ### Permission errors
-- Make scripts executable: `chmod +x xencode.sh xencode_core.py`
 - Check file permissions: `ls -la`
 
 ### Rust build errors
@@ -114,4 +92,5 @@ ollama pull qwen3:4b
 
 ---
 
-> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Complete codebase reference with all 12 crate descriptions, test counts, architecture diagrams, and remaining work items.
+> 📄 **Reference:** [README.md](../README.md) for the crate layout and current test
+> counts; [docs/ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md) for architecture.

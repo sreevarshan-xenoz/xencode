@@ -6,23 +6,19 @@
 3. [Getting Started](#getting-started)
 4. [Rust CLI](#rust-cli)
 5. [Rust TUI](#rust-tui)
-6. [Python CLI (Legacy)](#python-cli-legacy)
-7. [Command Reference](#command-reference)
-8. [Troubleshooting](#troubleshooting)
-9. [Examples](#examples)
+6. [Command Reference](#command-reference)
+7. [Troubleshooting](#troubleshooting)
+8. [Examples](#examples)
 
 ## Introduction
 
 Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, workspace collaboration, and plugin management with a focus on privacy and offline operation.
 
 ### Architecture
-Xencode uses a **dual-stack architecture**:
-- **Rust core** (12 crates, 176+ tests) — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, Anthropic, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
-- **Python stack** (~180+ files) — Legacy entry points, Textual TUI widgets, agentic workflows, analytics, FastAPI server
+Xencode is a **Rust-only** workspace (`rust/crates/*`, 13 crates):
+- **Rust core** — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, Anthropic, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
 
-The Rust binary (`xencode`) is the recommended entry point.
-
-> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Full codebase reference with architecture diagrams, crate details, test coverage, and remaining work items.
+The Rust binary (`xencode`) is the entry point.
 
 ### Key Features
 - **Rust TUI**: Ratatui-based terminal interface with 17 interactive feature panels and overlays
@@ -35,7 +31,7 @@ The Rust binary (`xencode`) is the recommended entry point.
 
 ## Installation
 
-### Rust Binary (Recommended)
+### Rust Binary
 
 ```bash
 # Build from source (requires Rust 1.75+)
@@ -43,20 +39,8 @@ cd rust && cargo build --release -p xencode-cli
 ./target/release/xencode --help
 ```
 
-> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Lists all 12 Rust crates with test counts, status, and migration phase tracking.
-
-### Python Stack (Legacy)
-
-```bash
-git clone https://github.com/sreevarshan-xenoz/xencode.git
-cd xencode
-pip install -e .
-pip install -r requirements.txt
-```
-
 ### Prerequisites
 - **Rust 1.75+** (for building from source)
-- **Python 3.8+** (for Python stack)
 - **Ollama** installed and running (`ollama serve`)
 - **A model** installed: `ollama pull qwen3:4b`
 - **4GB+ RAM** recommended
@@ -153,16 +137,6 @@ Launch the interactive TUI with `xencode tui`:
 | Custom Models | Profile list, parameter sliders |
 | Learning Mode | Lesson viewer, code examples |
 | Multi-Language | Language detection, translation |
-
-> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — See the **Rust TUI** section for the full feature panel table with status indicators and implementation details.
-
-### Python CLI (Legacy)
-
-```bash
-./xencode.sh
-./xencode.sh "Explain how to reverse a linked list in Python"
-./xencode.sh -m llama3.1:8b "Write a Python function to calculate factorial"
-```
 
 ### First-Time Setup
 
@@ -282,16 +256,6 @@ Options:
   -V, --version  Print version
 ```
 
-### Python CLI Commands (Legacy)
-- `./xencode.sh` — Launch interactive chat
-- `./xencode.sh "query"` — Inline query
-- `./xencode.sh -m <model>` — Specify model
-- `./xencode.sh --list-models` — List installed models
-- `/help` — Show help
-- `/clear` — Clear conversation
-- `/sessions` — List sessions
-- `/model <name>` — Switch model
-
 ## Examples
 
 ### Example 1: Code Analysis
@@ -381,8 +345,8 @@ $ xencode query "What does this Rust code do?"
 #### Slow Responses
 **Problem:** Long response times
 **Solution:**
-1. Check model health: `./xencode.sh --list-models`
-2. Try a different model: `./xencode.sh -m mistral:7b "your query"`
+1. Check model health: `xencode models health`
+2. List installed models: `xencode models list`
 3. Check system resources: `htop` or Task Manager
 
 #### File Operation Errors
