@@ -223,6 +223,7 @@ xencode --version                # Show version
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
+| **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
 | **Plugin** | `xencode plugin list` | List installed plugins |
 | **Plugin** | `xencode plugin install <path>` | Install a plugin |

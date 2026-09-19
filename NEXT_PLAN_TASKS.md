@@ -26,7 +26,7 @@
 
 - [x] Image input pipeline (`rust/crates/xencode-analysis-rs/` `images` module: magic-byte detect, header dimensions, data URLs; `analyze` CLI surfaces inventory; `MessageContent` parts flow end-to-end through Ollama/Anthropic/Gemini/OpenAI-compatible renderers; TUI attach sends images as message parts)
 - [ ] Document parsing into context (`rust/crates/xencode-context-rs/`)
-- [ ] Web extraction for research
+- [x] Web extraction for research (`web` module: timeout/capped fetch, content-type gate, HTML→text; `fetch` CLI subcommand)
 
 ## Secure Team Mode
 

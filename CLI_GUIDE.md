@@ -128,6 +128,15 @@ Plugin management: `list`, `install <path>`, `remove <name>`.
 xencode plugin list
 ```
 
+### `xencode fetch <url> [--format text|json]`
+Fetch a web page and extract research-ready text (title + body, scripts
+and markup stripped). `--format json` returns the full `FetchedPage`.
+
+```bash
+xencode fetch https://example.com
+xencode fetch https://example.com --format json | jq .title
+```
+
 ## 🎯 Usage Examples
 
 ### Development Workflow
