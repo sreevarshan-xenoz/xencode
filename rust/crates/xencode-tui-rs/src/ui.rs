@@ -48,6 +48,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::CustomModels => draw_custom_models(f, app, f.area()),
         FocusArea::LearningMode => draw_learning_mode(f, app, f.area()),
         FocusArea::MultiLanguage => draw_multi_language(f, app, f.area()),
+        FocusArea::ReviewDashboard => draw_review_dashboard(f, app, f.area()),
         _ => {}
     }
 
@@ -147,6 +148,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::CodeEditor => "e:edit  \u{2191}\u{2193}:scroll  Ctrl+S:save  Tab:next",
             FocusArea::ModelSelector => "\u{2191}\u{2193}:select  Enter:confirm  Esc:close",
             FocusArea::CodeReview => "Enter:review  Esc:close",
+            FocusArea::ReviewDashboard => "↑↓:file  u/d:scroll  b:base  Enter:reload  Esc:close",
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "h:refresh  Esc:close",
@@ -156,7 +158,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
             FocusArea::CustomModels | FocusArea::LearningMode |
             FocusArea::MultiLanguage => "Enter:start  Esc:close",
-            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
+            _ => "i:edit  m:models  s:settings  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
         }
     };
 
@@ -916,6 +918,94 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg))
         .wrap(Wrap { trim: false });
     f.render_widget(text, popup_area);
+}
+
+fn draw_review_dashboard(f: &mut Frame, app: &App, area: Rect) {
+    use crate::review::format_review_file_line;
+
+    let popup_area = centered_rect(90, 85, area);
+    f.render_widget(Clear, popup_area);
+
+    let dash = &app.review_dash;
+    let title = format!(
+        " 🔍 PR Review — {}...HEAD ({} files) ",
+        dash.base,
+        dash.files.len()
+    );
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(title);
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(inner);
+
+    // Left: changed-file list with the cursor row highlighted.
+    let file_lines: Vec<Line> = if dash.files.is_empty() {
+        vec![Line::from("  (no changes)")]
+    } else {
+        dash.files
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                let marker = if i == dash.selected { "> " } else { "  " };
+                let row = format!("{}{}", marker, format_review_file_line(file));
+                if i == dash.selected {
+                    Line::from(Span::styled(
+                        row,
+                        Style::default()
+                            .fg(app.theme.highlight_fg)
+                            .bg(app.theme.highlight)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                } else {
+                    Line::from(row)
+                }
+            })
+            .collect()
+    };
+    let file_list = Paragraph::new(file_lines)
+        .block(
+            Block::default()
+                .borders(Borders::RIGHT)
+                .border_style(Style::default().fg(app.theme.border))
+                .title(" Files "),
+        )
+        .style(Style::default().fg(app.theme.fg));
+    f.render_widget(file_list, panes[0]);
+
+    // Right: unified diff of the selected file (or error/empty state).
+    let body = if let Some(err) = &dash.error {
+        format!("Error: {err}")
+    } else if dash.diff_text.is_empty() {
+        if dash.files.is_empty() {
+            "No changes for this base.\n\nPress b to switch base (HEAD <-> main).".to_string()
+        } else {
+            "(empty diff)".to_string()
+        }
+    } else {
+        dash.diff_text.clone()
+    };
+    let diff = Paragraph::new(body)
+        .block(
+            Block::default()
+                .border_style(Style::default().fg(app.theme.border))
+                .title(" Diff "),
+        )
+        .style(Style::default().fg(app.theme.fg))
+        .wrap(Wrap { trim: false })
+        .scroll((dash.scroll, 0));
+    f.render_widget(diff, panes[1]);
 }
 
 // ── Phase 9 Overlays ────────────────────────────────────────────────────────
