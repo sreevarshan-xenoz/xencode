@@ -8,7 +8,8 @@ use crate::{split_data_url, ChatMessage, ContentPart, MessageContent, ProviderEr
 /// Google Gemini model provider.
 ///
 /// API: `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
-/// Auth: `key={api_key}` query parameter
+/// Auth: `x-goog-api-key` header (the `?key=` query form leaks the secret
+/// into reqwest error strings, which land in logs).
 ///
 /// Supports both streaming and non-streaming modes.
 pub struct GeminiProvider {
@@ -176,16 +177,14 @@ impl GeminiProvider {
         max_tokens: Option<u32>,
         temperature: Option<f32>,
     ) -> Result<String, ProviderError> {
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.base_url, model, self.api_key
-        );
+        let url = format!("{}/models/{}:generateContent", self.base_url, model);
         let payload = Self::build_payload(messages, max_tokens, temperature);
 
         let response = self
             .client
             .post(&url)
             .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .json(&payload)
             .send()
             .await
@@ -242,8 +241,8 @@ impl GeminiProvider {
         F: FnMut(&str),
     {
         let url = format!(
-            "{}/models/{}:streamGenerateContent?alt=sse&key={}",
-            self.base_url, model, self.api_key
+            "{}/models/{}:streamGenerateContent?alt=sse",
+            self.base_url, model
         );
         let payload = Self::build_payload(messages, max_tokens, temperature);
 
@@ -251,6 +250,7 @@ impl GeminiProvider {
             .client
             .post(&url)
             .header("Content-Type", "application/json")
+            .header("x-goog-api-key", &self.api_key)
             .json(&payload)
             .send()
             .await
