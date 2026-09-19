@@ -267,6 +267,17 @@ pub struct App<'a> {
     pub last_ctx_retrieved_files: u8,
 }
 
+/// First non-empty line of a process output, for one-line chat reporting.
+/// Pure — unit-tested.
+pub fn first_output_line(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("(no output)")
+        .to_string()
+}
+
 /// Format the proactive warning for a watched path. Pure — unit-tested.
 pub fn format_watch_warning(path: &str, kind: &str) -> String {
     match kind {
@@ -3164,6 +3175,18 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if token == "[HEALTH_DONE]" {
                 app.health_check_in_progress = false;
                 app.last_health_check = current_timestamp();
+            } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_OK]") {
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("✓ Commit: {body}"),
+                });
+                app.refresh_git();
+            } else if let Some(body) = token.strip_prefix("[GIT_COMMIT_ERR]") {
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("✗ Commit failed: {body}"),
+                });
+                app.refresh_git();
             } else if let Some(body) = token.strip_prefix("[WATCH]") {
                 app.handle_watch_event(body);
             } else {
@@ -3456,15 +3479,32 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                     FocusArea::GitCommit => {
                                         if !app.commit_message.trim().is_empty() {
-                                            // Execute git commit async or blockingly
+                                            // Off the UI thread (E2-02): slow repos
+                                            // must not freeze the TUI. The result
+                                            // arrives as a [GIT_COMMIT_*] chat line.
                                             let msg = app.commit_message.clone();
-                                            let _ = Command::new("git")
-                                                .args(["commit", "-am", &msg])
-                                                .output();
                                             app.commit_message.clear();
                                             app.commit_cursor = 0;
-                                            app.refresh_git();
                                             app.focus = FocusArea::ChatInput;
+                                            let ctx = tx.clone();
+                                            tokio::spawn(async move {
+                                                let out = tokio::process::Command::new("git")
+                                                    .args(["commit", "-am", &msg])
+                                                    .output()
+                                                    .await;
+                                                let (tag, body) = match out {
+                                                    Ok(o) if o.status.success() => (
+                                                        "[GIT_COMMIT_OK]",
+                                                        first_output_line(&o.stdout),
+                                                    ),
+                                                    Ok(o) => (
+                                                        "[GIT_COMMIT_ERR]",
+                                                        first_output_line(&o.stderr),
+                                                    ),
+                                                    Err(e) => ("[GIT_COMMIT_ERR]", e.to_string()),
+                                                };
+                                                let _ = ctx.send(format!("{tag}{body}"));
+                                            });
                                         }
                                     }
                                     FocusArea::ByteBotPanel => {
@@ -4162,8 +4202,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_advise_report, format_watch_warning, parse_llama_port, parse_porcelain_z,
-        watch_warning_for,
+        first_output_line, format_advise_report, format_watch_warning, parse_llama_port,
+        parse_porcelain_z, watch_warning_for,
     };
     use std::collections::HashSet;
     use xencode_core_rs::{scan_workspace, ScanOptions};
@@ -4283,6 +4323,17 @@ mod tests {
             ["src/attached.rs".to_string()].into_iter().collect(),
             ["src/tracked.rs".to_string()].into_iter().collect(),
         )
+    }
+
+    #[test]
+    fn first_output_line_picks_first_nonempty_line() {
+        assert_eq!(
+            first_output_line(b"[main abc1234] msg\n 2 files changed\n"),
+            "[main abc1234] msg"
+        );
+        assert_eq!(first_output_line(b"\n\n  real  \nx"), "real");
+        assert_eq!(first_output_line(b""), "(no output)");
+        assert_eq!(first_output_line(b"   \n"), "(no output)");
     }
 
     #[test]
