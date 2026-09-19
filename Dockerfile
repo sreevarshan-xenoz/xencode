@@ -1,38 +1,22 @@
-# Multi-stage Dockerfile for Xencode Application
-FROM python:3.11-slim as builder
+# Multi-stage Dockerfile for Xencode (Rust): builds the `xencode` binary,
+# then ships it in a slim runtime running the collaboration server.
+FROM rust:1-bookworm as builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /build
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create and set working directory
-WORKDIR /app
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt pyproject.toml ./
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Copy the Rust workspace and build the release binary
+COPY rust/ ./
+RUN cargo build --release -p xencode-cli
 
 # Production stage
-FROM python:3.11-slim as production
+FROM debian:bookworm-slim as production
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    XENCODE_ENV=production
+ENV XENCODE_ENV=production
 
-# Install runtime dependencies
+# Runtime dependencies (curl for the health check, CA certs for HTTPS providers)
 RUN apt-get update && apt-get install -y \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -42,25 +26,20 @@ RUN groupadd -r xencode && useradd -r -g xencode xencode
 RUN mkdir -p /app /app/logs /app/data && \
     chown -R xencode:xencode /app
 
-# Set working directory
 WORKDIR /app
 
-# Copy Python packages from builder stage
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application code
-COPY --chown=xencode:xencode . .
+# Copy the release binary from the builder stage
+COPY --from=builder --chown=xencode:xencode /build/target/release/xencode /usr/local/bin/xencode
 
 # Switch to non-root user
 USER xencode
 
-# Expose port
-EXPOSE 8000
+# Expose the collaboration server port
+EXPOSE 8765
 
-# Health check
+# Health check against the server status endpoint
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8765/api/status || exit 1
 
-# Default command
-CMD ["uvicorn", "xencode.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Default command: collaboration server (override for CLI use)
+CMD ["xencode", "server", "--port", "8765"]

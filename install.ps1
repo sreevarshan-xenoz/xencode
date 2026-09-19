@@ -1,5 +1,5 @@
-# Xencode Windows Installer
-# =========================
+# Xencode Windows Installer (Rust)
+# ================================
 
 $ErrorActionPreference = "Stop"
 Write-Host "🚀 Installing Xencode for Windows" -ForegroundColor Cyan
@@ -8,18 +8,18 @@ Write-Host "============================"
 # --- Configuration ---
 $AppName = "xencode"
 $InstallDir = "$env:LOCALAPPDATA\xencode"
-$PythonMinVersion = "3.8"
 $RepoUrl = "https://github.com/sreevarshan-xenoz/xencode.git"
 
 # --- 1. System Checks ---
 Write-Host "`n1. 🔍 System Checks" -ForegroundColor Yellow
 
-# Check Python
-if (Get-Command "python" -ErrorAction SilentlyContinue) {
-    $PyVer = python --version 2>&1
-    Write-Host "   ✅ Python found: $PyVer" -ForegroundColor Green
+# Check Rust toolchain (needed to build xencode)
+if (Get-Command "cargo" -ErrorAction SilentlyContinue) {
+    $CargoVer = cargo --version 2>&1
+    Write-Host "   ✅ Rust found: $CargoVer" -ForegroundColor Green
 } else {
-    Write-Host "   ❌ Python not found. Please install Python $PythonMinVersion+" -ForegroundColor Red
+    Write-Host "   ❌ cargo not found. Install Rust from https://rustup.rs first." -ForegroundColor Red
+    Write-Host "      Then re-run this installer (rustup installs cargo + rustc)." -ForegroundColor Gray
     exit 1
 }
 
@@ -39,62 +39,40 @@ if (Get-Command "ollama" -ErrorAction SilentlyContinue) {
     Write-Host "      You can install it later from https://ollama.ai" -ForegroundColor Gray
 }
 
-# --- 2. Environment Setup ---
-Write-Host "`n2. 🛠️  Environment Setup" -ForegroundColor Yellow
+# --- 2. Build ---
+Write-Host "`n2. 🏗️  Building Xencode (release)" -ForegroundColor Yellow
+
+if (-not (Test-Path "rust\Cargo.toml")) {
+    Write-Host "   ❌ rust\Cargo.toml not found. Run install.ps1 from the repo root." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "   ⏳ cargo build --release -p xencode-cli (first build takes a few minutes)..." -ForegroundColor Gray
+cargo build --release -p xencode-cli --manifest-path rust\Cargo.toml
+
+$BuiltExe = "rust\target\release\xencode.exe"
+if (-not (Test-Path $BuiltExe)) {
+    Write-Host "   ❌ Build failed: $BuiltExe not found." -ForegroundColor Red
+    exit 1
+}
+Write-Host "   ✅ Build succeeded" -ForegroundColor Green
+
+# --- 3. Install ---
+Write-Host "`n3. 📦 Installing" -ForegroundColor Yellow
 
 if (Test-Path $InstallDir) {
     Write-Host "   📂 Cleaning existing installation directory..." -ForegroundColor Gray
     Remove-Item -Path $InstallDir -Recurse -Force
 }
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
-Write-Host "   ✅ Created installation directory: $InstallDir" -ForegroundColor Green
 
-# Create venv
-Write-Host "   🐍 Creating virtual environment..." -ForegroundColor Gray
-python -m venv "$InstallDir\venv"
-if (-not (Test-Path "$InstallDir\venv\Scripts\python.exe")) {
-    Write-Host "   ❌ Failed to create venv." -ForegroundColor Red
-    exit 1
-}
-Write-Host "   ✅ Virtual environment ready" -ForegroundColor Green
-
-# Install Dependencies
-Write-Host "   📦 Installing dependencies (this may take a moment)..." -ForegroundColor Gray
-& "$InstallDir\venv\Scripts\python.exe" -m pip install --upgrade pip
-& "$InstallDir\venv\Scripts\python.exe" -m pip install -r requirements.txt
-& "$InstallDir\venv\Scripts\python.exe" -m pip install pyinstaller>=6.3.0
-Write-Host "   ✅ Dependencies installed" -ForegroundColor Green
-
-# --- 3. Build Executable ---
-Write-Host "`n3. 🏗️  Building Standalone Application" -ForegroundColor Yellow
-Write-Host "   ⏳ Running PyInstaller (please wait)..." -ForegroundColor Gray
-
-# Call build_exe.py using the venv python to ensure all deps are found
-# We assumes build_exe.py is in the current directory (repo root)
-if (Test-Path "build_exe.py") {
-    & "$InstallDir\venv\Scripts\python.exe" "build_exe.py"
-    
-    if (Test-Path "dist\xencode.exe") {
-        Copy-Item "dist\xencode.exe" "$InstallDir\xencode.exe"
-        Write-Host "   ✅ Standalone executable built and moved to install dir" -ForegroundColor Green
-    } else {
-        Write-Host "   ❌ Build failed: dist\xencode.exe not found." -ForegroundColor Red
-        exit 1
-    }
-} else {
-    Write-Host "   ❌ build_exe.py not found in current directory." -ForegroundColor Red
-    exit 1
-}
+Copy-Item $BuiltExe "$InstallDir\xencode.exe"
+Write-Host "   ✅ Installed: $InstallDir\xencode.exe" -ForegroundColor Green
 
 # --- 4. CLI Integration ---
 Write-Host "`n4. 🔌 CLI Integration" -ForegroundColor Yellow
 
 $BatPath = "$InstallDir\xencode.bat"
-# Create shim that prefers the exe if it exists, roughly mimicking the shell script logic?
-# Actually simpler: The batch file just runs the exe or the python script? 
-# Use the python script for CLI to allow faster updates without rebuilding EXE every time?
-# User wants "CLI tool that runs terminal". The EXE does exactly that.
-# Let's make the shim point to the exe for consistency.
 Set-Content -Path $BatPath -Value "@echo off`r`n`"%~dp0xencode.exe`" %*"
 Write-Host "   ✅ Created CLI shim: $BatPath" -ForegroundColor Green
 
@@ -157,7 +135,8 @@ Write-Host "   ✅ Created uninstaller: $UninstallScript" -ForegroundColor Green
 
 # --- Finish ---
 Write-Host "`n🎉 Installation Complete!" -ForegroundColor Green
-Write-Host "   • Run 'xencode' in a new terminal"
+Write-Host "   • Run 'xencode' in a new terminal (launches the TUI)"
+Write-Host "   • xencode query `"hello`" for a one-shot answer"
 Write-Host "   • Open 'Xencode AI' from your Desktop"
 Write-Host "   • To uninstall, run '$UninstallScript'"
 Read-Host -Prompt "Press Enter to exit"
