@@ -20,7 +20,9 @@ use xencode_models_rs::{
     current_timestamp, find_llama_server, resolve_gguf_model, start_llama_server, HealthStatus,
     LlamaCppClient, LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
-use xencode_providers_rs::{ChatMessage, ProviderManager};
+use xencode_providers_rs::{
+    ChatMessage, ContentPart, ImageUrlPart, MessageContent, ProviderManager,
+};
 
 use crate::ui;
 
@@ -485,6 +487,49 @@ pub fn watch_warning_for(
         warning.push_str(&format!("\n↳ Dependents to re-check: {shown}{more}"));
     }
     Some(warning)
+}
+
+/// Read an attached image off disk and encode it as a data URL for message
+/// parts. Pure over the file — unit-tested. The `Err` reason is a short
+/// human phrase for the `(image not sent: …)` note in the attached block,
+/// so a skipped image is always visible, never silent.
+fn encode_attached_image(path: &str) -> Result<String, String> {
+    use xencode_analysis_rs::{inspect_bytes, to_data_url, ImageError};
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read file: {e}"))?;
+    let meta = inspect_bytes(path, &bytes).map_err(|e| match e {
+        ImageError::TooLarge(_, cap) => {
+            format!("exceeds the {} MiB image cap", cap / 1024 / 1024)
+        }
+        ImageError::UnknownFormat(_) => "not a recognized image".to_string(),
+        ImageError::ReadError(_, detail) => format!("cannot read file: {detail}"),
+    })?;
+    Ok(to_data_url(meta.format, &bytes))
+}
+
+/// Merge image data URLs into the final user turn as content parts,
+/// preserving the assembled text ahead of them. Pure — unit-tested.
+/// Returns false (leaving `messages` untouched) when there is nothing to
+/// attach to: empty message list or a non-user tail.
+fn attach_images_to_last_message(messages: &mut [ChatMessage], urls: Vec<String>) -> bool {
+    if urls.is_empty() {
+        return false;
+    }
+    let Some(last) = messages.last_mut() else {
+        return false;
+    };
+    if last.role != "user" {
+        return false;
+    }
+    let text = last.text_content();
+    let mut parts = Vec::with_capacity(urls.len() + 1);
+    if !text.is_empty() {
+        parts.push(ContentPart::Text { text });
+    }
+    parts.extend(urls.into_iter().map(|url| ContentPart::ImageUrl {
+        image_url: ImageUrlPart { url, detail: None },
+    }));
+    last.content = MessageContent::Parts(parts);
+    true
 }
 
 /// Maximum finding lines per `/advise` report before an overflow note.
@@ -966,11 +1011,21 @@ impl<'a> App<'a> {
         let root = xencode_context_rs::default_root();
         let live = xencode_context_rs::collect_live_context(&root, &prompt, CTX_PROFILE);
         // Sorted for a deterministic prompt (and KV prefix) across turns.
+        // Images ride as message parts, not inlined text: read_to_string
+        // would silently drop them, and raw bytes would corrupt the prompt.
         let mut attached_paths: Vec<&String> = self.attached_files.iter().collect();
         attached_paths.sort();
         let mut attached_block = String::new();
+        let mut attached_image_urls: Vec<String> = Vec::new();
         for path in attached_paths {
-            if let Ok(content) = std::fs::read_to_string(path) {
+            if xencode_analysis_rs::is_image_path(std::path::Path::new(path)) {
+                match encode_attached_image(path) {
+                    Ok(url) => attached_image_urls.push(url),
+                    Err(reason) => attached_block.push_str(&format!(
+                        "<file path=\"{path}\">\n(image not sent: {reason})\n</file>\n\n"
+                    )),
+                }
+            } else if let Ok(content) = std::fs::read_to_string(path) {
                 attached_block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
             }
         }
@@ -999,7 +1054,7 @@ impl<'a> App<'a> {
                 content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
             });
         }
-        let context_messages: Vec<ChatMessage> = assembly
+        let mut context_messages: Vec<ChatMessage> = assembly
             .turns
             .into_iter()
             .map(|t| ChatMessage {
@@ -1007,6 +1062,9 @@ impl<'a> App<'a> {
                 content: t.content.into(),
             })
             .collect();
+        // Attached images become content parts on the final user turn, in
+        // sorted-path order (deterministic, KV-stable like the text block).
+        attach_images_to_last_message(&mut context_messages, attached_image_urls);
 
         // Metrics for this real generation (reaches `/ctx kv` via [CTXSTATS]
         // in the drain loop, next to the llama.cpp [TIMINGS]).
@@ -4450,5 +4508,95 @@ mod tests {
         let capped = format_advise_report(&many, None);
         assert_eq!(capped.len(), super::ADVISE_LINE_CAP + 2, "{capped:?}");
         assert!(capped.last().unwrap().contains("+3 more"), "{capped:?}");
+    }
+
+    fn image_test_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-tui-img-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        v.extend_from_slice(&13u32.to_be_bytes());
+        v.extend_from_slice(b"IHDR");
+        v.extend_from_slice(&2u32.to_be_bytes());
+        v.extend_from_slice(&2u32.to_be_bytes());
+        v.extend_from_slice(&[8, 2, 0, 0, 0]);
+        v
+    }
+
+    #[test]
+    fn encode_attached_image_produces_data_url() {
+        let dir = image_test_dir("ok");
+        let path = dir.join("shot.png");
+        let bytes = tiny_png();
+        std::fs::write(&path, &bytes).unwrap();
+        let url = super::encode_attached_image(path.to_str().unwrap()).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"), "{url}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn encode_attached_image_reports_skips() {
+        let dir = image_test_dir("skip");
+        let fake = dir.join("fake.png");
+        std::fs::write(&fake, b"not an image").unwrap();
+        let err = super::encode_attached_image(fake.to_str().unwrap()).unwrap_err();
+        assert_eq!(err, "not a recognized image");
+        let missing = super::encode_attached_image(dir.join("gone.png").to_str().unwrap())
+            .unwrap_err();
+        assert!(missing.starts_with("cannot read file:"), "{missing}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn attach_images_patches_final_user_turn() {
+        use xencode_providers_rs::{ChatMessage, ContentPart, MessageContent};
+        let mut messages = vec![
+            ChatMessage::text("system", "sys"),
+            ChatMessage::text("user", "look at this"),
+        ];
+        let patched = super::attach_images_to_last_message(
+            &mut messages,
+            vec!["data:image/png;base64,AAAA".to_string()],
+        );
+        assert!(patched);
+        assert_eq!(
+            messages[1].content,
+            MessageContent::Parts(vec![
+                ContentPart::Text {
+                    text: "look at this".to_string()
+                },
+                ContentPart::ImageUrl {
+                    image_url: xencode_providers_rs::ImageUrlPart {
+                        url: "data:image/png;base64,AAAA".to_string(),
+                        detail: None,
+                    },
+                },
+            ])
+        );
+        // Earlier turns are untouched.
+        assert_eq!(messages[0].text_content(), "sys");
+    }
+
+    #[test]
+    fn attach_images_refuses_non_user_tail_and_empty_urls() {
+        use xencode_providers_rs::ChatMessage;
+        let mut messages = vec![ChatMessage::text("assistant", "done")];
+        assert!(!super::attach_images_to_last_message(
+            &mut messages,
+            vec!["data:image/png;base64,AAAA".to_string()],
+        ));
+        assert_eq!(messages[0].text_content(), "done");
+
+        let mut empty: Vec<ChatMessage> = Vec::new();
+        assert!(!super::attach_images_to_last_message(&mut empty, vec![]));
     }
 }
