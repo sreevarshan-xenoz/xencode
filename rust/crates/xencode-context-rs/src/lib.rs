@@ -18,6 +18,7 @@ pub mod cmd_output;
 pub mod compact;
 pub mod context;
 pub mod conversation;
+pub mod documents;
 pub mod embed;
 pub mod eval;
 pub mod gitinfo;
@@ -49,6 +50,10 @@ pub use context::{
     AGENT_SYSTEM_PROMPT, HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
+pub use documents::{
+    is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
+    MAX_DOC_BYTES, MAX_DOC_CHARS,
+};
 pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
 pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
 pub use gitinfo::{
