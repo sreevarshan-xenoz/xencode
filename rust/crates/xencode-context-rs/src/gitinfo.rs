@@ -57,13 +57,11 @@ pub fn parse_numstat(output: &str) -> Vec<DiffFile> {
         match (counts(added), counts(deleted)) {
             // Binary (`- -`), or two real counts. Anything else is not a
             // numstat line — skipped, never guessed.
-            (a, d) if is_binary || (a.is_some() && d.is_some()) => {
-                files.push(DiffFile {
-                    path,
-                    added: a,
-                    deleted: d,
-                })
-            }
+            (a, d) if is_binary || (a.is_some() && d.is_some()) => files.push(DiffFile {
+                path,
+                added: a,
+                deleted: d,
+            }),
             _ => {}
         }
     }
