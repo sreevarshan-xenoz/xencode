@@ -526,6 +526,23 @@ fn doc_attach_block(path: &str, parsed: &Result<DocText, String>) -> String {
     }
 }
 
+/// Append a text attachment to the attached block, or a visible skip note
+/// when the file cannot be read as text (binary, deleted, permissions).
+/// Pure over the file — unit-tested. Same never-silent contract as images
+/// and documents.
+fn append_text_attachment(block: &mut String, path: &str) {
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
+        }
+        Err(e) => {
+            block.push_str(&format!(
+                "<file path=\"{path}\">\n(attachment not sent: {e})\n</file>\n\n"
+            ));
+        }
+    }
+}
+
 /// Read an attached image off disk and encode it as a data URL for message
 /// parts. Pure over the file — unit-tested. The `Err` reason is a short
 /// human phrase for the `(image not sent: …)` note in the attached block,
@@ -1063,8 +1080,8 @@ impl<'a> App<'a> {
                 }
             } else if xencode_context_rs::is_document_path(std::path::Path::new(path)) {
                 attached_block.push_str(&doc_attach_block(path, &parse_attached_document(path)));
-            } else if let Ok(content) = std::fs::read_to_string(path) {
-                attached_block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
+            } else {
+                append_text_attachment(&mut attached_block, path);
             }
         }
         // The model's real window when known (Step 3 capabilities); unknown
@@ -1102,7 +1119,17 @@ impl<'a> App<'a> {
             .collect();
         // Attached images become content parts on the final user turn, in
         // sorted-path order (deterministic, KV-stable like the text block).
-        attach_images_to_last_message(&mut context_messages, attached_image_urls);
+        // A `false` here means the turn was unusable — surface it in chat
+        // rather than dropping the user's images silently.
+        let images_pending = !attached_image_urls.is_empty();
+        let images_attached =
+            attach_images_to_last_message(&mut context_messages, attached_image_urls);
+        if images_pending && !images_attached {
+            self.messages.push(UiMessage {
+                role: "system".to_string(),
+                content: "⚠ Attached images could not be sent with this turn (no final user message) — they were dropped, not seen by the model.".to_string(),
+            });
+        }
 
         // Metrics for this real generation (reaches `/ctx kv` via [CTXSTATS]
         // in the drain loop, next to the llama.cpp [TIMINGS]).
@@ -4659,8 +4686,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_attached_document_reports_garbage_and_missing() {
-        let dir = image_test_dir("doc");
+    fn parse_attached_document_reports_garbage_and_missing() {        let dir = image_test_dir("doc");
         let fake = dir.join("fake.pdf");
         std::fs::write(&fake, b"not a pdf at all").unwrap();
         let err = super::parse_attached_document(fake.to_str().unwrap()).unwrap_err();
@@ -4669,6 +4695,28 @@ mod tests {
         let missing =
             super::parse_attached_document(dir.join("gone.pdf").to_str().unwrap()).unwrap_err();
         assert!(missing.starts_with("cannot read file:"), "{missing}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn text_attachment_inlines_readable_and_notes_unreadable() {
+        let dir = image_test_dir("txt");
+        let ok = dir.join("note.txt");
+        std::fs::write(&ok, "hello").unwrap();
+        let mut block = String::new();
+        super::append_text_attachment(&mut block, ok.to_str().unwrap());
+        assert_eq!(
+            block,
+            format!("<file path=\"{}\">\nhello\n</file>\n\n", ok.display())
+        );
+
+        // Binary content fails read_to_string → visible note, not silence.
+        let bin = dir.join("blob.bin");
+        std::fs::write(&bin, [0xFF, 0xFE, 0x00]).unwrap();
+        let mut block2 = String::new();
+        super::append_text_attachment(&mut block2, bin.to_str().unwrap());
+        assert!(block2.contains("(attachment not sent:"), "{block2}");
+        assert!(block2.contains(&bin.display().to_string()), "{block2}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
