@@ -1,3 +1,4 @@
+pub mod agent_tools;
 pub mod app;
 pub mod focus;
 pub mod help;

@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{
-    self, Event, KeyEventKind, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 use ratatui::{backend::Backend, Terminal};
 use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, TextArea};
@@ -170,6 +168,9 @@ pub struct App<'a> {
     /// Set when xencode exits so a still-loading auto-start aborts instead of
     /// orphaning a server behind the app.
     pub llama_cancel: Arc<AtomicBool>,
+    /// Shared background-task registry driven by the D1-02 tool loop (and the
+    /// D2 task panel/CLI later).
+    pub task_runtime: crate::agent_tools::TaskRuntime,
     pub total_llm_calls: u64,
     pub average_latency: f64,
 
@@ -753,6 +754,7 @@ impl<'a> App<'a> {
             last_llamacpp_timings: None,
             llama_process: None,
             llama_cancel: Arc::new(AtomicBool::new(false)),
+            task_runtime: crate::agent_tools::new_task_runtime(),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
         };
@@ -866,10 +868,8 @@ impl<'a> App<'a> {
     /// ByteBot command, settings URL buffer). Universal single-key shortcuts
     /// must not swallow the input itself (E2-06).
     pub fn text_entry_active(&self) -> bool {
-        matches!(
-            self.focus,
-            FocusArea::GitCommit | FocusArea::ByteBotPanel
-        ) || (self.focus == FocusArea::Settings && self.settings_url_editing)
+        matches!(self.focus, FocusArea::GitCommit | FocusArea::ByteBotPanel)
+            || (self.focus == FocusArea::Settings && self.settings_url_editing)
     }
 
     pub fn refresh_git(&mut self) {
@@ -1153,6 +1153,7 @@ impl<'a> App<'a> {
             json_schema: None,
             mirostat: None,
         };
+        let task_runtime = self.task_runtime.clone();
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
@@ -1160,16 +1161,60 @@ impl<'a> App<'a> {
             let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                 .with_llama_cpp(llama_client)
                 .with_request_timeout(timeout);
-            let _ = manager
-                .generate_stream_with_options(
-                    &model,
-                    &context_messages,
-                    Some(&llama_opts),
-                    |token| {
-                        let _ = tx.send(token.to_string());
-                    },
-                )
-                .await;
+            // Agentic turn loop (D1-02): offer the background-task tools on
+            // every step; execute requested calls through the shared registry
+            // and feed results back as AgentTurn history. The final round is
+            // tool-less so the loop always terminates with a text answer.
+            let tools = xencode_providers_rs::background_tools();
+            let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
+            for round in 0..=crate::agent_tools::MAX_TOOL_ROUNDS {
+                let offer: &[xencode_providers_rs::ToolDefinition] =
+                    if round == crate::agent_tools::MAX_TOOL_ROUNDS {
+                        &[]
+                    } else {
+                        &tools
+                    };
+                let step = match manager
+                    .generate_stream_with_tools(
+                        &model,
+                        &context_messages,
+                        &history,
+                        offer,
+                        Some(&llama_opts),
+                        |token| {
+                            let _ = tx.send(token.to_string());
+                        },
+                    )
+                    .await
+                {
+                    Ok(step) => step,
+                    // Errors leave no partial tool state; the drain loop
+                    // finalizes the turn on [DONE] like before.
+                    Err(_) => break,
+                };
+                if step.tool_calls.is_empty() {
+                    break;
+                }
+                history.push(xencode_providers_rs::AgentTurn::Assistant {
+                    text: step.text.clone(),
+                    calls: step.tool_calls.clone(),
+                });
+                for call in &step.tool_calls {
+                    let _ = tx.send(format!(
+                        "[TOOL]→ {}",
+                        crate::agent_tools::summarize_call(call)
+                    ));
+                    let result = crate::agent_tools::execute_tool_call(&task_runtime, call).await;
+                    let _ = tx.send(format!(
+                        "[TOOL]← {}",
+                        crate::agent_tools::truncate_one_line(&result, 120)
+                    ));
+                    history.push(xencode_providers_rs::AgentTurn::ToolResult {
+                        id: call.id.clone(),
+                        content: result,
+                    });
+                }
+            }
             // Report llama.cpp tok/s stats if this was a llama.cpp request
             if let Some(ts) = manager.last_llamacpp_timings() {
                 if let Ok(json) = serde_json::to_string(&ts) {
@@ -1300,10 +1345,8 @@ impl<'a> App<'a> {
         );
         let dependents: &[String] = affected.get(path).map(Vec::as_slice).unwrap_or(&[]);
         // Dedup against the last visible warning toast, not chat history (E3-03).
-        let last_warning = crate::toast::last_of_kind(
-            &self.toasts,
-            crate::toast::ToastKind::Warning,
-        );
+        let last_warning =
+            crate::toast::last_of_kind(&self.toasts, crate::toast::ToastKind::Warning);
         if let Some(warning) = watch_warning_for(
             path,
             kind,
@@ -3334,6 +3377,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     content: format!("✗ Commit failed: {body}"),
                 });
                 app.refresh_git();
+            } else if let Some(body) = token.strip_prefix("[TOOL]") {
+                // Tool-loop lines arrive mid-stream (D1-02); the next token
+                // opens a fresh assistant bubble, so each round stays visible.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("⚙{body}"),
+                });
             } else if let Some(body) = token.strip_prefix("[WATCH]") {
                 app.handle_watch_event(body);
             } else {
@@ -3347,8 +3397,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // Dispatch lives in keymap.rs (E6-01): modal help overlay,
                     // global Ctrl chords, then per-focus handlers.
-                    if crate::keymap::handle_key(&mut app, key, &tx)
-                        == crate::keymap::KeyFlow::Quit
+                    if crate::keymap::handle_key(&mut app, key, &tx) == crate::keymap::KeyFlow::Quit
                     {
                         return Ok(());
                     }
@@ -3461,8 +3510,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     },
                     MouseEventKind::Down(MouseButton::Left) => {
                         let size = terminal.size()?;
-                        let body_area =
-                            ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        let body_area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
                         match ui::body_hit_test(body_area, mouse.column) {
                             FocusArea::FileExplorer => {
                                 app.focus = FocusArea::FileExplorer;
@@ -4082,6 +4130,10 @@ mod tests {
         assert_eq!(app.chat_input.lines().join("\n"), "/ctx status");
         app.recall_history(1); // past newest → stashed draft returns
         assert_eq!(app.chat_input.lines().join("\n"), "current draft");
-        assert_eq!(app.input_history.len(), 2, "dedup keeps one copy per prompt");
+        assert_eq!(
+            app.input_history.len(),
+            2,
+            "dedup keeps one copy per prompt"
+        );
     }
 }

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 466 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 471 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -60,10 +60,16 @@
   child map so `kill_on_drop` can't silent-kill a live task). 5 `#[tokio::test]`
   lifecycle tests cover echo→Exited(0)+output, `exit 3`, sleep→stop→Killed→rm, and
   NotFound/AlreadyFinished paths.
-- [ ] D1-02 Tool surface: `background_start`/`background_poll`/`background_stop` as
+- [x] D1-02 Tool surface: `background_start`/`background_poll`/`background_stop` as
   `ToolDefinition`s in `xencode-providers-rs/tools.rs` shapes, and wire tool-call
   **execution** into the agent turn loop (`generate_stream_with_tools` exists in the
   providers; the TUI loop currently never handles a `ToolCall` — that lands here).
+  Shipped: `background_tools()` schema builder in providers; new TUI `agent_tools.rs`
+  with a shared `TaskRuntime` (`Arc<tokio::sync::Mutex<TaskManager>>` on `App`) and
+  `execute_tool_call`; the chat loop now runs up to `MAX_TOOL_ROUNDS` (8) tool rounds
+  per turn before a final tool-less answer, echoing each call/result into chat as a
+  `⚙` system line. Backends without native tool support degrade as before (schemas
+  only — Anthropic/Gemini return no calls).
 
 ### D2 — Background tasks UX
 
