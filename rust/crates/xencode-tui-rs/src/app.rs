@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
 use xencode_config_rs::XencodeConfig;
-use xencode_context_rs::{init_project, HardwareProfile};
+use xencode_context_rs::{init_project, DocError, DocText, HardwareProfile};
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
@@ -489,6 +489,43 @@ pub fn watch_warning_for(
     Some(warning)
 }
 
+/// Read an attached document off disk and parse it to text. Returns a short
+/// human reason on failure for the skip note — same visibility contract as
+/// images: never silent.
+fn parse_attached_document(path: &str) -> Result<DocText, String> {
+    use xencode_context_rs::{parse_document_bytes, MAX_DOC_BYTES};
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read file: {e}"))?;
+    if bytes.len() > MAX_DOC_BYTES {
+        return Err(format!(
+            "exceeds the {} MiB document cap",
+            MAX_DOC_BYTES / 1024 / 1024
+        ));
+    }
+    parse_document_bytes(path, &bytes).map_err(|e| match e {
+        DocError::UnknownType(_) => "not a supported document".to_string(),
+        DocError::ParseError(_, kind, detail) => format!("{kind} parse failed: {detail}"),
+        DocError::ReadError(_, detail) => format!("cannot read file: {detail}"),
+        DocError::TooLarge(_, _) => "exceeds the document cap".to_string(),
+    })
+}
+
+/// Render a parsed document as an attached-block entry: extracted text when
+/// present, an explicit note when the document held nothing extractable
+/// (scanned PDFs) or failed to parse. Pure — unit-tested.
+fn doc_attach_block(path: &str, parsed: &Result<DocText, String>) -> String {
+    match parsed {
+        Ok(doc) if !doc.text.trim().is_empty() => {
+            format!("<file path=\"{path}\">\n{}\n</file>\n\n", doc.text)
+        }
+        Ok(_) => format!(
+            "<file path=\"{path}\">\n(document held no extractable text — scanned?)\n</file>\n\n"
+        ),
+        Err(reason) => {
+            format!("<file path=\"{path}\">\n(document not parsed: {reason})\n</file>\n\n")
+        }
+    }
+}
+
 /// Read an attached image off disk and encode it as a data URL for message
 /// parts. Pure over the file — unit-tested. The `Err` reason is a short
 /// human phrase for the `(image not sent: …)` note in the attached block,
@@ -506,8 +543,7 @@ fn encode_attached_image(path: &str) -> Result<String, String> {
     Ok(to_data_url(meta.format, &bytes))
 }
 
-/// Merge image data URLs into the final user turn as content parts,
-/// preserving the assembled text ahead of them. Pure — unit-tested.
+/// Merge image data URLs into the final user turn as content parts,/// preserving the assembled text ahead of them. Pure — unit-tested.
 /// Returns false (leaving `messages` untouched) when there is nothing to
 /// attach to: empty message list or a non-user tail.
 fn attach_images_to_last_message(messages: &mut [ChatMessage], urls: Vec<String>) -> bool {
@@ -1025,6 +1061,8 @@ impl<'a> App<'a> {
                         "<file path=\"{path}\">\n(image not sent: {reason})\n</file>\n\n"
                     )),
                 }
+            } else if xencode_context_rs::is_document_path(std::path::Path::new(path)) {
+                attached_block.push_str(&doc_attach_block(path, &parse_attached_document(path)));
             } else if let Ok(content) = std::fs::read_to_string(path) {
                 attached_block.push_str(&format!("<file path=\"{path}\">\n{content}\n</file>\n\n"));
             }
@@ -4595,5 +4633,42 @@ mod tests {
 
         let mut empty: Vec<ChatMessage> = Vec::new();
         assert!(!super::attach_images_to_last_message(&mut empty, vec![]));
+    }
+
+    fn doc_of(text: &str) -> xencode_context_rs::DocText {
+        xencode_context_rs::DocText {
+            path: "paper.pdf".to_string(),
+            kind: xencode_context_rs::DocKind::Pdf,
+            text: text.to_string(),
+            truncated: false,
+            bytes: 100,
+        }
+    }
+
+    #[test]
+    fn doc_block_inlines_text_and_names_skips() {
+        let text = super::doc_attach_block("paper.pdf", &Ok(doc_of("Hello paper")));
+        assert_eq!(text, "<file path=\"paper.pdf\">\nHello paper\n</file>\n\n");
+
+        let empty = super::doc_attach_block("scan.pdf", &Ok(doc_of("   \n ")));
+        assert!(empty.contains("no extractable text"), "{empty}");
+
+        let failed: Result<xencode_context_rs::DocText, String> = Err("bogus".to_string());
+        let err = super::doc_attach_block("bad.pdf", &failed);
+        assert!(err.contains("(document not parsed: bogus)"), "{err}");
+    }
+
+    #[test]
+    fn parse_attached_document_reports_garbage_and_missing() {
+        let dir = image_test_dir("doc");
+        let fake = dir.join("fake.pdf");
+        std::fs::write(&fake, b"not a pdf at all").unwrap();
+        let err = super::parse_attached_document(fake.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("pdf parse failed"), "{err}");
+
+        let missing =
+            super::parse_attached_document(dir.join("gone.pdf").to_str().unwrap()).unwrap_err();
+        assert!(missing.starts_with("cannot read file:"), "{missing}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
