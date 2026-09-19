@@ -109,7 +109,7 @@ pub fn extract_rust_symbols(content: &str) -> PerFileSymbols {
 
 /// Which namespace an import resolves relative to.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Qualifier {
+pub(crate) enum Qualifier {
     /// `crate::` — anchored at the crate root (dir of `lib.rs`/`main.rs`).
     Crate,
     /// `self::` — anchored at the current module's dir.
@@ -123,7 +123,7 @@ enum Qualifier {
 
 /// Parse a raw `use`-statement text (already stripped of `use` / `;`)
 /// into a qualifier + remaining path segments.
-fn parse_import(raw: &str) -> Option<(Qualifier, Vec<String>)> {
+pub(crate) fn parse_import(raw: &str) -> Option<(Qualifier, Vec<String>)> {
     let mut s = raw.trim();
     if s.is_empty() || s.contains('{') || s.contains('}') || s.contains('*') {
         return None;
@@ -268,7 +268,7 @@ pub fn resolve_import(
 }
 
 /// Find the crate-root dirs (`dir of lib.rs`/`main.rs`) among the rust files.
-fn crate_roots(rust_files: &[String]) -> Vec<String> {
+pub(crate) fn crate_roots(rust_files: &[String]) -> Vec<String> {
     let mut roots: BTreeSet<String> = BTreeSet::new();
     for f in rust_files {
         let name = f.rsplit('/').next().unwrap_or(f);
@@ -280,7 +280,7 @@ fn crate_roots(rust_files: &[String]) -> Vec<String> {
 }
 
 /// Longest crate root that contains `file`; empty-string root is the fallback.
-fn crate_root_for<'a>(file: &str, roots: &'a [String]) -> Option<&'a str> {
+pub(crate) fn crate_root_for<'a>(file: &str, roots: &'a [String]) -> Option<&'a str> {
     let mut candidates: Vec<&String> = roots
         .iter()
         .filter(|r| r.is_empty() || file.starts_with(&format!("{r}/")))
