@@ -14,7 +14,6 @@ and cloud models with zero-latency ensemble reasoning, agentic
 
 [![CI](https://img.shields.io/github/actions/workflow/status/sreevarshan-xenoz/xencode/ci.yml?label=CI&logo=github&style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/actions)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&style=flat-square)](#option-b-python-package)
 [![Version](https://img.shields.io/badge/version-2.1.0-8A2BE2?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
@@ -31,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (12 crates, 176+ tests,
+At its core is a fast, single-file **Rust** binary (13 crates, 373 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -42,8 +41,8 @@ and fix your code — driven entirely from your terminal.
 - **🧠 Offline-first AI** — local Ollama models by default; cloud fallback only when you opt in.
 - **🤖 Agentic coding loop** — bounded `plan → edit → test → fix` cycles with error classification and targeted fixes.
 - **⚖️ Ensemble reasoning** — combine multiple models via vote, weighted, consensus, or hybrid strategies.
-- **🖥️ Two immersive TUIs** — a modern Rust/ratatui interface (17 panels) plus the legacy Python/Textual UI (31 widgets).
-- **🔒 Secure by design** — encrypted credential vault, refresh-token rotation, email verification, and OWASP-based security scanning.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (17 panels): agent, collaboration, audit, profiler, git, models, and more.
+- **🔒 Secure by design** — token-authenticated collaboration server and OWASP-based security scanning.
 - **🔌 Extensible platform** — plugin trait system, feature flags, and lifecycle management.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with CRDT sync, plus Docker, Compose, and Kubernetes assets.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), hybrid memory+disk cache, streaming with exponential backoff.
@@ -107,7 +106,6 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 
 ### Developer Experience
 - **Rust ratatui TUI** (primary) — 17 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
-- **Python Textual TUI** (legacy) — 31 widget panels with settings, options, and theme controls.
 - Code analysis with language-aware AST parsing (Python, JavaScript/TypeScript, Rust).
 - Side-by-side diff inspection and hunk-level review flows.
 - Rich CLI with `server`, `analyze`, and `plugin` subcommands.
@@ -126,12 +124,11 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 | Requirement | Used for | Get it |
 | --- | --- | --- |
 | **Ollama** | Local AI models (required) | [ollama.ai](https://ollama.ai/download) |
-| **Rust 1.75+** | Building the Rust binary (Opt A) | [rustup.rs](https://rustup.rs) |
-| **Python 3.8+** | Python stack (Opt B) | [python.org](https://python.org) |
+| **Rust 1.75+** | Building the binary | [rustup.rs](https://rustup.rs) |
 
 ### Option A: Rust binary (recommended)
 
-A single-file executable with zero Python dependency — the fastest, cleanest path.
+A single-file executable with no runtime dependencies — the fastest, cleanest path.
 
 ```bash
 git clone https://github.com/sreevarshan-xenoz/xencode
@@ -139,26 +136,14 @@ cd xencode/rust
 cargo build --release -p xencode-cli
 
 # Linux/macOS
-cp target/release/xencode-cli /usr/local/bin/xencode
+cp target/release/xencode /usr/local/bin/xencode
 # Windows
-copy target\release\xencode-cli.exe C:\Windows\System32\xencode.exe
+copy target\release\xencode.exe C:\Windows\System32\xencode.exe
 
 xencode --help
 ```
 
-### Option B: Python package
-
-```bash
-pip install xencode
-
-# or, from source:
-git clone https://github.com/sreevarshan-xenoz/xencode
-cd xencode
-pip install -e .
-pip install -r requirements.txt
-```
-
-### Option C: One-liner installers
+### Option B: One-liner installers
 
 The repository ships cross-platform installer scripts — [`install.sh`](install.sh) (Linux/macOS) and [`install.ps1`](install.ps1) (Windows). Download the script and run it, or review it first and execute locally:
 
@@ -207,10 +192,9 @@ xencode plugin list
 
 ```bash
 xencode                          # Launch the Rust TUI (default experience)
-xencode "what is python?"        # Inline query mode (immersive)
-xencode query "explain async"    # Run an ensemble query
-xencode status                   # Runtime status summary
-xencode health                   # Health checks
+xencode query "explain async"    # One-shot query without leaving your shell
+xencode analyze ./src            # Code analysis + image inventory
+xencode models list              # Model health
 xencode --version                # Show version
 ```
 
@@ -231,24 +215,20 @@ xencode --version                # Show version
 | --- | --- | --- |
 | **General** | `xencode` | Launch Rust TUI (default experience) |
 | **General** | `xencode --version` | Show installed version |
-| **System** | `xencode status` | Show runtime status summary |
-| **System** | `xencode health` | Run health checks |
-| **Query** | `xencode query "…"` | Run an ensemble query |
+| **Query** | `xencode query "…"` | Run a one-shot query |
 | **Scan** | `xencode scan . --max-depth 2` | Scan workspace |
 | **Config** | `xencode config show` | Show runtime config |
 | **Models** | `xencode models list` | List available models with health |
 | **Memory** | `xencode memory list` | List conversation sessions |
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
-| **Analyze** | `xencode analyze <path>` | Code analysis + security vulnerability scan |
+| **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
+| **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
 | **Plugin** | `xencode plugin list` | List installed plugins |
 | **Plugin** | `xencode plugin install <path>` | Install a plugin |
 | **Plugin** | `xencode plugin remove <name>` | Remove a plugin |
-| **Vault** | `xencode vault init` | Init encrypted credential vault |
-| **Vault** | `xencode vault migrate` | Move plaintext API keys into the vault |
-| **Vault** | `xencode vault status` | Inspect vault path, credential count, encryption |
 
-> For the full Rust CLI reference run `xencode --help`; for the Python CLI run `python xencode_cli.py --help`.
+> For the full CLI reference run `xencode --help`.
 
 ---
 
@@ -269,8 +249,8 @@ Xencode is organized as a layered runtime:
 flowchart TD
     U[User]
     CLI[xencode CLI]
-    TUI[Textual TUI]
-    API[FastAPI API]
+    TUI[ratatui TUI]
+    API[axum server]
 
     ORCH[Agent Orchestrator\nPlan -> Edit -> Test -> Fix]
     CTX[Context + Memory + Cache]
@@ -345,27 +325,19 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ## 🧪 Testing & Quality
 
-### Rust (primary)
+### Rust
 
 ```bash
 cd rust
-cargo test                          # All 176+ tests across 12 crates
+cargo test                          # Full workspace suite (373 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
+cargo fmt --check                   # Format gate (CI)
+cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
 ```
 
-### Python (legacy)
-
-```bash
-pytest                 # Python test suite
-ruff check .           # Lint
-black --check .        # Format check
-mypy xencode           # Type check
-```
-
-CI also runs `bandit` + `safety` security scans and publishes coverage
-to Codecov — see [`.github/workflows/`](.github/workflows/).
+CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/`](.github/workflows/).
 
 ---
 
@@ -373,10 +345,10 @@ to Codecov — see [`.github/workflows/`](.github/workflows/).
 
 Xencode ships production-oriented deployment assets:
 
-- **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml) (app + PostgreSQL 15 + Redis)
+- **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml) (Rust builder → slim runtime running `xencode server`)
 - **Kubernetes** — manifests in [`k8s/`](k8s/) (deployment, postgres, templated secrets)
 - **Monitoring** — Prometheus config in [`monitoring/`](monitoring/)
-- **CI/CD** — build → Trivy security scan → ghcr.io push → staging/prod deploy in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
+- **CI/CD** — fmt → clippy → cargo test → Trivy security scan → ghcr.io push → staging/prod deploy in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
 
 ---
 
@@ -384,21 +356,17 @@ Xencode ships production-oriented deployment assets:
 
 ```
 xencode/
-├── rust/                    # Rust workspace — 12 crates (primary)
+├── rust/                    # Rust workspace — 13 crates
 │   └── crates/
-│       ├── xencode-cli      # # CLI entry point
+│       ├── xencode-cli      # # CLI entry point (xencode binary)
 │       ├── xencode-tui-rs   # Ratatui TUI
 │       ├── xencode-server-rs# Axum HTTP/WebSocket collaboration server
-│       ├── xencode-analysis-rs # Code analysis + security scanner + RAG
+│       ├── xencode-analysis-rs # Code analysis + security scanner + image intake
 │       └── ...
-├── xencode/                 # Python package (legacy, extensibility)
 ├── bin/xencode.js           # Node.js CLI wrapper
 ├── k8s/                     # Kubernetes manifests
 ├── monitoring/              # Prometheus + analytics
-├── deployment/              # Deployment-related tooling
-├── scripts/                 # Build/benchmark/release scripts
-├── tests/                   # Python test suite
-├── docs/                    # User, onboarding & architecture docs
+├── scripts/                 # Build/smoke-test scripts (Rust)
 ├── images/                  # Screenshots
 └── .xencode.example.json    # Example configuration
 ```
@@ -437,7 +405,7 @@ ollama pull qwen3:4b               # small, fast starter model
 
 ### Slow responses
 - `/model phi3:mini` — switch to a faster local model.
-- Run `xencode status` and `xencode health` to check system state.
+- `xencode models list` — check provider health.
 
 ### Rust build errors
 ```bash
@@ -449,9 +417,8 @@ cd rust && cargo build -p xencode-cli 2>&1
 
 ## 🔒 Security
 
-- Store API keys and secrets in the encrypted vault (`xencode vault init`), never in tracked files.
+- Store API keys via `xencode config`, never in tracked files.
 - OWASP Top 10 + CVE vulnerability scanning built into `xencode analyze`.
-- 50+ Bandit security rules with CWE mappings in the Python stack.
 - Never commit plaintext credentials — use environment-specific secrets management and least-privilege access.
 
 Vulnerabilities can be reported privately to **security@xenoz.com** — see
@@ -461,7 +428,7 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 ## 🗺️ Roadmap
 
-The Rust migration (all 8 phases, 12 crates) is **complete**. Near-term direction:
+The Rust migration (all 8 phases, 13 crates) is **complete**. Near-term direction:
 
 - Repo-wide context indexing + routing intelligence
 - Smart fallback policy governance + provider health UX
@@ -478,9 +445,9 @@ Track progress in [docs/ROADMAP.md](docs/ROADMAP.md) and
 We welcome contributions of all kinds — bug reports, docs, features, and plugins.
 
 1. Fork the repo and create a branch.
-2. Set up the dev environment: `pip install -e .` + `pip install -r requirements.txt`.
-3. Follow the standards in [CONTRIBUTING.md](CONTRIBUTING.md) (Black, Ruff, mypy, Conventional Commits).
-4. Open a PR — CI runs lint, type checks, and the full test matrix automatically.
+2. Set up the dev environment: `cargo test --workspace` under `rust/` (plus `cargo fmt --check` and clippy per above).
+3. Follow the standards in [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) (rustfmt, clippy `-D warnings`, atomic commits, Conventional Commits).
+4. Open a PR — CI runs fmt, clippy, and the full workspace suite automatically.
 
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) and see the
 [Contributing Guide](CONTRIBUTING.md) to get started.

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 331 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 373 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -24,7 +24,7 @@
 
 ## Multimodal UX
 
-- [ ] Image input pipeline (`rust/crates/xencode-analysis-rs/` or a new `-multimodal` crate)
+- [x] Image input pipeline (`rust/crates/xencode-analysis-rs/` `images` module: magic-byte detect, header dimensions, data URLs; `analyze` CLI surfaces inventory; `MessageContent` parts flow end-to-end through Ollama/Anthropic/Gemini/OpenAI-compatible renderers; TUI attach sends images as message parts)
 - [ ] Document parsing into context (`rust/crates/xencode-context-rs/`)
 - [ ] Web extraction for research
 
