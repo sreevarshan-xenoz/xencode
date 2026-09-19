@@ -94,7 +94,10 @@ impl AnthropicProvider {
         for msg in messages {
             match msg.role.as_str() {
                 "system" => {
-                    // Accumulate system messages into a single system prompt
+                    // Accumulate system messages into a single system prompt.
+                    // The system field is text-only: image parts in a system
+                    // turn do not cross (text_content drops them) — attach
+                    // images to user turns instead.
                     let existing = system_prompt.get_or_insert_with(String::new);
                     if !existing.is_empty() {
                         existing.push_str("\n\n");
@@ -310,7 +313,7 @@ impl AnthropicProvider {
                                     }
                                 }
                             }
-                        } else if event_type == "message_start" {
+                        } else if current_event == "message_start" {
                             // Optionally capture message_id from the initial event
                             // (no text content in message_start)
                         }
