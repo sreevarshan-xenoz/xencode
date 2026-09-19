@@ -111,7 +111,6 @@ ollama pull qwen3:4b
 ### Rust build errors
 - Ensure Rust toolchain is up to date: `rustup update`
 - Check Cargo workspace: `cd rust && cargo build -p xencode-cli 2>&1`
-- See `docs/RUST_MIGRATION_STATUS.md` for crate details
 
 ---
 
