@@ -7,48 +7,39 @@ on:
       - "v*"
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-    env:
-      HAS_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7.0.1
 
-    - name: Set up Python
-      uses: actions/setup-python@v7.0.0
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Cargo registry and build
+      uses: actions/cache@v6.1.0
       with:
-        python-version: "3.11"
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust/target
+        key: ${{ runner.os }}-cargo-release-${{ hashFiles('rust/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-release-
+          ${{ runner.os }}-cargo-
 
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
+    - name: Build release binary
+      run: cargo build --release -p xencode-cli
+      working-directory: rust
 
-    - name: Validate versions
-      run: |
-        python scripts/check_version_consistency.py
+    - name: Smoke-test release binary
+      run: ./scripts/smoke-test.sh ./rust/target/release/xencode
 
-    - name: Build package artifacts
-      run: |
-        python -m build
-
-    - name: Verify package metadata
-      run: |
-        twine check dist/*
-
-    - name: Publish to PyPI
-      if: env.HAS_PYPI_TOKEN == 'true'
-      uses: pypa/gh-action-pypi-publish@v1.14.2
+    - name: Publish GitHub Release with binary
+      uses: softprops/action-gh-release@v2.3.2
       with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
-
-    - name: Upload distribution artifacts
-      uses: actions/upload-artifact@v7.0.1
-      with:
-        name: xencode-dist
-        path: dist/*
+        files: rust/target/release/xencode
+        generate_release_notes: true
