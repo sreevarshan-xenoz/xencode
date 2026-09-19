@@ -4139,6 +4139,27 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         FocusArea::ReviewDashboard => {
                             app.review_dash.scroll_by(-3);
                         }
+                        // E2-05: wheel drives the same state as ↑ for panels
+                        // that have a cursor/scroll offset but lacked wheel.
+                        // Remaining panels are single-screen with nothing to scroll.
+                        FocusArea::Settings => {
+                            if app.settings_cursor > 0 {
+                                app.settings_cursor -= 1;
+                            }
+                        }
+                        FocusArea::ModelSelector => {
+                            if app.selected_model > 0 {
+                                app.selected_model -= 1;
+                            }
+                        }
+                        FocusArea::CustomModels => {
+                            if app.models_selected > 0 {
+                                app.models_selected -= 1;
+                            }
+                        }
+                        FocusArea::CodeReview => {
+                            app.review_scroll = app.review_scroll.saturating_sub(1);
+                        }
                         _ => {}
                     },
                     MouseEventKind::ScrollDown => match app.focus {
@@ -4164,6 +4185,24 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         }
                         FocusArea::ReviewDashboard => {
                             app.review_dash.scroll_by(3);
+                        }
+                        FocusArea::Settings => {
+                            if app.settings_cursor + 1 < 14 {
+                                app.settings_cursor += 1;
+                            }
+                        }
+                        FocusArea::ModelSelector => {
+                            if app.selected_model + 1 < app.available_models.len() {
+                                app.selected_model += 1;
+                            }
+                        }
+                        FocusArea::CustomModels => {
+                            if app.models_selected + 1 < app.models_profiles.len() {
+                                app.models_selected += 1;
+                            }
+                        }
+                        FocusArea::CodeReview => {
+                            app.review_scroll += 1;
                         }
                         _ => {}
                     },

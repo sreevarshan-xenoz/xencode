@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 417 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 420 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -129,8 +129,10 @@
   paragraphs clamp their stored scroll at render time with `ui::clamp_scroll`
   (unit-tested) so scrolling past the end no longer renders blank; CodeReview output
   is now scrollable via `review_scroll` + ↑/↓, reset on each new review.
-- [ ] E2-05 Mouse wheel support for the remaining focus areas (currently 7 of 18;
-  `_ => {}` at `app.rs:4293`).
+- [x] E2-05 Mouse wheel now drives every focus area that has scroll state:
+  Settings/ModelSelector/CustomModels cursors and the (new, E2-04) CodeReview scroll
+  joined the existing 7. Remaining areas are single-screen panels with no scrollable
+  content — wheel is a deliberate no-op there.
 
 ### E3 — High-impact UX (UI doc §4, first half)
 
