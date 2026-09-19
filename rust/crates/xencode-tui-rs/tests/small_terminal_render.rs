@@ -52,7 +52,7 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.bytebot_log.push("❌ failed a thing".into());
     app.bytebot_history.push("run tests".into());
     app.attached_files.insert("./src/main.rs".into());
-    app.input = "some input text that is fairly long".into();
+    app.chat_input.insert_str("some input text that is fairly long");
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),

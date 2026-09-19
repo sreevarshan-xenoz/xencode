@@ -41,9 +41,10 @@ const UNIVERSAL: &[Binding] = &[
 
 const EDITING: &[Binding] = &[
     ("Enter", "send message"),
+    ("Alt+Enter / Ctrl+J", "insert newline"),
     ("Esc", "back to normal mode"),
     ("Tab", "insert 4 spaces"),
-    ("← → Home End", "move cursor"),
+    ("← → ↑ ↓ Home End", "move cursor"),
     ("Backspace/Del", "delete"),
 ];
 

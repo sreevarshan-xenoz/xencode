@@ -93,8 +93,9 @@ fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
 
 pub struct App<'a> {
     pub focus: FocusArea,
-    pub input: String,
-    pub input_cursor: usize,
+    /// Chat input box (multiline-capable; Enter submits, Alt+Enter/Ctrl+J
+    /// insert newlines).
+    pub chat_input: TextArea<'static>,
     pub input_mode: InputMode,
     pub messages: Vec<UiMessage>,
     pub chat_scroll: u16,
@@ -568,8 +569,7 @@ impl<'a> App<'a> {
 
         let mut app = Self {
             focus: FocusArea::ChatInput,
-            input: String::new(),
-            input_cursor: 0,
+            chat_input: TextArea::default(),
             input_mode: InputMode::Normal,
             messages: Vec::new(),
             chat_scroll: 0,
@@ -715,6 +715,7 @@ impl<'a> App<'a> {
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
         };
+        app.style_chat_input();
 
         // Seed initial health entries for configured providers
         app.ollama_health_entries.insert(
@@ -845,13 +846,25 @@ impl<'a> App<'a> {
         }
     }
 
+    /// The chat box is a plain textarea; only its colors follow the theme.
+    fn style_chat_input(&mut self) {
+        self.chat_input
+            .set_style(ratatui::style::Style::default().fg(self.theme.fg));
+        self.chat_input
+            .set_cursor_line_style(ratatui::style::Style::default());
+    }
+
+    fn reset_chat_input(&mut self) {
+        self.chat_input = TextArea::default();
+        self.style_chat_input();
+    }
+
     pub fn submit_message(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.input.trim().is_empty() {
+        let prompt = self.chat_input.lines().join("\n");
+        if prompt.trim().is_empty() {
             return;
         }
-        let prompt = self.input.clone();
-        self.input.clear();
-        self.input_cursor = 0;
+        self.reset_chat_input();
 
         self.messages.push(UiMessage {
             role: "user".to_string(),
@@ -3711,6 +3724,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                             let defaults = XencodeConfig::default();
                                             app.config = defaults;
                                             app.theme = ThemeColors::get(&app.config.active_theme);
+                                            app.style_chat_input();
                                             app.settings_reset_active = true;
                                             app.settings_cursor = 0;
                                             let _ = app.config.save();
@@ -3929,6 +3943,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     app.config.active_theme = next;
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
+                                                    app.style_chat_input();
                                                     let _ = app.config.save();
                                                 }
                                             }
@@ -4002,6 +4017,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                                     app.config.active_theme = next;
                                                     app.theme =
                                                         ThemeColors::get(&app.config.active_theme);
+                                                    app.style_chat_input();
                                                     let _ = app.config.save();
                                                 }
                                             }
@@ -4078,53 +4094,36 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                                     }
                                 }
                             } else {
-                                // Normal chat input editing
+                                // Chat input: tui_textarea owns cursor/edits.
+                                // Enter sends; Alt+Enter (or Ctrl+J, which
+                                // survives terminals that mangle Alt) adds a
+                                // newline instead.
                                 match key.code {
+                                    KeyCode::Enter
+                                        if key.modifiers.contains(KeyModifiers::ALT) =>
+                                    {
+                                        app.chat_input.insert_newline();
+                                    }
+                                    KeyCode::Char('j')
+                                        if key.modifiers == KeyModifiers::CONTROL =>
+                                    {
+                                        app.chat_input.insert_newline();
+                                    }
                                     KeyCode::Enter => {
                                         if !app.is_generating {
                                             app.submit_message(tx.clone());
                                             app.chat_scroll = 0;
                                         }
                                     }
-                                    KeyCode::Char(c) => {
-                                        app.input.insert(app.input_cursor, c);
-                                        app.input_cursor += 1;
-                                    }
-                                    KeyCode::Backspace => {
-                                        if app.input_cursor > 0 {
-                                            app.input_cursor -= 1;
-                                            app.input.remove(app.input_cursor);
-                                        }
-                                    }
-                                    KeyCode::Delete => {
-                                        if app.input_cursor < app.input.len() {
-                                            app.input.remove(app.input_cursor);
-                                        }
-                                    }
-                                    KeyCode::Left => {
-                                        if app.input_cursor > 0 {
-                                            app.input_cursor -= 1;
-                                        }
-                                    }
-                                    KeyCode::Right => {
-                                        if app.input_cursor < app.input.len() {
-                                            app.input_cursor += 1;
-                                        }
-                                    }
-                                    KeyCode::Home => {
-                                        app.input_cursor = 0;
-                                    }
-                                    KeyCode::End => {
-                                        app.input_cursor = app.input.len();
-                                    }
                                     KeyCode::Esc => {
                                         app.input_mode = InputMode::Normal;
                                     }
                                     KeyCode::Tab => {
-                                        app.input.insert_str(app.input_cursor, "    ");
-                                        app.input_cursor += 4;
+                                        app.chat_input.insert_str("    ");
                                     }
-                                    _ => {}
+                                    _ => {
+                                        app.chat_input.input(key);
+                                    }
                                 }
                             }
                         }
@@ -4274,9 +4273,10 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 mod tests {
     use super::{
         first_output_line, format_advise_report, format_watch_warning, parse_llama_port,
-        parse_porcelain_z, watch_warning_for, FocusArea,
+        parse_porcelain_z, watch_warning_for, App, FocusArea,
     };
     use std::collections::HashSet;
+    use tokio::sync::mpsc;
     use xencode_core_rs::{scan_workspace, ScanOptions};
 
     #[test]
@@ -4805,5 +4805,20 @@ mod tests {
             vec!["previous command".to_string()],
             "history must not be recalled on Enter"
         );
+    }
+
+    #[tokio::test]
+    async fn multiline_submit_keeps_newlines_and_clears_box() {
+        let mut app = App::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // "/init abort" is intercepted before any provider call, so the
+        // user-message capture can be asserted without spawning work.
+        app.chat_input.insert_str("/init abort");
+        app.chat_input.insert_newline();
+        app.chat_input.insert_str("second line");
+        app.submit_message(tx);
+        let last = app.messages.last().expect("message pushed");
+        assert_eq!(last.content, "/init abort\nsecond line");
+        assert_eq!(app.chat_input.lines().join("\n"), "");
     }
 }

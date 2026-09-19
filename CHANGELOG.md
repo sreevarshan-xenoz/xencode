@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Multiline chat input: the input box is now a real text area — Enter sends, Alt+Enter (or Ctrl+J) inserts a newline, arrows move inside multi-line drafts (Milestone E5)
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
