@@ -114,3 +114,15 @@ fn renders_help_overlay_at_any_terminal_size() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// E4-03 regression: the settings navigation bound derives from
+/// SETTINGS_ROWS, so every row index must be a renderable cursor position.
+#[test]
+fn settings_panel_renders_with_cursor_on_every_row() {
+    for row in 0..xencode_tui_rs::focus::SETTINGS_ROWS.len() {
+        let mut app = populated(FocusArea::Settings);
+        app.settings_cursor = row;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+    }
+}

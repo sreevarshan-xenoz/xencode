@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Settings panel navigation is bound to a real row list: new `focus::SETTINGS_ROWS` feeds the panel labels, section ranges, and the ↑↓/wheel bounds, replacing the hardcoded `14` (Milestone E4)
 - Removed legacy Node wrapper (`package.json`, `package-lock.json`, `bin/xencode.js`) and completed-migration docs (`docs/RUST_MIGRATION_PLAN.md`, `docs/RUST_MIGRATION_STATUS.md`); the product is Rust-only under `rust/`.
 
 ### Added

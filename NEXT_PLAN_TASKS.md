@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 433 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 434 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -168,8 +168,13 @@
 - [ ] E4-02 One layout function feeding both render and mouse-hit testing — kill
   the duplicated 20%/50%/30% and 20%/70% magic numbers (`ui.rs:178-210`,
   `app.rs:4322-4324`).
-- [ ] E4-03 Settings nav bound from the actual row list, not the hardcoded `14`
-  (`app.rs:3565` vs `ui.rs:687`).
+- [x] E4-03 Settings nav bound from the actual row list, not the hardcoded `14`.
+  New `focus::SETTINGS_ROWS` (14 row names) is the single source of truth: `ui.rs`
+  builds its padded labels from it and its value array is typed
+  `[&str; SETTINGS_ROWS.len()]` so row/value drift is a compile error; the section
+  ranges and the reset-row check derive from it too. Both nav bounds in `app.rs`
+  (↓ key and wheel-down) use `SETTINGS_ROWS.len()`. One render test walks the
+  cursor over every row.
 - [ ] E4-04 Light theme + config toggle; dedupe the triplicated theme-cycle lists
   (`ui.rs:574`, `app.rs:4026, 4108`).
 
