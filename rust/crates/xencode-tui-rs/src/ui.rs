@@ -364,11 +364,15 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("─".repeat(40), Style::default().fg(app.theme.border)),
         ]));
 
-        for line in msg.content.lines() {
-            text.push(Line::from(Span::styled(
-                format!("  {}", line),
-                Style::default().fg(app.theme.fg),
-            )));
+        if msg.role == "assistant" {
+            text.extend(crate::markdown::render_markdown(&msg.content, &app.theme));
+        } else {
+            for line in msg.content.lines() {
+                text.push(Line::from(Span::styled(
+                    format!("  {}", line),
+                    Style::default().fg(app.theme.fg),
+                )));
+            }
         }
         text.push(Line::from(""));
     }

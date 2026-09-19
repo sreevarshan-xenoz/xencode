@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 420 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 426 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -136,9 +136,12 @@
 
 ### E3 — High-impact UX (UI doc §4, first half)
 
-- [ ] E3-01 Markdown rendering in chat: block/heading/inline-code/URL splitter
-  rendered as styled `Line`s (no new deps unless justified); code fences visually
-  distinct while streaming. Headless render tests.
+- [x] E3-01 Markdown rendering in chat: new `markdown.rs` (no new deps) renders
+  fenced code (with `┌─ lang`/`└─` frame, correct even mid-stream when the fence is
+  still open), headings, bullets/ordered lists, block quotes, rules, and inline
+  `code`/**bold**/*italic* as styled `Line`s; unclosed inline markers stay literal.
+  Assistant messages in `draw_messages` use it; user/system stay plain. 6 unit tests
+  + the small-terminal render sweep cover it.
 - [ ] E3-02 Help overlay (`F1` or `?`): keybindings per current focus area,
   generated from the real key handler — no fiction.
 - [ ] E3-03 Toast/notification layer: file-watch warnings become transient overlays

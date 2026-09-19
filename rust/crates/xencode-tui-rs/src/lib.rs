@@ -1,5 +1,6 @@
 pub mod app;
 pub mod focus;
+pub mod markdown;
 pub mod review;
 pub mod theme;
 pub mod ui;

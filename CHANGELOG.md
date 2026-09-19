@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed legacy Node wrapper (`package.json`, `package-lock.json`, `bin/xencode.js`) and completed-migration docs (`docs/RUST_MIGRATION_PLAN.md`, `docs/RUST_MIGRATION_STATUS.md`); the product is Rust-only under `rust/`.
 
 ### Added
+- TUI markdown rendering for assistant chat: fenced code blocks with language labels (correct even mid-stream), headings, bullets/ordered lists, block quotes, rules, inline `code`/**bold**/*italic* (Milestone E3)
 - Image input pipeline: magic-byte format detect, header dimensions, data URLs (`analysis-rs` images module), `analyze` CLI inventory, `MessageContent` parts with per-backend rendering (Ollama/Anthropic/Gemini/OpenAI-compatible), TUI attach sends images as message parts
 - Web extraction for research: timeout/capped fetch with content-type gate, pure HTML→text (scripts/styles stripped, entities decoded), `FetchedPage` record, `fetch` CLI subcommand
 - PR-level diff triage: rename-aware numstat parsing and capped per-file diffs (`gitinfo`), `review` CLI command with working-tree analysis and documented JSON
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TUI PR review dashboard: per-file diff browsing (`Ctrl+Y`, Feature Navigator entry) over rename-aware numstat + capped diffs, base toggle HEAD<->main, scrollable diff pane
 
 ### Fixed
+- TUI (Milestone E2): ByteBot Enter executes the typed command instead of clobbering it with history; `git commit` runs off the UI thread with the result reported as a chat line; dead `FocusArea::Terminal` removed; unused `file_scroll_offset` deleted; provider-health/security/code-review scroll clamped (no more blank render past the end) and CodeReview output made scrollable; mouse wheel wired for Settings/ModelSelector/CustomModels/CodeReview
 - Docs: corrected stale crate/test counts (`NEXT_PLAN.md`, `docs/ROADMAP.md` said 331 tests; real count verified at 421/13 crates via `cargo test --workspace`), removed Python-era fiction from `docs/USER_MANUAL.md` and `docs/INSTALL_MANUAL.md` (dead `xencode.sh`/pip instructions, missing HTML reference)
 - Context budget: state/git tiers emitted only when margin-admitted; tail truncation hard-cuts single-line overflow; preview compaction flag only when content dropped
 - Symbol graph: brace-group import expansion and crate-root fallback for 2018 paths; broken-import checks per anchored pair
