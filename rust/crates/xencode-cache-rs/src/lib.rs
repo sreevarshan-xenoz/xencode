@@ -21,6 +21,13 @@ struct CacheEntry {
     /// deserialize; `load_from_disk` seeds those from `timestamp`.
     #[serde(default)]
     last_accessed: f64,
+    /// Monotonic recency counter — the true eviction order. Wall-clock
+    /// floats tie under coarse timers (equal `last_accessed` + HashMap
+    /// iteration randomness = nondeterministic victim), while sequence
+    /// numbers are unique by construction. Old files default to 0 and get
+    /// fresh numbers in `last_accessed` order on load.
+    #[serde(default)]
+    seq: u64,
     hit_count: u64,
 }
 
@@ -77,6 +84,7 @@ pub struct ResponseCache {
     ttl_seconds: f64,
     cache_dir: Option<PathBuf>,
     stats: CacheStats,
+    next_seq: u64,
 }
 
 impl ResponseCache {
@@ -88,6 +96,7 @@ impl ResponseCache {
             ttl_seconds,
             cache_dir: None,
             stats: CacheStats::default(),
+            next_seq: 1,
         }
     }
 
@@ -105,6 +114,7 @@ impl ResponseCache {
             ttl_seconds,
             cache_dir: Some(cache_dir),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
         cache.load_from_disk()?;
         Ok(cache)
@@ -114,6 +124,9 @@ impl ResponseCache {
     pub fn get(&mut self, prompt: &str, model: &str) -> Option<String> {
         let key = Self::cache_key(prompt, model);
         let now = current_timestamp();
+        // Bumped before the lookup so the mutable borrow below never
+        // conflicts; sequence gaps on misses are harmless.
+        let seq = self.bump_seq();
 
         let expired = if let Some(entry) = self.entries.get(&key) {
             now - entry.timestamp > self.ttl_seconds
@@ -131,8 +144,10 @@ impl ResponseCache {
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.hit_count += 1;
             // A read is a use: this is what makes eviction least-*recently-used*
-            // rather than oldest-inserted.
+            // rather than oldest-inserted. (Sequence bumped above so the
+            // borrow checker stays happy; gaps never affect order.)
             entry.last_accessed = now;
+            entry.seq = seq;
             self.stats.hits += 1;
             return Some(entry.response.clone());
         }
@@ -159,6 +174,7 @@ impl ResponseCache {
             prompt_hash: key.clone(),
             timestamp: now,
             last_accessed: now,
+            seq: self.bump_seq(),
             hit_count: 0,
         };
 
@@ -205,16 +221,20 @@ impl ResponseCache {
         format!("{:x}", hasher.finalize())
     }
 
+    /// Next recency number. Sequence counters never tie (unlike wall-clock
+    /// floats under coarse timers), so eviction order is deterministic.
+    fn bump_seq(&mut self) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.saturating_add(1);
+        seq
+    }
+
     /// Evict the entry that was least recently used — read or written.
     fn evict_lru(&mut self) {
         if let Some(key) = self
             .entries
             .iter()
-            .min_by(|a, b| {
-                a.1.last_accessed
-                    .partial_cmp(&b.1.last_accessed)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .min_by_key(|(_, entry)| entry.seq)
             .map(|(k, _)| k.clone())
         {
             self.entries.remove(&key);
@@ -277,6 +297,25 @@ impl ResponseCache {
                         }
                         Err(_) => continue,
                     }
+                }
+            }
+
+            // Sequence numbers are runtime-only (old files default to 0):
+            // reissue them in last-accessed order so loaded entries evict
+            // oldest-first instead of tying at zero.
+            let mut by_age: Vec<String> = self.entries.keys().cloned().collect();
+            by_age.sort_by(|a, b| {
+                let ea = &self.entries[a];
+                let eb = &self.entries[b];
+                ea.last_accessed
+                    .partial_cmp(&eb.last_accessed)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.cmp(b))
+            });
+            for key in by_age {
+                let seq = self.bump_seq();
+                if let Some(entry) = self.entries.get_mut(&key) {
+                    entry.seq = seq;
                 }
             }
 
@@ -352,11 +391,9 @@ mod tests {
     fn lru_eviction_when_full() {
         let mut cache = ResponseCache::new(2, 3600.0);
         cache.set("p1", "m", "r1");
-        // Add a small delay to ensure different timestamps
-        std::thread::sleep(std::time::Duration::from_millis(10));
         cache.set("p2", "m", "r2");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        // This should evict p1 (oldest)
+        // This should evict p1 (oldest) — no sleeps needed: recency is a
+        // sequence counter, so rapid inserts can never tie.
         cache.set("p3", "m", "r3");
 
         assert_eq!(cache.get("p1", "m"), None);
@@ -412,6 +449,7 @@ mod tests {
             ttl_seconds: 3600.0,
             cache_dir: Some(cache_dir.clone()),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
 
         cache.set("prompt", "model", "response");
@@ -431,6 +469,7 @@ mod tests {
             ttl_seconds: 3600.0,
             cache_dir: Some(cache_dir),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
         cache2.load_from_disk().unwrap();
         assert_eq!(cache2.get("prompt", "model"), Some("response".to_string()));
@@ -438,11 +477,14 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Force a known access order without sleeping: `last_accessed` is what
-    /// eviction reads, so setting it directly is both faster and exact.
+    /// Force a known access order without sleeping: call order is recency
+    /// (the sequence counter), with `last_accessed` kept consistent.
     fn touch(cache: &mut ResponseCache, prompt: &str, model: &str, at: f64) {
         let key = ResponseCache::cache_key(prompt, model);
-        cache.entries.get_mut(&key).unwrap().last_accessed = at;
+        let seq = cache.bump_seq();
+        let entry = cache.entries.get_mut(&key).unwrap();
+        entry.last_accessed = at;
+        entry.seq = seq;
     }
 
     /// The regression: reading an entry must protect it from eviction. Under
@@ -522,6 +564,7 @@ mod tests {
             ttl_seconds: 3600.0,
             cache_dir: Some(cache_dir.clone()),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
         for i in 0..5 {
             writer.set(&format!("prompt-{i}"), "m", "v");
@@ -534,6 +577,7 @@ mod tests {
             ttl_seconds: 3600.0,
             cache_dir: Some(cache_dir),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
         smaller.load_from_disk().unwrap();
 
@@ -563,11 +607,20 @@ mod tests {
             ttl_seconds: 3600.0,
             cache_dir: Some(cache_dir),
             stats: CacheStats::default(),
+            next_seq: 1,
         };
         cache.load_from_disk().unwrap();
 
         let entry = cache.entries.get("k").expect("legacy entry failed to load");
-        assert_eq!(entry.last_accessed, written_at);
+        // Approximate: the timestamp crosses a JSON text round-trip, and
+        // decimal formatting at 16 significant digits can shift the final
+        // ulp — exact f64 equality across serialization is inherently flaky.
+        assert!(
+            (entry.last_accessed - written_at).abs() < 1e-6,
+            "seeded {} != written {}",
+            entry.last_accessed,
+            written_at
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }
