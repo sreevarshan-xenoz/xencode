@@ -1030,6 +1030,51 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Proactive warning from the real-time watcher (`[WATCH]<path>|<kind>`).
+    ///
+    /// Only files the session is actually reasoning about get a chat warning:
+    /// ones pinned via `/ctx track`, `/attach`ed, or open in the editor. The
+    /// `FileContextTracker` is re-read from disk each time so concurrent
+    /// `/ctx track` updates are honored without threading state into the
+    /// watcher task.
+    fn handle_watch_event(&mut self, body: &str) {
+        let Some((path, kind)) = body.split_once('|') else {
+            return;
+        };
+        let tracked = self.attached_files.contains(path)
+            || self.opened_file.as_deref() == Some(path)
+            || {
+                let root = xencode_context_rs::default_root();
+                let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+                let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
+                tracker.load_from_disk();
+                tracker.state.files.contains_key(path)
+            };
+        if !tracked {
+            return;
+        }
+        if self
+            .messages
+            .last()
+            .is_some_and(|m| m.role == "system" && m.content.contains(path))
+        {
+            return;
+        }
+        let warning = match kind {
+            "removed" => format!(
+                "⚠ {path} was removed from disk — re-add or restore it before relying on it."
+            ),
+            "created" => format!("⚠ {path} was created on disk — it may affect your plan."),
+            _ => format!(
+                "⚠ {path} changed on disk — re-read it before relying on the version in context."
+            ),
+        };
+        self.messages.push(UiMessage {
+            role: "system".to_string(),
+            content: warning,
+        });
+    }
+
     /// Run asynchronous health checks for all configured providers.
     /// Results are sent back through the channel for processing in the event loop.
     /// Start a Collaboration Hub session with simulated team members and sync.
@@ -2662,6 +2707,36 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     // If llama.cpp is configured but not running, spawn it (attaches if it is).
     app.maybe_auto_start_llama(tx.clone());
 
+    // Real-time file watcher: every non-ignored change is reported as a
+    // `[WATCH]<path>|<kind>` token. The drain loop only surfaces warnings for
+    // files the session actually cares about (tracked/attached/open), so a
+    // large workspace does not spam the chat.
+    {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let root = xencode_context_rs::default_root();
+            let Ok(mut watcher) = xencode_context_rs::WorkspaceWatcher::spawn(&root, &[]) else {
+                return;
+            };
+            loop {
+                let batch = watcher.next_batch(Duration::from_millis(250));
+                if batch.is_empty() {
+                    continue;
+                }
+                for ev in batch {
+                    let kind = match ev.kind {
+                        xencode_context_rs::WatchKind::Created => "created",
+                        xencode_context_rs::WatchKind::Modified => "modified",
+                        xencode_context_rs::WatchKind::Removed => "removed",
+                    };
+                    if tx.send(format!("[WATCH]{}|{}", ev.path, kind)).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
     loop {
         terminal.draw(|f| ui::draw(f, &app))?;
 
@@ -2945,6 +3020,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if token == "[HEALTH_DONE]" {
                 app.health_check_in_progress = false;
                 app.last_health_check = current_timestamp();
+            } else if let Some(body) = token.strip_prefix("[WATCH]") {
+                app.handle_watch_event(body);
             } else {
                 app.append_generation(&token);
             }
