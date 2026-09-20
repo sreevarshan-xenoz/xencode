@@ -172,12 +172,32 @@ xencode advise src/auth             # only findings touching that path
 xencode advise --json --limit 0     # full machine-readable report
 ```
 
-### `xencode server [--port 8765]`
-Start the collaboration HTTP/WebSocket server.
+### `xencode server [OPTIONS]`
+Start the collaboration HTTP/WebSocket server. Sessions live in memory
+(the audit log is the only thing that survives a restart); clients
+authenticate on the WebSocket with a token from `POST /auth/login`, and
+the first WS frame must be the `auth` frame — the URL carries no
+identity (`/ws/{session_id}`).
 
 ```bash
-xencode server --port 8765
+xencode server                          # http://127.0.0.1:8765, ws://
+xencode server --port 9000 --audit-path none
+xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https + wss
 ```
+
+| Flag | Meaning |
+|---|---|
+| `--port <PORT>` | Listen port (default `8765`) |
+| `--host <HOST>` | Bind address (default `127.0.0.1`; IP or `localhost`) |
+| `--cert <PEM>` / `--key <PEM>` | TLS material — both or neither; enables `https://`/`wss://` |
+| `--audit-path <PATH\|none>` | JSONL audit trail (default `~/.xencode/audit.jsonl`; `none` disables) |
+| `--allow-insecure-public` | Escape hatch: bind a non-loopback address over plain ws:// |
+
+Posture rules, enforced at startup: a non-loopback `--host` without TLS
+refuses to start unless `--allow-insecure-public` is given (then it
+binds with a loud clear-text warning); `--cert` without `--key` (or the
+reverse) is an error; the banner prints the real scheme — `ws://` stays
+`ws://`, only certificates earn `wss://`.
 
 ### `xencode plugin <action>`
 Plugin management: `list`, `install <path>`, `remove <name>`.

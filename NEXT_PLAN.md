@@ -11,7 +11,7 @@
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
-- ✅ **Rust migration complete**: 13 crates, 547 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 13 crates, 555 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🚧 **Active backlog**: team-mode hardening
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))

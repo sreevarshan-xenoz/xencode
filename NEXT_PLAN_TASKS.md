@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 547 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 555 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -472,10 +472,16 @@ turns the hub into an actual WebSocket client.
 
 ### G2 — Network posture
 
-- [ ] G2-01 cli: `xencode server` gains `--host` (default 127.0.0.1), `--cert`/`--key`
+- [x] G2-01 cli: `xencode server` gains `--host` (default 127.0.0.1), `--cert`/`--key`
   (rustls via axum-server), `--audit-path`, `--allow-insecure-public`;
   non-loopback bind without TLS refuses to start (pure `resolve_bind` unit matrix,
   incl. IPv6 `::1`); banner prints honest `ws://`/`wss://` + audit status.
+  `--audit-path` defaults to `~/.xencode/audit.jsonl` (G1-04's sink is now
+  actually wired), `none` disables; cert-without-key errors; certificates beat
+  the escape hatch (no warning when TLS is on). 7 pure unit tests (no sockets);
+  live smoke: loopback run answered `/` and `/auth/login`, `--host 0.0.0.0`
+  refused with both ways out named. Hosts are IPs or `localhost` only — no
+  DNS resolution behind the user's back. Workspace at 555.
 
 ### G3 — The hub becomes real
 

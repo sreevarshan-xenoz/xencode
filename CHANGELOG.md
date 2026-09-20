@@ -42,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- `xencode server` is local-first by default (Milestone G, G2-01): it binds
+  `127.0.0.1` unless told otherwise (`--host` accepts an IP or `localhost` —
+  no DNS resolution behind the user's back), serves TLS only when given
+  `--cert` + `--key` (rustls; half a pair is an error), and refuses any
+  non-loopback plain bind unless `--allow-insecure-public` is set — with a
+  clear-text warning even then. The startup banner prints the honest scheme
+  (`ws://` never claims `wss://`) and the audit target; `--audit-path` picks
+  the JSONL file (default `~/.xencode/audit.jsonl`, `none` disables), so the
+  G1-04 sink is now actually wired. The banner's stale `/ws/{session_id}/{username}`
+  route text was corrected to the real `/ws/{session_id}`.
 - The WebSocket is no longer an identity claim (Milestone G, G1-03): the route
   is `/ws/{session_id}` — the username is gone from the URL — and the first
   frame must be `auth` with a token the server issued (5 s timeout). Joins run
