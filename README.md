@@ -221,6 +221,7 @@ xencode --version                # Show version
 | **Models** | `xencode models list` | List available models with health |
 | **Memory** | `xencode memory list` | List conversation sessions |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
+| **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |

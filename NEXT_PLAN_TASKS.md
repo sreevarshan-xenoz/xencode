@@ -132,7 +132,13 @@
   error string, no panic). `git_summary_text` now appends a `Worktrees:` block —
   path, branch, `[dirty]`, `[main]`, capped at 8 — but only when the repo actually
   has more than one worktree.
-- [ ] D3-04 CLI: `xencode worktree list | add <path> [<branch>] | remove <path>`.
+- [x] D3-04 CLI: `xencode worktree list | add <path> [<branch>] | remove <path>`.
+  Thin glue over the D3-01 helpers against the current directory: add with a branch
+  checks that branch out (git's error if it doesn't exist), without one lets git name
+  a new branch after the directory; remove is refused for the main checkout and for
+  dirty worktrees (git's own guard — no `--force`). Verified live end-to-end (add ×2,
+  list, dirty-remove error + clean remove) in a scratch repo; no unit tests added —
+  the parsing/shell layers are already covered in `worktree.rs`.
 
 ### D4 — Close-out
 

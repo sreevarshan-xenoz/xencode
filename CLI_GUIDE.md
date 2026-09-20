@@ -145,6 +145,20 @@ xencode tasks stop 1                            # signal a running task
 xencode tasks rm 1                              # forget a finished task (refuses running)
 ```
 
+### `xencode worktree <action>`
+Git worktrees of the repository at the current directory: `list`,
+`add <path> [<branch>]` (existing branch or commit to check out; when
+omitted git names the new branch after the directory), `remove <path>`
+(dirty worktrees are refused by git itself, the main checkout is never
+removable).
+
+```bash
+xencode worktree add ../feature-x        # new branch "feature-x"
+xencode worktree add ../hotfix main      # check out existing branch
+xencode worktree list
+xencode worktree remove ../feature-x
+```
+
 ### `xencode server [--port 8765]`
 Start the collaboration HTTP/WebSocket server.
 

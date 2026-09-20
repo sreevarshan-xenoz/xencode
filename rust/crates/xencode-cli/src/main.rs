@@ -133,6 +133,12 @@ enum Commands {
         action: TaskAction,
     },
 
+    /// Manage git worktrees of the current repository
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
+
     /// Start the collaboration server
     Server {
         /// Port to listen on
@@ -284,6 +290,26 @@ enum MemoryAction {
 }
 
 #[derive(Subcommand)]
+enum WorktreeAction {
+    /// List git worktrees of the current repository
+    List,
+    /// Create a worktree at <path>, checking out <branch> (or a new branch
+    /// named after the directory when omitted)
+    Add {
+        /// Directory for the new worktree
+        path: String,
+
+        /// Existing branch or commit to check out
+        branch: Option<String>,
+    },
+    /// Remove a worktree (git refuses dirty worktrees; main never removable)
+    Remove {
+        /// Path of the worktree to remove
+        path: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TaskAction {
     /// List known tasks with their derived status
     List {
@@ -366,6 +392,7 @@ async fn main() {
         }
         Commands::Memory { action } => run_memory(action),
         Commands::Tasks { action } => run_tasks(action),
+        Commands::Worktree { action } => run_worktree(action),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
@@ -1109,6 +1136,45 @@ fn run_tasks(action: TaskAction) -> Result<(), String> {
         TaskAction::Rm { id } => {
             reg.remove(id).map_err(|e| e.to_string())?;
             println!("removed task {id}");
+            Ok(())
+        }
+    }
+}
+
+fn run_worktree(action: WorktreeAction) -> Result<(), String> {
+    use xencode_context_rs::{worktree_add, worktree_list, worktree_remove, WorktreeInfo};
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let print_list = |list: &[WorktreeInfo]| {
+        println!("{:<10} {:<10} PATH", "BRANCH", "HEAD");
+        for wt in list {
+            let tag = if wt.is_main { " [main]" } else { "" };
+            println!(
+                "{:<10} {:<10} {}{tag}",
+                wt.display_branch(),
+                wt.short_head(),
+                wt.path.display(),
+            );
+        }
+    };
+    match action {
+        WorktreeAction::List => {
+            let list = worktree_list(&root)?;
+            print_list(&list);
+            Ok(())
+        }
+        WorktreeAction::Add { path, branch } => {
+            let list = worktree_add(&root, std::path::Path::new(&path), branch.as_deref(), false)?;
+            println!("added worktree {path}");
+            print_list(&list);
+            Ok(())
+        }
+        WorktreeAction::Remove { path } => {
+            if path == "." || std::path::Path::new(&path) == root {
+                return Err("the main worktree is not removable".to_string());
+            }
+            let list = worktree_remove(&root, std::path::Path::new(&path), false)?;
+            println!("removed worktree {path}");
+            print_list(&list);
             Ok(())
         }
     }
