@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 488 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 492 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -115,9 +115,15 @@
   made `pub(crate)` in `gitinfo.rs` so worktrees report failures exactly like diffs.
   Dirty state per worktree is a caller-side `dirty_paths(wt.path)` check (D3-02);
   tests include a real `git init` → add → remove round trip.
-- [ ] D3-02 TUI `WorktreePanel`: list worktrees (path, branch, HEAD, dirty flag),
+- [x] D3-02 TUI `WorktreePanel`: list worktrees (path, branch, HEAD, dirty flag),
   add (path+branch prompt), remove with confirm; guard: main worktree never
   removable. Same panel pattern as D2-01.
+  `Ctrl+O` toggle + Navigator entry #16; rows show ★ main / ⚡ dirty (via
+  `dirty_paths`) / ◯ clean with branch, short HEAD and path. `a` opens a two-stage
+  prompt (path → branch, empty branch lets git name it), `d` → y/N confirm —
+  removal of the main worktree is refused before any git call, and dirty linked
+  worktrees stay protected by git itself (no `--force`). `r` refreshes; git calls
+  are synchronous, matching the `Ctrl+G` refresh precedent.
 - [ ] D3-03 Agent integration: background tasks (D1) take an optional `cwd` so a task
   can run inside a chosen worktree; worktree list included in the context bundle.
 - [ ] D3-04 CLI: `xencode worktree list | add <path> [<branch>] | remove <path>`.

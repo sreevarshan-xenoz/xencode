@@ -53,6 +53,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::MultiLanguage => draw_multi_language(f, app, f.area()),
         FocusArea::ReviewDashboard => draw_review_dashboard(f, app, f.area()),
         FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
+        FocusArea::WorktreePanel => draw_worktree_panel(f, app, f.area()),
         _ => {}
     }
 
@@ -215,6 +216,16 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                     "↑↓:select  Enter:output  x:stop  d:remove  Esc:close"
                 }
             }
+            FocusArea::WorktreePanel => match app.worktree_prompt {
+                crate::focus::WorktreePrompt::None =>
+                    "a:add  d:remove  r:refresh  Esc:close",
+                crate::focus::WorktreePrompt::AddPath =>
+                    "path: <type>  Enter:next  Esc:cancel",
+                crate::focus::WorktreePrompt::AddBranch =>
+                    "branch (Enter=auto): <type>  Enter:run  Esc:cancel",
+                crate::focus::WorktreePrompt::ConfirmRemove =>
+                    "y:confirm  n/Esc:cancel",
+            },
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
@@ -1243,6 +1254,112 @@ fn task_line(
     } else {
         ratatui::text::Line::from(Span::styled(row, Style::default().fg(color)))
     }
+}
+
+fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
+    use crate::focus::WorktreePrompt;
+
+    let popup_area = centered_rect(80, 65, area);
+    f.render_widget(Clear, popup_area);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(" 🌳 Worktrees — {} ", app.worktrees.len()));
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    // List rows (prompt mode keeps showing them, dimmed) + action lines.
+    let mut rows: Vec<Line> = Vec::new();
+    if app.worktrees.is_empty() {
+        rows.push(Line::from(Span::styled(
+            if app.worktree_status.is_empty() {
+                "  No worktrees found — this is the only checkout."
+            } else {
+                app.worktree_status.as_str()
+            },
+            Style::default().fg(app.theme.fg),
+        )));
+    } else {
+        let selected = app.worktree_selected.min(app.worktrees.len() - 1);
+        for (i, wt) in app.worktrees.iter().enumerate() {
+            let dirty = app.worktree_dirty.get(i).copied().unwrap_or(false);
+            let (icon, color) = if wt.is_main {
+                ("★", app.theme.accent)
+            } else if dirty {
+                ("⚡", app.theme.warning)
+            } else {
+                ("◯", app.theme.success)
+            };
+            let marker = if i == selected { "> " } else { "  " };
+            let text = format!(
+                "{marker}{icon} {:<10} {:<24} {}",
+                wt.display_branch(),
+                wt.short_head(),
+                wt.path.display()
+            );
+            if i == selected {
+                rows.push(Line::from(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(app.theme.highlight_fg)
+                        .bg(app.theme.highlight)
+                        .add_modifier(Modifier::BOLD),
+                )));
+            } else {
+                rows.push(Line::from(Span::styled(
+                    text,
+                    Style::default().fg(color),
+                )));
+            }
+        }
+    }
+
+    let mut lines: Vec<Line> = vec![Line::from(Span::styled(
+        "  legend: ★ main (never removable)  ⚡ dirty  ◯ clean",
+        Style::default().fg(app.theme.border),
+    ))];
+    lines.extend(rows);
+    lines.push(Line::from(""));
+
+    let prompt_line = match app.worktree_prompt {
+        WorktreePrompt::None => None,
+        WorktreePrompt::AddPath => Some(format!("  new path: {}▏", app.worktree_path_buf)),
+        WorktreePrompt::AddBranch => Some(format!(
+            "  branch ({}): {}▏",
+            if app.worktree_path_buf.is_empty() { "?" } else { app.worktree_path_buf.as_str() },
+            app.worktree_branch_buf
+        )),
+        WorktreePrompt::ConfirmRemove => Some(match app.worktrees.get(app.worktree_selected) {
+            Some(wt) => format!(
+                "  remove {} ? (git refuses dirty worktrees) y/n",
+                wt.path.display()
+            ),
+            None => "  nothing to remove".to_string(),
+        }),
+    };
+    if let Some(p) = prompt_line {
+        lines.push(Line::from(Span::styled(
+            p,
+            Style::default()
+                .fg(app.theme.message_assistant)
+                .add_modifier(Modifier::BOLD),
+        )));
+    } else if !app.worktree_status.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("  {}", app.worktree_status),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+
+    let text = Paragraph::new(lines).style(Style::default().fg(app.theme.fg));
+    f.render_widget(text, inner);
 }
 
 // ── Phase 9 Overlays ────────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("MultiLanguage", FocusArea::MultiLanguage),
     ("ReviewDashboard", FocusArea::ReviewDashboard),
     ("TaskManager", FocusArea::TaskManager),
+    ("WorktreePanel", FocusArea::WorktreePanel),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
@@ -189,4 +190,59 @@ fn task_panel_renders_populated_registry() {
         app.task_runtime.lock().await.stop(id_running).await.unwrap();
         assert!(id_running < id_done);
     });
+}
+
+fn fixture_worktrees() -> Vec<xencode_context_rs::WorktreeInfo> {
+    let wt = |path: &str, branch: Option<&str>, detached: bool, main: bool| {
+        xencode_context_rs::WorktreeInfo {
+            path: path.into(),
+            head: "0123456789abcdef0123456789abcdef01234567".into(),
+            branch: branch.map(str::to_string),
+            detached,
+            bare: false,
+            locked: None,
+            prunable: None,
+            is_main: main,
+        }
+    };
+    vec![
+        wt("/home/u/proj", Some("main"), false, true),
+        wt("/home/u/proj with space/feat", Some("feature/x"), false, false),
+        wt("/home/u/proj/detached", None, true, false),
+    ]
+}
+
+/// WorktreePanel across list, both prompt stages and confirm mode at tiny
+/// and normal sizes, on populated and empty registries. Fixtures only —
+/// this never shells out to git.
+#[test]
+fn worktree_panel_renders_all_prompt_stages() {
+    use xencode_tui_rs::focus::WorktreePrompt;
+    let stages = [
+        (WorktreePrompt::None, "", ""),
+        (WorktreePrompt::AddPath, "/home/u/proj-ne", ""),
+        (WorktreePrompt::AddBranch, "/home/u/proj-new", "feat"),
+        (WorktreePrompt::ConfirmRemove, "", ""),
+    ];
+    for (prompt, path, branch) in stages {
+        for has_rows in [true, false] {
+            let mut app = populated(FocusArea::WorktreePanel);
+            if has_rows {
+                app.worktrees = fixture_worktrees();
+                app.worktree_dirty = vec![false, true, false];
+            }
+            app.worktree_prompt = prompt;
+            app.worktree_path_buf = path.into();
+            app.worktree_branch_buf = branch.into();
+            app.worktree_status = "main worktree is not removable".into();
+            for &width in &[20, 61, 80] {
+                for &height in &[8, 16, 24] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal
+                        .draw(|f| draw(f, &app))
+                        .unwrap_or_else(|_| panic!("render {width}x{height} {prompt:?} has_rows={has_rows}"));
+                }
+            }
+        }
+    }
 }

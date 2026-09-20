@@ -20,6 +20,7 @@ const GLOBAL: &[Binding] = &[
     ("Ctrl+R", "code review (AI, current file)"),
     ("Ctrl+Y", "PR review dashboard"),
     ("Ctrl+K", "background tasks panel"),
+    ("Ctrl+O", "worktree panel"),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+P", "project analyzer"),
@@ -142,6 +143,13 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("x", "stop selected task"),
             ("d", "remove finished task"),
         ],
+        WorktreePanel => &[
+            ("↑ ↓ / j k", "select worktree"),
+            ("a", "add worktree (path, then branch)"),
+            ("d", "remove selected worktree (y to confirm)"),
+            ("r", "refresh worktree list"),
+            ("Esc", "cancel prompt · close panel"),
+        ],
     }
 }
 
@@ -205,6 +213,7 @@ mod tests {
             MultiLanguage,
             ReviewDashboard,
             TaskManager,
+            WorktreePanel,
         ] {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }

@@ -131,6 +131,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::CodeReview
                 | FocusArea::ReviewDashboard
                 | FocusArea::TaskManager
+                | FocusArea::WorktreePanel
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
@@ -164,6 +165,18 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.tasks_detail = false;
                 app.tasks_scroll = 0;
                 app.focus = FocusArea::TaskManager;
+            }
+        }
+        KeyCode::Char('o') => {
+            // Worktree panel (D3-02): re-reads git on every open.
+            if app.focus == FocusArea::WorktreePanel {
+                app.focus = FocusArea::ChatInput;
+            } else {
+                app.worktree_selected = 0;
+                app.worktree_prompt = crate::focus::WorktreePrompt::None;
+                app.worktree_status.clear();
+                app.refresh_worktrees();
+                app.focus = FocusArea::WorktreePanel;
             }
         }
         KeyCode::Char('t') => {
@@ -240,6 +253,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::CodeReview => key_code_review(app, key, tx),
         FocusArea::ReviewDashboard => key_review_dashboard(app, key),
         FocusArea::TaskManager => key_task_manager(app, key, tx),
+        FocusArea::WorktreePanel => key_worktree_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key),
         FocusArea::CustomModels => key_custom_models(app, key),
@@ -300,6 +314,13 @@ fn on_esc(app: &mut App) {
                 app.settings_reset_active = false;
                 let _ = app.config.save();
                 app.focus = FocusArea::ChatInput;
+            }
+        }
+        FocusArea::WorktreePanel => {
+            // Esc unwinds the prompt one stage, closes the panel at the list.
+            match app.worktree_prompt {
+                crate::focus::WorktreePrompt::None => app.focus = FocusArea::ChatInput,
+                _ => cancel_worktree_prompt(app),
             }
         }
         FocusArea::ModelSelector
@@ -827,6 +848,84 @@ fn key_task_manager(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     true
 }
 
+fn cancel_worktree_prompt(app: &mut App) {
+    app.worktree_prompt = crate::focus::WorktreePrompt::None;
+    app.worktree_path_buf.clear();
+    app.worktree_branch_buf.clear();
+}
+
+/// WorktreePanel (D3-02): list keys are inert while a prompt is open —
+/// the prompt swallows everything (typed buffers, Enter, Esc).
+fn key_worktree_panel(app: &mut App, key: KeyEvent) -> bool {
+    use crate::focus::WorktreePrompt::*;
+    if app.worktree_prompt != None {
+        return key_worktree_prompt(app, key);
+    }
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.worktree_selected = app.worktree_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.worktree_selected + 1 < app.worktrees.len() {
+                app.worktree_selected += 1;
+            }
+        }
+        KeyCode::Char('a') => {
+            app.worktree_prompt = AddPath;
+            app.worktree_path_buf.clear();
+            app.worktree_branch_buf.clear();
+            app.worktree_status.clear();
+        }
+        KeyCode::Char('d') => {
+            if app.worktrees.is_empty() {
+                return true;
+            }
+            app.worktree_prompt = ConfirmRemove;
+            app.worktree_status.clear();
+        }
+        KeyCode::Char('r') => {
+            app.worktree_status.clear();
+            app.refresh_worktrees();
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn key_worktree_prompt(app: &mut App, key: KeyEvent) -> bool {
+    use crate::focus::WorktreePrompt::*;
+    match (app.worktree_prompt, key.code) {
+        (_, KeyCode::Esc) => cancel_worktree_prompt(app),
+        (ConfirmRemove, KeyCode::Char('y')) => app.worktree_do_remove(),
+        (ConfirmRemove, KeyCode::Char('n')) => app.worktree_prompt = None,
+        (AddPath, KeyCode::Enter) => {
+            if app.worktree_path_buf.trim().is_empty() {
+                app.worktree_status = "path must not be empty".to_string();
+            } else {
+                app.worktree_prompt = AddBranch;
+            }
+        }
+        (AddBranch, KeyCode::Enter) => app.worktree_do_add(),
+        (_, KeyCode::Enter) => app.worktree_prompt = None,
+        (_, KeyCode::Backspace) => {
+            let buf = match app.worktree_prompt {
+                AddPath => &mut app.worktree_path_buf,
+                _ => &mut app.worktree_branch_buf,
+            };
+            buf.pop();
+        }
+        (_, KeyCode::Char(c)) => {
+            let buf = match app.worktree_prompt {
+                AddPath => &mut app.worktree_path_buf,
+                _ => &mut app.worktree_branch_buf,
+            };
+            buf.push(c);
+        }
+        _ => {}
+    }
+    true
+}
+
 fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
@@ -1264,5 +1363,75 @@ mod tests {
         handle_key(&mut app, key(KeyCode::Char('d')), &tx);
         assert!(rx.try_recv().is_err());
         app.task_runtime.lock().await.stop(1).await.unwrap();
+    }
+
+    fn worktree(path: &str, branch: &str, main: bool) -> xencode_context_rs::WorktreeInfo {
+        xencode_context_rs::WorktreeInfo {
+            path: std::path::PathBuf::from(path),
+            head: "0123456789abcdef0123456789abcdef01234567".into(),
+            branch: Some(branch.into()),
+            detached: false,
+            bare: false,
+            locked: None,
+            prunable: None,
+            is_main: main,
+        }
+    }
+
+    #[test]
+    fn ctrl_o_toggles_worktree_panel_and_prompts_reset() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.worktree_prompt = crate::focus::WorktreePrompt::AddPath;
+        press_with_mods(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::WorktreePanel);
+        assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
+        // Read-only listing of the repo the tests run in: at least the main
+        // worktree, and no side effects.
+        assert!(!app.worktrees.is_empty());
+        press_with_mods(&mut app, KeyCode::Char('o'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
+    fn worktree_add_prompt_captures_text_and_esc_cancels() {
+        let mut app = app_with(FocusArea::WorktreePanel);
+        app.worktrees = vec![worktree("/repo", "main", true)];
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::AddPath);
+        // Letters go to the buffer, not to global shortcuts ('q' must not quit).
+        for c in "feature".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.worktree_path_buf, "feature");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::AddBranch);
+        press(&mut app, KeyCode::Backspace);
+        assert!(app.worktree_branch_buf.is_empty());
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
+        assert!(app.worktree_path_buf.is_empty());
+        // Panel itself stays open; Esc at the list closes it.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
+    fn worktree_remove_refuses_main_and_confirms_others() {
+        let mut app = app_with(FocusArea::WorktreePanel);
+        app.worktrees = vec![worktree("/repo", "main", true), worktree("/repo-wt", "feat", false)];
+        app.worktree_dirty = vec![false, true];
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.worktree_selected, 1);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.worktree_selected, 0);
+        // Main: 'y' is refused before any git call happens.
+        press(&mut app, KeyCode::Char('d'));
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(app.worktree_status, "main worktree is not removable");
+        assert_eq!(app.worktrees.len(), 2);
+        // 'n' cancels without touching git.
+        press(&mut app, KeyCode::Char('d'));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
     }
 }

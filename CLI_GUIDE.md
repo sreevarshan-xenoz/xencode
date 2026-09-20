@@ -42,7 +42,7 @@ keybinding overlay; the authoritative list lives there. Essentials:
 `Tab` cycles explorer/editor/chat · `i` edits chat (`Enter` sends,
 `Alt+Enter`/`Ctrl+J` newline, `Alt+↑/↓` history, `Tab` completes `/`
 commands) · `m` model selector · `s` settings · `e` edit focused file ·
-`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+B` ByteBot ·
+`Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+B` ByteBot ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+C` or `q` quit. Slash commands: `/init`, `/ctx`, `/advise`,
 `/bytebot`.

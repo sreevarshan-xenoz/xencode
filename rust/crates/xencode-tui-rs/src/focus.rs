@@ -32,6 +32,17 @@ pub enum FocusArea {
     MultiLanguage,
     ReviewDashboard,
     TaskManager,
+    WorktreePanel,
+}
+
+/// Sub-states of the WorktreePanel: while one is active every keystroke
+/// belongs to the prompt instead of the list.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum WorktreePrompt {
+    None,
+    AddPath,
+    AddBranch,
+    ConfirmRemove,
 }
 
 /// Rows of the Settings panel in display order; the index is
@@ -73,6 +84,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("🌐 Multi-Language", "Language detection & tools"),
     ("🔍 PR Review", "Per-file diff browsing"),
     ("⏳ Background Tasks", "Running & finished commands"),
+    ("🌳 Worktrees", "List, create and remove git worktrees"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -93,6 +105,7 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         12 => FocusArea::MultiLanguage,
         13 => FocusArea::ReviewDashboard,
         14 => FocusArea::TaskManager,
+        15 => FocusArea::WorktreePanel,
         _ => FocusArea::ChatInput,
     }
 }
