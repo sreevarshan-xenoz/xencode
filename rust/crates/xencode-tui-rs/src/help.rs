@@ -12,7 +12,7 @@ use ratatui::{
 
 type Binding = (&'static str, &'static str);
 
-const GLOBAL: &[Binding] = &[
+pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+C / q", "quit"),
     ("Ctrl+G", "refresh git status"),
     ("Ctrl+E", "file explorer"),

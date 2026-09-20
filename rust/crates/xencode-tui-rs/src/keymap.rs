@@ -1435,6 +1435,20 @@ mod tests {
         assert_eq!(app.focus, FocusArea::ChatInput);
     }
 
+    /// H1-10 pin: the help overlay advertises Ctrl+U, so the chord must
+    /// actually be handled — help and keymap may not drift apart.
+    #[test]
+    fn ctrl_u_is_documented_and_handled() {
+        assert!(
+            crate::help::GLOBAL.iter().any(|(key, _)| *key == "Ctrl+U"),
+            "Ctrl+U missing from the GLOBAL help table"
+        );
+        let mut app = app_with(FocusArea::ChatInput);
+        let start = app.config.layout.clone();
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_ne!(app.config.layout, start, "Ctrl+U did not cycle the layout");
+    }
+
     #[test]
     fn plain_q_quits_but_not_while_typing() {
         let mut app = app_with(FocusArea::ChatInput);
