@@ -13,7 +13,7 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, server, analyze, fetch, review, plugin, llamacpp, tui
 - [x] Workspace gates green — 13 crates, 494 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
@@ -142,8 +142,17 @@
 
 ### D4 — Close-out
 
-- [ ] D4-01 Docs sweep: README structure + CLI_GUIDE subcommands, NEXT_PLAN.md counts,
+- [x] D4-01 Docs sweep: README structure + CLI_GUIDE subcommands, NEXT_PLAN.md counts,
   CHANGELOG entry; `cargo test --workspace` count recorded.
+
+  Live figures at commit: **494 tests passed, 0 failed, 4 ignored, 13 crates**;
+  `cargo clippy --workspace --all-targets` clean. Sweep covered: README (23 panels,
+  Tasks/Worktree rows, counts), CLI_GUIDE (`tasks`/`worktree` sections, essentials
+  keys), USER_MANUAL (command reference re-synced to real `--help`, Background Tasks
+  + worktree docs), NEXT_PLAN.md (Milestone D marked complete; stale claims fixed —
+  watcher and multimodal inputs are shipped, PR-review backlog entry corrected,
+  team-workflow item reworded against the real `xencode-collaboration-rs`), and the
+  stale CLI-subcommand checklist line above refreshed from `xencode --help`.
 
 ## Milestone E — UI Systematic Fixes (drafted 2026-09-19)
 
