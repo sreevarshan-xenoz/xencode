@@ -42,8 +42,13 @@ pub async fn execute_tool_call(rt: &TaskRuntime, call: &ToolCall) -> String {
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .unwrap_or(command);
+            let cwd = args
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from);
             let mut m = rt.lock().await;
-            match m.start(name, command).await {
+            match m.start_with_cwd(name, command, cwd.as_deref()).await {
                 Ok(id) => {
                     let pid = m
                         .snapshot(id)
@@ -51,7 +56,13 @@ pub async fn execute_tool_call(rt: &TaskRuntime, call: &ToolCall) -> String {
                         .and_then(|r| r.pid)
                         .map(|p| p.to_string())
                         .unwrap_or_else(|| "?".into());
-                    format!("started task {id} (pid {pid}): {command}")
+                    match &cwd {
+                        Some(dir) => format!(
+                            "started task {id} (pid {pid}) in {}: {command}",
+                            dir.display()
+                        ),
+                        None => format!("started task {id} (pid {pid}): {command}"),
+                    }
                 }
                 Err(e) => format!("error: {e}"),
             }
@@ -250,5 +261,36 @@ mod tests {
             serde_json::json!({"command": "x".repeat(200)}),
         );
         assert!(summarize_call(&long).chars().count() < 130);
+    }
+
+    /// D3-03: an optional `cwd` is passed through and echoed back so the
+    /// model knows where the command actually ran.
+    #[tokio::test]
+    async fn start_with_cwd_reports_the_directory() {
+        let rt = new_task_runtime();
+        let dir = std::env::temp_dir();
+        let started = execute_tool_call(
+            &rt,
+            &call(
+                "background_start",
+                serde_json::json!({"command": "pwd", "cwd": dir.display().to_string()}),
+            ),
+        )
+        .await;
+        assert!(
+            started.contains(&format!("in {}", dir.display())),
+            "{started}"
+        );
+        wait_exit(&rt, 1).await;
+        // A nonexistent cwd is an error string, never a panic.
+        let bad = execute_tool_call(
+            &rt,
+            &call(
+                "background_start",
+                serde_json::json!({"command": "pwd", "cwd": "/definitely/not/here-xyz"}),
+            ),
+        )
+        .await;
+        assert!(bad.starts_with("error:"), "{bad}");
     }
 }

@@ -574,6 +574,28 @@ pub fn git_summary_text(root: &Path) -> Option<String> {
             s.push_str(&format!("  … +{} more\n", changed.len() - 12));
         }
     }
+    // Extra worktrees only: a lone checkout is the status quo and noise.
+    if let Ok(wts) = crate::worktree::worktree_list(root) {
+        if wts.len() > 1 {
+            s.push_str("\nWorktrees:\n");
+            for wt in wts.iter().take(8) {
+                let dirty = if crate::gitinfo::dirty_paths(&wt.path).is_empty() {
+                    ""
+                } else {
+                    " [dirty]"
+                };
+                s.push_str(&format!(
+                    "  • {} ({}){dirty}{}\n",
+                    wt.path.display(),
+                    wt.display_branch(),
+                    if wt.is_main { " [main]" } else { "" }
+                ));
+            }
+            if wts.len() > 8 {
+                s.push_str(&format!("  … +{} more\n", wts.len() - 8));
+            }
+        }
+    }
     Some(s)
 }
 
