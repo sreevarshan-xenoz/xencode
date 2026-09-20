@@ -2,7 +2,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Frame,
 };
 
@@ -328,9 +331,26 @@ fn panel_block(app: &App, title: String, state: PaneState) -> Block<'static> {
         .title(title)
 }
 
-fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
+fn draw_code_editor(f: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = app.focus == FocusArea::CodeEditor;
     let is_editing = is_focused && app.input_mode == InputMode::Editing;
+
+    // The width gate for the gutter lives here and only here: below ~45
+    // columns the numbers would eat too much of the code area.
+    let gutter = app.config.show_line_numbers && area.width >= 45;
+    if gutter {
+        if app.editor.line_number_style().is_none() {
+            app.editor
+                .set_line_number_style(Style::default().fg(ratatui::style::Color::DarkGray));
+        }
+    } else {
+        app.editor.remove_line_number();
+    }
+    app.editor.set_cursor_line_style(if is_editing {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    });
 
     let dirty_mark = if app.editor_dirty { " [modified]" } else { "" };
     let mode_mark = if is_editing { " EDITING" } else { "" };
@@ -441,10 +461,36 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    let show_bar = app.config.show_scrollbars && area.width >= 24;
+    let (list_area, bar_area) = if show_bar {
+        let c = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+        (c[0], Some(c[1]))
+    } else {
+        (area, None)
+    };
+
     let list = List::new(items).block(block);
     let mut state = ListState::default();
     state.select(Some(app.selected_file));
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_stateful_widget(list, list_area, &mut state);
+
+    if let Some(bar) = bar_area {
+        let mut sb_state = ScrollbarState::new(app.file_tree.len()).position(state.offset());
+        f.render_stateful_widget(scrollbar_bar(app), bar, &mut sb_state);
+    }
+}
+
+/// The shared vertical scrollbar style for body panes (H1-07): accent
+/// thumb, no arrow heads — the arrow glyphs would dominate a 1-column bar.
+fn scrollbar_bar(app: &App) -> Scrollbar<'static> {
+    Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .thumb_style(Style::default().fg(app.theme.accent))
+        .track_style(Style::default().fg(app.theme.border))
 }
 
 // ── Chat Messages ───────────────────────────────────────────────────────────
@@ -525,12 +571,29 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
     let max_scroll = text_lines.saturating_sub(height);
     let scroll = max_scroll.saturating_sub(app.chat_scroll);
 
+    let show_bar = app.config.show_scrollbars && area.width >= 24;
+    let (text_area, bar_area) = if show_bar {
+        let c = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+        (c[0], Some(c[1]))
+    } else {
+        (area, None)
+    };
+
     let paragraph = Paragraph::new(text)
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
-    f.render_widget(paragraph, area);
+    f.render_widget(paragraph, text_area);
+
+    if let Some(bar) = bar_area {
+        // Same logical-line model the paragraph scroll uses above.
+        let mut sb_state = ScrollbarState::new(text_lines as usize).position(scroll as usize);
+        f.render_stateful_widget(scrollbar_bar(app), bar, &mut sb_state);
+    }
 }
 
 // ── Input ───────────────────────────────────────────────────────────────────

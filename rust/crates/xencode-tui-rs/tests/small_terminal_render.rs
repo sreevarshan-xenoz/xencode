@@ -428,3 +428,57 @@ fn rounded_borders_switch_every_panel_corner() {
         );
     }
 }
+
+/// H1-07: the scrollbar preference and the editor gutter actually reach the
+/// screen, and both respect their gates (no bars in narrow panes, no gutter
+/// below 45 editor columns).
+#[test]
+fn scrollbars_and_gutter_follow_config_and_width() {
+    // Chat: 120-wide zen leaves a 1-column bar; the long transcript makes a
+    // thumb smaller than the track, so the double-line glyph must appear.
+    let mut app = populated(FocusArea::ChatInput);
+    app.config.layout = "zen".into();
+    let text = render_text(&mut app, 120, 24);
+    assert!(
+        text.contains('║'),
+        "scrollbar missing when enabled:\n{text}"
+    );
+    app.config.show_scrollbars = false;
+    let text = render_text(&mut app, 120, 24);
+    assert!(!text.contains('║'), "scrollbar leaked when disabled");
+
+    // Editor gutter: needs show_line_numbers AND ≥45 columns.
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("xencode_gutter_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("sample.rs");
+    std::fs::write(
+        &path,
+        (1..=12)
+            .map(|i| format!("line{i} contents"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let mut app = populated(FocusArea::CodeEditor);
+    app.config.layout = "zen".into();
+    app.open_file_in_editor(path.to_str().unwrap());
+
+    let text = render_text(&mut app, 120, 24);
+    assert!(text.contains("1 line1"), "gutter missing:\n{text}");
+    assert!(text.contains("12 line12"), "two-digit gutter missing");
+
+    app.config.show_line_numbers = false;
+    let text = render_text(&mut app, 120, 24);
+    assert!(text.contains("line1 contents"));
+    assert!(!text.contains("1 line1"), "gutter leaked when disabled");
+
+    // Wide toggle, narrow pane: classic's 40-column editor must drop the
+    // gutter below the 45-column gate.
+    app.config.show_line_numbers = true;
+    app.config.layout = "classic".into();
+    let text = render_text(&mut app, 80, 24);
+    assert!(!text.contains("1 line1"), "gutter shown under 45 columns");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
