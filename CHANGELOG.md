@@ -52,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- The Collaboration Hub is real now, not a demo (Milestone G, G3-02): `c`
+  creates and connects a session, `j` edits a session id to join, `Enter`
+  connects, `r` retries, `Tab` cycles the server/user/session fields, and
+  `Esc` stops editing → disconnects (aborting the worker) → closes; Ctrl+W
+  hangs up on its way out too. Fabricated telemetry — the timestamp-derived
+  port, "Protocol: WebSocket (TLS)" on a plain connection, `<15ms` latency,
+  hardcoded alice/bob/carol members — is gone: the panel shows the real
+  server URL, an honest `ws (no TLS)`/`wss (TLS)` transport line, the live
+  member list with role badges, connected-for time, and any worker error
+  verbatim. The help overlay lists exactly the keys the hub handles.
 - `xencode server` is local-first by default (Milestone G, G2-01): it binds
   `127.0.0.1` unless told otherwise (`--host` accepts an IP or `localhost` —
   no DNS resolution behind the user's back), serves TLS only when given

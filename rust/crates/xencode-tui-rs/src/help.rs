@@ -63,7 +63,7 @@ const COMMANDS: &[Binding] = &[
     ("/bytebot <task>", "autonomous task execution"),
 ];
 
-fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
+pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
     use FocusArea::*;
     match focus {
         ChatInput => &[("↑ ↓ / j k", "scroll chat")],
@@ -90,8 +90,18 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("row 13 + Enter", "factory reset"),
         ],
         CodeReview => &[("↑ ↓ / j k", "scroll review"), ("Enter", "start review")],
-        PerformanceDashboard | ProjectAnalyzer | CollaborationHub | PerformanceProfiler
-        | MultiLanguage => &[("Enter", "start / continue")],
+        CollaborationHub => &[
+            ("c", "create + connect a new session"),
+            ("j", "edit session id to join"),
+            ("Enter", "connect / finish editing"),
+            ("r", "retry"),
+            ("Tab", "cycle server/user/session field"),
+            ("type", "edit selected field"),
+            ("Esc", "stop editing / disconnect / close"),
+        ],
+        PerformanceDashboard | ProjectAnalyzer | PerformanceProfiler | MultiLanguage => {
+            &[("Enter", "start / continue")]
+        }
         VoiceInterface => &[
             ("Enter", "start voice session"),
             ("Space / m", "toggle mute"),

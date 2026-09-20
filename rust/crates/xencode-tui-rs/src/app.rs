@@ -226,7 +226,6 @@ pub struct App<'a> {
     pub collab_members: Vec<(String, String, String)>, // (name, role, connection)
     pub collab_sync_status: String,                    // "disconnected", "connecting", "connected"
     pub collab_last_sync: f64,
-    pub collab_pending_changes: u32,
     pub collab_activity_log: Vec<String>,
     pub collab_server_url: String,
     pub collab_username: String,
@@ -234,6 +233,9 @@ pub struct App<'a> {
     pub collab_worker: Option<tokio::task::JoinHandle<()>>,
     /// The server's most recent `error` frame, for the hub to surface.
     pub collab_error: String,
+    /// Hub form mode: while set, typed characters edit `collab_field`.
+    pub collab_editing: bool,
+    pub collab_field: crate::focus::CollabField,
 
     // Voice Interface state
     pub voice_active: bool,
@@ -722,12 +724,13 @@ impl<'a> App<'a> {
             collab_members: Vec::new(),
             collab_sync_status: "disconnected".to_string(),
             collab_last_sync: 0.0,
-            collab_pending_changes: 0,
             collab_activity_log: Vec::new(),
             collab_server_url: "http://127.0.0.1:8765".to_string(),
             collab_username: std::env::var("USER").unwrap_or_else(|_| "you".to_string()),
             collab_worker: None,
             collab_error: String::new(),
+            collab_editing: false,
+            collab_field: crate::focus::CollabField::Server,
 
             voice_active: false,
             voice_status: "idle".to_string(),
@@ -929,6 +932,7 @@ impl<'a> App<'a> {
     pub fn text_entry_active(&self) -> bool {
         matches!(self.focus, FocusArea::GitCommit | FocusArea::ByteBotPanel)
             || (self.focus == FocusArea::Settings && self.settings_url_editing)
+            || (self.focus == FocusArea::CollaborationHub && self.collab_editing)
     }
 
     pub fn refresh_git(&mut self) {
@@ -1570,7 +1574,6 @@ impl<'a> App<'a> {
         }
         self.collab_session_active = true;
         self.collab_sync_status = "connecting".to_string();
-        self.collab_pending_changes = 0;
         self.collab_error.clear();
         self.collab_members.clear();
         self.collab_activity_log.clear();
@@ -1582,6 +1585,90 @@ impl<'a> App<'a> {
             self.collab_username.clone(),
             tx,
         ));
+    }
+
+    /// Stop the client task and mark the hub idle. Safe to call twice; an
+    /// already-finished worker's handle aborts cheaply.
+    pub fn collab_disconnect(&mut self) {
+        if let Some(worker) = self.collab_worker.take() {
+            worker.abort();
+        }
+        if self.collab_session_active {
+            self.collab_activity_log.push("🔌 Disconnected".to_string());
+        }
+        self.collab_session_active = false;
+        self.collab_sync_status = "disconnected".to_string();
+    }
+
+    /// Hang up (if connected) and dial the same server/session again. The
+    /// only reconnect there is — the client never retries by itself.
+    pub fn collab_retry(&mut self, tx: mpsc::UnboundedSender<String>) {
+        self.collab_disconnect();
+        self.start_collab_session(tx);
+    }
+
+    /// Tab in the hub: cycle the edited field, entering edit mode with it.
+    pub fn collab_cycle_field(&mut self) {
+        self.collab_field = self.collab_field.next();
+        self.collab_editing = true;
+    }
+
+    /// One typed character for the hub form.
+    pub fn collab_edit_char(&mut self, c: char) {
+        match self.collab_field {
+            crate::focus::CollabField::Server => self.collab_server_url.push(c),
+            crate::focus::CollabField::Username => self.collab_username.push(c),
+            crate::focus::CollabField::Session => self.collab_session_id.push(c),
+        }
+    }
+
+    pub fn collab_edit_backspace(&mut self) {
+        match self.collab_field {
+            crate::focus::CollabField::Server => {
+                self.collab_server_url.pop();
+            }
+            crate::focus::CollabField::Username => {
+                self.collab_username.pop();
+            }
+            crate::focus::CollabField::Session => {
+                self.collab_session_id.pop();
+            }
+        }
+    }
+
+    /// Apply one `[COLLAB]` token from the client worker (the prefix is
+    /// already stripped). Grammar lives in `collab_client::frame_to_tokens`.
+    pub fn apply_collab_token(&mut self, body: &str) {
+        if let Some(s) = body.strip_prefix("status:") {
+            self.collab_sync_status = s.to_string();
+            if s == "disconnected" {
+                // The worker is finished by definition — it just reported
+                // its own end. Drop the handle.
+                self.collab_session_active = false;
+                self.collab_worker = None;
+            }
+        } else if let Some(id) = body.strip_prefix("session:") {
+            self.collab_session_id = id.to_string();
+        } else if let Some(json) = body.strip_prefix("members:") {
+            // Complete snapshot from the server; swap the list whole.
+            match serde_json::from_str::<Vec<xencode_collaboration_rs::wire::MemberInfo>>(json) {
+                Ok(members) => {
+                    self.collab_members = members
+                        .iter()
+                        .map(|m| (m.username.clone(), m.role.clone(), "connected".to_string()))
+                        .collect();
+                }
+                Err(_) => {
+                    self.collab_error = "malformed members list from server".to_string();
+                }
+            }
+        } else if let Some(msg) = body.strip_prefix("log:") {
+            self.collab_activity_log.push(msg.to_string());
+        } else if let Some(msg) = body.strip_prefix("error:") {
+            self.collab_error = msg.to_string();
+        } else if body == "ready" {
+            self.collab_last_sync = current_timestamp();
+        }
     }
 
     /// Start a ByteBot autonomous task execution.
@@ -3270,40 +3357,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     }
                 }
             } else if let Some(body) = token.strip_prefix("[COLLAB]") {
-                if let Some(s) = body.strip_prefix("status:") {
-                    app.collab_sync_status = s.to_string();
-                    if s == "disconnected" {
-                        // The worker is finished by definition — it just
-                        // reported its own end. Drop the handle.
-                        app.collab_session_active = false;
-                        app.collab_worker = None;
-                    }
-                } else if let Some(id) = body.strip_prefix("session:") {
-                    app.collab_session_id = id.to_string();
-                } else if let Some(json) = body.strip_prefix("members:") {
-                    // Complete snapshot from the server; swap the list whole.
-                    match serde_json::from_str::<Vec<xencode_collaboration_rs::wire::MemberInfo>>(
-                        json,
-                    ) {
-                        Ok(members) => {
-                            app.collab_members = members
-                                .iter()
-                                .map(|m| {
-                                    (m.username.clone(), m.role.clone(), "connected".to_string())
-                                })
-                                .collect();
-                        }
-                        Err(_) => {
-                            app.collab_error = "malformed members list from server".to_string();
-                        }
-                    }
-                } else if let Some(msg) = body.strip_prefix("log:") {
-                    app.collab_activity_log.push(msg.to_string());
-                } else if let Some(msg) = body.strip_prefix("error:") {
-                    app.collab_error = msg.to_string();
-                } else if body == "ready" {
-                    app.collab_last_sync = current_timestamp();
-                }
+                app.apply_collab_token(body);
             } else if let Some(body) = token.strip_prefix("[HEALTH]") {
                 let parts: Vec<&str> = body.splitn(4, '|').collect();
                 if parts.len() >= 3 {
@@ -3678,7 +3732,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             || app.health_check_in_progress
             || app.bytebot_running
             || app.voice_active
-            || app.collab_sync_status == "syncing"
+            || app.collab_sync_status == "connecting"
             || app.sec_scan_active
             || app.profiler_running
         {
@@ -3839,6 +3893,47 @@ mod tests {
         assert!(!app.text_entry_active());
         app.settings_url_editing = true;
         assert!(app.text_entry_active());
+        app.focus = FocusArea::CollaborationHub;
+        app.collab_editing = false;
+        assert!(!app.text_entry_active());
+        app.collab_editing = true;
+        assert!(app.text_entry_active());
+    }
+
+    #[test]
+    fn collab_member_snapshots_replace_the_list_wholesale() {
+        let mut app = super::App::new();
+        app.collab_members = vec![("ghost".into(), "editor".into(), "connected".into())];
+        app.apply_collab_token(
+            r#"members:[{"username":"alice","role":"admin"},{"username":"bob","role":"viewer"}]"#,
+        );
+        assert_eq!(app.collab_members.len(), 2);
+        assert_eq!(
+            app.collab_members[0],
+            (
+                "alice".to_string(),
+                "admin".to_string(),
+                "connected".to_string()
+            )
+        );
+        assert_eq!(app.collab_members[1].1, "viewer");
+
+        app.apply_collab_token("session:xencode-77");
+        assert_eq!(app.collab_session_id, "xencode-77");
+
+        app.apply_collab_token("status:connected");
+        assert_eq!(app.collab_sync_status, "connected");
+        app.apply_collab_token("status:disconnected");
+        assert!(!app.collab_session_active);
+        assert_eq!(app.collab_sync_status, "disconnected");
+
+        app.apply_collab_token("error:bad_token: invalid or expired token");
+        assert_eq!(app.collab_error, "bad_token: invalid or expired token");
+
+        // Garbage must not clobber the current list — it reports honestly.
+        app.apply_collab_token("members:not-json");
+        assert_eq!(app.collab_members.len(), 2);
+        assert_eq!(app.collab_error, "malformed members list from server");
     }
 
     #[test]

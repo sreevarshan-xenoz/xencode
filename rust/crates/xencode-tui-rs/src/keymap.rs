@@ -113,6 +113,12 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             };
         }
         KeyCode::Char('w') => {
+            // Closing the hub with a live socket must not orphan the worker —
+            // Esc is the documented hang-up, Ctrl+W does the same first.
+            if app.focus == FocusArea::CollaborationHub {
+                app.collab_editing = false;
+                app.collab_disconnect();
+            }
             // Close current panel and return to ChatInput
             match app.focus {
                 FocusArea::ByteBotPanel
@@ -233,6 +239,12 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     // Keys with no focus-specific meaning at all.
     match key.code {
         KeyCode::Tab => {
+            // The Collaboration Hub owns Tab: it cycles the form field
+            // instead of the body focus ring.
+            if app.focus == FocusArea::CollaborationHub {
+                app.collab_cycle_field();
+                return done();
+            }
             app.focus = match app.focus {
                 FocusArea::FileExplorer => FocusArea::CodeEditor,
                 FocusArea::CodeEditor => FocusArea::ChatInput,
@@ -350,6 +362,17 @@ fn on_esc(app: &mut App) {
                 app.focus = FocusArea::ChatInput;
             }
         }
+        FocusArea::CollaborationHub => {
+            // Esc unwinds the hub: field editing → live session (hang up,
+            // panel stays open idle) → close.
+            if app.collab_editing {
+                app.collab_editing = false;
+            } else if app.collab_session_active {
+                app.collab_disconnect();
+            } else {
+                app.focus = FocusArea::ChatInput;
+            }
+        }
         FocusArea::ModelSelector
         | FocusArea::CodeReview
         | FocusArea::PerformanceDashboard
@@ -358,7 +381,6 @@ fn on_esc(app: &mut App) {
         | FocusArea::GitCommit
         | FocusArea::FeatureNavigator
         | FocusArea::ByteBotPanel
-        | FocusArea::CollaborationHub
         | FocusArea::VoiceInterface
         | FocusArea::TerminalAssistant
         | FocusArea::SecurityAuditor
@@ -1118,12 +1140,37 @@ fn key_terminal_assistant(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     true
 }
 
+/// Collaboration Hub (G3-02): a real client, so the keys are a form, not a
+/// toy. Idle: `c` creates a session (server assigns the id), `j` edits the
+/// session id to join, `Enter`/`Tab` connect or edit fields. Live: only `r`
+/// (retry) and `Esc` (disconnect, handled in `on_esc`) do anything.
 fn key_collab(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    if key.code == KeyCode::Enter && !app.collab_session_active {
-        app.start_collab_session(tx.clone());
+    if app.collab_editing {
+        match key.code {
+            KeyCode::Enter => app.collab_editing = false,
+            KeyCode::Backspace => app.collab_edit_backspace(),
+            KeyCode::Char(c) => app.collab_edit_char(c),
+            _ => {}
+        }
         return true;
     }
-    false
+    match key.code {
+        KeyCode::Char('c') if !app.collab_session_active => {
+            // "create" means "connect and let the server name the session".
+            app.collab_session_id.clear();
+            app.start_collab_session(tx.clone());
+        }
+        KeyCode::Char('j') if !app.collab_session_active => {
+            app.collab_field = crate::focus::CollabField::Session;
+            app.collab_editing = true;
+        }
+        KeyCode::Enter if !app.collab_session_active => {
+            app.start_collab_session(tx.clone());
+        }
+        KeyCode::Char('r') => app.collab_retry(tx.clone()),
+        _ => return false,
+    }
+    true
 }
 
 fn key_profiler(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
@@ -1509,6 +1556,92 @@ mod tests {
         press(&mut app, KeyCode::Char('d'));
         press(&mut app, KeyCode::Char('n'));
         assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
+    }
+
+    #[tokio::test]
+    async fn collab_create_connects_and_esc_hangs_up() {
+        let mut app = app_with(FocusArea::CollaborationHub);
+        press(&mut app, KeyCode::Char('c'));
+        assert!(app.collab_session_active);
+        assert!(app.collab_worker.is_some());
+        // "create" leaves the id empty: the server names the session and
+        // reports it back through the session: token.
+        assert!(app.collab_session_id.is_empty());
+        // Live already: neither 'c' nor Enter starts a second connection.
+        press(&mut app, KeyCode::Char('c'));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.collab_session_active && app.collab_worker.is_some());
+        // Esc disconnects but keeps the panel open…
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.collab_session_active);
+        assert!(app.collab_worker.is_none());
+        assert_eq!(app.focus, FocusArea::CollaborationHub);
+        // …'r' reconnects…
+        press(&mut app, KeyCode::Char('r'));
+        assert!(app.collab_session_active && app.collab_worker.is_some());
+        // …and Ctrl+W closes the panel without orphaning the worker.
+        press_with_mods(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        assert!(!app.collab_session_active);
+        assert!(app.collab_worker.is_none());
+        // Re-opening the hub (via the Feature Navigator in real use) finds
+        // it idle; Esc from idle closes again.
+        app.focus = FocusArea::CollaborationHub;
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[tokio::test]
+    async fn collab_form_edits_only_the_selected_field() {
+        use crate::focus::CollabField;
+        let mut app = app_with(FocusArea::CollaborationHub);
+        press(&mut app, KeyCode::Tab); // Server → Username, entering edit mode
+        assert!(app.collab_editing);
+        assert_eq!(app.collab_field, CollabField::Username);
+        // Typing belongs to the field: 'q' must not quit.
+        app.collab_username.clear();
+        press(&mut app, KeyCode::Char('q'));
+        assert_eq!(app.collab_username, "q");
+        assert_eq!(app.focus, FocusArea::CollaborationHub);
+        press(&mut app, KeyCode::Backspace);
+        assert!(app.collab_username.is_empty());
+        press(&mut app, KeyCode::Enter); // ends editing, keeps the value
+        assert!(!app.collab_editing);
+        // 'j' is the join entry point: straight into the Session field.
+        press(&mut app, KeyCode::Char('j'));
+        assert!(app.collab_editing);
+        assert_eq!(app.collab_field, CollabField::Session);
+        for c in "xencode-7".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert_eq!(app.collab_session_id, "xencode-7");
+        // Tab while editing cycles the field without leaving edit mode.
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.collab_field, CollabField::Server);
+        assert!(app.collab_editing);
+    }
+
+    #[tokio::test]
+    async fn collab_r_retries_from_idle_and_from_live() {
+        let mut app = app_with(FocusArea::CollaborationHub);
+        press(&mut app, KeyCode::Char('r'));
+        assert!(app.collab_session_active); // retry from idle = connect
+        press(&mut app, KeyCode::Char('r'));
+        assert!(app.collab_session_active); // retry while live = reconnect
+        assert!(app.collab_worker.is_some());
+    }
+
+    #[test]
+    fn collab_help_lists_only_keys_the_hub_handles() {
+        let keys: Vec<&str> = crate::help::panel_bindings(FocusArea::CollaborationHub)
+            .iter()
+            .map(|(key, _)| *key)
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["c", "j", "Enter", "r", "Tab", "type", "Esc"],
+            "the help overlay and key_collab have drifted apart"
+        );
     }
 
     #[test]

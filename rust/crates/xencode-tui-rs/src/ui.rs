@@ -2435,19 +2435,28 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Collaboration Hub Panel ────────────────────────────────────────────────
 
+/// "admin" → "Admin" — server roles arrive lowercase from the wire.
+fn capitalize_role(role: &str) -> String {
+    let mut chars = role.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(75, 72, area);
     f.render_widget(Clear, popup_area);
 
     let status_icon: String = match app.collab_sync_status.as_str() {
-        "connected" | "synced" => "✅".to_string(),
-        "syncing" | "connecting" => spinner::frame(app.spinner_tick).to_string(),
-        "error" | "disconnected" => "❌".to_string(),
+        "connected" => "✅".to_string(),
+        "connecting" => spinner::frame(app.spinner_tick).to_string(),
+        "disconnected" => "○".to_string(),
         _ => "❓".to_string(),
     };
 
     let title = format!(
-        " 👥 Collaboration Hub [{}] (Enter:start, Esc:close) ",
+        " 👥 Collaboration Hub [{}] (c:create j:join ⏎:connect r:retry Tab:field Esc:back) ",
         status_icon
     );
     let block = Block::default()
@@ -2480,20 +2489,47 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         .title(" \u{1F310} Session ");
 
     let session_display = if !session_active {
-        " Press Enter to start a collaboration session".to_string()
+        // The form: three fields, the edited one marked and cursorred.
+        let cursor = |selected: bool| {
+            if selected {
+                "▸"
+            } else {
+                " "
+            }
+        };
+        use crate::focus::CollabField;
+        let session_shown = if app.collab_session_id.is_empty() {
+            "(new)"
+        } else {
+            app.collab_session_id.as_str()
+        };
+        let mut line = format!(
+            " {}Server: {}   {}User: {}   {}Session: {}",
+            cursor(app.collab_editing && app.collab_field == CollabField::Server),
+            app.collab_server_url,
+            cursor(app.collab_editing && app.collab_field == CollabField::Username),
+            app.collab_username,
+            cursor(app.collab_editing && app.collab_field == CollabField::Session),
+            session_shown,
+        );
+        if app.collab_editing {
+            line.push_str(" ▏");
+        } else {
+            line.push_str("   c/⏎ to connect");
+        }
+        line
     } else {
         let status_color = match app.collab_sync_status.as_str() {
-            "synced" | "connected" => "\u{2705}",
-            "syncing" | "connecting" => "\u{1F504}",
-            "error" | "disconnected" => "\u{274C}",
+            "connected" => "\u{2705}",
+            "connecting" => "\u{1F504}",
+            "disconnected" => "\u{274C}",
             _ => "\u{2753}",
         };
         format!(
-            " ID: {}   Status: {} {}   Pending: {}   Members: {}",
+            " ID: {}   Status: {} {}   Members: {}",
             app.collab_session_id,
             status_color,
             app.collab_sync_status,
-            app.collab_pending_changes,
             app.collab_members.len(),
         )
     };
@@ -2522,63 +2558,57 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         )));
         member_lines.push(Line::from(""));
 
-        for (name, status, connection) in &app.collab_members {
-            let (status_icon, status_color) = match status.as_str() {
-                "online" => ("\u{25CF}", app.theme.success),
-                "away" => ("\u{25CB}", app.theme.warning),
-                "busy" => ("\u{25A0}", app.theme.danger),
-                _ => ("?", app.theme.message_system),
-            };
-            let role_badge = match name.as_str() {
-                "You (local)" => " [Admin]",
-                "alice" => " [Editor]",
-                "bob" => " [Viewer]",
-                "carol" => " [Editor]",
-                _ => "",
+        for (name, role, _connection) in &app.collab_members {
+            // Presence is the server's members list: everyone in it is
+            // connected right now; the badge is their workspace role.
+            let badge = capitalize_role(role);
+            let label = if badge.is_empty() {
+                name.clone()
+            } else {
+                format!("{name} [{badge}]")
             };
             member_lines.push(Line::from(vec![
-                Span::styled(
-                    format!(" {} ", status_icon),
-                    Style::default().fg(status_color),
-                ),
-                Span::styled(
-                    format!("{}{}  {}", name, role_badge, connection),
-                    Style::default().fg(app.theme.fg),
-                ),
+                Span::styled(" \u{25CF} ", Style::default().fg(app.theme.success)),
+                Span::styled(label, Style::default().fg(app.theme.fg)),
             ]));
         }
     } else {
         member_lines.push(Line::from(""));
         member_lines.push(Line::from(Span::styled(
-            "  No team members yet.",
-            Style::default().fg(app.theme.message_system),
-        )));
-        member_lines.push(Line::from(Span::styled(
-            "  Press Enter to start a session.",
+            if session_active {
+                "  Waiting for the server…"
+            } else {
+                "  Not connected. c: new session, j: join one."
+            },
             Style::default().fg(app.theme.message_system),
         )));
     }
 
-    // Connection info at bottom of members panel
-    if session_active {
-        member_lines.push(Line::from(""));
+    // Connection info at bottom of members panel — only what is real.
+    member_lines.push(Line::from(""));
+    member_lines.push(Line::from(Span::styled(
+        " Connection",
+        Style::default()
+            .fg(app.theme.fg)
+            .add_modifier(Modifier::UNDERLINED),
+    )));
+    member_lines.push(Line::from(""));
+    member_lines.push(Line::from(format!("   Server: {}", app.collab_server_url)));
+    let transport = if app.collab_server_url.starts_with("https://") {
+        "wss (TLS)"
+    } else {
+        "ws (no TLS)"
+    };
+    member_lines.push(Line::from(format!("   Transport: {transport}")));
+    if session_active && app.collab_last_sync > 0.0 {
+        let elapsed = (current_timestamp() - app.collab_last_sync).max(0.0);
+        member_lines.push(Line::from(format!("   Connected: {elapsed:.0}s")));
+    }
+    if !app.collab_error.is_empty() {
         member_lines.push(Line::from(Span::styled(
-            " Connection",
-            Style::default()
-                .fg(app.theme.fg)
-                .add_modifier(Modifier::UNDERLINED),
+            format!("   ⚠ {}", app.collab_error),
+            Style::default().fg(app.theme.danger),
         )));
-        member_lines.push(Line::from(""));
-        member_lines.push(Line::from(format!(
-            "   Port:  {:04}",
-            (current_timestamp() as u64 % 60000 + 8000)
-        )));
-        member_lines.push(Line::from("   Protocol: WebSocket (TLS)"));
-        member_lines.push(Line::from("   Latency: <15ms"));
-        if app.collab_last_sync > 0.0 {
-            let elapsed = (current_timestamp() - app.collab_last_sync).max(0.0);
-            member_lines.push(Line::from(format!("   Last sync: {:.0}s ago", elapsed)));
-        }
     }
 
     let member_block = Block::default()
