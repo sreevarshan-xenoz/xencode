@@ -985,7 +985,10 @@ fn key_advise_panel(app: &mut App, key: KeyEvent) -> bool {
             app.refresh_advise();
         }
         KeyCode::Char('o') if !app.advise_detail => {
-            if let Some(path) = app.advise_items.get(app.advise_selected).map(|a| a.file.clone())
+            if let Some(path) = app
+                .advise_items
+                .get(app.advise_selected)
+                .map(|a| a.file.clone())
             {
                 app.open_file_in_editor(&path);
             }
@@ -1026,9 +1029,7 @@ fn key_learning(app: &mut App, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Left
-            if app.learn_quiz_active
-                && !app.learn_quiz_answered
-                && app.learn_quiz_selected > 0 =>
+            if app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected > 0 =>
         {
             app.learn_quiz_selected -= 1;
         }
@@ -1389,7 +1390,10 @@ mod tests {
         app.tasks_detail = true;
         press_with_mods(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
         assert_eq!(app.focus, FocusArea::TaskManager);
-        assert_eq!((app.tasks_selected, app.tasks_detail, app.tasks_scroll), (0, false, 0));
+        assert_eq!(
+            (app.tasks_selected, app.tasks_detail, app.tasks_scroll),
+            (0, false, 0)
+        );
         press_with_mods(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
         assert_eq!(app.focus, FocusArea::ChatInput);
     }
@@ -1487,7 +1491,10 @@ mod tests {
     #[test]
     fn worktree_remove_refuses_main_and_confirms_others() {
         let mut app = app_with(FocusArea::WorktreePanel);
-        app.worktrees = vec![worktree("/repo", "main", true), worktree("/repo-wt", "feat", false)];
+        app.worktrees = vec![
+            worktree("/repo", "main", true),
+            worktree("/repo-wt", "feat", false),
+        ];
         app.worktree_dirty = vec![false, true];
         press(&mut app, KeyCode::Down);
         assert_eq!(app.worktree_selected, 1);

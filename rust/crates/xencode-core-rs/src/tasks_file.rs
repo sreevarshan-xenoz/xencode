@@ -81,7 +81,9 @@ impl FileTaskRegistry {
             .map_err(|e| TaskError::Spawn(std::io::Error::other(e)))?;
         // Atomic replace: other processes read this file at any moment and
         // must never see a half-written JSON document.
-        let tmp = self.root.join(format!("tasks.json.{}.tmp", std::process::id()));
+        let tmp = self
+            .root
+            .join(format!("tasks.json.{}.tmp", std::process::id()));
         fs::write(&tmp, json).map_err(TaskError::Spawn)?;
         fs::rename(&tmp, self.tasks_file()).map_err(TaskError::Spawn)
     }
@@ -135,7 +137,10 @@ impl FileTaskRegistry {
     }
 
     fn find<'a>(&self, tasks: &'a [FileTask], id: u64) -> Result<&'a FileTask, TaskError> {
-        tasks.iter().find(|t| t.id == id).ok_or(TaskError::NotFound(id))
+        tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or(TaskError::NotFound(id))
     }
 
     /// Read the wrapper's exit code file, if it exists.
@@ -192,11 +197,7 @@ impl FileTaskRegistry {
             return Err(TaskError::StillRunning(id));
         }
         let rest: Vec<FileTask> = tasks.into_iter().filter(|t| t.id != id).collect();
-        for path in [
-            self.script_path(id),
-            self.exit_path(id),
-            self.out_path(id),
-        ] {
+        for path in [self.script_path(id), self.exit_path(id), self.out_path(id)] {
             let _ = fs::remove_file(path);
         }
         self.save(&rest)
@@ -269,7 +270,10 @@ mod tests {
     /// real `~/.xencode` state is never touched.
     fn temp_root(label: &str) -> PathBuf {
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        let root = std::env::temp_dir().join(format!("xencode-tasksfile-{label}-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "xencode-tasksfile-{label}-{}-{n}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&root);
         root
     }
@@ -374,10 +378,7 @@ mod tests {
         };
         reg.save(std::slice::from_ref(&ghost)).unwrap();
         assert_eq!(reg.status(&ghost), TaskStatus::Killed);
-        assert!(matches!(
-            reg.stop(7),
-            Err(TaskError::AlreadyFinished(7))
-        ));
+        assert!(matches!(reg.stop(7), Err(TaskError::AlreadyFinished(7))));
         let _ = fs::remove_dir_all(reg.root());
     }
 

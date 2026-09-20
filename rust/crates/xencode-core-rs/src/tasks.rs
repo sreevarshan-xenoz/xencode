@@ -265,10 +265,7 @@ impl TaskManager {
     }
 
     pub fn snapshot(&self, id: u64) -> Result<TaskRecord, TaskError> {
-        self.store
-            .get(id)
-            .cloned()
-            .ok_or(TaskError::NotFound(id))
+        self.store.get(id).cloned().ok_or(TaskError::NotFound(id))
     }
 
     /// Remove a finished task's record entirely.
@@ -408,10 +405,7 @@ mod tests {
         store.insert(rec);
         store.remove(2).unwrap();
         assert!(store.get(2).is_none());
-        assert!(matches!(
-            store.remove(99),
-            Err(TaskError::NotFound(99))
-        ));
+        assert!(matches!(store.remove(99), Err(TaskError::NotFound(99))));
     }
 
     #[test]
@@ -445,10 +439,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xencode-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut m = TaskManager::new();
-        let id = m
-            .start_with_cwd("pwd", "pwd", Some(&dir))
-            .await
-            .unwrap();
+        let id = m.start_with_cwd("pwd", "pwd", Some(&dir)).await.unwrap();
         let mut rec = await_exit(&mut m, id).await;
         for _ in 0..100 {
             if !rec.output().is_empty() {

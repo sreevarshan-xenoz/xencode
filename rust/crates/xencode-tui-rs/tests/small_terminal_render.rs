@@ -55,7 +55,8 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.bytebot_log.push("❌ failed a thing".into());
     app.bytebot_history.push("run tests".into());
     app.attached_files.insert("./src/main.rs".into());
-    app.chat_input.insert_str("some input text that is fairly long");
+    app.chat_input
+        .insert_str("some input text that is fairly long");
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -162,7 +163,13 @@ fn task_panel_renders_populated_registry() {
             .start("sleeper", "sleep 30")
             .await
             .unwrap();
-        let id_done = app.task_runtime.lock().await.start("echo", "echo hi").await.unwrap();
+        let id_done = app
+            .task_runtime
+            .lock()
+            .await
+            .start("echo", "echo hi")
+            .await
+            .unwrap();
         for _ in 0..200 {
             let settled = {
                 let mut m = app.task_runtime.lock().await;
@@ -182,13 +189,18 @@ fn task_panel_renders_populated_registry() {
             for &width in &[20, 61, 80] {
                 for &height in &[8, 16, 24] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal
-                        .draw(|f| draw(f, &app))
-                        .unwrap_or_else(|_| panic!("render {width}x{height} sel={selected} detail={detail}"));
+                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                        panic!("render {width}x{height} sel={selected} detail={detail}")
+                    });
                 }
             }
         }
-        app.task_runtime.lock().await.stop(id_running).await.unwrap();
+        app.task_runtime
+            .lock()
+            .await
+            .stop(id_running)
+            .await
+            .unwrap();
         assert!(id_running < id_done);
     });
 }
@@ -208,7 +220,12 @@ fn fixture_worktrees() -> Vec<xencode_context_rs::WorktreeInfo> {
     };
     vec![
         wt("/home/u/proj", Some("main"), false, true),
-        wt("/home/u/proj with space/feat", Some("feature/x"), false, false),
+        wt(
+            "/home/u/proj with space/feat",
+            Some("feature/x"),
+            false,
+            false,
+        ),
         wt("/home/u/proj/detached", None, true, false),
     ]
 }
@@ -239,9 +256,9 @@ fn worktree_panel_renders_all_prompt_stages() {
             for &width in &[20, 61, 80] {
                 for &height in &[8, 16, 24] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal
-                        .draw(|f| draw(f, &app))
-                        .unwrap_or_else(|_| panic!("render {width}x{height} {prompt:?} has_rows={has_rows}"));
+                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                        panic!("render {width}x{height} {prompt:?} has_rows={has_rows}")
+                    });
                 }
             }
         }

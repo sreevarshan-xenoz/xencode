@@ -55,7 +55,9 @@ pub fn render_markdown(content: &str, theme: &ThemeColors) -> Vec<Line<'static>>
         if let Some((marker, body)) = heading(trimmed) {
             let mut spans = vec![Span::styled(
                 format!("  {marker} "),
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             )];
             spans.extend(inline_spans(body, theme, Modifier::BOLD));
             lines.push(Line::from(spans));
@@ -183,9 +185,7 @@ fn inline_spans(text: &str, theme: &ThemeColors, base: Modifier) -> Vec<Span<'st
                     let italic: String = chars[i + 1..end].iter().collect();
                     spans.push(Span::styled(
                         italic,
-                        Style::default()
-                            .fg(theme.fg)
-                            .add_modifier(Modifier::ITALIC),
+                        Style::default().fg(theme.fg).add_modifier(Modifier::ITALIC),
                     ));
                     i = end + 1;
                 } else {
@@ -260,7 +260,10 @@ mod tests {
         assert!(text.starts_with("  before"));
         assert!(text.ends_with("  after"));
         // Code line carries its own style, not plain fg.
-        let code_line = out.iter().find(|l| l.spans[0].content.contains("fn x")).unwrap();
+        let code_line = out
+            .iter()
+            .find(|l| l.spans[0].content.contains("fn x"))
+            .unwrap();
         assert_eq!(code_line.spans[0].style.fg, Some(theme().message_assistant));
     }
 
@@ -270,7 +273,10 @@ mod tests {
         let text = plain_text(&out);
         assert!(text.contains("┌─ py"));
         assert!(text.contains("    print(1)"));
-        assert!(text.contains("└─"), "streamed fence must not leave open box: {text}");
+        assert!(
+            text.contains("└─"),
+            "streamed fence must not leave open box: {text}"
+        );
     }
 
     #[test]
@@ -299,7 +305,9 @@ mod tests {
         let italic = kinds.iter().find(|(c, _)| c == "fast").unwrap();
         assert!(italic.1.add_modifier.contains(Modifier::ITALIC));
         // No leftover markers anywhere.
-        assert!(!kinds.iter().any(|(c, _)| c.contains('`') || c.contains('*')));
+        assert!(!kinds
+            .iter()
+            .any(|(c, _)| c.contains('`') || c.contains('*')));
     }
 
     #[test]

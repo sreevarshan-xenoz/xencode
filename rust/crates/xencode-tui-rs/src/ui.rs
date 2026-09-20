@@ -395,7 +395,7 @@ fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
                 match status.as_str() {
                     "M" | "MM" => app.theme.message_user,      // Modified
                     "A" | "AM" => app.theme.message_assistant, // Added
-                    "D" => app.theme.danger,         // Deleted
+                    "D" => app.theme.danger,                   // Deleted
                     _ => app.theme.fg,                         // Untracked etc
                 }
             } else {
@@ -548,10 +548,9 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         .title(title);
 
     if app.is_generating {
-        let paragraph =
-            Paragraph::new("Please wait...")
-                .block(block)
-                .style(Style::default().fg(app.theme.fg));
+        let paragraph = Paragraph::new("Please wait...")
+            .block(block)
+            .style(Style::default().fg(app.theme.fg));
         f.render_widget(paragraph, area);
     } else {
         let inner = block.inner(area);
@@ -1321,10 +1320,7 @@ fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 )));
             } else {
-                rows.push(Line::from(Span::styled(
-                    text,
-                    Style::default().fg(color),
-                )));
+                rows.push(Line::from(Span::styled(text, Style::default().fg(color))));
             }
         }
     }
@@ -1341,7 +1337,11 @@ fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
         WorktreePrompt::AddPath => Some(format!("  new path: {}▏", app.worktree_path_buf)),
         WorktreePrompt::AddBranch => Some(format!(
             "  branch ({}): {}▏",
-            if app.worktree_path_buf.is_empty() { "?" } else { app.worktree_path_buf.as_str() },
+            if app.worktree_path_buf.is_empty() {
+                "?"
+            } else {
+                app.worktree_path_buf.as_str()
+            },
             app.worktree_branch_buf
         )),
         WorktreePrompt::ConfirmRemove => Some(match app.worktrees.get(app.worktree_selected) {
@@ -1380,7 +1380,10 @@ fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
     let outer = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(format!(" 💡 Insights — {} finding(s) ", app.advise_items.len()));
+        .title(format!(
+            " 💡 Insights — {} finding(s) ",
+            app.advise_items.len()
+        ));
     f.render_widget(outer, popup_area);
     let inner = popup_area.inner(ratatui::layout::Margin {
         horizontal: 1,
@@ -1433,13 +1436,14 @@ fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     );
     let mut state = ListState::default();
-    state.select(Some(
-        app.advise_selected.min(app.advise_items.len() - 1),
-    ));
+    state.select(Some(app.advise_selected.min(app.advise_items.len() - 1)));
     f.render_stateful_widget(list, inner, &mut state);
 }
 
-fn advise_kind_style(kind: xencode_context_rs::AdviceKind, app: &App) -> (&'static str, ratatui::style::Color) {
+fn advise_kind_style(
+    kind: xencode_context_rs::AdviceKind,
+    app: &App,
+) -> (&'static str, ratatui::style::Color) {
     use xencode_context_rs::AdviceKind;
     match kind {
         AdviceKind::BrokenImport => ("⚠", app.theme.danger),
@@ -1961,12 +1965,16 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
     // Code Review popup.
     let review_area = centered_rect(80, 80, area);
     let review_rows = review_display_text(app).lines().count();
-    app.review_scroll = app.review_scroll.min(clamp_scroll(review_rows, review_area.height));
+    app.review_scroll = app
+        .review_scroll
+        .min(clamp_scroll(review_rows, review_area.height));
 
     // Provider Health popup.
     let health_area = centered_rect(70, 55, area);
-    app.provider_health_scroll = app.provider_health_scroll
-        .min(clamp_scroll(provider_health_lines(app).len(), health_area.height));
+    app.provider_health_scroll = app.provider_health_scroll.min(clamp_scroll(
+        provider_health_lines(app).len(),
+        health_area.height,
+    ));
 
     // Security Auditor findings list (inner column, below the summary cards).
     let sec_inner = Block::default()
@@ -1976,13 +1984,17 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(5), Constraint::Min(1)])
         .split(sec_inner)[1];
-    app.security_scroll = app.security_scroll
-        .min(clamp_scroll(security_findings_lines(app).len(), sec_list.height));
+    app.security_scroll = app.security_scroll.min(clamp_scroll(
+        security_findings_lines(app).len(),
+        sec_list.height,
+    ));
 
     // Help overlay.
     let help_area = centered_rect(70, 85, area);
-    app.help_scroll = app.help_scroll
-        .min(clamp_scroll(crate::help::help_lines(app.focus, &app.theme).len(), help_area.height));
+    app.help_scroll = app.help_scroll.min(clamp_scroll(
+        crate::help::help_lines(app.focus, &app.theme).len(),
+        help_area.height,
+    ));
 
     // Background Tasks detail pane (only scrolled state the panel keeps).
     if app.tasks_detail {
@@ -2002,7 +2014,9 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
             vertical: 1,
         });
         let rows = advise_detail_text(app).lines().count();
-        app.advise_scroll = app.advise_scroll.min(clamp_scroll(rows, inner.height) as usize);
+        app.advise_scroll = app
+            .advise_scroll
+            .min(clamp_scroll(rows, inner.height) as usize);
     }
 }
 
@@ -2165,7 +2179,11 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
             steps_lines.push(Line::from(""));
             let bar_width = 20usize;
             let pct = (app.bytebot_progress * 100.0).round();
-            let bar = gauge::bar((app.bytebot_progress * 100.0).round() as u64, 100, bar_width);
+            let bar = gauge::bar(
+                (app.bytebot_progress * 100.0).round() as u64,
+                100,
+                bar_width,
+            );
             let bar_str = format!("  {} {:.0}%", bar, pct);
             steps_lines.push(Line::from(Span::styled(
                 bar_str,
@@ -2423,9 +2441,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
 
     let status_icon: String = match app.collab_sync_status.as_str() {
         "connected" | "synced" => "✅".to_string(),
-        "syncing" | "connecting" => {
-            spinner::frame(app.spinner_tick).to_string()
-        }
+        "syncing" | "connecting" => spinner::frame(app.spinner_tick).to_string(),
         "error" | "disconnected" => "❌".to_string(),
         _ => "❓".to_string(),
     };
@@ -2998,7 +3014,8 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg))
         .wrap(Wrap { trim: false })
         .scroll((
-            app.security_scroll.min(clamp_scroll(find_len, chunks[1].height)),
+            app.security_scroll
+                .min(clamp_scroll(find_len, chunks[1].height)),
             0,
         ));
     f.render_widget(find_para, chunks[1]);
@@ -3067,12 +3084,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::UNDERLINED),
         )),
         Line::from(""),
-        gauge_block(
-            "CPU     ",
-            app.profiler_gauge_cpu,
-            100.0,
-            app.theme.info,
-        ),
+        gauge_block("CPU     ", app.profiler_gauge_cpu, 100.0, app.theme.info),
         gauge_block(
             "Memory  ",
             app.profiler_gauge_mem,
@@ -3138,11 +3150,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
 
         for (name, time_ms, mem_mb, calls) in &app.profiler_functions {
             let hot = *time_ms > 200.0;
-            let color = if hot {
-                app.theme.danger
-            } else {
-                app.theme.fg
-            };
+            let color = if hot { app.theme.danger } else { app.theme.fg };
             let hot_mark = if hot { " 🔥" } else { "  " };
             func_lines.push(Line::from(Span::styled(
                 format!(
@@ -3621,8 +3629,8 @@ mod tests {
 
     #[test]
     fn body_hit_test_follows_body_layout() {
-        use super::{body_chunks, body_hit_test};
         use super::FocusArea;
+        use super::{body_chunks, body_hit_test};
         use ratatui::layout::Rect;
 
         for width in [1u16, 7, 20, 33, 61, 80, 100, 120, 240] {
