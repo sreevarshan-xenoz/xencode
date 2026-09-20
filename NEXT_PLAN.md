@@ -21,8 +21,9 @@
 1. **Real-time file watcher + proactive warnings** — shipped (Milestone E): a
    debounced `WorkspaceWatcher` (notify) feeds the TUI, which warns — as toasts —
    only about tracked/attached/open files, enriched with dep-graph dependents.
-2. **Refactor suggestions** — build on the `xencode-context-rs` index/symbol graph
-   (`rust/crates/xencode-context-rs/`) to propose live improvements.
+2. **Refactor suggestions** — ✅ drafted 2026-09-20 as **Milestone F — Live Refactor
+   Insights**: live symbol/dep snapshot refresh off the watcher, a `Ctrl+S` insights
+   panel, `xencode advise` CLI and a `repo_advise` agent tool.
 3. **Multimodal inputs** — shipped (Milestone E): image analysis and TUI attach as
    per-backend message parts, plus PDF/DOCX text extraction into the context bundle.
 4. **Secure team workflows hardening** — workspace RBAC and audit events (membership
