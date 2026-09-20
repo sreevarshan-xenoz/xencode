@@ -13,7 +13,7 @@ use crate::focus::{
     FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS, SETTINGS_LABEL_WIDTH,
 };
 use crate::layout::compute_layout;
-use crate::widgets::{gauge, spinner};
+use crate::widgets::{gauge, panel_border_set, spinner};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     // Full-screen themed background
@@ -93,6 +93,7 @@ fn draw_toasts(f: &mut Frame, app: &App, area: Rect) {
     .intersection(area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📣 ");
@@ -108,6 +109,7 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" ⌨ Keybindings — Esc or ? to close ");
@@ -298,17 +300,37 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+/// How a pane's border should read, in priority order.
+#[derive(Clone, Copy)]
+enum PaneState {
+    /// The user is typing in this pane right now.
+    Editing,
+    /// Keyboard focus lives here, normal mode.
+    Focused,
+    /// Always-live pane (e.g. the terminal strip).
+    Active,
+    /// Unfocused.
+    Plain,
+}
+
+/// The framed panel block every body pane builds (H1-06): one place that
+/// applies the rounded-borders preference and the focus border convention.
+fn panel_block(app: &App, title: String, state: PaneState) -> Block<'static> {
+    let border = match state {
+        PaneState::Editing => Style::default().fg(app.theme.accent),
+        PaneState::Focused | PaneState::Active => Style::default().fg(app.theme.border_active),
+        PaneState::Plain => Style::default().fg(app.theme.border),
+    };
+    Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(border)
+        .title(title)
+}
+
 fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focus == FocusArea::CodeEditor;
     let is_editing = is_focused && app.input_mode == InputMode::Editing;
-
-    let border_style = if is_editing {
-        Style::default().fg(app.theme.accent)
-    } else if is_focused {
-        Style::default().fg(app.theme.border_active)
-    } else {
-        Style::default().fg(app.theme.border)
-    };
 
     let dirty_mark = if app.editor_dirty { " [modified]" } else { "" };
     let mode_mark = if is_editing { " EDITING" } else { "" };
@@ -319,10 +341,17 @@ fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
         " 📝 Code Editor (Select a file & press Enter) ".to_string()
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(title);
+    let block = panel_block(
+        app,
+        title,
+        if is_editing {
+            PaneState::Editing
+        } else if is_focused {
+            PaneState::Focused
+        } else {
+            PaneState::Plain
+        },
+    );
 
     if app.opened_file.is_some() {
         let inner = block.inner(area);
@@ -354,17 +383,17 @@ fn draw_code_editor(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focus == FocusArea::FileExplorer;
-    let border_style = if is_focused {
-        Style::default().fg(app.theme.border_active)
-    } else {
-        Style::default().fg(app.theme.border)
-    };
 
     let title = format!(" 📁 Workspace ({} files) ", app.file_tree.len());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(title);
+    let block = panel_block(
+        app,
+        title,
+        if is_focused {
+            PaneState::Focused
+        } else {
+            PaneState::Plain
+        },
+    );
 
     let items: Vec<ListItem> = app
         .file_tree
@@ -480,16 +509,16 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
     let text = chat_lines(app);
 
     let is_focused = app.focus == FocusArea::ChatInput && app.input_mode == InputMode::Normal;
-    let border_style = if is_focused {
-        Style::default().fg(app.theme.border_active)
-    } else {
-        Style::default().fg(app.theme.border)
-    };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(" 💬 Chat ");
+    let block = panel_block(
+        app,
+        " 💬 Chat ".to_string(),
+        if is_focused {
+            PaneState::Focused
+        } else {
+            PaneState::Plain
+        },
+    );
 
     let text_lines = text.len() as u16;
     let height = area.height.saturating_sub(2);
@@ -508,13 +537,6 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let is_editing = app.input_mode == InputMode::Editing;
-    let border_style = if is_editing {
-        Style::default().fg(app.theme.accent)
-    } else if app.focus == FocusArea::ChatInput {
-        Style::default().fg(app.theme.border_active)
-    } else {
-        Style::default().fg(app.theme.border)
-    };
 
     let title = if app.is_generating {
         let frame = spinner::frame(app.spinner_tick);
@@ -525,10 +547,17 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         " Press 'i' to start typing ".to_string()
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title(title);
+    let block = panel_block(
+        app,
+        title,
+        if is_editing {
+            PaneState::Editing
+        } else if app.focus == FocusArea::ChatInput {
+            PaneState::Focused
+        } else {
+            PaneState::Plain
+        },
+    );
 
     if app.is_generating {
         let paragraph = Paragraph::new("Please wait...")
@@ -555,10 +584,11 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 // ── Terminal Pane ───────────────────────────────────────────────────────────
 
 fn draw_terminal(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.border_active))
-        .title(" 🖥️  Terminal (Ctrl+T to toggle) ");
+    let block = panel_block(
+        app,
+        " 🖥️  Terminal (Ctrl+T to toggle) ".to_string(),
+        PaneState::Active,
+    );
 
     let text =
         Paragraph::new("  Terminal emulation coming soon.\n  Use Ctrl+T to toggle this pane.")
@@ -574,6 +604,7 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🧠 Select Model (↑↓ Enter · 'r' Refresh · 'l' Load · 'u' Unload · Esc Close) ");
@@ -738,6 +769,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" ⚙️  Settings (↑↓ select, ←→ change, Enter edit/save, Esc close) ");
@@ -962,6 +994,7 @@ fn draw_code_review(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -993,6 +1026,7 @@ fn draw_review_dashboard(f: &mut Frame, app: &App, area: Rect) {
         dash.files.len()
     );
     let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -1106,6 +1140,7 @@ fn draw_task_manager(f: &mut Frame, app: &App, area: Rect) {
         .filter(|t| matches!(t.status, TaskStatus::Running))
         .count();
     let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(format!(
@@ -1203,6 +1238,7 @@ fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(format!(" 🌳 Worktrees — {} ", app.worktrees.len()));
@@ -1311,6 +1347,7 @@ fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(format!(
@@ -1405,6 +1442,7 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📊 Performance Dashboard (Esc to close) ");
@@ -1750,6 +1788,7 @@ fn draw_provider_health(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🏥 Provider Health (Esc to close · h to refresh) ");
@@ -1772,6 +1811,7 @@ fn draw_project_analyzer(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📈 Project Analyzer (Esc to close) ");
@@ -1809,6 +1849,7 @@ fn draw_git_commit(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📝 Git Commit (Enter to commit, Esc to cancel) ");
@@ -1903,6 +1944,7 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
 
     // Security Auditor findings list (inner column, below the summary cards).
     let sec_inner = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .inner(centered_rect(75, 70, area));
     let sec_list = Layout::default()
@@ -1950,6 +1992,7 @@ fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🚀 Feature Navigator (↑↓ Enter, Esc to close) ");
@@ -2004,6 +2047,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         "\u{1F916}", status_icon, status_str
     );
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -2028,6 +2072,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(app.theme.border)
     };
     let cmd_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(cmd_border)
         .title(" ⌨️  Command (e.g., 'update deps', 'analyze tests') ");
@@ -2129,6 +2174,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let steps_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" \u{1F4CB} Steps ");
@@ -2171,6 +2217,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let log_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" \u{1F4DD} Log ");
@@ -2227,6 +2274,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         };
         f.render_widget(Clear, hist_area);
         let hist_block = Block::default()
+            .border_set(panel_border_set(app.config.rounded_borders))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(app.theme.border))
             .title(" History ");
@@ -2259,6 +2307,7 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
         status_icon, status
     );
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -2298,6 +2347,7 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let steps_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" Steps ");
@@ -2329,6 +2379,7 @@ fn draw_project_init_panel(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
     let log_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" Log ");
@@ -2385,6 +2436,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         status_icon
     );
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -2409,6 +2461,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(app.theme.border)
     };
     let session_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(session_border)
         .title(" \u{1F310} Session ");
@@ -2537,6 +2590,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let member_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" \u{1F465} Members ");
@@ -2591,6 +2645,7 @@ fn draw_collaboration_hub(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let activity_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" \u{1F4AC} Activity ");
@@ -2627,6 +2682,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
         status_icon
     );
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -2645,6 +2701,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Audio Meter + Status ────────────────────────────────────────────────
     let status_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📡 Audio Input ");
@@ -2665,6 +2722,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Recent Commands ─────────────────────────────────────────────────────
     let cmd_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📋 Recent Commands ");
@@ -2696,6 +2754,7 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Transcript Log ──────────────────────────────────────────────────────
     let trans_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📝 Transcript ");
@@ -2734,6 +2793,7 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 💡 Terminal Assistant (Enter:refresh, Esc:close) ");
@@ -2752,6 +2812,7 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Status ──────────────────────────────────────────────────────────────
     let status_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🤖 AI Shell Helper ");
@@ -2767,6 +2828,7 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Command Suggestions ─────────────────────────────────────────────────
     let sugg_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📋 Suggested Commands ");
@@ -2811,6 +2873,7 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
 
     // ── History ─────────────────────────────────────────────────────────────
     let hist_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📜 Execution History ");
@@ -2894,6 +2957,7 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🛡️ Security Auditor (Enter:scan, Esc:close) ");
@@ -2948,6 +3012,7 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     ];
 
     let summary_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📊 Risk Summary ");
@@ -2958,6 +3023,7 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Findings List ───────────────────────────────────────────────────────
     let find_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔎 Findings ");
@@ -2993,6 +3059,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
         status_indicator
     );
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(title);
@@ -3055,6 +3122,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     ];
 
     let gauge_block_w = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📈 Gauges ");
@@ -3065,6 +3133,7 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Function List ───────────────────────────────────────────────────────
     let func_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📊 Profiled Functions ");
@@ -3130,6 +3199,7 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🧩 Custom Models (↑↓ select, Esc:close) ");
@@ -3147,6 +3217,7 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Profile List ────────────────────────────────────────────────────────
     let list_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📋 Profiles ");
@@ -3182,6 +3253,7 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Profile Details ─────────────────────────────────────────────────────
     let detail_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔧 Parameters ");
@@ -3259,6 +3331,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 📚 Learning Mode (Enter:start, Esc:close) ");
@@ -3276,6 +3349,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Header + Progress ───────────────────────────────────────────────────
     let header_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🎯 Lesson Progress ");
@@ -3315,6 +3389,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
 
     // ── Lesson Content ──────────────────────────────────────────────────────
     let content_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 📖 Content ");
@@ -3440,6 +3515,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
         .title(" 🌐 Multi-Language (Enter:detect, Esc:close) ");
@@ -3466,6 +3542,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 
     // Detection results
     let detect_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔍 Language Detection ");
@@ -3496,6 +3573,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 
     // Supported languages
     let supp_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🌍 Supported Languages ");
@@ -3526,6 +3604,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
         .split(chunks[1]);
 
     let trans_block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔄 Quick Translate ");

@@ -397,3 +397,34 @@ fn advise_panel_renders_list_detail_and_empty() {
         }
     }
 }
+
+/// H1-06: the `rounded_borders` preference reaches every framed panel at
+/// once — body panes, overlays and toasts. Mixed corner sets would mean a
+/// construction site was missed by `panel_block`/`panel_border_set`.
+/// Messages are cleared because markdown code-fence decoration (`┌─ rust`)
+/// is content styling and stays square by design.
+#[test]
+fn rounded_borders_switch_every_panel_corner() {
+    for (name, focus) in FOCI {
+        let mut app = populated(*focus);
+        app.messages.clear();
+        app.config.rounded_borders = true;
+        let text = render_text(&mut app, 100, 30);
+        assert!(
+            text.contains('╭'),
+            "{name}: no rounded corner found in:\n{text}"
+        );
+        assert!(
+            !text.contains('┌'),
+            "{name}: square corner survived:\n{text}"
+        );
+
+        app.config.rounded_borders = false;
+        let text = render_text(&mut app, 100, 30);
+        assert!(text.contains('┌'), "{name}: square corner missing");
+        assert!(
+            !text.contains('╭'),
+            "{name}: rounded corner leaked:\n{text}"
+        );
+    }
+}
