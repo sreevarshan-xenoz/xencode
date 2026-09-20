@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Background Tasks panel (`Ctrl+K` or Feature Navigator, D2-01): live registry view with per-status colored rows (running / exited / killed), Enter → scrollable output detail for the selected task, `x` stop and `d` remove dispatched through the event channel so keys never block, wheel + resize clamping included
 - Agentic background-task tool loop in chat (D1-02): the model can call `background_start` / `background_poll` / `background_stop` (schemas in `xencode-providers-rs::background_tools`), executed client-side against the shared task registry with up to 8 tool rounds per turn; each call and result echoes into chat as a `⚙` system line
 - Background task registry (`xencode-core-rs::tasks`, D1-01): pure `TaskStore`/`TaskRecord` (status Running/Exited(code)/Killed, 500-line capped output tail) plus a tokio-backed `TaskManager` that spawns commands through `sh -c`, drains stdout+stderr without blocking polls, and refuses to remove or drop a still-running task's child process
 - Chat input history & autocomplete: Alt+Up/Down recalls sent prompts (draft stashed and restored, adjacent duplicates skipped), Tab completes slash commands — `/init`, `/ctx`, `/advise`, `/bytebot` — with the command list surfaced in the help overlay and as a toast on a lone `/` (Milestone E5)

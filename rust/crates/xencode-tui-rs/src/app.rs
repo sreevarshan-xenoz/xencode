@@ -149,6 +149,11 @@ pub struct App<'a> {
     pub is_reviewing: bool,
     pub code_review_output: String,
     pub review_dash: crate::review::ReviewDashboard,
+    /// Task panel (D2-01) cursor state. The data itself lives in
+    /// `task_runtime`; these are just the view's selection/scroll.
+    pub tasks_selected: usize,
+    pub tasks_detail: bool,
+    pub tasks_scroll: usize,
     pub commit_message: String,
     pub commit_cursor: usize,
     pub spinner_tick: usize,
@@ -629,6 +634,9 @@ impl<'a> App<'a> {
             is_reviewing: false,
             code_review_output: String::new(),
             review_dash: crate::review::ReviewDashboard::new(),
+            tasks_selected: 0,
+            tasks_detail: false,
+            tasks_scroll: 0,
             commit_message: String::new(),
             commit_cursor: 0,
             spinner_tick: 0,
@@ -1315,6 +1323,41 @@ impl<'a> App<'a> {
         } else {
             self.code_review_output.push_str(text);
         }
+    }
+
+    /// Registry snapshot for the task panel's draw/keys. `None` while the
+    /// chat tool loop holds the lock — registry ops never await mid-lock,
+    /// so this window is effectively between keystrokes.
+    pub fn tasks_snapshot(&self) -> Option<Vec<xencode_core_rs::TaskRecord>> {
+        self.task_runtime
+            .try_lock()
+            .ok()
+            .map(|m| m.list().to_vec())
+    }
+
+    /// `[TASKS]<verb>[|id]>` from the panel keys (D2-01): mutate the shared
+    /// registry off the UI thread. No feedback line — the panel renders the
+    /// registry live, so the new status is the feedback.
+    pub fn handle_tasks_command(&mut self, body: &str) {
+        let mut parts = body.split('|');
+        let Some(id) = parts
+            .next()
+            .filter(|v| matches!(*v, "stop" | "rm"))
+            .and_then(|_| parts.next())
+            .and_then(|s| s.parse::<u64>().ok())
+        else {
+            return;
+        };
+        let is_stop = body.starts_with("stop");
+        let rt = self.task_runtime.clone();
+        tokio::spawn(async move {
+            let mut m = rt.lock().await;
+            if is_stop {
+                let _ = m.stop(id).await;
+            } else {
+                let _ = m.remove(id);
+            }
+        });
     }
 
     /// Proactive warning from the real-time watcher (`[WATCH]<kind>|<path>`).
@@ -3377,6 +3420,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     content: format!("✗ Commit failed: {body}"),
                 });
                 app.refresh_git();
+            } else if let Some(body) = token.strip_prefix("[TASKS]") {
+                app.handle_tasks_command(body);
             } else if let Some(body) = token.strip_prefix("[TOOL]") {
                 // Tool-loop lines arrive mid-stream (D1-02); the next token
                 // opens a fresh assistant bubble, so each round stays visible.
@@ -3441,6 +3486,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         FocusArea::ReviewDashboard => {
                             app.review_dash.scroll_by(-3);
                         }
+                        FocusArea::TaskManager => {
+                            if app.tasks_detail {
+                                app.tasks_scroll = app.tasks_scroll.saturating_sub(3);
+                            } else {
+                                app.tasks_selected = app.tasks_selected.saturating_sub(3);
+                            }
+                        }
                         // E2-05: wheel drives the same state as ↑ for panels
                         // that have a cursor/scroll offset but lacked wheel.
                         // Remaining panels are single-screen with nothing to scroll.
@@ -3487,6 +3539,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         }
                         FocusArea::ReviewDashboard => {
                             app.review_dash.scroll_by(3);
+                        }
+                        FocusArea::TaskManager => {
+                            if app.tasks_detail {
+                                app.tasks_scroll += 3;
+                            } else if let Some(tasks) = app.tasks_snapshot() {
+                                app.tasks_selected =
+                                    (app.tasks_selected + 3).min(tasks.len().saturating_sub(1));
+                            }
                         }
                         FocusArea::Settings => {
                             if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {

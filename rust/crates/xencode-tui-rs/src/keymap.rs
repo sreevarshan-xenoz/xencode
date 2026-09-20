@@ -130,6 +130,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::GitCommit
                 | FocusArea::CodeReview
                 | FocusArea::ReviewDashboard
+                | FocusArea::TaskManager
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
@@ -152,6 +153,17 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 let base = app.review_dash.base.clone();
                 app.review_dash.open(&base);
                 app.focus = FocusArea::ReviewDashboard;
+            }
+        }
+        KeyCode::Char('k') => {
+            // Background task panel (D2-01): opens at the top of the list.
+            if app.focus == FocusArea::TaskManager {
+                app.focus = FocusArea::ChatInput;
+            } else {
+                app.tasks_selected = 0;
+                app.tasks_detail = false;
+                app.tasks_scroll = 0;
+                app.focus = FocusArea::TaskManager;
             }
         }
         KeyCode::Char('t') => {
@@ -227,6 +239,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::SecurityAuditor => key_security(app, key, tx),
         FocusArea::CodeReview => key_code_review(app, key, tx),
         FocusArea::ReviewDashboard => key_review_dashboard(app, key),
+        FocusArea::TaskManager => key_task_manager(app, key, tx),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key),
         FocusArea::CustomModels => key_custom_models(app, key),
@@ -305,7 +318,8 @@ fn on_esc(app: &mut App) {
         | FocusArea::CustomModels
         | FocusArea::LearningMode
         | FocusArea::MultiLanguage
-        | FocusArea::ReviewDashboard => {
+        | FocusArea::ReviewDashboard
+        | FocusArea::TaskManager => {
             app.focus = FocusArea::ChatInput;
         }
         FocusArea::CodeEditor => {
@@ -773,6 +787,46 @@ fn key_review_dashboard(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+fn key_task_manager(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    fn select(app: &mut App, delta: i32) {
+        let count = app.tasks_snapshot().map(|t| t.len()).unwrap_or(0);
+        let next = app.tasks_selected as i64 + delta as i64;
+        app.tasks_selected = next.clamp(0, count.saturating_sub(1) as i64) as usize;
+    }
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if app.tasks_detail => {
+            app.tasks_scroll = app.tasks_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.tasks_detail => {
+            app.tasks_scroll += 1;
+        }
+        KeyCode::Up | KeyCode::Char('k') => select(app, -1),
+        KeyCode::Down | KeyCode::Char('j') => select(app, 1),
+        KeyCode::Enter => {
+            app.tasks_detail = !app.tasks_detail;
+            app.tasks_scroll = 0;
+        }
+        KeyCode::Char('x') if !app.tasks_detail => {
+            if let Some(id) = app
+                .tasks_snapshot()
+                .and_then(|t| t.get(app.tasks_selected).map(|r| r.id))
+            {
+                let _ = tx.send(format!("[TASKS]stop|{id}"));
+            }
+        }
+        KeyCode::Char('d') if !app.tasks_detail => {
+            if let Some(id) = app
+                .tasks_snapshot()
+                .and_then(|t| t.get(app.tasks_selected).map(|r| r.id))
+            {
+                let _ = tx.send(format!("[TASKS]rm|{id}"));
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
@@ -1158,5 +1212,57 @@ mod tests {
         app.input_mode = InputMode::Editing;
         press_with_mods(&mut app, KeyCode::Char('j'), KeyModifiers::CONTROL);
         assert_eq!(app.chat_input.lines().len(), 2);
+    }
+
+    #[test]
+    fn ctrl_k_toggles_task_panel_and_resets_cursor() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.tasks_selected = 4;
+        app.tasks_detail = true;
+        press_with_mods(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::TaskManager);
+        assert_eq!((app.tasks_selected, app.tasks_detail, app.tasks_scroll), (0, false, 0));
+        press_with_mods(&mut app, KeyCode::Char('k'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
+    fn task_panel_enter_toggles_detail_and_arrows_change_role() {
+        let mut app = app_with(FocusArea::TaskManager);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.tasks_detail);
+        // In detail view j/k scroll the output, not the selection.
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!((app.tasks_scroll, app.tasks_selected), (1, 0));
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.tasks_detail);
+        // Empty registry: list selection stays pinned at 0.
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.tasks_selected, 0);
+        // Esc closes like any panel.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[tokio::test]
+    async fn task_panel_x_and_d_target_the_selected_task() {
+        let mut app = app_with(FocusArea::TaskManager);
+        app.task_runtime
+            .lock()
+            .await
+            .start("sleeper", "sleep 30")
+            .await
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let key = |code| crossterm::event::KeyEvent::new(code, KeyModifiers::NONE);
+        handle_key(&mut app, key(KeyCode::Char('x')), &tx);
+        assert_eq!(rx.try_recv().unwrap(), "[TASKS]stop|1");
+        handle_key(&mut app, key(KeyCode::Char('d')), &tx);
+        assert_eq!(rx.try_recv().unwrap(), "[TASKS]rm|1");
+        // Detail view: x/d are not list actions and must not fire.
+        app.tasks_detail = true;
+        handle_key(&mut app, key(KeyCode::Char('d')), &tx);
+        assert!(rx.try_recv().is_err());
+        app.task_runtime.lock().await.stop(1).await.unwrap();
     }
 }

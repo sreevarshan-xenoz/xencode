@@ -33,6 +33,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("LearningMode", FocusArea::LearningMode),
     ("MultiLanguage", FocusArea::MultiLanguage),
     ("ReviewDashboard", FocusArea::ReviewDashboard),
+    ("TaskManager", FocusArea::TaskManager),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
@@ -139,4 +140,53 @@ fn every_panel_renders_with_light_theme() {
         }));
         assert!(result.is_ok(), "{name} failed under light theme");
     }
+}
+
+/// D2-01: the empty-state sweep above never sees registry rows. This renders
+/// the list and detail views over a live (`sleep`) and a finished+output
+/// (`echo`) task, across the sizes where layout maths breaks.
+#[test]
+fn task_panel_renders_populated_registry() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let mut app = populated(FocusArea::TaskManager);
+        let id_running = app
+            .task_runtime
+            .lock()
+            .await
+            .start("sleeper", "sleep 30")
+            .await
+            .unwrap();
+        let id_done = app.task_runtime.lock().await.start("echo", "echo hi").await.unwrap();
+        for _ in 0..200 {
+            let settled = {
+                let mut m = app.task_runtime.lock().await;
+                let rec = m.poll(id_done).await.unwrap();
+                !matches!(rec.status, xencode_core_rs::TaskStatus::Running)
+                    && !rec.output().is_empty()
+            };
+            if settled {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        for (selected, detail) in [(0usize, false), (1, false), (0, true), (1, true)] {
+            app.tasks_selected = selected;
+            app.tasks_detail = detail;
+            for &width in &[20, 61, 80] {
+                for &height in &[8, 16, 24] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal
+                        .draw(|f| draw(f, &app))
+                        .unwrap_or_else(|_| panic!("render {width}x{height} sel={selected} detail={detail}"));
+                }
+            }
+        }
+        app.task_runtime.lock().await.stop(id_running).await.unwrap();
+        assert!(id_running < id_done);
+    });
 }
