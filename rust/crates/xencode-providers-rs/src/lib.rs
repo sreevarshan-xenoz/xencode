@@ -20,7 +20,8 @@ use retry::RetryConfig;
 pub use capabilities::{capabilities_for, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
 pub use tools::{
-    advise_tools, background_tools, file_tools, AgentStep, AgentTurn, ToolCall, ToolDefinition,
+    advise_tools, background_tools, command_tools, file_tools, AgentStep, AgentTurn, ToolCall,
+    ToolDefinition,
 };
 
 #[derive(Debug)]

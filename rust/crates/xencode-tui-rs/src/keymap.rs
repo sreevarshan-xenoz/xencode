@@ -827,6 +827,10 @@ fn settings_step(app: &mut App, dir: i32) {
                     app.config.response_timeout =
                         stepped(app.config.response_timeout, dir, step, min, max)
                 }
+                "Command Timeout" => {
+                    app.config.agent_command_timeout =
+                        stepped(app.config.agent_command_timeout, dir, step, min, max)
+                }
                 _ => return,
             }
             app.save_config();
@@ -1716,6 +1720,14 @@ mod tests {
             agent.kind,
             SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES)
         );
+        // I2-02: the command budget sits under it, and the section stays
+        // contiguous — Settings prints a header only when the section changes.
+        let agent_rows: Vec<&str> = SETTINGS_ITEMS
+            .iter()
+            .filter(|r| r.section == "Agent")
+            .map(|r| r.label)
+            .collect();
+        assert_eq!(agent_rows, ["Agent Approval", "Command Timeout"]);
     }
 
     #[test]
@@ -1787,6 +1799,20 @@ mod tests {
         press(&mut app, KeyCode::Left);
         assert_eq!(app.config.response_timeout, 5, "stepped below min");
 
+        // I2-02: the agent's foreground-command budget is a stepped row too,
+        // so it is adjustable without leaving the TUI.
+        app.settings_cursor = settings_row_index("Command Timeout");
+        assert_eq!(app.config.agent_command_timeout, 30, "config default");
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.config.agent_command_timeout, 35);
+        for _ in 0..20 {
+            press(&mut app, KeyCode::Left);
+        }
+        assert_eq!(
+            app.config.agent_command_timeout, 5,
+            "stepped below min at the row's own floor"
+        );
+
         // Navigation bounds derive from the table.
         app.settings_cursor = SETTINGS_ITEMS.len() - 1;
         press(&mut app, KeyCode::Char('j'));
@@ -1808,6 +1834,7 @@ mod tests {
         assert!(saved.rounded_borders);
         assert_eq!(saved.response_timeout, 5);
         assert_eq!(saved.agent_approval, "edit-allow");
+        assert_eq!(saved.agent_command_timeout, 5);
 
         // The chord keeps cycling (and saving) from the chat pane.
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);

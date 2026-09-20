@@ -133,6 +133,7 @@ xencode config reset
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
 | `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
+| `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).

@@ -229,6 +229,7 @@ Display settings (Settings panel rows, same keys as `xencode config set`):
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
 | `Agent Approval` / `agent_approval` | `ask` | how the chat agent may use its tools: `ask` prompts before mutating tools, `edit-allow` auto-approves file edits but still prompts for shell, `all-allow` auto-approves everything inside the workspace (paths outside it, `.git/` and the config dir are always refused) |
+| `Command Timeout` / `agent_command_timeout` | 30 s | how long the agent's `run_command` may run before it is killed; the panel steps 5–300 s, `config set` accepts 1–600 |
 
 The header reads ` ✦ xencode [layout] ⎇branch model` on the left with the
 focused panel name on the right; on narrow terminals parts drop out in that
@@ -250,6 +251,7 @@ back to the model before it continues.
 | `background_poll(id)` / `background_stop(id)` | Output / cancel of a background task | read-only |
 | `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |
 | `edit_file(path, old, new, all?)` | Exact string replace; refuses an ambiguous match unless `all` | file change |
+| `run_command(command)` | `sh -c` in the project root, waits and returns the exit status plus output | shell command |
 | `background_start(command, cwd?, name?)` | Start a shell command in the background (`Ctrl+K` panel) | shell command |
 
 `file change` and `shell command` calls stop at the approval prompt described
@@ -263,6 +265,16 @@ the agent explains or re-plans instead of looping.
 `agent_max_rounds` (default 16) caps how many tool rounds one turn may take;
 after that the model is asked for a prose answer with no tools offered.
 
+`run_command` is what closes the edit → test → fix loop: the prompt shows the
+literal command line (never a diff, because there is no proposed file change to
+show) and the answer comes back as `$ <command>`, `exit <code>` and the
+combined stdout+stderr. Only the last 8 KiB of output is kept — when a build
+fails the reason is at the end — and the cap is announced in the result.
+`agent_command_timeout` (default 30 seconds, Settings row `Command Timeout`,
+or `xencode config set agent_command_timeout 45`) kills a command that runs
+too long; a killed command returns no output at all, and the model is told to
+use `background_start` for anything that slow.
+
 Every approved write or edit is snapshotted first, so **`/rewind [turns]`**
 puts the files back: `/rewind` undoes the last turn that changed anything,
 `/rewind 3` the last three. Files the agent created are deleted, files it
@@ -271,7 +283,10 @@ instead of counted. The snapshots live in memory only — quitting discards
 them, and git is never touched, so your own commits remain the durable
 history. `/rewind` refuses to run while the agent is still generating, and
 if the rewound file is open in the editor with unsaved edits, it warns rather
-than throwing your work away.
+than throwing your work away. It covers the `write_file` / `edit_file` tools
+only — a `run_command` or `background_start` that touched files behind our
+back is not undone, which is why every snapshot refusal is stated in the
+transcript instead of quietly claimed.
 
 ### First-Time Setup
 

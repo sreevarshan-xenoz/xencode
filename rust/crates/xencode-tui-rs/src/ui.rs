@@ -875,6 +875,7 @@ fn setting_display(app: &App, idx: usize) -> String {
             "Max Cache Size" => format!("{} entries", app.config.max_cache_size),
             "Memory Items" => format!("{} entries", app.config.max_memory_items),
             "Response Timeout" => format!("{}s", app.config.response_timeout),
+            "Command Timeout" => format!("{}s", app.config.agent_command_timeout),
             _ => String::new(),
         },
         SettingKind::Text => {

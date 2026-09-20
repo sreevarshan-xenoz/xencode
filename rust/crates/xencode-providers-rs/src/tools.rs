@@ -552,9 +552,51 @@ pub fn file_tools() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Tool surface for running a command and waiting for it (Milestone I,
+/// I2-02). This is the "did my change actually work?" tool: the output comes
+/// back to the model as produced, so the timeout and the output cap are
+/// enforced by the executor rather than by the schema.
+pub fn command_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "run_command".to_string(),
+        description: "Run a shell command in the workspace root and wait for it to \
+                      finish, returning its combined output and exit code. Use this to \
+                      build, test or inspect after a change. Long-running work belongs \
+                      in background_start instead."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Shell command line, run through sh -c in the \
+                                    workspace root"
+                }
+            },
+            "required": ["command"]
+        }),
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_command_takes_one_string_argument() {
+        let tools = command_tools();
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["run_command"]
+        );
+        let value = tools[0].to_api_value();
+        let props = value["function"]["parameters"]["properties"]
+            .as_object()
+            .unwrap();
+        assert_eq!(props.len(), 1);
+        assert_eq!(props["command"]["type"], "string");
+        assert_eq!(value["function"]["parameters"]["required"][0], "command");
+    }
 
     #[test]
     fn file_tools_have_minimal_openai_function_schemas() {
