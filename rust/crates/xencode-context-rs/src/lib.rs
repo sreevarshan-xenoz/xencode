@@ -31,6 +31,7 @@ pub mod stale;
 pub mod state;
 pub mod symbols;
 pub mod watcher;
+pub mod worktree;
 
 pub use advise::{
     advise, affected_dependents, broken_imports, find_cycles, hub_files, orphan_files, Advice,
@@ -70,6 +71,9 @@ pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, Retri
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
+pub use worktree::{
+    parse_worktree_list, worktree_add, worktree_list, worktree_remove, WorktreeInfo,
+};
 pub use symbols::{
     build_graph, dependency_map, dependent_map, expand_dependencies, extract_rust_symbols,
     rank_files, resolve_import, DepEdge, PerFileSymbols,
