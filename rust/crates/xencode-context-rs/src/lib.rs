@@ -35,8 +35,8 @@ pub mod watcher;
 pub mod worktree;
 
 pub use advise::{
-    advise, affected_dependents, broken_imports, find_cycles, hub_files, orphan_files, Advice,
-    AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
+    advise, advise_from_snapshot, affected_dependents, broken_imports, find_cycles, hub_files,
+    orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
 pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
 pub use cmd_output::{

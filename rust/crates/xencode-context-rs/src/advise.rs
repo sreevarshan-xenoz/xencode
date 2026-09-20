@@ -18,6 +18,7 @@
 //! [`advise`] aggregates the file-level findings into sorted [`Advice`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::Path;
 
 use crate::symbols::{DepEdge, PerFileSymbols};
 
@@ -272,6 +273,33 @@ pub fn advise(
     out
 }
 
+/// Recompute [`advise`] from the `.xencode` snapshot written by
+/// [`crate::init_project`] in `root`. This is the single read path shared by
+/// the TUI panel, the `xencode advise` CLI and the agentic `repo_advise`
+/// tool, so the surfaces can never disagree about what the snapshot says.
+/// `Err(NoIndex)` when the symbol map is missing or empty.
+pub fn advise_from_snapshot(root: &Path) -> Result<Vec<Advice>, crate::ContextError> {
+    use crate::index::{deps_json_path, file_index_path, read_json, symbols_json_path};
+    let xencode = root.join(crate::init::XENCODE_DIR);
+    let symbols: BTreeMap<String, PerFileSymbols> =
+        read_json(&symbols_json_path(&xencode)).unwrap_or_default();
+    if symbols.is_empty() {
+        return Err(crate::ContextError::NoIndex(xencode));
+    }
+    let graph: Vec<DepEdge> = read_json(&deps_json_path(&xencode)).unwrap_or_default();
+    let index: Option<crate::index::FilesIndex> = read_json(&file_index_path(&xencode));
+    let rust_files: Vec<String> = index
+        .map(|i| {
+            i.files
+                .into_iter()
+                .filter(|f| f.language == "rust")
+                .map(|f| f.path)
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(advise(&rust_files, &symbols, &graph))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +333,37 @@ mod tests {
     fn detects_a_two_file_cycle_once() {
         let (_, _, graph) = two_cycle_repo();
         assert_eq!(find_cycles(&graph), vec![vec!["src/a.rs", "src/b.rs"]]);
+    }
+
+    #[test]
+    fn advise_from_snapshot_reads_disk_and_errors_without_index() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "xencode-advise-snap-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        // No snapshot yet → NoIndex with the /init hint, not an empty report.
+        let err = advise_from_snapshot(&root).unwrap_err();
+        assert!(matches!(err, crate::ContextError::NoIndex(_)), "{err:?}");
+        assert!(err.to_string().contains("no project index"), "{err}");
+
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod a;\nmod b;\n").unwrap();
+        std::fs::write(root.join("src/a.rs"), "use crate::b::bee;\n").unwrap();
+        std::fs::write(root.join("src/b.rs"), "use crate::a::ay;\n").unwrap();
+        std::fs::File::create(root.join("Cargo.toml")).unwrap();
+        crate::init_project(&root, std::sync::Arc::new(AtomicBool::new(false)), |_| {})
+            .expect("init");
+        let items = advise_from_snapshot(&root).unwrap();
+        assert!(
+            items
+                .iter()
+                .any(|i| i.kind == AdviceKind::Cycle && i.file == "src/a.rs"),
+            "{items:?}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

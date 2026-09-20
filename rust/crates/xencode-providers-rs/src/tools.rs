@@ -390,9 +390,50 @@ pub fn background_tools() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Tool surface for repository insights (Milestone F, F3-02).
+///
+/// Schema only — execution lives in the TUI's agent tool loop, which owns
+/// the workspace snapshot.
+pub fn advise_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "repo_advise".to_string(),
+        description: "Report deterministic repository insights from the \
+                      project's .xencode symbol snapshot: broken imports, \
+                      import cycles, hub files and orphan files. Read-only; \
+                      requires the project index (/init). Returns at most 40 \
+                      findings; pass a path filter to narrow them."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "string",
+                    "description": "Only report findings whose file path \
+                                    contains this substring"
+                }
+            }
+        }),
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advise_tool_is_a_valid_openai_function_schema() {
+        let tools = advise_tools();
+        assert_eq!(tools[0].name, "repo_advise");
+        let value = tools[0].to_api_value();
+        assert_eq!(value["type"], "function");
+        assert_eq!(value["function"]["name"], "repo_advise");
+        let params = &value["function"]["parameters"];
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"]["filter"].is_object());
+        // Everything is optional.
+        assert!(params.get("required").is_none());
+        assert!(!tools[0].description.is_empty());
+    }
 
     #[test]
     fn background_tools_are_valid_openai_function_schemas() {
