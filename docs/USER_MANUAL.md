@@ -160,6 +160,16 @@ Chat editing (after `i`):
 | `Alt+↑` / `Alt+↓` | Recall previous / next sent prompt |
 | `Tab` | Complete a `/` command, else insert 4 spaces |
 
+Agent approval prompt (modal — while it is open these are the only keys that
+do anything):
+
+| Key | Action |
+|-----|--------|
+| `y` | Allow this call |
+| `a` | Allow, and allow everything of this class for the rest of the session |
+| `n` / `Esc` | Deny (the model is told it was denied and must not retry unchanged) |
+| `k` / `j` | Scroll the diff or command preview |
+
 **Feature Navigator panels (Ctrl+F → select → Enter):**
 
 | Panel | Description |

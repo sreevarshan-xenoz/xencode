@@ -53,6 +53,15 @@ const EDITING: &[Binding] = &[
     ("Backspace/Del", "delete"),
 ];
 
+/// The agent approval prompt (I1-03) is modal: these are the only keys it
+/// answers while it is on screen.
+const APPROVAL: &[Binding] = &[
+    ("y", "allow this call"),
+    ("a", "allow · and everything like it this session"),
+    ("n / Esc", "deny (the model is told it was denied)"),
+    ("k / j", "scroll the diff or command preview"),
+];
+
 /// Commands intercepted by `submit_message` — keep in sync with SLASH_COMMANDS.
 const COMMANDS: &[Binding] = &[
     ("/init [abort|status]", "generate & control project docs"),
@@ -171,6 +180,7 @@ pub fn help_lines(focus: FocusArea, theme: &ThemeColors) -> Vec<Line<'static>> {
     section(&mut lines, "Universal", UNIVERSAL, theme);
     section(&mut lines, "Global (Ctrl)", GLOBAL, theme);
     section(&mut lines, "While editing chat", EDITING, theme);
+    section(&mut lines, "Agent approval prompt", APPROVAL, theme);
     section(&mut lines, "Slash commands", COMMANDS, theme);
     lines
 }

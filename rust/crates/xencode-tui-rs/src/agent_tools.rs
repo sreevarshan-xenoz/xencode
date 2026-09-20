@@ -63,6 +63,46 @@ pub enum Permission {
     Deny,
 }
 
+/// The user's answer at an approval prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalAnswer {
+    Approved,
+    ApprovedForSession,
+    Denied,
+}
+
+impl ApprovalAnswer {
+    /// Word for the chat transcript's tool-call record.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::ApprovedForSession => "always allowed",
+            Self::Denied => "denied",
+        }
+    }
+}
+
+/// What the approval overlay shows for one pending call. `preview` carries
+/// the proposed unified diff (file edits) or the exact command line (shell),
+/// already size-capped by [`approval_preview`].
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    pub tool: String,
+    pub class: ToolClass,
+    pub summary: String,
+    pub preview: String,
+}
+
+impl ApprovalRequest {
+    pub fn class_label(&self) -> &'static str {
+        match self.class {
+            ToolClass::ReadOnly => "read-only",
+            ToolClass::Edit => "file change",
+            ToolClass::Shell => "shell command",
+        }
+    }
+}
+
 /// What a tool call touches. Unknown tools count as Shell — the executor
 /// errors on them anyway, but they are never silently treated as read-only.
 pub fn tool_class(tool: &str) -> ToolClass {
@@ -484,6 +524,101 @@ fn tool_write_file(root: &Path, args: &serde_json::Map<String, serde_json::Value
         if existed { "updated" } else { "created" },
         content.lines().count()
     )
+}
+
+/// Result string fed back to the model when the user denies at the prompt.
+/// Wording matters: weak models otherwise retry the identical call forever.
+pub const DENIED_RESULT: &str = "error: the user denied this action. Do not retry it unchanged — explain, adjust, or ask the user.";
+
+/// Result string fed back to the model for a policy-denied call.
+pub const FORBIDDEN_RESULT: &str =
+    "error: refused by the permission policy (path outside the allowed workspace).";
+
+/// One-line label for the approval overlay: tool + its focus argument.
+pub fn approval_summary(call: &ToolCall) -> String {
+    let args = call.arguments_object();
+    let focus = arg_str(&args, "path")
+        .or_else(|| arg_str(&args, "command"))
+        .or_else(|| arg_str(&args, "pattern"))
+        .unwrap_or("");
+    if focus.is_empty() {
+        call.name.clone()
+    } else {
+        truncate_one_line(&format!("{} {}", call.name, focus), 90)
+    }
+}
+
+/// The overlay's body: the concrete bytes at stake. File writes/edits get
+/// the exact unified diff of the proposed change (computed on a snapshot of
+/// the current file — the call re-reads at execution, so the real change
+/// could differ if the file is edited mid-prompt); shell tools get the
+/// literal command line; everything else gets the argument summary.
+pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
+    let args = call.arguments_object();
+    let diff_for = |path: &str, new_text: &str| -> String {
+        let (full, display) = match workspace_path(root, path) {
+            Ok(ok) => ok,
+            Err(e) => return e,
+        };
+        let old = if full.exists() {
+            match read_text(&full, &display) {
+                Ok(t) => t,
+                Err(e) => return e,
+            }
+        } else {
+            String::new()
+        };
+        let header = if full.exists() {
+            format!("target: {display}")
+        } else {
+            format!("target: {display} (new file)")
+        };
+        format!("{header}\n{}", unified_diff(&old, new_text).trim_end())
+    };
+    match call.name.as_str() {
+        "write_file" => match (arg_str(&args, "path"), arg_str(&args, "content")) {
+            (Some(p), Some(c)) => diff_for(p, c),
+            _ => summarize_call(call),
+        },
+        "edit_file" => {
+            let (Some(p), Some(old), Some(new)) = (
+                arg_str(&args, "path"),
+                arg_str(&args, "old"),
+                arg_str(&args, "new"),
+            ) else {
+                return summarize_call(call);
+            };
+            if old.is_empty() {
+                return summarize_call(call);
+            }
+            let (full, _) = match workspace_path(root, p) {
+                Ok(ok) => ok,
+                Err(e) => return e,
+            };
+            let Ok(current) = read_text(&full, p) else {
+                return summarize_call(call);
+            };
+            let count = current.matches(old).count();
+            let updated = if arg_bool(&args, "all") {
+                current.replace(old, new)
+            } else {
+                current.replacen(old, new, 1)
+            };
+            let mut preview = diff_for(p, &updated);
+            if count != 1 && !arg_bool(&args, "all") {
+                preview.push_str(&format!(
+                    "\n(note: \"old\" currently matches {count} times — the edit \
+                     would fail unless all=true)"
+                ));
+            }
+            preview
+        }
+        "background_start" => match arg_str(&args, "command") {
+            Some(command) => format!("command: sh -c {command:?}"),
+            None => summarize_call(call),
+        },
+        _ => summarize_call(call),
+    }
 }
 
 fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -1357,6 +1492,106 @@ mod tests {
         )
         .await;
         assert_eq!(read, "1\tok");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn approval_summary_focuses_the_argument_that_matters() {
+        assert_eq!(
+            approval_summary(&call(
+                "write_file",
+                serde_json::json!({"path": "src/lib.rs", "content": "x"}),
+            )),
+            "write_file src/lib.rs"
+        );
+        assert_eq!(
+            approval_summary(&call(
+                "background_start",
+                serde_json::json!({"command": "cargo test"})
+            )),
+            "background_start cargo test"
+        );
+        // No recognisable focus argument → bare tool name, and long lines
+        // stay on one screen row.
+        assert_eq!(
+            approval_summary(&call("repo_advise", serde_json::json!({"filter": "all"}))),
+            "repo_advise"
+        );
+        let long = approval_summary(&call(
+            "search_files",
+            serde_json::json!({"pattern": "x".repeat(200)}),
+        ));
+        // truncate_one_line keeps `max` chars and appends the ellipsis.
+        assert!(long.chars().count() <= 91, "{long}");
+    }
+
+    #[test]
+    fn approval_preview_shows_the_exact_diff_for_write_and_edit() {
+        let root = temp_root("preview");
+        std::fs::write(root.join("code.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+        let write = approval_preview(
+            &root,
+            &call(
+                "write_file",
+                serde_json::json!({"path": "code.rs", "content": "fn a() {}\nfn c() {}\n"}),
+            ),
+        );
+        assert!(write.contains("target: code.rs"), "{write}");
+        assert!(write.contains("-fn b() {}"), "{write}");
+        assert!(write.contains("+fn c() {}"), "{write}");
+
+        let fresh = approval_preview(
+            &root,
+            &call(
+                "write_file",
+                serde_json::json!({"path": "new/mod.rs", "content": "pub fn n() {}\n"}),
+            ),
+        );
+        assert!(fresh.contains("(new file)"), "{fresh}");
+
+        let edit = approval_preview(
+            &root,
+            &call(
+                "edit_file",
+                serde_json::json!({"path": "code.rs", "old": "fn a", "new": "fn z", "all": true}),
+            ),
+        );
+        assert!(edit.contains("-fn a"), "{edit}");
+        assert!(edit.contains("+fn z"), "{edit}");
+
+        // An ambiguous edit is the one case the diff alone cannot show: the
+        // preview must say the old text matches twice.
+        std::fs::write(root.join("dup.rs"), "x\nx\n").unwrap();
+        let dup = approval_preview(
+            &root,
+            &call(
+                "edit_file",
+                serde_json::json!({"path": "dup.rs", "old": "x", "new": "y"}),
+            ),
+        );
+        assert!(dup.contains("2 times"), "{dup}");
+
+        // Out-of-workspace paths are refused in the preview, not displayed
+        // as if they were editable.
+        let outside = approval_preview(
+            &root,
+            &call(
+                "write_file",
+                serde_json::json!({"path": "../../etc/pwned", "content": "x"}),
+            ),
+        );
+        assert!(outside.contains("outside the workspace"), "{outside}");
+
+        // Shell tools show the command line, no diff.
+        let shell = approval_preview(
+            &root,
+            &call(
+                "background_start",
+                serde_json::json!({"command": "rm -rf /"}),
+            ),
+        );
+        assert!(shell.contains("rm -rf /"), "{shell}");
+        assert!(!shell.contains("@@"), "{shell}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

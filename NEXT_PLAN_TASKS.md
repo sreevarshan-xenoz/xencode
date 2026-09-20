@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 596 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 611 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -586,9 +586,14 @@ outgoing editor-activity producer, configurable max session size.
   in `agent_tools`, hard-deny outside the workspace / `.git/` / config dir,
   `agent_approval` config key + Settings Cycle row + CLI `config set`,
   session grants on `App`. **596 tests passed, zero clippy warnings**
-- [ ] I1-02 — file tool definitions + executors (read/list/search/write/edit,
-  unified diffs via `similar`)
-- [ ] I1-03 — approval overlay + tool-call records in the chat log
+- [x] I1-02 — file tool definitions + executors (read/list/search/write/edit,
+  unified diffs via `similar`), all hard-denied outside the workspace at the
+  executor itself; `background_start` resolves relative `cwd` against the
+  workspace root. **603 tests passed, zero clippy warnings**
+- [x] I1-03 — approval overlay: topmost modal with diff/command preview,
+  `y`/`a`/`n`/`Esc` + `k`/`j` scroll, session grants, FIFO queue for stacked
+  calls, and a `⚙ … · approved/denied` line in the chat log for every answer.
+  **611 tests passed, zero clippy warnings**
 - [ ] I1-04 — wire file tools into the chat loop; `agent_max_rounds`
 - [ ] I2-01 — checkpoints + `/rewind`
 - [ ] I2-02 — `run_command` tool (timed, capped, approval-gated)
