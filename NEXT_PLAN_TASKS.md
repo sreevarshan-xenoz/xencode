@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 641 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 645 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -601,7 +601,7 @@ outgoing editor-activity producer, configurable max session size.
 - [x] I2-01 — checkpoints + `/rewind`: pre-bytes snapshot of every approved write/edit, grouped per turn (session-only, git untouched), `/rewind [turns]`, editor buffer refreshed unless unsaved edits are at stake. **624 tests passed, zero clippy warnings**
 - [x] I2-02 — `run_command` tool: foreground `sh -c` in the workspace root, `agent_command_timeout` (default 30 s, Settings row + CLI), 8 KiB tail of combined output, exit status first, approval prompt shows the literal command line. **630 tests passed, zero clippy warnings**
 - [x] I2-03 — plan/TODO visibility: `update_plan(items)` posts the model's todo list (≤12 steps, read-only class so it never prompts), rendered as a `☰ Plan 2/5` strip above the transcript with `✓`/`▶`/`·` glyphs, compact at 6 steps with a hidden-count line; `/plan` pins, `/plan clear` drops; tolerant parsing of weak-model shapes, failed update leaves the visible plan alone. **641 tests passed, zero clippy warnings**
-- [ ] I2-04 — real ByteBot replacing the scripted simulation
+- [x] I2-04 — real ByteBot: `run_bytebot` drives the same agent loop as chat (background + file + command + plan tools) with the delegated task as its first message, so `bytebot_steps` are the **actual tool calls** with live status and the progress bar is the share of them that came back — it can regress, and the closing line says `N/M call(s) completed`. Honours `agent_approval` (every mutating call prompts in `ask` mode), shares the checkpoint groups so one `/rewind` undoes a whole run, and prints the provider's real error instead of invented output; the scripted sleeps and fabricated "All tests pass" rows are gone. **645 tests passed, zero clippy warnings**
 - [ ] I3-01 — MCP stdio client (`xencode-mcp-rs`)
 - [ ] I3-02 — pre/post tool-use hooks
 - [ ] I3-03 — `/spawn` subagent in a git worktree

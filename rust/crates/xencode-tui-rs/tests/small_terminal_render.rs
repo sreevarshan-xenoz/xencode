@@ -53,6 +53,15 @@ fn populated(focus: FocusArea) -> App<'static> {
     });
     app.bytebot_log.push("✅ did a thing".into());
     app.bytebot_log.push("❌ failed a thing".into());
+    // I2-04: step rows are real tool calls, so the panel renders every
+    // outcome a call can have.
+    app.bytebot_steps = vec![
+        ("read_file src/app.rs".into(), "done".into()),
+        ("edit_file src/app.rs".into(), "running".into()),
+        ("run_command cargo test".into(), "denied".into()),
+        ("write_file NOTES.md".into(), "failed".into()),
+    ];
+    app.bytebot_progress = 0.25;
     app.bytebot_history.push("run tests".into());
     app.attached_files.insert("./src/main.rs".into());
     app.chat_input
@@ -264,6 +273,30 @@ fn plan_strip_shows_progress_and_points_at_the_hidden_steps() {
     // A short pane would rather drop the strip than starve the transcript.
     let text = render_text(&mut app, 100, 10);
     assert!(!text.contains("☰ Plan"), "{text}");
+}
+
+/// I2-04: every step row is a call the model made, refusal included. Nothing
+/// on this screen comes from a script, so no "Applying changes…" row can
+/// appear before a change was made and no "all tests pass" can be claimed.
+#[test]
+fn bytebot_panel_shows_real_calls_and_their_outcomes() {
+    let mut app = populated(FocusArea::ByteBotPanel);
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 40);
+    assert!(text.contains("Step 1: read_file src/app.rs"), "{text}");
+    assert!(
+        text.contains("Step 3: run_command cargo test · denied"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Step 4: write_file NOTES.md · failed"),
+        "{text}"
+    );
+    assert!(text.contains("25%"), "the bar is calls finished: {text}");
+    assert!(text.contains("did a thing"), "{text}");
+    for scripted in ["Analyzing workspace", "Applying changes", "All tests pass"] {
+        assert!(!text.contains(scripted), "{scripted} is not real: {text}");
+    }
 }
 
 /// E4-03 regression: the settings navigation bound derives from

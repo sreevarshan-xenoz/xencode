@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- ByteBot is the real agent (Milestone I, I2-04): `/bytebot <task>` and the
+  panel's Enter used to play a recording — six fixed steps, `sleep`s, and
+  invented output like "🧪 Running test suite (142 tests)" and "✅ All tests
+  pass". Both now run the *same* tool loop as a chat turn, with the task as its
+  only user turn (project guidelines, git state and retrieved context, no chat
+  history), so the panel's **Execution Steps** are the calls the model actually
+  made: `⏳` while one runs, then `✅ done`, `✗ denied`, `✗ refused` or `❌
+  failed`. The progress bar is finished calls over calls made — it can move
+  backwards, which is honest. The approval gate is exactly your
+  `agent_approval` setting (`ask` prompts every edit and every command), the
+  writes are checkpointed so one `/rewind` undoes the whole run, a plan the run
+  posts shows in the same strip, and a provider failure is printed as the error
+  it was. `is_generating` no longer claims a delegated run, `/rewind` refuses
+  while ByteBot is working, and the panel keeps the task visible while it runs
+  instead of a stock "Executing…" line
 - The agent's plan is now on screen (Milestone I, I2-03): `update_plan(items)`
   lets the model post its todo list — one `{text, status}` object per step, at
   most 12 — and it renders above the chat transcript as a `☰ Plan 2/5` strip

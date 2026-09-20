@@ -2371,9 +2371,7 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(cmd_border)
         .title(" ⌨️  Command (e.g., 'update deps', 'analyze tests') ");
-    let display_cmd = if app.bytebot_running {
-        "Executing... press Esc to return".to_string()
-    } else if app.bytebot_command.is_empty() {
+    let display_cmd = if app.bytebot_command.is_empty() {
         "Type a command and press Enter".to_string()
     } else {
         app.bytebot_command.clone()
@@ -2423,13 +2421,19 @@ fn draw_bytebot_panel(f: &mut Frame, app: &App, area: Rect) {
                     };
                     (running_icon, app.theme.warning)
                 }
-                "failed" => ("\u{274C}".to_string(), app.theme.danger),
-                _ => ("\u{25CB}".to_string(), app.theme.message_system), // pending / unknown
+                // A refusal is its own outcome: the call was never made, which
+                // is not the same as one that ran and failed.
+                "denied" | "refused" => ("\u{2717}".to_string(), app.theme.warning),
+                _ => ("\u{274C}".to_string(), app.theme.danger), // failed / unknown
+            };
+            let suffix = match status.as_str() {
+                "done" | "running" => String::new(),
+                other => format!(" · {other}"),
             };
             steps_lines.push(Line::from(vec![
                 Span::styled(format!(" {} ", icon), Style::default().fg(color)),
                 Span::styled(
-                    format!("Step {}: {}", i + 1, step_name),
+                    format!("Step {}: {}{}", i + 1, step_name, suffix),
                     Style::default().fg(if status == "done" || status == "running" {
                         app.theme.fg
                     } else {
