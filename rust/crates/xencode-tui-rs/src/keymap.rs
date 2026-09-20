@@ -342,7 +342,7 @@ fn on_esc(app: &mut App) {
                 app.settings_url_editing = false;
             } else {
                 app.settings_reset_active = false;
-                let _ = app.config.save();
+                app.save_config();
                 app.focus = FocusArea::ChatInput;
             }
         }
@@ -505,7 +505,24 @@ fn key_model_selector(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     true
 }
 
+/// The row under the settings cursor (the list is a compile-time constant,
+/// so the clamp can never panic).
+fn settings_current(app: &App) -> &'static crate::focus::SettingRow {
+    let items = crate::focus::SETTINGS_ITEMS;
+    &items[app.settings_cursor.min(items.len() - 1)]
+}
+
+/// Rows whose value is typed into the buffer (Text/Number kinds). Only
+/// these claim ←/→ for cursor movement while editing.
+fn settings_row_typable(app: &App) -> bool {
+    matches!(
+        settings_current(app).kind,
+        crate::focus::SettingKind::Text | crate::focus::SettingKind::Number
+    )
+}
+
 fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    let row_count = crate::focus::SETTINGS_ITEMS.len();
     // While a value is being typed, every character belongs to the buffer —
     // including j/k, which would otherwise move the row cursor (E6-01).
     if app.settings_url_editing {
@@ -519,22 +536,26 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
                 app.settings_url_buffer.remove(app.settings_url_cursor);
             }
             KeyCode::Up => {
+                // Moving rows abandons the uncommitted edit: the buffer
+                // belongs to one row's field, and silently retargeting it
+                // to whatever row the cursor landed on would commit it to
+                // the wrong config value.
+                app.settings_url_editing = false;
                 if app.settings_cursor > 0 {
                     app.settings_cursor -= 1;
                 }
             }
             KeyCode::Down => {
-                if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {
+                app.settings_url_editing = false;
+                if app.settings_cursor + 1 < row_count {
                     app.settings_cursor += 1;
                 }
             }
-            KeyCode::Left
-                if (6..=12).contains(&app.settings_cursor) && app.settings_url_cursor > 0 =>
-            {
+            KeyCode::Left if settings_row_typable(app) && app.settings_url_cursor > 0 => {
                 app.settings_url_cursor -= 1;
             }
             KeyCode::Right
-                if (6..=12).contains(&app.settings_cursor)
+                if settings_row_typable(app)
                     && app.settings_url_cursor < app.settings_url_buffer.len() =>
             {
                 app.settings_url_cursor += 1;
@@ -551,7 +572,7 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {
+            if app.settings_cursor + 1 < row_count {
                 app.settings_cursor += 1;
             }
         }
@@ -564,144 +585,182 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
 }
 
 fn settings_enter(app: &mut App, tx: &Tx) {
+    use crate::focus::SettingKind;
+    let row_label = settings_current(app).label;
     if app.settings_url_editing {
-        // Commit the edit for whichever row is under the cursor.
-        match app.settings_cursor {
-            6 => app.config.ollama_url = app.settings_url_buffer.clone(),
-            7 => app.config.llama_cpp_url = app.settings_url_buffer.clone(),
-            8 => app.config.llama_cpp_model_path = app.settings_url_buffer.clone(),
-            9 => {
-                app.config.llama_cpp_temperature = app
-                    .settings_url_buffer
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|x| x.is_finite());
+        // Commit the edit for the row that owns the buffer.
+        let buf = app.settings_url_buffer.clone();
+        match row_label {
+            "Ollama URL" => app.config.ollama_url = buf,
+            "Llama.cpp URL" => app.config.llama_cpp_url = buf,
+            "Llama.cpp Model" => app.config.llama_cpp_model_path = buf,
+            "Llama Temp" => {
+                app.config.llama_cpp_temperature =
+                    buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
             }
-            10 => {
-                app.config.llama_cpp_top_k = app.settings_url_buffer.trim().parse().ok();
+            "Llama Top-K" => {
+                app.config.llama_cpp_top_k = buf.trim().parse().ok();
             }
-            11 => {
-                app.config.llama_cpp_min_p = app
-                    .settings_url_buffer
-                    .trim()
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|x| x.is_finite());
+            "Llama Min-P" => {
+                app.config.llama_cpp_min_p =
+                    buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
             }
-            12 => {
-                app.config.llama_cpp_max_tokens = app.settings_url_buffer.trim().parse().ok();
+            "Llama Max Tokens" => {
+                app.config.llama_cpp_max_tokens = buf.trim().parse().ok();
             }
             _ => {}
         }
         app.settings_url_editing = false;
-        let _ = app.config.save();
+        app.save_config();
         // Refresh models and health check when a URL/model path changed.
-        if app.settings_cursor <= 8 {
+        if matches!(
+            row_label,
+            "Ollama URL" | "Llama.cpp URL" | "Llama.cpp Model"
+        ) {
             app.refresh_models(tx.clone());
             app.run_health_check(tx.clone());
         }
         return;
     }
-    let row = app.settings_cursor;
-    if (6..=12).contains(&row) {
-        // Start editing this row's text value.
-        app.settings_url_editing = true;
-        app.settings_url_buffer = match row {
-            6 => app.config.ollama_url.clone(),
-            7 => app.config.llama_cpp_url.clone(),
-            8 => app.config.llama_cpp_model_path.clone(),
-            9 => app
-                .config
-                .llama_cpp_temperature
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-            10 => app
-                .config
-                .llama_cpp_top_k
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-            11 => app
-                .config
-                .llama_cpp_min_p
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-            _ => app
-                .config
-                .llama_cpp_max_tokens
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-        };
-        app.settings_url_cursor = app.settings_url_buffer.len();
-    } else if row == 13 {
-        // Factory reset
-        app.config = XencodeConfig::default();
-        app.theme = ThemeColors::get(&app.config.active_theme);
-        app.style_chat_input();
-        app.settings_reset_active = true;
-        app.settings_cursor = 0;
-        let _ = app.config.save();
-        app.refresh_models(tx.clone());
-        app.run_health_check(tx.clone());
-        app.focus = FocusArea::ChatInput;
-    } else {
-        let _ = app.config.save();
-        app.focus = FocusArea::ChatInput;
+    match settings_current(app).kind {
+        SettingKind::Text | SettingKind::Number => {
+            // Start editing this row's value.
+            app.settings_url_editing = true;
+            app.settings_url_buffer = settings_edit_seed(app, row_label);
+            app.settings_url_cursor = app.settings_url_buffer.len();
+        }
+        SettingKind::Action => {
+            // Factory Reset
+            app.config = XencodeConfig::default();
+            app.theme = ThemeColors::get(&app.config.active_theme);
+            app.style_chat_input();
+            app.settings_reset_active = true;
+            app.settings_cursor = 0;
+            app.save_config();
+            app.refresh_models(tx.clone());
+            app.run_health_check(tx.clone());
+            app.focus = FocusArea::ChatInput;
+        }
+        _ => {
+            app.save_config();
+            app.focus = FocusArea::ChatInput;
+        }
     }
 }
 
+/// The current stored value for a typed-edit row, as the initial buffer.
+fn settings_edit_seed(app: &App, label: &str) -> String {
+    match label {
+        "Ollama URL" => app.config.ollama_url.clone(),
+        "Llama.cpp URL" => app.config.llama_cpp_url.clone(),
+        "Llama.cpp Model" => app.config.llama_cpp_model_path.clone(),
+        "Llama Temp" => app
+            .config
+            .llama_cpp_temperature
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        "Llama Top-K" => app
+            .config
+            .llama_cpp_top_k
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        "Llama Min-P" => app
+            .config
+            .llama_cpp_min_p
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        "Llama Max Tokens" => app
+            .config
+            .llama_cpp_max_tokens
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// One ←/→ adjustment for an integer row: add/subtract `step`, clamped to
+/// `[min, max]`; downward never crosses below the `min + step` floor the
+/// historical per-row guards enforced.
+fn stepped(v: u64, dir: i32, step: u64, min: u64, max: u64) -> u64 {
+    if dir > 0 {
+        v.saturating_add(step).min(max)
+    } else if v >= min + step {
+        v - step
+    } else {
+        v
+    }
+}
+
+fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], dir: i32) {
+    let current = match label {
+        "Theme" => app.config.active_theme.clone(),
+        "Layout" => app.config.layout.clone(),
+        _ => return,
+    };
+    let len = options.len();
+    let pos = options.iter().position(|o| *o == current).unwrap_or(0);
+    let next = if dir > 0 {
+        (pos + 1) % len
+    } else {
+        (pos + len - 1) % len
+    };
+    let value = options[next];
+    match label {
+        "Theme" => {
+            app.config.active_theme = value.to_string();
+            app.theme = ThemeColors::get(&app.config.active_theme);
+            app.style_chat_input();
+        }
+        "Layout" => app.config.layout = value.to_string(),
+        _ => {}
+    }
+}
+
+fn settings_toggle(app: &mut App, label: &str) -> bool {
+    let flag = match label {
+        "Rounded Borders" => &mut app.config.rounded_borders,
+        "Show Scrollbars" => &mut app.config.show_scrollbars,
+        "Line Numbers" => &mut app.config.show_line_numbers,
+        "Cache Enabled" => &mut app.config.cache_enabled,
+        "Memory Enabled" => &mut app.config.memory_enabled,
+        _ => return false,
+    };
+    *flag = !*flag;
+    true
+}
+
+/// ←/→ on the row under the cursor. Every behavior derives from the row's
+/// `SettingKind` in `focus::SETTINGS_ITEMS` — never from the row number.
 fn settings_step(app: &mut App, dir: i32) {
-    match app.settings_cursor {
-        0 => {
-            if let Some(next) = crate::theme::cycle_theme(&app.config.active_theme, dir > 0) {
-                app.config.active_theme = next;
-                app.theme = ThemeColors::get(&app.config.active_theme);
-                app.style_chat_input();
-                let _ = app.config.save();
+    use crate::focus::SettingKind;
+    let label = settings_current(app).label;
+    match settings_current(app).kind {
+        SettingKind::Cycle(options) => {
+            settings_cycle(app, label, options, dir);
+            app.save_config();
+        }
+        SettingKind::Toggle => {
+            if settings_toggle(app, label) {
+                app.save_config();
             }
         }
-        1 => {
-            app.config.cache_enabled = !app.config.cache_enabled;
-            let _ = app.config.save();
-        }
-        2 => {
-            app.config.memory_enabled = !app.config.memory_enabled;
-            let _ = app.config.save();
-        }
-        3 => {
-            if dir < 0 {
-                if app.config.max_cache_size >= 20 {
-                    app.config.max_cache_size -= 10;
-                    let _ = app.config.save();
+        SettingKind::Stepped { step, min, max } => {
+            match label {
+                "Max Cache Size" => {
+                    app.config.max_cache_size =
+                        stepped(app.config.max_cache_size as u64, dir, step, min, max) as usize
                 }
-            } else {
-                app.config.max_cache_size = app.config.max_cache_size.saturating_add(10).min(1000);
-                let _ = app.config.save();
-            }
-        }
-        4 => {
-            if dir < 0 {
-                if app.config.max_memory_items >= 10 {
-                    app.config.max_memory_items -= 5;
-                    let _ = app.config.save();
+                "Memory Items" => {
+                    app.config.max_memory_items =
+                        stepped(app.config.max_memory_items as u64, dir, step, min, max) as usize
                 }
-            } else {
-                app.config.max_memory_items =
-                    app.config.max_memory_items.saturating_add(5).min(500);
-                let _ = app.config.save();
-            }
-        }
-        5 => {
-            if dir < 0 {
-                if app.config.response_timeout >= 10 {
-                    app.config.response_timeout -= 5;
-                    let _ = app.config.save();
+                "Response Timeout" => {
+                    app.config.response_timeout =
+                        stepped(app.config.response_timeout, dir, step, min, max)
                 }
-            } else {
-                app.config.response_timeout =
-                    app.config.response_timeout.saturating_add(5).min(300);
-                let _ = app.config.save();
+                _ => return,
             }
+            app.save_config();
         }
         _ => {}
     }
@@ -1269,6 +1328,7 @@ mod tests {
     use crate::focus::FocusArea;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tokio::sync::mpsc;
+    use xencode_config_rs::XencodeConfig;
 
     fn press(app: &mut App, code: KeyCode) -> KeyFlow {
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -1376,13 +1436,116 @@ mod tests {
     #[test]
     fn settings_url_editing_types_j_k_instead_of_moving_row_cursor() {
         let mut app = app_with(FocusArea::Settings);
-        app.settings_cursor = 6;
+        let url_row = crate::focus::settings_row_index("Ollama URL");
+        app.settings_cursor = url_row;
         app.settings_url_editing = true;
         app.settings_url_buffer = "http://localhost:11434".to_string();
         app.settings_url_cursor = app.settings_url_buffer.len();
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(app.settings_url_buffer, "http://localhost:11434j");
-        assert_eq!(app.settings_cursor, 6);
+        assert_eq!(app.settings_cursor, url_row);
+    }
+
+    #[test]
+    fn settings_table_shape_is_stable() {
+        use crate::focus::{SettingKind, SETTINGS_ITEMS};
+        assert_eq!(SETTINGS_ITEMS.first().unwrap().label, "Theme");
+        assert_eq!(SETTINGS_ITEMS.last().unwrap().label, "Factory Reset");
+        assert_eq!(SETTINGS_ITEMS.last().unwrap().kind, SettingKind::Action);
+        // The H1-04 polish rows sit right after Theme in Display.
+        let display: Vec<&str> = SETTINGS_ITEMS
+            .iter()
+            .filter(|r| r.section == "Display")
+            .map(|r| r.label)
+            .collect();
+        assert_eq!(
+            display,
+            [
+                "Theme",
+                "Layout",
+                "Rounded Borders",
+                "Show Scrollbars",
+                "Line Numbers"
+            ]
+        );
+    }
+
+    #[test]
+    fn settings_edit_moving_rows_abandons_the_buffer() {
+        // The edit buffer belongs to one row's field; rowing away must not
+        // leave it armed to commit into whatever row the cursor lands on.
+        let mut app = app_with(FocusArea::Settings);
+        app.settings_cursor = crate::focus::settings_row_index("Ollama URL");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.settings_url_editing);
+        let original = app.config.ollama_url.clone();
+        press(&mut app, KeyCode::Char('X'));
+        press(&mut app, KeyCode::Down);
+        assert!(!app.settings_url_editing);
+        assert_eq!(app.config.ollama_url, original, "uncommitted edit leaked");
+        assert_eq!(
+            app.settings_cursor,
+            crate::focus::settings_row_index("Llama.cpp URL")
+        );
+    }
+
+    #[test]
+    fn settings_steps_persist_through_the_config_dir() {
+        // The only test that touches XCODE_CONFIG_DIR (process-global):
+        // pointing saves at a temp dir means this test — and any concurrent
+        // save — never writes the user's real ~/.xencode.
+        use crate::focus::{settings_row_index, SETTINGS_ITEMS};
+
+        let dir =
+            std::env::temp_dir().join(format!("xencode-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+
+        let mut app = app_with(FocusArea::Settings);
+        app.config = XencodeConfig::default();
+
+        // Layout row: → cycles presets and wraps back around.
+        app.settings_cursor = settings_row_index("Layout");
+        for _ in 0..crate::layout::LAYOUT_NAMES.len() {
+            press(&mut app, KeyCode::Right);
+        }
+        assert_eq!(app.config.layout, "classic", "cycle must wrap");
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.config.layout, "chat-first");
+
+        // A typo'd choice snaps into the cycle instead of wedging the row.
+        app.config.layout = "bogus".into();
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.config.layout, "chat-first");
+
+        // Toggles flip.
+        app.settings_cursor = settings_row_index("Rounded Borders");
+        press(&mut app, KeyCode::Right);
+        assert!(app.config.rounded_borders);
+
+        // Stepped rows clamp at the floor.
+        app.settings_cursor = settings_row_index("Response Timeout");
+        app.config.response_timeout = 10;
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.config.response_timeout, 5);
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.config.response_timeout, 5, "stepped below min");
+
+        // Navigation bounds derive from the table.
+        app.settings_cursor = SETTINGS_ITEMS.len() - 1;
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.settings_cursor, SETTINGS_ITEMS.len() - 1);
+
+        // Esc closes Settings and persists everything above.
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
+        assert_eq!(saved.layout, "chat-first");
+        assert!(saved.rounded_borders);
+        assert_eq!(saved.response_timeout, 5);
+
+        std::env::remove_var("XCODE_CONFIG_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
