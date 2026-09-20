@@ -4,6 +4,7 @@ pub mod collab_client;
 pub mod focus;
 pub mod help;
 pub mod keymap;
+pub mod layout;
 pub mod markdown;
 pub mod review;
 pub mod theme;
