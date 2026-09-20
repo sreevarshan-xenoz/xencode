@@ -34,10 +34,7 @@ pub enum RefreshOutcome {
 /// disk. `rel_path` may be repo-relative (the watcher's format) or absolute
 /// inside `root`. Removal (file no longer readable) drops the index entry,
 /// symbol record and mtime alongside the edges.
-pub fn refresh_rust_file(
-    root: &Path,
-    rel_path: &str,
-) -> Result<RefreshOutcome, ContextError> {
+pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, ContextError> {
     let root = root.canonicalize().map_err(|source| ContextError::Io {
         path: root.to_path_buf(),
         source,
@@ -117,8 +114,8 @@ mod tests {
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
     fn temp_workspace() -> PathBuf {
-        let unique = (std::process::id() as u64) * 1_000_000
-            + NEXT.fetch_add(1, AtomicOrdering::Relaxed);
+        let unique =
+            (std::process::id() as u64) * 1_000_000 + NEXT.fetch_add(1, AtomicOrdering::Relaxed);
         let dir = std::env::temp_dir().join(format!("xencode-refresh-test-{unique}"));
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -159,11 +156,7 @@ mod tests {
         let root = setup();
         // Drop the import: the a→b edge must vanish from the returned graph
         // and from deps.json.
-        fs::write(
-            root.join("src/a.rs"),
-            "pub fn ay() { crate::other(); }\n",
-        )
-        .unwrap();
+        fs::write(root.join("src/a.rs"), "pub fn ay() { crate::other(); }\n").unwrap();
         let out = refresh_rust_file(&root, "src/a.rs").unwrap();
         let RefreshOutcome::Updated(graph) = out else {
             panic!("expected Updated, got {out:?}");
@@ -226,8 +219,8 @@ mod tests {
         assert!(matches!(out, RefreshOutcome::Updated(_)));
         // The manifest mtime was bumped to the edited file's, so the next
         // /init considers the snapshot fresh — refresh is init-consistent.
-        let summary = init_project(&root, Arc::new(AtomicBool::new(false)), |_| {})
-            .expect("second init");
+        let summary =
+            init_project(&root, Arc::new(AtomicBool::new(false)), |_| {}).expect("second init");
         assert!(summary.fresh, "init should see the snapshot as fresh");
     }
 }

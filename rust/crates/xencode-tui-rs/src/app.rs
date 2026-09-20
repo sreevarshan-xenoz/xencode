@@ -1374,10 +1374,7 @@ impl<'a> App<'a> {
     /// chat tool loop holds the lock — registry ops never await mid-lock,
     /// so this window is effectively between keystrokes.
     pub fn tasks_snapshot(&self) -> Option<Vec<xencode_core_rs::TaskRecord>> {
-        self.task_runtime
-            .try_lock()
-            .ok()
-            .map(|m| m.list().to_vec())
+        self.task_runtime.try_lock().ok().map(|m| m.list().to_vec())
     }
 
     /// `[TASKS]<verb>[|id]>` from the panel keys (D2-01): mutate the shared
@@ -1470,7 +1467,8 @@ impl<'a> App<'a> {
     pub fn worktree_do_add(&mut self) {
         let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let path = std::path::PathBuf::from(&self.worktree_path_buf);
-        let branch = (!self.worktree_branch_buf.is_empty()).then_some(self.worktree_branch_buf.as_str());
+        let branch =
+            (!self.worktree_branch_buf.is_empty()).then_some(self.worktree_branch_buf.as_str());
         self.worktree_prompt = crate::focus::WorktreePrompt::None;
         match xencode_context_rs::worktree_add(&root, &path, branch, false) {
             Ok(list) => {

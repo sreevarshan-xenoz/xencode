@@ -169,7 +169,9 @@ mod tests {
     #[test]
     fn bare_repo_and_empty_input() {
         assert!(parse_worktree_list("").is_empty());
-        let wts = parse_worktree_list("worktree /srv/repo.git\nHEAD 1111222233334444111122223333444411112222\nbare\n");
+        let wts = parse_worktree_list(
+            "worktree /srv/repo.git\nHEAD 1111222233334444111122223333444411112222\nbare\n",
+        );
         assert_eq!(wts.len(), 1);
         assert!(wts[0].bare);
         assert!(wts[0].is_main);
@@ -187,7 +189,18 @@ mod tests {
         git(&repo, &["init", "-b", "main"]);
         std::fs::write(repo.join("f.txt"), "hi").unwrap();
         git(&repo, &["add", "f.txt"]);
-        git(&repo, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-m",
+                "init",
+            ],
+        );
 
         let mains = worktree_list(&repo).unwrap();
         assert_eq!(mains.len(), 1);
@@ -212,6 +225,10 @@ mod tests {
             .current_dir(root)
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

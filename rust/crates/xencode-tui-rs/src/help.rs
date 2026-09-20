@@ -72,7 +72,11 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "open file in editor"),
             ("Space", "attach/detach file"),
         ],
-        CodeEditor => &[("↑ ↓ / j k", "scroll"), ("e", "type edits"), ("Ctrl+S", "save file")],
+        CodeEditor => &[
+            ("↑ ↓ / j k", "scroll"),
+            ("e", "type edits"),
+            ("Ctrl+S", "save file"),
+        ],
         ModelSelector => &[
             ("↑ ↓ / j k", "select model"),
             ("Enter", "set default model"),
@@ -85,38 +89,26 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "toggle, edit URL/number, or save"),
             ("row 13 + Enter", "factory reset"),
         ],
-        CodeReview => &[
-            ("↑ ↓ / j k", "scroll review"),
-            ("Enter", "start review"),
-        ],
+        CodeReview => &[("↑ ↓ / j k", "scroll review"), ("Enter", "start review")],
         PerformanceDashboard | ProjectAnalyzer | CollaborationHub | PerformanceProfiler
         | MultiLanguage => &[("Enter", "start / continue")],
         VoiceInterface => &[
             ("Enter", "start voice session"),
             ("Space / m", "toggle mute"),
         ],
-        TerminalAssistant => &[
-            ("Enter", "start assistant"),
-            ("Space", "cycle risk filter"),
-        ],
+        TerminalAssistant => &[("Enter", "start assistant"), ("Space", "cycle risk filter")],
         GitCommit => &[
             ("type", "commit message"),
             ("Enter", "git commit -am (async)"),
             ("Backspace", "delete char"),
         ],
-        FeatureNavigator => &[
-            ("↑ ↓ / j k", "select feature"),
-            ("Enter", "open feature"),
-        ],
+        FeatureNavigator => &[("↑ ↓ / j k", "select feature"), ("Enter", "open feature")],
         ByteBotPanel => &[
             ("type", "command"),
             ("Enter", "run command"),
             ("↑", "recall last command"),
         ],
-        ProviderHealth => &[
-            ("↑ ↓ / j k", "scroll"),
-            ("Ctrl+H", "run check"),
-        ],
+        ProviderHealth => &[("↑ ↓ / j k", "scroll"), ("Ctrl+H", "run check")],
         SecurityAuditor => &[
             ("↑ ↓ / j k", "scroll"),
             ("Enter", "start scan"),
