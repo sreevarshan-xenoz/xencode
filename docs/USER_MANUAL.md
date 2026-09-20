@@ -24,10 +24,10 @@ The Rust binary (`xencode`) is the entry point.
 - **Rust TUI**: Ratatui-based terminal interface with 24 interactive feature panels and overlays
 - **Multi-Provider AI Routing**: Ollama local + Anthropic, Gemini, Qwen, OpenRouter cloud with token-aware exponential retry middleware
 - **Code Analysis**: Language-aware AST analysis (Python, JS/TS, Rust) + OWASP vulnerability scanning
-- **HTTP/WebSocket Server**: Axum-based collaboration server with session management
+- **HTTP/WebSocket Server**: Axum-based collaboration server with token auth, role-based access control, a JSONL audit trail and local-first bind defaults (TLS opt-in)
 - **Plugin System**: Plugin trait, host, registry with lifecycle management
 - **Conversation Memory & Cache**: Persistent session history with compressed hybrid caching
-- **Secure Authentication**: Encrypted credential vault, SQLite store, refresh token rotation, email verification
+- **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
 ## Installation
 
@@ -168,7 +168,7 @@ Chat editing (after `i`):
 | Project Analyzer | Workspace file type analysis |
 | Git Commit | Commit message input with cursor |
 | ByteBot Agent | Step-through autonomous task execution |
-| Collaboration Hub | Session sharing, member status, sync |
+| Collaboration Hub | Real WebSocket client: create/join sessions, live members with roles, server errors verbatim |
 | Voice Interface | Audio level meter, commands, transcript |
 | Terminal Assistant | Shell command suggestions, risk badges |
 | Security Auditor | Vulnerability findings, severity bars |
@@ -180,6 +180,23 @@ Chat editing (after `i`):
 | Background Tasks | Live registry of background commands (stop/remove) |
 | Worktrees | Git worktree list, add (path+branch) and remove with confirm |
 | Insights | Refactor findings from the live symbol graph (broken imports, cycles, hubs, orphans) |
+
+**Collaboration Hub keys (while the panel is focused):**
+
+| Key | Action |
+|-----|--------|
+| `c` | Create a new session and connect (the server assigns the id) |
+| `j` | Edit the session id to join an existing session |
+| `Enter` | Connect with the fields as shown / finish editing a field |
+| `r` | Retry: hang up and dial the same server/session again |
+| `Tab` | Cycle the edited field: server → user → session |
+| `Esc` | Stop editing → disconnect (stops the client) → close the panel |
+
+The hub talks to `xencode server` (see Collaboration Server): it logs in
+over HTTP, authenticates the WebSocket with the first `auth` frame, and
+renders only real state — transport (`ws (no TLS)` / `wss (TLS)`), session
+id, live members with their roles, connected-for time, and the server's
+last error. There is no auto-reconnect; `r` is manual by design.
 
 ### First-Time Setup
 
@@ -218,21 +235,28 @@ The Rust analyzer includes OWASP-focused vulnerability scanning:
 
 ### Collaboration Server
 
-Start a real-time collaboration session:
+Start the team server — local-first by default:
 
 ```bash
-# Start server on default port
-xencode server
-
-# Start on a specific port
-xencode server --port 8765
-
-# Server provides:
-# - WebSocket peer broadcast
-# - Session management
-# - Health and status endpoints
-# - Model listing
+xencode server                        # http://127.0.0.1:8765, ws://
+xencode server --port 9000 --audit-path none
+xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https + wss
 ```
+
+- Binds `127.0.0.1` unless `--host` says otherwise; a non-loopback plain
+  bind refuses to start unless `--allow-insecure-public` is given (and
+  warns loudly even then). TLS needs both `--cert` and `--key`.
+- Clients obtain a token from `POST /auth/login` (the username is an
+  identity claim — the bind surface is the perimeter) and authenticate
+  each WebSocket with a first `auth` frame; the URL carries only the
+  session id (`/ws/{session_id}`).
+- Roles come from the workspace ledger: the session creator is Admin,
+  joiners are Editor, and only Editor-or-above may relay activity on the
+  WebSocket (Viewers receive). All mutating HTTP endpoints require the
+  bearer token. Every action appends one JSONL line to
+  `~/.xencode/audit.jsonl` (`--audit-path` to move, `none` to disable).
+- Sessions live in memory only: after a server restart the peers are
+  gone — only the audit log survives.
 
 ### Plugin System
 
@@ -308,6 +332,7 @@ Commands:
   memory    Manage conversation memory
   tasks     Manage background tasks (file-backed, survives this process)
   worktree  Manage git worktrees of the current repository
+  advise    Repository insights from the .xencode snapshot: broken imports, import cycles, hub files and orphans
   server    Start the collaboration server
   analyze   Analyze code for issues and vulnerabilities
   fetch     Fetch a web page and extract research-ready text
@@ -348,9 +373,11 @@ $ xencode analyze src/
 
 ### Example 2: Collaboration Server
 ```bash
-# Start the server
-$ xencode server --port 8765
-🚀 Xencode server starting on http://0.0.0.0:8765
+# Start the server (local-first: binds 127.0.0.1, plain ws://)
+$ xencode server
+🚀 Xencode server starting on http://127.0.0.1:8765
+   WebSocket: ws://127.0.0.1:8765/ws/{session_id}
+   audit: ~/.xencode/audit.jsonl
 
 # In another terminal, check health
 $ curl http://localhost:8765/

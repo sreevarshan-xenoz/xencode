@@ -38,6 +38,10 @@ impl SyncCoordinator {
     }
 
     /// Join a session as a new peer.
+    ///
+    /// This crate stays auth-free by design: token validation and RBAC
+    /// (WorkspaceManager::join, session-size cap, close codes) are enforced
+    /// upstream in `xencode-server-rs` before this is ever reached.
     pub fn join_session(&mut self, session_id: &str, username: &str) -> PeerInfo {
         let peer = PeerInfo {
             peer_id: uuid::Uuid::new_v4().to_string(),

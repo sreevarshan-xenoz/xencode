@@ -11,10 +11,11 @@
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
+- ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Rust migration complete**: 13 crates, 571 tests passing, zero warnings — the Rust workspace is the only active codebase
-- 🚧 **Active backlog**: team-mode hardening
+- ✅ **Backlog emptied** (2026-09-20) — next focus not yet chosen
 
-## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
+## Backlog (all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 
 0. **Milestone D — Background tasks & worktree support** — ✅ complete 2026-09-20:
    a background-task registry + TUI task panel + `tasks`/`worktree` CLI, and git
@@ -28,12 +29,13 @@
    `repo_advise` agent tool all read one shared `advise_from_snapshot` path.
 3. **Multimodal inputs** — shipped (Milestone E): image analysis and TUI attach as
    per-backend message parts, plus PDF/DOCX text extraction into the context bundle.
-4. **Secure team workflows hardening** — ✅ drafted 2026-09-20 as **Milestone G —
-   Team Mode Hardening**: the RBAC/audit crate (which so far had zero consumers) gets
-   wired into the server behind real token auth, the WS join loses its
-   username-in-URL identity, audit persists to disk, the bind defaults to loopback
-   with opt-in TLS — and the TUI Collaboration Hub stops simulating and connects
-   for real.
+4. **Secure team workflows hardening** — ✅ complete 2026-09-20 as **Milestone G —
+   Team Mode Hardening**: the orphaned RBAC/audit crate is wired into the server
+   behind real bearer tokens, WS identity moved from the URL to a first `auth`
+   frame with close codes for every refusal, joins/denials persist to a JSONL
+   audit log, `xencode server` binds loopback by default with opt-in TLS — and
+   the TUI Collaboration Hub stopped simulating: it connects for real, showing
+   live members with their roles.
 5. **Git loop completion** — PR review browsing in the TUI: shipped (Milestone E,
    `Ctrl+Y` per-file dashboard); remaining ideas live in later milestones.
 

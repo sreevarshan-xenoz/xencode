@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- Manuals tell the truth about team mode (Milestone G, G4-01): the user
+  manual gained a Collaboration Hub key table and lost its fabricated
+  claims (`0.0.0.0` default, "credential vault… email verification");
+  `docs/api_documentation.md`'s Python-era JWT auth matrix was replaced by
+  the real route table (public vs bearer vs WS close codes) with the legacy
+  module sections marked as such; README's CRDT-sync bullet (the module is
+  unwired) now describes token auth, RBAC and the audit trail.
 - The Collaboration Hub is real now, not a demo (Milestone G, G3-02): `c`
   creates and connects a session, `j` edits a session id to join, `Enter`
   connects, `r` retries, `Tab` cycles the server/user/session fields, and

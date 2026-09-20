@@ -44,7 +44,7 @@ and fix your code — driven entirely from your terminal.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface (24 panels): agent, collaboration, audit, profiler, git, models, and more.
 - **🔒 Secure by design** — token-authenticated collaboration server and OWASP-based security scanning.
 - **🔌 Extensible platform** — plugin trait system, feature flags, and lifecycle management.
-- **🛰️ Built for teams** — HTTP/WebSocket collaboration server with CRDT sync, plus Docker, Compose, and Kubernetes assets.
+- **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an audit trail, plus Docker, Compose, and Kubernetes assets.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), hybrid memory+disk cache, streaming with exponential backoff.
 
 ---
@@ -178,7 +178,8 @@ xencode query "Explain clean architecture briefly"
 xencode analyze src/
 
 # 6) Collaborate with your team
-xencode server --port 8765
+xencode server           # local-first: http://127.0.0.1:8765, ws://
+# then in the TUI: Ctrl+F → Collaboration Hub → c to create, j to join
 
 # 7) Extend Xencode with plugins
 xencode plugin list
@@ -223,7 +224,7 @@ xencode --version                # Show version
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
 | **Cache** | `xencode cache stats` | Show cache statistics |
-| **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
+| **Server** | `xencode server` | Start collaboration server (local-first: `127.0.0.1:8765`; TLS opt-in) |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
 | **Review** | `xencode review [--base main]` | PR-level diff triage with per-file analysis |
