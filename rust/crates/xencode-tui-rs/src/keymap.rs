@@ -205,6 +205,15 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         KeyCode::Char('t') => {
             app.show_terminal = !app.show_terminal;
         }
+        KeyCode::Char('u') => {
+            // Live layout-preset cycling (H1-05): pure geometry, so this
+            // never touches pane state — open file, scrolls and messages
+            // all survive the switch.
+            let next = crate::layout::cycle_layout(&app.config.layout, true);
+            app.config.layout = next.clone();
+            app.save_config();
+            app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
+        }
         KeyCode::Char('h') => {
             if !app.health_check_in_progress {
                 app.run_health_check(tx.clone());
@@ -245,12 +254,7 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
                 app.collab_cycle_field();
                 return done();
             }
-            app.focus = match app.focus {
-                FocusArea::FileExplorer => FocusArea::CodeEditor,
-                FocusArea::CodeEditor => FocusArea::ChatInput,
-                FocusArea::ChatInput => FocusArea::FileExplorer,
-                _ => FocusArea::ChatInput,
-            };
+            app.focus = next_body_focus(app);
             return done();
         }
         KeyCode::Esc => {
@@ -266,6 +270,37 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
         return done();
     }
     global_chord(app, key, tx)
+}
+
+/// Tab's ring: explorer → editor → chat, but only through the panes the
+/// layout actually renders (H1-05) — tabbing to a pane hidden by chat-first
+/// would leave the user staring at an unhighlighted screen. Zen is the
+/// exception: it renders one pane at a time *from the focus*, so the full
+/// ring is how the user flips between them. Before the first draw (or with
+/// no layout recorded) every pane counts as visible, which is classic.
+/// From any overlay panel, Tab lands back on the chat input.
+fn next_body_focus(app: &App) -> FocusArea {
+    use crate::focus::FocusArea::*;
+    let ring = [FileExplorer, CodeEditor, ChatInput];
+    if crate::layout::effective_layout(&app.config.layout) == "zen" {
+        return match app.focus {
+            FileExplorer => CodeEditor,
+            CodeEditor => ChatInput,
+            _ => FileExplorer,
+        };
+    }
+    let is_visible = |f| match f {
+        FileExplorer => app.last_layout.explorer.is_some(),
+        CodeEditor => app.last_layout.editor.is_some(),
+        ChatInput => app.last_layout.chat.is_some() || app.last_layout.input.is_some(),
+        _ => false,
+    };
+    let active: Vec<FocusArea> = ring.iter().copied().filter(|f| is_visible(*f)).collect();
+    let ring_ref: &[FocusArea] = if active.is_empty() { &ring } else { &active };
+    match ring_ref.iter().position(|f| *f == app.focus) {
+        Some(i) => ring_ref[(i + 1) % ring_ref.len()],
+        None => ChatInput,
+    }
 }
 
 /// Per-focus dispatch: each handler returns true if it consumed the key.
@@ -1359,6 +1394,48 @@ mod tests {
     }
 
     #[test]
+    fn tab_ring_skips_panes_the_layout_hides() {
+        use crate::layout::compute_layout;
+        let mut app = app_with(FocusArea::ChatInput);
+        app.config.layout = "chat-first".into();
+        app.last_layout = compute_layout(
+            ratatui::layout::Rect::new(0, 1, 80, 22),
+            "chat-first",
+            false,
+            FocusArea::ChatInput,
+        );
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::CodeEditor);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.focus,
+            FocusArea::ChatInput,
+            "the hidden explorer must stay out of the ring"
+        );
+    }
+
+    #[test]
+    fn tab_flips_through_zen_panes() {
+        // Zen shows one pane at a time *following the focus*, so its ring is
+        // deliberately the full one: Tab is how you flip panes.
+        use crate::layout::compute_layout;
+        let mut app = app_with(FocusArea::ChatInput);
+        app.config.layout = "zen".into();
+        app.last_layout = compute_layout(
+            ratatui::layout::Rect::new(0, 1, 80, 22),
+            "zen",
+            false,
+            FocusArea::ChatInput,
+        );
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::FileExplorer);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::CodeEditor);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
     fn plain_q_quits_but_not_while_typing() {
         let mut app = app_with(FocusArea::ChatInput);
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Quit);
@@ -1536,13 +1613,27 @@ mod tests {
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(app.settings_cursor, SETTINGS_ITEMS.len() - 1);
 
+        // The Ctrl+U chord cycles presets live and toasts the name (H1-05).
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(app.config.layout, "zen", "chat-first → zen");
+        assert!(
+            app.toasts.iter().any(|t| t.message.contains("zen")),
+            "the chord must toast the new layout"
+        );
+
         // Esc closes Settings and persists everything above.
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.focus, FocusArea::ChatInput);
         let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
-        assert_eq!(saved.layout, "chat-first");
+        assert_eq!(saved.layout, "zen");
         assert!(saved.rounded_borders);
         assert_eq!(saved.response_timeout, 5);
+
+        // The chord keeps cycling (and saving) from the chat pane.
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(app.config.layout, "classic", "zen wraps to classic");
+        let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
+        assert_eq!(saved.layout, "classic");
 
         std::env::remove_var("XCODE_CONFIG_DIR");
         let _ = std::fs::remove_dir_all(&dir);

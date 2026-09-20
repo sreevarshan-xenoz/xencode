@@ -1014,7 +1014,7 @@ impl<'a> App<'a> {
         }
     }
 
-    fn push_toast(&mut self, kind: crate::toast::ToastKind, message: String) {
+    pub(crate) fn push_toast(&mut self, kind: crate::toast::ToastKind, message: String) {
         crate::toast::push(&mut self.toasts, message, kind, current_timestamp());
     }
 
