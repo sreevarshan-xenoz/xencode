@@ -39,7 +39,7 @@ pub fn cycle_layout(active: &str, forward: bool) -> String {
 /// the preset hides that pane entirely. `terminal` is `None` when the
 /// embedded terminal is off *or* the chat column is too short to host it —
 /// that decision lives here, once, not in the draw code.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct BodyLayout {
     pub explorer: Option<Rect>,
     pub editor: Option<Rect>,

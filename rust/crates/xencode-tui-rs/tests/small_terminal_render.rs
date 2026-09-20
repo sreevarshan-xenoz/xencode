@@ -77,12 +77,12 @@ fn renders_at_any_terminal_size() {
     let mut failures = Vec::new();
 
     for (name, focus) in FOCI {
-        let app = populated(*focus);
+        let mut app = populated(*focus);
         for &width in WIDTHS {
             for &height in HEIGHTS {
                 let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal.draw(|f| draw(f, &app)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
                 }));
                 if rendered.is_err() {
                     failures.push(format!("{name} at {width}x{height}"));
@@ -109,7 +109,7 @@ fn renders_help_overlay_at_any_terminal_size() {
         for &height in HEIGHTS {
             let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal.draw(|f| draw(f, &app)).unwrap();
+                terminal.draw(|f| draw(f, &mut app)).unwrap();
             }));
             if rendered.is_err() {
                 failures.push(format!("help at {width}x{height}"));
@@ -127,7 +127,7 @@ fn settings_panel_renders_with_cursor_on_every_row() {
         let mut app = populated(FocusArea::Settings);
         app.settings_cursor = row;
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
     }
 }
 
@@ -139,7 +139,7 @@ fn every_panel_renders_with_light_theme() {
         app.theme = xencode_tui_rs::app::ThemeColors::get("light");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            terminal.draw(|f| draw(f, &app)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
         }));
         assert!(result.is_ok(), "{name} failed under light theme");
     }
@@ -189,7 +189,7 @@ fn task_panel_renders_populated_registry() {
             for &width in &[20, 61, 80] {
                 for &height in &[8, 16, 24] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                    terminal.draw(|f| draw(f, &mut app)).unwrap_or_else(|_| {
                         panic!("render {width}x{height} sel={selected} detail={detail}")
                     });
                 }
@@ -256,7 +256,7 @@ fn worktree_panel_renders_all_prompt_stages() {
             for &width in &[20, 61, 80] {
                 for &height in &[8, 16, 24] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                    terminal.draw(|f| draw(f, &mut app)).unwrap_or_else(|_| {
                         panic!("render {width}x{height} {prompt:?} has_rows={has_rows}")
                     });
                 }
@@ -265,7 +265,7 @@ fn worktree_panel_renders_all_prompt_stages() {
     }
 }
 
-fn render_text(app: &App<'static>, width: u16, height: u16) -> String {
+fn render_text(app: &mut App<'static>, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|f| draw(f, app)).unwrap();
     terminal
@@ -296,7 +296,7 @@ fn collaboration_hub_renders_real_state_not_theatre() {
     // Wide enough that the 35%-columns panel shows the whole URL; the
     // truncation at smaller sizes is a layout fact, not a missing feature —
     // the sweep at the bottom covers those sizes for panics.
-    let text = render_text(&app, 140, 40);
+    let text = render_text(&mut app, 140, 40);
     assert!(text.contains("Server: http://127.0.0.1:8765"), "{text}");
     assert!(text.contains("ws (no TLS)"), "{text}");
     assert!(text.contains("xencode-abc123"), "{text}");
@@ -311,12 +311,12 @@ fn collaboration_hub_renders_real_state_not_theatre() {
 
     // wss transport is claimed only when the server URL is https.
     app.collab_server_url = "https://team.example.com".into();
-    let text = render_text(&app, 140, 40);
+    let text = render_text(&mut app, 140, 40);
     assert!(text.contains("wss (TLS)"), "{text}");
 
     // Errors surface verbatim instead of being papered over.
     app.collab_error = "connection refused".into();
-    let text = render_text(&app, 140, 40);
+    let text = render_text(&mut app, 140, 40);
     assert!(text.contains("connection refused"), "{text}");
 
     // Idle form: the three editable fields and no fake session line.
@@ -325,7 +325,7 @@ fn collaboration_hub_renders_real_state_not_theatre() {
     idle.collab_username = "sree".into();
     idle.collab_editing = true;
     idle.collab_field = xencode_tui_rs::focus::CollabField::Session;
-    let text = render_text(&idle, 140, 40);
+    let text = render_text(&mut idle, 140, 40);
     assert!(text.contains("Server: http://127.0.0.1:8765"), "{text}");
     assert!(text.contains("User: sree"), "{text}");
     assert!(text.contains("Session: (new)"), "{text}");
@@ -337,7 +337,7 @@ fn collaboration_hub_renders_real_state_not_theatre() {
         for &height in &[8, 16, 24] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
-                .draw(|f| draw(f, &app))
+                .draw(|f| draw(f, &mut app))
                 .unwrap_or_else(|_| panic!("hub render failed at {width}x{height}"));
         }
     }
@@ -389,7 +389,7 @@ fn advise_panel_renders_list_detail_and_empty() {
             for &width in &[20, 61, 80] {
                 for &height in &[8, 16, 24] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                    terminal.draw(|f| draw(f, &mut app)).unwrap_or_else(|_| {
                         panic!("render {width}x{height} detail={detail} items={with_items}")
                     });
                 }
