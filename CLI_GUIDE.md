@@ -45,7 +45,8 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+B` ByteBot ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+C` or `q` quit. Slash commands: `/init`, `/ctx`, `/advise`,
-`/bytebot`, `/rewind` (undo the agent's file changes for this session).
+`/bytebot`, `/plan` (pin or clear the agent's todo list),
+`/rewind` (undo the agent's file changes for this session).
 
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.

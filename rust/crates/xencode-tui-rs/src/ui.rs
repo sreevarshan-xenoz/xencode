@@ -633,10 +633,107 @@ fn chat_lines(app: &App) -> Vec<Line<'static>> {
     text
 }
 
+/// Rows the agent's plan strip takes off the top of the chat pane — 0 when
+/// there is no plan, or when the pane is too short to give any up. Shared by
+/// `draw_messages` and the resize clamp so the transcript's scroll math sees
+/// the geometry the user does (E6-02 discipline).
+fn plan_block_height(app: &App, area: Rect) -> u16 {
+    const MIN_TRANSCRIPT_ROWS: u16 = 6;
+    let items = crate::agent_tools::plan_items(&app.agent_plan);
+    if items.is_empty() {
+        return 0;
+    }
+    let shown = plan_visible_items(app, items.len());
+    let rows = shown + usize::from(items.len() > shown);
+    let height = (rows + 2).min(u16::MAX as usize) as u16; // + borders
+    if area.height < height + MIN_TRANSCRIPT_ROWS {
+        return 0;
+    }
+    height
+}
+
+/// How many steps the strip renders before pointing at `/plan`.
+fn plan_visible_items(app: &App, total: usize) -> usize {
+    if app.plan_pinned {
+        total
+    } else {
+        total.min(crate::agent_tools::PLAN_COMPACT_ITEMS)
+    }
+}
+
+fn draw_plan_strip(f: &mut Frame, app: &App, area: Rect) {
+    let items = crate::agent_tools::plan_items(&app.agent_plan);
+    if items.is_empty() || area.height < 3 {
+        return;
+    }
+    let shown = plan_visible_items(app, items.len());
+    let done = items
+        .iter()
+        .filter(|item| item.status == crate::agent_tools::PlanStatus::Done)
+        .count();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .border_style(Style::default().fg(app.theme.border))
+        .title(format!(" ☰ Plan {done}/{} ", items.len()));
+    // One line per step, clipped to the pane: a wrapped step would push the
+    // next one out of a block whose height was computed without wrapping.
+    let width = (area.width as usize).saturating_sub(4);
+    let mut lines: Vec<Line<'static>> = items
+        .iter()
+        .take(shown)
+        .map(|item| {
+            let (glyph, style) = match item.status {
+                crate::agent_tools::PlanStatus::Done => (
+                    "✓",
+                    Style::default()
+                        .fg(app.theme.message_system)
+                        .add_modifier(Modifier::CROSSED_OUT),
+                ),
+                crate::agent_tools::PlanStatus::InProgress => (
+                    "▶",
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                crate::agent_tools::PlanStatus::Pending => ("·", Style::default().fg(app.theme.fg)),
+            };
+            Line::from(vec![
+                Span::styled(format!("{glyph} "), style),
+                Span::styled(
+                    crate::agent_tools::truncate_one_line(&item.text, width),
+                    style,
+                ),
+            ])
+        })
+        .collect();
+    if items.len() > shown {
+        lines.push(Line::from(Span::styled(
+            format!("  … {} more — /plan", items.len() - shown),
+            Style::default().fg(app.theme.message_system),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
     let text = chat_lines(app);
 
     let is_focused = app.focus == FocusArea::ChatInput && app.input_mode == InputMode::Normal;
+
+    // The agent's todo list sits above the transcript, outside the scroll: a
+    // plan you have to scroll up to find is not a plan (I2-03).
+    let plan_rows = plan_block_height(app, area);
+    let area = if plan_rows == 0 {
+        area
+    } else {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(plan_rows), Constraint::Min(3)])
+            .split(area);
+        draw_plan_strip(f, app, split[0]);
+        split[1]
+    };
 
     let block = panel_block(
         app,
@@ -2104,9 +2201,12 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         app.last_body_focus,
     );
     if let Some(chat_area) = layout.chat {
+        let rows = chat_area
+            .height
+            .saturating_sub(plan_block_height(app, chat_area));
         app.chat_scroll = app
             .chat_scroll
-            .min(clamp_scroll(chat_lines(app).len(), chat_area.height));
+            .min(clamp_scroll(chat_lines(app).len(), rows));
     }
 
     // Code Review popup.

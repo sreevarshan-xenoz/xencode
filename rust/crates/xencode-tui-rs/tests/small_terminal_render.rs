@@ -172,6 +172,100 @@ fn approval_overlay_shows_the_call_class_diff_and_queue() {
     assert!(text.contains("+1 more"), "{text}");
 }
 
+fn seed_plan(app: &mut App<'static>, items: serde_json::Value) {
+    let posted = xencode_tui_rs::agent_tools::apply_plan(&app.agent_plan, &items);
+    assert!(posted.starts_with("plan updated:"), "{posted}");
+}
+
+/// I2-03: the strip eats rows out of the transcript, so it has to survive the
+/// same sweep — including a pinned 12-step list in a pane far too short for
+/// it, where the honest answer is to drop the strip, not crush the chat.
+#[test]
+fn renders_plan_strip_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    let mut app = populated(FocusArea::ChatInput);
+    seed_plan(
+        &mut app,
+        serde_json::json!([
+            {"text": "read the failing test", "status": "done"},
+            {"text": "fix the ✂ parser", "status": "in_progress"},
+            {"text": "x".repeat(400), "status": "pending"},
+            {"text": "run cargo test", "status": "pending"},
+        ]),
+    );
+    for &width in WIDTHS {
+        for &height in HEIGHTS {
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut app)).unwrap();
+            }));
+            if rendered.is_err() {
+                failures.push(format!("plan at {width}x{height}"));
+            }
+        }
+    }
+    app.plan_pinned = true;
+    let many: Vec<serde_json::Value> = (1..=xencode_tui_rs::agent_tools::PLAN_MAX_ITEMS)
+        .map(|i| serde_json::json!({"text": format!("item {i:02}")}))
+        .collect();
+    seed_plan(&mut app, serde_json::Value::Array(many));
+    for &width in WIDTHS {
+        for &height in HEIGHTS {
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut app)).unwrap();
+            }));
+            if rendered.is_err() {
+                failures.push(format!("pinned plan at {width}x{height}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn plan_strip_shows_progress_and_points_at_the_hidden_steps() {
+    let mut app = populated(FocusArea::ChatInput);
+    // Geometry this test asserts on belongs to the classic preset, not to
+    // whatever the developer happens to have in ~/.xencode.
+    app.config.layout = "classic".into();
+    // The strip lives at the top of a pane; `populated`'s pinned toast is a
+    // top-right overlay, so drop it to read the strip's own cells.
+    app.toasts.clear();
+    let items: Vec<serde_json::Value> = (1..=8)
+        .map(|i| {
+            serde_json::json!({
+                "text": format!("item {i:02}"),
+                "status": if i == 1 { "done" } else if i == 2 { "in_progress" } else { "pending" },
+            })
+        })
+        .collect();
+    seed_plan(&mut app, serde_json::Value::Array(items));
+
+    let text = render_text(&mut app, 100, 30);
+    assert!(text.contains("☰ Plan 1/8"), "{text}");
+    assert!(text.contains("✓ item 01"), "{text}");
+    assert!(text.contains("▶ item 02"), "{text}");
+    assert!(text.contains("· item 03"), "{text}");
+    assert!(text.contains("… 2 more — /plan"), "{text}");
+    assert!(
+        !text.contains("item 07"),
+        "the compact strip shows the first few steps, not all of them: {text}"
+    );
+
+    app.plan_pinned = true;
+    let text = render_text(&mut app, 100, 40);
+    assert!(text.contains("item 07"), "{text}");
+    assert!(
+        !text.contains("more — /plan"),
+        "a pinned plan has nothing hidden: {text}"
+    );
+
+    // A short pane would rather drop the strip than starve the transcript.
+    let text = render_text(&mut app, 100, 10);
+    assert!(!text.contains("☰ Plan"), "{text}");
+}
+
 /// E4-03 regression: the settings navigation bound derives from
 /// SETTINGS_ITEMS, so every row index must be a renderable cursor position.
 #[test]

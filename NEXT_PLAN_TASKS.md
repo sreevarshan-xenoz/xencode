@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 630 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 641 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -600,7 +600,7 @@ outgoing editor-activity producer, configurable max session size.
   **617 tests passed, zero clippy warnings**
 - [x] I2-01 — checkpoints + `/rewind`: pre-bytes snapshot of every approved write/edit, grouped per turn (session-only, git untouched), `/rewind [turns]`, editor buffer refreshed unless unsaved edits are at stake. **624 tests passed, zero clippy warnings**
 - [x] I2-02 — `run_command` tool: foreground `sh -c` in the workspace root, `agent_command_timeout` (default 30 s, Settings row + CLI), 8 KiB tail of combined output, exit status first, approval prompt shows the literal command line. **630 tests passed, zero clippy warnings**
-- [ ] I2-03 — plan/TODO visibility (`update_plan` tool + checklist render)
+- [x] I2-03 — plan/TODO visibility: `update_plan(items)` posts the model's todo list (≤12 steps, read-only class so it never prompts), rendered as a `☰ Plan 2/5` strip above the transcript with `✓`/`▶`/`·` glyphs, compact at 6 steps with a hidden-count line; `/plan` pins, `/plan clear` drops; tolerant parsing of weak-model shapes, failed update leaves the visible plan alone. **641 tests passed, zero clippy warnings**
 - [ ] I2-04 — real ByteBot replacing the scripted simulation
 - [ ] I3-01 — MCP stdio client (`xencode-mcp-rs`)
 - [ ] I3-02 — pre/post tool-use hooks
