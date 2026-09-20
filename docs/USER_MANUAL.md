@@ -82,6 +82,11 @@ xencode query "Explain clean architecture"
 # View conversation memory
 xencode memory list
 
+# Manage background tasks
+xencode tasks start "cargo test" --name tests
+xencode tasks list
+xencode tasks poll 1 --lines 20
+
 # Check cache stats
 xencode cache stats
 
@@ -265,25 +270,47 @@ xencode cache stats
 xencode cache clear
 ```
 
+### Background Tasks
+
+```bash
+# Start a task that survives this process (state in .xencode/tasks/)
+xencode tasks start "cargo test" --name tests
+
+# List tasks with derived status (running / exited(code) / killed)
+xencode tasks list
+xencode tasks list --json
+
+# Show a task's status and trailing output
+xencode tasks poll 1 --lines 20
+
+# Stop a running task; remove a finished one (refused while running)
+xencode tasks stop 1
+xencode tasks rm 1
+```
+
 ## Command Reference
 
 ### Rust CLI Commands
 
 ```
-Usage: xencode <COMMAND>
+Usage: xencode [COMMAND]
 
 Commands:
   scan      Scan a workspace and list all entries
-  config    Manage configuration
-  models    List and check models
-  cache     Manage response cache
-  query     Run a query
+  config    Configuration management
+  models    Local model management (Ollama & llama.cpp)
+  cache     Response cache management
+  query     Send a query to a model
   memory    Manage conversation memory
-  tui       Launch the TUI
+  tasks     Manage background tasks (file-backed, survives this process)
   server    Start the collaboration server
   analyze   Analyze code for issues and vulnerabilities
+  fetch     Fetch a web page and extract research-ready text
+  review    Review the diff between a base branch and HEAD, file by file
   plugin    Manage plugins
-  help      Print this message or the help of the given subcommand
+  llamacpp  llama.cpp server management (status/start/stop/load/unload)
+  tui       Launch the Terminal User Interface
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help     Print help

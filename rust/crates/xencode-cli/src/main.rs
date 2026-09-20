@@ -127,6 +127,12 @@ enum Commands {
         action: MemoryAction,
     },
 
+    /// Manage background tasks (file-backed, survives this process)
+    Tasks {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+
     /// Start the collaboration server
     Server {
         /// Port to listen on
@@ -277,6 +283,44 @@ enum MemoryAction {
     },
 }
 
+#[derive(Subcommand)]
+enum TaskAction {
+    /// List known tasks with their derived status
+    List {
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a background task (survives this CLI process)
+    Start {
+        /// Shell command to run
+        command: String,
+
+        /// Human-friendly label (defaults to the command)
+        #[arg(long, short)]
+        name: Option<String>,
+    },
+    /// Show a task's status and captured output
+    Poll {
+        /// Task ID
+        id: u64,
+
+        /// Trailing output lines to print
+        #[arg(long, default_value = "50")]
+        lines: usize,
+    },
+    /// Ask a running task to stop
+    Stop {
+        /// Task ID
+        id: u64,
+    },
+    /// Forget a finished task and delete its files
+    Rm {
+        /// Task ID
+        id: u64,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -321,6 +365,7 @@ async fn main() {
             .await
         }
         Commands::Memory { action } => run_memory(action),
+        Commands::Tasks { action } => run_tasks(action),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
@@ -977,8 +1022,99 @@ fn run_memory(action: MemoryAction) -> Result<(), String> {
     }
 }
 
-async fn run_server(port: u16) -> Result<(), String> {
-    use std::net::SocketAddr;
+/// Registry location: `<default_root>/.xencode/tasks`, the same dir layout
+/// `xencode init` uses for project state.
+fn tasks_registry() -> xencode_core_rs::FileTaskRegistry {
+    let root = xencode_context_rs::default_root()
+        .join(xencode_context_rs::XENCODE_DIR)
+        .join("tasks");
+    xencode_core_rs::FileTaskRegistry::new(root)
+}
+
+fn run_tasks(action: TaskAction) -> Result<(), String> {
+    let reg = tasks_registry();
+    match action {
+        TaskAction::List { json } => {
+            let entries = reg.poll().map_err(|e| e.to_string())?;
+            if json {
+                let rows: Vec<serde_json::Value> = entries
+                    .values()
+                    .map(|(t, status)| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "name": t.name,
+                            "command": t.command,
+                            "pid": t.pid,
+                            "started_at": t.started_at,
+                            "status": status.label(),
+                        })
+                    })
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| e.to_string())?
+                );
+            } else if entries.is_empty() {
+                println!("No background tasks.");
+            } else {
+                println!("{:>4}  {:<12} {:>8}  NAME", "ID", "STATUS", "PID");
+                for (task, status) in entries.values() {
+                    println!(
+                        "{:>4}  {:<12} {:>8}  {}",
+                        task.id,
+                        status.label(),
+                        task.pid,
+                        task.name
+                    );
+                }
+            }
+            Ok(())
+        }
+        TaskAction::Start { command, name } => {
+            let task = reg
+                .start(name.as_deref().unwrap_or(""), &command)
+                .map_err(|e| e.to_string())?;
+            println!("started task {} (pid {}): {}", task.id, task.pid, task.command);
+            Ok(())
+        }
+        TaskAction::Poll { id, lines } => {
+            let task = reg
+                .list()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .find(|t| t.id == id)
+                .ok_or_else(|| format!("no such task: {id}"))?;
+            println!(
+                "task {} [{}] {} (pid {})",
+                task.id,
+                reg.status(&task).label(),
+                task.command,
+                task.pid
+            );
+            let output = reg.output(id, lines);
+            if output.is_empty() {
+                println!("  (no output)");
+            } else {
+                for line in output {
+                    println!("  {line}");
+                }
+            }
+            Ok(())
+        }
+        TaskAction::Stop { id } => {
+            reg.stop(id).map_err(|e| e.to_string())?;
+            println!("stopped task {id}");
+            Ok(())
+        }
+        TaskAction::Rm { id } => {
+            reg.remove(id).map_err(|e| e.to_string())?;
+            println!("removed task {id}");
+            Ok(())
+        }
+    }
+}
+
+async fn run_server(port: u16) -> Result<(), String> {    use std::net::SocketAddr;
     let state = Arc::new(ServerState::new());
     let app = xencode_server_rs::build_app_with_state(state.clone());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
