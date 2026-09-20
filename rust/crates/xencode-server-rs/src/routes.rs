@@ -43,7 +43,7 @@ async fn health_check() -> Json<HealthResponse> {
 
 /// Server status with session count and uptime.
 async fn server_status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
-    let sessions = state.sessions.lock().await.len();
+    let sessions = state.workspaces.lock().await.workspace_count();
     Json(StatusResponse {
         online: true,
         sessions,
@@ -51,43 +51,54 @@ async fn server_status(State(state): State<Arc<AppState>>) -> Json<StatusRespons
     })
 }
 
-/// Create a new collaboration session. Requires a valid token.
-async fn create_session(State(state): State<Arc<AppState>>, _auth: Authed) -> Json<SessionInfo> {
-    let mut sessions = state.sessions.lock().await;
+/// Create a new collaboration session. Requires a valid token; the creator
+/// becomes the session's admin, so membership changes later are governable.
+async fn create_session(State(state): State<Arc<AppState>>, auth: Authed) -> Json<SessionInfo> {
+    let mut workspaces = state.workspaces.lock().await;
 
     // The id is a truncated UUID, so it carries only 32 bits. That was harmless
     // while nothing was stored under it; now that it is a map key, a collision
     // would merge two unrelated sessions — so pick one that is actually free.
     let id = loop {
         let candidate = format!("xencode-{}", &uuid::Uuid::new_v4().to_string()[..8]);
-        if !sessions.contains_key(&candidate) {
+        if workspaces.get_workspace(&candidate).is_none() {
             break candidate;
         }
     };
 
-    sessions.insert(id.clone(), Vec::new());
+    let ws = workspaces.create_workspace_with_id(&id, "collaboration", &auth.0.username);
+    let members = member_names(&ws);
 
     Json(SessionInfo {
         id,
-        members: Vec::new(),
-        created_at: chrono::Utc::now().to_rfc3339(),
+        members,
+        created_at: ws.created_at,
     })
+}
+
+/// Sorted member usernames — `HashMap` iteration order must not leak into
+/// an API response.
+fn member_names(ws: &xencode_collaboration_rs::Workspace) -> Vec<String> {
+    let mut members: Vec<String> = ws.members.keys().cloned().collect();
+    members.sort();
+    members
 }
 
 /// Get session info by id. Unknown ids are a 404, not an empty 200 — the
 /// caller must be able to tell "no such session" from "session with nobody
-/// in it".
+/// connected". Members are the identities that *belong* (with roles); who is
+/// connected right now is the WebSocket `members` frame's job.
 async fn get_session(
     State(state): State<Arc<AppState>>,
     _auth: Authed,
     Path(id): Path<String>,
 ) -> Result<Json<SessionInfo>, (StatusCode, Json<serde_json::Value>)> {
-    let session = state.sessions.lock().await.get(&id).cloned();
+    let session = state.workspaces.lock().await.get_workspace(&id).cloned();
     match session {
-        Some(members) => Ok(Json(SessionInfo {
+        Some(ws) => Ok(Json(SessionInfo {
+            members: member_names(&ws),
             id,
-            members,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: ws.created_at,
         })),
         None => Err((
             StatusCode::NOT_FOUND,
@@ -96,13 +107,14 @@ async fn get_session(
     }
 }
 
-/// WebSocket upgrade handler for collaboration sessions.
+/// WebSocket upgrade handler for collaboration sessions. The URL names only
+/// the session; identity comes from the first frame's token.
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    Path((session_id, username)): Path<(String, String)>,
+    Path(session_id): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| crate::ws::handle_socket(socket, session_id, username, state))
+    ws.on_upgrade(move |socket| crate::ws::handle_socket(socket, session_id, state))
 }
 
 /// API config endpoint — returns current server configuration.
@@ -114,7 +126,7 @@ async fn get_config() -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "max_session_size": 10,
+        "max_session_size": xencode_collaboration_rs::MAX_SESSION_MEMBERS,
         "supported_models": ["qwen2.5:7b", "llama3.1:8b", "gpt-4o", "claude-3.5-sonnet"],
         "features": ["collaboration", "code_analysis", "rag", "plugins", "llamacpp"],
         "llamacpp": {
@@ -249,7 +261,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/", get(health_check))
         .route("/sessions/create", post(create_session))
         .route("/sessions/{id}", get(get_session))
-        .route("/ws/{session_id}/{username}", get(ws_handler))
+        .route("/ws/{session_id}", get(ws_handler))
         .route("/auth/login", post(crate::auth::login))
         .route("/auth/verify", post(crate::auth::verify_token))
         .route("/api/config", get(get_config))
@@ -348,7 +360,8 @@ mod tests {
         let state = Arc::new(AppState::new());
         let session = create_session(State(state), authed()).await;
         assert!(session.id.starts_with("xencode-"));
-        assert!(session.members.is_empty());
+        // The creator is the session's admin from the moment it exists.
+        assert_eq!(session.members, vec!["tester".to_string()]);
         assert!(!session.created_at.is_empty());
     }
 
@@ -357,14 +370,14 @@ mod tests {
         let state = Arc::new(AppState::new());
         let session = create_session(State(state.clone()), authed()).await;
 
-        let sessions = state.sessions.lock().await;
-        assert!(
-            sessions.contains_key(&session.id),
-            "created session {} is not in state; state holds {:?}",
-            session.id,
-            sessions.keys().collect::<Vec<_>>()
+        let workspaces = state.workspaces.lock().await;
+        let ws = workspaces
+            .get_workspace(&session.id)
+            .unwrap_or_else(|| panic!("created session {} is not in state", session.id));
+        assert_eq!(
+            ws.members.get("tester"),
+            Some(&xencode_collaboration_rs::Role::Admin)
         );
-        assert_eq!(sessions[&session.id], Vec::<String>::new());
     }
 
     /// Created and fetched sessions are the same object; unknown ids are now
@@ -378,7 +391,7 @@ mod tests {
             .await
             .expect("created session should be found");
         assert_eq!(fetched.0.id, created.id);
-        assert!(fetched.0.members.is_empty());
+        assert_eq!(fetched.0.members, vec!["tester".to_string()]);
     }
 
     /// The regression this guards: `get_session` used to answer 200 with an
@@ -404,19 +417,21 @@ mod tests {
 
         // What handle_socket does when a peer joins.
         state
-            .sessions
+            .workspaces
             .lock()
             .await
-            .entry(created.id.clone())
-            .or_default()
-            .push("alice".to_string());
+            .join(&created.id, "alice")
+            .expect("join should succeed");
 
         let fetched = get_session(State(state.clone()), authed(), Path(created.id.clone()))
             .await
             .expect("created session should be found");
-        assert_eq!(fetched.0.members, vec!["alice".to_string()]);
+        assert_eq!(
+            fetched.0.members,
+            vec!["alice".to_string(), "tester".to_string()]
+        );
         // Joining must not have created a second, parallel session entry.
-        assert_eq!(state.sessions.lock().await.len(), 1);
+        assert_eq!(state.workspaces.lock().await.workspace_count(), 1);
     }
 
     #[tokio::test]
@@ -444,35 +459,41 @@ mod tests {
             );
         }
         assert_eq!(ids.len(), 50);
-        assert_eq!(state.sessions.lock().await.len(), 50);
+        assert_eq!(state.workspaces.lock().await.workspace_count(), 50);
     }
 
     #[tokio::test]
     async fn create_session_never_overwrites_an_existing_session() {
         let state = Arc::new(AppState::new());
         // A session that already has members, as a live one would.
-        state
-            .sessions
-            .lock()
-            .await
-            .insert("xencode-existing".to_string(), vec!["alice".to_string()]);
+        state.workspaces.lock().await.create_workspace_with_id(
+            "xencode-existing",
+            "existing",
+            "alice",
+        );
 
         let _ = create_session(State(state.clone()), authed()).await;
 
-        let sessions = state.sessions.lock().await;
-        assert_eq!(sessions["xencode-existing"], vec!["alice".to_string()]);
+        let workspaces = state.workspaces.lock().await;
+        let ws = workspaces.get_workspace("xencode-existing").unwrap();
+        assert_eq!(ws.members.keys().collect::<Vec<_>>(), vec!["alice"]);
     }
 
     #[tokio::test]
     async fn test_get_session_with_members() {
         let state = Arc::new(AppState::new());
-        // Manually add a session with members
+        // A session with two members, as a live one would have.
         {
-            let mut sessions = state.sessions.lock().await;
-            sessions.insert(
-                "active-session".to_string(),
-                vec!["alice".to_string(), "bob".to_string()],
-            );
+            let mut workspaces = state.workspaces.lock().await;
+            workspaces.create_workspace_with_id("active-session", "active", "alice");
+            workspaces
+                .add_member(
+                    "active-session",
+                    "alice",
+                    "bob",
+                    xencode_collaboration_rs::Role::Editor,
+                )
+                .unwrap();
         }
         let session = get_session(State(state), authed(), Path("active-session".to_string()))
             .await

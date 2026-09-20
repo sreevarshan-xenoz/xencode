@@ -1,11 +1,17 @@
 use crate::tokens::TokenStore;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
+use xencode_collaboration_rs::wire::{
+    ClientFrame, MemberInfo, ServerFrame, CLOSE_BAD_TOKEN, CLOSE_NO_SESSION, CLOSE_RBAC_DENIED,
+    CLOSE_SESSION_FULL, MAX_SESSION_MEMBERS,
+};
+use xencode_collaboration_rs::{Role, SyncCoordinator, WorkspaceManager};
 
 /// Messages buffered per peer before it is considered unable to keep up.
 ///
@@ -13,6 +19,10 @@ use tracing::{info, warn};
 /// growing a queue without limit. Broadcasts are small JSON frames, so this is
 /// a generous allowance for a client that is merely slow.
 const PEER_SEND_BUFFER: usize = 256;
+
+/// How long a freshly-upgraded connection gets to send its `auth` frame.
+/// Anything else — silence, garbage, a non-auth frame — is closed 4401.
+const AUTH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Identifies one WebSocket connection, so a broadcast can skip the connection
 /// it came from.
@@ -32,9 +42,12 @@ impl PeerId {
 }
 
 /// One connected peer: the channel its writer task drains, tagged with the
-/// connection's id.
+/// connection's id and the identity it authenticated as.
 pub struct Peer {
     pub id: PeerId,
+    pub username: String,
+    /// The `SyncCoordinator` presence record for this connection.
+    pub sync_id: String,
     tx: mpsc::Sender<Message>,
 }
 
@@ -44,9 +57,15 @@ pub struct Peer {
 /// from holding up every other session.
 pub type PeerMap = Arc<Mutex<HashMap<String, Vec<Peer>>>>;
 
+/// Server state. Two distinct membership notions live here on purpose:
+/// `workspaces` says who *belongs* to a session (roles survive disconnects),
+/// `sync` says who is *connected right now* (presence). The old single
+/// `sessions` map conflated them and was writable by anyone who merely
+/// opened a socket with a chosen username.
 pub struct AppState {
     pub peers: PeerMap,
-    pub sessions: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    pub workspaces: Arc<Mutex<WorkspaceManager>>,
+    pub sync: Arc<Mutex<SyncCoordinator>>,
     pub tokens: Arc<Mutex<TokenStore>>,
 }
 
@@ -54,7 +73,8 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             peers: Arc::new(Mutex::new(HashMap::new())),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            workspaces: Arc::new(Mutex::new(WorkspaceManager::new())),
+            sync: Arc::new(Mutex::new(SyncCoordinator::new())),
             tokens: Arc::new(Mutex::new(TokenStore::new())),
         }
     }
@@ -66,19 +86,120 @@ impl Default for AppState {
     }
 }
 
-/// Handle an incoming WebSocket connection.
-pub async fn handle_socket(
-    socket: WebSocket,
-    session_id: String,
-    username: String,
-    state: Arc<AppState>,
+/// Refuse a connection that never became a peer: one explanatory `error`
+/// frame, then a close with a protocol-defined code.
+async fn reject(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    code: u16,
+    reason: &str,
 ) {
+    use futures_util::SinkExt;
+    let frame = match code {
+        CLOSE_BAD_TOKEN => "bad_token",
+        CLOSE_NO_SESSION => "no_session",
+        CLOSE_SESSION_FULL => "session_full",
+        CLOSE_RBAC_DENIED => "rbac_denied",
+        _ => "error",
+    };
+    let _ = sink
+        .send(Message::Text(
+            ServerFrame::error(frame, reason).to_json().into(),
+        ))
+        .await;
+    let _ = sink
+        .send(Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.to_string().into(),
+        })))
+        .await;
+    let _ = sink.close().await;
+}
+
+/// Handle an incoming WebSocket connection.
+///
+/// Identity comes from the first frame's token, never from the URL: a
+/// username a caller types into a path argument proves nothing.
+pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<AppState>) {
     let (mut sink, mut receiver) = socket.split();
 
-    // One writer task per peer owns the sink; everyone else reaches this peer
-    // through `tx`. The task ends when every sender is dropped, i.e. once the
-    // peer is gone from the map and this function has returned.
+    // ---- authentication phase (before any peer exists) ----
+    let outcome: Result<String, (u16, &'static str)> =
+        match tokio::time::timeout(AUTH_TIMEOUT, receiver.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => match ClientFrame::parse(&text) {
+                Ok(ClientFrame::Auth { token }) => Ok(token),
+                Ok(_) => Err((CLOSE_BAD_TOKEN, "first frame must be auth")),
+                Err(_) => Err((CLOSE_BAD_TOKEN, "missing or malformed auth frame")),
+            },
+            // The client vanished before authenticating: nothing left to send.
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_)))) => return,
+            Ok(Some(Ok(_))) => Err((CLOSE_BAD_TOKEN, "binary frame before auth")),
+            Err(_) => Err((CLOSE_BAD_TOKEN, "auth timeout")),
+        };
+    let token = match outcome {
+        Ok(token) => token,
+        Err((code, reason)) => {
+            reject(&mut sink, code, reason).await;
+            return;
+        }
+    };
+    let principal = {
+        let mut tokens = state.tokens.lock().await;
+        tokens.lookup(&token)
+    };
+    let Some(principal) = principal else {
+        reject(&mut sink, CLOSE_BAD_TOKEN, "invalid or expired token").await;
+        return;
+    };
+    let username = principal.username;
+
+    // RBAC gate: the session must exist, and admitting a new identity must
+    // not exceed the shared size cap. Joining is idempotent — a reconnect
+    // keeps its role.
+    let role = {
+        let mut workspaces = state.workspaces.lock().await;
+        if workspaces.get_workspace(&session_id).is_none() {
+            drop(workspaces);
+            reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
+            return;
+        }
+        let known = workspaces.role_of(&session_id, &username).is_some();
+        if !known && workspaces.member_count(&session_id) >= MAX_SESSION_MEMBERS {
+            drop(workspaces);
+            reject(&mut sink, CLOSE_SESSION_FULL, "session is full").await;
+            return;
+        }
+        match workspaces.join(&session_id, &username) {
+            Ok(role) => role,
+            Err(_) => {
+                drop(workspaces);
+                reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
+                return;
+            }
+        }
+    };
+
+    info!("{username} ({role}) authenticated for session {session_id}");
+
+    // ---- peer phase ----
     let (tx, mut rx) = mpsc::channel::<Message>(PEER_SEND_BUFFER);
+    let sync_id = state
+        .sync
+        .lock()
+        .await
+        .join_session(&session_id, &username)
+        .peer_id;
+    let peer_id = PeerId::next();
+    {
+        let mut peers = state.peers.lock().await;
+        peers.entry(session_id.clone()).or_default().push(Peer {
+            id: peer_id,
+            username: username.clone(),
+            sync_id: sync_id.clone(),
+            tx: tx.clone(),
+        });
+    }
+
+    // The writer task owns the sink from here on; the auth phase is over.
     tokio::spawn(async move {
         use futures_util::SinkExt;
         while let Some(msg) = rx.recv().await {
@@ -90,66 +211,174 @@ pub async fn handle_socket(
         let _ = sink.close().await;
     });
 
-    // Register the peer
-    let peer_id = PeerId::next();
-    {
-        let mut peers = state.peers.lock().await;
-        peers
-            .entry(session_id.clone())
-            .or_default()
-            .push(Peer { id: peer_id, tx });
-    }
-    {
-        let mut sessions = state.sessions.lock().await;
-        sessions
-            .entry(session_id.clone())
-            .or_default()
-            .push(username.clone());
-    }
-
-    info!("User {username} joined session {session_id}");
-
-    // Broadcast join message
-    broadcast_to_session(
+    let members = presence(&state, &session_id).await;
+    let _ = tx
+        .send(Message::Text(
+            ServerFrame::AuthOk {
+                username: username.clone(),
+                role: role.to_string(),
+                session_id: session_id.clone(),
+                members: members.clone(),
+            }
+            .to_json()
+            .into(),
+        ))
+        .await;
+    broadcast_frame(
         &state,
         &session_id,
-        &serde_json::json!({
-            "type": "join",
-            "username": username,
-        })
-        .to_string(),
-        None,
+        &ServerFrame::Members { members },
+        Some(peer_id),
     )
     .await;
 
-    // Forward messages from this peer to others
+    // ---- message loop ----
     while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(text) = msg {
-            broadcast_to_session(&state, &session_id, &text, Some(peer_id)).await;
+        let Message::Text(text) = msg else {
+            continue;
+        };
+        match ClientFrame::parse(&text) {
+            Ok(ClientFrame::Activity { text: body }) => {
+                let allowed = {
+                    let mut workspaces = state.workspaces.lock().await;
+                    match workspaces.role_of(&session_id, &username) {
+                        Some(role) if role.can(&Role::Editor) => true,
+                        other => {
+                            // The denial belongs in the audit trail whoever
+                            // the actor is; roles can change mid-session.
+                            workspaces.log_denied(
+                                &username,
+                                &session_id,
+                                "relay activity",
+                                other.as_ref(),
+                            );
+                            false
+                        }
+                    }
+                };
+                if !allowed {
+                    let _ = tx
+                        .send(Message::Text(
+                            ServerFrame::error(
+                                "rbac_denied",
+                                "viewers cannot send activity to the session",
+                            )
+                            .to_json()
+                            .into(),
+                        ))
+                        .await;
+                    continue;
+                }
+                // `user` is set from server state, never from the frame.
+                let relay = ServerFrame::Activity {
+                    user: username.clone(),
+                    text: body,
+                };
+                broadcast_frame(&state, &session_id, &relay, Some(peer_id)).await;
+            }
+            Ok(ClientFrame::Ping) => {
+                let _ = tx
+                    .send(Message::Text(ServerFrame::Pong.to_json().into()))
+                    .await;
+            }
+            // Auth mid-session, or anything unparseable: answer, keep the
+            // connection, make no state changes.
+            Ok(ClientFrame::Auth { .. }) => {
+                let _ = tx
+                    .send(Message::Text(
+                        ServerFrame::error("already_authenticated", "send activity or ping")
+                            .to_json()
+                            .into(),
+                    ))
+                    .await;
+            }
+            Err(_) => {
+                let _ = tx
+                    .send(Message::Text(
+                        ServerFrame::error("bad_frame", "expected a tagged JSON frame")
+                            .to_json()
+                            .into(),
+                    ))
+                    .await;
+            }
         }
     }
 
-    // Handle disconnect
-    info!("User {username} left session {session_id}");
-    remove_peer(&state, &session_id, &username).await;
-
-    broadcast_to_session(
-        &state,
-        &session_id,
-        &serde_json::json!({
-            "type": "leave",
-            "username": username,
-        })
-        .to_string(),
-        None,
-    )
-    .await;
+    // ---- disconnect ----
+    info!("{username} left session {session_id}");
+    remove_connection(&state, &session_id, peer_id).await;
+    let members = presence(&state, &session_id).await;
+    broadcast_frame(&state, &session_id, &ServerFrame::Members { members }, None).await;
 }
 
-/// Broadcast a message to every peer in a session, skipping `exclude` if given.
+/// Remove one connection (not the whole identity) from the peer and presence
+/// maps. Dropping its sender ends the writer task.
+async fn remove_connection(state: &AppState, session_id: &str, peer_id: PeerId) {
+    let sync_id = {
+        let mut peers = state.peers.lock().await;
+        let Some(session_peers) = peers.get_mut(session_id) else {
+            return;
+        };
+        let mut removed = None;
+        session_peers.retain(|p| {
+            if p.id == peer_id {
+                removed = Some(p.sync_id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if session_peers.is_empty() {
+            peers.remove(session_id);
+        }
+        removed
+    };
+    if let Some(sync_id) = sync_id {
+        state.sync.lock().await.leave_session(session_id, &sync_id);
+    }
+}
+
+/// Who is connected to a session right now, deduplicated by username, with
+/// each identity's current workspace role.
 ///
-/// `exclude` is the connection a message arrived on, so the sender is not sent
-/// its own message back.
+/// Lock order is `peers` then `workspaces`; every path that takes both
+/// follows it.
+async fn presence(state: &AppState, session_id: &str) -> Vec<MemberInfo> {
+    let usernames: Vec<String> = {
+        let peers = state.peers.lock().await;
+        let mut seen: Vec<String> = Vec::new();
+        if let Some(session_peers) = peers.get(session_id) {
+            for peer in session_peers {
+                if !seen.contains(&peer.username) {
+                    seen.push(peer.username.clone());
+                }
+            }
+        }
+        seen
+    };
+    let workspaces = state.workspaces.lock().await;
+    usernames
+        .into_iter()
+        .map(|username| {
+            let role = workspaces
+                .role_of(session_id, &username)
+                .unwrap_or(Role::Viewer)
+                .to_string();
+            MemberInfo { username, role }
+        })
+        .collect()
+}
+
+/// Broadcast a server frame to every peer in a session, skipping `exclude`.
+async fn broadcast_frame(
+    state: &AppState,
+    session_id: &str,
+    frame: &ServerFrame,
+    exclude: Option<PeerId>,
+) {
+    broadcast_to_session(state, session_id, &frame.to_json(), exclude).await;
+}
+
 async fn broadcast_to_session(
     state: &AppState,
     session_id: &str,
@@ -179,14 +408,6 @@ async fn broadcast_to_session(
     }
 }
 
-/// Remove a peer from the session on disconnect.
-async fn remove_peer(state: &AppState, session_id: &str, username: &str) {
-    let mut sessions = state.sessions.lock().await;
-    if let Some(users) = sessions.get_mut(session_id) {
-        users.retain(|u| u != username);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,81 +415,11 @@ mod tests {
     #[tokio::test]
     async fn test_app_state_new() {
         let state = AppState::new();
-        let peers = state.peers.lock().await;
-        assert!(peers.is_empty());
-        let sessions = state.sessions.lock().await;
-        assert!(sessions.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_remove_peer_removes_user() {
-        let state = Arc::new(AppState::new());
-        // Manually add a user to a session
-        {
-            let mut sessions = state.sessions.lock().await;
-            sessions.insert(
-                "session-1".to_string(),
-                vec!["alice".to_string(), "bob".to_string()],
-            );
-        }
-        remove_peer(&state, "session-1", "alice").await;
-        let sessions = state.sessions.lock().await;
-        assert_eq!(sessions.get("session-1"), Some(&vec!["bob".to_string()]));
-    }
-
-    #[tokio::test]
-    async fn test_remove_peer_last_user_removes_entry() {
-        let state = Arc::new(AppState::new());
-        {
-            let mut sessions = state.sessions.lock().await;
-            sessions.insert("session-2".to_string(), vec!["dave".to_string()]);
-        }
-        remove_peer(&state, "session-2", "dave").await;
-        let sessions = state.sessions.lock().await;
-        // The key should still exist but with an empty vec
-        assert_eq!(sessions.get("session-2"), Some(&vec![] as &Vec<String>));
-    }
-
-    #[tokio::test]
-    async fn test_remove_peer_nonexistent_session() {
-        let state = Arc::new(AppState::new());
-        // Should not panic
-        remove_peer(&state, "ghost-session", "nobody").await;
-        // State should still be empty
-        let sessions = state.sessions.lock().await;
-        assert!(sessions.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_remove_peer_nonexistent_user() {
-        let state = Arc::new(AppState::new());
-        {
-            let mut sessions = state.sessions.lock().await;
-            sessions.insert("session-3".to_string(), vec!["eve".to_string()]);
-        }
-        // Removing a user that doesn't exist in the session
-        remove_peer(&state, "session-3", "mallory").await;
-        let sessions = state.sessions.lock().await;
-        assert_eq!(sessions.get("session-3"), Some(&vec!["eve".to_string()]));
-    }
-
-    #[tokio::test]
-    async fn test_broadcast_to_session_no_peers() {
-        // Broadcasting to a session with no peers should not panic
-        let state = Arc::new(AppState::new());
-        {
-            let mut sessions = state.sessions.lock().await;
-            sessions.insert("empty-session".to_string(), vec!["alice".to_string()]);
-        }
-        broadcast_to_session(&state, "empty-session", r#"{"type":"test"}"#, None).await;
-        // No assertions needed — just shouldn't crash
-    }
-
-    #[tokio::test]
-    async fn test_broadcast_to_session_nonexistent() {
-        // Broadcasting to a session that doesn't exist should not panic
-        let state = Arc::new(AppState::new());
-        broadcast_to_session(&state, "no-such-session", r#"{"type":"test"}"#, None).await;
+        assert!(state.peers.lock().await.is_empty());
+        assert_eq!(state.workspaces.lock().await.workspace_count(), 0);
+        assert!(state.sync.lock().await.get_active_sessions().is_empty());
+        let mut tokens = state.tokens.lock().await;
+        assert!(tokens.lookup("xencode_nothing").is_none());
     }
 
     fn text_of(msg: &Message) -> String {
@@ -283,6 +434,8 @@ mod tests {
         let (tx, rx) = mpsc::channel(capacity);
         let peer = Peer {
             id: PeerId::next(),
+            username: "tester".to_string(),
+            sync_id: uuid::Uuid::new_v4().to_string(),
             tx,
         };
         (peer, rx)
@@ -406,7 +559,7 @@ mod tests {
 
         // Completes without waiting on the stalled peer.
         tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            Duration::from_secs(5),
             broadcast_to_session(&state, "s", "hello", None),
         )
         .await
@@ -459,12 +612,88 @@ mod tests {
         broadcast_to_session(&state, "stalled-session", "a", None).await;
 
         tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            Duration::from_secs(5),
             broadcast_to_session(&state, "other-session", "b", None),
         )
         .await
         .expect("a stalled peer in one session blocked another session");
 
         assert_eq!(text_of(&other_rx.recv().await.unwrap()), "b");
+    }
+
+    /// Register a peer's presence the way `handle_socket` does, and hand back
+    /// the sync id so the test's `Peer` carries the same one.
+    async fn join_presence(state: &AppState, session: &str, username: &str) -> String {
+        state
+            .sync
+            .lock()
+            .await
+            .join_session(session, username)
+            .peer_id
+    }
+
+    #[tokio::test]
+    async fn remove_connection_drops_only_that_one_peer() {
+        let state = Arc::new(AppState::new());
+        let (mut first, _first_rx) = test_peer(8);
+        let (mut second, _second_rx) = test_peer(8);
+        first.sync_id = join_presence(&state, "s", "tester").await;
+        second.sync_id = join_presence(&state, "s", "other").await;
+        let (first_id, second_id) = (first.id, second.id);
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![first, second]);
+
+        remove_connection(&state, "s", first_id).await;
+
+        let peers = state.peers.lock().await;
+        assert_eq!(peers["s"].len(), 1);
+        assert_eq!(peers["s"][0].id, second_id);
+        drop(peers);
+        // Presence saw exactly this connection leave.
+        let sync = state.sync.lock().await;
+        let peers = sync.get_peers("s");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].username, "other");
+    }
+
+    #[tokio::test]
+    async fn removing_the_last_connection_clears_the_session_entry() {
+        let state = Arc::new(AppState::new());
+        let (mut only, _rx) = test_peer(8);
+        only.sync_id = join_presence(&state, "s", "tester").await;
+        let only_id = only.id;
+        state.peers.lock().await.insert("s".to_string(), vec![only]);
+
+        remove_connection(&state, "s", only_id).await;
+
+        assert!(!state.peers.lock().await.contains_key("s"));
+        assert!(!state.sync.lock().await.session_has_peers("s"));
+    }
+
+    #[tokio::test]
+    async fn presence_deduplicates_by_username_and_reports_roles() {
+        let state = Arc::new(AppState::new());
+        let (first, _rx_a) = test_peer(8);
+        let (second, _rx_b) = test_peer(8);
+        state
+            .peers
+            .lock()
+            .await
+            .insert("s".to_string(), vec![first, second]);
+        state
+            .workspaces
+            .lock()
+            .await
+            .create_workspace_with_id("s", "s", "tester");
+
+        let members = presence(&state, "s").await;
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].username, "tester");
+        // "tester" created the workspace, so the two connections share one
+        // admin identity rather than appearing twice.
+        assert_eq!(members[0].role, "admin");
     }
 }
