@@ -548,3 +548,69 @@ fn toast_stays_clear_of_the_input_on_short_screens() {
         "toast vanished at 60x10"
     );
 }
+
+/// H1-10: the layout engine's acceptance sweep — every preset (plus an
+/// unknown one that must degrade to classic) × every panel × sizes, with
+/// all display toggles on, plus zen rendered against each body focus.
+#[test]
+fn every_layout_preset_renders_at_any_size() {
+    const LAYOUTS: &[&str] = &["classic", "chat-first", "zen", "bogus-name"];
+    const SIZES: &[(u16, u16)] = &[
+        (4, 4),
+        (7, 8),
+        (20, 4),
+        (20, 16),
+        (40, 8),
+        (40, 24),
+        (61, 16),
+        (80, 6),
+        (80, 24),
+        (120, 30),
+    ];
+    let mut failures = Vec::new();
+
+    for layout in LAYOUTS {
+        for (name, focus) in FOCI {
+            let mut app = populated(*focus);
+            app.config.layout = (*layout).into();
+            app.config.rounded_borders = true;
+            app.config.show_scrollbars = true;
+            app.config.show_line_numbers = true;
+            for &(width, height) in SIZES {
+                let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
+                }));
+                if rendered.is_err() {
+                    failures.push(format!("{layout}/{name} at {width}x{height}"));
+                }
+            }
+        }
+    }
+
+    // Zen's target pane follows the last body focus — pin all three.
+    for body_focus in [
+        FocusArea::ChatInput,
+        FocusArea::FileExplorer,
+        FocusArea::CodeEditor,
+    ] {
+        let mut app = populated(FocusArea::Settings); // overlay must not steal zen's slot
+        app.last_body_focus = body_focus;
+        app.config.layout = "zen".into();
+        for &(width, height) in SIZES {
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut app)).unwrap();
+            }));
+            if rendered.is_err() {
+                failures.push(format!("zen/{body_focus:?} at {width}x{height}"));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} layout/panel/size combinations panicked: {failures:#?}",
+        failures.len()
+    );
+}
