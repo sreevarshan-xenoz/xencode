@@ -305,6 +305,7 @@ Commands:
   query     Send a query to a model
   memory    Manage conversation memory
   tasks     Manage background tasks (file-backed, survives this process)
+  worktree  Manage git worktrees of the current repository
   server    Start the collaboration server
   analyze   Analyze code for issues and vulnerabilities
   fetch     Fetch a web page and extract research-ready text
