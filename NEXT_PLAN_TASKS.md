@@ -333,3 +333,45 @@
   `FocusArea` enum size).
 
 > Status legend: `[x]` done, `[ ]` todo.
+
+## Milestone F — Live Refactor Insights (drafted 2026-09-20)
+
+Goal (backlog item 2): make the deterministic `advise` engine *live* — the symbol/dep
+snapshot stays current between `/init` runs, insights get a dedicated panel, and both
+the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
+
+### F1 — Live graph
+
+- [ ] F1-01 `xencode-context-rs`: `refresh_rust_file(root, rel_path)` — re-extract
+  symbols for one already-indexed `.rs` file from its current bytes (drop the record if
+  the file is gone), rebuild `deps.json` via `build_graph`, and keep `index.json` +
+  `manifest.json` entries (size/loc/mtime) consistent; a path absent from the index is
+  a no-op (new files still need `/init`). Atomic writes via `write_atomic`. Unit tests
+  on temp `.xencode` dirs: edit changes edges, delete drops record + edges, unknown
+  file no-op.
+- [ ] F1-02 TUI watcher wiring: `handle_watch_event` refreshes the snapshot for
+  modified/removed `.rs` files before computing affected dependents, so toasts and
+  `/advise` see the current graph without re-running `/init`. Tests with temp dirs.
+
+### F2 — Insights panel
+
+- [ ] F2-01 `Ctrl+S` AdvisePanel: computes `advise()` from the (now live) snapshot on
+  open; rows colored per kind (⚠ broken import / 🔁 cycle / 🧶 hub / 🕸 orphan),
+  ↑↓/jk select, Enter → full-message detail, `o` opens the advised file in the editor,
+  `r` recomputes, Esc unwinds detail → panel → chat. Feature Navigator entry #17,
+  help overlay, focus/Esc plumbing, keymap tests + small-terminal render test.
+
+### F3 — Surfaces
+
+- [ ] F3-01 CLI: `xencode advise [filter] [--json] [--limit]` over the `.xencode`
+  snapshot of the current directory; text table or JSON array; `--filter` narrows to
+  matching paths. Verified live against a temp repo; docs match `--help` exactly.
+- [ ] F3-02 Agentic tool: `repo_advise` callable by the model in the chat tool loop
+  (schema in `xencode-providers-rs`, executor in `agent_tools.rs`) returning the
+  compact advice report (cap ~40 lines) for the current workspace; test for the
+  executor's success/error paths.
+
+### F4 — Close-out
+
+- [ ] F4-01 Docs sweep: README/CLI_GUIDE/USER_MANUAL/NEXT_PLAN synced to what shipped,
+  live test/crate counts recorded, CHANGELOG entry.
