@@ -29,6 +29,7 @@ const GLOBAL: &[Binding] = &[
     ("Ctrl+,", "settings"),
     ("Ctrl+W", "close panel → chat"),
     ("Ctrl+T", "toggle terminal strip"),
+    ("Ctrl+U", "cycle layout preset"),
     ("Ctrl+H", "run provider health check"),
 ];
 
