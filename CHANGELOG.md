@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Selectable TUI body layouts and display preferences (Milestone H): three
+  layout presets — `classic` (20/50/30 as before), `chat-first` (explorer
+  hidden, editor 25 %, chat 75 %), `zen` (one pane fills the body, following
+  focus) — cycled live with `Ctrl+U` or picked on the Settings panel, plus
+  `rounded_borders`, `show_scrollbars` (chat & explorer) and
+  `show_line_numbers` (editor gutter + current-line highlight). All four
+  persist to `~/.xencode/config.json` and are settable via
+  `xencode config set`; unknown layout names fall back to classic. The
+  config dir honors `XCODE_CONFIG_DIR`
 - The Collaboration Hub gains a real client (Milestone G, G3-01):
   `xencode-tui-rs::collab_client` logs in over HTTP, opens the WebSocket,
   authenticates with the first-frame `auth` token (creating a session via
@@ -52,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- TUI header reads ` ✦ xencode [layout] ⎇branch model` with the focused
+  panel name on the right; parts drop out at 72/60/40 columns. Panel
+  borders all route through one `panel_block` (rounded-corner aware), body
+  pane titles drop their emoji under 30 columns, popups that would collapse
+  below 16×6 grow to 80 % of the screen, and toasts no longer overlay the
+  chat input on short terminals (Milestone H)
 - Manuals tell the truth about team mode (Milestone G, G4-01): the user
   manual gained a Collaboration Hub key table and lost its fabricated
   claims (`0.0.0.0` default, "credential vault… email verification");

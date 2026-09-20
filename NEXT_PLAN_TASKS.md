@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 571 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 591 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -546,3 +546,36 @@ claim; the bind surface is the perimeter), join approval (knowledge of the
 session id is the invite), CRDT document sync (`crdt.rs` stays unwired),
 session recovery after restart, TUI auto-reconnect, private-CA wss trust,
 outgoing editor-activity producer, configurable max session size.
+
+## Milestone H — TUI Polish + Selectable Layouts (complete 2026-09-20)
+
+- [x] H1-01 — config schema: `layout`, `rounded_borders`, `show_scrollbars`,
+  `show_line_numbers` (flat keys, serde defaults, CLI `config set` arms) and
+  `XCODE_CONFIG_DIR` override for the config dir. Commit `70884aa`
+- [x] H1-02 — `layout.rs`: pure `compute_layout` engine, presets
+  classic/chat-first/zen, unknown→classic fallback, terminal-drop under
+  18 rows, hit-test maps hidden-pane clicks to visible neighbours. `33129d7`
+- [x] H1-03 — wired the engine: draw, mouse and resize-clamp read the same
+  geometry; `App.last_body_focus`/`last_layout` latch at draw time. `268f221`
+- [x] H1-04 — declarative `SETTINGS_ITEMS` table replaces magic row indices;
+  new Display rows; `App::save_config` choke point; fixed the settings bug
+  where rowing away kept the old edit buffer armed. `04be29a`
+- [x] H1-05 — `Ctrl+U` cycles presets live with a toast; Tab ring skips
+  hidden panes (zen deliberately keeps the full ring — Tab flips its panes).
+  `8ff96bc`
+- [x] H1-06 — `panel_block` + `panel_border_set`: every framed panel honors
+  `rounded_borders`; markdown code-fence decoration stays square by design.
+  `5c3739c`
+- [x] H1-07 — config-driven scrollbars (chat & explorer, ≥24 cols) and the
+  editor line-number gutter + current-line highlight (≥45 cols, gate in one
+  place). `6ce7a53`
+- [x] H1-08 — header revamp: ` ✦ xencode [layout] ⎇branch model` + focus
+  badge, width ladder 72/60/40. `8d1dce0`
+- [x] H1-09 — small-terminal pass: emoji-free titles <30 cols, popup
+  80 %-floor when collapsed, toasts never cover the input. `ce14b5b`
+- [x] H1-10 — layout×panel×size render sweep (incl. unknown preset and zen
+  per body focus, all toggles on) + Ctrl+U help/keymap pin. `79f1b4a`
+- [x] H1-11 — close-out docs (this entry): USER_MANUAL layout table + keys,
+  CLI_GUIDE config keys + `XCODE_CONFIG_DIR`, QUICK_START layout line,
+  README counts, CHANGELOG Added/Changed. Live figures at this commit:
+  **591 tests passed, 13 crates, zero clippy warnings**

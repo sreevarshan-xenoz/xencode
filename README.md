@@ -30,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (13 crates, 571 tests,
+At its core is a fast, single-file **Rust** binary (13 crates, 591 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -41,7 +41,7 @@ and fix your code — driven entirely from your terminal.
 - **🧠 Offline-first AI** — local Ollama models by default; cloud fallback only when you opt in.
 - **🤖 Agentic coding loop** — bounded `plan → edit → test → fix` cycles with error classification and targeted fixes.
 - **⚖️ Ensemble reasoning** — combine multiple models via vote, weighted, consensus, or hybrid strategies.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (24 panels): agent, collaboration, audit, profiler, git, models, and more.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (24 panels, three selectable layouts via `Ctrl+U`): agent, collaboration, audit, profiler, git, models, and more.
 - **🔒 Secure by design** — token-authenticated collaboration server and OWASP-based security scanning.
 - **🔌 Extensible platform** — plugin trait system, feature flags, and lifecycle management.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an audit trail, plus Docker, Compose, and Kubernetes assets.
@@ -334,7 +334,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (571 tests)
+cargo test                          # Full workspace suite (591 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

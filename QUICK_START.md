@@ -82,7 +82,10 @@ live members with roles. Flags, tokens, TLS and the audit log are in
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
-keybinding help overlay.
+keybinding help overlay. `Ctrl+U` cycles the body layout (classic →
+chat-first → zen); the same choice lives on the Settings panel (`s`),
+alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
+everything persists to `~/.xencode/config.json`.
 
 ## Examples
 
