@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The TUI file watcher now keeps the symbol/dep snapshot live (F1-02): modified/removed `.rs` files trigger `refresh_rust_file` before dependent-file warnings are computed, so toasts and `/advise` reflect current imports without another `/init`
 - Live symbol-graph refresh (`xencode-context-rs::refresh`, F1-01): `refresh_rust_file` re-extracts one already-indexed `.rs` file from disk (or drops it when deleted), rebuilds `deps.json` and keeps `files.json`/`manifest.json` (sizes, loc, mtimes) consistent — a refreshed snapshot makes the next `/init` report fresh; the watcher now also excludes `.xencode` so snapshot rewrites never loop back into themselves
 - `xencode worktree list | add <path> [<branch>] | remove <path>` (D3-04) over the D3-01 helpers; omitted branch lets git name the new branch after the directory, dirty removals stay refused by git and the main checkout is never removable
 - Background tasks can run in another directory (D3-03): `TaskManager::start_with_cwd`, an optional `cwd` on the `background_start` tool (echoed back as `in <dir>` in the result), and the context bundle's git summary now lists extra git worktrees with branch and dirty markers
