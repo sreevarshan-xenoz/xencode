@@ -11,7 +11,7 @@
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
-- ✅ **Rust migration complete**: 13 crates, 508 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 13 crates, 513 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🚧 **Active backlog**: team-mode hardening
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
@@ -28,9 +28,12 @@
    `repo_advise` agent tool all read one shared `advise_from_snapshot` path.
 3. **Multimodal inputs** — shipped (Milestone E): image analysis and TUI attach as
    per-backend message parts, plus PDF/DOCX text extraction into the context bundle.
-4. **Secure team workflows hardening** — workspace RBAC and audit events (membership
-   changes, last-admin guard, denials) already ship in `xencode-collaboration-rs`;
-   remaining hardening on top, and the TUI hub session still runs simulated members.
+4. **Secure team workflows hardening** — ✅ drafted 2026-09-20 as **Milestone G —
+   Team Mode Hardening**: the RBAC/audit crate (which so far had zero consumers) gets
+   wired into the server behind real token auth, the WS join loses its
+   username-in-URL identity, audit persists to disk, the bind defaults to loopback
+   with opt-in TLS — and the TUI Collaboration Hub stops simulating and connects
+   for real.
 5. **Git loop completion** — PR review browsing in the TUI: shipped (Milestone E,
    `Ctrl+Y` per-file dashboard); remaining ideas live in later milestones.
 

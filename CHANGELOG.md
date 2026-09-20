@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- Collaboration RBAC groundwork (Milestone G, G1-01): the sole admin can no longer
+  be *demoted* by an admin role-change (only removal was guarded), both guards now
+  write `Denied` audit events, and `WorkspaceManager` gained `join` (idempotent
+  self-join as Editor), `create_workspace_with_id` and `log_denied` — the API the
+  hardened server will consume
 - Docs close-out (Milestone F4): NEXT_PLAN.md marks Milestone F complete and its
   backlog now carries only team-mode hardening; the TUI panel count (24),
   Feature Navigator entries (17), key tables, `xencode advise` docs and the
