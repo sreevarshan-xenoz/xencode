@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 540 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 547 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -458,10 +458,17 @@ turns the hub into an actual WebSocket client.
   5 wire round-trip tests (server-rs 88, collaboration-rs 29); workspace at
   540. The 5 s auth timeout itself is not timing-tested — every rejection path
   is covered, but a dedicated test would add 5 s to the suite for one branch.
-- [ ] G1-04 server-rs: `AuditSink` mirroring every mutation + denial to
+- [x] G1-04 server-rs: `AuditSink` mirroring every mutation + denial to
   `~/.xencode/audit.jsonl` (`--audit-path`, `none` disables); one line per event,
   append-not-truncate across restarts, write failure disables the sink without
-  taking down the session plane.
+  taking down the session plane. Sink lives in server-rs (`audit.rs`), the
+  collaboration crate stays IO-free; `AppState::new` defaults to a disabled
+  sink so no test touches disk, and the CLI flag that points it at
+  `~/.xencode/audit.jsonl` arrives with G2-01. Join refusals (no session 4404,
+  session full 4409) now also write `Denied` events — the actor is
+  authenticated by then. `AuditAction` serializes snake_case to match its
+  `Display`. 6 sink unit tests + 1 wire-up e2e (audit lines on disk: order,
+  strict seq, actor); workspace at 547.
 
 ### G2 — Network posture
 

@@ -1,3 +1,4 @@
+use crate::audit::AuditSink;
 use crate::tokens::TokenStore;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::StreamExt;
@@ -67,15 +68,24 @@ pub struct AppState {
     pub workspaces: Arc<Mutex<WorkspaceManager>>,
     pub sync: Arc<Mutex<SyncCoordinator>>,
     pub tokens: Arc<Mutex<TokenStore>>,
+    /// Disk mirror of the workspace audit trail. Disabled by default so
+    /// nothing in the test suite touches `~/.xencode`; the CLI opts in via
+    /// `with_audit`.
+    pub audit: Arc<AuditSink>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        Self::with_audit(Arc::new(AuditSink::disabled()))
+    }
+
+    pub fn with_audit(audit: Arc<AuditSink>) -> Self {
         Self {
             peers: Arc::new(Mutex::new(HashMap::new())),
             workspaces: Arc::new(Mutex::new(WorkspaceManager::new())),
             sync: Arc::new(Mutex::new(SyncCoordinator::new())),
             tokens: Arc::new(Mutex::new(TokenStore::new())),
+            audit,
         }
     }
 }
@@ -154,28 +164,35 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
 
     // RBAC gate: the session must exist, and admitting a new identity must
     // not exceed the shared size cap. Joining is idempotent — a reconnect
-    // keeps its role.
+    // keeps its role. Every refusal here is by an *authenticated* identity,
+    // so it earns a Denied audit entry.
     let role = {
         let mut workspaces = state.workspaces.lock().await;
         if workspaces.get_workspace(&session_id).is_none() {
+            workspaces.log_denied(&username, &session_id, "join", None);
+            state.audit.sync_from(&workspaces);
             drop(workspaces);
             reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
             return;
         }
         let known = workspaces.role_of(&session_id, &username).is_some();
         if !known && workspaces.member_count(&session_id) >= MAX_SESSION_MEMBERS {
+            workspaces.log_denied(&username, &session_id, "join (session full)", None);
+            state.audit.sync_from(&workspaces);
             drop(workspaces);
             reject(&mut sink, CLOSE_SESSION_FULL, "session is full").await;
             return;
         }
-        match workspaces.join(&session_id, &username) {
+        let role = match workspaces.join(&session_id, &username) {
             Ok(role) => role,
             Err(_) => {
                 drop(workspaces);
                 reject(&mut sink, CLOSE_NO_SESSION, "no such session").await;
                 return;
             }
-        }
+        };
+        state.audit.sync_from(&workspaces);
+        role
     };
 
     info!("{username} ({role}) authenticated for session {session_id}");
@@ -252,6 +269,7 @@ pub async fn handle_socket(socket: WebSocket, session_id: String, state: Arc<App
                                 "relay activity",
                                 other.as_ref(),
                             );
+                            state.audit.sync_from(&workspaces);
                             false
                         }
                     }
