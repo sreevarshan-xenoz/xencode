@@ -131,6 +131,7 @@ xencode config reset
 | `rounded_borders` | bool | rounded panel corners |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
+| `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).

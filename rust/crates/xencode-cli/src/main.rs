@@ -560,6 +560,7 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .parse()
                         .map_err(|_| format!("invalid boolean: {value}"))?;
                 }
+                "agent_approval" => config.agent_approval = value.clone(),
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;

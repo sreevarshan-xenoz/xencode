@@ -218,6 +218,7 @@ Display settings (Settings panel rows, same keys as `xencode config set`):
 | `Rounded Borders` / `rounded_borders` | off | rounded panel corners |
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
+| `Agent Approval` / `agent_approval` | `ask` | how the chat agent may use its tools: `ask` prompts before mutating tools, `edit-allow` auto-approves file edits but still prompts for shell, `all-allow` auto-approves everything inside the workspace (paths outside it, `.git/` and the config dir are always refused) |
 
 The header reads ` ✦ xencode [layout] ⎇branch model` on the left with the
 focused panel name on the right; on narrow terminals parts drop out in that

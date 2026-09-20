@@ -184,6 +184,9 @@ pub struct App<'a> {
     /// The body geometry `draw_body` rendered last frame. The Tab focus-ring
     /// reads it so it can only Tab to panes the user can actually see.
     pub last_layout: crate::layout::BodyLayout,
+    /// Tool classes the user answered "always allow" for this session
+    /// (I1-03 approvals). Session-only: never persisted.
+    pub agent_grants: Vec<crate::agent_tools::ToolClass>,
     pub memory: ConversationMemory,
     pub feature_nav_selected: usize,
 
@@ -703,6 +706,7 @@ impl<'a> App<'a> {
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
+            agent_grants: Vec::new(),
             memory,
             feature_nav_selected: 0,
             session_start_time: now,
@@ -964,6 +968,20 @@ impl<'a> App<'a> {
     /// settings write (H1-04).
     pub fn save_config(&mut self) {
         let _ = self.config.save();
+    }
+
+    /// The agent tool-loop's approval mode, parsed from config with the
+    /// strictest value as fallback (I1-01).
+    pub fn agent_mode(&self) -> crate::agent_tools::ApprovalMode {
+        crate::agent_tools::ApprovalMode::parse(&self.config.agent_approval)
+    }
+
+    /// Remember an "always allow for this session" approval answer. Never
+    /// written to config — quitting revokes every grant.
+    pub fn grant_tools_for_session(&mut self, class: crate::agent_tools::ToolClass) {
+        if !self.agent_grants.contains(&class) {
+            self.agent_grants.push(class);
+        }
     }
 
     pub(crate) fn style_chat_input(&mut self) {

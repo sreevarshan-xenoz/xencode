@@ -785,6 +785,7 @@ fn setting_display(app: &App, idx: usize) -> String {
             let current = match row.label {
                 "Theme" => &app.config.active_theme,
                 "Layout" => &app.config.layout,
+                "Agent Approval" => &app.config.agent_approval,
                 _ => options[0],
             };
             let pos = options.iter().position(|o| *o == current).unwrap_or(0);

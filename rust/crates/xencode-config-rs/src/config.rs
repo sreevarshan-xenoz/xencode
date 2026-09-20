@@ -46,6 +46,11 @@ pub struct XencodeConfig {
     #[serde(default = "default_true")]
     pub show_line_numbers: bool,
 
+    /// Agent tool-approval mode: "ask", "edit-allow" or "all-allow".
+    /// Unknown values fall back to "ask" at decision time.
+    #[serde(default = "default_agent_approval")]
+    pub agent_approval: String,
+
     /// Ollama base URL.
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
@@ -119,6 +124,10 @@ fn default_layout() -> String {
     "classic".to_string()
 }
 
+fn default_agent_approval() -> String {
+    "ask".to_string()
+}
+
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -156,6 +165,7 @@ impl Default for XencodeConfig {
             rounded_borders: false,
             show_scrollbars: true,
             show_line_numbers: true,
+            agent_approval: default_agent_approval(),
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
@@ -287,6 +297,7 @@ mod tests {
         assert!(!config.rounded_borders);
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
+        assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.llama_cpp_url, "http://localhost:8080");
         assert_eq!(config.llama_cpp_model_path, "");
@@ -314,6 +325,7 @@ mod tests {
             rounded_borders: true,
             show_scrollbars: false,
             show_line_numbers: false,
+            agent_approval: "edit-allow".to_string(),
             ..XencodeConfig::default()
         };
         config.api_keys.openai_api_key = Some("sk-test-123".to_string());
@@ -349,6 +361,8 @@ mod tests {
         assert!(config.show_scrollbars);
         assert!(config.show_line_numbers);
         assert!(!config.rounded_borders);
+        assert_eq!(config.agent_approval, "ask");
+        assert_eq!(config.active_theme, "ocean");
 
         fs::remove_dir_all(&dir).unwrap();
     }
