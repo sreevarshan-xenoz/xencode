@@ -108,13 +108,29 @@ xencode llamacpp start --model mymodel.gguf --port 8080
 ```
 
 ### `xencode config <action>`
-Configuration management.
+Configuration management. Config lives in `~/.xencode/config.json`;
+set `XCODE_CONFIG_DIR` to point Xencode at a different directory.
 
 ```bash
 xencode config show
 xencode config set default_model qwen3:4b
 xencode config reset
 ```
+
+`config set` keys (values are validated; `config show` prints the JSON):
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `default_model` | string | e.g. `qwen3:4b` |
+| `ollama_url`, `llama_cpp_url` | string | provider endpoints |
+| `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
+| `llama_cpp_args` | string | split on whitespace |
+| `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
+| `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
+| `layout` | string | TUI body preset: `classic`, `chat-first`, `zen` (unknown → classic at render) |
+| `rounded_borders` | bool | rounded panel corners |
+| `show_scrollbars` | bool | scrollbars on chat & explorer panes |
+| `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).

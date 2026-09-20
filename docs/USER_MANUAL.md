@@ -132,6 +132,7 @@ Global (work in every panel, any mode):
 | `Ctrl+B` | ByteBot agent panel |
 | `Ctrl+H` | Run provider health check |
 | `Ctrl+T` | Toggle embedded terminal strip |
+| `Ctrl+U` | Cycle body layout preset: classic → chat-first → zen |
 | `Ctrl+W` | Close panel → chat |
 | `Ctrl+,` | Settings |
 
@@ -197,6 +198,31 @@ over HTTP, authenticates the WebSocket with the first `auth` frame, and
 renders only real state — transport (`ws (no TLS)` / `wss (TLS)`), session
 id, live members with their roles, connected-for time, and the server's
 last error. There is no auto-reconnect; `r` is manual by design.
+
+### Layouts & Display
+
+The body layout is a preset — pick it with `Ctrl+U` (live, with a toast) or
+on the Settings panel (`s`). All choices persist to `~/.xencode/config.json`.
+
+| Preset | Shape |
+|--------|-------|
+| `classic` | explorer 20 % / editor 50 % / chat 30 % (the default look) |
+| `chat-first` | explorer hidden, editor 25 %, chat 75 % |
+| `zen` | one pane fills the body — explorer or editor when focused, otherwise chat |
+
+Display settings (Settings panel rows, same keys as `xencode config set`):
+
+| Row / config key | Default | Effect |
+|------------------|---------|--------|
+| `Layout` / `layout` | `classic` | preset above; unknown values fall back to classic |
+| `Rounded Borders` / `rounded_borders` | off | rounded panel corners |
+| `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
+| `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
+
+The header reads ` ✦ xencode [layout] ⎇branch model` on the left with the
+focused panel name on the right; on narrow terminals parts drop out in that
+order (layout chip below 72 columns, branch/model below 60, badge below 40).
+Tab cycles only the panes the current layout shows.
 
 ### First-Time Setup
 
