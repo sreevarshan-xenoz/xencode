@@ -119,6 +119,59 @@ fn renders_help_overlay_at_any_terminal_size() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+fn queue_prompt(app: &mut App<'static>, tool: &str, class: xencode_tui_rs::agent_tools::ToolClass) {
+    let (responder, _answer) = tokio::sync::oneshot::channel();
+    app.approval_queue.push_back((
+        xencode_tui_rs::agent_tools::ApprovalRequest {
+            tool: tool.into(),
+            class,
+            summary: format!("{tool} src/lib.rs"),
+            preview: "@@ -1,2 +1,3 @@\n-fn old() {}\n+fn hello() {}\n+fn world() {}\n".into(),
+        },
+        responder,
+    ));
+}
+
+/// I1-03: the approval prompt is topmost and modal, so it must survive the
+/// same size sweep — including a stacked queue and a long diff at 1 row.
+#[test]
+fn renders_approval_overlay_at_any_terminal_size() {
+    use xencode_tui_rs::agent_tools::ToolClass;
+    let mut failures = Vec::new();
+    let mut app = populated(FocusArea::ChatInput);
+    app.help_visible = true; // drawn underneath: the prompt must still paint
+    queue_prompt(&mut app, "write_file", ToolClass::Edit);
+    queue_prompt(&mut app, "run_command", ToolClass::Shell);
+    for &width in WIDTHS {
+        for &height in HEIGHTS {
+            let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut app)).unwrap();
+            }));
+            if rendered.is_err() {
+                failures.push(format!("approval at {width}x{height}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn approval_overlay_shows_the_call_class_diff_and_queue() {
+    use xencode_tui_rs::agent_tools::ToolClass;
+    let mut app = populated(FocusArea::ChatInput);
+    queue_prompt(&mut app, "write_file", ToolClass::Edit);
+    let text = render_text(&mut app, 100, 30);
+    assert!(text.contains("Allow file change?"), "{text}");
+    assert!(text.contains("write_file src/lib.rs"), "{text}");
+    assert!(text.contains("fn hello"), "{text}");
+    assert!(text.contains("y:allow"), "{text}");
+
+    queue_prompt(&mut app, "run_command", ToolClass::Shell);
+    let text = render_text(&mut app, 100, 30);
+    assert!(text.contains("+1 more"), "{text}");
+}
+
 /// E4-03 regression: the settings navigation bound derives from
 /// SETTINGS_ITEMS, so every row index must be a renderable cursor position.
 #[test]

@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- File tools for the agent (Milestone I, I1-02): `read_file` (paged, numbered
+  lines), `list_dir`, `search_files` (regex walk that skips `target/`,
+  `node_modules/` and dot-dirs, 100-hit cap), `write_file` and `edit_file`
+  (exact old→new replace, `all` for multi-match) are defined in
+  `xencode-providers-rs::file_tools` and executed in
+  `xencode-tui-rs::agent_tools`, each returning a unified diff built with
+  `similar`. Every executor refuses paths outside the workspace on its own,
+  and `background_start` now resolves a relative `cwd` against the workspace
+  root instead of the process directory
+- Agent approval prompt (Milestone I, I1-03): when the policy says `Ask`, the
+  TUI shows a topmost modal with the call, its class and the exact bytes at
+  stake — colored unified diff for writes/edits, the literal command line for
+  shell calls. `y` allows, `a` allows and remembers the class for this
+  session, `n`/`Esc` deny, `k`/`j` scroll; every other key (quit chords
+  included) is swallowed and Enter is deliberately *not* an answer. Stacked
+  calls queue FIFO, denials come back to the model as a message telling it
+  not to retry unchanged, and each answer is logged in the chat as
+  `⚙ write_file src/lib.rs · approved`. The keys also appear in the `?` help
+  overlay and the status bar
 - Agent permission policy core (Milestone I, I1-01): every tool call is now
   classified against an `agent_approval` mode — `ask` (default),
   `edit-allow`, `all-allow` — via a single `classify` in

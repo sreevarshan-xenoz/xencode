@@ -27,6 +27,12 @@ pub enum KeyFlow {
 
 /// Entry point called from `Event::Key` in the run loop.
 pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
+    // The approval prompt is topmost and modal: it answers y/a/n/Esc,
+    // scrolls the diff, and swallows everything else — quit chords
+    // included — exactly like the help overlay.
+    if app.pending_approval().is_some() {
+        return approval_modal_key(app, key);
+    }
     // The help overlay is modal: Esc/?/F1 close it, every other key is
     // swallowed while it is open.
     if app.help_visible {
@@ -50,6 +56,32 @@ fn quit() -> KeyFlow {
 
 fn done() -> KeyFlow {
     KeyFlow::Continue
+}
+
+/// The approval prompt answers with four keys and nothing else. Enter is
+/// deliberately swallowed rather than treated as a deny: a stray Return in
+/// the terminal should never be read as an answer.
+fn approval_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
+    use crate::agent_tools::ApprovalAnswer;
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            app.resolve_approval(ApprovalAnswer::Approved);
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            app.resolve_approval(ApprovalAnswer::ApprovedForSession);
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.resolve_approval(ApprovalAnswer::Denied);
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.approval_scroll = app.approval_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => {
+            app.approval_scroll += 1;
+        }
+        _ => {}
+    }
+    done()
 }
 
 fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
@@ -1468,6 +1500,119 @@ mod tests {
         assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
         assert_eq!(press(&mut app, KeyCode::Char('?')), KeyFlow::Continue);
         assert!(!app.help_visible);
+    }
+
+    /// Queue an approval prompt the way the tool task would, and hand back
+    /// the receiving end so a test can assert what the task was woken with.
+    fn queue_approval(
+        app: &mut App,
+        tool: &str,
+        class: crate::agent_tools::ToolClass,
+    ) -> tokio::sync::oneshot::Receiver<crate::agent_tools::ApprovalAnswer> {
+        use crate::agent_tools::ApprovalRequest;
+        let (responder, answer) = tokio::sync::oneshot::channel();
+        app.approval_queue.push_back((
+            ApprovalRequest {
+                tool: tool.into(),
+                class,
+                summary: format!("{tool} src/lib.rs"),
+                preview: "+fn hello() {}\n".into(),
+            },
+            responder,
+        ));
+        answer
+    }
+
+    #[test]
+    fn approval_modal_is_topmost_and_swallows_quit_chords() {
+        use crate::agent_tools::{ApprovalAnswer, ToolClass};
+        let mut app = app_with(FocusArea::ChatInput);
+        let mut answer = queue_approval(&mut app, "write_file", ToolClass::Edit);
+        // Help can open underneath, but the prompt still owns the keys.
+        press(&mut app, KeyCode::Char('?'));
+        assert_eq!(press(&mut app, KeyCode::Char('q')), KeyFlow::Continue);
+        assert_eq!(
+            press_with_mods(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL),
+            KeyFlow::Continue
+        );
+        assert!(
+            !app.help_visible,
+            "q/Ctrl+C/? must not reach the handlers below the prompt"
+        );
+        assert_eq!(
+            app.pending_approval().map(|r| r.tool.as_str()),
+            Some("write_file")
+        );
+        // Enter is deliberately neither an allow nor a deny.
+        assert_eq!(press(&mut app, KeyCode::Enter), KeyFlow::Continue);
+        assert!(answer.try_recv().is_err());
+        assert_eq!(press(&mut app, KeyCode::Char('y')), KeyFlow::Continue);
+        assert_eq!(answer.try_recv(), Ok(ApprovalAnswer::Approved));
+        assert!(app.pending_approval().is_none());
+    }
+
+    #[test]
+    fn approval_keys_answer_in_queue_order_and_record_the_transcript() {
+        use crate::agent_tools::{ApprovalAnswer, ToolClass};
+        let mut app = app_with(FocusArea::ChatInput);
+        let mut first = queue_approval(&mut app, "write_file", ToolClass::Edit);
+        let mut second = queue_approval(&mut app, "edit_file", ToolClass::Edit);
+        assert_eq!(press(&mut app, KeyCode::Char('n')), KeyFlow::Continue);
+        assert_eq!(first.try_recv(), Ok(ApprovalAnswer::Denied));
+        assert_eq!(
+            app.pending_approval().map(|r| r.tool.as_str()),
+            Some("edit_file"),
+            "the queue must stay FIFO"
+        );
+        assert_eq!(press(&mut app, KeyCode::Esc), KeyFlow::Continue);
+        assert_eq!(second.try_recv(), Ok(ApprovalAnswer::Denied));
+        let logged: Vec<&str> = app
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(
+            logged,
+            vec![
+                "⚙ write_file src/lib.rs · denied",
+                "⚙ edit_file src/lib.rs · denied"
+            ]
+        );
+    }
+
+    #[test]
+    fn approval_a_grants_the_tool_class_for_the_session_only() {
+        use crate::agent_tools::{ApprovalAnswer, ToolClass};
+        let mut app = app_with(FocusArea::ChatInput);
+        let mut answer = queue_approval(&mut app, "edit_file", ToolClass::Edit);
+        assert_eq!(press(&mut app, KeyCode::Char('a')), KeyFlow::Continue);
+        assert_eq!(answer.try_recv(), Ok(ApprovalAnswer::ApprovedForSession));
+        assert!(app.agent_grants.contains(&ToolClass::Edit));
+        // Shell commands are a separate class: granting edits says nothing
+        // about running commands.
+        assert!(!app.agent_grants.contains(&ToolClass::Shell));
+        assert!(app.pending_approval().is_none());
+        // Answering an empty queue is a no-op, not a panic.
+        assert_eq!(press(&mut app, KeyCode::Char('y')), KeyFlow::Continue);
+    }
+
+    #[test]
+    fn approval_scroll_keys_page_the_diff_and_reset_on_answer() {
+        use crate::agent_tools::ToolClass;
+        let mut app = app_with(FocusArea::ChatInput);
+        let _answer = queue_approval(&mut app, "write_file", ToolClass::Edit);
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.approval_scroll, 2);
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.approval_scroll, 1);
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(app.approval_scroll, 0);
+        // Up at the top saturates instead of underflowing.
+        let _answer = queue_approval(&mut app, "write_file", ToolClass::Edit);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.approval_scroll, 0);
     }
 
     #[test]

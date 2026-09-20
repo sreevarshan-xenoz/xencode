@@ -187,6 +187,26 @@ pub struct App<'a> {
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted.
     pub agent_grants: Vec<crate::agent_tools::ToolClass>,
+    /// Pending approval prompts from the agent tool loop, in arrival order.
+    /// The overlay shows the front; answering pops and resolves the oneshot
+    /// the tool task is awaiting.
+    pub approval_queue: std::collections::VecDeque<(
+        crate::agent_tools::ApprovalRequest,
+        tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
+    )>,
+    pub approval_scroll: usize,
+    /// Sender the spawned tool loops use to raise approval prompts.
+    pub approval_tx: mpsc::UnboundedSender<(
+        crate::agent_tools::ApprovalRequest,
+        tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
+    )>,
+    /// Receive end, taken once by `run_app` and drained each frame.
+    pub approval_rx: Option<
+        mpsc::UnboundedReceiver<(
+            crate::agent_tools::ApprovalRequest,
+            tokio::sync::oneshot::Sender<crate::agent_tools::ApprovalAnswer>,
+        )>,
+    >,
     pub memory: ConversationMemory,
     pub feature_nav_selected: usize,
 
@@ -643,6 +663,7 @@ impl<'a> App<'a> {
         let selected_model = 0;
         let theme = ThemeColors::get(&config.active_theme);
 
+        let (approval_tx, approval_rx) = mpsc::unbounded_channel();
         let git_status = git_status_map();
         let git_branch = Command::new("git")
             .args(["branch", "--show-current"])
@@ -707,6 +728,10 @@ impl<'a> App<'a> {
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
             agent_grants: Vec::new(),
+            approval_queue: std::collections::VecDeque::new(),
+            approval_scroll: 0,
+            approval_tx,
+            approval_rx: Some(approval_rx),
             memory,
             feature_nav_selected: 0,
             session_start_time: now,
@@ -982,6 +1007,29 @@ impl<'a> App<'a> {
         if !self.agent_grants.contains(&class) {
             self.agent_grants.push(class);
         }
+    }
+
+    /// The approval prompt the overlay shows right now, if any.
+    pub fn pending_approval(&self) -> Option<&crate::agent_tools::ApprovalRequest> {
+        self.approval_queue.front().map(|(request, _)| request)
+    }
+
+    /// Answer the frontmost prompt: wake the waiting tool task, apply the
+    /// session grant for "always allow", and record the decision in the
+    /// chat transcript using the same ⚙ grammar as the tool-loop lines.
+    pub fn resolve_approval(&mut self, answer: crate::agent_tools::ApprovalAnswer) {
+        let Some((request, responder)) = self.approval_queue.pop_front() else {
+            return;
+        };
+        if answer == crate::agent_tools::ApprovalAnswer::ApprovedForSession {
+            self.grant_tools_for_session(request.class);
+        }
+        let _ = responder.send(answer);
+        self.approval_scroll = 0;
+        self.messages.push(UiMessage {
+            role: "system".to_string(),
+            content: format!("⚙ {} · {}", request.summary, answer.tag()),
+        });
     }
 
     pub(crate) fn style_chat_input(&mut self) {
@@ -3604,6 +3652,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 app.handle_watch_event(body);
             } else {
                 app.append_generation(&token);
+            }
+        }
+
+        // Approval prompts from the tool loop (I1-03): queue them; the
+        // modal overlay answers the front one and wakes its task.
+        if let Some(arx) = app.approval_rx.as_mut() {
+            while let Ok((request, responder)) = arx.try_recv() {
+                app.approval_queue.push_back((request, responder));
             }
         }
 
