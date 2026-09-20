@@ -223,13 +223,17 @@ pub struct App<'a> {
     // Collaboration Hub state
     pub collab_session_active: bool,
     pub collab_session_id: String,
-    pub collab_members: Vec<(String, String, String)>, // (name, status, connection)
-    pub collab_sync_status: String,                    // "synced", "syncing", "error"
+    pub collab_members: Vec<(String, String, String)>, // (name, role, connection)
+    pub collab_sync_status: String,                    // "disconnected", "connecting", "connected"
     pub collab_last_sync: f64,
     pub collab_pending_changes: u32,
     pub collab_activity_log: Vec<String>,
-    pub collab_commit_stream: Vec<(String, String)>, // (author, message)
-    pub collab_shared_files: Vec<String>,            // shared file names
+    pub collab_server_url: String,
+    pub collab_username: String,
+    /// The live client task, if any. Aborted when the hub disconnects.
+    pub collab_worker: Option<tokio::task::JoinHandle<()>>,
+    /// The server's most recent `error` frame, for the hub to surface.
+    pub collab_error: String,
 
     // Voice Interface state
     pub voice_active: bool,
@@ -720,8 +724,10 @@ impl<'a> App<'a> {
             collab_last_sync: 0.0,
             collab_pending_changes: 0,
             collab_activity_log: Vec::new(),
-            collab_commit_stream: Vec::new(),
-            collab_shared_files: Vec::new(),
+            collab_server_url: "http://127.0.0.1:8765".to_string(),
+            collab_username: std::env::var("USER").unwrap_or_else(|_| "you".to_string()),
+            collab_worker: None,
+            collab_error: String::new(),
 
             voice_active: false,
             voice_status: "idle".to_string(),
@@ -1554,81 +1560,28 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Run asynchronous health checks for all configured providers.
-    /// Results are sent back through the channel for processing in the event loop.
-    /// Start a Collaboration Hub session with simulated team members and sync.
+    /// Connect the Collaboration Hub to a real server: the worker logs in,
+    /// joins (or creates) the session, and feeds this event loop `[COLLAB]`
+    /// tokens. Nothing here is simulated — if the server is unreachable the
+    /// hub says so and goes back to disconnected.
     pub fn start_collab_session(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.collab_session_active {
             return;
         }
         self.collab_session_active = true;
-        self.collab_session_id = format!("xencode-{:06x}", (current_timestamp() as u64) & 0xFFFFFF);
         self.collab_sync_status = "connecting".to_string();
         self.collab_pending_changes = 0;
+        self.collab_error.clear();
+        self.collab_members.clear();
         self.collab_activity_log.clear();
-
-        // Seed initial team members
-        self.collab_members = vec![
-            (
-                "You (local)".to_string(),
-                "online".to_string(),
-                "🔗 LAN".to_string(),
-            ),
-            (
-                "alice".to_string(),
-                "online".to_string(),
-                "🌐 WAN".to_string(),
-            ),
-            ("bob".to_string(), "away".to_string(), "🌐 WAN".to_string()),
-            (
-                "carol".to_string(),
-                "busy".to_string(),
-                "🔗 LAN".to_string(),
-            ),
-        ];
-
         self.collab_activity_log
-            .push("🔌 Connecting to collaboration server...".to_string());
-
-        let session_id = self.collab_session_id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let _ = tx.send("[COLLAB]status:connected".to_string());
-            let _ = tx.send(format!(
-                "[COLLAB]log:🔗 Connected — Session: {}",
-                session_id
-            ));
-            let _ = tx.send("[COLLAB]log:👥 3 remote team members online".to_string());
-            let _ = tx.send("[COLLAB]member:alice:online".to_string());
-            let _ = tx.send("[COLLAB]member:bob:away".to_string());
-            let _ = tx.send("[COLLAB]member:carol:busy".to_string());
-
-            // Simulate sync pulses
-            let pulses = [
-                ("📤 Syncing workspace...", "syncing", 5u32),
-                ("📥 Pulled 3 remote changes", "synced", 0u32),
-                ("🔄 Auto-merge applied (2 files)", "synced", 0u32),
-                ("📤 Pushing local edits...", "syncing", 3u32),
-                ("✅ All changes synchronized", "synced", 0u32),
-            ];
-            for (msg, status, pending) in pulses {
-                tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-                let _ = tx.send(format!("[COLLAB]sync:{}", status));
-                let _ = tx.send(format!("[COLLAB]pending:{}", pending));
-                let _ = tx.send(format!("[COLLAB]log:{}", msg));
-            }
-
-            // Member status changes
-            tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
-            let _ = tx.send("[COLLAB]member:bob:online".to_string());
-            let _ = tx.send("[COLLAB]log:👤 bob is now online".to_string());
-            tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-            let _ = tx.send("[COLLAB]member:carol:online".to_string());
-            let _ = tx.send("[COLLAB]log:👤 carol is now online".to_string());
-
-            let _ = tx.send("[COLLAB]log:✅ Collaboration session ready".to_string());
-            let _ = tx.send("[COLLAB]ready".to_string());
-        });
+            .push(format!("🔌 Connecting to {}...", self.collab_server_url));
+        self.collab_worker = Some(crate::collab_client::spawn_collab_worker(
+            self.collab_server_url.clone(),
+            self.collab_session_id.clone(),
+            self.collab_username.clone(),
+            tx,
+        ));
     }
 
     /// Start a ByteBot autonomous task execution.
@@ -3317,33 +3270,37 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     }
                 }
             } else if let Some(body) = token.strip_prefix("[COLLAB]") {
-                if body.starts_with("status:") {
-                    if let Some(s) = body.strip_prefix("status:") {
-                        app.collab_sync_status = s.to_string();
+                if let Some(s) = body.strip_prefix("status:") {
+                    app.collab_sync_status = s.to_string();
+                    if s == "disconnected" {
+                        // The worker is finished by definition — it just
+                        // reported its own end. Drop the handle.
+                        app.collab_session_active = false;
+                        app.collab_worker = None;
                     }
-                } else if body.starts_with("sync:") {
-                    if let Some(s) = body.strip_prefix("sync:") {
-                        app.collab_sync_status = s.to_string();
-                    }
-                } else if body.starts_with("pending:") {
-                    if let Some(n) = body.strip_prefix("pending:") {
-                        app.collab_pending_changes = n.trim().parse::<u32>().unwrap_or(0);
-                    }
-                } else if body.starts_with("member:") {
-                    let parts: Vec<&str> = body.splitn(3, ':').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[1].to_string();
-                        let new_status = parts[2].to_string();
-                        if let Some(member) =
-                            app.collab_members.iter_mut().find(|(n, _, _)| n == &name)
-                        {
-                            member.1 = new_status;
+                } else if let Some(id) = body.strip_prefix("session:") {
+                    app.collab_session_id = id.to_string();
+                } else if let Some(json) = body.strip_prefix("members:") {
+                    // Complete snapshot from the server; swap the list whole.
+                    match serde_json::from_str::<Vec<xencode_collaboration_rs::wire::MemberInfo>>(
+                        json,
+                    ) {
+                        Ok(members) => {
+                            app.collab_members = members
+                                .iter()
+                                .map(|m| {
+                                    (m.username.clone(), m.role.clone(), "connected".to_string())
+                                })
+                                .collect();
+                        }
+                        Err(_) => {
+                            app.collab_error = "malformed members list from server".to_string();
                         }
                     }
-                } else if body.starts_with("log:") {
-                    if let Some(msg) = body.strip_prefix("log:") {
-                        app.collab_activity_log.push(msg.to_string());
-                    }
+                } else if let Some(msg) = body.strip_prefix("log:") {
+                    app.collab_activity_log.push(msg.to_string());
+                } else if let Some(msg) = body.strip_prefix("error:") {
+                    app.collab_error = msg.to_string();
                 } else if body == "ready" {
                     app.collab_last_sync = current_timestamp();
                 }

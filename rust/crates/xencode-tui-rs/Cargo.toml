@@ -16,7 +16,10 @@ xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
+xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.29", features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = "0.3"
 crossterm = "0.28"
 ratatui = "0.29"
 tui-textarea = "0.7"
