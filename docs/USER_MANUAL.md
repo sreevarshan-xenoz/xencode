@@ -235,6 +235,34 @@ focused panel name on the right; on narrow terminals parts drop out in that
 order (layout chip below 72 columns, branch/model below 60, badge below 40).
 Tab cycles only the panes the current layout shows.
 
+### Agent Tools & Approvals
+
+While it is answering, the chat agent can call tools; each round is shown in
+the transcript as `⚙ <tool> <arguments>`, and the result of every call is fed
+back to the model before it continues.
+
+| Tool | What it does | Class |
+|------|--------------|-------|
+| `read_file(path, offset?, limit?)` | Paged, line-numbered file text (200 lines by default) | read-only |
+| `list_dir(path?)` | Directory listing, `/` marks directories | read-only |
+| `search_files(pattern, path?)` | Regex search over the tree (skips `target/`, `node_modules/`, dot-dirs; 100 hits) | read-only |
+| `repo_advise(filter?)` | Findings from the project index | read-only |
+| `background_poll(id)` / `background_stop(id)` | Output / cancel of a background task | read-only |
+| `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |
+| `edit_file(path, old, new, all?)` | Exact string replace; refuses an ambiguous match unless `all` | file change |
+| `background_start(command, cwd?, name?)` | Start a shell command in the background (`Ctrl+K` panel) | shell command |
+
+`file change` and `shell command` calls stop at the approval prompt described
+in the key table above, unless `agent_approval` says otherwise. Paths are
+relative to the project root; anything resolving outside it, anything under
+`.git/`, and anything in the config directory is refused in every mode without
+prompting — the transcript shows `⚙✗ … · refused: outside the workspace`. A
+denial is reported to the model as an error it must not retry unchanged, so
+the agent explains or re-plans instead of looping.
+
+`agent_max_rounds` (default 16) caps how many tool rounds one turn may take;
+after that the model is asked for a prose answer with no tools offered.
+
 ### First-Time Setup
 
 On first run, Xencode will guide you through:

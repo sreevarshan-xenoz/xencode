@@ -30,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (13 crates, 611 tests,
+At its core is a fast, single-file **Rust** binary (13 crates, 617 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -106,6 +106,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 
 ### Developer Experience
 - **Rust ratatui TUI** (primary) — 24 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
+- **Approval-gated agent tool loop** — the chat model can call 9 tools (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `background_start/poll/stop`, `repo_advise`); file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), paths outside the workspace are refused in every mode, and every answer is logged in the transcript.
 - Code analysis with language-aware AST parsing (Python, JavaScript/TypeScript, Rust).
 - Side-by-side diff inspection and hunk-level review flows.
 - Rich CLI with `advise`, `server`, `analyze`, and `plugin` subcommands.
@@ -334,7 +335,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (611 tests)
+cargo test                          # Full workspace suite (617 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

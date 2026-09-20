@@ -9,12 +9,22 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tokio::sync::{mpsc, oneshot};
 use xencode_core_rs::{TaskError, TaskManager, TaskRecord};
 use xencode_providers_rs::ToolCall;
 
-/// Safety valve: how many assistant→tool→assistant rounds one user turn may
-/// take before we stop offering tools and let the model answer.
-pub const MAX_TOOL_ROUNDS: usize = 8;
+/// How many assistant→tool→assistant rounds one user turn may take before
+/// tools stop being offered and the model must answer in prose. The budget
+/// itself is the `agent_max_rounds` config key (default 16, clamped to
+/// 1..=64 by the loop); this is the wording the model is taught.
+pub const TOOL_HINT: &str = "\n\n## Tools\n\
+Available: read_file(path, offset?, limit?), list_dir(path?), search_files(pattern, path?), \
+write_file(path, content), edit_file(path, old, new, all?), background_start(command, cwd?, name?), \
+background_poll(id), background_stop(id), repo_advise(filter?).\n\
+Paths are relative to the project root and must stay inside it; anything outside is refused without asking. \
+File writes, edits and shell commands need the user's approval, which they may grant once, allow for the \
+session, or deny. If a result begins with `error:`, do not retry that call unchanged - say what failed and \
+try a different approach. Prefer edit_file over write_file, and read_file before touching code you have not seen.";
 
 // ── Permission policy (I1-01) ───────────────────────────────────────────
 // One source of truth for "may the agent run this call?". The chat loop
@@ -777,6 +787,76 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         other => format!("error: unknown tool {other}"),
+    }
+}
+
+/// What the loop needs to gate a call before running it: the configured
+/// mode, the session grants — shared with `App` so an "always allow" answer
+/// is still in force for the next message — and the channel the approval
+/// overlay drains each frame.
+#[derive(Clone)]
+pub struct ApprovalCtx {
+    pub mode: ApprovalMode,
+    pub grants: Arc<std::sync::Mutex<Vec<ToolClass>>>,
+    pub prompts: mpsc::UnboundedSender<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
+}
+
+impl ApprovalCtx {
+    fn granted(&self) -> Vec<ToolClass> {
+        self.grants
+            .lock()
+            .map(|grants| grants.clone())
+            .unwrap_or_default()
+    }
+
+    fn grant(&self, class: ToolClass) {
+        if let Ok(mut grants) = self.grants.lock() {
+            if !grants.contains(&class) {
+                grants.push(class);
+            }
+        }
+    }
+}
+
+/// The loop's entry point (I1-04): policy first, prompt if the policy says
+/// `Ask`, execute only on a yes. The result string is always something the
+/// model can act on — a denial is stated as a denial.
+pub async fn execute_tool_call_approved(
+    rt: &TaskRuntime,
+    root: &Path,
+    call: &ToolCall,
+    ctx: &ApprovalCtx,
+) -> String {
+    let args = call.arguments_object();
+    match classify(root, &call.name, &args, ctx.mode, &ctx.granted()) {
+        // Refused without asking: the path is outside what the agent may
+        // touch in any mode, so a prompt would only invite a mistake.
+        Permission::Deny => FORBIDDEN_RESULT.to_string(),
+        Permission::Allow => execute_tool_call(rt, root, call).await,
+        Permission::Ask => {
+            let class = tool_class(&call.name);
+            let request = ApprovalRequest {
+                tool: call.name.clone(),
+                class,
+                summary: approval_summary(call),
+                preview: approval_preview(root, call),
+            };
+            let (responder, answer) = oneshot::channel();
+            if ctx.prompts.send((request, responder)).is_err() {
+                // Nothing is listening — no TUI attached. The strictest
+                // possible answer is the only honest one.
+                return DENIED_RESULT.to_string();
+            }
+            match answer.await {
+                Ok(ApprovalAnswer::Approved) => execute_tool_call(rt, root, call).await,
+                Ok(ApprovalAnswer::ApprovedForSession) => {
+                    ctx.grant(class);
+                    execute_tool_call(rt, root, call).await
+                }
+                // A dropped responder means the prompt vanished with the app.
+                Ok(ApprovalAnswer::Denied) | Err(_) => DENIED_RESULT.to_string(),
+            }
+        }
     }
 }
 
@@ -1592,6 +1672,254 @@ mod tests {
         );
         assert!(shell.contains("rm -rf /"), "{shell}");
         assert!(!shell.contains("@@"), "{shell}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The loop's gating path (I1-04), driven without a provider: these
+    /// tests play the user at the overlay by answering the oneshot the
+    /// prompt carried.
+    struct Harness {
+        ctx: ApprovalCtx,
+        prompts: mpsc::UnboundedReceiver<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
+    }
+
+    fn harness(mode: ApprovalMode) -> Harness {
+        let (tx, rx) = mpsc::unbounded_channel();
+        Harness {
+            ctx: ApprovalCtx {
+                mode,
+                grants: Arc::new(std::sync::Mutex::new(Vec::new())),
+                prompts: tx,
+            },
+            prompts: rx,
+        }
+    }
+
+    fn write_call(path: &str, content: &str) -> ToolCall {
+        call(
+            "write_file",
+            serde_json::json!({"path": path, "content": content}),
+        )
+    }
+
+    fn bg_call(command: &str) -> ToolCall {
+        call("background_start", serde_json::json!({"command": command}))
+    }
+
+    /// Run one gated call to completion, answering its prompt (if it raises
+    /// one) with `answer`. The call runs on its own task because on this
+    /// single-threaded test runtime an unpolled future would never get as
+    /// far as sending the prompt we are waiting to receive.
+    async fn gated(
+        rt: TaskRuntime,
+        root: PathBuf,
+        tool: ToolCall,
+        ctx: ApprovalCtx,
+        prompts: &mut mpsc::UnboundedReceiver<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
+        answer: ApprovalAnswer,
+    ) -> String {
+        let running =
+            tokio::spawn(async move { execute_tool_call_approved(&rt, &root, &tool, &ctx).await });
+        tokio::pin!(running);
+        tokio::select! {
+            maybe_prompt = prompts.recv() => {
+                // None here means the receiver was dropped, i.e. no UI is
+                // listening: the loop must treat that as a denial, which is
+                // what it does, so there is nothing to answer.
+                if let Some((_request, responder)) = maybe_prompt {
+                    responder.send(answer).unwrap();
+                }
+            }
+            finished = &mut running => return finished.unwrap(),
+        }
+        running.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn ask_mode_prompts_before_a_write_and_runs_after_a_yes() {
+        let root = temp_root("gate-ask");
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("hello.txt", "hi\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert!(result.starts_with("created hello.txt"), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("hello.txt")).unwrap(),
+            "hi\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_denied_write_touches_nothing_and_says_so_to_the_model() {
+        let root = temp_root("gate-deny");
+        std::fs::write(root.join("keep.txt"), "original\n").unwrap();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("keep.txt", "overwritten\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(result, DENIED_RESULT);
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "original\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn allow_for_session_stops_prompting_that_class_but_not_other_classes() {
+        let root = temp_root("gate-session");
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+
+        let first = gated(
+            rt.clone(),
+            root.clone(),
+            write_call("a.txt", "a\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::ApprovedForSession,
+        )
+        .await;
+        assert!(first.starts_with("created a.txt"), "{first}");
+
+        // Same class now auto-allows: no prompt, so `gated` just runs.
+        let second = gated(
+            rt.clone(),
+            root.clone(),
+            write_call("b.txt", "b\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(second.starts_with("created b.txt"), "{second}");
+        assert!(
+            prompts.try_recv().is_err(),
+            "an allowed class must not keep asking"
+        );
+        assert_eq!(
+            h.ctx.grants.lock().unwrap().as_slice(),
+            &[ToolClass::Edit],
+            "the grant lives in the shared list, so the next turn inherits it"
+        );
+
+        // Shell is a separate class: granting edits says nothing about it.
+        let shell = gated(
+            rt.clone(),
+            root.clone(),
+            bg_call("true"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(shell, DENIED_RESULT);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_only_tools_run_without_a_prompt_and_policy_denies_never_ask() {
+        let root = temp_root("gate-readonly");
+        std::fs::write(root.join("r.txt"), "readable\n").unwrap();
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+
+        let read = gated(
+            rt.clone(),
+            root.clone(),
+            call("read_file", serde_json::json!({"path": "r.txt"})),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(read, "1\treadable");
+        assert!(prompts.try_recv().is_err(), "reads must not prompt");
+
+        // A path outside the workspace is refused outright in every mode:
+        // prompting would offer the user something policy already forbids.
+        let outside = gated(
+            rt.clone(),
+            root.clone(),
+            write_call("../outside-of-root.txt", "x\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert_eq!(outside, FORBIDDEN_RESULT);
+        assert!(prompts.try_recv().is_err(), "a hard deny must not prompt");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn edit_allow_mode_writes_silently_but_shell_still_asks() {
+        let root = temp_root("gate-editallow");
+        let rt = new_task_runtime();
+        let h = harness(ApprovalMode::EditAllow);
+        let mut prompts = h.prompts;
+
+        let written = gated(
+            rt.clone(),
+            root.clone(),
+            write_call("q.txt", "q\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(written.starts_with("created q.txt"), "{written}");
+        assert!(prompts.try_recv().is_err());
+
+        // Answering "nothing" (dropping the responder) is a denial too, never
+        // an implicit yes.
+        let shell = gated(
+            rt.clone(),
+            root.clone(),
+            bg_call("true"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(shell, DENIED_RESULT);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn with_no_ui_listening_a_gated_call_is_denied_not_run() {
+        let root = temp_root("gate-noui");
+        let h = harness(ApprovalMode::Ask);
+        drop(h.prompts);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("z.txt", "z\n"),
+            &h.ctx,
+        )
+        .await;
+        assert_eq!(result, DENIED_RESULT);
+        assert!(
+            !root.join("z.txt").exists(),
+            "nothing may be written unasked"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
