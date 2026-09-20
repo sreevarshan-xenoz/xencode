@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 494 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 498 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -342,13 +342,20 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
 
 ### F1 — Live graph
 
-- [ ] F1-01 `xencode-context-rs`: `refresh_rust_file(root, rel_path)` — re-extract
+- [x] F1-01 `xencode-context-rs`: `refresh_rust_file(root, rel_path)` — re-extract
   symbols for one already-indexed `.rs` file from its current bytes (drop the record if
   the file is gone), rebuild `deps.json` via `build_graph`, and keep `index.json` +
   `manifest.json` entries (size/loc/mtime) consistent; a path absent from the index is
   a no-op (new files still need `/init`). Atomic writes via `write_atomic`. Unit tests
   on temp `.xencode` dirs: edit changes edges, delete drops record + edges, unknown
   file no-op.
+  Shipped as `refresh::refresh_rust_file` returning `RefreshOutcome::{Updated(graph),
+  NoOp}` (explicit enum instead of `Option<Vec<_>>` — reads better at call sites).
+  Also added `.xencode` to the watcher's `DEFAULT_EXCLUDED_DIRS` so snapshot rewrites
+  never feed watcher events back into a refresh. 4 unit tests on temp workspaces
+  (edit rewrites edges + index sizes, removal drops record/entry/edges and keeps the
+  manifest consistent, unknown/non-Rust no-op leaves bytes untouched, absolute paths
+  accepted and a refreshed snapshot makes the next `/init` report `fresh`).
 - [ ] F1-02 TUI watcher wiring: `handle_watch_event` refreshes the snapshot for
   modified/removed `.rs` files before computing affected dependents, so toasts and
   `/advise` see the current graph without re-running `/init`. Tests with temp dirs.
