@@ -2,30 +2,34 @@
 
 > Companion doc to [docs/ROADMAP.md](docs/ROADMAP.md). This file tracks the
 > current focus and immediate next milestones for Xencode. **Verified against
-> the tree on 2026-09-19** — see [docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md).
+> the tree on 2026-09-20** — see [docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md).
 
 ## Current Status
 
 - ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, vault, smoke gate)
 - ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
+- ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Rust migration complete**: 13 crates, 494 tests passing, zero warnings — the Rust workspace is the only active codebase
-- 🚧 **Active backlog**: real-time intelligence (file watcher), multimodal UX, team-mode hardening, PR review dashboard
+- 🚧 **Active backlog**: refactor suggestions over the dep graph, team-mode hardening
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 
-0. **Milestone D — Background tasks & worktree support** — drafted 2026-09-19:
+0. **Milestone D — Background tasks & worktree support** — ✅ complete 2026-09-20:
    a background-task registry + TUI task panel + `tasks`/`worktree` CLI, and git
    worktree creation/browsing so agent runs can be isolated per task.
-1. **Real-time file watcher + proactive warnings** — watch the workspace and surface
-   warnings/refactor hints as files change (new capability; no watcher exists today).
+1. **Real-time file watcher + proactive warnings** — shipped (Milestone E): a
+   debounced `WorkspaceWatcher` (notify) feeds the TUI, which warns — as toasts —
+   only about tracked/attached/open files, enriched with dep-graph dependents.
 2. **Refactor suggestions** — build on the `xencode-context-rs` index/symbol graph
    (`rust/crates/xencode-context-rs/`) to propose live improvements.
-3. **Multimodal inputs** — image/document input paths (no Rust implementation yet).
-4. **Secure team workflows hardening** — audit-log coverage for team/RBAC actions and
-   workspace-permission tightening on top of `rust/crates/xencode-collaboration-rs/`.
-5. **Git loop completion** — PR review browsing in the TUI; a per-file Code Review
-   panel exists (`rust/crates/xencode-tui-rs/`), a PR-level dashboard does not.
+3. **Multimodal inputs** — shipped (Milestone E): image analysis and TUI attach as
+   per-backend message parts, plus PDF/DOCX text extraction into the context bundle.
+4. **Secure team workflows hardening** — workspace RBAC and audit events (membership
+   changes, last-admin guard, denials) already ship in `xencode-collaboration-rs`;
+   remaining hardening on top, and the TUI hub session still runs simulated members.
+5. **Git loop completion** — PR review browsing in the TUI: shipped (Milestone E,
+   `Ctrl+Y` per-file dashboard); remaining ideas live in later milestones.
 
 ## Done (recent Rust work, not new work)
 
