@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 502 tests passing, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
+- [x] Workspace gates green — 13 crates, 503 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -383,9 +383,18 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
 
 ### F3 — Surfaces
 
-- [ ] F3-01 CLI: `xencode advise [filter] [--json] [--limit]` over the `.xencode`
-  snapshot of the current directory; text table or JSON array; `--filter` narrows to
-  matching paths. Verified live against a temp repo; docs match `--help` exactly.
+- [x] F3-01 CLI: `xencode advise [FILTER] [--json] [--limit 40]` over the
+  `.xencode` snapshot of the current directory.
+  Shipped with the filter as positional `[FILTER]` (substring of the
+  finding's file path), not the drafted `--filter` flag; `--limit 0` shows
+  all findings; missing index is an actionable `error: no project index in
+  … — start the TUI and run /init first` with exit 1, not an empty report.
+  Shares the snapshot read path with the TUI (`compute_advise` mirrors
+  `refresh_advise`). Unit test on a temp workspace (cycle + orphan
+  present, filter narrows and non-matching filter empties, no-index error)
+  plus a live smoke on a scratch repo: numbered text table, `--json`
+  array, positional filter, `… +N more` overflow line, `--limit 0`,
+  error/exit-1 path, and `--help` text.
 - [ ] F3-02 Agentic tool: `repo_advise` callable by the model in the chat tool loop
   (schema in `xencode-providers-rs`, executor in `agent_tools.rs`) returning the
   compact advice report (cap ~40 lines) for the current workspace; test for the

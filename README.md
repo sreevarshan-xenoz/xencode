@@ -30,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (13 crates, 502 tests,
+At its core is a fast, single-file **Rust** binary (13 crates, 503 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -108,7 +108,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **Rust ratatui TUI** (primary) — 24 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
 - Code analysis with language-aware AST parsing (Python, JavaScript/TypeScript, Rust).
 - Side-by-side diff inspection and hunk-level review flows.
-- Rich CLI with `server`, `analyze`, and `plugin` subcommands.
+- Rich CLI with `advise`, `server`, `analyze`, and `plugin` subcommands.
 
 ### Reliability + Ops
 - Hybrid cache (memory + disk) with compression and eviction.
@@ -333,7 +333,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (502 tests)
+cargo test                          # Full workspace suite (503 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

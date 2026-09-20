@@ -159,6 +159,19 @@ xencode worktree list
 xencode worktree remove ../feature-x
 ```
 
+### `xencode advise [FILTER] [--json] [--limit 40]`
+Repository insights from the `.xencode` snapshot written by the TUI's
+`/init`: broken imports, import cycles, hub files and orphans.
+`FILTER` is a positional substring matched against each finding's file
+path; `--limit 0` shows everything. Errors with exit 1 when the project
+has no index yet.
+
+```bash
+xencode advise                      # top 40 findings
+xencode advise src/auth             # only findings touching that path
+xencode advise --json --limit 0     # full machine-readable report
+```
+
 ### `xencode server [--port 8765]`
 Start the collaboration HTTP/WebSocket server.
 

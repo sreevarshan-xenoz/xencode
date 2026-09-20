@@ -52,6 +52,14 @@ xencode analyze ./src
 ```
 Code issues + security findings, plus an inventory of any images found.
 
+### Repository insights
+```bash
+xencode advise            # needs the /init snapshot from the TUI
+xencode advise src/auth --json
+```
+Broken imports, import cycles, hub files and orphans, read straight from
+the `.xencode` index.
+
 ## Commands
 
 ### In the TUI
