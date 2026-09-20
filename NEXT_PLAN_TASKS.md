@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 498 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 499 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -356,9 +356,14 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
   (edit rewrites edges + index sizes, removal drops record/entry/edges and keeps the
   manifest consistent, unknown/non-Rust no-op leaves bytes untouched, absolute paths
   accepted and a refreshed snapshot makes the next `/init` report `fresh`).
-- [ ] F1-02 TUI watcher wiring: `handle_watch_event` refreshes the snapshot for
+- [x] F1-02 TUI watcher wiring: `handle_watch_event` refreshes the snapshot for
   modified/removed `.rs` files before computing affected dependents, so toasts and
   `/advise` see the current graph without re-running `/init`. Tests with temp dirs.
+  Shipped as the pure `live_refresh_snapshot(root, kind, path)` gate/helper — only
+  modified|removed on `.rs` reach the disk, and refresh errors are swallowed so a
+  broken snapshot can never kill the warning path. One integration-style test on a
+  temp workspace pins edit-removes-edge, the kind/extension/unknown-path gates, and
+  removal dropping the symbol record.
 
 ### F2 — Insights panel
 

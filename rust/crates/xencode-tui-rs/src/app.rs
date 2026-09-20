@@ -350,12 +350,28 @@ pub fn format_watch_warning(path: &str, kind: &str) -> String {
     }
 }
 
+/// Live snapshot hook (F1-02): rewrite the `.xencode` symbol/dep snapshot
+/// after a modified/removed `.rs` file so the dependent list (and `/advise`)
+/// see current imports. Returns whether the snapshot was rewritten. Errors
+/// are swallowed deliberately — a stale snapshot still warns, a panic
+/// on the UI thread would not.
+pub fn live_refresh_snapshot(root: &std::path::Path, kind: &str, path: &str) -> bool {
+    if !matches!(kind, "modified" | "removed") || !path.ends_with(".rs") {
+        return false;
+    }
+    matches!(
+        xencode_context_rs::refresh_rust_file(root, path),
+        Ok(xencode_context_rs::RefreshOutcome::Updated(_))
+    )
+}
+
 /// Decide whether a watched path deserves a proactive warning. Pure —
 /// unit-tested.
 ///
 /// `attached`/`opened`/`tracked` are the session's context sets;
-/// `dependents` are the files transitively importing `path` (from the
-/// last `/init` snapshot); `last_notice` is the newest visible warning
+/// `dependents` are the files transitively importing `path` (from the live
+/// `.xencode` snapshot, kept current by [`live_refresh_snapshot`] and
+/// otherwise by the last `/init`); `last_notice` is the newest visible warning
 /// toast, used to suppress repeat warnings for a path the user was
 /// already told about.
 pub fn watch_warning_for(
@@ -1466,6 +1482,9 @@ impl<'a> App<'a> {
         };
         let root = xencode_context_rs::default_root();
         let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        // Live snapshot (F1-02): update the graph for the changed file before
+        // asking it who depends on the change.
+        live_refresh_snapshot(&root, kind, path);
         let mut tracker = xencode_context_rs::FileContextTracker::new(&xencode);
         tracker.load_from_disk();
         let tracked: HashSet<String> = tracker.state.files.keys().cloned().collect();
@@ -3697,8 +3716,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        first_output_line, format_advise_report, format_watch_warning, parse_llama_port,
-        parse_porcelain_z, watch_warning_for, App, FocusArea,
+        first_output_line, format_advise_report, format_watch_warning, live_refresh_snapshot,
+        parse_llama_port, parse_porcelain_z, watch_warning_for, App, FocusArea,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -4331,5 +4350,58 @@ mod tests {
             }
         }
         assert!(app.task_runtime.lock().await.list().is_empty());
+    }
+
+    #[test]
+    fn live_refresh_snapshot_updates_edited_rs_files() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "xencode-liverefresh-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod a;\nmod b;\n").unwrap();
+        std::fs::write(root.join("src/a.rs"), "use crate::b::bee;\n").unwrap();
+        std::fs::write(root.join("src/b.rs"), "pub fn bee() {}\n").unwrap();
+        xencode_context_rs::init_project(
+            &root,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            |_| {},
+        )
+        .expect("init");
+        let deps = |root: &std::path::Path| -> Vec<xencode_context_rs::DepEdge> {
+            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(
+                &root.join(xencode_context_rs::XENCODE_DIR),
+            ))
+            .unwrap()
+        };
+        assert!(deps(&root)
+            .iter()
+            .any(|e| e.from == "src/a.rs" && e.to == "src/b.rs"));
+
+        // Edited file: edge vanishes from the on-disk snapshot.
+        std::fs::write(root.join("src/a.rs"), "pub fn ay() {}\n").unwrap();
+        assert!(live_refresh_snapshot(&root, "modified", "src/a.rs"));
+        assert!(!deps(&root).iter().any(|e| e.from == "src/a.rs"));
+
+        // Gates: wrong kinds and non-Rust paths never touch the snapshot.
+        assert!(!live_refresh_snapshot(&root, "created", "src/a.rs"));
+        assert!(!live_refresh_snapshot(&root, "modified", "src/lib.txt"));
+        // Unknown (never-indexed) path → refresh is a no-op → false.
+        assert!(!live_refresh_snapshot(&root, "modified", "src/ghost.rs"));
+
+        // Removed file: its symbol record drops out of the snapshot.
+        std::fs::remove_file(root.join("src/b.rs")).unwrap();
+        assert!(live_refresh_snapshot(&root, "removed", "src/b.rs"));
+        let symbols: std::collections::BTreeMap<String, xencode_context_rs::PerFileSymbols> =
+            xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(
+                &root.join(xencode_context_rs::XENCODE_DIR),
+            ))
+            .unwrap();
+        assert!(!symbols.contains_key("src/b.rs"));
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
