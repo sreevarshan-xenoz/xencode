@@ -86,7 +86,13 @@ fn draw_toasts(f: &mut Frame, app: &App, area: Rect) {
     }
     let text_w = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
     let width = (text_w + 2).min(area.width.saturating_sub(2));
-    let height = lines.len() as u16 + 2;
+    // Never overlay the input strip: the toast's last row must stay above
+    // the body's bottom three rows, so it shrinks to one line or steps
+    // aside entirely on short screens (H1-09).
+    let height = (lines.len() as u16 + 2).min(area.height.saturating_sub(5));
+    if height < 3 {
+        return;
+    }
     let popup = Rect {
         x: area.x + area.width.saturating_sub(width + 1),
         y: area.y + 1,
@@ -362,11 +368,13 @@ fn draw_code_editor(f: &mut Frame, app: &mut App, area: Rect) {
 
     let dirty_mark = if app.editor_dirty { " [modified]" } else { "" };
     let mode_mark = if is_editing { " EDITING" } else { "" };
+    // Below ~30 columns the emoji costs more than it tells.
+    let icon = if area.width < 30 { "" } else { " 📝" };
 
     let title = if let Some(ref fp) = app.opened_file {
-        format!(" 📝 {}{}{} ", fp, dirty_mark, mode_mark)
+        format!("{icon} {fp}{dirty_mark}{mode_mark} ")
     } else {
-        " 📝 Code Editor (Select a file & press Enter) ".to_string()
+        format!("{icon} Code Editor (Select a file & press Enter) ")
     };
 
     let block = panel_block(
@@ -412,7 +420,11 @@ fn draw_code_editor(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_file_explorer(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.focus == FocusArea::FileExplorer;
 
-    let title = format!(" 📁 Workspace ({} files) ", app.file_tree.len());
+    let title = if area.width < 30 {
+        format!(" Files ({} files) ", app.file_tree.len())
+    } else {
+        format!(" 📁 Workspace ({} files) ", app.file_tree.len())
+    };
     let block = panel_block(
         app,
         title,
@@ -566,7 +578,11 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
 
     let block = panel_block(
         app,
-        " 💬 Chat ".to_string(),
+        if area.width < 30 {
+            " Chat ".to_string()
+        } else {
+            " 💬 Chat ".to_string()
+        },
         if is_focused {
             PaneState::Focused
         } else {
@@ -613,7 +629,11 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         let frame = spinner::frame(app.spinner_tick);
         format!(" {} Thinking... ", frame)
     } else if is_editing {
-        " ✏️  Enter to send · Alt+Enter (or Ctrl+J) for newline ".to_string()
+        if area.width < 30 {
+            " Enter:send · Alt+Enter: newline ".to_string()
+        } else {
+            " ✏️  Enter to send · Alt+Enter (or Ctrl+J) for newline ".to_string()
+        }
     } else {
         " Press 'i' to start typing ".to_string()
     };
@@ -657,7 +677,11 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 fn draw_terminal(f: &mut Frame, app: &App, area: Rect) {
     let block = panel_block(
         app,
-        " 🖥️  Terminal (Ctrl+T to toggle) ".to_string(),
+        if area.width < 30 {
+            " Terminal (Ctrl+T) ".to_string()
+        } else {
+            " 🖥️  Terminal (Ctrl+T to toggle) ".to_string()
+        },
         PaneState::Active,
     );
 
@@ -1960,14 +1984,36 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_y) / 2),
         ])
         .split(r);
-    Layout::default()
+    let raw = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage((100 - percent_x) / 2),
             Constraint::Percentage(percent_x),
             Constraint::Percentage((100 - percent_x) / 2),
         ])
-        .split(popup_layout[1])[1]
+        .split(popup_layout[1])[1];
+
+    // On tiny terminals the percentage collapses to a 1-2 cell box where
+    // borders eat all the content. Such popups get at least 80 % coverage
+    // (H1-09); usable-sized ones keep their designed percentage.
+    let floor = |dim: u16| ((dim as u32 * 80) / 100) as u16;
+    let width = if raw.width < 16 {
+        raw.width.max(floor(r.width)).min(r.width)
+    } else {
+        raw.width
+    };
+    let height = if raw.height < 6 {
+        raw.height.max(floor(r.height)).min(r.height)
+    } else {
+        raw.height
+    };
+    Rect {
+        x: r.x + (r.width - width) / 2,
+        y: r.y + (r.height - height) / 2,
+        width,
+        height,
+    }
+    .intersection(r)
 }
 
 /// Re-clamp every stored scroll offset against the new terminal size.
@@ -3730,6 +3776,26 @@ mod tests {
         // Degenerate heights must not underflow.
         assert_eq!(clamp_scroll(5, 0), 5);
         assert_eq!(clamp_scroll(0, 24), 0);
+    }
+
+    #[test]
+    fn centered_rect_lifts_useless_popups_but_not_designed_ones() {
+        use super::centered_rect;
+        use ratatui::layout::Rect;
+
+        // 20x8: 60/50 % would give a 12x4 border-only shell — it grows to
+        // the 80 % floor instead (H1-09).
+        let r = centered_rect(60, 50, Rect::new(0, 0, 20, 8));
+        assert!(r.width >= 16 && r.height >= 6, "{r:?}");
+        assert!(r.intersection(Rect::new(0, 0, 20, 8)) == r);
+
+        // A normal terminal keeps the requested percentage untouched.
+        let big = centered_rect(50, 50, Rect::new(0, 0, 100, 40));
+        assert_eq!((big.width, big.height), (50, 20));
+
+        // 1x1 stays inside the screen without underflowing.
+        let tiny = centered_rect(70, 70, Rect::new(0, 0, 1, 1));
+        assert!(tiny.width <= 1 && tiny.height <= 1, "{tiny:?}");
     }
 
     #[test]
