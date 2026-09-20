@@ -130,6 +130,21 @@ Conversation memory management (`list`, …).
 xencode memory list
 ```
 
+### `xencode tasks <action>`
+File-backed background tasks. State lives in `.xencode/tasks/` under the
+current directory, so tasks started here are visible to later `xencode
+tasks` runs in the same project (the TUI's `Ctrl+K` panel keeps its own
+in-process registry). Status is derived on read from the task's exit file,
+killed flag, and process liveness.
+
+```bash
+xencode tasks start "cargo test" --name tests   # → "started task 1 (pid …)"
+xencode tasks list                              # table; --json for machine output
+xencode tasks poll 1 --lines 20                 # status + trailing stdout/stderr
+xencode tasks stop 1                            # signal a running task
+xencode tasks rm 1                              # forget a finished task (refuses running)
+```
+
 ### `xencode server [--port 8765]`
 Start the collaboration HTTP/WebSocket server.
 

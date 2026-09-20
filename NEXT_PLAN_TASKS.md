@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 475 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 482 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -82,7 +82,14 @@
   via non-blocking `tasks_snapshot()`, `x`/`d` dispatch `[TASKS]stop|id` /
   `[TASKS]rm|id` through the event channel so keys never block the UI thread,
   detail scroll re-clamped on resize (shared line builders, E6-02 pattern).
-- [ ] D2-02 CLI: `xencode tasks list | start <cmd> | poll <id> | stop <id> | rm <id>`.
+- [x] D2-02 CLI: `xencode tasks list | start <cmd> | poll <id> | stop <id> | rm <id>`.
+  Since a CLI process can't see the TUI's in-memory registry, this ships a
+  file-backed twin (`xencode-core-rs::tasks_file`): records in `.xencode/tasks/tasks.json`,
+  each command wrapped in an `sh` script whose EXIT trap writes `<id>.exit` (survives
+  `exit N` inside the command), merged stdout+stderr in `<id>.out`, status derived on
+  read from exit file + killed flag + `/proc` liveness (zombies count as dead). `stop`
+  signals `kill` and marks the record; `rm` refuses running tasks. Root is the current
+  directory's `.xencode/tasks` (same layout as `xencode init`).
 - [ ] D2-03 Tests: registry lifecycle (start→exit→rm, stop of dead task, output cap)
   + headless frame renders for the panel.
 

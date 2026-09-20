@@ -30,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (13 crates, 475 tests,
+At its core is a fast, single-file **Rust** binary (13 crates, 482 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -220,6 +220,7 @@ xencode --version                # Show version
 | **Config** | `xencode config show` | Show runtime config |
 | **Models** | `xencode models list` | List available models with health |
 | **Memory** | `xencode memory list` | List conversation sessions |
+| **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Cache** | `xencode cache stats` | Show cache statistics |
 | **Server** | `xencode server --port 8765` | Start collaboration HTTP/WebSocket server |
 | **Analyze** | `xencode analyze <path>` | Code analysis + security scan + image inventory |
@@ -331,7 +332,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (475 tests)
+cargo test                          # Full workspace suite (482 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

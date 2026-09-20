@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `xencode tasks` CLI (D2-02): file-backed background-task registry (`xencode-core-rs::tasks_file`) shared through `.xencode/tasks/` — `list [--json]`, `start <cmd> [--name]`, `poll <id> [--lines]`, `stop <id>`, `rm <id>`; tasks survive the starting process (EXIT-trap wrapper records exit codes, output captured to `<id>.out`), status is derived on read from exit file + killed flag + `/proc` liveness, and `rm` refuses still-running tasks
 - Background Tasks panel (`Ctrl+K` or Feature Navigator, D2-01): live registry view with per-status colored rows (running / exited / killed), Enter → scrollable output detail for the selected task, `x` stop and `d` remove dispatched through the event channel so keys never block, wheel + resize clamping included
 - Agentic background-task tool loop in chat (D1-02): the model can call `background_start` / `background_poll` / `background_stop` (schemas in `xencode-providers-rs::background_tools`), executed client-side against the shared task registry with up to 8 tool rounds per turn; each call and result echoes into chat as a `⚙` system line
 - Background task registry (`xencode-core-rs::tasks`, D1-01): pure `TaskStore`/`TaskRecord` (status Running/Exited(code)/Killed, 500-line capped output tail) plus a tokio-backed `TaskManager` that spawns commands through `sh -c`, drains stdout+stderr without blocking polls, and refuses to remove or drop a still-running task's child process
