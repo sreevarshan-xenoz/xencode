@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Agent permission policy core (Milestone I, I1-01): every tool call is now
+  classified against an `agent_approval` mode — `ask` (default),
+  `edit-allow`, `all-allow` — via a single `classify` in
+  `xencode-tui-rs::agent_tools`; read-only tools always run, file edits and
+  shell calls prompt or auto-allow per mode, and paths outside the workspace,
+  inside `.git/` or the config dir are hard-denied in every mode. New
+  `Agent Approval` Settings row (Cycle) and `xencode config set
+  agent_approval`; session "always allow" grants live in `App.agent_grants`
+  until quit. Approval prompts and file tools land in I1-02…I1-04
 - Selectable TUI body layouts and display preferences (Milestone H): three
   layout presets — `classic` (20/50/30 as before), `chat-first` (explorer
   hidden, editor 25 %, chat 75 %), `zen` (one pane fills the body, following

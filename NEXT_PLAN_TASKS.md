@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 591 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 596 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -579,3 +579,24 @@ outgoing editor-activity producer, configurable max session size.
   CLI_GUIDE config keys + `XCODE_CONFIG_DIR`, QUICK_START layout line,
   README counts, CHANGELOG Added/Changed. Live figures at this commit:
   **591 tests passed, 13 crates, zero clippy warnings**
+
+## Milestone I — Real Agentic Features (in progress)
+
+- [x] I1-01 — permission policy core: `classify`/`ApprovalMode`/`ToolClass`
+  in `agent_tools`, hard-deny outside the workspace / `.git/` / config dir,
+  `agent_approval` config key + Settings Cycle row + CLI `config set`,
+  session grants on `App`. **596 tests passed, zero clippy warnings**
+- [ ] I1-02 — file tool definitions + executors (read/list/search/write/edit,
+  unified diffs via `similar`)
+- [ ] I1-03 — approval overlay + tool-call records in the chat log
+- [ ] I1-04 — wire file tools into the chat loop; `agent_max_rounds`
+- [ ] I2-01 — checkpoints + `/rewind`
+- [ ] I2-02 — `run_command` tool (timed, capped, approval-gated)
+- [ ] I2-03 — plan/TODO visibility (`update_plan` tool + checklist render)
+- [ ] I2-04 — real ByteBot replacing the scripted simulation
+- [ ] I3-01 — MCP stdio client (`xencode-mcp-rs`)
+- [ ] I3-02 — pre/post tool-use hooks
+- [ ] I3-03 — `/spawn` subagent in a git worktree
+- [ ] I4-01 — provider fallback chain (optional)
+- [ ] I4-02 — close-out docs + honesty sweep (incl. the README "ensemble
+  reasoning" claim)

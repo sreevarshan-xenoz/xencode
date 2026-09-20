@@ -730,6 +730,7 @@ fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], 
     let current = match label {
         "Theme" => app.config.active_theme.clone(),
         "Layout" => app.config.layout.clone(),
+        "Agent Approval" => app.config.agent_approval.clone(),
         _ => return,
     };
     let len = options.len();
@@ -747,6 +748,7 @@ fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], 
             app.style_chat_input();
         }
         "Layout" => app.config.layout = value.to_string(),
+        "Agent Approval" => app.config.agent_approval = value.to_string(),
         _ => {}
     }
 }
@@ -1559,6 +1561,16 @@ mod tests {
                 "Line Numbers"
             ]
         );
+        // I1-01: the agent policy row is a three-option Cycle in its own section.
+        let agent = SETTINGS_ITEMS
+            .iter()
+            .find(|r| r.label == "Agent Approval")
+            .expect("Agent Approval row exists");
+        assert_eq!(agent.section, "Agent");
+        assert_eq!(
+            agent.kind,
+            SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES)
+        );
     }
 
     #[test]
@@ -1614,6 +1626,14 @@ mod tests {
         press(&mut app, KeyCode::Right);
         assert!(app.config.rounded_borders);
 
+        // Agent Approval cycles the three modes and wraps (I1-01).
+        app.settings_cursor = settings_row_index("Agent Approval");
+        assert_eq!(app.config.agent_approval, "ask");
+        for expected in ["edit-allow", "all-allow", "ask", "edit-allow"] {
+            press(&mut app, KeyCode::Right);
+            assert_eq!(app.config.agent_approval, expected, "cycle must wrap");
+        }
+
         // Stepped rows clamp at the floor.
         app.settings_cursor = settings_row_index("Response Timeout");
         app.config.response_timeout = 10;
@@ -1642,6 +1662,7 @@ mod tests {
         assert_eq!(saved.layout, "zen");
         assert!(saved.rounded_borders);
         assert_eq!(saved.response_timeout, 5);
+        assert_eq!(saved.agent_approval, "edit-allow");
 
         // The chord keeps cycling (and saving) from the chat pane.
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);

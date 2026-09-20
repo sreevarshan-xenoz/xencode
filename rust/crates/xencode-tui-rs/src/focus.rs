@@ -163,6 +163,11 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Toggle,
     },
     SettingRow {
+        label: "Agent Approval",
+        section: "Agent",
+        kind: SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES),
+    },
+    SettingRow {
         label: "Cache Enabled",
         section: "Performance",
         kind: SettingKind::Toggle,

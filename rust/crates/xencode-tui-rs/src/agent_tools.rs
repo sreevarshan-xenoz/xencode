@@ -6,7 +6,7 @@
 //! and the D2 panel share one registry. Results come back as plain text —
 //! readable to the model and cheap to echo into chat.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use xencode_core_rs::{TaskError, TaskManager, TaskRecord};
@@ -15,6 +15,152 @@ use xencode_providers_rs::ToolCall;
 /// Safety valve: how many assistant→tool→assistant rounds one user turn may
 /// take before we stop offering tools and let the model answer.
 pub const MAX_TOOL_ROUNDS: usize = 8;
+
+// ── Permission policy (I1-01) ───────────────────────────────────────────
+// One source of truth for "may the agent run this call?". The chat loop
+// (and later the approval overlay) asks `classify`; nothing else decides.
+
+/// Named values for the `agent_approval` config key (Settings row + CLI).
+pub const APPROVAL_MODE_NAMES: &[&str] = &["ask", "edit-allow", "all-allow"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalMode {
+    /// Mutating and shell tools prompt; read-only tools run freely.
+    Ask,
+    /// File edits are auto-approved; shell still prompts.
+    EditAllow,
+    /// Everything except hard-denied paths is auto-approved.
+    AllAllow,
+}
+
+impl ApprovalMode {
+    /// Unknown values fall back to the strictest mode (theme/layout precedent).
+    pub fn parse(name: &str) -> Self {
+        match name {
+            "edit-allow" => Self::EditAllow,
+            "all-allow" => Self::AllAllow,
+            _ => Self::Ask,
+        }
+    }
+}
+
+/// What a tool touches; drives both the mode decision and session grants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolClass {
+    ReadOnly,
+    Edit,
+    Shell,
+}
+
+/// The outcome of the policy for one call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission {
+    /// Run it.
+    Allow,
+    /// Show the user an approval prompt (I1-03).
+    Ask,
+    /// Never run it, no prompt (outside the workspace, `.git`, config dir).
+    Deny,
+}
+
+/// What a tool call touches. Unknown tools count as Shell — the executor
+/// errors on them anyway, but they are never silently treated as read-only.
+pub fn tool_class(tool: &str) -> ToolClass {
+    match tool {
+        "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files" => {
+            ToolClass::ReadOnly
+        }
+        "write_file" | "edit_file" => ToolClass::Edit,
+        _ => ToolClass::Shell,
+    }
+}
+
+/// Lexical path tidy: resolves `.` and `..` without touching the filesystem,
+/// so paths that do not exist yet (a file a write tool is about to create)
+/// can still be judged. A `..` that pops above the root leaves a path that no
+/// longer starts with it, and the descendant check rejects that.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Lexical absolute path (cwd-prefixed if relative); never errors for paths
+/// that merely do not exist yet.
+fn absolutize(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Whether `raw` (relative paths resolve against `root`) lands inside the
+/// workspace and outside the forbidden zones (`.git/`, the config dir).
+/// Best-effort lexical check — symlinks are not resolved — which is why
+/// in-workspace writes still prompt in `ask` mode instead of running blindly.
+pub fn path_allowed(root: &Path, raw: &str) -> bool {
+    let root = normalize(&absolutize(root));
+    let candidate = Path::new(raw);
+    let joined_path = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(candidate)
+    };
+    let joined = normalize(&absolutize(&joined_path));
+    if !joined.starts_with(&root) {
+        return false;
+    }
+    let relative = joined.strip_prefix(&root).unwrap_or(&joined);
+    if relative
+        .components()
+        .any(|c| matches!(c, std::path::Component::Normal(name) if name == ".git"))
+    {
+        return false;
+    }
+    if let Ok(config_dir) = xencode_config_rs::XencodeConfig::config_dir() {
+        if joined.starts_with(normalize(&config_dir)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The policy decision for one call. `granted` lists classes the user
+/// approved for the whole session at an earlier prompt.
+pub fn classify(
+    root: &Path,
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+    mode: ApprovalMode,
+    granted: &[ToolClass],
+) -> Permission {
+    // Path arguments are hard-denied outside the workspace in every mode:
+    // "all-allow" never means "anywhere on disk".
+    for key in ["path", "cwd"] {
+        if let Some(serde_json::Value::String(raw)) = args.get(key) {
+            if !raw.is_empty() && !path_allowed(root, raw) {
+                return Permission::Deny;
+            }
+        }
+    }
+    let class = tool_class(tool);
+    let base = match class {
+        ToolClass::ReadOnly => Permission::Allow,
+        ToolClass::Edit if mode == ApprovalMode::Ask => Permission::Ask,
+        ToolClass::Shell if mode != ApprovalMode::AllAllow => Permission::Ask,
+        _ => Permission::Allow,
+    };
+    if base == Permission::Ask && granted.contains(&class) {
+        Permission::Allow
+    } else {
+        base
+    }
+}
 
 /// Output lines handed back to the model per poll (the store keeps 500).
 const MODEL_OUTPUT_TAIL: usize = 50;
@@ -443,6 +589,141 @@ mod tests {
         assert!(
             out.ends_with("… +5 more (call again with a path filter)"),
             "{out}"
+        );
+    }
+
+    fn args_of(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn approval_mode_parses_named_values_and_falls_back_to_ask() {
+        assert_eq!(ApprovalMode::parse("ask"), ApprovalMode::Ask);
+        assert_eq!(ApprovalMode::parse("edit-allow"), ApprovalMode::EditAllow);
+        assert_eq!(ApprovalMode::parse("all-allow"), ApprovalMode::AllAllow);
+        assert_eq!(ApprovalMode::parse("yolo"), ApprovalMode::Ask);
+        assert_eq!(ApprovalMode::parse(""), ApprovalMode::Ask);
+    }
+
+    #[test]
+    fn tool_classes_cover_the_registry_and_default_to_shell() {
+        assert_eq!(tool_class("repo_advise"), ToolClass::ReadOnly);
+        assert_eq!(tool_class("background_poll"), ToolClass::ReadOnly);
+        assert_eq!(tool_class("write_file"), ToolClass::Edit);
+        assert_eq!(tool_class("edit_file"), ToolClass::Edit);
+        assert_eq!(tool_class("background_start"), ToolClass::Shell);
+        // Unknown tools are never silently read-only.
+        assert_eq!(tool_class("mystery"), ToolClass::Shell);
+    }
+
+    #[test]
+    fn path_allowed_follows_the_workspace_and_blocks_traversal() {
+        let root = Path::new(".");
+        assert!(path_allowed(root, "src/app.rs"));
+        assert!(path_allowed(root, "./src/../src/lib.rs"));
+        assert!(path_allowed(
+            root,
+            &std::env::current_dir().unwrap().display().to_string()
+        ));
+        assert!(!path_allowed(root, "../escape"));
+        assert!(!path_allowed(root, "/etc/passwd"));
+        // Dot-git anywhere below the root is off-limits, even for reads.
+        assert!(!path_allowed(root, "x/.git/config"));
+        assert!(!path_allowed(root, ".git/HEAD"));
+    }
+
+    #[test]
+    fn classify_asks_per_mode_and_grants_shortcut_the_prompt() {
+        let root = Path::new(".");
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(
+            classify(root, "repo_advise", &none, ApprovalMode::Ask, &[]),
+            Permission::Allow
+        );
+        assert_eq!(
+            classify(root, "write_file", &none, ApprovalMode::Ask, &[]),
+            Permission::Ask
+        );
+        assert_eq!(
+            classify(root, "write_file", &none, ApprovalMode::EditAllow, &[]),
+            Permission::Allow,
+            "edit-allow auto-approves file edits"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "background_start",
+                &none,
+                ApprovalMode::EditAllow,
+                &[]
+            ),
+            Permission::Ask,
+            "edit-allow still prompts for shell"
+        );
+        assert_eq!(
+            classify(root, "background_start", &none, ApprovalMode::AllAllow, &[]),
+            Permission::Allow
+        );
+        assert_eq!(
+            classify(
+                root,
+                "background_start",
+                &none,
+                ApprovalMode::Ask,
+                &[ToolClass::Shell]
+            ),
+            Permission::Allow,
+            "a session grant replaces the prompt for that class"
+        );
+        assert_eq!(
+            classify(
+                root,
+                "write_file",
+                &none,
+                ApprovalMode::Ask,
+                &[ToolClass::Shell]
+            ),
+            Permission::Ask,
+            "a shell grant must not unlock edits"
+        );
+    }
+
+    #[test]
+    fn classify_denies_out_of_workspace_paths_in_every_mode() {
+        let root = std::env::temp_dir().join(format!("xencode-perm-{}", std::process::id()));
+        let outside = args_of(serde_json::json!({"path": "../escape.txt"}));
+        for mode in [
+            ApprovalMode::Ask,
+            ApprovalMode::EditAllow,
+            ApprovalMode::AllAllow,
+        ] {
+            assert_eq!(
+                classify(&root, "write_file", &outside, mode, &[]),
+                Permission::Deny,
+                "all-allow never means anywhere on disk ({mode:?})"
+            );
+        }
+        let git = args_of(serde_json::json!({"path": "repo/.git/config"}));
+        assert_eq!(
+            classify(&root, "edit_file", &git, ApprovalMode::AllAllow, &[]),
+            Permission::Deny
+        );
+        // background_start's cwd gets the same treatment; an in-root cwd does not.
+        let bad_cwd = args_of(serde_json::json!({"command": "ls", "cwd": "/etc"}));
+        assert_eq!(
+            classify(
+                &root,
+                "background_start",
+                &bad_cwd,
+                ApprovalMode::AllAllow,
+                &[]
+            ),
+            Permission::Deny
+        );
+        let good_cwd = args_of(serde_json::json!({"command": "ls", "cwd": "sub/dir"}));
+        assert_eq!(
+            classify(&root, "background_start", &good_cwd, ApprovalMode::Ask, &[]),
+            Permission::Ask
         );
     }
 }
