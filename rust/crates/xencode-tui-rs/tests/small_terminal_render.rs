@@ -531,3 +531,20 @@ fn header_ladder_drops_chips_as_width_shrinks() {
     assert!(text.contains("✦"), "brand vanished at 30: {text}");
     assert!(!text.contains("Chat"), "focus badge survived at 30: {text}");
 }
+
+/// H1-09: the toast overlay must never sit on top of the input strip. On
+/// short screens it steps aside (skips) rather than covering the editor.
+#[test]
+fn toast_stays_clear_of_the_input_on_short_screens() {
+    let mut app = populated(FocusArea::ChatInput);
+    let text = render_text(&mut app, 60, 6);
+    assert!(
+        !text.contains("src/x.rs changed on disk"),
+        "toast covered the input at 60x6:\n{text}"
+    );
+    let text = render_text(&mut app, 60, 10);
+    assert!(
+        text.contains("src/x.rs changed on disk"),
+        "toast vanished at 60x10"
+    );
+}
