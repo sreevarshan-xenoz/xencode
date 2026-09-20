@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 484 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 488 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -106,9 +106,15 @@
 
 ### D3 — Worktree support
 
-- [ ] D3-01 Git helpers in `xencode-context-rs` (`worktree.rs`, alongside `gitinfo.rs`):
+- [x] D3-01 Git helpers in `xencode-context-rs` (`worktree.rs`, alongside `gitinfo.rs`):
   parse `git worktree list --porcelain` (pure fn), add/remove shells with explicit
   args; dirty marker reuse via `dirty_paths`.
+  Shipped as `parse_worktree_list` (pure; handles spaces in paths, detached/locked/
+  prunable/bare markers, `is_main` on the first block) plus `worktree_list`/
+  `worktree_add`/`worktree_remove` shells built from explicit arg vectors — `git_stdout`
+  made `pub(crate)` in `gitinfo.rs` so worktrees report failures exactly like diffs.
+  Dirty state per worktree is a caller-side `dirty_paths(wt.path)` check (D3-02);
+  tests include a real `git init` → add → remove round trip.
 - [ ] D3-02 TUI `WorktreePanel`: list worktrees (path, branch, HEAD, dirty flag),
   add (path+branch prompt), remove with confirm; guard: main worktree never
   removable. Same panel pattern as D2-01.

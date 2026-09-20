@@ -70,7 +70,7 @@ pub fn parse_numstat(output: &str) -> Vec<DiffFile> {
 
 /// Run git and return stdout, or a short error. Smallest shared helper so
 /// every diff entry point reports failures the same way.
-fn git_stdout(root: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(root)
