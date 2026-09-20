@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `repo_advise` agentic tool (F3-02): the chat model can now call repository
+  insights directly — broken imports, cycles, hubs, orphans — with an optional
+  path `filter`, a 40-finding cap and `error:` strings instead of panics; both
+  surfaces share a new `advise_from_snapshot` loader in `xencode-context-rs`
+  that the insights panel and the CLI now read through as well
 - `xencode advise [FILTER] [--json] [--limit 40]` — repository insights
   (broken imports, cycles, hubs, orphans) read straight from the `.xencode`
   snapshot in the current directory; positional filter matches finding file

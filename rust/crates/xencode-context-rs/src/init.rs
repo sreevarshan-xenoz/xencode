@@ -30,6 +30,8 @@ pub enum ContextError {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// A snapshot read found no usable `.xencode` index at `path`.
+    NoIndex(PathBuf),
     Scan(String),
     Cancelled,
 }
@@ -40,6 +42,11 @@ impl fmt::Display for ContextError {
             ContextError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
+            ContextError::NoIndex(path) => write!(
+                f,
+                "no project index in {} — start the TUI and run /init first",
+                path.display()
+            ),
             ContextError::Scan(msg) => f.write_str(msg),
             ContextError::Cancelled => f.write_str("cancelled"),
         }

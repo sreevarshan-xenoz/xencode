@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 503 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 508 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -395,10 +395,20 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
   plus a live smoke on a scratch repo: numbered text table, `--json`
   array, positional filter, `… +N more` overflow line, `--limit 0`,
   error/exit-1 path, and `--help` text.
-- [ ] F3-02 Agentic tool: `repo_advise` callable by the model in the chat tool loop
-  (schema in `xencode-providers-rs`, executor in `agent_tools.rs`) returning the
-  compact advice report (cap ~40 lines) for the current workspace; test for the
-  executor's success/error paths.
+- [x] F3-02 Agentic tool: `repo_advise` callable by the model in the chat tool
+  loop (schema `advise_tools()` in `xencode-providers-rs` next to
+  `background_tools`, executor in `agent_tools.rs`) returning the compact
+  advice report (optional `filter` arg; capped at 40 findings with a
+  `… +N more` line; missing index comes back as an `error: …` string, never
+  a panic). Tools are offered on every round except the final tool-less one.
+  Instead of a third copy of the snapshot reader, this shipped as
+  `advise_from_snapshot` in `xencode_context_rs` — the TUI panel
+  (`refresh_advise`) and the CLI (`compute_advise`) now read through it too,
+  with a `ContextError::NoIndex` variant carrying the user-facing message.
+  Verified by unit tests against real on-disk `init_project` snapshots in
+  temp dirs (cycle found, filter empties to the clean report, no-index
+  error, cap boundary) plus a providers schema test; not driven through a
+  live model run.
 
 ### F4 — Close-out
 

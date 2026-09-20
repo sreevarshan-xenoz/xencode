@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1207,6 +1207,7 @@ impl<'a> App<'a> {
             mirostat: None,
         };
         let task_runtime = self.task_runtime.clone();
+        let tool_root = xencode_context_rs::default_root();
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
@@ -1218,7 +1219,9 @@ impl<'a> App<'a> {
             // every step; execute requested calls through the shared registry
             // and feed results back as AgentTurn history. The final round is
             // tool-less so the loop always terminates with a text answer.
-            let tools = xencode_providers_rs::background_tools();
+            // F3-02 adds the read-only repo_advise insight tool to the offer.
+            let mut tools = xencode_providers_rs::background_tools();
+            tools.extend(xencode_providers_rs::advise_tools());
             let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
             for round in 0..=crate::agent_tools::MAX_TOOL_ROUNDS {
                 let offer: &[xencode_providers_rs::ToolDefinition] =
@@ -1257,7 +1260,9 @@ impl<'a> App<'a> {
                         "[TOOL]→ {}",
                         crate::agent_tools::summarize_call(call)
                     ));
-                    let result = crate::agent_tools::execute_tool_call(&task_runtime, call).await;
+                    let result =
+                        crate::agent_tools::execute_tool_call(&task_runtime, &tool_root, call)
+                            .await;
                     let _ = tx.send(format!(
                         "[TOOL]← {}",
                         crate::agent_tools::truncate_one_line(&result, 120)
@@ -1408,34 +1413,19 @@ impl<'a> App<'a> {
     /// `advise_status`.
     pub fn refresh_advise(&mut self) {
         let root = xencode_context_rs::default_root();
-        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-        let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
-            xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
-                .unwrap_or_default();
-        if symbols.is_empty() {
-            self.advise_items.clear();
-            self.advise_status = "No project index — run /init first.".to_string();
-            return;
+        match xencode_context_rs::advise_from_snapshot(&root) {
+            Ok(items) => {
+                self.advise_items = items;
+                self.advise_status.clear();
+                self.advise_selected = self
+                    .advise_selected
+                    .min(self.advise_items.len().saturating_sub(1));
+            }
+            Err(_) => {
+                self.advise_items.clear();
+                self.advise_status = "No project index — run /init first.".to_string();
+            }
         }
-        let graph: Vec<xencode_context_rs::DepEdge> =
-            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
-                .unwrap_or_default();
-        let index: Option<xencode_context_rs::FilesIndex> =
-            xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
-        let rust_files: Vec<String> = index
-            .map(|i| {
-                i.files
-                    .into_iter()
-                    .filter(|f| f.language == "rust")
-                    .map(|f| f.path)
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.advise_items = xencode_context_rs::advise(&rust_files, &symbols, &graph);
-        self.advise_status.clear();
-        self.advise_selected = self
-            .advise_selected
-            .min(self.advise_items.len().saturating_sub(1));
     }
 
     /// Re-read `git worktree list` for the current directory and mark each

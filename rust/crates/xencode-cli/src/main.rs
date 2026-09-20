@@ -1210,32 +1210,7 @@ fn compute_advise(
     root: &std::path::Path,
     filter: Option<&str>,
 ) -> Result<Vec<xencode_context_rs::Advice>, String> {
-    use std::collections::BTreeMap;
-    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-    let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
-        xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
-            .unwrap_or_default();
-    if symbols.is_empty() {
-        return Err(format!(
-            "no project index in {} — start the TUI and run /init first",
-            xencode.display()
-        ));
-    }
-    let graph: Vec<xencode_context_rs::DepEdge> =
-        xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
-            .unwrap_or_default();
-    let index: Option<xencode_context_rs::FilesIndex> =
-        xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
-    let rust_files: Vec<String> = index
-        .map(|i| {
-            i.files
-                .into_iter()
-                .filter(|f| f.language == "rust")
-                .map(|f| f.path)
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut items = xencode_context_rs::advise(&rust_files, &symbols, &graph);
+    let mut items = xencode_context_rs::advise_from_snapshot(root).map_err(|e| e.to_string())?;
     if let Some(needle) = filter {
         items.retain(|a| a.file.contains(needle));
     }
