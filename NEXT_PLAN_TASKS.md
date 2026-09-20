@@ -334,7 +334,7 @@
 
 > Status legend: `[x]` done, `[ ]` todo.
 
-## Milestone F — Live Refactor Insights (drafted 2026-09-20)
+## Milestone F — Live Refactor Insights (complete 2026-09-20)
 
 Goal (backlog item 2): make the deterministic `advise` engine *live* — the symbol/dep
 snapshot stays current between `/init` runs, insights get a dedicated panel, and both
@@ -344,7 +344,7 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
 
 - [x] F1-01 `xencode-context-rs`: `refresh_rust_file(root, rel_path)` — re-extract
   symbols for one already-indexed `.rs` file from its current bytes (drop the record if
-  the file is gone), rebuild `deps.json` via `build_graph`, and keep `index.json` +
+  the file is gone), rebuild `deps.json` via `build_graph`, and keep `files.json` +
   `manifest.json` entries (size/loc/mtime) consistent; a path absent from the index is
   a no-op (new files still need `/init`). Atomic writes via `write_atomic`. Unit tests
   on temp `.xencode` dirs: edit changes edges, delete drops record + edges, unknown
@@ -412,5 +412,11 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
 
 ### F4 — Close-out
 
-- [ ] F4-01 Docs sweep: README/CLI_GUIDE/USER_MANUAL/NEXT_PLAN synced to what shipped,
+- [x] F4-01 Docs sweep: README/CLI_GUIDE/USER_MANUAL/NEXT_PLAN synced to what shipped,
   live test/crate counts recorded, CHANGELOG entry.
+  Close-out pass re-verified every Milestone F claim against the tree: 13 crates
+  and 508 tests match a fresh `cargo test --workspace` at this commit; `Ctrl+L`
+  appears in the help overlay, both key tables and the CLI guide; the insights
+  panel is FocusArea #24 / Feature Navigator entry #17; `xencode advise` matches
+  `--help` exactly (positional `[FILTER]`, `--json`, `--limit` default 40,
+  0 = all). NEXT_PLAN's backlog now carries only team-mode hardening.
