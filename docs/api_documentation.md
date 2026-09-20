@@ -1,33 +1,43 @@
 # Xencode API Documentation
 
+> ⚠️ Partially legacy: the module sections below still describe the retired
+> Python platform. The Rust workspace (`rust/crates/*`) is the only active
+> codebase — the HTTP/WebSocket surface in the Auth Matrix is current, the
+> Python module docs are pending a rewrite.
+
 ## Overview
 
-Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. This document describes the public APIs and modules available in the Xencode platform.
+Xencode is an AI-powered development assistant (Rust CLI/TUI with local
+language models). This document describes its public APIs and modules.
 
 ## Auth Matrix
 
-The API uses JWT bearer authentication for protected routes.
+The Rust collaboration server (`xencode server`, axum) issues real bearer
+tokens (`xencode_<uuid>`, 24 h TTL). `POST /auth/login` takes `{"username"}`
+and returns a token; WebSocket identity is the first `auth` frame, never
+the URL.
 
-- Public routes (no auth required):
-  - `GET /health`
-  - `GET /health/detailed`
-  - `GET /metrics`
-  - `GET /info`
-  - Docs/OpenAPI endpoints (`/docs`, `/redoc`, `/openapi.json`)
+- Public (no auth required):
+  - `GET /` — health check
+  - `GET /api/config` · `GET /api/models` · `GET /api/status` ·
+    `GET /api/llamacpp/status` (never leak host paths)
+  - `POST /auth/login` — identity claim; the bind surface is the perimeter
+- Bearer token required (`Authorization: Bearer xencode_...`):
+  - `POST /sessions/create`
+  - `GET /sessions/{id}` — 200 for known, 404 for unknown
+  - `POST /auth/verify` — returns `{username, expires_at}` of the presented token
+  - `POST /api/llamacpp/load` · `POST /api/llamacpp/unload`
+- WebSocket, first-frame auth:
+  - `GET /ws/{session_id}` — frame #1 must be `{"type":"auth","token":…}`;
+    close `4401` bad token, `4403` RBAC denied, `4404` unknown session,
+    `4409` session full (10 members max)
+- No CORS layer: the only clients are the TUI (reqwest — unaffected by
+  CORS) and curl-style tooling; permissive CORS would only widen the
+  browser attack surface for no consumer.
 
-- Protected core routes (JWT required):
-  - `POST /api/v1/code/analyze`
-  - `GET /api/v1/code/`
-  - `POST /api/v1/documents/upload`
-  - `GET /api/v1/documents/`
-  - `GET /api/v1/documents/{document_id}`
-
-- Protected dynamic feature routes (JWT required):
-  - Any route mounted from feature descriptors, including examples:
-    - `POST /api/v1/collab/start`
-    - `POST /api/v1/review/file`
-    - `POST /api/v1/security/scan`
-    - `POST /api/v1/profile/run`
+Session lifecycle is in-memory only (a restart drops peers); every create,
+join, relay, denial and removal is appended as one JSONL line to
+`~/.xencode/audit.jsonl` by default.
 
 ## Core Modules
 

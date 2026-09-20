@@ -60,6 +60,17 @@ xencode advise src/auth --json
 Broken imports, import cycles, hub files and orphans, read straight from
 the `.xencode` index.
 
+### Team collaboration
+```bash
+xencode server           # local-first: http://127.0.0.1:8765, ws://
+```
+Then in the TUI open the Collaboration Hub (Ctrl+F → Collaboration Hub):
+`c` creates and connects a session, `j` edits in a session id to join one,
+`Tab` cycles the server/user/session fields, `r` retries, `Esc` hangs up.
+The panel shows only the real connection state — transport, session id,
+live members with roles. Flags, tokens, TLS and the audit log are in
+`CLI_GUIDE.md`.
+
 ## Commands
 
 ### In the TUI

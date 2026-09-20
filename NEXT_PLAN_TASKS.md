@@ -32,7 +32,10 @@
 
 - [x] Audit log coverage for team actions (`workspace` manager: sequenced `AuditEvent`s incl. denials, `audit_log`/`events_for`)
 - [x] Workspace RBAC hardening (`rust/crates/xencode-collaboration-rs/workspace.rs`: Admin-gated membership, self-leave, last-admin guard)
-- [ ] Collaboration session security review and polish
+- [x] Collaboration session security review and polish (Milestone G: real
+  bearer tokens with expiry, RBAC-backed first-frame WS auth, enforced session
+  size, local-first bind with opt-in TLS, persistent JSONL audit, and a TUI
+  hub that actually connects — details in G1–G3 below)
 
 ## Git Loop Completion
 
@@ -519,9 +522,24 @@ turns the hub into an actual WebSocket client.
 
 ### G4 — Close-out
 
-- [ ] G4-01 Docs sweep: CLI_GUIDE server section (flags, refusal rule, token
+- [x] G4-01 Docs sweep: CLI_GUIDE server section (flags, refusal rule, token
   flow, in-memory-sessions note), USER_MANUAL hub keys, QUICK_START/README/
   CHANGELOG synced, `docs/api_documentation.md` WS path corrected, live counts.
+  The CLI_GUIDE server section had already shipped with G2-01 and was
+  re-verified against `run_server`. This pass: USER_MANUAL gained a
+  Collaboration Hub key table (c/j/Enter/r/Tab/Esc) and lost its fake claims
+  (`0.0.0.0` default example banner, "credential vault/SQLite/refresh-token/
+  email-verification" bullet), its command reference now lists `advise`
+  verbatim from `--help`, and the Collaboration Server section documents the
+  real posture (loopback default, TLS pairing rule, first-frame auth, audit
+  path, in-memory sessions). `docs/api_documentation.md` had no username-in-URL
+  WS path to fix — instead its entirely-fake JWT/`/api/v1` auth matrix was
+  replaced with the real route table (public vs bearer vs WS close codes)
+  behind a banner marking the Python module sections below as legacy.
+  QUICK_START gained a Team collaboration quickstart; README's CRDT-sync
+  claim (crdt.rs is unwired, deferred) replaced with token auth/RBAC/audit.
+  `sync.rs::join_session` now records that credentials are enforced upstream
+  in `xencode-server-rs`. Counts refreshed with this commit's gates.
 
 Deferred on purpose (recorded, not skipped): passwords/IdPs (login = identity
 claim; the bind surface is the perimeter), join approval (knowledge of the
