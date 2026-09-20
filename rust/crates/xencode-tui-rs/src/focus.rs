@@ -73,25 +73,149 @@ impl CollabField {
     }
 }
 
+/// How a settings row responds to ←/→ and Enter. The row's behavior comes
+/// from this table, not from its index — adding a row means adding an
+/// entry, never renumbering the panel (H1-04).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SettingKind {
+    /// ←/→ selects among option names (also the config values).
+    Cycle(&'static [&'static str]),
+    /// ←/→ flips a boolean.
+    Toggle,
+    /// ←/→ adjusts an integer by `step`, never below `min` nor above `max`.
+    Stepped { step: u64, min: u64, max: u64 },
+    /// Enter opens a text editor; commit stores the string as typed.
+    Text,
+    /// Enter opens a text editor; commit parses the number.
+    Number,
+    /// Enter triggers it (Factory Reset).
+    Action,
+}
+
+/// One row of the Settings panel: display order is table order, and the
+/// section header prints once when the section changes.
+pub struct SettingRow {
+    pub label: &'static str,
+    pub section: &'static str,
+    pub kind: SettingKind,
+}
+
 /// Rows of the Settings panel in display order; the index is
 /// `app.settings_cursor`. Navigation bounds derive from this list — adding
 /// a row here makes it reachable without touching the key handler.
-pub const SETTINGS_ROWS: &[&str] = &[
-    "Theme",
-    "Cache Enabled",
-    "Memory Enabled",
-    "Max Cache Size",
-    "Memory Items",
-    "Response Timeout",
-    "Ollama URL",
-    "Llama.cpp URL",
-    "Llama.cpp Model",
-    "Llama Temp",
-    "Llama Top-K",
-    "Llama Min-P",
-    "Llama Max Tokens",
-    "Factory Reset",
+pub const SETTINGS_ITEMS: &[SettingRow] = &[
+    SettingRow {
+        label: "Theme",
+        section: "Display",
+        kind: SettingKind::Cycle(crate::theme::THEME_NAMES),
+    },
+    SettingRow {
+        label: "Layout",
+        section: "Display",
+        kind: SettingKind::Cycle(crate::layout::LAYOUT_NAMES),
+    },
+    SettingRow {
+        label: "Rounded Borders",
+        section: "Display",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
+        label: "Show Scrollbars",
+        section: "Display",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
+        label: "Line Numbers",
+        section: "Display",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
+        label: "Cache Enabled",
+        section: "Performance",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
+        label: "Memory Enabled",
+        section: "Performance",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
+        label: "Max Cache Size",
+        section: "Limits",
+        kind: SettingKind::Stepped {
+            step: 10,
+            min: 10,
+            max: 1000,
+        },
+    },
+    SettingRow {
+        label: "Memory Items",
+        section: "Limits",
+        kind: SettingKind::Stepped {
+            step: 5,
+            min: 5,
+            max: 500,
+        },
+    },
+    SettingRow {
+        label: "Response Timeout",
+        section: "Limits",
+        kind: SettingKind::Stepped {
+            step: 5,
+            min: 5,
+            max: 300,
+        },
+    },
+    SettingRow {
+        label: "Ollama URL",
+        section: "Connection",
+        kind: SettingKind::Text,
+    },
+    SettingRow {
+        label: "Llama.cpp URL",
+        section: "Connection",
+        kind: SettingKind::Text,
+    },
+    SettingRow {
+        label: "Llama.cpp Model",
+        section: "Connection",
+        kind: SettingKind::Text,
+    },
+    SettingRow {
+        label: "Llama Temp",
+        section: "llama.cpp",
+        kind: SettingKind::Number,
+    },
+    SettingRow {
+        label: "Llama Top-K",
+        section: "llama.cpp",
+        kind: SettingKind::Number,
+    },
+    SettingRow {
+        label: "Llama Min-P",
+        section: "llama.cpp",
+        kind: SettingKind::Number,
+    },
+    SettingRow {
+        label: "Llama Max Tokens",
+        section: "llama.cpp",
+        kind: SettingKind::Number,
+    },
+    SettingRow {
+        label: "Factory Reset",
+        section: "Actions",
+        kind: SettingKind::Action,
+    },
 ];
+
+/// Index of a settings row by its (stable) label — the test/keying
+/// replacement for magic row numbers.
+pub fn settings_row_index(label: &str) -> usize {
+    SETTINGS_ITEMS
+        .iter()
+        .position(|r| r.label == label)
+        .unwrap_or(0)
+}
 
 /// Column width the Settings panel pads its labels to.
 pub const SETTINGS_LABEL_WIDTH: usize = 17;

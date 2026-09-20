@@ -960,6 +960,12 @@ impl<'a> App<'a> {
     }
 
     /// The chat box is a plain textarea; only its colors follow the theme.
+    /// Persist the working config to disk. One choke point for every
+    /// settings write (H1-04).
+    pub fn save_config(&mut self) {
+        let _ = self.config.save();
+    }
+
     pub(crate) fn style_chat_input(&mut self) {
         self.chat_input
             .set_style(ratatui::style::Style::default().fg(self.theme.fg));
@@ -3696,7 +3702,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                         }
                         FocusArea::Settings => {
-                            if app.settings_cursor + 1 < crate::focus::SETTINGS_ROWS.len() {
+                            if app.settings_cursor + 1 < crate::focus::SETTINGS_ITEMS.len() {
                                 app.settings_cursor += 1;
                             }
                         }

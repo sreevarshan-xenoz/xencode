@@ -9,9 +9,10 @@ use ratatui::{
 use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
-use crate::focus::{FocusArea, InputMode, FEATURE_LIST, SETTINGS_LABEL_WIDTH, SETTINGS_ROWS};
+use crate::focus::{
+    FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS, SETTINGS_LABEL_WIDTH,
+};
 use crate::layout::compute_layout;
-use crate::theme::THEME_NAMES;
 use crate::widgets::{gauge, spinner};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -647,6 +648,91 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// The right-hand value column for one settings row, formatted per its
+/// `SettingKind` (and label, for the rows that carry units or types).
+fn setting_display(app: &App, idx: usize) -> String {
+    use crate::focus::SettingKind;
+    let row = &SETTINGS_ITEMS[idx];
+    let editing_here = app.settings_url_editing && app.settings_cursor == idx;
+    match &row.kind {
+        SettingKind::Cycle(options) => {
+            let current = match row.label {
+                "Theme" => &app.config.active_theme,
+                "Layout" => &app.config.layout,
+                _ => options[0],
+            };
+            let pos = options.iter().position(|o| *o == current).unwrap_or(0);
+            let dots: Vec<&str> = (0..options.len())
+                .map(|i| if i == pos { "●" } else { "○" })
+                .collect();
+            format!("{}  [{}]", current, dots.join(" "))
+        }
+        SettingKind::Toggle => {
+            let on = match row.label {
+                "Rounded Borders" => app.config.rounded_borders,
+                "Show Scrollbars" => app.config.show_scrollbars,
+                "Line Numbers" => app.config.show_line_numbers,
+                "Cache Enabled" => app.config.cache_enabled,
+                "Memory Enabled" => app.config.memory_enabled,
+                _ => false,
+            };
+            if on {
+                "✅ Enabled".to_string()
+            } else {
+                "❌ Disabled".to_string()
+            }
+        }
+        SettingKind::Stepped { .. } => match row.label {
+            "Max Cache Size" => format!("{} entries", app.config.max_cache_size),
+            "Memory Items" => format!("{} entries", app.config.max_memory_items),
+            "Response Timeout" => format!("{}s", app.config.response_timeout),
+            _ => String::new(),
+        },
+        SettingKind::Text => {
+            let value = match row.label {
+                "Ollama URL" => &app.config.ollama_url,
+                "Llama.cpp URL" => &app.config.llama_cpp_url,
+                "Llama.cpp Model" => &app.config.llama_cpp_model_path,
+                _ => &app.config.ollama_url,
+            };
+            if editing_here {
+                format!(
+                    "{}| (type to edit, Enter to confirm)",
+                    &app.settings_url_buffer[..app.settings_url_cursor]
+                )
+            } else if row.label == "Llama.cpp Model" && value.is_empty() {
+                "⚠️  Not set (Enter to edit)".to_string()
+            } else {
+                format!("{}  (Enter to edit)", value)
+            }
+        }
+        SettingKind::Number => {
+            let shown = match row.label {
+                "Llama Temp" => app.config.llama_cpp_temperature.map(|v| v.to_string()),
+                "Llama Top-K" => app.config.llama_cpp_top_k.map(|v| v.to_string()),
+                "Llama Min-P" => app.config.llama_cpp_min_p.map(|v| v.to_string()),
+                "Llama Max Tokens" => app.config.llama_cpp_max_tokens.map(|v| v.to_string()),
+                _ => None,
+            };
+            if editing_here {
+                format!(
+                    "{}| (Enter to confirm)",
+                    &app.settings_url_buffer[..app.settings_url_cursor]
+                )
+            } else {
+                shown.unwrap_or_else(|| "default".to_string())
+            }
+        }
+        SettingKind::Action => {
+            if app.settings_reset_active {
+                "✅ Reset to defaults!".to_string()
+            } else {
+                "⚠️  Reset to defaults (Enter to confirm)".to_string()
+            }
+        }
+    }
+}
+
 fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(65, 80, area);
     f.render_widget(Clear, popup_area);
@@ -669,188 +755,53 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     // ── Settings List ──────────────────────────────────────────────────────
-    let theme_pos = THEME_NAMES
-        .iter()
-        .position(|t| *t == app.config.active_theme)
-        .unwrap_or(0);
-    let theme_indicators: String = (0..THEME_NAMES.len())
-        .map(|i| if i == theme_pos { "●" } else { "○" })
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let cache_str = if app.config.cache_enabled {
-        "✅ Enabled".to_string()
-    } else {
-        "❌ Disabled".to_string()
-    };
-    let memory_str = if app.config.memory_enabled {
-        "✅ Enabled".to_string()
-    } else {
-        "❌ Disabled".to_string()
-    };
-    let cache_size_str = format!("{} entries", app.config.max_cache_size);
-    let memory_items_str = format!("{} entries", app.config.max_memory_items);
-    let timeout_str = format!("{}s", app.config.response_timeout);
-    let theme_str = format!("{}  [{}]", app.config.active_theme, theme_indicators);
-
-    let ollama_url_str = if app.settings_url_editing && app.settings_cursor == 6 {
-        format!(
-            "{}| (type to edit, Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        format!("{}  (Enter to edit)", app.config.ollama_url)
-    };
-
-    let llamacpp_url_str = if app.settings_url_editing && app.settings_cursor == 7 {
-        format!(
-            "{}| (type to edit, Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        format!("{}  (Enter to edit)", app.config.llama_cpp_url)
-    };
-
-    let llamacpp_model_path_str = if app.settings_url_editing && app.settings_cursor == 8 {
-        format!(
-            "{}| (type to edit, Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else if app.config.llama_cpp_model_path.is_empty() {
-        "⚠️  Not set (Enter to edit)".to_string()
-    } else {
-        format!("{}  (Enter to edit)", app.config.llama_cpp_model_path)
-    };
-
-    let fmt_opt = |v: &Option<f64>| match v {
-        Some(x) => format!("{x}"),
-        None => "default".to_string(),
-    };
-    let fmt_opt_i32 = |v: &Option<i32>| match v {
-        Some(x) => format!("{x}"),
-        None => "default".to_string(),
-    };
-    let fmt_opt_u32 = |v: &Option<u32>| match v {
-        Some(x) => format!("{x}"),
-        None => "default".to_string(),
-    };
-
-    let llama_temp_str = if app.settings_url_editing && app.settings_cursor == 9 {
-        format!(
-            "{}| (Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        fmt_opt(&app.config.llama_cpp_temperature)
-    };
-    let llama_topk_str = if app.settings_url_editing && app.settings_cursor == 10 {
-        format!(
-            "{}| (Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        fmt_opt_i32(&app.config.llama_cpp_top_k)
-    };
-    let llama_minp_str = if app.settings_url_editing && app.settings_cursor == 11 {
-        format!(
-            "{}| (Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        fmt_opt(&app.config.llama_cpp_min_p)
-    };
-    let llama_maxtokens_str = if app.settings_url_editing && app.settings_cursor == 12 {
-        format!(
-            "{}| (Enter to confirm)",
-            &app.settings_url_buffer[..app.settings_url_cursor]
-        )
-    } else {
-        fmt_opt_u32(&app.config.llama_cpp_max_tokens)
-    };
-
-    let reset_label = if app.settings_reset_active {
-        "✅ Reset to defaults!"
-    } else {
-        "⚠️  Reset to defaults (Enter to confirm)"
-    };
-
-    let value_strs: [&str; SETTINGS_ROWS.len()] = [
-        &theme_str,
-        &cache_str,
-        &memory_str,
-        &cache_size_str,
-        &memory_items_str,
-        &timeout_str,
-        &ollama_url_str,
-        &llamacpp_url_str,
-        &llamacpp_model_path_str,
-        &llama_temp_str,
-        &llama_topk_str,
-        &llama_minp_str,
-        &llama_maxtokens_str,
-        reset_label,
-    ];
+    // One line per row of `focus::SETTINGS_ITEMS`: sections, values and
+    // colors all derive from the table, never from row numbers (H1-04).
     let width = SETTINGS_LABEL_WIDTH;
-    let settings_labels: Vec<String> = SETTINGS_ROWS
-        .iter()
-        .map(|label| format!("{label:<width$}"))
-        .collect();
-    let settings_values: Vec<(&str, &str)> = settings_labels
-        .iter()
-        .map(String::as_str)
-        .zip(value_strs)
-        .collect();
-
-    let last_row = SETTINGS_ROWS.len() - 1;
-    let sections: [(usize, usize, &str); 6] = [
-        (0, 1, "  Display"),
-        (1, 3, "  Performance"),
-        (3, 6, "  Limits"),
-        (6, 8, "  Connection"),
-        (8, last_row, "  llama.cpp"),
-        (last_row, SETTINGS_ROWS.len(), "  Actions"),
-    ];
-
     let mut settings_lines: Vec<Line> = Vec::new();
-    for (s_idx, &(start, end, section_name)) in sections.iter().enumerate() {
-        settings_lines.push(Line::from(Span::styled(
-            section_name,
-            Style::default()
-                .fg(app.theme.fg)
-                .add_modifier(Modifier::UNDERLINED),
-        )));
-
-        for (idx, &(label, value)) in settings_values.iter().enumerate().take(end).skip(start) {
-            let is_selected = app.settings_cursor == idx;
-            let style = if is_selected {
+    let mut prev_section: Option<&str> = None;
+    for (idx, row) in SETTINGS_ITEMS.iter().enumerate() {
+        if prev_section != Some(row.section) {
+            if prev_section.is_some() {
+                settings_lines.push(Line::from(""));
+            }
+            settings_lines.push(Line::from(Span::styled(
+                format!("  {}", row.section),
                 Style::default()
-                    .fg(app.theme.highlight_fg)
-                    .bg(app.theme.highlight)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(app.theme.fg)
-            };
-            let pointer = if is_selected { " ▶ " } else { "   " };
-            let is_reset = idx == last_row;
-            let is_url_item = idx == 6 || idx == 7 || idx == 8;
-            let is_num_item = idx == 9 || idx == 10 || idx == 11 || idx == 12;
-            let value_color = if is_reset && is_selected {
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::UNDERLINED),
+            )));
+            prev_section = Some(row.section);
+        }
+
+        let is_selected = app.settings_cursor == idx;
+        let style = if is_selected {
+            Style::default()
+                .fg(app.theme.highlight_fg)
+                .bg(app.theme.highlight)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.fg)
+        };
+        let pointer = if is_selected { " ▶ " } else { "   " };
+        let value_color = if row.kind == SettingKind::Action {
+            if is_selected {
                 app.theme.danger
-            } else if is_reset {
-                app.theme.message_system
-            } else if (is_url_item || is_num_item) && app.settings_url_editing && is_selected {
-                app.theme.warning
             } else {
-                app.theme.accent
-            };
-            settings_lines.push(Line::from(vec![
-                Span::styled(format!("{}{}", pointer, label), style),
-                Span::styled(value, Style::default().fg(value_color)),
-            ]));
-        }
-        if s_idx + 1 < sections.len() {
-            settings_lines.push(Line::from(""));
-        }
+                app.theme.message_system
+            }
+        } else if matches!(row.kind, SettingKind::Text | SettingKind::Number)
+            && app.settings_url_editing
+            && is_selected
+        {
+            app.theme.warning
+        } else {
+            app.theme.accent
+        };
+        settings_lines.push(Line::from(vec![
+            Span::styled(format!("{pointer}{:<width$}", row.label), style),
+            Span::styled(setting_display(app, idx), Style::default().fg(value_color)),
+        ]));
     }
 
     let settings_para = Paragraph::new(settings_lines).style(Style::default().fg(app.theme.fg));
