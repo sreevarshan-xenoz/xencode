@@ -10,10 +10,11 @@ use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
 use crate::focus::{FocusArea, InputMode, FEATURE_LIST, SETTINGS_LABEL_WIDTH, SETTINGS_ROWS};
+use crate::layout::compute_layout;
 use crate::theme::THEME_NAMES;
 use crate::widgets::{gauge, spinner};
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     // Full-screen themed background
     let bg = Block::default().style(Style::default().bg(app.theme.bg).fg(app.theme.fg));
     f.render_widget(bg, f.area());
@@ -257,61 +258,42 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(bar, area);
 }
 
-// ── Body (file explorer + chat + input) ─────────────────────────────────────
+// ── Body (explorer + editor + chat + input) ────────────────────────────────
 
-/// The body column split (File Explorer | Code Editor | Chat). Single source
-/// of truth: `draw_body` renders these rects and the mouse handler hit-tests
-/// them, so the two can no longer disagree about where the panels are.
-pub fn body_chunks(area: Rect) -> [Rect; 3] {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(20), // File Explorer
-            Constraint::Percentage(50), // Code Editor
-            Constraint::Percentage(30), // Chat
-        ])
-        .split(area);
-    [chunks[0], chunks[1], chunks[2]]
-}
-
-/// Which body panel owns terminal column `column` at this area's width?
-pub fn body_hit_test(area: Rect, column: u16) -> FocusArea {
-    let chunks = body_chunks(area);
-    if column < chunks[0].right() {
-        FocusArea::FileExplorer
-    } else if column < chunks[1].right() {
-        FocusArea::CodeEditor
-    } else {
-        FocusArea::ChatInput
+/// Renders the body from the layout engine's resolved rects (H1-03). The
+/// geometry lives in exactly one place (`layout::compute_layout`); the mouse
+/// handler and resize clamp call the same function. `last_layout` is
+/// recorded here so the Tab focus-ring can see what the user can see, and
+/// `last_body_focus` is latched for zen's focus-follows target.
+fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
+    if matches!(
+        app.focus,
+        FocusArea::FileExplorer | FocusArea::CodeEditor | FocusArea::ChatInput
+    ) {
+        app.last_body_focus = app.focus;
     }
-}
+    let layout = compute_layout(
+        area,
+        &app.config.layout,
+        app.show_terminal,
+        app.last_body_focus,
+    );
+    app.last_layout = layout;
 
-fn draw_body(f: &mut Frame, app: &App, area: Rect) {
-    let main_chunks = body_chunks(area);
-
-    draw_file_explorer(f, app, main_chunks[0]);
-    draw_code_editor(f, app, main_chunks[1]);
-
-    // Right side: chat + optional terminal + input
-    if app.show_terminal {
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(6),    // chat
-                Constraint::Length(8), // terminal
-                Constraint::Length(3), // input
-            ])
-            .split(main_chunks[2]);
-        draw_messages(f, app, right[0]);
-        draw_terminal(f, app, right[1]);
-        draw_input(f, app, right[2]);
-    } else {
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
-            .split(main_chunks[2]);
-        draw_messages(f, app, right[0]);
-        draw_input(f, app, right[1]);
+    if let Some(rect) = layout.explorer {
+        draw_file_explorer(f, app, rect);
+    }
+    if let Some(rect) = layout.editor {
+        draw_code_editor(f, app, rect);
+    }
+    if let Some(rect) = layout.chat {
+        draw_messages(f, app, rect);
+    }
+    if let Some(rect) = layout.terminal {
+        draw_terminal(f, app, rect);
+    }
+    if let Some(rect) = layout.input {
+        draw_input(f, app, rect);
     }
 }
 
@@ -1932,8 +1914,8 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
     let area = Rect::new(0, 0, width, height);
 
-    // Chat pane: outer [header 1 | body | status 1], body col 3 split by
-    // whether the embedded terminal is visible.
+    // Chat pane: outer [header 1 | body | status 1], then the layout
+    // engine's chat rect — the exact one draw_body renders (H1-03).
     let body = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1942,25 +1924,17 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
             Constraint::Length(1),
         ])
         .split(area)[1];
-    let chat_col = body_chunks(body)[2];
-    let chat_area = if app.show_terminal {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(6),
-                Constraint::Length(8),
-                Constraint::Length(3),
-            ])
-            .split(chat_col)[0]
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
-            .split(chat_col)[0]
-    };
-    app.chat_scroll = app
-        .chat_scroll
-        .min(clamp_scroll(chat_lines(app).len(), chat_area.height));
+    let layout = compute_layout(
+        body,
+        &app.config.layout,
+        app.show_terminal,
+        app.last_body_focus,
+    );
+    if let Some(chat_area) = layout.chat {
+        app.chat_scroll = app
+            .chat_scroll
+            .min(clamp_scroll(chat_lines(app).len(), chat_area.height));
+    }
 
     // Code Review popup.
     let review_area = centered_rect(80, 80, area);
@@ -3658,32 +3632,37 @@ mod tests {
     }
 
     #[test]
-    fn body_hit_test_follows_body_layout() {
+    fn classic_hit_test_follows_body_layout() {
         use super::FocusArea;
-        use super::{body_chunks, body_hit_test};
+        use crate::layout::compute_layout;
         use ratatui::layout::Rect;
 
         for width in [1u16, 7, 20, 33, 61, 80, 100, 120, 240] {
             let area = Rect::new(0, 0, width, 24);
-            let chunks = body_chunks(area);
+            let layout = compute_layout(area, "classic", false, FocusArea::ChatInput);
+            let (explorer, editor, chat) = (
+                layout.explorer.unwrap(),
+                layout.editor.unwrap(),
+                layout.chat.unwrap(),
+            );
             // The three panes tile the full width: no dead columns, no overlap.
-            assert_eq!(chunks[0].x, 0);
-            assert_eq!(chunks[1].x, chunks[0].right());
-            assert_eq!(chunks[2].x, chunks[1].right());
-            assert_eq!(chunks[2].right(), area.right());
+            assert_eq!(explorer.x, 0);
+            assert_eq!(editor.x, explorer.right());
+            assert_eq!(chat.x, editor.right());
+            assert_eq!(chat.right(), area.right());
 
             // Every column hits exactly the pane rendered under it.
             for col in 0..width {
-                let expected = if col < chunks[0].right() {
+                let expected = if col < explorer.right() {
                     FocusArea::FileExplorer
-                } else if col < chunks[1].right() {
+                } else if col < editor.right() {
                     FocusArea::CodeEditor
                 } else {
                     FocusArea::ChatInput
                 };
                 assert_eq!(
-                    body_hit_test(area, col),
-                    expected,
+                    layout.hit_test(col),
+                    Some(expected),
                     "width {width} col {col}"
                 );
             }

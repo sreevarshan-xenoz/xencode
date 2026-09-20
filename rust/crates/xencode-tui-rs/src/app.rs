@@ -177,6 +177,13 @@ pub struct App<'a> {
     pub theme: ThemeColors,
     pub config: XencodeConfig,
     pub show_terminal: bool,
+    /// Last focus that pointed at a body pane (explorer/editor/chat). Zen
+    /// layout uses it as its focus-follows target; overlay focus never
+    /// touches it, so zen doesn't flicker when a popup closes.
+    pub last_body_focus: FocusArea,
+    /// The body geometry `draw_body` rendered last frame. The Tab focus-ring
+    /// reads it so it can only Tab to panes the user can actually see.
+    pub last_layout: crate::layout::BodyLayout,
     pub memory: ConversationMemory,
     pub feature_nav_selected: usize,
 
@@ -694,6 +701,8 @@ impl<'a> App<'a> {
             theme,
             config,
             show_terminal: false,
+            last_body_focus: FocusArea::ChatInput,
+            last_layout: crate::layout::BodyLayout::default(),
             memory,
             feature_nav_selected: 0,
             session_start_time: now,
@@ -3282,7 +3291,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
     loop {
         crate::toast::prune(&mut app.toasts, current_timestamp());
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         // Drain async messages
         while let Ok(token) = rx.try_recv() {
@@ -3708,16 +3717,29 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     },
                     MouseEventKind::Down(MouseButton::Left) => {
                         let size = terminal.size()?;
-                        let body_area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        match ui::body_hit_test(body_area, mouse.column) {
-                            FocusArea::FileExplorer => {
+                        // Same outer split as ui::draw: header(1) + body + status(1).
+                        let body_area = ratatui::layout::Rect::new(
+                            0,
+                            1,
+                            size.width,
+                            size.height.saturating_sub(2),
+                        );
+                        let body_layout = crate::layout::compute_layout(
+                            body_area,
+                            &app.config.layout,
+                            app.show_terminal,
+                            app.last_body_focus,
+                        );
+                        match body_layout.hit_test(mouse.column) {
+                            Some(FocusArea::FileExplorer) => {
                                 app.focus = FocusArea::FileExplorer;
                                 let row = mouse.row.saturating_sub(2) as usize;
                                 if row < app.file_tree.len() {
                                     app.selected_file = row;
                                 }
                             }
-                            target => app.focus = target,
+                            Some(target) => app.focus = target,
+                            None => {}
                         }
                     }
                     _ => {}
