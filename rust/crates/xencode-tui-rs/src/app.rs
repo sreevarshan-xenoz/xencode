@@ -3611,7 +3611,7 @@ mod tests {
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
-    use xencode_core_rs::{scan_workspace, ScanOptions};
+    use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
 
     #[test]
     fn parse_llama_port_handles_common_urls() {
@@ -4195,5 +4195,50 @@ mod tests {
             2,
             "dedup keeps one copy per prompt"
         );
+    }
+
+    /// Receive side of the `[TASKS]` channel protocol (the send side is
+    /// covered in `keymap.rs`): malformed bodies are silent no-ops,
+    /// `stop|id` and `rm|id` mutate the shared registry off-thread.
+    #[tokio::test]
+    async fn tasks_command_mutates_registry_and_ignores_junk() {
+        let mut app = App::new();
+        app.task_runtime
+            .lock()
+            .await
+            .start("sleeper", "sleep 30")
+            .await
+            .unwrap();
+        for junk in ["", "stop", "stop|x", "bogus|1"] {
+            app.handle_tasks_command(junk);
+        }
+        tokio::task::yield_now().await;
+        {
+            let m = app.task_runtime.lock().await;
+            assert_eq!(m.list().len(), 1, "junk bodies must not touch the registry");
+            assert_eq!(m.list()[0].status, TaskStatus::Running);
+        }
+        app.handle_tasks_command("stop|1");
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            if !matches!(
+                app.task_runtime.lock().await.list()[0].status,
+                TaskStatus::Running
+            ) {
+                break;
+            }
+        }
+        assert_eq!(
+            app.task_runtime.lock().await.list()[0].status,
+            TaskStatus::Killed
+        );
+        app.handle_tasks_command("rm|1");
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            if app.task_runtime.lock().await.list().is_empty() {
+                break;
+            }
+        }
+        assert!(app.task_runtime.lock().await.list().is_empty());
     }
 }

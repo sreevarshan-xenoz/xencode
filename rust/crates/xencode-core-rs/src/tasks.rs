@@ -458,6 +458,19 @@ mod tests {
         m.stop(id).await.unwrap();
     }
 
+    /// The full natural lifecycle: start → exit(0) → remove. The stop-path
+    /// tests only remove killed tasks.
+    #[tokio::test]
+    async fn naturally_finished_task_can_be_removed() {
+        let mut m = TaskManager::new();
+        let id = m.start("bye", "echo bye").await.unwrap();
+        let rec = await_exit(&mut m, id).await;
+        assert_eq!(rec.status, TaskStatus::Exited(0));
+        m.remove(id).unwrap();
+        assert!(m.list().is_empty());
+        assert!(matches!(m.remove(id), Err(TaskError::NotFound(_))));
+    }
+
     #[tokio::test]
     async fn unknown_ids_report_not_found() {
         let mut m = TaskManager::new();

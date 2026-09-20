@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 482 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 484 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -90,8 +90,19 @@
   read from exit file + killed flag + `/proc` liveness (zombies count as dead). `stop`
   signals `kill` and marks the record; `rm` refuses running tasks. Root is the current
   directory's `.xencode/tasks` (same layout as `xencode init`).
-- [ ] D2-03 Tests: registry lifecycle (start→exit→rm, stop of dead task, output cap)
-  + headless frame renders for the panel.
+- [x] D2-03 Tests: registry lifecycle (start→exit→rm, stop of dead task, output cap)
+  + headless frame renders for the panel. Most of this landed with D1/D2 and was
+  verified rather than duplicated: output cap (store eviction unit test + bounded
+  `poll` tail), stop-of-dead / double-stop (`AlreadyFinished`, both registries),
+  file-registry full lifecycle incl. persisted ids, atomic saves and torn-read
+  safety (7 `tasks_file` tests), headless renders (populated `Ctrl+K` panel across
+  sizes and detail modes, `x`/`d` key dispatch). Added here: the natural
+  start→exit(0)→remove lifecycle on `TaskManager` (killed-path removal was covered,
+  clean-exit removal was not) and the receive side of the `[TASKS]` protocol
+  (`handle_tasks_command` junk-body no-ops + real stop→rm against the registry).
+  The `xencode tasks` CLI itself is covered by manual end-to-end runs (list/start/
+  poll/stop/rm + error exits), not unit tests — `run_tasks` is thin glue over the
+  registry against the real cwd.
 
 ### D3 — Worktree support
 
