@@ -54,6 +54,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::ReviewDashboard => draw_review_dashboard(f, app, f.area()),
         FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
         FocusArea::WorktreePanel => draw_worktree_panel(f, app, f.area()),
+        FocusArea::AdvisePanel => draw_advise_panel(f, app, f.area()),
         _ => {}
     }
 
@@ -226,6 +227,13 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                 crate::focus::WorktreePrompt::ConfirmRemove =>
                     "y:confirm  n/Esc:cancel",
             },
+            FocusArea::AdvisePanel => {
+                if app.advise_detail {
+                    "↑↓:scroll  Enter:back to list  Esc:close"
+                } else {
+                    "↑↓:select  Enter:detail  o:open file  r:recompute  Esc:close"
+                }
+            }
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
@@ -1362,6 +1370,97 @@ fn draw_worktree_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(text, inner);
 }
 
+/// AdvisePanel (F2-01): the stateful `List` gives the (potentially long)
+/// findings list a viewport that follows the selection for free; only the
+/// wrapped detail body needs manual scrolling.
+fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(85, 70, area);
+    f.render_widget(Clear, popup_area);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(" 💡 Insights — {} finding(s) ", app.advise_items.len()));
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    if app.advise_detail {
+        let body = advise_detail_text(app);
+        let rows = body.lines().count();
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                (app.advise_scroll as u16).min(clamp_scroll(rows, inner.height)),
+                0,
+            ));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    if app.advise_items.is_empty() {
+        let why = if app.advise_status.is_empty() {
+            "Nothing to flag — the symbol graph is clean."
+        } else {
+            app.advise_status.as_str()
+        };
+        let text = Paragraph::new(why).style(Style::default().fg(app.theme.fg));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .advise_items
+        .iter()
+        .map(|a| {
+            let (icon, color) = advise_kind_style(a.kind, app);
+            ListItem::new(Line::from(Span::styled(
+                format!("{icon} {}", a.message),
+                Style::default().fg(color),
+            )))
+        })
+        .collect();
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.highlight)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(Some(
+        app.advise_selected.min(app.advise_items.len() - 1),
+    ));
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
+fn advise_kind_style(kind: xencode_context_rs::AdviceKind, app: &App) -> (&'static str, ratatui::style::Color) {
+    use xencode_context_rs::AdviceKind;
+    match kind {
+        AdviceKind::BrokenImport => ("⚠", app.theme.danger),
+        AdviceKind::Cycle => ("🔁", app.theme.warning),
+        AdviceKind::Hub => ("🧶", app.theme.info),
+        AdviceKind::Orphan => ("🕸", app.theme.border),
+        AdviceKind::AffectedDependent => ("↳", app.theme.success),
+    }
+}
+
+fn advise_detail_text(app: &App) -> String {
+    let Some(a) = app.advise_items.get(app.advise_selected) else {
+        return "Nothing selected — Esc back to the list.".to_string();
+    };
+    let (icon, _) = advise_kind_style(a.kind, app);
+    format!(
+        "{icon} {}\nkind: {:?}\nfile: {}\n\nPress o to open the file in the editor, Enter/Esc back to the list.",
+        a.message, a.kind, a.file
+    )
+}
+
 // ── Phase 9 Overlays ────────────────────────────────────────────────────────
 
 fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
@@ -1893,6 +1992,17 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         app.tasks_scroll = app
             .tasks_scroll
             .min(clamp_scroll(body.lines().count(), task_panel_inner_height(height)) as usize);
+    }
+
+    // Insights detail pane (the findings list viewport follows the
+    // selection on its own via the stateful List).
+    if app.advise_detail {
+        let inner = centered_rect(85, 70, area).inner(ratatui::layout::Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let rows = advise_detail_text(app).lines().count();
+        app.advise_scroll = app.advise_scroll.min(clamp_scroll(rows, inner.height) as usize);
     }
 }
 

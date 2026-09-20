@@ -35,6 +35,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("ReviewDashboard", FocusArea::ReviewDashboard),
     ("TaskManager", FocusArea::TaskManager),
     ("WorktreePanel", FocusArea::WorktreePanel),
+    ("AdvisePanel", FocusArea::AdvisePanel),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
@@ -241,6 +242,61 @@ fn worktree_panel_renders_all_prompt_stages() {
                     terminal
                         .draw(|f| draw(f, &app))
                         .unwrap_or_else(|_| panic!("render {width}x{height} {prompt:?} has_rows={has_rows}"));
+                }
+            }
+        }
+    }
+}
+
+/// AdvisePanel across list/detail × populated/empty, with every advice kind
+/// and an oversized detail scroll (clamp path). Fixtures only — the panel
+/// never touches `.xencode` at draw time.
+#[test]
+fn advise_panel_renders_list_detail_and_empty() {
+    use xencode_context_rs::{Advice, AdviceKind};
+    let items = vec![
+        Advice {
+            file: "src/a.rs".into(),
+            kind: AdviceKind::BrokenImport,
+            message: "⚠ src/a.rs imports `crate::gone::Thing`, which resolves to nothing in this workspace — did a module move or get renamed?".into(),
+        },
+        Advice {
+            file: "src/b.rs".into(),
+            kind: AdviceKind::Cycle,
+            message: "🔁 import cycle: src/b.rs → src/c.rs → src/b.rs".into(),
+        },
+        Advice {
+            file: "src/big.rs".into(),
+            kind: AdviceKind::Hub,
+            message: "🧶 src/big.rs depends on 12 files".into(),
+        },
+        Advice {
+            file: "src/dead.rs".into(),
+            kind: AdviceKind::Orphan,
+            message: "🕸 src/dead.rs has no workspace imports in either direction".into(),
+        },
+        Advice {
+            file: "src/d.rs".into(),
+            kind: AdviceKind::AffectedDependent,
+            message: "↳ you changed src/d.rs — src/e.rs depends on it".into(),
+        },
+    ];
+    for with_items in [true, false] {
+        for detail in [true, false] {
+            let mut app = populated(FocusArea::AdvisePanel);
+            if with_items {
+                app.advise_items = items.clone();
+                app.advise_selected = items.len() - 1;
+            }
+            app.advise_detail = detail;
+            app.advise_scroll = 999;
+            app.advise_status = "No project index — run /init first.".into();
+            for &width in &[20, 61, 80] {
+                for &height in &[8, 16, 24] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &app)).unwrap_or_else(|_| {
+                        panic!("render {width}x{height} detail={detail} items={with_items}")
+                    });
                 }
             }
         }

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Insights panel (`Ctrl+L` or Feature Navigator #17, F2-01): deterministic refactor findings from the live symbol graph — broken imports, cycles, hubs, orphans — as a color-coded selectable list; Enter shows the full message, `o` opens the advised file in the editor, `r` recomputes; `/advise` now renders through the same snapshot path, so chat and panel always agree
 - The TUI file watcher now keeps the symbol/dep snapshot live (F1-02): modified/removed `.rs` files trigger `refresh_rust_file` before dependent-file warnings are computed, so toasts and `/advise` reflect current imports without another `/init`
 - Live symbol-graph refresh (`xencode-context-rs::refresh`, F1-01): `refresh_rust_file` re-extracts one already-indexed `.rs` file from disk (or drops it when deleted), rebuilds `deps.json` and keeps `files.json`/`manifest.json` (sizes, loc, mtimes) consistent — a refreshed snapshot makes the next `/init` report fresh; the watcher now also excludes `.xencode` so snapshot rewrites never loop back into themselves
 - `xencode worktree list | add <path> [<branch>] | remove <path>` (D3-04) over the D3-01 helpers; omitted branch lets git name the new branch after the directory, dirty removals stay refused by git and the main checkout is never removable

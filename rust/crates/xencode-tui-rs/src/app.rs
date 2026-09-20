@@ -164,6 +164,13 @@ pub struct App<'a> {
     pub worktree_path_buf: String,
     pub worktree_branch_buf: String,
     pub worktree_status: String,
+    /// AdvisePanel (F2-01): insights computed from the live `.xencode`
+    /// snapshot on open/`r`; the detail view scrolls with `advise_scroll`.
+    pub advise_items: Vec<xencode_context_rs::Advice>,
+    pub advise_selected: usize,
+    pub advise_detail: bool,
+    pub advise_scroll: usize,
+    pub advise_status: String,
     pub commit_message: String,
     pub commit_cursor: usize,
     pub spinner_tick: usize,
@@ -670,6 +677,11 @@ impl<'a> App<'a> {
             worktree_path_buf: String::new(),
             worktree_branch_buf: String::new(),
             worktree_status: String::new(),
+            advise_items: Vec::new(),
+            advise_selected: 0,
+            advise_detail: false,
+            advise_scroll: 0,
+            advise_status: String::new(),
             commit_message: String::new(),
             commit_cursor: 0,
             spinner_tick: 0,
@@ -1391,6 +1403,42 @@ impl<'a> App<'a> {
                 let _ = m.remove(id);
             }
         });
+    }
+
+    /// Recompute repository insights from the `.xencode` snapshot (F2-01).
+    /// Shared by the AdvisePanel and `/advise` so both always agree. An
+    /// un-indexed workspace clears the list and leaves the reason in
+    /// `advise_status`.
+    pub fn refresh_advise(&mut self) {
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
+            xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
+                .unwrap_or_default();
+        if symbols.is_empty() {
+            self.advise_items.clear();
+            self.advise_status = "No project index — run /init first.".to_string();
+            return;
+        }
+        let graph: Vec<xencode_context_rs::DepEdge> =
+            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
+                .unwrap_or_default();
+        let index: Option<xencode_context_rs::FilesIndex> =
+            xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
+        let rust_files: Vec<String> = index
+            .map(|i| {
+                i.files
+                    .into_iter()
+                    .filter(|f| f.language == "rust")
+                    .map(|f| f.path)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.advise_items = xencode_context_rs::advise(&rust_files, &symbols, &graph);
+        self.advise_status.clear();
+        self.advise_selected = self
+            .advise_selected
+            .min(self.advise_items.len().saturating_sub(1));
     }
 
     /// Re-read `git worktree list` for the current directory and mark each
@@ -2148,9 +2196,10 @@ impl<'a> App<'a> {
     }
 
     /// Repository insights (`/advise [filter]`) — deterministic refactor
-    /// suggestions + bug warnings from the last `/init` snapshot, streamed
-    /// back through `[ADVISE]` chat lines. An optional substring narrows the
-    /// report to matching files (e.g. `/advise router`).
+    /// suggestions + bug warnings from the live `.xencode` snapshot
+    /// ([`Self::refresh_advise`]), streamed back through `[ADVISE]` chat
+    /// lines. An optional substring narrows the report to matching files
+    /// (e.g. `/advise router`).
     fn handle_advise_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
         let filter = prompt.strip_prefix("/advise").unwrap_or("").trim();
         let filter = if filter.is_empty() {
@@ -2158,33 +2207,13 @@ impl<'a> App<'a> {
         } else {
             Some(filter)
         };
-        let root = xencode_context_rs::default_root();
-        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-        let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
-            xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
-                .unwrap_or_default();
-        if symbols.is_empty() {
-            let _ = tx.send("[ADVISE_START]".to_string());
-            let _ = tx.send("[ADVISE]❌ No project index — run /init first.".to_string());
+        self.refresh_advise();
+        let _ = tx.send("[ADVISE_START]".to_string());
+        if !self.advise_status.is_empty() {
+            let _ = tx.send(format!("[ADVISE]❌ {}", self.advise_status));
             return;
         }
-        let graph: Vec<xencode_context_rs::DepEdge> =
-            xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
-                .unwrap_or_default();
-        let index: Option<xencode_context_rs::FilesIndex> =
-            xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
-        let rust_files: Vec<String> = index
-            .map(|i| {
-                i.files
-                    .into_iter()
-                    .filter(|f| f.language == "rust")
-                    .map(|f| f.path)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let all = xencode_context_rs::advise(&rust_files, &symbols, &graph);
-        let _ = tx.send("[ADVISE_START]".to_string());
-        for line in format_advise_report(&all, filter) {
+        for line in format_advise_report(&self.advise_items, filter) {
             let _ = tx.send(format!("[ADVISE]{line}"));
         }
     }

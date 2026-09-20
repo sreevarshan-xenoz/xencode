@@ -132,6 +132,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::ReviewDashboard
                 | FocusArea::TaskManager
                 | FocusArea::WorktreePanel
+                | FocusArea::AdvisePanel
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
@@ -177,6 +178,22 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.worktree_status.clear();
                 app.refresh_worktrees();
                 app.focus = FocusArea::WorktreePanel;
+            }
+        }
+        KeyCode::Char('l') => {
+            // Insights panel (F2-01): re-runs the deterministic analyses on
+            // every open — they're pure and the snapshot is kept live.
+            // (Ctrl+S stays with editor-save/GitCommit; Ctrl+I is Tab's
+            // alias, so the panel lives on L.)
+            if app.focus == FocusArea::AdvisePanel {
+                app.focus = FocusArea::ChatInput;
+            } else {
+                app.advise_selected = 0;
+                app.advise_detail = false;
+                app.advise_scroll = 0;
+                app.advise_status.clear();
+                app.refresh_advise();
+                app.focus = FocusArea::AdvisePanel;
             }
         }
         KeyCode::Char('t') => {
@@ -254,6 +271,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::ReviewDashboard => key_review_dashboard(app, key),
         FocusArea::TaskManager => key_task_manager(app, key, tx),
         FocusArea::WorktreePanel => key_worktree_panel(app, key),
+        FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key),
         FocusArea::CustomModels => key_custom_models(app, key),
@@ -321,6 +339,15 @@ fn on_esc(app: &mut App) {
             match app.worktree_prompt {
                 crate::focus::WorktreePrompt::None => app.focus = FocusArea::ChatInput,
                 _ => cancel_worktree_prompt(app),
+            }
+        }
+        FocusArea::AdvisePanel => {
+            // Esc unwinds detail → list → chat.
+            if app.advise_detail {
+                app.advise_detail = false;
+                app.advise_scroll = 0;
+            } else {
+                app.focus = FocusArea::ChatInput;
             }
         }
         FocusArea::ModelSelector
@@ -926,6 +953,48 @@ fn key_worktree_prompt(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// AdvisePanel (F2-01): a read-only insights list. Enter toggles the detail
+/// view (where j/k scroll the message), `o` opens the advised file in the
+/// editor, `r` recomputes from the live snapshot.
+fn key_advise_panel(app: &mut App, key: KeyEvent) -> bool {
+    let count = app.advise_items.len();
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if app.advise_detail => {
+            app.advise_scroll = app.advise_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.advise_detail => {
+            app.advise_scroll += 1;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.advise_selected = app.advise_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.advise_selected + 1 < count {
+                app.advise_selected += 1;
+            }
+        }
+        KeyCode::Enter => {
+            app.advise_detail = !app.advise_detail;
+            app.advise_scroll = 0;
+        }
+        KeyCode::Char('r') => {
+            app.advise_selected = 0;
+            app.advise_detail = false;
+            app.advise_scroll = 0;
+            app.advise_status.clear();
+            app.refresh_advise();
+        }
+        KeyCode::Char('o') if !app.advise_detail => {
+            if let Some(path) = app.advise_items.get(app.advise_selected).map(|a| a.file.clone())
+            {
+                app.open_file_in_editor(&path);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
@@ -1433,5 +1502,51 @@ mod tests {
         press(&mut app, KeyCode::Char('d'));
         press(&mut app, KeyCode::Char('n'));
         assert_eq!(app.worktree_prompt, crate::focus::WorktreePrompt::None);
+    }
+
+    #[test]
+    fn ctrl_l_toggles_advise_panel() {
+        let mut app = app_with(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('l'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::AdvisePanel);
+        assert!(!app.advise_detail);
+        press_with_mods(&mut app, KeyCode::Char('l'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
+    fn advise_panel_detail_navigation_open_and_esc_unwind() {
+        use xencode_context_rs::AdviceKind;
+        let item = |kind, file: &str| xencode_context_rs::Advice {
+            file: file.to_string(),
+            kind,
+            message: format!("message for {file}"),
+        };
+        let mut app = app_with(FocusArea::AdvisePanel);
+        app.advise_items = vec![
+            item(AdviceKind::BrokenImport, "src/app.rs"),
+            item(AdviceKind::Cycle, "src/b.rs"),
+        ];
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.advise_selected, 1);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.advise_selected, 1, "clamped at the end");
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.advise_selected, 0);
+        // Detail mode: j/k scroll, 'o' is inert, Esc returns to the list.
+        press(&mut app, KeyCode::Enter);
+        assert!(app.advise_detail);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.advise_scroll, 1);
+        press(&mut app, KeyCode::Char('o'));
+        assert_eq!(app.opened_file, None);
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.advise_detail);
+        assert_eq!(app.focus, FocusArea::AdvisePanel);
+        // List mode: 'o' opens the advised file, Esc closes the panel.
+        press(&mut app, KeyCode::Char('o'));
+        assert_eq!(app.opened_file.as_deref(), Some("src/app.rs"));
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
     }
 }
