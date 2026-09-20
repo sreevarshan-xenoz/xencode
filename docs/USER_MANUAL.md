@@ -293,12 +293,35 @@ puts the files back: `/rewind` undoes the last turn that changed anything,
 changed return byte-for-byte, and turns that wrote nothing are skipped
 instead of counted. The snapshots live in memory only — quitting discards
 them, and git is never touched, so your own commits remain the durable
-history. `/rewind` refuses to run while the agent is still generating, and
+history. `/rewind` refuses to run while the agent is still generating — a chat
+turn or a ByteBot run — and
 if the rewound file is open in the editor with unsaved edits, it warns rather
 than throwing your work away. It covers the `write_file` / `edit_file` tools
 only — a `run_command` or `background_start` that touched files behind our
 back is not undone, which is why every snapshot refusal is stated in the
 transcript instead of quietly claimed.
+
+### ByteBot (delegated runs)
+
+`/bytebot <task>` in the chat, or `Ctrl+B` and type it in the panel, hands the
+task to the *same* tool loop the chat uses with the task as its only user turn:
+the project's guidelines, git state and retrieved context, no chat history. It
+is not a separate engine and it is not a demo —
+
+- the **Execution Steps** list is the call log: one row per tool call the model
+  actually made, `⏳` while it runs, then `✅ done`, `✗ denied` (you said no at
+  the prompt), `✗ refused` (the policy blocked it) or `❌ failed`. A step never
+  appears before the call exists.
+- the progress bar is finished calls over calls made, so it can move
+  backwards when the model starts another one; it is not a promise of work
+  remaining.
+- the approval gate is exactly your `agent_approval` setting: in `ask` mode a
+  delegated run prompts at every edit and every command, which is the point —
+  autonomy is a setting, not a hidden override.
+- its writes are checkpointed like any other turn, so one `/rewind` puts the
+  whole run's file changes back, and a plan it posts shows in the same strip.
+- if the provider fails, the panel prints the error it got and the open step
+  goes `failed`. Nothing is reported as done that xencode did not observe.
 
 ### First-Time Setup
 

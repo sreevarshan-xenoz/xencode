@@ -546,6 +546,42 @@ pub const DENIED_RESULT: &str = "error: the user denied this action. Do not retr
 pub const FORBIDDEN_RESULT: &str =
     "error: refused by the permission policy (path outside the allowed workspace).";
 
+/// How a call ended, for the surfaces that show progress (I2-04). The result
+/// string is the only record the loop keeps, so this reads it back rather
+/// than re-deriving the policy: an `error:` from an executor is a failure, the
+/// two constants above are refusals.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CallOutcome {
+    Finished,
+    Denied,
+    Refused,
+    Failed,
+}
+
+impl CallOutcome {
+    /// The word a step row shows.
+    pub fn label(self) -> &'static str {
+        match self {
+            CallOutcome::Finished => "done",
+            CallOutcome::Denied => "denied",
+            CallOutcome::Refused => "refused",
+            CallOutcome::Failed => "failed",
+        }
+    }
+}
+
+pub fn call_outcome(result: &str) -> CallOutcome {
+    if result == DENIED_RESULT {
+        CallOutcome::Denied
+    } else if result == FORBIDDEN_RESULT {
+        CallOutcome::Refused
+    } else if result.starts_with("error:") {
+        CallOutcome::Failed
+    } else {
+        CallOutcome::Finished
+    }
+}
+
 /// One-line label for the approval overlay: tool + its focus argument.
 pub fn approval_summary(call: &ToolCall) -> String {
     let args = call.arguments_object();
@@ -2839,5 +2875,19 @@ mod tests {
             "error: update_plan is only available in the chat loop"
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// I2-04: the panel's step rows say how a call ended, and "the user said
+    /// no", "the policy said no" and "it ran and broke" are three different
+    /// answers even though all three start with `error:`.
+    #[test]
+    fn call_outcomes_separate_a_refusal_from_a_failure() {
+        assert_eq!(call_outcome("edited src/lib.rs"), CallOutcome::Finished);
+        assert_eq!(call_outcome(DENIED_RESULT), CallOutcome::Denied);
+        assert_eq!(call_outcome(FORBIDDEN_RESULT), CallOutcome::Refused);
+        assert_eq!(call_outcome("error: file not found"), CallOutcome::Failed);
+        assert_eq!(CallOutcome::Denied.label(), "denied");
+        assert_eq!(CallOutcome::Refused.label(), "refused");
+        assert_eq!(CallOutcome::Failed.label(), "failed");
     }
 }

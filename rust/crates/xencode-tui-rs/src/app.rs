@@ -123,6 +123,64 @@ pub fn complete_slash_token(token: &str) -> Option<String> {
     (lcp.len() > token.len()).then_some(lcp)
 }
 
+/// Who is watching a tool-loop run (I2-04). The chat turn and ByteBot execute
+/// the same rounds through the same permission gate — only where the events
+/// go differs, so neither can drift from the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoopSink {
+    /// Stream deltas and `⚙` transcript lines, as the chat loop always has.
+    Chat,
+    /// Report to the ByteBot panel: calls become step rows, the model's text
+    /// for a round becomes one log line.
+    ByteBot,
+}
+
+/// ByteBot panel events. `call:<summary>` opens a step row, `done:<outcome>`
+/// retires the row still running, `log:<text>` appends a log line, `err:<text>`
+/// reports a real failure. Progress is derived from the step rows on the app
+/// side — nothing here invents it.
+const BYTEBOT_PREFIX: &str = "[BYTEBOT]";
+
+/// How a delegated run is framed for the model. Deliberately short: the tools
+/// themselves are taught by `TOOL_HINT`, which rides on the system turn.
+const BYTEBOT_BRIEF: &str = "Delegated task — work it end to end with the tools, \
+                             reading before you edit and testing what you change. \
+                             Post your steps with update_plan as you go. Stop when it \
+                             is done or when you are blocked, and say which; never \
+                             report an outcome you did not observe.\n\nTask: ";
+
+/// What the ByteBot progress bar means: the share of calls made so far that
+/// came back. It can move backwards when the model makes another call — which
+/// is honest, unlike a bar that hits 100% because a script promised six steps.
+fn bytebot_progress(steps: &[(String, String)]) -> f64 {
+    if steps.is_empty() {
+        return 0.0;
+    }
+    let done = steps.iter().filter(|(_, s)| s != "running").count();
+    done as f64 / steps.len() as f64
+}
+
+/// Everything the shared tool loop needs beyond the conversation itself.
+/// Owned, because the loop runs on its own task.
+struct AgentRun {
+    sink: LoopSink,
+    model: String,
+    context_messages: Vec<ChatMessage>,
+    approval: crate::agent_tools::ApprovalCtx,
+    task_runtime: crate::agent_tools::TaskRuntime,
+    tool_root: std::path::PathBuf,
+    /// Offered until the final round, which is tool-less so a run always ends
+    /// with a text answer.
+    max_rounds: usize,
+    ollama_url: String,
+    llama_cpp_url: String,
+    timeout: u64,
+    openrouter_key: Option<String>,
+    qwen_key: Option<String>,
+    gemini_key: Option<String>,
+    llama_opts: LlamaCppOptions,
+}
+
 pub struct App<'a> {
     pub focus: FocusArea,
     /// Chat input box (multiline-capable; Enter submits, Alt+Enter/Ctrl+J
@@ -1174,34 +1232,20 @@ impl<'a> App<'a> {
             return;
         }
 
-        self.is_generating = true;
-
-        // ByteBot interception
+        // ByteBot: the same gated tool loop, reported to its own panel (I2-04)
         if prompt.starts_with("/bytebot") {
-            let command = prompt
+            let task = prompt
                 .strip_prefix("/bytebot")
                 .unwrap_or("")
                 .trim()
                 .to_string();
-            tokio::spawn(async move {
-                let _ = tx.send(format!("⚡ ByteBot: Initializing for '{}'\n", command));
-                tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
-                for step in [
-                    "Analyzing workspace...",
-                    "Formulating plan...",
-                    "Scanning deps...",
-                    "Running tests...",
-                    "Applying changes...",
-                    "Verifying...",
-                ] {
-                    let _ = tx.send(format!("  → {}\n", step));
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
-                }
-                let _ = tx.send("✅ ByteBot execution complete.\n".to_string());
-                let _ = tx.send("[DONE]".to_string());
-            });
+            if let Some(run) = self.arm_bytebot(&task) {
+                tokio::spawn(agent_rounds(run, tx));
+            }
             return;
         }
+
+        self.is_generating = true;
 
         // Normal LLM generation — project context is injected on every turn:
         // a byte-stable system head (KV-cacheable) + budgeted history turns +
@@ -1317,133 +1361,53 @@ impl<'a> App<'a> {
             assembly.retrieved_included.min(u8::MAX as usize)
         ));
 
-        let ollama_url = self.config.ollama_url.clone();
-        let llama_cpp_url = self.config.llama_cpp_url.clone();
-        let timeout = self.config.response_timeout;
-        let or_key = self.config.api_keys.openrouter_api_key.clone();
-        let qwen_key = self.config.api_keys.qwen_api_key.clone();
-        let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
-        let llama_opts = LlamaCppOptions {
-            temperature: self.config.llama_cpp_temperature,
-            top_k: self.config.llama_cpp_top_k,
-            min_p: self.config.llama_cpp_min_p,
-            max_tokens: self.config.llama_cpp_max_tokens,
-            grammar: None,
-            json_schema: None,
-            mirostat: None,
-        };
-        let task_runtime = self.task_runtime.clone();
-        let tool_root = xencode_context_rs::default_root();
-        let approval_tx = self.approval_tx.clone();
-        let agent_grants = self.agent_grants.clone();
-        let checkpoint_store = self.checkpoints.clone();
-        let agent_plan = self.agent_plan.clone();
-        let agent_mode = self.agent_mode();
-        // One checkpoint group per user turn (I2-01): `/rewind` steps back
-        // whole turns, not individual tool calls.
-        let turn_group = self.checkpoints.begin_turn();
-        // Keep at least one tool round; 0 would offer tools on no turn at all.
-        let max_rounds = self.config.agent_max_rounds.clamp(1, 64);
-        // A 0-second budget would kill every command before it produced
-        // output, so the floor is one second.
-        let command_timeout = self.config.agent_command_timeout.max(1);
+        let run = self.agent_run(LoopSink::Chat, context_messages);
 
-        tokio::spawn(async move {
-            let client = OllamaClient::new(&ollama_url, timeout);
-            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
-            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
-                .with_llama_cpp(llama_client)
-                .with_request_timeout(timeout);
-            // Agentic turn loop (D1-02): offer the background-task tools on
-            // every step; execute requested calls through the shared registry
-            // and feed results back as AgentTurn history. The final round is
-            // tool-less so the loop always terminates with a text answer.
-            // F3-02 adds the read-only repo_advise insight tool to the offer,
-            // and I1-04 the file tools — every call now goes through the
-            // permission policy, so a write or a shell command stops at the
-            // approval overlay instead of running silently.
-            let mut tools = xencode_providers_rs::background_tools();
-            tools.extend(xencode_providers_rs::advise_tools());
-            tools.extend(xencode_providers_rs::file_tools());
-            tools.extend(xencode_providers_rs::command_tools());
-            tools.extend(xencode_providers_rs::plan_tools());
-            let approval_ctx = crate::agent_tools::ApprovalCtx {
-                mode: agent_mode,
-                grants: agent_grants,
-                prompts: approval_tx,
-                checkpoints: checkpoint_store,
-                turn: turn_group,
-                command_timeout,
-                plan: agent_plan,
-            };
-            let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
-            for round in 0..=max_rounds {
-                let offer: &[xencode_providers_rs::ToolDefinition] =
-                    if round == max_rounds { &[] } else { &tools };
-                let step = match manager
-                    .generate_stream_with_tools(
-                        &model,
-                        &context_messages,
-                        &history,
-                        offer,
-                        Some(&llama_opts),
-                        |token| {
-                            let _ = tx.send(token.to_string());
-                        },
-                    )
-                    .await
-                {
-                    Ok(step) => step,
-                    // Errors leave no partial tool state; the drain loop
-                    // finalizes the turn on [DONE] like before.
-                    Err(_) => break,
-                };
-                if step.tool_calls.is_empty() {
-                    break;
-                }
-                history.push(xencode_providers_rs::AgentTurn::Assistant {
-                    text: step.text.clone(),
-                    calls: step.tool_calls.clone(),
-                });
-                for call in &step.tool_calls {
-                    let _ = tx.send(format!(
-                        "[TOOL]→ {}",
-                        crate::agent_tools::summarize_call(call)
-                    ));
-                    let result = crate::agent_tools::execute_tool_call_approved(
-                        &task_runtime,
-                        &tool_root,
-                        call,
-                        &approval_ctx,
-                    )
-                    .await;
-                    if result == crate::agent_tools::FORBIDDEN_RESULT {
-                        // A policy refusal never reaches the overlay, so it
-                        // needs its own transcript line or it would be
-                        // invisible outside the model's context.
-                        let _ = tx.send(format!(
-                            "[TOOL]✗ {} · refused: outside the workspace",
-                            crate::agent_tools::approval_summary(call)
-                        ));
-                    }
-                    let _ = tx.send(format!(
-                        "[TOOL]← {}",
-                        crate::agent_tools::truncate_one_line(&result, 120)
-                    ));
-                    history.push(xencode_providers_rs::AgentTurn::ToolResult {
-                        id: call.id.clone(),
-                        content: result,
-                    });
-                }
-            }
-            // Report llama.cpp tok/s stats if this was a llama.cpp request
-            if let Some(ts) = manager.last_llamacpp_timings() {
-                if let Ok(json) = serde_json::to_string(&ts) {
-                    let _ = tx.send(format!("[TIMINGS]{}", json));
-                }
-            }
-            let _ = tx.send("[DONE]".to_string());
-        });
+        tokio::spawn(agent_rounds(run, tx));
+    }
+
+    /// A tool-loop run carrying this session's providers, permission state,
+    /// checkpoint group and budgets. Read at the moment a turn starts, so a
+    /// settings change lands on the next turn; chat and ByteBot build the same
+    /// run and differ only in `sink` (I2-04).
+    fn agent_run(&self, sink: LoopSink, context_messages: Vec<ChatMessage>) -> AgentRun {
+        AgentRun {
+            sink,
+            model: self.config.default_model.clone(),
+            context_messages,
+            approval: crate::agent_tools::ApprovalCtx {
+                mode: self.agent_mode(),
+                grants: self.agent_grants.clone(),
+                prompts: self.approval_tx.clone(),
+                checkpoints: self.checkpoints.clone(),
+                // One checkpoint group per user turn (I2-01): `/rewind` steps
+                // back whole turns, not individual tool calls.
+                turn: self.checkpoints.begin_turn(),
+                // A 0-second budget would kill every command before it
+                // produced output, so the floor is one second.
+                command_timeout: self.config.agent_command_timeout.max(1),
+                plan: self.agent_plan.clone(),
+            },
+            task_runtime: self.task_runtime.clone(),
+            tool_root: xencode_context_rs::default_root(),
+            // Keep at least one tool round; 0 would offer tools on no turn.
+            max_rounds: self.config.agent_max_rounds.clamp(1, 64),
+            ollama_url: self.config.ollama_url.clone(),
+            llama_cpp_url: self.config.llama_cpp_url.clone(),
+            timeout: self.config.response_timeout,
+            openrouter_key: self.config.api_keys.openrouter_api_key.clone(),
+            qwen_key: self.config.api_keys.qwen_api_key.clone(),
+            gemini_key: self.config.api_keys.google_gemini_api_key.clone(),
+            llama_opts: LlamaCppOptions {
+                temperature: self.config.llama_cpp_temperature,
+                top_k: self.config.llama_cpp_top_k,
+                min_p: self.config.llama_cpp_min_p,
+                max_tokens: self.config.llama_cpp_max_tokens,
+                grammar: None,
+                json_schema: None,
+                mirostat: None,
+            },
+        }
     }
 
     /// Send a load/unload/switch command to the llama.cpp server and report the
@@ -1824,71 +1788,118 @@ impl<'a> App<'a> {
         }
     }
 
-    /// Start a ByteBot autonomous task execution.
-    /// Sends step updates back through the channel.
+    /// Panel Enter: run what is typed in the command box.
     pub fn run_bytebot(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.bytebot_running || self.bytebot_command.trim().is_empty() {
+        let task = self.bytebot_command.trim().to_string();
+        if task.is_empty() {
             return;
         }
+        if let Some(run) = self.arm_bytebot(&task) {
+            tokio::spawn(agent_rounds(run, tx));
+        }
+    }
 
-        let command = self.bytebot_command.trim().to_string();
+    /// Start an autonomous ByteBot run (I2-04). This is the ordinary chat tool
+    /// loop — same tools, same permission gate, same checkpoints, same plan
+    /// strip — with the task as its only user turn. Every step row in the
+    /// panel is a call the model actually made and its real outcome, and a run
+    /// that fails says so instead of playing a script.
+    ///
+    /// The caller spawns: arming is state only, so a test can check what the
+    /// panel promises without firing a provider request.
+    fn arm_bytebot(&mut self, task: &str) -> Option<AgentRun> {
+        let task = task.trim();
+        if task.is_empty() {
+            self.system_line("usage: /bytebot <task>   (or Ctrl+B to open the panel)");
+            return None;
+        }
+        if self.bytebot_running {
+            self.push_toast(
+                crate::toast::ToastKind::Warning,
+                "ByteBot is already working — Ctrl+B to watch it".to_string(),
+            );
+            return None;
+        }
+        let task = task.to_string();
+        if self.bytebot_history.last().is_none_or(|last| *last != task) {
+            self.bytebot_history.push(task.clone());
+            if self.bytebot_history.len() > INPUT_HISTORY_LIMIT {
+                self.bytebot_history.remove(0);
+            }
+        }
+        self.bytebot_command = task.clone();
+        self.bytebot_cursor = task.len();
         self.bytebot_running = true;
         self.bytebot_progress = 0.0;
-        self.bytebot_steps = vec![
-            ("Analyzing workspace".to_string(), "pending".to_string()),
-            ("Scanning dependencies".to_string(), "pending".to_string()),
-            (
-                "Formulating execution plan".to_string(),
-                "pending".to_string(),
-            ),
-            ("Running tests".to_string(), "pending".to_string()),
-            ("Applying changes".to_string(), "pending".to_string()),
-            ("Verifying results".to_string(), "pending".to_string()),
-        ];
+        self.bytebot_steps.clear();
         self.bytebot_log.clear();
-        self.bytebot_log
-            .push(format!("⚡ ByteBot: Initializing for '{}'", command));
-        self.bytebot_command.clear();
-        self.bytebot_cursor = 0;
+        self.bytebot_log.push(format!("⚡ task: {task}"));
+        self.focus = FocusArea::ByteBotPanel;
 
-        tokio::spawn(async move {
-            let steps = [
-                ("Analyzing workspace", "📁 Found 342 files in workspace"),
-                (
-                    "Scanning dependencies",
-                    "🔍 Identified 12 outdated packages",
-                ),
-                (
-                    "Formulating execution plan",
-                    "📋 Plan: update 5 deps, fix 3 deprecations",
-                ),
-                ("Running tests", "🧪 Running test suite (142 tests)"),
-                ("Applying changes", "🔧 Applying 8 changes across 6 files"),
-                ("Verifying results", "✅ All tests pass, changes verified"),
-            ];
+        let context_messages = self.bytebot_context(&task);
+        Some(self.agent_run(LoopSink::ByteBot, context_messages))
+    }
 
-            for (i, (step_name, detail)) in steps.iter().enumerate() {
-                // Mark current step as running
-                let _ = tx.send(format!("[BYTEBOT]step:{}:running:{}", i, step_name));
-                tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-
-                // Send progress update
-                let progress = (i as f64 + 1.0) / steps.len() as f64;
-                let _ = tx.send(format!("[BYTEBOT]progress:{:.2}", progress));
-
-                // Send log line
-                let _ = tx.send(format!(
-                    "[BYTEBOT]log:{}  → {} — {}",
-                    "▸", step_name, detail
-                ));
-
-                // Mark step as done
-                let _ = tx.send(format!("[BYTEBOT]step:{}:done:{}", i, step_name));
-            }
-
-            let _ = tx.send("[BYTEBOT]log:✅ ByteBot execution complete.".to_string());
-            let _ = tx.send("[BYTEBOT_DONE]".to_string());
+    /// ByteBot's conversation: the task framed as an autonomous brief, on the
+    /// same live project context a chat turn gets (guidelines, git, retrieval)
+    /// and with the tool vocabulary appended. No chat history — a delegated
+    /// run starts from the repository, not from whatever was said before.
+    fn bytebot_context(&self, task: &str) -> Vec<ChatMessage> {
+        let root = xencode_context_rs::default_root();
+        let live = xencode_context_rs::collect_live_context(&root, task, CTX_PROFILE);
+        let model = self.config.default_model.clone();
+        let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+        let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
+            profile: CTX_PROFILE,
+            context_window,
+            system: CTX_SYSTEM,
+            agents_md: live.agents_md.as_deref(),
+            anchor_md: live.anchor_md.as_deref(),
+            state_md: live.state_md.as_deref(),
+            git_summary: &live.git_summary,
+            retrieved: live.blocks,
+            attached_block: "",
+            history: &[],
+            prompt: &format!("{BYTEBOT_BRIEF}{task}"),
         });
+        let mut messages: Vec<ChatMessage> = assembly
+            .turns
+            .into_iter()
+            .map(|t| ChatMessage {
+                role: t.role,
+                content: t.content.into(),
+            })
+            .collect();
+        if let Some(system) = messages.first_mut().filter(|m| m.role == "system") {
+            if let xencode_providers_rs::MessageContent::Text(text) = &mut system.content {
+                text.push_str(crate::agent_tools::TOOL_HINT);
+            }
+        }
+        messages
+    }
+
+    /// Apply one ByteBot loop event. Pure state, so the panel's honesty —
+    /// steps are calls, progress is the share of them that finished — is
+    /// testable without a model.
+    pub fn bytebot_event(&mut self, body: &str) {
+        if let Some(summary) = body.strip_prefix("call:") {
+            self.bytebot_steps
+                .push((summary.to_string(), "running".to_string()));
+        } else if let Some(outcome) = body.strip_prefix("done:") {
+            if let Some(last) = self.bytebot_steps.last_mut() {
+                last.1 = outcome.to_string();
+            }
+        } else if let Some(text) = body.strip_prefix("err:") {
+            self.bytebot_log.push(format!("❌ {text}"));
+            if let Some(last) = self.bytebot_steps.last_mut() {
+                if last.1 == "running" {
+                    last.1 = "failed".to_string();
+                }
+            }
+        } else if let Some(text) = body.strip_prefix("log:") {
+            self.bytebot_log.push(text.to_string());
+        }
+        self.bytebot_progress = bytebot_progress(&self.bytebot_steps);
     }
 
     /// Handle `/init`, `/init abort` and `/init status` chat commands.
@@ -2404,7 +2415,9 @@ impl<'a> App<'a> {
     /// snapshots are session-only bytes in memory, so this can never undo an
     /// earlier xencode run, and git is left entirely alone.
     fn handle_rewind_command(&mut self, prompt: &str) {
-        if self.is_generating {
+        // ByteBot writes through the same gate, so rewinding under it would
+        // fight a run that is still going.
+        if self.is_generating || self.bytebot_running {
             self.push_toast(
                 crate::toast::ToastKind::Warning,
                 "can't rewind while the agent is working — Esc to stop it first".to_string(),
@@ -3502,6 +3515,152 @@ impl<'a> App<'a> {
     }
 }
 
+/// The agentic turn loop (D1-02), shared by the chat and ByteBot (I2-04):
+/// offer the tools on every round but the last, execute requested calls
+/// through the permission gate, feed the results back as `AgentTurn` history.
+/// The final round is tool-less so a run always ends with a text answer, and
+/// every call is gated — a write or a shell command stops at the approval
+/// overlay rather than running silently.
+async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
+    let AgentRun {
+        sink,
+        model,
+        context_messages,
+        approval,
+        task_runtime,
+        tool_root,
+        max_rounds,
+        ollama_url,
+        llama_cpp_url,
+        timeout,
+        openrouter_key,
+        qwen_key,
+        gemini_key,
+        llama_opts,
+    } = run;
+
+    let client = OllamaClient::new(&ollama_url, timeout);
+    let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
+    let manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
+        .with_llama_cpp(llama_client)
+        .with_request_timeout(timeout);
+    let mut tools = xencode_providers_rs::background_tools();
+    tools.extend(xencode_providers_rs::advise_tools());
+    tools.extend(xencode_providers_rs::file_tools());
+    tools.extend(xencode_providers_rs::command_tools());
+    tools.extend(xencode_providers_rs::plan_tools());
+
+    let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
+    for round in 0..=max_rounds {
+        let offer: &[xencode_providers_rs::ToolDefinition] =
+            if round == max_rounds { &[] } else { &tools };
+        // Chat streams deltas straight to the transcript; ByteBot wants one
+        // row per assistant turn, so its text is collected instead.
+        let mut spoken = String::new();
+        let step = match manager
+            .generate_stream_with_tools(
+                &model,
+                &context_messages,
+                &history,
+                offer,
+                Some(&llama_opts),
+                |token| {
+                    if sink == LoopSink::Chat {
+                        let _ = tx.send(token.to_string());
+                    } else {
+                        spoken.push_str(token);
+                    }
+                },
+            )
+            .await
+        {
+            Ok(step) => step,
+            // Errors leave no partial tool state. The chat finalizes the turn
+            // on [DONE] like before; ByteBot has no transcript to bury it in,
+            // so the panel says what failed.
+            Err(e) => {
+                if sink == LoopSink::ByteBot {
+                    let _ = tx.send(format!("{BYTEBOT_PREFIX}err:{e}"));
+                }
+                break;
+            }
+        };
+        if sink == LoopSink::ByteBot {
+            let text = if step.text.is_empty() {
+                std::mem::take(&mut spoken)
+            } else {
+                step.text.clone()
+            };
+            if !text.trim().is_empty() {
+                let _ = tx.send(format!(
+                    "{BYTEBOT_PREFIX}log:{}",
+                    crate::agent_tools::truncate_one_line(&text, 200)
+                ));
+            }
+        }
+        if step.tool_calls.is_empty() {
+            break;
+        }
+        history.push(xencode_providers_rs::AgentTurn::Assistant {
+            text: step.text.clone(),
+            calls: step.tool_calls.clone(),
+        });
+        for call in &step.tool_calls {
+            let summary = crate::agent_tools::summarize_call(call);
+            match sink {
+                LoopSink::Chat => {
+                    let _ = tx.send(format!("[TOOL]→ {summary}"));
+                }
+                LoopSink::ByteBot => {
+                    let _ = tx.send(format!("{BYTEBOT_PREFIX}call:{summary}"));
+                }
+            }
+            let result = crate::agent_tools::execute_tool_call_approved(
+                &task_runtime,
+                &tool_root,
+                call,
+                &approval,
+            )
+            .await;
+            let outcome = crate::agent_tools::call_outcome(&result);
+            if sink == LoopSink::Chat && outcome == crate::agent_tools::CallOutcome::Refused {
+                // A policy refusal never reaches the overlay, so it needs its
+                // own transcript line or it would be invisible outside the
+                // model's context.
+                let _ = tx.send(format!(
+                    "[TOOL]✗ {} · refused: outside the workspace",
+                    crate::agent_tools::approval_summary(call)
+                ));
+            }
+            match sink {
+                LoopSink::Chat => {
+                    let _ = tx.send(format!(
+                        "[TOOL]← {}",
+                        crate::agent_tools::truncate_one_line(&result, 120)
+                    ));
+                }
+                LoopSink::ByteBot => {
+                    let _ = tx.send(format!("{BYTEBOT_PREFIX}done:{}", outcome.label()));
+                }
+            }
+            history.push(xencode_providers_rs::AgentTurn::ToolResult {
+                id: call.id.clone(),
+                content: result,
+            });
+        }
+    }
+    // Report llama.cpp tok/s stats if this was a llama.cpp request
+    if let Some(ts) = manager.last_llamacpp_timings() {
+        if let Ok(json) = serde_json::to_string(&ts) {
+            let _ = tx.send(format!("[TIMINGS]{}", json));
+        }
+    }
+    let _ = tx.send(match sink {
+        LoopSink::Chat => "[DONE]".to_string(),
+        LoopSink::ByteBot => "[BYTEBOT_DONE]".to_string(),
+    });
+}
+
 impl<'a> Default for App<'a> {
     fn default() -> Self {
         Self::new()
@@ -3597,27 +3756,21 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             if let Some(body) = token.strip_prefix("[REVIEW]") {
                 app.append_review(body);
             } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
-                if body.starts_with("step:") {
-                    let parts: Vec<&str> = body.splitn(4, ':').collect();
-                    if parts.len() >= 4 {
-                        let idx = parts[1].parse::<usize>().unwrap_or(0);
-                        let status = parts[2].to_string();
-                        if idx < app.bytebot_steps.len() {
-                            app.bytebot_steps[idx].1 = status;
-                        }
-                    }
-                } else if body.starts_with("progress:") {
-                    if let Some(pct) = body.strip_prefix("progress:") {
-                        app.bytebot_progress = pct.trim().parse::<f64>().unwrap_or(0.0);
-                    }
-                } else if body.starts_with("log:") {
-                    if let Some(msg) = body.strip_prefix("log:") {
-                        app.bytebot_log.push(msg.to_string());
-                    }
-                }
+                app.bytebot_event(body);
             } else if token == "[BYTEBOT_DONE]" {
                 app.bytebot_running = false;
-                app.bytebot_progress = 1.0;
+                // Whatever came back is what there is: the bar and the closing
+                // line read the step rows, so an aborted run cannot claim 100%.
+                app.bytebot_progress = bytebot_progress(&app.bytebot_steps);
+                let done = app
+                    .bytebot_steps
+                    .iter()
+                    .filter(|(_, status)| status == "done")
+                    .count();
+                app.bytebot_log.push(format!(
+                    "■ run over: {done}/{} call(s) completed",
+                    app.bytebot_steps.len()
+                ));
             } else if token == "[INIT_DONE]" {
                 app.init_running = false;
                 app.init_progress = 1.0;
@@ -4074,7 +4227,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 mod tests {
     use super::{
         first_output_line, format_advise_report, format_watch_warning, live_refresh_snapshot,
-        parse_llama_port, parse_porcelain_z, watch_warning_for, App, FocusArea,
+        parse_llama_port, parse_porcelain_z, watch_warning_for, App, FocusArea, LoopSink,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -4160,6 +4313,15 @@ mod tests {
                 .any(|toast| toast.message.contains("while the agent is working")),
             "the refusal has to be visible"
         );
+
+        // I2-04: ByteBot writes through the same gate, so it counts too.
+        let mut app = App::new();
+        app.bytebot_running = true;
+        app.handle_rewind_command("/rewind");
+        assert!(app
+            .toasts
+            .iter()
+            .any(|toast| toast.message.contains("while the agent is working")));
     }
 
     /// I2-03: the list the agent posts belongs to the user as well — `/plan`
@@ -4806,28 +4968,114 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// Regression for E2-01: Enter in the ByteBot panel used to overwrite the
-    /// typed command with the last history entry instead of executing it.
-    #[tokio::test]
-    async fn bytebot_enter_executes_typed_command_not_history() {
-        use tokio::sync::mpsc;
+    /// Regression for E2-01, rewritten for I2-04: Enter in the ByteBot panel
+    /// used to overwrite the typed command with the last history entry, and
+    /// the run itself was a script. Now it arms the real tool loop — the task
+    /// stays on screen, and no step row exists until a call does.
+    #[test]
+    fn bytebot_arms_a_real_run_from_the_typed_task() {
         let mut app = super::App::new();
         app.bytebot_history = vec!["previous command".to_string()];
         app.bytebot_command = "fix flaky tests".to_string();
         app.bytebot_cursor = app.bytebot_command.len();
-        let (tx, _rx) = mpsc::unbounded_channel();
-        app.run_bytebot(tx);
-        assert!(app.bytebot_running, "typed command must start executing");
-        assert!(app.bytebot_command.is_empty());
-        assert!(app
-            .bytebot_log
-            .iter()
-            .any(|l| l.contains("fix flaky tests")));
+
+        let run = app
+            .arm_bytebot("fix flaky tests")
+            .expect("a typed task arms a run");
+        assert!(app.bytebot_running);
+        assert_eq!(
+            app.bytebot_command, "fix flaky tests",
+            "the task stays visible while it runs"
+        );
+        assert!(
+            app.bytebot_steps.is_empty(),
+            "no step exists before a call does: {:?}",
+            app.bytebot_steps
+        );
+        assert_eq!(run.sink, LoopSink::ByteBot);
+        assert_eq!(run.max_rounds, app.config.agent_max_rounds.clamp(1, 64));
+        // The brief and the tool vocabulary ride along; the model is not
+        // asked to guess that it may edit files.
+        let system = run.context_messages.first().expect("system turn");
+        let xencode_providers_rs::MessageContent::Text(system_text) = &system.content else {
+            panic!("the system turn is text");
+        };
+        assert!(system_text.contains("update_plan"), "{system_text}");
+        let last = run.context_messages.last().expect("task turn");
+        let xencode_providers_rs::MessageContent::Text(task_text) = &last.content else {
+            panic!("the task turn is text");
+        };
+        assert!(task_text.contains("fix flaky tests"), "{task_text}");
+        assert!(task_text.contains("Delegated task"), "{task_text}");
         assert_eq!(
             app.bytebot_history,
-            vec!["previous command".to_string()],
-            "history must not be recalled on Enter"
+            vec![
+                "previous command".to_string(),
+                "fix flaky tests".to_string()
+            ],
+            "history is remembered, not recalled"
         );
+
+        // A second task while the first runs is refused, not queued blindly.
+        assert!(app.arm_bytebot("and again").is_none());
+        assert!(app
+            .toasts
+            .iter()
+            .any(|toast| toast.message.contains("already working")));
+    }
+
+    /// `/bytebot <task>` from the chat is the same run, and an argument-less
+    /// one is usage rather than a silent no-op.
+    #[tokio::test]
+    async fn bytebot_command_arms_the_panel_from_chat() {
+        let mut app = App::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.set_chat_text("/bytebot");
+        app.submit_message(tx.clone());
+        assert!(!app.bytebot_running);
+        assert!(!app.is_generating, "delegating is not a chat turn");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("usage: /bytebot"));
+    }
+
+    #[test]
+    fn bytebot_steps_are_the_calls_and_progress_is_their_outcome() {
+        let mut app = App::new();
+        app.bytebot_running = true;
+
+        app.bytebot_event("call:read_file src/app.rs");
+        app.bytebot_event("done:done");
+        assert_eq!(
+            app.bytebot_steps,
+            vec![("read_file src/app.rs".to_string(), "done".to_string())]
+        );
+        assert_eq!(app.bytebot_progress, 1.0);
+
+        app.bytebot_event("call:edit_file src/app.rs");
+        assert_eq!(
+            app.bytebot_progress, 0.5,
+            "an in-flight call counts against the total, not for it"
+        );
+        app.bytebot_event("done:denied");
+        assert_eq!(app.bytebot_steps[1].1, "denied");
+
+        app.bytebot_event("log:renamed the helper");
+        assert_eq!(app.bytebot_log.last().unwrap(), "renamed the helper");
+
+        // A provider failure is reported, and leaves the open call failed
+        // rather than spinning forever.
+        app.bytebot_event("call:run_command cargo test");
+        app.bytebot_event("err:connection refused");
+        assert_eq!(app.bytebot_steps[2].1, "failed");
+        assert!(app
+            .bytebot_log
+            .last()
+            .unwrap()
+            .contains("connection refused"));
     }
 
     #[tokio::test]
