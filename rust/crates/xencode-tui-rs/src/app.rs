@@ -185,8 +185,9 @@ pub struct App<'a> {
     /// reads it so it can only Tab to panes the user can actually see.
     pub last_layout: crate::layout::BodyLayout,
     /// Tool classes the user answered "always allow" for this session
-    /// (I1-03 approvals). Session-only: never persisted.
-    pub agent_grants: Vec<crate::agent_tools::ToolClass>,
+    /// (I1-03 approvals). Session-only: never persisted. Shared with the
+    /// spawned tool loops so a grant made mid-turn holds for the next one.
+    pub agent_grants: Arc<std::sync::Mutex<Vec<crate::agent_tools::ToolClass>>>,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -727,7 +728,7 @@ impl<'a> App<'a> {
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
-            agent_grants: Vec::new(),
+            agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             approval_tx,
@@ -1004,8 +1005,10 @@ impl<'a> App<'a> {
     /// Remember an "always allow for this session" approval answer. Never
     /// written to config — quitting revokes every grant.
     pub fn grant_tools_for_session(&mut self, class: crate::agent_tools::ToolClass) {
-        if !self.agent_grants.contains(&class) {
-            self.agent_grants.push(class);
+        if let Ok(mut grants) = self.agent_grants.lock() {
+            if !grants.contains(&class) {
+                grants.push(class);
+            }
         }
     }
 
@@ -1251,6 +1254,14 @@ impl<'a> App<'a> {
                 content: t.content.into(),
             })
             .collect();
+        // Teach the model the tool vocabulary (I1-04). Appended to the
+        // assembled system turn so context assembly and its KV-cache
+        // stability are untouched; only text-only system messages qualify.
+        if let Some(system) = context_messages.first_mut().filter(|m| m.role == "system") {
+            if let xencode_providers_rs::MessageContent::Text(text) = &mut system.content {
+                text.push_str(crate::agent_tools::TOOL_HINT);
+            }
+        }
         // Attached images become content parts on the final user turn, in
         // sorted-path order (deterministic, KV-stable like the text block).
         // A `false` here means the turn was unusable — surface it in chat
@@ -1299,6 +1310,11 @@ impl<'a> App<'a> {
         };
         let task_runtime = self.task_runtime.clone();
         let tool_root = xencode_context_rs::default_root();
+        let approval_tx = self.approval_tx.clone();
+        let agent_grants = self.agent_grants.clone();
+        let agent_mode = self.agent_mode();
+        // Keep at least one tool round; 0 would offer tools on no turn at all.
+        let max_rounds = self.config.agent_max_rounds.clamp(1, 64);
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
@@ -1310,17 +1326,22 @@ impl<'a> App<'a> {
             // every step; execute requested calls through the shared registry
             // and feed results back as AgentTurn history. The final round is
             // tool-less so the loop always terminates with a text answer.
-            // F3-02 adds the read-only repo_advise insight tool to the offer.
+            // F3-02 adds the read-only repo_advise insight tool to the offer,
+            // and I1-04 the file tools — every call now goes through the
+            // permission policy, so a write or a shell command stops at the
+            // approval overlay instead of running silently.
             let mut tools = xencode_providers_rs::background_tools();
             tools.extend(xencode_providers_rs::advise_tools());
+            tools.extend(xencode_providers_rs::file_tools());
+            let approval_ctx = crate::agent_tools::ApprovalCtx {
+                mode: agent_mode,
+                grants: agent_grants,
+                prompts: approval_tx,
+            };
             let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
-            for round in 0..=crate::agent_tools::MAX_TOOL_ROUNDS {
+            for round in 0..=max_rounds {
                 let offer: &[xencode_providers_rs::ToolDefinition] =
-                    if round == crate::agent_tools::MAX_TOOL_ROUNDS {
-                        &[]
-                    } else {
-                        &tools
-                    };
+                    if round == max_rounds { &[] } else { &tools };
                 let step = match manager
                     .generate_stream_with_tools(
                         &model,
@@ -1351,9 +1372,22 @@ impl<'a> App<'a> {
                         "[TOOL]→ {}",
                         crate::agent_tools::summarize_call(call)
                     ));
-                    let result =
-                        crate::agent_tools::execute_tool_call(&task_runtime, &tool_root, call)
-                            .await;
+                    let result = crate::agent_tools::execute_tool_call_approved(
+                        &task_runtime,
+                        &tool_root,
+                        call,
+                        &approval_ctx,
+                    )
+                    .await;
+                    if result == crate::agent_tools::FORBIDDEN_RESULT {
+                        // A policy refusal never reaches the overlay, so it
+                        // needs its own transcript line or it would be
+                        // invisible outside the model's context.
+                        let _ = tx.send(format!(
+                            "[TOOL]✗ {} · refused: outside the workspace",
+                            crate::agent_tools::approval_summary(call)
+                        ));
+                    }
                     let _ = tx.send(format!(
                         "[TOOL]← {}",
                         crate::agent_tools::truncate_one_line(&result, 120)

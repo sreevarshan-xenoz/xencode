@@ -132,6 +132,7 @@ xencode config reset
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
 | `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
+| `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).

@@ -561,6 +561,15 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .map_err(|_| format!("invalid boolean: {value}"))?;
                 }
                 "agent_approval" => config.agent_approval = value.clone(),
+                "agent_max_rounds" => {
+                    let rounds: usize = value
+                        .parse()
+                        .map_err(|_| format!("invalid number: {value}"))?;
+                    if !(1..=64).contains(&rounds) {
+                        return Err("agent_max_rounds must be 1..=64".to_string());
+                    }
+                    config.agent_max_rounds = rounds;
+                }
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;

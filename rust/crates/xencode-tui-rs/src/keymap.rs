@@ -1588,10 +1588,10 @@ mod tests {
         let mut answer = queue_approval(&mut app, "edit_file", ToolClass::Edit);
         assert_eq!(press(&mut app, KeyCode::Char('a')), KeyFlow::Continue);
         assert_eq!(answer.try_recv(), Ok(ApprovalAnswer::ApprovedForSession));
-        assert!(app.agent_grants.contains(&ToolClass::Edit));
+        assert!(app.agent_grants.lock().unwrap().contains(&ToolClass::Edit));
         // Shell commands are a separate class: granting edits says nothing
         // about running commands.
-        assert!(!app.agent_grants.contains(&ToolClass::Shell));
+        assert!(!app.agent_grants.lock().unwrap().contains(&ToolClass::Shell));
         assert!(app.pending_approval().is_none());
         // Answering an empty queue is a no-op, not a panic.
         assert_eq!(press(&mut app, KeyCode::Char('y')), KeyFlow::Continue);

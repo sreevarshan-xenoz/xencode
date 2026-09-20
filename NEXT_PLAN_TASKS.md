@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 611 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 617 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -594,7 +594,10 @@ outgoing editor-activity producer, configurable max session size.
   `y`/`a`/`n`/`Esc` + `k`/`j` scroll, session grants, FIFO queue for stacked
   calls, and a `⚙ … · approved/denied` line in the chat log for every answer.
   **611 tests passed, zero clippy warnings**
-- [ ] I1-04 — wire file tools into the chat loop; `agent_max_rounds`
+- [x] I1-04 — file tools offered in the chat loop; every call routed through
+  the policy (approve → execute, deny → `error:` the model must not retry),
+  session grants shared with the loop, `agent_max_rounds` config (default 16).
+  **617 tests passed, zero clippy warnings**
 - [ ] I2-01 — checkpoints + `/rewind`
 - [ ] I2-02 — `run_command` tool (timed, capped, approval-gated)
 - [ ] I2-03 — plan/TODO visibility (`update_plan` tool + checklist render)

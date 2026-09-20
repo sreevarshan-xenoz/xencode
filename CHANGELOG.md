@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The agent tool loop is now file-capable and gated (Milestone I, I1-04): the
+  chat turn offers `file_tools()` next to the background and advice tools,
+  and every requested call goes through the permission policy first —
+  `Allow` runs it, `Deny` answers `error: refused by the permission policy`
+  without ever prompting, and `Ask` raises the approval overlay and waits. A
+  yes executes the call, an "always allow" answer also grants that tool class
+  for the rest of the session (shared state, so the next message inherits
+  it), and a no — or a prompt whose UI disappeared mid-wait — returns
+  `DENIED_RESULT`, worded so the model explains instead of retrying the same
+  call. The model is taught the vocabulary, the workspace boundary and the
+  no-retry rule in a short tools block appended to the system turn. New
+  `agent_max_rounds` config key (default 16, clamped 1..=64, settable with
+  `xencode config set`) replaces the old hard-coded 8-round valve
 - File tools for the agent (Milestone I, I1-02): `read_file` (paged, numbered
   lines), `list_dir`, `search_files` (regex walk that skips `target/`,
   `node_modules/` and dot-dirs, 100-hit cap), `write_file` and `edit_file`
