@@ -46,6 +46,33 @@ pub enum WorktreePrompt {
     ConfirmRemove,
 }
 
+/// Which Collaboration Hub connection field typed characters edit. Tab
+/// cycles through these; the hub's form is an editing mode, not a focus.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum CollabField {
+    Server,
+    Username,
+    Session,
+}
+
+impl CollabField {
+    pub fn next(self) -> Self {
+        match self {
+            CollabField::Server => CollabField::Username,
+            CollabField::Username => CollabField::Session,
+            CollabField::Session => CollabField::Server,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CollabField::Server => "Server",
+            CollabField::Username => "User",
+            CollabField::Session => "Session",
+        }
+    }
+}
+
 /// Rows of the Settings panel in display order; the index is
 /// `app.settings_cursor`. Navigation bounds derive from this list — adding
 /// a row here makes it reachable without touching the key handler.

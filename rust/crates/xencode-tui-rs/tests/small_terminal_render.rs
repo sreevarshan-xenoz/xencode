@@ -265,6 +265,84 @@ fn worktree_panel_renders_all_prompt_stages() {
     }
 }
 
+fn render_text(app: &App<'static>, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect()
+}
+
+/// G3-02: the hub renders the real connection state — no fabricated port,
+/// no "Protocol: WebSocket (TLS)" over plain ws, no "<15ms" latency. Every
+/// claim on screen comes from app state the worker actually wrote.
+#[test]
+fn collaboration_hub_renders_real_state_not_theatre() {
+    let mut app = populated(FocusArea::CollaborationHub);
+    app.collab_server_url = "http://127.0.0.1:8765".into();
+    app.collab_session_id = "xencode-abc123".into();
+    app.collab_session_active = true;
+    app.collab_sync_status = "connected".into();
+    app.collab_members = vec![
+        ("alice".into(), "admin".into(), "connected".into()),
+        ("bob".into(), "viewer".into(), "connected".into()),
+    ];
+    app.collab_last_sync = xencode_models_rs::current_timestamp() - 5.0;
+
+    // Wide enough that the 35%-columns panel shows the whole URL; the
+    // truncation at smaller sizes is a layout fact, not a missing feature —
+    // the sweep at the bottom covers those sizes for panics.
+    let text = render_text(&app, 140, 40);
+    assert!(text.contains("Server: http://127.0.0.1:8765"), "{text}");
+    assert!(text.contains("ws (no TLS)"), "{text}");
+    assert!(text.contains("xencode-abc123"), "{text}");
+    assert!(text.contains("alice [Admin]"), "{text}");
+    assert!(text.contains("bob [Viewer]"), "{text}");
+    assert!(text.contains("Connected: 5s"), "{text}");
+    // The deleted theatre, gone for good on a plain-ws connection.
+    assert!(!text.contains("Protocol: WebSocket"), "{text}");
+    assert!(!text.contains("Latency"), "{text}");
+    assert!(!text.contains("Port:"), "{text}");
+    assert!(!text.contains("carol"), "{text}");
+
+    // wss transport is claimed only when the server URL is https.
+    app.collab_server_url = "https://team.example.com".into();
+    let text = render_text(&app, 140, 40);
+    assert!(text.contains("wss (TLS)"), "{text}");
+
+    // Errors surface verbatim instead of being papered over.
+    app.collab_error = "connection refused".into();
+    let text = render_text(&app, 140, 40);
+    assert!(text.contains("connection refused"), "{text}");
+
+    // Idle form: the three editable fields and no fake session line.
+    let mut idle = populated(FocusArea::CollaborationHub);
+    idle.collab_server_url = "http://127.0.0.1:8765".into();
+    idle.collab_username = "sree".into();
+    idle.collab_editing = true;
+    idle.collab_field = xencode_tui_rs::focus::CollabField::Session;
+    let text = render_text(&idle, 140, 40);
+    assert!(text.contains("Server: http://127.0.0.1:8765"), "{text}");
+    assert!(text.contains("User: sree"), "{text}");
+    assert!(text.contains("Session: (new)"), "{text}");
+    assert!(!text.contains("Status:"), "{text}");
+
+    // And the size sweep for the active branch, which the FOCI pass renders
+    // only in its idle state.
+    for &width in &[20, 40, 61, 80] {
+        for &height in &[8, 16, 24] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|f| draw(f, &app))
+                .unwrap_or_else(|_| panic!("hub render failed at {width}x{height}"));
+        }
+    }
+}
+
 /// AdvisePanel across list/detail × populated/empty, with every advice kind
 /// and an oversized detail scroll (clamp path). Fixtures only — the panel
 /// never touches `.xencode` at draw time.

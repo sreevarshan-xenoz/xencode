@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 565 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 571 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -498,10 +498,24 @@ turns the hub into an actual WebSocket client.
   `run_session` e2e (auth frame → auth_ok → 4409 close translated honestly);
   no server-rs dev-dep in the TUI — that would be a dependency cycle.
   Workspace at 565.
-- [ ] G3-02 tui: real hub UX — `c` create, `j` join-by-id, `Enter` connect,
+- [x] G3-02 tui: real hub UX — `c` create, `j` join-by-id, `Enter` connect,
   `r` retry, `Tab` field cycle, `Esc` disconnect+abort; fake port/latency/"TLS"
   telemetry replaced with server/transport/session/role from real state;
   help overlay matches handled keys; render sweep covers the active branch.
+  The form is an in-panel editing mode (no new FocusArea): `Tab` is intercepted
+  for the hub only and cycles server/user/session; while editing, keystrokes
+  type into the selected field (`text_entry_active` guards the global chords;
+  'q' types instead of quitting) and Esc unwinds edit → disconnect → close.
+  Deleted telemetry: timestamp-derived port, "Protocol: WebSocket (TLS)",
+  `<15ms` latency, hardcoded alice/bob/carol rows and the dead
+  `collab_pending_changes` field. Rendered instead: real server URL, honest
+  transport line (`ws (no TLS)` unless the URL is https), session id, live
+  member rows with role badges from the `members:` snapshot, connected-for
+  time, and the worker's last error verbatim. Ctrl+W closes the hub and
+  aborts the worker too, so no socket is orphaned. The help table lists
+  exactly the seven keys the hub binds (pinned by an exact-list test); a
+  buffer-text render test covers idle-form/editing/ws/wss/error states plus
+  a small-size sweep of the active branch. Workspace at 571.
 
 ### G4 — Close-out
 
