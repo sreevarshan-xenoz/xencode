@@ -578,6 +578,47 @@ pub fn command_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// The agent's visible todo list (Milestone I, I2-03). One call replaces the
+/// whole plan, so the model never has to track indices, and the tool touches
+/// no files — it is presentation only. A model that ignores it loses the
+/// checklist and nothing else.
+pub fn plan_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "update_plan".to_string(),
+        description: "Replace your task list for the current request. Call it \
+                      once when you decide the approach and again whenever an \
+                      item's status changes; keep it to at most 12 short \
+                      items. Statuses: pending, in_progress, done. This \
+                      changes no files and runs no commands."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "The complete plan, in the order you will do it",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "One short line describing the step"
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "pending | in_progress | done \
+                                                (default pending)"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                }
+            },
+            "required": ["items"]
+        }),
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,6 +637,25 @@ mod tests {
         assert_eq!(props.len(), 1);
         assert_eq!(props["command"]["type"], "string");
         assert_eq!(value["function"]["parameters"]["required"][0], "command");
+    }
+
+    #[test]
+    fn update_plan_takes_one_array_of_text_and_status() {
+        let tools = plan_tools();
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["update_plan"]
+        );
+        let value = tools[0].to_api_value();
+        let params = &value["function"]["parameters"];
+        assert_eq!(params["required"][0], "items");
+        // The only structured argument we offer, so keep its object flat:
+        // text + status, and only text is required.
+        let item = &params["properties"]["items"]["items"];
+        let props = item["properties"].as_object().unwrap();
+        assert_eq!(props.len(), 2);
+        assert!(props.contains_key("text") && props.contains_key("status"));
+        assert_eq!(item["required"][0], "text");
     }
 
     #[test]

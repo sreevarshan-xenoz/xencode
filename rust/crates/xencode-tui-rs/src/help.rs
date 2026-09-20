@@ -71,6 +71,7 @@ const COMMANDS: &[Binding] = &[
     ),
     ("/advise [filter]", "repository insights"),
     ("/bytebot <task>", "autonomous task execution"),
+    ("/plan [clear]", "expand or clear the agent's todo list"),
     (
         "/rewind [turns]",
         "undo the agent's file changes (session-only)",

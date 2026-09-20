@@ -38,7 +38,7 @@ xencode
 Full-screen terminal UI: chat, file explorer (Space attaches files —
 images ride as message parts the model actually sees, PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, `/rewind` to undo agent edits, model picker, and more.
+`/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, model picker, and more.
 
 ### One-shot query
 ```bash
@@ -79,6 +79,8 @@ live members with roles. Flags, tokens, TLS and the audit log are in
 /ctx <sub>            - Context engine (status/track/compact/eval/kv/archive)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /bytebot <task>       - Delegate a task to the autonomous agent
+/plan [clear]         - Pin the agent's todo list, or clear it
+/rewind [turns]       - Undo the agent's file changes for this session
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full

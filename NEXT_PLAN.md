@@ -12,7 +12,7 @@
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
-- ✅ **Rust migration complete**: 13 crates, 630 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 13 crates, 641 tests passing, zero warnings — the Rust workspace is the only active codebase
 - ✅ **Backlog emptied** (2026-09-20) — next focus not yet chosen
 
 ## Backlog (all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))

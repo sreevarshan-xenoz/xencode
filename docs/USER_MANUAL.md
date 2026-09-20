@@ -248,6 +248,7 @@ back to the model before it continues.
 | `list_dir(path?)` | Directory listing, `/` marks directories | read-only |
 | `search_files(pattern, path?)` | Regex search over the tree (skips `target/`, `node_modules/`, dot-dirs; 100 hits) | read-only |
 | `repo_advise(filter?)` | Findings from the project index | read-only |
+| `update_plan(items)` | Post or refresh the todo list the user watches | read-only |
 | `background_poll(id)` / `background_stop(id)` | Output / cancel of a background task | read-only |
 | `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |
 | `edit_file(path, old, new, all?)` | Exact string replace; refuses an ambiguous match unless `all` | file change |
@@ -274,6 +275,17 @@ fails the reason is at the end — and the cap is announced in the result.
 or `xencode config set agent_command_timeout 45`) kills a command that runs
 too long; a killed command returns no output at all, and the model is told to
 use `background_start` for anything that slow.
+
+For multi-step work the model can post a todo list with `update_plan`, and it
+appears above the chat transcript as a bordered `☰ Plan 2/5` strip: `✓` done
+(struck through), `▶` the step in progress, `·` not started. Up to 12 steps are
+kept, the compact strip shows the first 6 and points at `/plan` for the rest.
+**`/plan`** pins the full list (or shrinks it again), **`/plan clear`** drops
+it. Posting a plan is read-only — it never costs an approval, in any mode — and
+a malformed update is refused with a message the model can act on, leaving the
+plan already on screen untouched. A plan is a window into the agent's turn, not
+a contract: weak local models may skip it entirely, and nothing is enforced
+from it.
 
 Every approved write or edit is snapshotted first, so **`/rewind [turns]`**
 puts the files back: `/rewind` undoes the last turn that changed anything,

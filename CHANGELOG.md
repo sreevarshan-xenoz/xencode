@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The agent's plan is now on screen (Milestone I, I2-03): `update_plan(items)`
+  lets the model post its todo list — one `{text, status}` object per step, at
+  most 12 — and it renders above the chat transcript as a `☰ Plan 2/5` strip
+  with `✓` done (struck through), `▶` in progress and `·` pending. The compact
+  strip shows the first 6 steps and says how many are hidden; `/plan` pins the
+  whole list, `/plan clear` drops it, and neither opens a chat turn. Posting a
+  plan is a read-only call, so it never costs an approval even in `ask` mode.
+  Parsing is deliberately tolerant of what local models actually write (bare
+  strings, `- [x]` markdown, invented keys like `title`/`state`, a JSON string
+  instead of an array); a rejected update is an error the model can act on and
+  leaves the visible plan untouched. On a pane too short for both the strip and
+  six lines of transcript the strip is dropped rather than squeezing the chat
 - `run_command` for the agent (Milestone I, I2-02): the missing `t` in
   edit→test→fix. The model runs one foreground `sh -c` line in the workspace
   root and gets back `$ <command>`, `exit <code>`, then the combined

@@ -21,11 +21,13 @@ pub const TOOL_HINT: &str = "\n\n## Tools\n\
 Available: read_file(path, offset?, limit?), list_dir(path?), search_files(pattern, path?), \
 write_file(path, content), edit_file(path, old, new, all?), run_command(command), \
 background_start(command, cwd?, name?), \
-background_poll(id), background_stop(id), repo_advise(filter?).\n\
+background_poll(id), background_stop(id), update_plan(items), repo_advise(filter?).\n\
 Paths are relative to the project root and must stay inside it; anything outside is refused without asking. \
 File writes, edits and shell commands need the user's approval, which they may grant once, allow for the \
 session, or deny. If a result begins with `error:`, do not retry that call unchanged - say what failed and \
-try a different approach. Prefer edit_file over write_file, and read_file before touching code you have not seen.";
+try a different approach. Prefer edit_file over write_file, and read_file before touching code you have not seen.\n\
+For anything that takes several steps, post a short plan with update_plan(items=[{text,status}]) before the \
+first edit and update the statuses as you go; the user watches that list.";
 
 // ── Permission policy (I1-01) ───────────────────────────────────────────
 // One source of truth for "may the agent run this call?". The chat loop
@@ -118,9 +120,8 @@ impl ApprovalRequest {
 /// errors on them anyway, but they are never silently treated as read-only.
 pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
-        "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files" => {
-            ToolClass::ReadOnly
-        }
+        "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files"
+        | "update_plan" => ToolClass::ReadOnly,
         "write_file" | "edit_file" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
@@ -788,8 +789,30 @@ pub async fn execute_tool_call_timed(
     call: &ToolCall,
     command_timeout: u64,
 ) -> String {
+    execute_tool_call_plan(rt, root, call, command_timeout, None).await
+}
+
+/// The dispatcher. `plan` is the chat's visible todo list: only the loop has
+/// one, so `update_plan` outside it is an error rather than a silent no-op.
+async fn execute_tool_call_plan(
+    rt: &TaskRuntime,
+    root: &Path,
+    call: &ToolCall,
+    command_timeout: u64,
+    plan: Option<&PlanHandle>,
+) -> String {
     let args = call.arguments_object();
     match call.name.as_str() {
+        "update_plan" => match plan {
+            Some(handle) => {
+                let items = args
+                    .get("items")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                apply_plan(handle, &items)
+            }
+            None => err("update_plan is only available in the chat loop"),
+        },
         "run_command" => match arg_str(&args, "command") {
             Some(command) if !command.trim().is_empty() => {
                 run_foreground(root, command, command_timeout).await
@@ -904,6 +927,8 @@ pub struct ApprovalCtx {
     pub turn: usize,
     /// Wall-clock budget for `run_command` (`agent_command_timeout`).
     pub command_timeout: u64,
+    /// The chat pane's todo list, written by `update_plan`.
+    pub plan: PlanHandle,
 }
 
 impl ApprovalCtx {
@@ -967,7 +992,8 @@ async fn run_and_checkpoint(
     ctx: &ApprovalCtx,
 ) -> String {
     let note = ctx.snapshot_before(root, call);
-    let mut result = execute_tool_call_timed(rt, root, call, ctx.command_timeout).await;
+    let mut result =
+        execute_tool_call_plan(rt, root, call, ctx.command_timeout, Some(&ctx.plan)).await;
     if let Some(note) = note {
         if !result.starts_with("error:") {
             result.push('\n');
@@ -1203,6 +1229,178 @@ pub fn truncate_one_line(s: &str, max: usize) -> String {
         let cut: String = flat.chars().take(max).collect();
         format!("{cut}…")
     }
+}
+
+// ── Plan / TODO visibility (I2-03) ────────────────────────────────────
+// The model's todo list. It is the only tool here that changes no files and
+// runs nothing: its whole purpose is to show the user what the agent thinks
+// it is doing. Weak models may ignore it entirely — that costs the strip,
+// never the work.
+
+/// How long the list is allowed to be. Longer plans are truncated rather than
+/// refused: the user is better off with the first steps than with nothing.
+pub const PLAN_MAX_ITEMS: usize = 12;
+
+/// Rows shown before `/plan` is needed to see the rest.
+pub const PLAN_COMPACT_ITEMS: usize = 6;
+
+/// Longest plan line worth rendering (the rest is an essay, not a step).
+const PLAN_TEXT_WIDTH: usize = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanStatus {
+    Pending,
+    InProgress,
+    Done,
+}
+
+impl PlanStatus {
+    /// Transcript/strip glyph.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::Pending => "·",
+            Self::InProgress => "▶",
+            Self::Done => "✓",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanItem {
+    pub text: String,
+    pub status: PlanStatus,
+}
+
+/// Shared between `App` (renders it) and the tool loop (writes it), so an
+/// update lands on the next frame rather than at the end of the turn.
+pub type PlanHandle = Arc<std::sync::Mutex<Vec<PlanItem>>>;
+
+pub fn new_plan_handle() -> PlanHandle {
+    Arc::new(std::sync::Mutex::new(Vec::new()))
+}
+
+/// Read the current plan (the renderer and `/plan` both need a snapshot).
+pub fn plan_items(plan: &PlanHandle) -> Vec<PlanItem> {
+    plan.lock().map(|plan| plan.clone()).unwrap_or_default()
+}
+
+/// Statuses arrive in many spellings from models (`in-progress`, `doing`,
+/// `complete`); anything unrecognized stays pending, which is the safest thing
+/// to show — nothing claims to be finished that is not.
+fn parse_status(raw: &str) -> PlanStatus {
+    let key = raw.trim().to_lowercase().replace([' ', '-', '_'], "");
+    match key.as_str() {
+        "done" | "complete" | "completed" | "finished" | "closed" => PlanStatus::Done,
+        "inprogress" | "doing" | "active" | "current" | "wip" | "started" => PlanStatus::InProgress,
+        _ => PlanStatus::Pending,
+    }
+}
+
+/// Read one entry of the `items` array: an object with a text-ish key, or a
+/// bare string carrying an optional markdown checkbox.
+fn parse_plan_entry(entry: &serde_json::Value) -> Option<PlanItem> {
+    let (raw, status) = match entry {
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            let (marker, rest) = if let Some(tail) = s
+                .strip_prefix("[ ]")
+                .or_else(|| s.strip_prefix("[x]"))
+                .or_else(|| s.strip_prefix("[X]"))
+            {
+                let done = !s.starts_with("[ ]");
+                (Some(done), tail.trim())
+            } else {
+                (None, s)
+            };
+            let status = match marker {
+                Some(true) => PlanStatus::Done,
+                _ => PlanStatus::Pending,
+            };
+            (rest, status)
+        }
+        serde_json::Value::Object(map) => {
+            let raw = ["text", "content", "title", "step", "description", "item"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .trim();
+            let status = ["status", "state"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(|v| v.as_str()))
+                .map(parse_status)
+                .unwrap_or(PlanStatus::Pending);
+            (raw, status)
+        }
+        _ => return None,
+    };
+    if raw.is_empty() {
+        return None;
+    }
+    Some(PlanItem {
+        text: truncate_one_line(raw, PLAN_TEXT_WIDTH),
+        status,
+    })
+}
+
+/// Parse an `items` argument into a plan. The Err is a bare reason (the caller
+/// words it for the model). An empty list is a success — it clears the strip —
+/// but a list whose entries are all unusable is an error, because otherwise
+/// the model would be told "plan updated" about a plan nobody can read.
+pub fn parse_plan(value: &serde_json::Value) -> Result<Vec<PlanItem>, String> {
+    let decoded;
+    let value = match value {
+        // Models routinely pass the array as a JSON-encoded string.
+        serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(parsed @ serde_json::Value::Array(_)) => {
+                decoded = parsed;
+                &decoded
+            }
+            _ => return Err("needs an \"items\" array of {text, status} objects".into()),
+        },
+        other => other,
+    };
+    let Some(entries) = value.as_array() else {
+        return Err("needs an \"items\" array of {text, status} objects".into());
+    };
+    let items: Vec<PlanItem> = entries.iter().filter_map(parse_plan_entry).collect();
+    if items.is_empty() && !entries.is_empty() {
+        return Err("no usable items — each one needs a string \"text\"".into());
+    }
+    Ok(items)
+}
+
+/// Post a plan, answering with what the model should believe about it.
+pub fn apply_plan(plan: &PlanHandle, items: &serde_json::Value) -> String {
+    let parsed = match parse_plan(items) {
+        Ok(parsed) => parsed,
+        Err(why) => return err(format!("update_plan {why}")),
+    };
+    if parsed.is_empty() {
+        if let Ok(mut guard) = plan.lock() {
+            guard.clear();
+        }
+        return "plan cleared".to_string();
+    }
+    let dropped = parsed.len().saturating_sub(PLAN_MAX_ITEMS);
+    let kept: Vec<PlanItem> = parsed.into_iter().take(PLAN_MAX_ITEMS).collect();
+    let done = kept.iter().filter(|i| i.status == PlanStatus::Done).count();
+    let running = kept
+        .iter()
+        .filter(|i| i.status == PlanStatus::InProgress)
+        .count();
+    if let Ok(mut guard) = plan.lock() {
+        *guard = kept.clone();
+    }
+    let mut answer = format!("plan updated: {} step(s), {done} done", kept.len());
+    if running > 0 {
+        answer.push_str(&format!(", {running} in progress"));
+    }
+    if dropped > 0 {
+        answer.push_str(&format!(
+            " — {dropped} more were dropped; keep a plan under {PLAN_MAX_ITEMS} items"
+        ));
+    }
+    answer
 }
 
 #[cfg(test)]
@@ -1521,6 +1719,9 @@ mod tests {
         assert_eq!(tool_class("write_file"), ToolClass::Edit);
         assert_eq!(tool_class("edit_file"), ToolClass::Edit);
         assert_eq!(tool_class("background_start"), ToolClass::Shell);
+        assert_eq!(tool_class("run_command"), ToolClass::Shell);
+        // The todo list touches no files, so it must never cost an approval.
+        assert_eq!(tool_class("update_plan"), ToolClass::ReadOnly);
         // Unknown tools are never silently read-only.
         assert_eq!(tool_class("mystery"), ToolClass::Shell);
     }
@@ -1983,6 +2184,7 @@ mod tests {
                 checkpoints,
                 turn,
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
+                plan: new_plan_handle(),
             },
             prompts: rx,
         }
@@ -2301,6 +2503,7 @@ mod tests {
                 checkpoints: store.clone(),
                 turn: turn_group,
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
+                plan: new_plan_handle(),
             };
             let content = format!("written in turn {turn}\n");
             let result =
@@ -2502,5 +2705,139 @@ mod tests {
             start += 1;
         }
         text[start..].to_string()
+    }
+
+    // ── update_plan (I2-03) ──────────────────────────────────────────
+
+    fn plan_call(items: serde_json::Value) -> ToolCall {
+        call("update_plan", serde_json::json!({ "items": items }))
+    }
+
+    #[tokio::test]
+    async fn update_plan_posts_the_list_the_strip_renders() {
+        let root = temp_root("plan-post");
+        let h = harness(ApprovalMode::Ask);
+        let answer = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &plan_call(serde_json::json!([
+                {"text": "read the failing test", "status": "done"},
+                {"text": "fix the off-by-one", "status": "in_progress"},
+                {"text": "run cargo test"},
+            ])),
+            &h.ctx,
+        )
+        .await;
+        assert_eq!(
+            answer, "plan updated: 3 step(s), 1 done, 1 in progress",
+            "the model must hear what the user will see"
+        );
+        let items = plan_items(&h.ctx.plan);
+        assert_eq!(
+            items
+                .iter()
+                .map(|i| (i.text.as_str(), i.status))
+                .collect::<Vec<_>>(),
+            vec![
+                ("read the failing test", PlanStatus::Done),
+                ("fix the off-by-one", PlanStatus::InProgress),
+                ("run cargo test", PlanStatus::Pending),
+            ]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn update_plan_accepts_what_models_actually_write() {
+        let plan = new_plan_handle();
+        // Bare strings, markdown checkboxes…
+        let first = apply_plan(&plan, &serde_json::json!(["[x] recon", "[ ] fix"]));
+        assert!(
+            first.starts_with("plan updated: 2 step(s), 1 done"),
+            "{first}"
+        );
+        assert_eq!(plan_items(&plan)[1].text, "fix");
+        // …invented key names and statuses…
+        apply_plan(
+            &plan,
+            &serde_json::json!([{"content": "step one", "state": "doing"}]),
+        );
+        assert_eq!(plan_items(&plan)[0].status, PlanStatus::InProgress);
+        // …and a JSON array smuggled through a string.
+        let encoded = serde_json::Value::String(
+            serde_json::to_string(&serde_json::json!([{"text": "escaped"}])).unwrap(),
+        );
+        apply_plan(&plan, &encoded);
+        assert_eq!(plan_items(&plan)[0].text, "escaped");
+    }
+
+    #[test]
+    fn a_rejected_plan_update_leaves_the_visible_plan_alone() {
+        let plan = new_plan_handle();
+        apply_plan(&plan, &serde_json::json!([{"text": "still here"}]));
+
+        let junk = apply_plan(&plan, &serde_json::json!([1, 2, true]));
+        assert!(junk.starts_with("error: update_plan"), "{junk}");
+        assert!(junk.contains("no usable items"), "{junk}");
+        assert_eq!(
+            plan_items(&plan)[0].text,
+            "still here",
+            "an unreadable call must not wipe the list"
+        );
+
+        let missing = apply_plan(&plan, &serde_json::Value::Null);
+        assert!(missing.contains("needs an \"items\" array"), "{missing}");
+
+        // An explicit empty list is the model's way of finishing up.
+        assert_eq!(apply_plan(&plan, &serde_json::json!([])), "plan cleared");
+        assert!(plan_items(&plan).is_empty());
+    }
+
+    #[test]
+    fn an_overlong_plan_keeps_the_first_steps_and_admits_trimming() {
+        let plan = new_plan_handle();
+        let items: Vec<serde_json::Value> = (0..15)
+            .map(|i| serde_json::json!({"text": format!("step {i}")}))
+            .collect();
+        let answer = apply_plan(&plan, &serde_json::Value::Array(items));
+        assert_eq!(plan_items(&plan).len(), PLAN_MAX_ITEMS);
+        assert!(answer.contains("12 step(s)"), "{answer}");
+        assert!(answer.contains("3 more were dropped"), "{answer}");
+    }
+
+    #[tokio::test]
+    async fn a_plan_never_costs_an_approval_even_in_ask_mode() {
+        let root = temp_root("plan-free");
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let answer = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &plan_call(serde_json::json!([{"text": "x"}])),
+            &h.ctx,
+        )
+        .await;
+        assert_eq!(answer, "plan updated: 1 step(s), 0 done");
+        assert!(
+            prompts.try_recv().is_err(),
+            "a checklist is not an action to approve"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_plan_outside_a_chat_loop_says_so() {
+        let root = temp_root("plan-alone");
+        let answer = execute_tool_call(
+            &new_task_runtime(),
+            &root,
+            &plan_call(serde_json::json!([])),
+        )
+        .await;
+        assert_eq!(
+            answer,
+            "error: update_plan is only available in the chat loop"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

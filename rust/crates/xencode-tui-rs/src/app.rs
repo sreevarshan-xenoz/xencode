@@ -93,7 +93,7 @@ fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
 const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
-pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot", "/rewind"];
+pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot", "/plan", "/rewind"];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
 /// Returns the longest common prefix when it extends the token (pure —
@@ -191,6 +191,11 @@ pub struct App<'a> {
     /// Byte-for-byte snapshots of what the agent changed, grouped per chat
     /// turn (I2-01). `/rewind` puts them back; quitting drops them.
     pub checkpoints: Arc<crate::agent_tools::CheckpointStore>,
+    /// The agent's current todo list (I2-03), written by its `update_plan`
+    /// calls and rendered as a strip above the transcript. Session-only.
+    pub agent_plan: crate::agent_tools::PlanHandle,
+    /// `/plan` toggles this: pinned shows every item, unpinned the first few.
+    pub plan_pinned: bool,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -733,6 +738,8 @@ impl<'a> App<'a> {
             last_layout: crate::layout::BodyLayout::default(),
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
+            agent_plan: crate::agent_tools::new_plan_handle(),
+            plan_pinned: false,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             approval_tx,
@@ -1102,7 +1109,8 @@ impl<'a> App<'a> {
         if draft == "/" {
             self.push_toast(
                 crate::toast::ToastKind::Info,
-                "Commands: /init  /ctx  /advise  /bytebot  /rewind (Tab completes)".to_string(),
+                "Commands: /init  /ctx  /advise  /bytebot  /plan  /rewind (Tab completes)"
+                    .to_string(),
             );
             return true;
         }
@@ -1157,6 +1165,12 @@ impl<'a> App<'a> {
         // Undo what the agent changed (/rewind [turns])
         if prompt == "/rewind" || prompt.starts_with("/rewind ") {
             self.handle_rewind_command(&prompt);
+            return;
+        }
+
+        // The agent's todo list (/plan, /plan clear)
+        if prompt == "/plan" || prompt.starts_with("/plan ") {
+            self.handle_plan_command(&prompt);
             return;
         }
 
@@ -1323,6 +1337,7 @@ impl<'a> App<'a> {
         let approval_tx = self.approval_tx.clone();
         let agent_grants = self.agent_grants.clone();
         let checkpoint_store = self.checkpoints.clone();
+        let agent_plan = self.agent_plan.clone();
         let agent_mode = self.agent_mode();
         // One checkpoint group per user turn (I2-01): `/rewind` steps back
         // whole turns, not individual tool calls.
@@ -1351,6 +1366,7 @@ impl<'a> App<'a> {
             tools.extend(xencode_providers_rs::advise_tools());
             tools.extend(xencode_providers_rs::file_tools());
             tools.extend(xencode_providers_rs::command_tools());
+            tools.extend(xencode_providers_rs::plan_tools());
             let approval_ctx = crate::agent_tools::ApprovalCtx {
                 mode: agent_mode,
                 grants: agent_grants,
@@ -1358,6 +1374,7 @@ impl<'a> App<'a> {
                 checkpoints: checkpoint_store,
                 turn: turn_group,
                 command_timeout,
+                plan: agent_plan,
             };
             let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
             for round in 0..=max_rounds {
@@ -2449,6 +2466,55 @@ impl<'a> App<'a> {
             crate::toast::ToastKind::Info,
             format!("rewound {} file(s)", report.files.len()),
         );
+    }
+
+    /// `/plan` toggles the agent's todo strip between its compact form (the
+    /// first few steps, always visible while a plan exists) and the full list;
+    /// `/plan clear` drops the list the model posted without asking it to.
+    fn handle_plan_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/plan").unwrap_or("").trim();
+        let items = crate::agent_tools::plan_items(&self.agent_plan);
+        match arg {
+            "clear" => {
+                if items.is_empty() {
+                    self.system_line("There is no plan to clear.");
+                    return;
+                }
+                if let Ok(mut plan) = self.agent_plan.lock() {
+                    plan.clear();
+                }
+                self.plan_pinned = false;
+                self.system_line("Plan cleared. The agent can post a new one.");
+            }
+            "" => {
+                if items.is_empty() {
+                    self.system_line(
+                        "No plan yet. Ask the agent to plan the work and it will post one here.",
+                    );
+                    return;
+                }
+                self.plan_pinned = !self.plan_pinned;
+                let done = items
+                    .iter()
+                    .filter(|item| item.status == crate::agent_tools::PlanStatus::Done)
+                    .count();
+                self.system_line(&format!(
+                    "Plan {}: {done}/{} steps done{}",
+                    if self.plan_pinned {
+                        "pinned"
+                    } else {
+                        "compact"
+                    },
+                    items.len(),
+                    if self.plan_pinned || items.len() <= crate::agent_tools::PLAN_COMPACT_ITEMS {
+                        String::new()
+                    } else {
+                        format!(" — /plan again to see all {}", items.len())
+                    }
+                ));
+            }
+            _ => self.system_line("usage: /plan (toggle the full list)  |  /plan clear"),
+        }
     }
 
     /// A rewind that touches the file the user is looking at must not leave
@@ -4031,6 +4097,7 @@ mod tests {
             checkpoints: app.checkpoints.clone(),
             turn: app.checkpoints.begin_turn(),
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
+            plan: app.agent_plan.clone(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -4093,6 +4160,105 @@ mod tests {
                 .any(|toast| toast.message.contains("while the agent is working")),
             "the refusal has to be visible"
         );
+    }
+
+    /// I2-03: the list the agent posts belongs to the user as well — `/plan`
+    /// pins it, `/plan clear` drops it. Seeded through the real gated path so
+    /// the test also proves a plan costs no approval in `ask` mode.
+    #[tokio::test]
+    async fn plan_command_pins_and_clears_the_list_the_agent_posted() {
+        let mut app = App::new();
+        let (prompts, _rx) = mpsc::unbounded_channel();
+        let ctx = crate::agent_tools::ApprovalCtx {
+            mode: crate::agent_tools::ApprovalMode::Ask,
+            grants: app.agent_grants.clone(),
+            prompts,
+            checkpoints: app.checkpoints.clone(),
+            turn: app.checkpoints.begin_turn(),
+            command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
+            plan: app.agent_plan.clone(),
+        };
+        let call = xencode_providers_rs::ToolCall {
+            id: "p1".to_string(),
+            name: "update_plan".to_string(),
+            arguments: serde_json::json!({"items": [
+                {"text": "read the failing test", "status": "done"},
+                {"text": "fix the parser", "status": "in_progress"},
+                {"text": "re-run the suite", "status": "pending"},
+            ]}),
+        };
+        let dir = std::env::temp_dir().join(format!("xencode-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let posted =
+            crate::agent_tools::execute_tool_call_approved(&app.task_runtime, &dir, &call, &ctx)
+                .await;
+        assert!(
+            posted.starts_with("plan updated: 3 step(s), 1 done"),
+            "{posted}"
+        );
+
+        app.handle_plan_command("/plan");
+        assert!(app.plan_pinned);
+        assert!(
+            app.messages
+                .last()
+                .unwrap()
+                .content
+                .contains("Plan pinned: 1/3 steps done"),
+            "{:?}",
+            app.messages.last().unwrap().content
+        );
+
+        app.handle_plan_command("/plan");
+        assert!(!app.plan_pinned);
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Plan compact: 1/3 steps done"));
+
+        app.handle_plan_command("/plan clear");
+        assert!(crate::agent_tools::plan_items(&app.agent_plan).is_empty());
+        assert!(!app.plan_pinned, "a cleared plan cannot stay pinned");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Plan cleared"));
+
+        // Clearing nothing says so instead of pretending to work.
+        app.handle_plan_command("/plan clear");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("no plan to clear"));
+
+        // A bad argument is usage, not a silent no-op.
+        app.handle_plan_command("/plan expand");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("usage: /plan"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `/plan` is a viewer, not a request: it must never open a chat turn.
+    #[tokio::test]
+    async fn plan_command_does_not_start_a_generation() {
+        let mut app = App::new();
+        app.set_chat_text("/plan");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.submit_message(tx);
+        assert!(!app.is_generating);
+        assert_eq!(app.messages.last().unwrap().role, "system");
+        assert!(app.messages.last().unwrap().content.contains("No plan yet"));
     }
 
     #[test]
