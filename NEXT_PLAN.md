@@ -10,7 +10,7 @@
 - ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
-- ✅ **Rust migration complete**: 13 crates, 499 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 13 crates, 502 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🚧 **Active backlog**: refactor suggestions over the dep graph, team-mode hardening
 
 ## Active Backlog (all Rust — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
@@ -22,7 +22,7 @@
    debounced `WorkspaceWatcher` (notify) feeds the TUI, which warns — as toasts —
    only about tracked/attached/open files, enriched with dep-graph dependents.
 2. **Refactor suggestions** — ✅ drafted 2026-09-20 as **Milestone F — Live Refactor
-   Insights**: live symbol/dep snapshot refresh off the watcher, a `Ctrl+S` insights
+   Insights**: live symbol/dep snapshot refresh off the watcher, a `Ctrl+L` insights
    panel, `xencode advise` CLI and a `repo_advise` agent tool.
 3. **Multimodal inputs** — shipped (Milestone E): image analysis and TUI attach as
    per-backend message parts, plus PDF/DOCX text extraction into the context bundle.

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 499 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 502 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -367,11 +367,19 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
 
 ### F2 — Insights panel
 
-- [ ] F2-01 `Ctrl+S` AdvisePanel: computes `advise()` from the (now live) snapshot on
+- [x] F2-01 AdvisePanel (`Ctrl+L` — not the drafted `Ctrl+S`, which is taken by
+  editor-save/GitCommit, and not `Ctrl+I`, which terminals alias to Tab): computes
+  `advise()` from the (now live) snapshot on
   open; rows colored per kind (⚠ broken import / 🔁 cycle / 🧶 hub / 🕸 orphan),
   ↑↓/jk select, Enter → full-message detail, `o` opens the advised file in the editor,
   `r` recomputes, Esc unwinds detail → panel → chat. Feature Navigator entry #17,
   help overlay, focus/Esc plumbing, keymap tests + small-terminal render test.
+
+  Findings list is a stateful `List` (viewport follows the selection; no manual
+  scroll state), so the only resize-clamped offset is the wrapped detail body.
+  `/advise` now renders through the same `refresh_advise()` the panel uses, so
+  chat and panel can never disagree. 2 keymap tests + 1 render sweep (all five
+  advice kinds, list/detail × populated/empty, oversized scroll); workspace at 502.
 
 ### F3 — Surfaces
 

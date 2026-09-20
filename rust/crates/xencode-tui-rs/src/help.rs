@@ -21,6 +21,7 @@ const GLOBAL: &[Binding] = &[
     ("Ctrl+Y", "PR review dashboard"),
     ("Ctrl+K", "background tasks panel"),
     ("Ctrl+O", "worktree panel"),
+    ("Ctrl+L", "insights panel"),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+P", "project analyzer"),
@@ -150,6 +151,13 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("r", "refresh worktree list"),
             ("Esc", "cancel prompt · close panel"),
         ],
+        AdvisePanel => &[
+            ("↑ ↓ / j k", "select finding · scroll in detail view"),
+            ("Enter", "open/close detail for the selected finding"),
+            ("o", "open the advised file in the editor"),
+            ("r", "recompute insights from the live snapshot"),
+            ("Esc", "back to list · close panel"),
+        ],
     }
 }
 
@@ -214,6 +222,7 @@ mod tests {
             ReviewDashboard,
             TaskManager,
             WorktreePanel,
+            AdvisePanel,
         ] {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }

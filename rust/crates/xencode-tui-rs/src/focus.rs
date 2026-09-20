@@ -33,6 +33,7 @@ pub enum FocusArea {
     ReviewDashboard,
     TaskManager,
     WorktreePanel,
+    AdvisePanel,
 }
 
 /// Sub-states of the WorktreePanel: while one is active every keystroke
@@ -85,6 +86,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("🔍 PR Review", "Per-file diff browsing"),
     ("⏳ Background Tasks", "Running & finished commands"),
     ("🌳 Worktrees", "List, create and remove git worktrees"),
+    ("💡 Insights", "Live refactor suggestions & warnings"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -106,6 +108,7 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         13 => FocusArea::ReviewDashboard,
         14 => FocusArea::TaskManager,
         15 => FocusArea::WorktreePanel,
+        16 => FocusArea::AdvisePanel,
         _ => FocusArea::ChatInput,
     }
 }
