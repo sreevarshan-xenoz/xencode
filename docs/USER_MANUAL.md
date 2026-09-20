@@ -21,7 +21,7 @@ Xencode is a **Rust-only** workspace (`rust/crates/*`, 13 crates):
 The Rust binary (`xencode`) is the entry point.
 
 ### Key Features
-- **Rust TUI**: Ratatui-based terminal interface with 17 interactive feature panels and overlays
+- **Rust TUI**: Ratatui-based terminal interface with 22 interactive feature panels and overlays
 - **Multi-Provider AI Routing**: Ollama local + Anthropic, Gemini, Qwen, OpenRouter cloud with token-aware exponential retry middleware
 - **Code Analysis**: Language-aware AST analysis (Python, JS/TS, Rust) + OWASP vulnerability scanning
 - **HTTP/WebSocket Server**: Axum-based collaboration server with session management
@@ -118,7 +118,8 @@ Global (work in every panel, any mode):
 | `Ctrl+S` | Save editor / Git commit panel |
 | `Ctrl+R` | AI code review (current file) |
 | `Ctrl+Y` | PR review dashboard |
-| `Ctrl+F` | Feature Navigator (14 panels) |
+| `Ctrl+K` | Background tasks panel |
+| `Ctrl+F` | Feature Navigator (15 panels) |
 | `Ctrl+D` | Performance dashboard |
 | `Ctrl+P` | Project analyzer |
 | `Ctrl+B` | ByteBot agent panel |
@@ -168,6 +169,8 @@ Chat editing (after `i`):
 | Custom Models | Profile list, parameter sliders |
 | Learning Mode | Lesson viewer, code examples |
 | Multi-Language | Language detection, translation |
+| PR Review | Per-file diff browsing, base toggle |
+| Background Tasks | Live registry of background commands (stop/remove) |
 
 ### First-Time Setup
 

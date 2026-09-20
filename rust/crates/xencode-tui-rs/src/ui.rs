@@ -52,6 +52,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         FocusArea::LearningMode => draw_learning_mode(f, app, f.area()),
         FocusArea::MultiLanguage => draw_multi_language(f, app, f.area()),
         FocusArea::ReviewDashboard => draw_review_dashboard(f, app, f.area()),
+        FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
         _ => {}
     }
 
@@ -207,6 +208,13 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::ModelSelector => "\u{2191}\u{2193}:select  Enter:confirm  Esc:close",
             FocusArea::CodeReview => "Enter:review  Esc:close",
             FocusArea::ReviewDashboard => "↑↓:file  u/d:scroll  b:base  Enter:reload  Esc:close",
+            FocusArea::TaskManager => {
+                if app.tasks_detail {
+                    "↑↓:scroll  Enter:back to list  Esc:close"
+                } else {
+                    "↑↓:select  Enter:output  x:stop  d:remove  Esc:close"
+                }
+            }
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
@@ -1109,6 +1117,134 @@ fn draw_review_dashboard(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(diff, panes[1]);
 }
 
+/// Detail-pane body for the selected task. Shared by the renderer and the
+/// resize clamp so they count the same lines (E6-02 discipline).
+fn task_detail_text(tasks: &[xencode_core_rs::TaskRecord], selected: usize) -> String {
+    match tasks.get(selected) {
+        None => "(no task selected)".to_string(),
+        Some(rec) if rec.output().is_empty() => format!(
+            "{} — no output yet (still {})",
+            rec.command,
+            rec.status.label()
+        ),
+        Some(rec) => rec.output().join("\n"),
+    }
+}
+
+/// Inner rows of the task panel popup at terminal height `area_height`.
+fn task_panel_inner_height(area_height: u16) -> u16 {
+    centered_rect(85, 75, Rect::new(0, 0, 1, area_height))
+        .inner(ratatui::layout::Margin {
+            horizontal: 1,
+            vertical: 1,
+        })
+        .height
+}
+
+fn draw_task_manager(f: &mut Frame, app: &App, area: Rect) {
+    use xencode_core_rs::TaskStatus;
+
+    let popup_area = centered_rect(85, 75, area);
+    f.render_widget(Clear, popup_area);
+
+    // Registry read without blocking; `None` only during a tool call, and
+    // an empty list is the honest fallback for that one frame.
+    let tasks = app.tasks_snapshot().unwrap_or_default();
+    let running = tasks
+        .iter()
+        .filter(|t| matches!(t.status, TaskStatus::Running))
+        .count();
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(
+            " ⏳ Background Tasks — {running} running / {} total ",
+            tasks.len()
+        ));
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    if app.tasks_detail {
+        let body = task_detail_text(&tasks, app.tasks_selected);
+        let rows = body.lines().count();
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                (app.tasks_scroll as u16).min(clamp_scroll(rows, inner.height)),
+                0,
+            ));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let rows: Vec<Line> = if tasks.is_empty() {
+        vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No background tasks yet.",
+                Style::default().fg(app.theme.fg),
+            )),
+            Line::from(Span::styled(
+                "  Ask the model to run a command in the background",
+                Style::default().fg(app.theme.border),
+            )),
+            Line::from(Span::styled(
+                "  (background_start) — it shows up here.",
+                Style::default().fg(app.theme.border),
+            )),
+        ]
+    } else {
+        let selected = app.tasks_selected.min(tasks.len() - 1);
+        tasks
+            .iter()
+            .enumerate()
+            .map(|(i, rec)| task_line(rec, i == selected, app))
+            .collect()
+    };
+    let list = Paragraph::new(rows).style(Style::default().fg(app.theme.fg));
+    f.render_widget(list, inner);
+}
+
+fn task_line(
+    rec: &xencode_core_rs::TaskRecord,
+    selected: bool,
+    app: &App,
+) -> ratatui::text::Line<'static> {
+    use xencode_core_rs::TaskStatus;
+    let (icon, color) = match &rec.status {
+        TaskStatus::Running => ("▶", app.theme.info),
+        TaskStatus::Exited(0) => ("✓", app.theme.success),
+        TaskStatus::Exited(_) => ("✗", app.theme.danger),
+        TaskStatus::Killed => ("⊘", app.theme.warning),
+    };
+    let marker = if selected { "> " } else { "  " };
+    let row = format!(
+        "{marker}{icon} #{:<3} {:<11} {} — {}",
+        rec.id,
+        rec.status.label(),
+        rec.name,
+        rec.command.replace('\n', " "),
+    );
+    if selected {
+        ratatui::text::Line::from(Span::styled(
+            row,
+            Style::default()
+                .fg(app.theme.highlight_fg)
+                .bg(app.theme.highlight)
+                .add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        ratatui::text::Line::from(Span::styled(row, Style::default().fg(color)))
+    }
+}
+
 // ── Phase 9 Overlays ────────────────────────────────────────────────────────
 
 fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
@@ -1631,6 +1767,16 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
     let help_area = centered_rect(70, 85, area);
     app.help_scroll = app.help_scroll
         .min(clamp_scroll(crate::help::help_lines(app.focus, &app.theme).len(), help_area.height));
+
+    // Background Tasks detail pane (only scrolled state the panel keeps).
+    if app.tasks_detail {
+        let tasks = app.tasks_snapshot().unwrap_or_default();
+        let selected = app.tasks_selected.min(tasks.len().saturating_sub(1));
+        let body = task_detail_text(&tasks, selected);
+        app.tasks_scroll = app
+            .tasks_scroll
+            .min(clamp_scroll(body.lines().count(), task_panel_inner_height(height)) as usize);
+    }
 }
 
 fn draw_feature_navigator(f: &mut Frame, app: &App, area: Rect) {

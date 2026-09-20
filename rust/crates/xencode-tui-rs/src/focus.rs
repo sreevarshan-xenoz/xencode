@@ -31,6 +31,7 @@ pub enum FocusArea {
     LearningMode,
     MultiLanguage,
     ReviewDashboard,
+    TaskManager,
 }
 
 /// Rows of the Settings panel in display order; the index is
@@ -71,6 +72,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("📚 Learning Mode", "Interactive code tutorials"),
     ("🌐 Multi-Language", "Language detection & tools"),
     ("🔍 PR Review", "Per-file diff browsing"),
+    ("⏳ Background Tasks", "Running & finished commands"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -90,6 +92,7 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         11 => FocusArea::LearningMode,
         12 => FocusArea::MultiLanguage,
         13 => FocusArea::ReviewDashboard,
+        14 => FocusArea::TaskManager,
         _ => FocusArea::ChatInput,
     }
 }

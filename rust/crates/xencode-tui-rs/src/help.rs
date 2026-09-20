@@ -19,6 +19,7 @@ const GLOBAL: &[Binding] = &[
     ("Ctrl+S", "save editor / git commit panel"),
     ("Ctrl+R", "code review (AI, current file)"),
     ("Ctrl+Y", "PR review dashboard"),
+    ("Ctrl+K", "background tasks panel"),
     ("Ctrl+F", "feature navigator"),
     ("Ctrl+D", "performance dashboard"),
     ("Ctrl+P", "project analyzer"),
@@ -135,6 +136,12 @@ fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("b", "toggle base HEAD ↔ main"),
             ("u / d", "scroll diff ±10"),
         ],
+        TaskManager => &[
+            ("↑ ↓ / j k", "select task · scroll in detail view"),
+            ("Enter", "open/close task output"),
+            ("x", "stop selected task"),
+            ("d", "remove finished task"),
+        ],
     }
 }
 
@@ -197,6 +204,7 @@ mod tests {
             LearningMode,
             MultiLanguage,
             ReviewDashboard,
+            TaskManager,
         ] {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }

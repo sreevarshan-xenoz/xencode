@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 471 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 475 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -73,9 +73,15 @@
 
 ### D2 — Background tasks UX
 
-- [ ] D2-01 TUI `tasks.rs` panel modeled on `review.rs`: `FocusArea::TaskManager`,
+- [x] D2-01 TUI `tasks.rs` panel modeled on `review.rs`: `FocusArea::TaskManager`,
   Feature Navigator entry + global hotkey, task list with status colors, Enter →
   output detail pane (scrollable), `x` → stop, `d` → remove finished.
+  Shipped in `ui.rs::draw_task_manager` (panel lives with the other overlays; no
+  separate `tasks.rs` was warranted at this size): `Ctrl+K` toggle + Navigator
+  entry #14, status-colored rows (▶ info / ✓ success / ✗ danger / ⊘ warning) read
+  via non-blocking `tasks_snapshot()`, `x`/`d` dispatch `[TASKS]stop|id` /
+  `[TASKS]rm|id` through the event channel so keys never block the UI thread,
+  detail scroll re-clamped on resize (shared line builders, E6-02 pattern).
 - [ ] D2-02 CLI: `xencode tasks list | start <cmd> | poll <id> | stop <id> | rm <id>`.
 - [ ] D2-03 Tests: registry lifecycle (start→exit→rm, stop of dead task, output cap)
   + headless frame renders for the panel.
