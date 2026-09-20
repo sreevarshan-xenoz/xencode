@@ -416,9 +416,180 @@ pub fn advise_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// The workspace file tools (Milestone I, I1-02): read, list, search,
+/// write and a precise old→new edit. Schemas stay deliberately small —
+/// local models call fewer, flatter tools far more reliably. Execution
+/// lives in the TUI's agent tool loop behind the permission policy.
+pub fn file_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "read_file".to_string(),
+            description: "Read a UTF-8 text file in the workspace and return \
+                          its lines with numbers. Returns 200 lines per call; \
+                          pass offset (1-based line number) to page through \
+                          longer files."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path, relative to the workspace \
+                                        root (e.g. src/main.rs)"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "First line to return, 1-based; \
+                                        defaults to 1"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum lines to return (default \
+                                        200, cap 2000)"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "list_dir".to_string(),
+            description: "List the entries of a directory in the workspace. \
+                          Directories end with a slash. Returns at most 300 \
+                          entries."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path relative to the \
+                                        workspace root; empty or omitted \
+                                        means the root itself"
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "search_files".to_string(),
+            description: "Search the workspace for a regular expression \
+                          (matched line by line) and return \
+                          path:line:content matches, at most 100 hits. Skips \
+                          .git, target, node_modules and binary files."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regular expression, e.g. fn\\s+main"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Restrict to this file or directory \
+                                        (relative); omit for the whole \
+                                        workspace"
+                    }
+                },
+                "required": ["pattern"]
+            }),
+        },
+        ToolDefinition {
+            name: "write_file".to_string(),
+            description: "Create or overwrite a UTF-8 text file in the \
+                          workspace with the given content. Parent \
+                          directories are created. Returns a unified diff \
+                          of the change."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to the workspace \
+                                        root"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The complete new content of the file"
+                    }
+                },
+                "required": ["path", "content"]
+            }),
+        },
+        ToolDefinition {
+            name: "edit_file".to_string(),
+            description: "Replace an exact string in an existing workspace \
+                          file. Fails when old is missing or appears more \
+                          than once — then pass more surrounding context, \
+                          or all=true to replace every occurrence. Returns \
+                          a unified diff."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to the workspace \
+                                        root"
+                    },
+                    "old": {
+                        "type": "string",
+                        "description": "The exact text to replace"
+                    },
+                    "new": {
+                        "type": "string",
+                        "description": "The replacement text"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Replace every occurrence instead of \
+                                        requiring a unique match"
+                    }
+                },
+                "required": ["path", "old", "new"]
+            }),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_tools_have_minimal_openai_function_schemas() {
+        let tools = file_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "read_file",
+                "list_dir",
+                "search_files",
+                "write_file",
+                "edit_file"
+            ]
+        );
+        for tool in &tools {
+            let value = tool.to_api_value();
+            assert_eq!(value["type"], "function");
+            assert_eq!(value["function"]["name"], tool.name);
+            // Every argument is a plain scalar — local models handle these.
+            let props = value["function"]["parameters"]["properties"]
+                .as_object()
+                .unwrap();
+            for (_, schema) in props {
+                let ty = schema["type"].as_str().unwrap();
+                assert!(
+                    matches!(ty, "string" | "integer" | "boolean"),
+                    "{}: {ty}",
+                    tool.name
+                );
+            }
+        }
+        assert_eq!(tools[0].parameters["required"][0], "path");
+        assert_eq!(tools[4].parameters["required"][2], "new");
+    }
 
     #[test]
     fn advise_tool_is_a_valid_openai_function_schema() {

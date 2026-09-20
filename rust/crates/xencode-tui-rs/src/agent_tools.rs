@@ -99,19 +99,33 @@ fn absolutize(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// The workspace root as a normalized absolute path — the anchor every
+/// containment check compares against.
+fn workspace_root(root: &Path) -> PathBuf {
+    normalize(&absolutize(root))
+}
+
+/// Resolve a model-supplied path against `root` without touching the disk:
+/// absolute paths pass through, relative ones join the normalized root, and
+/// `.`/`..` are collapsed lexically so a `..` that escapes leaves a path
+/// that no longer starts with the root.
+fn resolve_path(root: &Path, raw: &str) -> PathBuf {
+    let candidate = Path::new(raw.trim());
+    let joined = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        workspace_root(root).join(candidate)
+    };
+    normalize(&absolutize(&joined))
+}
+
 /// Whether `raw` (relative paths resolve against `root`) lands inside the
 /// workspace and outside the forbidden zones (`.git/`, the config dir).
 /// Best-effort lexical check — symlinks are not resolved — which is why
 /// in-workspace writes still prompt in `ask` mode instead of running blindly.
 pub fn path_allowed(root: &Path, raw: &str) -> bool {
-    let root = normalize(&absolutize(root));
-    let candidate = Path::new(raw);
-    let joined_path = if candidate.is_absolute() {
-        candidate.to_path_buf()
-    } else {
-        root.join(candidate)
-    };
-    let joined = normalize(&absolutize(&joined_path));
+    let root = workspace_root(root);
+    let joined = resolve_path(root.as_path(), raw);
     if !joined.starts_with(&root) {
         return false;
     }
@@ -123,7 +137,7 @@ pub fn path_allowed(root: &Path, raw: &str) -> bool {
         return false;
     }
     if let Ok(config_dir) = xencode_config_rs::XencodeConfig::config_dir() {
-        if joined.starts_with(normalize(&config_dir)) {
+        if joined.starts_with(normalize(&absolutize(&config_dir))) {
             return false;
         }
     }
@@ -168,6 +182,360 @@ const MODEL_OUTPUT_TAIL: usize = 50;
 /// Findings handed back to the model per `repo_advise` call.
 const MODEL_ADVISE_CAP: usize = 40;
 
+// ── File tools (I1-02) ──────────────────────────────────────────────────
+
+const READ_DEFAULT_LINES: usize = 200;
+const READ_MAX_LINES: usize = 2000;
+const LIST_MAX_ENTRIES: usize = 300;
+const SEARCH_MAX_HITS: usize = 100;
+const SEARCH_MAX_WALK_DEPTH: usize = 24;
+const DIFF_MAX_LINES: usize = 80;
+/// Directory names the workspace walk always skips (dot-directories are
+/// skipped wholesale, these are the common non-dot offenders).
+const SEARCH_SKIP_DIRS: &[&str] = &["target", "node_modules", "dist", "build", "venv"];
+
+fn err(msg: impl std::fmt::Display) -> String {
+    format!("error: {msg}")
+}
+
+fn arg_str<'a>(args: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> Option<&'a str> {
+    args.get(key).and_then(|v| v.as_str())
+}
+
+fn arg_usize(args: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<usize> {
+    args.get(key).and_then(|v| match v {
+        serde_json::Value::Number(n) => n.as_u64().map(|x| x as usize),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    })
+}
+
+fn arg_bool(args: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
+    match args.get(key) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => s == "true",
+        _ => false,
+    }
+}
+
+/// Resolve a model-supplied path to an absolute in-workspace path, returning
+/// the hard-deny error string when it escapes (outside the root, `.git/`,
+/// config dir). This is the executor-side mirror of `classify`'s path rule:
+/// until the approval prompt (I1-03) is wired, the file tools still refuse
+/// every out-of-workspace byte.
+fn workspace_path(root: &Path, raw: &str) -> Result<(PathBuf, String), String> {
+    if raw.trim().is_empty() {
+        return Err(err("\"path\" must not be empty"));
+    }
+    if !path_allowed(root, raw) {
+        return Err(err(format!(
+            "path outside the workspace (or a forbidden directory): {raw}"
+        )));
+    }
+    let full = resolve_path(root, raw);
+    Ok((full, raw.trim().to_string()))
+}
+
+/// Read a workspace file as text; unreadable, binary and non-UTF-8 files
+/// come back as model-actionable error strings, never panics.
+fn read_text(path: &Path, display: &str) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| err(format!("cannot read {display}: {e}")))?;
+    if bytes.contains(&0) {
+        return Err(err(format!("{display} looks like a binary file")));
+    }
+    String::from_utf8(bytes).map_err(|_| err(format!("{display} is not valid UTF-8")))
+}
+
+/// Capped unified diff between old and new content ("" for a new file).
+fn unified_diff(old: &str, new: &str) -> String {
+    use similar::TextDiff;
+    let mut out = String::new();
+    let mut lines = 0usize;
+    for hunk in TextDiff::from_lines(old, new).unified_diff().iter_hunks() {
+        for line in hunk.to_string().lines() {
+            if lines >= DIFF_MAX_LINES {
+                out.push_str("… diff truncated\n");
+                return out;
+            }
+            out.push_str(line);
+            out.push('\n');
+            lines += 1;
+        }
+    }
+    out
+}
+
+fn tool_read_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(raw) = arg_str(args, "path") else {
+        return err("read_file needs a string \"path\"");
+    };
+    let (full, display) = match workspace_path(root, raw) {
+        Ok(ok) => ok,
+        Err(e) => return e,
+    };
+    let text = match read_text(&full, &display) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return format!("{display}: empty file");
+    }
+    let offset = arg_usize(args, "offset").unwrap_or(1).max(1);
+    let limit = arg_usize(args, "limit")
+        .unwrap_or(READ_DEFAULT_LINES)
+        .clamp(1, READ_MAX_LINES);
+    if offset > lines.len() {
+        return err(format!(
+            "offset {offset} is past the end of {display} ({} lines)",
+            lines.len()
+        ));
+    }
+    let end = lines.len().min(offset - 1 + limit);
+    let mut out = String::new();
+    for (i, line) in lines[offset - 1..end].iter().enumerate() {
+        out.push_str(&format!("{}\t{line}\n", offset + i));
+    }
+    if end < lines.len() {
+        out.push_str(&format!(
+            "… lines {offset}–{end} of {}, pass offset={} for the next page\n",
+            lines.len(),
+            end + 1
+        ));
+    }
+    out.truncate(out.len() - 1);
+    out
+}
+
+fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
+    let (full, display) = match raw {
+        Some(raw) => match workspace_path(root, raw) {
+            Ok(ok) => ok,
+            Err(e) => return e,
+        },
+        None => (workspace_root(root), ".".to_string()),
+    };
+    let Ok(entries) = std::fs::read_dir(&full) else {
+        return err(format!("cannot list {display}: is it a directory?"));
+    };
+    let mut names: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let name = entry.file_name().to_string_lossy().into_owned();
+        names.push(if is_dir { format!("{name}/") } else { name });
+    }
+    names.sort();
+    let total = names.len();
+    if total > LIST_MAX_ENTRIES {
+        names.truncate(LIST_MAX_ENTRIES);
+        names.push(format!("… +{} more entries", total - LIST_MAX_ENTRIES));
+    }
+    if names.is_empty() {
+        return format!("{display}: empty");
+    }
+    format!("{display}:\n{}", names.join("\n"))
+}
+
+fn is_skipped_dir(name: &str) -> bool {
+    name.starts_with('.') || SEARCH_SKIP_DIRS.contains(&name)
+}
+
+/// Collect the files a search walks, bounded in depth; symlinks are never
+/// followed (DirEntry types report the link itself, so cycles cannot occur).
+fn walk_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > SEARCH_MAX_WALK_DEPTH || out.len() >= 20_000 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if !is_skipped_dir(&entry.file_name().to_string_lossy()) {
+                walk_files(&entry.path(), depth + 1, out);
+            }
+        } else if file_type.is_file() {
+            out.push(entry.path());
+        }
+    }
+}
+
+fn relative_display(root: &Path, path: &Path) -> String {
+    normalize(path)
+        .strip_prefix(workspace_root(root))
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn search_one_file(
+    full: &Path,
+    display: &str,
+    re: &regex::Regex,
+    hits: &mut Vec<String>,
+) -> Result<(), String> {
+    let Ok(bytes) = std::fs::read(full) else {
+        return Ok(()); // unreadable files are silently out of scope
+    };
+    if bytes.contains(&0) {
+        return Ok(());
+    }
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(());
+    };
+    for (i, line) in text.lines().enumerate() {
+        if re.is_match(line) {
+            let excerpt: String = line.trim_start().chars().take(200).collect();
+            hits.push(format!("{display}:{}:{excerpt}", i + 1));
+            if hits.len() >= SEARCH_MAX_HITS {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn tool_search_files(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(pattern) = arg_str(args, "pattern") else {
+        return err("search_files needs a string \"pattern\"");
+    };
+    let Ok(re) = regex::Regex::new(pattern) else {
+        return err(format!("invalid regular expression: {pattern}"));
+    };
+    let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
+    let scope = match raw {
+        Some(raw) => match workspace_path(root, raw) {
+            Ok((full, _)) => full,
+            Err(e) => return e,
+        },
+        None => workspace_root(root),
+    };
+    let mut hits: Vec<String> = Vec::new();
+    if scope.is_file() {
+        let display = relative_display(root, &scope);
+        let _ = search_one_file(&scope, &display, &re, &mut hits);
+    } else {
+        let mut files = Vec::new();
+        walk_files(&scope, 0, &mut files);
+        files.sort();
+        for file in files {
+            let display = relative_display(root, &file);
+            let _ = search_one_file(&file, &display, &re, &mut hits);
+            if hits.len() >= SEARCH_MAX_HITS {
+                break;
+            }
+        }
+    }
+    if hits.is_empty() {
+        return format!("no matches for /{pattern}/");
+    }
+    let mut out = format!("{} match(es):\n", hits.len());
+    out.push_str(&hits.join("\n"));
+    if hits.len() >= SEARCH_MAX_HITS {
+        out.push_str(&format!(
+            "\n… {SEARCH_MAX_HITS}-hit cap reached — narrow the pattern or path"
+        ));
+    }
+    out
+}
+
+fn tool_write_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(raw) = arg_str(args, "path") else {
+        return err("write_file needs a string \"path\"");
+    };
+    let Some(content) = arg_str(args, "content") else {
+        return err("write_file needs a string \"content\"");
+    };
+    let (full, display) = match workspace_path(root, raw) {
+        Ok(ok) => ok,
+        Err(e) => return e,
+    };
+    if full.is_dir() {
+        return err(format!("{display} is a directory"));
+    }
+    let existed = full.exists();
+    let old = if existed {
+        match read_text(&full, &display) {
+            Ok(t) => t,
+            Err(e) => return e,
+        }
+    } else {
+        String::new()
+    };
+    if let Some(parent) = full.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return err(format!("cannot create {}: {e}", parent.display()));
+        }
+    }
+    if let Err(e) = std::fs::write(&full, content) {
+        return err(format!("cannot write {display}: {e}"));
+    }
+    let diff = unified_diff(&old, content);
+    let body = if diff.is_empty() {
+        "no textual change".to_string()
+    } else {
+        diff.trim_end().to_string()
+    };
+    format!(
+        "{} {display} ({} line(s))\n{body}",
+        if existed { "updated" } else { "created" },
+        content.lines().count()
+    )
+}
+
+fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(raw) = arg_str(args, "path") else {
+        return err("edit_file needs a string \"path\"");
+    };
+    let Some(old) = arg_str(args, "old") else {
+        return err("edit_file needs a string \"old\"");
+    };
+    let Some(new) = arg_str(args, "new") else {
+        return err("edit_file needs a string \"new\"");
+    };
+    if old.is_empty() {
+        return err("\"old\" must not be empty (use write_file to create content)");
+    }
+    let (full, display) = match workspace_path(root, raw) {
+        Ok(ok) => ok,
+        Err(e) => return e,
+    };
+    let text = match read_text(&full, &display) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let count = text.matches(old).count();
+    let replace_all = arg_bool(args, "all");
+    if count == 0 {
+        return err(format!(
+            "\"old\" not found in {display} — read_file it first and copy the \
+             exact text (including indentation)"
+        ));
+    }
+    if count > 1 && !replace_all {
+        return err(format!(
+            "\"old\" appears {count} times in {display} — pass more context to \
+             make it unique, or all=true to replace every occurrence"
+        ));
+    }
+    let updated = if replace_all {
+        text.replace(old, new)
+    } else {
+        text.replacen(old, new, 1)
+    };
+    if let Err(e) = std::fs::write(&full, &updated) {
+        return err(format!("cannot write {display}: {e}"));
+    }
+    let n = if replace_all { count } else { 1 };
+    let diff = unified_diff(&text, &updated);
+    format!("edited {display}: replaced {n} occurrence(s)\n{diff}")
+        .trim_end()
+        .to_string()
+}
+
 pub type TaskRuntime = Arc<tokio::sync::Mutex<TaskManager>>;
 
 pub fn new_task_runtime() -> TaskRuntime {
@@ -197,7 +565,18 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
                 .get("cwd")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
-                .map(std::path::PathBuf::from);
+                // Resolve against the workspace so a relative cwd means "in
+                // the project", not "in the directory xencode was started
+                // from" — the registry spawns relative to the process dir.
+                .map(|raw| resolve_path(root, raw));
+            if let Some(dir) = &cwd {
+                if !path_allowed(root, &dir.to_string_lossy()) {
+                    return err(format!(
+                        "cwd outside the workspace (or a forbidden directory): {}",
+                        dir.display()
+                    ));
+                }
+            }
             let mut m = rt.lock().await;
             match m.start_with_cwd(name, command, cwd.as_deref()).await {
                 Ok(id) => {
@@ -257,6 +636,11 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
                 Err(e) => format!("error: {e}"),
             }
         }
+        "read_file" => tool_read_file(root, &args),
+        "list_dir" => tool_list_dir(root, &args),
+        "search_files" => tool_search_files(root, &args),
+        "write_file" => tool_write_file(root, &args),
+        "edit_file" => tool_edit_file(root, &args),
         other => format!("error: unknown tool {other}"),
     }
 }
@@ -431,11 +815,18 @@ mod tests {
             execute_tool_call(
                 &rt,
                 Path::new("."),
-                &call("read_file", serde_json::json!({}))
+                &call("mystery_tool", serde_json::json!({}))
             )
             .await
-                == "error: unknown tool read_file"
+                == "error: unknown tool mystery_tool"
         );
+        assert!(execute_tool_call(
+            &rt,
+            Path::new("."),
+            &call("read_file", serde_json::json!({}))
+        )
+        .await
+        .starts_with("error: read_file needs"));
     }
 
     #[tokio::test]
@@ -475,36 +866,51 @@ mod tests {
     }
 
     /// D3-03: an optional `cwd` is passed through and echoed back so the
-    /// model knows where the command actually ran.
+    /// model knows where the command actually ran. I1-02: the cwd must sit
+    /// inside the workspace — an out-of-root cwd is refused by the executor
+    /// itself, not just by `classify`.
     #[tokio::test]
     async fn start_with_cwd_reports_the_directory() {
+        let root = std::env::temp_dir().join(format!("xencode-cwd-test-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
         let rt = new_task_runtime();
-        let dir = std::env::temp_dir();
         let started = execute_tool_call(
             &rt,
-            Path::new("."),
+            &root,
             &call(
                 "background_start",
-                serde_json::json!({"command": "pwd", "cwd": dir.display().to_string()}),
+                serde_json::json!({"command": "pwd", "cwd": "sub"}),
             ),
         )
         .await;
         assert!(
-            started.contains(&format!("in {}", dir.display())),
+            started.contains(&format!("in {}", root.join("sub").display())),
             "{started}"
         );
         wait_exit(&rt, 1).await;
-        // A nonexistent cwd is an error string, never a panic.
+        // A nonexistent (but in-root) cwd is an error string, never a panic.
         let bad = execute_tool_call(
             &rt,
-            Path::new("."),
+            &root,
             &call(
                 "background_start",
-                serde_json::json!({"command": "pwd", "cwd": "/definitely/not/here-xyz"}),
+                serde_json::json!({"command": "pwd", "cwd": "definitely/not/here-xyz"}),
             ),
         )
         .await;
         assert!(bad.starts_with("error:"), "{bad}");
+        // An out-of-workspace cwd is refused without ever spawning.
+        let outside = execute_tool_call(
+            &rt,
+            &root,
+            &call(
+                "background_start",
+                serde_json::json!({"command": "pwd", "cwd": "/etc"}),
+            ),
+        )
+        .await;
+        assert!(outside.contains("outside the workspace"), "{outside}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// F3-02: the model-facing insight tool reads the on-disk snapshot.
@@ -725,5 +1131,232 @@ mod tests {
             classify(&root, "background_start", &good_cwd, ApprovalMode::Ask, &[]),
             Permission::Ask
         );
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        use std::sync::atomic::AtomicUsize;
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-filetools-{label}-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn read_file_numbers_pages_and_rejects_bad_input() {
+        let root = temp_root("read");
+        let body: String = (1..=300).map(|i| format!("line{i}\n")).collect::<String>();
+        std::fs::write(root.join("big.txt"), &body).unwrap();
+
+        let out = tool_read_file(&root, &args_of(serde_json::json!({"path": "big.txt"})));
+        assert!(
+            out.starts_with("1\tline1\n"),
+            "{}",
+            &out[..40.min(out.len())]
+        );
+        assert!(out.contains("200\tline200"));
+        assert!(!out.contains("201\tline201"));
+        assert!(out.contains("pass offset=201 for the next page"), "{out}");
+
+        let paged = tool_read_file(
+            &root,
+            &args_of(serde_json::json!({"path": "big.txt", "offset": 250})),
+        );
+        assert!(paged.starts_with("250\tline250"));
+        assert!(paged.contains("300\tline300"));
+        assert!(!paged.contains("next page"), "last page has no pointer");
+
+        // Out-of-workspace and traversal attempts are refused before any I/O.
+        for path in ["../escape", "/etc/passwd", ".git/config"] {
+            let denied = tool_read_file(&root, &args_of(serde_json::json!({"path": path})));
+            assert!(
+                denied.starts_with("error:") && denied.contains("outside"),
+                "{denied}"
+            );
+        }
+        // Binary and missing files are error strings, not panics.
+        std::fs::write(root.join("bin.dat"), [b'a', 0, b'b']).unwrap();
+        let bin = tool_read_file(&root, &args_of(serde_json::json!({"path": "bin.dat"})));
+        assert!(bin.contains("binary"), "{bin}");
+        let missing = tool_read_file(&root, &args_of(serde_json::json!({"path": "nope.txt"})));
+        assert!(missing.starts_with("error: cannot read"), "{missing}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_dir_sorts_marks_dirs_and_caps() {
+        let root = temp_root("list");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let out = tool_list_dir(&root, &args_of(serde_json::json!({})));
+        assert!(out.starts_with(".:\n"), "{out}");
+        assert!(out.contains("a.txt\n") && out.contains("src/"), "{out}");
+        assert!(
+            out.find("a.txt").unwrap() < out.find("src/").unwrap(),
+            "sorted: {out}"
+        );
+        let file_as_dir = tool_list_dir(&root, &args_of(serde_json::json!({"path": "a.txt"})));
+        assert!(file_as_dir.starts_with("error:"), "{file_as_dir}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn search_files_matches_scopes_and_caps() {
+        let root = temp_root("search");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn main() {}\n// fn main again\n").unwrap();
+        std::fs::write(root.join("target/leak.rs"), "fn main() {}\n").unwrap();
+        let out = tool_search_files(
+            &root,
+            &args_of(serde_json::json!({"pattern": r"fn\s+main"})),
+        );
+        assert!(out.contains("src/a.rs:1:fn main() {}"), "{out}");
+        assert!(out.contains("src/a.rs:2:// fn main again"), "{out}");
+        assert!(!out.contains("target"), "ignored dir leaked: {out}");
+        assert!(out.starts_with("2 match(es)"), "{out}");
+
+        let scoped = tool_search_files(
+            &root,
+            &args_of(serde_json::json!({"pattern": "again", "path": "src"})),
+        );
+        assert!(
+            scoped.contains("1 match(es)") && scoped.contains("src/a.rs:2"),
+            "{scoped}"
+        );
+        assert!(
+            tool_search_files(&root, &args_of(serde_json::json!({"pattern": "zzz-nope"})))
+                .starts_with("no matches"),
+        );
+        let bad_re = tool_search_files(&root, &args_of(serde_json::json!({"pattern": "("})));
+        assert!(bad_re.contains("invalid regular expression"), "{bad_re}");
+
+        // Hit cap: 150 matches report the cap and stop.
+        std::fs::write(root.join("src/many.txt"), "hit\n".repeat(150)).unwrap();
+        let capped = tool_search_files(&root, &args_of(serde_json::json!({"pattern": "^hit$"})));
+        assert!(capped.contains("100 match(es)"), "{capped}");
+        assert!(capped.ends_with("narrow the pattern or path"), "{capped}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn write_file_creates_pages_and_returns_diffs() {
+        let root = temp_root("write");
+        let out = tool_write_file(
+            &root,
+            &args_of(serde_json::json!({"path": "deep/dir/new.txt", "content": "hello\nworld\n"})),
+        );
+        assert!(
+            out.starts_with("created deep/dir/new.txt (2 line(s))"),
+            "{out}"
+        );
+        assert!(out.contains("+hello") && out.contains("+world"), "{out}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("deep/dir/new.txt")).unwrap(),
+            "hello\nworld\n"
+        );
+
+        let again = tool_write_file(
+            &root,
+            &args_of(serde_json::json!({"path": "deep/dir/new.txt", "content": "hello\nmars\n"})),
+        );
+        assert!(again.starts_with("updated"), "{again}");
+        assert!(
+            again.contains("-world") && again.contains("+mars"),
+            "{again}"
+        );
+
+        let denied = tool_write_file(
+            &root,
+            &args_of(serde_json::json!({"path": "../../oops", "content": "x"})),
+        );
+        assert!(denied.contains("outside the workspace"), "{denied}");
+        assert!(!Path::new("/oops").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn edit_file_requires_unique_matches_or_all() {
+        let root = temp_root("edit");
+        std::fs::write(root.join("code.rs"), "alpha\nbeta\nalpha\n").unwrap();
+
+        let dup = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "code.rs", "old": "alpha", "new": "gamma"})),
+        );
+        assert!(
+            dup.contains("appears 2 times") && dup.contains("all=true"),
+            "{dup}"
+        );
+        // The failed edit must not touch the file.
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            "alpha\nbeta\nalpha\n"
+        );
+
+        let missing = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "code.rs", "old": "zzz", "new": "q"})),
+        );
+        assert!(
+            missing.contains("not found") && missing.contains("read_file"),
+            "{missing}"
+        );
+
+        let every = tool_edit_file(
+            &root,
+            &args_of(
+                serde_json::json!({"path": "code.rs", "old": "alpha", "new": "gamma", "all": true}),
+            ),
+        );
+        assert!(
+            every.starts_with("edited code.rs: replaced 2 occurrence(s)"),
+            "{every}"
+        );
+        assert!(
+            every.contains("-alpha") && every.contains("+gamma"),
+            "{every}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            "gamma\nbeta\ngamma\n"
+        );
+
+        std::fs::write(root.join("code.rs"), "gamma\nbeta\ngamma\n").unwrap();
+        let unique = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "code.rs", "old": "beta", "new": "delta"})),
+        );
+        assert!(
+            unique.starts_with("edited code.rs: replaced 1 occurrence(s)"),
+            "{unique}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_tools_route_through_execute_tool_call() {
+        let root = temp_root("route");
+        let written = execute_tool_call(
+            &new_task_runtime(),
+            &root,
+            &call(
+                "write_file",
+                serde_json::json!({"path": "r.txt", "content": "ok\n"}),
+            ),
+        )
+        .await;
+        assert!(written.starts_with("created r.txt"), "{written}");
+        let read = execute_tool_call(
+            &new_task_runtime(),
+            &root,
+            &call("read_file", serde_json::json!({"path": "r.txt"})),
+        )
+        .await;
+        assert_eq!(read, "1\tok");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
