@@ -21,5 +21,6 @@ xencode-config-rs = { path = "../xencode-config-rs" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tokio-tungstenite = { version = "0.29", features = ["connect"] }
+tempfile = "3"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }

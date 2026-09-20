@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Persistent audit trail for collaboration servers (Milestone G, G1-04):
+  `xencode-server-rs::audit::AuditSink` mirrors every `WorkspaceManager`
+  event — creations, joins, role changes, and denials (including
+  authenticated join refusals: unknown session, session full) — as one
+  JSONL line each, appending across restarts. A failed open or write warns
+  once and disables the sink; the session plane never notices. Defaults to
+  disabled so tests touch no disk; the `--audit-path` flag arrives with the
+  CLI server work (G2-01)
 - `repo_advise` agentic tool (F3-02): the chat model can now call repository
   insights directly — broken imports, cycles, hubs, orphans — with an optional
   path `filter`, a 40-finding cap and `error:` strings instead of panics; both

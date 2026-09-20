@@ -67,6 +67,7 @@ async fn create_session(State(state): State<Arc<AppState>>, auth: Authed) -> Jso
     };
 
     let ws = workspaces.create_workspace_with_id(&id, "collaboration", &auth.0.username);
+    state.audit.sync_from(&workspaces);
     let members = member_names(&ws);
 
     Json(SessionInfo {

@@ -68,6 +68,7 @@ pub enum WorkspaceError {
 /// Auditable workspace actions. Denied attempts are logged too — a team
 /// audit trail that omits failures is a liability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuditAction {
     WorkspaceCreated,
     MemberAdded,

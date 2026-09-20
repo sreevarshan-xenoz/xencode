@@ -368,3 +368,69 @@ async fn the_old_username_in_path_route_is_gone() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// G1-04's promise end-to-end: a server started with an audit file mirrors
+/// every mutation and every denial there, in order, as JSONL.
+#[tokio::test]
+async fn the_audit_sink_mirrors_a_real_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let state = Arc::new(AppState::with_audit(Arc::new(
+        xencode_server_rs::audit::AuditSink::to_file(&path),
+    )));
+    let guest_token = state.tokens.lock().await.issue("guest").token;
+    state
+        .workspaces
+        .lock()
+        .await
+        .create_workspace_with_id("s1", "session one", "owner");
+    state
+        .workspaces
+        .lock()
+        .await
+        .add_member("s1", "owner", "guest", Role::Viewer)
+        .unwrap();
+
+    let app = build_app_with_state(state);
+    let mut ws = connect(app, "s1").await;
+    authenticate(&mut ws, &guest_token).await;
+    send(
+        &mut ws,
+        &ClientFrame::Activity {
+            text: "should have been denied".into(),
+        },
+    )
+    .await;
+    match next_event(&mut ws).await {
+        Event::Frame(ServerFrame::Error { code, .. }) => assert_eq!(code, "rbac_denied"),
+        other => panic!("expected error frame, got {other:?}"),
+    }
+    drop(ws);
+
+    // Give the denial write a moment: it happens on the server's schedule,
+    // and every earlier event is already flushed.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let lines: Vec<serde_json::Value> = loop {
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        if lines.len() >= 3 || std::time::Instant::now() > deadline {
+            break lines;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let actions: Vec<&str> = lines
+        .iter()
+        .map(|l| l["action"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, vec!["workspace_created", "member_added", "denied"]);
+    let seqs: Vec<u64> = lines.iter().map(|l| l["seq"].as_u64().unwrap()).collect();
+    assert!(
+        seqs.windows(2).all(|w| w[0] < w[1]),
+        "seq must strictly increase on disk: {seqs:?}"
+    );
+    assert_eq!(lines[2]["actor"], "guest");
+    assert_eq!(lines[2]["target"], "s1");
+}
