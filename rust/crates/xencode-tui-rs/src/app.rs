@@ -93,7 +93,7 @@ fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
 const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
-pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot"];
+pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot", "/rewind"];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
 /// Returns the longest common prefix when it extends the token (pure —
@@ -188,6 +188,9 @@ pub struct App<'a> {
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
     pub agent_grants: Arc<std::sync::Mutex<Vec<crate::agent_tools::ToolClass>>>,
+    /// Byte-for-byte snapshots of what the agent changed, grouped per chat
+    /// turn (I2-01). `/rewind` puts them back; quitting drops them.
+    pub checkpoints: Arc<crate::agent_tools::CheckpointStore>,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -729,6 +732,7 @@ impl<'a> App<'a> {
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
+            checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
             approval_tx,
@@ -1098,7 +1102,7 @@ impl<'a> App<'a> {
         if draft == "/" {
             self.push_toast(
                 crate::toast::ToastKind::Info,
-                "Commands: /init  /ctx  /advise  /bytebot (Tab completes)".to_string(),
+                "Commands: /init  /ctx  /advise  /bytebot  /rewind (Tab completes)".to_string(),
             );
             return true;
         }
@@ -1147,6 +1151,12 @@ impl<'a> App<'a> {
         // Repository insights (/advise [filter])
         if prompt.starts_with("/advise") {
             self.handle_advise_command(&prompt, tx);
+            return;
+        }
+
+        // Undo what the agent changed (/rewind [turns])
+        if prompt == "/rewind" || prompt.starts_with("/rewind ") {
+            self.handle_rewind_command(&prompt);
             return;
         }
 
@@ -1312,7 +1322,11 @@ impl<'a> App<'a> {
         let tool_root = xencode_context_rs::default_root();
         let approval_tx = self.approval_tx.clone();
         let agent_grants = self.agent_grants.clone();
+        let checkpoint_store = self.checkpoints.clone();
         let agent_mode = self.agent_mode();
+        // One checkpoint group per user turn (I2-01): `/rewind` steps back
+        // whole turns, not individual tool calls.
+        let turn_group = self.checkpoints.begin_turn();
         // Keep at least one tool round; 0 would offer tools on no turn at all.
         let max_rounds = self.config.agent_max_rounds.clamp(1, 64);
 
@@ -1337,6 +1351,8 @@ impl<'a> App<'a> {
                 mode: agent_mode,
                 grants: agent_grants,
                 prompts: approval_tx,
+                checkpoints: checkpoint_store,
+                turn: turn_group,
             };
             let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
             for round in 0..=max_rounds {
@@ -2359,6 +2375,112 @@ impl<'a> App<'a> {
         for line in format_advise_report(&self.advise_items, filter) {
             let _ = tx.send(format!("[ADVISE]{line}"));
         }
+    }
+
+    /// `/rewind [turns]` — put back the files the agent changed in its most
+    /// recent turns that touched anything (default: the last turn). The
+    /// snapshots are session-only bytes in memory, so this can never undo an
+    /// earlier xencode run, and git is left entirely alone.
+    fn handle_rewind_command(&mut self, prompt: &str) {
+        if self.is_generating {
+            self.push_toast(
+                crate::toast::ToastKind::Warning,
+                "can't rewind while the agent is working — Esc to stop it first".to_string(),
+            );
+            return;
+        }
+        let arg = prompt.strip_prefix("/rewind").unwrap_or("").trim();
+        let back = if arg.is_empty() {
+            1
+        } else {
+            match arg.parse::<usize>() {
+                Ok(n) if n >= 1 => n,
+                _ => {
+                    self.system_line("usage: /rewind [turns] — a whole number of turns, default 1");
+                    return;
+                }
+            }
+        };
+        let available = self.checkpoints.turns();
+        if available == 0 {
+            self.system_line(
+                "Nothing to rewind: the agent has not changed any files in this session.",
+            );
+            return;
+        }
+        let report = self.checkpoints.rewind(back.min(available));
+        self.refresh_editor_after_rewind(&report);
+        let restored = report.files.len() - report.removed;
+        let mut parts: Vec<String> = Vec::new();
+        if restored > 0 {
+            parts.push(format!("{restored} put back"));
+        }
+        if report.removed > 0 {
+            parts.push(format!("{} deleted", report.removed));
+        }
+        if !report.failed.is_empty() {
+            parts.push(format!("{} failed", report.failed.len()));
+        }
+        self.system_line(&format!(
+            "↺ Rewound {} agent turn(s) — {} ({})",
+            report.turns,
+            parts.join(", "),
+            if report.files.len() > 4 {
+                format!(
+                    "{}, …",
+                    report
+                        .files
+                        .iter()
+                        .take(4)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                report.files.join(", ")
+            }
+        ));
+        self.push_toast(
+            crate::toast::ToastKind::Info,
+            format!("rewound {} file(s)", report.files.len()),
+        );
+    }
+
+    /// A rewind that touches the file the user is looking at must not leave
+    /// a stale buffer in the editor — but unsaved edits are the user's, so
+    /// those are never silently thrown away.
+    fn refresh_editor_after_rewind(&mut self, report: &crate::agent_tools::RewindReport) {
+        let Some(opened) = self.opened_file.clone() else {
+            return;
+        };
+        if !report
+            .paths
+            .iter()
+            .any(|path| path == std::path::Path::new(&opened))
+        {
+            return;
+        }
+        if self.editor_dirty {
+            self.system_line(&format!(
+                "⚠ {opened} was rewound but your unsaved editor changes were kept — save would overwrite the rewind."
+            ));
+            return;
+        }
+        if std::path::Path::new(&opened).exists() {
+            self.open_file_in_editor(&opened);
+        } else {
+            self.editor = TextArea::new(vec![format!("(rewound: {opened} was deleted)")]);
+            self.opened_file = None;
+        }
+    }
+
+    /// One line in the transcript under the system role (local commands that
+    /// never round-trip a provider).
+    fn system_line(&mut self, text: &str) {
+        self.messages.push(UiMessage {
+            role: "system".to_string(),
+            content: text.to_string(),
+        });
     }
 
     /// Sync the in-memory conversation into the canonical transcript store.    /// Appends only messages that aren't already at the tail, so repeated
@@ -3886,6 +4008,86 @@ mod tests {
     use std::collections::HashSet;
     use tokio::sync::mpsc;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
+
+    /// I2-01: `/rewind` is the user's undo for what the agent wrote. The
+    /// checkpoint is recorded by the real gated path, not seeded by hand.
+    #[tokio::test]
+    async fn rewind_command_undoes_agent_writes_and_reports_them() {
+        let dir = std::env::temp_dir().join(format!("xencode-rewind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("keep.txt"), "mine\n").unwrap();
+
+        let mut app = App::new();
+        let (prompts, _rx) = mpsc::unbounded_channel();
+        let ctx = crate::agent_tools::ApprovalCtx {
+            mode: crate::agent_tools::ApprovalMode::AllAllow,
+            grants: app.agent_grants.clone(),
+            prompts,
+            checkpoints: app.checkpoints.clone(),
+            turn: app.checkpoints.begin_turn(),
+        };
+        let call = xencode_providers_rs::ToolCall {
+            id: "c1".to_string(),
+            name: "edit_file".to_string(),
+            arguments: serde_json::json!({"path": "keep.txt", "old": "mine", "new": "theirs"}),
+        };
+        let wrote =
+            crate::agent_tools::execute_tool_call_approved(&app.task_runtime, &dir, &call, &ctx)
+                .await;
+        assert!(wrote.starts_with("edited keep.txt"), "{wrote}");
+        assert!(dir.join("keep.txt").exists());
+
+        app.handle_rewind_command("/rewind");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
+            "mine\n"
+        );
+        let line = app.messages.last().unwrap();
+        assert_eq!(line.role, "system");
+        assert!(
+            line.content.contains("Rewound 1 agent turn") && line.content.contains("keep.txt"),
+            "{:?}",
+            line.content
+        );
+
+        // Honest about having nothing left, rather than pretending to undo.
+        app.handle_rewind_command("/rewind");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("Nothing to rewind"));
+
+        // A bad argument is usage, not a silent no-op.
+        app.handle_rewind_command("/rewind lots");
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .contains("usage: /rewind"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn rewind_refuses_to_fight_a_running_generation() {
+        let mut app = App::new();
+        app.is_generating = true;
+        let before = app.messages.len();
+        app.handle_rewind_command("/rewind");
+        assert_eq!(
+            app.messages.len(),
+            before,
+            "mid-generation rewinds must not touch files"
+        );
+        assert!(
+            app.toasts
+                .iter()
+                .any(|toast| toast.message.contains("while the agent is working")),
+            "the refusal has to be visible"
+        );
+    }
 
     #[test]
     fn parse_llama_port_handles_common_urls() {

@@ -799,6 +799,10 @@ pub struct ApprovalCtx {
     pub mode: ApprovalMode,
     pub grants: Arc<std::sync::Mutex<Vec<ToolClass>>>,
     pub prompts: mpsc::UnboundedSender<(ApprovalRequest, oneshot::Sender<ApprovalAnswer>)>,
+    /// Where writes get snapshotted before they land (I2-01 checkpoints).
+    pub checkpoints: Arc<CheckpointStore>,
+    /// Which turn's group this loop records into.
+    pub turn: usize,
 }
 
 impl ApprovalCtx {
@@ -816,6 +820,60 @@ impl ApprovalCtx {
             }
         }
     }
+
+    /// Save what a file looks like right before an edit-class call changes
+    /// it. Returns a note when the snapshot was impossible, so the model and
+    /// the transcript are never left believing a change is undoable.
+    fn snapshot_before(&self, root: &Path, call: &ToolCall) -> Option<String> {
+        if tool_class(&call.name) != ToolClass::Edit {
+            return None;
+        }
+        let args = call.arguments_object();
+        let raw = arg_str(&args, "path")?;
+        let Ok((full, display)) = workspace_path(root, raw) else {
+            return None;
+        };
+        let prior = match std::fs::read(&full) {
+            Ok(bytes) if bytes.len() > CHECKPOINT_MAX_BYTES => {
+                return Some(format!(
+                    "note: {display} is larger than {} MiB, so /rewind cannot undo this change.",
+                    CHECKPOINT_MAX_BYTES / (1024 * 1024)
+                ));
+            }
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            // A directory or an unreadable file: there is no byte state to
+            // put back, and guessing would risk deleting user data.
+            Err(_) => return None,
+        };
+        self.checkpoints.record(
+            self.turn,
+            Checkpoint {
+                full,
+                display,
+                prior,
+            },
+        );
+        None
+    }
+}
+
+/// Run an approved call, checkpointing the target first.
+async fn run_and_checkpoint(
+    rt: &TaskRuntime,
+    root: &Path,
+    call: &ToolCall,
+    ctx: &ApprovalCtx,
+) -> String {
+    let note = ctx.snapshot_before(root, call);
+    let mut result = execute_tool_call(rt, root, call).await;
+    if let Some(note) = note {
+        if !result.starts_with("error:") {
+            result.push('\n');
+            result.push_str(&note);
+        }
+    }
+    result
 }
 
 /// The loop's entry point (I1-04): policy first, prompt if the policy says
@@ -832,7 +890,7 @@ pub async fn execute_tool_call_approved(
         // Refused without asking: the path is outside what the agent may
         // touch in any mode, so a prompt would only invite a mistake.
         Permission::Deny => FORBIDDEN_RESULT.to_string(),
-        Permission::Allow => execute_tool_call(rt, root, call).await,
+        Permission::Allow => run_and_checkpoint(rt, root, call, ctx).await,
         Permission::Ask => {
             let class = tool_class(&call.name);
             let request = ApprovalRequest {
@@ -848,15 +906,144 @@ pub async fn execute_tool_call_approved(
                 return DENIED_RESULT.to_string();
             }
             match answer.await {
-                Ok(ApprovalAnswer::Approved) => execute_tool_call(rt, root, call).await,
+                Ok(ApprovalAnswer::Approved) => run_and_checkpoint(rt, root, call, ctx).await,
                 Ok(ApprovalAnswer::ApprovedForSession) => {
                     ctx.grant(class);
-                    execute_tool_call(rt, root, call).await
+                    run_and_checkpoint(rt, root, call, ctx).await
                 }
                 // A dropped responder means the prompt vanished with the app.
                 Ok(ApprovalAnswer::Denied) | Err(_) => DENIED_RESULT.to_string(),
             }
         }
+    }
+}
+
+// ── Checkpoints (I2-01) ───────────────────────────────────────────────
+// Session-scoped undo for what the agent wrote: the bytes a file had before
+// the change, grouped per chat turn. Deliberately not git plumbing — no
+// commits, no stash, no branch touched; quitting forgets everything and the
+// user's own `git` workflow stays the durable history.
+
+/// Files above this size are not snapshotted (the change still happens, but
+/// `/rewind` says it cannot undo that one).
+pub const CHECKPOINT_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// One file's state before the agent touched it. `prior == None` means the
+/// file did not exist, so undoing deletes it.
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    pub full: PathBuf,
+    pub display: String,
+    pub prior: Option<Vec<u8>>,
+}
+
+/// What a rewind actually did, for the transcript line and the toast.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RewindReport {
+    /// Workspace-relative paths put back or deleted.
+    pub files: Vec<String>,
+    /// Of those, the ones the agent had created (deleted by the rewind).
+    pub removed: usize,
+    /// Snapshots that could not be restored (unreadable, vanished parent).
+    pub failed: Vec<String>,
+    /// Turns actually undone (groups holding at least one change).
+    pub turns: usize,
+    /// Absolute paths put back or deleted, for callers that must refresh
+    /// their own view of a file (the editor buffer).
+    pub paths: Vec<PathBuf>,
+}
+
+#[derive(Default)]
+pub struct CheckpointStore {
+    groups: std::sync::Mutex<Vec<Vec<Checkpoint>>>,
+}
+
+impl CheckpointStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Vec<Checkpoint>>> {
+        self.groups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Open a group for one chat turn; the index goes into `ApprovalCtx`.
+    pub fn begin_turn(&self) -> usize {
+        let mut groups = self.lock();
+        groups.push(Vec::new());
+        groups.len() - 1
+    }
+
+    fn record(&self, turn: usize, checkpoint: Checkpoint) {
+        if let Some(group) = self.lock().get_mut(turn) {
+            group.push(checkpoint);
+        }
+    }
+
+    /// How many turns actually changed files (turns that wrote nothing are
+    /// not steps to walk back).
+    pub fn turns(&self) -> usize {
+        self.lock().iter().filter(|group| !group.is_empty()).count()
+    }
+
+    /// Undo the last `back` turns that changed files, newest first. Turns
+    /// with no writes are skipped rather than counted.
+    pub fn rewind(&self, back: usize) -> RewindReport {
+        let mut report = RewindReport::default();
+        let mut undone = 0;
+        while undone < back {
+            let group = {
+                let mut groups = self.lock();
+                match groups.last_mut() {
+                    Some(group) => {
+                        let taken = std::mem::take(group);
+                        groups.pop();
+                        taken
+                    }
+                    None => break,
+                }
+            };
+            if group.is_empty() {
+                continue;
+            }
+            // Reverse order so an earlier snapshot of the same file wins.
+            for checkpoint in group.iter().rev() {
+                restore_one(checkpoint, &mut report);
+            }
+            undone += 1;
+            report.turns += 1;
+        }
+        report
+    }
+}
+
+fn restore_one(checkpoint: &Checkpoint, report: &mut RewindReport) {
+    match &checkpoint.prior {
+        Some(bytes) => {
+            if let Some(parent) = checkpoint.full.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(&checkpoint.full, bytes) {
+                Ok(()) => {
+                    report.files.push(checkpoint.display.clone());
+                    report.paths.push(checkpoint.full.clone());
+                }
+                Err(_) => report.failed.push(checkpoint.display.clone()),
+            }
+        }
+        // The agent created it: undo means deleting — and only ever a file,
+        // never whatever else may occupy that path now.
+        None => match std::fs::remove_file(&checkpoint.full) {
+            Ok(()) => {
+                report.files.push(checkpoint.display.clone());
+                report.paths.push(checkpoint.full.clone());
+                report.removed += 1;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => report.failed.push(checkpoint.display.clone()),
+        },
     }
 }
 
@@ -1685,11 +1872,15 @@ mod tests {
 
     fn harness(mode: ApprovalMode) -> Harness {
         let (tx, rx) = mpsc::unbounded_channel();
+        let checkpoints = Arc::new(CheckpointStore::new());
+        let turn = checkpoints.begin_turn();
         Harness {
             ctx: ApprovalCtx {
                 mode,
                 grants: Arc::new(std::sync::Mutex::new(Vec::new())),
                 prompts: tx,
+                checkpoints,
+                turn,
             },
             prompts: rx,
         }
@@ -1920,6 +2111,187 @@ mod tests {
             !root.join("z.txt").exists(),
             "nothing may be written unasked"
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    // ── Checkpoints (I2-01) ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn an_approved_write_is_snapshotted_and_rewinds_to_absent() {
+        let root = temp_root("cp-created");
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("new.rs", "fn n() {}\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert!(result.starts_with("created new.rs"), "{result}");
+        assert!(root.join("new.rs").exists());
+        assert_eq!(h.ctx.checkpoints.turns(), 1);
+
+        let report = h.ctx.checkpoints.rewind(1);
+        assert_eq!(report.turns, 1);
+        assert_eq!(report.files, vec!["new.rs".to_string()]);
+        assert_eq!(report.removed, 1);
+        assert!(
+            !root.join("new.rs").exists(),
+            "a rewind deletes what the agent created"
+        );
+        assert_eq!(h.ctx.checkpoints.turns(), 0, "a rewound group is gone");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rewritten_file_comes_back_byte_for_byte() {
+        let root = temp_root("cp-modified");
+        std::fs::write(root.join("keep.txt"), "original\né\n").unwrap();
+        let h = harness(ApprovalMode::AllAllow);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("keep.txt", "overwritten\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+            // AllAllow: no prompt is raised, so `answer` is never used.
+        )
+        .await;
+        assert!(result.starts_with("updated keep.txt"), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "overwritten\n"
+        );
+        h.ctx.checkpoints.rewind(1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "original\né\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn rewind_steps_back_one_turn_at_a_time_and_keeps_the_oldest_state() {
+        let root = temp_root("cp-turns");
+        let store = Arc::new(CheckpointStore::new());
+        let rt = new_task_runtime();
+        for turn in 0..3 {
+            let turn_group = {
+                let _ = &store;
+                store.begin_turn()
+            };
+            let ctx = ApprovalCtx {
+                mode: ApprovalMode::AllAllow,
+                grants: Arc::new(std::sync::Mutex::new(Vec::new())),
+                prompts: mpsc::unbounded_channel().0,
+                checkpoints: store.clone(),
+                turn: turn_group,
+            };
+            let content = format!("written in turn {turn}\n");
+            let result =
+                execute_tool_call_approved(&rt, &root, &write_call("loop.txt", &content), &ctx)
+                    .await;
+            assert!(
+                result.starts_with("created loop.txt") || result.starts_with("updated loop.txt"),
+                "{result}"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("loop.txt")).unwrap(),
+            "written in turn 2\n"
+        );
+        assert_eq!(store.turns(), 3);
+
+        // One step back: the state at the end of turn 1, not of turn 0 —
+        // the snapshot taken *before* turn 2 was turn 1's output.
+        store.rewind(1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("loop.txt")).unwrap(),
+            "written in turn 1\n"
+        );
+        assert_eq!(store.turns(), 2);
+        store.rewind(1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("loop.txt")).unwrap(),
+            "written in turn 0\n"
+        );
+        store.rewind(1);
+        assert!(
+            !root.join("loop.txt").exists(),
+            "the last step undoes the creation itself"
+        );
+        assert_eq!(store.turns(), 0);
+        // Rewinding with nothing left is a no-op, not a panic.
+        let empty = store.rewind(5);
+        assert_eq!(empty.turns, 0);
+        assert!(empty.files.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn reads_never_checkpoint_and_denied_calls_leave_nothing_behind() {
+        let root = temp_root("cp-noise");
+        std::fs::write(root.join("r.txt"), "x\n").unwrap();
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+        let read = gated(
+            new_task_runtime(),
+            root.clone(),
+            call("read_file", serde_json::json!({"path": "r.txt"})),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(read, "1\tx");
+        assert_eq!(h.ctx.checkpoints.turns(), 0, "a read has nothing to undo");
+
+        gated(
+            new_task_runtime(),
+            root.clone(),
+            write_call("never.txt", "y\n"),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(
+            h.ctx.checkpoints.turns(),
+            0,
+            "a denied call must not record a snapshot either"
+        );
+        assert!(!root.join("never.txt").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_oversized_target_says_rewind_cannot_undo_it() {
+        let root = temp_root("cp-big");
+        // One byte over the cap, written by hand so the test does not need a
+        // 4 MiB write_file argument through JSON.
+        let big = root.join("big.bin");
+        std::fs::write(&big, vec![b'a'; CHECKPOINT_MAX_BYTES + 1]).unwrap();
+        let h = harness(ApprovalMode::AllAllow);
+        let mut prompts = h.prompts;
+        let result = gated(
+            new_task_runtime(),
+            root.clone(),
+            call(
+                "edit_file",
+                serde_json::json!({"path": "big.bin", "old": "aaa", "new": "bbb", "all": true}),
+            ),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert!(result.starts_with("edited big.bin"), "{result}");
+        assert!(result.contains("/rewind cannot undo"), "{result}");
+        assert_eq!(h.ctx.checkpoints.turns(), 0);
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

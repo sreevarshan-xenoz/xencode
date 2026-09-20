@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Agent checkpoints and `/rewind` (Milestone I, I2-01): every write or edit the
+  user approves is snapshotted first — the exact prior bytes, or "this file did
+  not exist" — grouped by chat turn in memory. `/rewind` undoes the last turn
+  that changed files, `/rewind 3` the last three; created files are deleted,
+  changed files come back byte-for-byte, turns that wrote nothing are skipped
+  rather than counted. Nothing touches git, nothing is persisted, and a file
+  larger than 4 MiB says out loud that `/rewind` cannot undo it. It refuses to
+  run mid-generation, and if the rewound file is open with unsaved edits the
+  editor warns instead of discarding them
 - The agent tool loop is now file-capable and gated (Milestone I, I1-04): the
   chat turn offers `file_tools()` next to the background and advice tools,
   and every requested call goes through the permission policy first —

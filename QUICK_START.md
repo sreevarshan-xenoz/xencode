@@ -38,7 +38,7 @@ xencode
 Full-screen terminal UI: chat, file explorer (Space attaches files —
 images ride as message parts the model actually sees, PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, model picker, and more.
+`/advise` repo insights, `/rewind` to undo agent edits, model picker, and more.
 
 ### One-shot query
 ```bash
