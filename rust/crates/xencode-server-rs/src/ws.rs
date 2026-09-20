@@ -1,3 +1,4 @@
+use crate::tokens::TokenStore;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use std::collections::HashMap;
@@ -46,6 +47,7 @@ pub type PeerMap = Arc<Mutex<HashMap<String, Vec<Peer>>>>;
 pub struct AppState {
     pub peers: PeerMap,
     pub sessions: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    pub tokens: Arc<Mutex<TokenStore>>,
 }
 
 impl AppState {
@@ -53,6 +55,7 @@ impl AppState {
         Self {
             peers: Arc::new(Mutex::new(HashMap::new())),
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            tokens: Arc::new(Mutex::new(TokenStore::new())),
         }
     }
 }

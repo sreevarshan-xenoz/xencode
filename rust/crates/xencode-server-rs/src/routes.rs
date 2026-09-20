@@ -1,13 +1,14 @@
 use axum::{
     extract::{Path, State, WebSocketUpgrade},
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
 
+use crate::tokens::Authed;
 use crate::ws::AppState;
 
 #[derive(Serialize)]
@@ -50,8 +51,8 @@ async fn server_status(State(state): State<Arc<AppState>>) -> Json<StatusRespons
     })
 }
 
-/// Create a new collaboration session.
-async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionInfo> {
+/// Create a new collaboration session. Requires a valid token.
+async fn create_session(State(state): State<Arc<AppState>>, _auth: Authed) -> Json<SessionInfo> {
     let mut sessions = state.sessions.lock().await;
 
     // The id is a truncated UUID, so it carries only 32 bits. That was harmless
@@ -73,23 +74,26 @@ async fn create_session(State(state): State<Arc<AppState>>) -> Json<SessionInfo>
     })
 }
 
-/// Get session info by invite code (id).
+/// Get session info by id. Unknown ids are a 404, not an empty 200 — the
+/// caller must be able to tell "no such session" from "session with nobody
+/// in it".
 async fn get_session(
-    Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> Json<SessionInfo> {
-    let members = state
-        .sessions
-        .lock()
-        .await
-        .get(&id)
-        .cloned()
-        .unwrap_or_default();
-    Json(SessionInfo {
-        id,
-        members,
-        created_at: chrono::Utc::now().to_rfc3339(),
-    })
+    _auth: Authed,
+    Path(id): Path<String>,
+) -> Result<Json<SessionInfo>, (StatusCode, Json<serde_json::Value>)> {
+    let session = state.sessions.lock().await.get(&id).cloned();
+    match session {
+        Some(members) => Ok(Json(SessionInfo {
+            id,
+            members,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        })),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no such session"})),
+        )),
+    }
 }
 
 /// WebSocket upgrade handler for collaboration sessions.
@@ -102,6 +106,10 @@ async fn ws_handler(
 }
 
 /// API config endpoint — returns current server configuration.
+///
+/// The llamacpp block deliberately omits `model_path`, `executable`, and
+/// `args`: those are host filesystem details, this endpoint is public, and
+/// the operator can read them in `~/.xencode/config` locally.
 async fn get_config() -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     Json(serde_json::json!({
@@ -111,9 +119,6 @@ async fn get_config() -> Json<serde_json::Value> {
         "features": ["collaboration", "code_analysis", "rag", "plugins", "llamacpp"],
         "llamacpp": {
             "url": cfg.llama_cpp_url,
-            "model_path": cfg.llama_cpp_model_path,
-            "executable": cfg.llama_cpp_executable,
-            "args": cfg.llama_cpp_args,
             "sampling": {
                 "temperature": cfg.llama_cpp_temperature,
                 "top_k": cfg.llama_cpp_top_k,
@@ -175,8 +180,9 @@ async fn list_models() -> Json<serde_json::Value> {
     }))
 }
 
-/// Whether the llama.cpp server process is tracked/auto-startable, and the
-/// last recorded generation timing stats.
+/// Whether the llama.cpp server process is tracked/auto-startable. Public,
+/// so it reports only reachability facts — filesystem paths stay in the
+/// config file.
 async fn llamacpp_status() -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     let exe = if cfg.llama_cpp_executable.is_empty() {
@@ -189,14 +195,16 @@ async fn llamacpp_status() -> Json<serde_json::Value> {
         "server_running": llama_pid.is_some(),
         "pid": llama_pid,
         "url": cfg.llama_cpp_url,
-        "model_path": cfg.llama_cpp_model_path,
-        "executable": cfg.llama_cpp_executable,
     }))
 }
 
 /// Load the configured GGUF model into the llama.cpp server (unloads any
-/// currently loaded model first).
-async fn llamacpp_load() -> Json<serde_json::Value> {
+/// currently loaded model first). Requires a valid token — this spawns and
+/// reconfigures a local process.
+async fn llamacpp_load(
+    State(_state): State<Arc<AppState>>,
+    _auth: Authed,
+) -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     if cfg.llama_cpp_model_path.is_empty() {
         return Json(serde_json::json!({
@@ -214,8 +222,12 @@ async fn llamacpp_load() -> Json<serde_json::Value> {
     }
 }
 
-/// Unload the currently loaded model from the llama.cpp server.
-async fn llamacpp_unload() -> Json<serde_json::Value> {
+/// Unload the currently loaded model from the llama.cpp server. Requires a
+/// valid token.
+async fn llamacpp_unload(
+    State(_state): State<Arc<AppState>>,
+    _auth: Authed,
+) -> Json<serde_json::Value> {
     let cfg = xencode_config_rs::XencodeConfig::load().unwrap_or_default();
     let client = xencode_models_rs::LlamaCppClient::new(&cfg.llama_cpp_url, 60);
     match client.unload_models().await {
@@ -228,6 +240,10 @@ async fn llamacpp_unload() -> Json<serde_json::Value> {
 }
 
 /// Build the complete axum Router with all routes.
+///
+/// No CORS layer: the only clients are the TUI (reqwest — unaffected by CORS)
+/// and curl-style tooling. Adding permissive CORS would only widen the
+/// browser-based attack surface for no consumer.
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(health_check))
@@ -242,13 +258,23 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/llamacpp/status", get(llamacpp_status))
         .route("/api/llamacpp/load", post(llamacpp_load))
         .route("/api/llamacpp/unload", post(llamacpp_unload))
-        .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tokens::Principal;
+
+    /// A principal for calling auth-gated handlers directly; the handlers do
+    /// not re-check it (the extractor did), so any well-formed one works.
+    fn authed() -> Authed {
+        Authed(Principal {
+            username: "tester".to_string(),
+            token: "xencode_test".to_string(),
+            expires_at: chrono::Utc::now(),
+        })
+    }
 
     #[tokio::test]
     async fn test_health_check_body() {
@@ -271,15 +297,22 @@ mod tests {
         assert!(features.contains(&serde_json::json!("llamacpp")));
         let ll = &config.0["llamacpp"];
         assert!(ll["url"].is_string());
-        assert!(ll["model_path"].is_string());
-        assert!(ll["executable"].is_string());
-        assert!(ll["args"].is_array());
         assert!(
             ll["sampling"]["temperature"].is_null() || ll["sampling"]["temperature"].is_number()
         );
         assert!(ll["sampling"]["top_k"].is_null() || ll["sampling"]["top_k"].is_number());
         assert!(ll["sampling"]["min_p"].is_null() || ll["sampling"]["min_p"].is_number());
         assert!(ll["sampling"]["max_tokens"].is_null() || ll["sampling"]["max_tokens"].is_number());
+    }
+
+    /// This endpoint is public; host filesystem details must not ride along.
+    #[tokio::test]
+    async fn get_config_does_not_leak_host_paths() {
+        let config = get_config().await;
+        let ll = &config.0["llamacpp"];
+        assert!(ll["model_path"].is_null());
+        assert!(ll["executable"].is_null());
+        assert!(ll["args"].is_null());
     }
 
     #[tokio::test]
@@ -313,7 +346,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_session_returns_id() {
         let state = Arc::new(AppState::new());
-        let session = create_session(State(state)).await;
+        let session = create_session(State(state), authed()).await;
         assert!(session.id.starts_with("xencode-"));
         assert!(session.members.is_empty());
         assert!(!session.created_at.is_empty());
@@ -322,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn create_session_records_the_session_in_state() {
         let state = Arc::new(AppState::new());
-        let session = create_session(State(state.clone())).await;
+        let session = create_session(State(state.clone()), authed()).await;
 
         let sessions = state.sessions.lock().await;
         assert!(
@@ -334,19 +367,32 @@ mod tests {
         assert_eq!(sessions[&session.id], Vec::<String>::new());
     }
 
-    /// Round-trip check only. It cannot detect the bug this change fixes:
-    /// `get_session` uses `unwrap_or_default()`, so a session that was never
-    /// recorded is indistinguishable from one recorded with no members. Making
-    /// the two distinguishable means returning 404 for the former, which is an
-    /// API change worth deciding on its own.
+    /// Created and fetched sessions are the same object; unknown ids are now
+    /// distinguishable — see `get_session_returns_404_for_unknown_id`.
     #[tokio::test]
     async fn get_session_round_trips_a_created_session() {
         let state = Arc::new(AppState::new());
-        let created = create_session(State(state.clone())).await;
+        let created = create_session(State(state.clone()), authed()).await;
 
-        let fetched = get_session(Path(created.id.clone()), State(state)).await;
-        assert_eq!(fetched.id, created.id);
-        assert!(fetched.members.is_empty());
+        let fetched = get_session(State(state), authed(), Path(created.id.clone()))
+            .await
+            .expect("created session should be found");
+        assert_eq!(fetched.0.id, created.id);
+        assert!(fetched.0.members.is_empty());
+    }
+
+    /// The regression this guards: `get_session` used to answer 200 with an
+    /// empty member list for ids that were never created, making "no such
+    /// session" indistinguishable from an empty session.
+    #[tokio::test]
+    async fn get_session_returns_404_for_unknown_id() {
+        let state = Arc::new(AppState::new());
+        let result = get_session(State(state), authed(), Path("nonexistent".to_string())).await;
+        let resp = result
+            .err()
+            .expect("unknown session must not be 200")
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     /// A member joining through the WebSocket path must be visible on the
@@ -354,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn a_member_joining_a_created_session_is_visible_on_it() {
         let state = Arc::new(AppState::new());
-        let created = create_session(State(state.clone())).await;
+        let created = create_session(State(state.clone()), authed()).await;
 
         // What handle_socket does when a peer joins.
         state
@@ -365,8 +411,10 @@ mod tests {
             .or_default()
             .push("alice".to_string());
 
-        let fetched = get_session(Path(created.id.clone()), State(state.clone())).await;
-        assert_eq!(fetched.members, vec!["alice".to_string()]);
+        let fetched = get_session(State(state.clone()), authed(), Path(created.id.clone()))
+            .await
+            .expect("created session should be found");
+        assert_eq!(fetched.0.members, vec!["alice".to_string()]);
         // Joining must not have created a second, parallel session entry.
         assert_eq!(state.sessions.lock().await.len(), 1);
     }
@@ -376,8 +424,8 @@ mod tests {
         let state = Arc::new(AppState::new());
         assert_eq!(server_status(State(state.clone())).await.sessions, 0);
 
-        let _ = create_session(State(state.clone())).await;
-        let _ = create_session(State(state.clone())).await;
+        let _ = create_session(State(state.clone()), authed()).await;
+        let _ = create_session(State(state.clone()), authed()).await;
 
         assert_eq!(server_status(State(state)).await.sessions, 2);
     }
@@ -387,7 +435,13 @@ mod tests {
         let state = Arc::new(AppState::new());
         let mut ids = std::collections::HashSet::new();
         for _ in 0..50 {
-            ids.insert(create_session(State(state.clone())).await.0.id.clone());
+            ids.insert(
+                create_session(State(state.clone()), authed())
+                    .await
+                    .0
+                    .id
+                    .clone(),
+            );
         }
         assert_eq!(ids.len(), 50);
         assert_eq!(state.sessions.lock().await.len(), 50);
@@ -403,18 +457,10 @@ mod tests {
             .await
             .insert("xencode-existing".to_string(), vec!["alice".to_string()]);
 
-        let _ = create_session(State(state.clone())).await;
+        let _ = create_session(State(state.clone()), authed()).await;
 
         let sessions = state.sessions.lock().await;
         assert_eq!(sessions["xencode-existing"], vec!["alice".to_string()]);
-    }
-
-    #[tokio::test]
-    async fn test_get_session_not_found() {
-        let state = Arc::new(AppState::new());
-        let session = get_session(Path("nonexistent".to_string()), State(state)).await;
-        assert_eq!(session.id, "nonexistent");
-        assert!(session.members.is_empty());
     }
 
     #[tokio::test]
@@ -428,8 +474,10 @@ mod tests {
                 vec!["alice".to_string(), "bob".to_string()],
             );
         }
-        let session = get_session(Path("active-session".to_string()), State(state)).await;
-        assert_eq!(session.members, vec!["alice", "bob"]);
+        let session = get_session(State(state), authed(), Path("active-session".to_string()))
+            .await
+            .expect("session should be found");
+        assert_eq!(session.0.members, vec!["alice", "bob"]);
     }
 
     #[tokio::test]
@@ -448,21 +496,29 @@ mod tests {
         // pid may be null or a string
         assert!(status.0["pid"].is_null() || status.0["pid"].is_string());
         assert!(status.0["url"].is_string());
-        assert!(status.0["model_path"].is_string());
-        assert!(status.0["executable"].is_string());
+    }
+
+    /// This endpoint is public; it must not name host files.
+    #[tokio::test]
+    async fn llamacpp_status_does_not_leak_host_paths() {
+        let status = llamacpp_status().await;
+        assert!(status.0["model_path"].is_null());
+        assert!(status.0["executable"].is_null());
     }
 
     #[tokio::test]
     async fn test_llamacpp_load_no_path() {
         // Guard against an environment-configured path leaking in: only assert
         // the response is a well-formed object with a success boolean.
-        let resp = llamacpp_load().await;
+        let state = Arc::new(AppState::new());
+        let resp = llamacpp_load(State(state), authed()).await;
         assert!(resp.0["success"].is_boolean());
     }
 
     #[tokio::test]
     async fn test_llamacpp_unload_shape() {
-        let resp = llamacpp_unload().await;
+        let state = Arc::new(AppState::new());
+        let resp = llamacpp_unload(State(state), authed()).await;
         assert!(resp.0["success"].is_boolean());
     }
 
