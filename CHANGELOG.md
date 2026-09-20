@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- Docs close-out (Milestone F4): NEXT_PLAN.md marks Milestone F complete and its
+  backlog now carries only team-mode hardening; the TUI panel count (24),
+  Feature Navigator entries (17), key tables, `xencode advise` docs and the
+  CLI subcommand list were re-verified against the tree — 13 crates, 508 tests,
+  zero warnings at this commit
 - Docs close-out (Milestone D4): NEXT_PLAN.md marks Milestone D complete and drops stale backlog claims (the real-time watcher, multimodal inputs and PR review have all shipped); NEXT_PLAN_TASKS.md subcommand checklist refreshed from `xencode --help`; counts re-verified against a full run — 13 crates, 494 tests, zero warnings
 - Docs close-out (Milestone E7): QUICK_START/USER_MANUAL TUI sections rewritten against the real keymap — removed the never-existing `/help` `/models` `/model` `/clear` `/exit` slash commands, documented the help overlay, multiline input, history recall and Tab completion; README panel count corrected to 21; the unbound `h:refresh` Provider Health status hint now shows the working `Ctrl+H`
 - TUI key handling restructured into a new `keymap.rs`: global Ctrl chord table + per-focus handlers replace the ~900-line `match` in the event loop. Panels now own their letter keys — SecurityAuditor `s` (sort toggle) and CustomModels `s` (save profile) work again instead of opening Settings — and `j`/`k` are typable in every text field (commit message, ByteBot command, settings URL edit); ByteBot history recall is ↑ only (E6-01)
