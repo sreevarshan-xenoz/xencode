@@ -159,6 +159,27 @@ enum Commands {
         /// Port to listen on
         #[arg(long, default_value = "8765")]
         port: u16,
+
+        /// Address to bind (default: loopback only)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
+        /// TLS certificate in PEM form; requires --key
+        #[arg(long)]
+        cert: Option<PathBuf>,
+
+        /// TLS private key in PEM form; requires --cert
+        #[arg(long)]
+        key: Option<PathBuf>,
+
+        /// Audit log path; "none" disables (default: ~/.xencode/audit.jsonl)
+        #[arg(long)]
+        audit_path: Option<String>,
+
+        /// Allow a non-loopback bind without TLS — tokens and activity then
+        /// travel in clear text; read the warning before reaching for this
+        #[arg(long)]
+        allow_insecure_public: bool,
     },
 
     /// Analyze code for issues and vulnerabilities
@@ -413,7 +434,14 @@ async fn main() {
             json,
             limit,
         } => run_advise(filter, json, limit),
-        Commands::Server { port } => run_server(port).await,
+        Commands::Server {
+            port,
+            host,
+            cert,
+            key,
+            audit_path,
+            allow_insecure_public,
+        } => run_server(port, host, cert, key, audit_path, allow_insecure_public).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
         Commands::Review { base, format } => run_review(base, format),
@@ -1263,23 +1291,145 @@ fn run_advise(filter: Option<String>, json: bool, limit: usize) -> Result<(), St
     Ok(())
 }
 
-async fn run_server(port: u16) -> Result<(), String> {
-    use std::net::SocketAddr;
-    let state = Arc::new(ServerState::new());
-    let app = xencode_server_rs::build_app_with_state(state.clone());
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("🚀 Xencode server starting on http://0.0.0.0:{}", port);
+/// What `xencode server` decided about its bind, before any socket exists.
+#[derive(Debug, PartialEq, Eq)]
+struct ServerBind {
+    addr: std::net::SocketAddr,
+    /// (cert, key) when TLS was requested.
+    tls: Option<(PathBuf, PathBuf)>,
+    /// Non-fatal condition the operator must see on startup.
+    warning: Option<String>,
+}
+
+/// Decide how the server binds. Pure — no sockets, no filesystem.
+///
+/// The loopback question is an `IpAddr` property, not a string prefix:
+/// `::1` is loopback and `127.0.0.53` is too, while a `starts_with("127.")`
+/// check would silently refuse the former and bless lookalikes.
+fn resolve_bind(
+    host: &str,
+    port: u16,
+    cert: Option<&std::path::Path>,
+    key: Option<&std::path::Path>,
+    allow_insecure_public: bool,
+) -> Result<ServerBind, String> {
+    let ip: std::net::IpAddr = match host {
+        "localhost" => std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        other => other.parse().map_err(|_| {
+            format!("invalid --host '{host}': expected an IP address or 'localhost'")
+        })?,
+    };
+    let tls = match (cert, key) {
+        (Some(c), Some(k)) => Some((c.to_path_buf(), k.to_path_buf())),
+        (Some(_), None) => return Err("--cert given without --key; TLS needs both".to_string()),
+        (None, Some(_)) => return Err("--key given without --cert; TLS needs both".to_string()),
+        (None, None) => None,
+    };
+    let public_plain = tls.is_none() && !ip.is_loopback();
+    if public_plain && !allow_insecure_public {
+        return Err(format!(
+            "refusing to bind {ip} without TLS: pass --cert and --key, \
+             or --allow-insecure-public to serve plain ws:// on a public interface"
+        ));
+    }
+    let warning = public_plain.then(|| {
+        format!(
+            "serving WITHOUT TLS on {ip} because --allow-insecure-public was set: \
+             tokens and activity travel in clear text"
+        )
+    });
+    Ok(ServerBind {
+        addr: std::net::SocketAddr::new(ip, port),
+        tls,
+        warning,
+    })
+}
+
+/// Where the audit log goes: `--audit-path none` disables, an explicit path
+/// is taken verbatim, and the default is the user-level config directory
+/// (`~/.xencode/audit.jsonl`) — sessions are not repo-scoped, so neither is
+/// the trail.
+fn resolve_audit_path(audit_path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    match audit_path {
+        Some("none") => Ok(None),
+        Some(p) => Ok(Some(PathBuf::from(p))),
+        None => Ok(Some(
+            XencodeConfig::config_dir()
+                .map_err(|e| e.to_string())?
+                .join("audit.jsonl"),
+        )),
+    }
+}
+
+async fn run_server(
+    port: u16,
+    host: String,
+    cert: Option<PathBuf>,
+    key: Option<PathBuf>,
+    audit_path: Option<String>,
+    allow_insecure_public: bool,
+) -> Result<(), String> {
+    use xencode_server_rs::audit::AuditSink;
+
+    let bind = resolve_bind(
+        &host,
+        port,
+        cert.as_deref(),
+        key.as_deref(),
+        allow_insecure_public,
+    )?;
+    if let Some(warning) = &bind.warning {
+        println!("⚠ {warning}");
+    }
+
+    let audit = resolve_audit_path(audit_path.as_deref())?;
+    if let Some(path) = &audit {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+    }
+    let state = Arc::new(match &audit {
+        Some(path) => ServerState::with_audit(Arc::new(AuditSink::to_file(path))),
+        None => ServerState::new(),
+    });
+    let app = xencode_server_rs::build_app_with_state(state);
+
+    let (http, ws) = if bind.tls.is_some() {
+        ("https", "wss")
+    } else {
+        ("http", "ws")
+    };
+    println!("🚀 Xencode server starting on {http}://{}", bind.addr);
+    println!("   WebSocket: {ws}://{}/ws/{{session_id}}", bind.addr);
     println!(
-        "   WebSocket: ws://0.0.0.0:{}/ws/{{session_id}}/{{username}}",
-        port
+        "   audit: {}",
+        audit
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "disabled".to_string())
     );
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| e.to_string())?;
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+
+    match bind.tls {
+        Some((cert_path, key_path)) => {
+            let rustls =
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+                    .await
+                    .map_err(|e| format!("TLS configuration failed: {e}"))?;
+            axum_server::bind_rustls(bind.addr, rustls)
+                .serve(app.into_make_service())
+                .await
+                .map_err(|e| e.to_string())
+        }
+        None => {
+            let listener = tokio::net::TcpListener::bind(bind.addr)
+                .await
+                .map_err(|e| e.to_string())?;
+            axum::serve(listener, app)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+    }
 }
 
 /// One-line image inventory for text output. Pure — unit-tested.
@@ -1722,8 +1872,119 @@ async fn run_tui() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_advise, format_image_text};
+    use super::{compute_advise, format_image_text, resolve_audit_path, resolve_bind};
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+
+    fn path(p: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(p)
+    }
+
+    #[test]
+    fn loopback_binds_are_accepted_without_tls_or_warning() {
+        // "::1" is the case a `starts_with("127.")` check gets wrong.
+        for host in ["127.0.0.1", "localhost", "::1", "127.0.0.53"] {
+            let bind = resolve_bind(host, 8765, None, None, false).unwrap();
+            assert!(bind.addr.ip().is_loopback(), "{host} misclassified");
+            assert_eq!(bind.addr.port(), 8765);
+            assert!(bind.tls.is_none());
+            assert!(bind.warning.is_none());
+        }
+    }
+
+    #[test]
+    fn a_public_plain_bind_is_refused_and_the_error_names_both_ways_out() {
+        let err = resolve_bind("0.0.0.0", 8765, None, None, false).unwrap_err();
+        assert!(err.contains("--cert") && err.contains("--key"));
+        assert!(err.contains("--allow-insecure-public"));
+        // IPv6 public bind: same refusal.
+        assert!(resolve_bind("::", 8765, None, None, false).is_err());
+    }
+
+    #[test]
+    fn the_escape_hatch_binds_but_warns_loudly() {
+        let bind = resolve_bind("0.0.0.0", 9000, None, None, true).unwrap();
+        assert_eq!(bind.addr.port(), 9000);
+        assert!(bind.tls.is_none());
+        let warning = bind.warning.expect("plain public bind must warn");
+        assert!(warning.contains("WITHOUT TLS"));
+    }
+
+    #[test]
+    fn cert_and_key_must_come_as_a_pair() {
+        assert!(resolve_bind(
+            "127.0.0.1",
+            8765,
+            Some(path("c.pem").as_path()),
+            None,
+            false
+        )
+        .unwrap_err()
+        .contains("--key"));
+        assert!(resolve_bind(
+            "127.0.0.1",
+            8765,
+            None,
+            Some(path("k.pem").as_path()),
+            false
+        )
+        .unwrap_err()
+        .contains("--cert"));
+    }
+
+    #[test]
+    fn certs_win_over_the_escape_hatch_and_speak() {
+        let bind = resolve_bind(
+            "0.0.0.0",
+            8765,
+            Some(path("c.pem").as_path()),
+            Some(path("k.pem").as_path()),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            bind.tls,
+            Some((path("c.pem"), path("k.pem"))),
+            "TLS must be on, not the plain hatch"
+        );
+        assert!(bind.warning.is_none());
+    }
+
+    #[test]
+    fn tls_on_loopback_needs_no_hatch() {
+        let bind = resolve_bind(
+            "::1",
+            8765,
+            Some(path("c.pem").as_path()),
+            Some(path("k.pem").as_path()),
+            false,
+        )
+        .unwrap();
+        assert!(bind.tls.is_some());
+    }
+
+    #[test]
+    fn invalid_hosts_are_rejected_not_resolved_lazily() {
+        // Hostnames would need a DNS lookup — run_server must not pretend.
+        assert!(resolve_bind("example.com", 8765, None, None, true).is_err());
+        assert!(resolve_bind("0.0.0.256", 8765, None, None, true).is_err());
+        assert!(resolve_bind("", 8765, None, None, true).is_err());
+    }
+
+    #[test]
+    fn audit_path_none_disables_explicit_paths_pass_through() {
+        assert_eq!(resolve_audit_path(Some("none")).unwrap(), None);
+        assert_eq!(
+            resolve_audit_path(Some("/tmp/x.jsonl")).unwrap(),
+            Some(path("/tmp/x.jsonl"))
+        );
+        // The default lands in the user config dir, never the repo.
+        let default = resolve_audit_path(None).unwrap().unwrap();
+        assert_eq!(default.file_name().unwrap(), "audit.jsonl");
+        assert_eq!(
+            default.parent().unwrap(),
+            xencode_config_rs::XencodeConfig::config_dir().unwrap()
+        );
+    }
 
     #[test]
     fn compute_advise_reads_snapshot_filters_and_errors() {
