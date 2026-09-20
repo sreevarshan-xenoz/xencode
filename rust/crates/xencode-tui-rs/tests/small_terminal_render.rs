@@ -482,3 +482,52 @@ fn scrollbars_and_gutter_follow_config_and_width() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// H1-08: the header carries brand + layout chip + branch/model + focus
+/// badge, and each part drops out at its own width rung. Asserts on the
+/// header row only — body panels legitimately say "Chat" etc.
+#[test]
+fn header_ladder_drops_chips_as_width_shrinks() {
+    let header = |app: &mut App<'static>, width: u16| -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .take(width as usize)
+            .map(|c| c.symbol())
+            .collect()
+    };
+
+    let mut app = populated(FocusArea::ChatInput);
+    app.config.layout = "zen".into();
+    app.config.default_model = "testmodel:1".into();
+    app.git_branch = "testbranch".into();
+
+    let text = header(&mut app, 100);
+    assert!(text.contains("✦ xencode"), "{text}");
+    assert!(text.contains("[zen]"), "{text}");
+    assert!(text.contains("⎇ testbranch"), "{text}");
+    assert!(text.contains("testmodel:1"), "{text}");
+    assert!(text.contains("Chat"), "{text}");
+
+    let text = header(&mut app, 70);
+    assert!(
+        !text.contains("[zen]"),
+        "layout chip survived at 70: {text}"
+    );
+    assert!(text.contains("⎇ testbranch"), "{text}");
+
+    let text = header(&mut app, 55);
+    assert!(
+        !text.contains("testbranch"),
+        "branch survived at 55: {text}"
+    );
+    assert!(!text.contains("testmodel"), "model survived at 55: {text}");
+
+    let text = header(&mut app, 30);
+    assert!(text.contains("✦"), "brand vanished at 30: {text}");
+    assert!(!text.contains("Chat"), "focus badge survived at 30: {text}");
+}

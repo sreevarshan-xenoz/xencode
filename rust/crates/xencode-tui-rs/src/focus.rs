@@ -36,6 +36,39 @@ pub enum FocusArea {
     AdvisePanel,
 }
 
+impl FocusArea {
+    /// Short human name for the header's focused-panel badge. Kept under
+    /// ~12 columns so the right side survives narrow terminals.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            FocusArea::ChatInput => "Chat",
+            FocusArea::FileExplorer => "Explorer",
+            FocusArea::CodeEditor => "Editor",
+            FocusArea::ModelSelector => "Models",
+            FocusArea::Settings => "Settings",
+            FocusArea::CodeReview => "Review",
+            FocusArea::PerformanceDashboard => "Dashboard",
+            FocusArea::ProviderHealth => "Providers",
+            FocusArea::ProjectAnalyzer => "Analyzer",
+            FocusArea::GitCommit => "Git Commit",
+            FocusArea::FeatureNavigator => "Features",
+            FocusArea::ByteBotPanel => "ByteBot",
+            FocusArea::CollaborationHub => "Collab Hub",
+            FocusArea::VoiceInterface => "Voice",
+            FocusArea::TerminalAssistant => "Assistant",
+            FocusArea::SecurityAuditor => "Security",
+            FocusArea::PerformanceProfiler => "Profiler",
+            FocusArea::CustomModels => "Custom Models",
+            FocusArea::LearningMode => "Learning",
+            FocusArea::MultiLanguage => "Languages",
+            FocusArea::ReviewDashboard => "PR Review",
+            FocusArea::TaskManager => "Tasks",
+            FocusArea::WorktreePanel => "Worktrees",
+            FocusArea::AdvisePanel => "Advice",
+        }
+    }
+}
+
 /// Sub-states of the WorktreePanel: while one is active every keystroke
 /// belongs to the prompt instead of the list.
 #[derive(Debug, PartialEq, Clone, Copy)]
