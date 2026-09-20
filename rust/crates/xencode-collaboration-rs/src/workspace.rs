@@ -149,24 +149,37 @@ impl WorkspaceManager {
     /// Create a new workspace. The owner becomes its first admin.
     pub fn create_workspace(&mut self, name: &str, owner: &str) -> Workspace {
         let id = format!("ws-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        self.create_workspace_with_id(&id, name, owner)
+    }
+
+    /// Like [`create_workspace`](Self::create_workspace) with a caller-chosen
+    /// id — the collaboration server generates session ids and must keep
+    /// them. Re-using an existing id overwrites that workspace (deliberate:
+    /// the server picks collision-free ids itself; "fixing" this silently
+    /// would break that flow).
+    pub fn create_workspace_with_id(&mut self, id: &str, name: &str, owner: &str) -> Workspace {
         let mut members = HashMap::new();
         members.insert(owner.to_string(), Role::Admin);
 
         let ws = Workspace {
-            id: id.clone(),
+            id: id.to_string(),
             name: name.to_string(),
             owner: owner.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             members,
         };
-        self.workspaces.insert(id.clone(), ws.clone());
+        self.workspaces.insert(id.to_string(), ws.clone());
         self.log(
             owner,
             AuditAction::WorkspaceCreated,
-            &id,
+            id,
             format!("workspace '{name}' created"),
         );
         ws
+    }
+
+    fn admin_count(ws: &Workspace) -> usize {
+        ws.members.values().filter(|r| **r == Role::Admin).count()
     }
 
     /// Get workspace by ID.
@@ -209,7 +222,8 @@ impl WorkspaceManager {
     }
 
     /// Add a member (or change their role) — Admin only. Re-adding with the
-    /// same role is an idempotent no-op and logs nothing.
+    /// same role is an idempotent no-op and logs nothing. Demoting the sole
+    /// admin is refused: an orphaned workspace has no one left to govern it.
     pub fn add_member(
         &mut self,
         workspace_id: &str,
@@ -231,9 +245,20 @@ impl WorkspaceManager {
             return Err(WorkspaceError::NotFound(workspace_id.to_string()));
         }
         let ws = self.workspaces.get_mut(workspace_id).unwrap();
-        match ws.members.get(user_id) {
-            Some(existing) if *existing == role => Ok(()),
-            Some(_) => {
+        let existing = ws.members.get(user_id).cloned();
+        match existing {
+            Some(ref r) if *r == role => Ok(()),
+            Some(old) => {
+                if old == Role::Admin && role != Role::Admin && Self::admin_count(ws) == 1 {
+                    let id = ws.id.clone();
+                    self.log(
+                        actor,
+                        AuditAction::Denied,
+                        &id,
+                        format!("blocked demoting last admin {user_id}"),
+                    );
+                    return Err(WorkspaceError::LastAdmin(id));
+                }
                 ws.members.insert(user_id.to_string(), role.clone());
                 let id = ws.id.clone();
                 self.log(
@@ -256,6 +281,50 @@ impl WorkspaceManager {
                 Ok(())
             }
         }
+    }
+
+    /// Self-join by presenting the workspace id — the server's WS join path
+    /// (knowing the session id is the invitation). Idempotent: members keep
+    /// their current role. New members land as Editor; Admin is only ever
+    /// granted by an existing Admin through `add_member`.
+    pub fn join(&mut self, workspace_id: &str, user_id: &str) -> Result<Role, WorkspaceError> {
+        if let Some(role) = self.role_of(workspace_id, user_id) {
+            return Ok(role);
+        }
+        let ws = self
+            .workspaces
+            .get_mut(workspace_id)
+            .ok_or_else(|| WorkspaceError::NotFound(workspace_id.to_string()))?;
+        ws.members.insert(user_id.to_string(), Role::Editor);
+        let id = ws.id.clone();
+        self.log(
+            user_id,
+            AuditAction::MemberAdded,
+            &id,
+            format!("{user_id} self-joined as editor"),
+        );
+        Ok(Role::Editor)
+    }
+
+    /// Record a denial decided outside the workspace mutators (e.g. the
+    /// server's role gate on message relay). Same trail, same `Denied`
+    /// action — the audit log must not depend on which layer caught it.
+    pub fn log_denied(
+        &mut self,
+        actor: &str,
+        workspace_id: &str,
+        action: &str,
+        has: Option<&Role>,
+    ) {
+        let has = has
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "non-member".to_string());
+        self.log(
+            actor,
+            AuditAction::Denied,
+            workspace_id,
+            format!("{actor} attempted {action} (requires editor, has {has})"),
+        );
     }
 
     /// Remove a member. Admins may remove anyone; anyone may remove
@@ -283,10 +352,15 @@ impl WorkspaceManager {
         }
         let ws = self.workspaces.get(workspace_id).unwrap();
         let target_role = ws.members.get(user_id).cloned();
-        if target_role == Some(Role::Admin)
-            && ws.members.values().filter(|r| **r == Role::Admin).count() == 1
-        {
-            return Err(WorkspaceError::LastAdmin(workspace_id.to_string()));
+        if target_role == Some(Role::Admin) && Self::admin_count(ws) == 1 {
+            let id = ws.id.clone();
+            self.log(
+                actor,
+                AuditAction::Denied,
+                &id,
+                format!("blocked removing last admin {user_id}"),
+            );
+            return Err(WorkspaceError::LastAdmin(id));
         }
         let ws = self.workspaces.get_mut(workspace_id).unwrap();
         ws.members.remove(user_id);
@@ -402,6 +476,13 @@ mod tests {
             manager.remove_member(&ws.id, "alice", "alice"),
             Err(WorkspaceError::LastAdmin(_))
         ));
+        // Blocked removals are audited as denials, not silently refused.
+        let last = manager.audit_log().last().unwrap();
+        assert_eq!(last.action, AuditAction::Denied);
+        assert!(
+            last.detail.contains("blocked removing last admin"),
+            "{last:?}"
+        );
         // With two admins, one may leave.
         manager
             .add_member(&ws.id, "alice", "bob", Role::Admin)
@@ -415,6 +496,76 @@ mod tests {
         assert!(manager.remove_member(&ws.id, "carol", "alice").is_err());
         manager.remove_member(&ws.id, "carol", "carol").unwrap();
         assert_eq!(manager.member_count(&ws.id), 1);
+    }
+
+    #[test]
+    fn last_admin_cannot_be_demoted_via_role_change() {
+        let mut manager = WorkspaceManager::new();
+        let ws = manager.create_workspace("test", "alice");
+        let err = manager
+            .add_member(&ws.id, "alice", "alice", Role::Viewer)
+            .unwrap_err();
+        assert!(matches!(err, WorkspaceError::LastAdmin(_)), "{err:?}");
+        assert_eq!(manager.role_of(&ws.id, "alice"), Some(Role::Admin));
+        let last = manager.audit_log().last().unwrap();
+        assert_eq!(last.action, AuditAction::Denied);
+        assert!(
+            last.detail.contains("blocked demoting last admin"),
+            "{last:?}"
+        );
+    }
+
+    #[test]
+    fn demotion_is_fine_when_a_second_admin_exists() {
+        let mut manager = WorkspaceManager::new();
+        let ws = manager.create_workspace("test", "alice");
+        manager
+            .add_member(&ws.id, "alice", "bob", Role::Admin)
+            .unwrap();
+        manager
+            .add_member(&ws.id, "alice", "bob", Role::Viewer)
+            .unwrap();
+        assert_eq!(manager.role_of(&ws.id, "bob"), Some(Role::Viewer));
+        let last = manager.audit_log().last().unwrap();
+        assert_eq!(last.action, AuditAction::RoleChanged);
+    }
+
+    #[test]
+    fn self_join_grants_editor_once_and_is_idempotent() {
+        let mut manager = WorkspaceManager::new();
+        let ws = manager.create_workspace("test", "alice");
+        assert_eq!(manager.join(&ws.id, "bob").unwrap(), Role::Editor);
+        assert_eq!(manager.role_of(&ws.id, "bob"), Some(Role::Editor));
+        let before = manager.audit_log().len();
+        assert_eq!(manager.join(&ws.id, "bob").unwrap(), Role::Editor);
+        assert_eq!(manager.audit_log().len(), before, "re-join logs nothing");
+        // Joining cannot escalate: the stored role is what an admin gave.
+        manager
+            .add_member(&ws.id, "alice", "carol", Role::Viewer)
+            .unwrap();
+        assert_eq!(manager.join(&ws.id, "carol").unwrap(), Role::Viewer);
+    }
+
+    #[test]
+    fn join_unknown_workspace_is_not_found() {
+        let mut manager = WorkspaceManager::new();
+        assert!(matches!(
+            manager.join("ws-missing", "bob"),
+            Err(WorkspaceError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn create_workspace_with_id_uses_the_given_id() {
+        let mut manager = WorkspaceManager::new();
+        let ws = manager.create_workspace_with_id("xencode-deadbeef", "s", "alice");
+        assert_eq!(ws.id, "xencode-deadbeef");
+        assert!(manager.get_workspace("xencode-deadbeef").is_some());
+        // Caller-chosen ids are the caller's problem: same id overwrites
+        // (the server loops until it draws a free one).
+        let ws2 = manager.create_workspace_with_id("xencode-deadbeef", "s2", "bob");
+        assert_eq!(ws2.name, "s2");
+        assert_eq!(manager.member_count("xencode-deadbeef"), 1);
     }
 
     #[test]

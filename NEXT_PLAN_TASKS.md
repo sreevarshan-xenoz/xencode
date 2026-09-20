@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 508 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 513 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -420,3 +420,68 @@ the user (`xencode advise`) and the model (a `repo_advise` tool) can reach them.
   panel is FocusArea #24 / Feature Navigator entry #17; `xencode advise` matches
   `--help` exactly (positional `[FILTER]`, `--json`, `--limit` default 40,
   0 = all). NEXT_PLAN's backlog now carries only team-mode hardening.
+> Status legend: `[x]` done, `[ ]` todo.
+
+## Milestone G — Team Mode Hardening (drafted 2026-09-20)
+
+Goal (backlog item 4): the collaboration RBAC/audit crate is currently orphaned —
+zero consumers — while the server runs its own unauthenticated session model
+(identity = username in the WS URL, decorative `/auth` routes, permissive CORS,
+plain HTTP on 0.0.0.0) and the TUI hub is a pure simulation (hardcoded members,
+fake telemetry, a false "WebSocket (TLS)" label). G wires the server to real
+tokens + RBAC + persisted audit, hardens the bind posture with opt-in TLS, and
+turns the hub into an actual WebSocket client.
+
+### G1 — Server security core
+
+- [x] G1-01 collaboration-rs: close the last-admin *demotion* hole (removal was
+  guarded; role-change downgrades were not), audit both guards with `Denied`
+  events, add `join()` (idempotent self-join as Editor), `create_workspace_with_id`
+  (server-chosen ids), and `log_denied` for denials decided outside the mutators.
+  5 new unit tests (24 in crate); workspace at 513.
+- [ ] G1-02 server-rs: real `TokenStore` (random `xencode_<uuid v4 hex>`, 24 h TTL,
+  prune-on-issue, constant-time compare) + `Authed` bearer extractor; `/auth/login`
+  rejects the silently-ignored `api_key` with a 400, `/auth/verify` becomes a real
+  lookup; sessions + llamacpp load/unload require auth; permissive CORS deleted;
+  `/api/llamacpp/status` stops leaking model/executable paths.
+- [ ] G1-03 server-rs: WS route loses the username (`/ws/{session_id}`), first-frame
+  `auth` with 5 s timeout, close codes 4401/4403/4404/4409; joins go through
+  `WorkspaceManager::join`; `activity` relay is Editor+ and server-stamped;
+  `MAX_SESSION_MEMBERS` (10) enforced, not advisory; shared `wire.rs` in
+  collaboration-rs; the parallel in-memory session map is deleted. Duplex
+  (no-ports) wire tests.
+- [ ] G1-04 server-rs: `AuditSink` mirroring every mutation + denial to
+  `~/.xencode/audit.jsonl` (`--audit-path`, `none` disables); one line per event,
+  append-not-truncate across restarts, write failure disables the sink without
+  taking down the session plane.
+
+### G2 — Network posture
+
+- [ ] G2-01 cli: `xencode server` gains `--host` (default 127.0.0.1), `--cert`/`--key`
+  (rustls via axum-server), `--audit-path`, `--allow-insecure-public`;
+  non-loopback bind without TLS refuses to start (pure `resolve_bind` unit matrix,
+  incl. IPv6 `::1`); banner prints honest `ws://`/`wss://` + audit status.
+
+### G3 — The hub becomes real
+
+- [ ] G3-01 tui: `collab_client.rs` worker (tokio-tungstenite) — login, connect,
+  auth frame, read loop translated through pure `frame_to_tokens` into the
+  existing `[COLLAB]` ingestion grammar; 30 s ping keepalive, manual retry
+  (no auto-reconnect); simulated session task and the two dead state fields
+  deleted.
+- [ ] G3-02 tui: real hub UX — `c` create, `j` join-by-id, `Enter` connect,
+  `r` retry, `Tab` field cycle, `Esc` disconnect+abort; fake port/latency/"TLS"
+  telemetry replaced with server/transport/session/role from real state;
+  help overlay matches handled keys; render sweep covers the active branch.
+
+### G4 — Close-out
+
+- [ ] G4-01 Docs sweep: CLI_GUIDE server section (flags, refusal rule, token
+  flow, in-memory-sessions note), USER_MANUAL hub keys, QUICK_START/README/
+  CHANGELOG synced, `docs/api_documentation.md` WS path corrected, live counts.
+
+Deferred on purpose (recorded, not skipped): passwords/IdPs (login = identity
+claim; the bind surface is the perimeter), join approval (knowledge of the
+session id is the invite), CRDT document sync (`crdt.rs` stays unwired),
+session recovery after restart, TUI auto-reconnect, private-CA wss trust,
+outgoing editor-activity producer, configurable max session size.
