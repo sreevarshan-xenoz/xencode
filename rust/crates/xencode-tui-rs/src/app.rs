@@ -1329,6 +1329,9 @@ impl<'a> App<'a> {
         let turn_group = self.checkpoints.begin_turn();
         // Keep at least one tool round; 0 would offer tools on no turn at all.
         let max_rounds = self.config.agent_max_rounds.clamp(1, 64);
+        // A 0-second budget would kill every command before it produced
+        // output, so the floor is one second.
+        let command_timeout = self.config.agent_command_timeout.max(1);
 
         tokio::spawn(async move {
             let client = OllamaClient::new(&ollama_url, timeout);
@@ -1347,12 +1350,14 @@ impl<'a> App<'a> {
             let mut tools = xencode_providers_rs::background_tools();
             tools.extend(xencode_providers_rs::advise_tools());
             tools.extend(xencode_providers_rs::file_tools());
+            tools.extend(xencode_providers_rs::command_tools());
             let approval_ctx = crate::agent_tools::ApprovalCtx {
                 mode: agent_mode,
                 grants: agent_grants,
                 prompts: approval_tx,
                 checkpoints: checkpoint_store,
                 turn: turn_group,
+                command_timeout,
             };
             let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
             for round in 0..=max_rounds {
@@ -4025,6 +4030,7 @@ mod tests {
             prompts,
             checkpoints: app.checkpoints.clone(),
             turn: app.checkpoints.begin_turn(),
+            command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),

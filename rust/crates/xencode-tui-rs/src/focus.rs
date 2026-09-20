@@ -168,6 +168,15 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES),
     },
     SettingRow {
+        label: "Command Timeout",
+        section: "Agent",
+        kind: SettingKind::Stepped {
+            step: 5,
+            min: 5,
+            max: 300,
+        },
+    },
+    SettingRow {
         label: "Cache Enabled",
         section: "Performance",
         kind: SettingKind::Toggle,

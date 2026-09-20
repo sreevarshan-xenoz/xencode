@@ -19,7 +19,8 @@ use xencode_providers_rs::ToolCall;
 /// 1..=64 by the loop); this is the wording the model is taught.
 pub const TOOL_HINT: &str = "\n\n## Tools\n\
 Available: read_file(path, offset?, limit?), list_dir(path?), search_files(pattern, path?), \
-write_file(path, content), edit_file(path, old, new, all?), background_start(command, cwd?, name?), \
+write_file(path, content), edit_file(path, old, new, all?), run_command(command), \
+background_start(command, cwd?, name?), \
 background_poll(id), background_stop(id), repo_advise(filter?).\n\
 Paths are relative to the project root and must stay inside it; anything outside is refused without asking. \
 File writes, edits and shell commands need the user's approval, which they may grant once, allow for the \
@@ -623,9 +624,9 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
             }
             preview
         }
-        "background_start" => match arg_str(&args, "command") {
-            Some(command) => format!("command: sh -c {command:?}"),
-            None => summarize_call(call),
+        "background_start" | "run_command" => match arg_str(&args, "command") {
+            Some(command) if !command.trim().is_empty() => format!("command: sh -c {command:?}"),
+            _ => summarize_call(call),
         },
         _ => summarize_call(call),
     }
@@ -694,9 +695,107 @@ pub fn summarize_call(call: &ToolCall) -> String {
     format!("{}({args})", call.name)
 }
 
+/// Foreground-command budget when nothing is configured (I2-02). The real
+/// value comes from `agent_command_timeout`; this is the fallback.
+pub const DEFAULT_COMMAND_TIMEOUT: u64 = 30;
+
+/// Bytes of combined output kept for the model — the *tail*, because when a
+/// build fails the reason is at the end.
+pub const COMMAND_OUTPUT_CAP: usize = 8 * 1024;
+
+/// Keep the last `cap` bytes of `text` on a char boundary, reporting whether
+/// anything was dropped.
+fn cap_tail(text: &str, cap: usize) -> (bool, &str) {
+    if text.len() <= cap {
+        return (false, text);
+    }
+    let mut start = text.len() - cap;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    (true, &text[start..])
+}
+
+/// `sh -c` in the workspace root, waiting up to `timeout_secs` for it. The
+/// result always states the exit status first, so a capped or empty body can
+/// never be mistaken for success.
+async fn run_foreground(root: &Path, command: &str, timeout_secs: u64) -> String {
+    let child = match tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => return err(format!("cannot run {command:?}: {e}")),
+    };
+    let secs = timeout_secs.max(1);
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(secs),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return err(format!("{command:?} failed to run: {e}")),
+        Err(_) => {
+            // The cancelled future dropped the child, and `kill_on_drop` did
+            // the killing; the pipes went with it, so nothing was captured.
+            // Saying so beats showing a truncated body with no explanation.
+            return err(format!(
+                "timed out after {secs}s and was killed, so no output was captured \
+                 — use background_start for anything this slow"
+            ));
+        }
+    };
+    let body = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body = body.trim();
+    let (dropped, tail) = cap_tail(body, COMMAND_OUTPUT_CAP);
+    let status = match output.status.code() {
+        Some(code) => format!("exit {code}"),
+        None => "killed by signal".to_string(),
+    };
+    let mut result = format!("$ {command}\n{status}");
+    if dropped {
+        result.push_str(&format!(
+            "\n(output capped to the last {} bytes of {})",
+            COMMAND_OUTPUT_CAP,
+            body.len()
+        ));
+    }
+    if !tail.is_empty() {
+        result.push('\n');
+        result.push_str(tail);
+    }
+    result
+}
+
 pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -> String {
+    execute_tool_call_timed(rt, root, call, DEFAULT_COMMAND_TIMEOUT).await
+}
+
+/// [`execute_tool_call`] with the caller's configured foreground timeout.
+pub async fn execute_tool_call_timed(
+    rt: &TaskRuntime,
+    root: &Path,
+    call: &ToolCall,
+    command_timeout: u64,
+) -> String {
     let args = call.arguments_object();
     match call.name.as_str() {
+        "run_command" => match arg_str(&args, "command") {
+            Some(command) if !command.trim().is_empty() => {
+                run_foreground(root, command, command_timeout).await
+            }
+            _ => "error: run_command needs a non-empty string \"command\"".to_string(),
+        },
         "background_start" => {
             let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
                 return "error: background_start needs a string \"command\"".to_string();
@@ -803,6 +902,8 @@ pub struct ApprovalCtx {
     pub checkpoints: Arc<CheckpointStore>,
     /// Which turn's group this loop records into.
     pub turn: usize,
+    /// Wall-clock budget for `run_command` (`agent_command_timeout`).
+    pub command_timeout: u64,
 }
 
 impl ApprovalCtx {
@@ -866,7 +967,7 @@ async fn run_and_checkpoint(
     ctx: &ApprovalCtx,
 ) -> String {
     let note = ctx.snapshot_before(root, call);
-    let mut result = execute_tool_call(rt, root, call).await;
+    let mut result = execute_tool_call_timed(rt, root, call, ctx.command_timeout).await;
     if let Some(note) = note {
         if !result.starts_with("error:") {
             result.push('\n');
@@ -1881,6 +1982,7 @@ mod tests {
                 prompts: tx,
                 checkpoints,
                 turn,
+                command_timeout: DEFAULT_COMMAND_TIMEOUT,
             },
             prompts: rx,
         }
@@ -1895,6 +1997,14 @@ mod tests {
 
     fn bg_call(command: &str) -> ToolCall {
         call("background_start", serde_json::json!({"command": command}))
+    }
+
+    fn cmd_call(command: &str) -> ToolCall {
+        call("run_command", serde_json::json!({"command": command}))
+    }
+
+    async fn timed(root: &Path, tool: ToolCall, seconds: u64) -> String {
+        execute_tool_call_timed(&new_task_runtime(), root, &tool, seconds).await
     }
 
     /// Run one gated call to completion, answering its prompt (if it raises
@@ -2190,6 +2300,7 @@ mod tests {
                 prompts: mpsc::unbounded_channel().0,
                 checkpoints: store.clone(),
                 turn: turn_group,
+                command_timeout: DEFAULT_COMMAND_TIMEOUT,
             };
             let content = format!("written in turn {turn}\n");
             let result =
@@ -2293,5 +2404,103 @@ mod tests {
         assert!(result.contains("/rewind cannot undo"), "{result}");
         assert_eq!(h.ctx.checkpoints.turns(), 0);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ── run_command (I2-02) ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_command_reports_status_and_output_for_success_and_failure() {
+        let root = temp_root("cmd-status");
+        let ok = timed(&root, cmd_call("echo hello"), 10).await;
+        assert_eq!(ok, "$ echo hello\nexit 0\nhello");
+
+        // A failing command is not an `error:` result — the shell ran it and
+        // the model needs the real exit code, not our verdict on it.
+        let bad = timed(&root, cmd_call("echo oops >&2; exit 3"), 10).await;
+        assert!(bad.starts_with("$ echo oops >&2; exit 3\nexit 3"), "{bad}");
+        assert!(bad.ends_with("oops"), "{bad}");
+        assert!(!bad.starts_with("error:"));
+
+        let empty = timed(&root, cmd_call("true"), 10).await;
+        assert_eq!(empty, "$ true\nexit 0");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn run_command_runs_in_the_workspace_root() {
+        let root = temp_root("cmd-cwd");
+        let result = timed(&root, cmd_call("printf line > made.txt"), 10).await;
+        assert!(result.ends_with("exit 0"), "{result}");
+        // The write landed in the workspace, not wherever xencode was started.
+        assert_eq!(
+            std::fs::read_to_string(root.join("made.txt")).unwrap(),
+            "line"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn run_command_keeps_the_tail_of_oversized_output() {
+        let root = temp_root("cmd-cap");
+        let result = timed(&root, cmd_call("seq 1 20000"), 20).await;
+        assert!(result.contains("output capped"), "{result}");
+        assert!(result.ends_with("\n20000"), "{}", tail(&result, 40));
+        assert!(
+            !result.contains("\n1\n2\n"),
+            "the head must be dropped, not the tail"
+        );
+        assert!(result.len() < COMMAND_OUTPUT_CAP + 256, "{}", result.len());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn run_command_kills_a_command_that_overruns_its_budget() {
+        let root = temp_root("cmd-slow");
+        let result = timed(&root, cmd_call("sleep 5; echo never"), 1).await;
+        assert!(result.starts_with("error: timed out after 1s"), "{result}");
+        assert!(result.contains("background_start"), "{result}");
+        assert!(!result.contains("never"), "{result}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn run_command_needs_a_command_and_prompts_as_shell_with_the_line() {
+        let root = temp_root("cmd-gate");
+        let rt = new_task_runtime();
+        let missing = execute_tool_call(&rt, &root, &cmd_call("   ")).await;
+        assert_eq!(
+            missing,
+            "error: run_command needs a non-empty string \"command\""
+        );
+
+        // Ask mode: the prompt shows the literal command line and nothing
+        // else — no diff, because there is no proposed file change to show.
+        let mut h = harness(ApprovalMode::Ask);
+        assert_eq!(tool_class("run_command"), ToolClass::Shell);
+        h.ctx.command_timeout = 10;
+        let pending = cmd_call("echo gated");
+        let running = {
+            let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &pending, &ctx).await },
+            )
+        };
+        let (request, responder) = h.prompts.recv().await.expect("shell prompts in ask mode");
+        assert_eq!(request.class, ToolClass::Shell);
+        assert_eq!(request.class_label(), "shell command");
+        assert_eq!(request.summary, "run_command echo gated");
+        assert_eq!(request.preview, "command: sh -c \"echo gated\"");
+        responder.send(ApprovalAnswer::Approved).unwrap();
+        assert_eq!(running.await.unwrap(), "$ echo gated\nexit 0\ngated");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Last `n` chars, for assertion messages that must not dump 8 KiB.
+    fn tail(text: &str, n: usize) -> String {
+        let mut start = text.len().saturating_sub(n);
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].to_string()
     }
 }

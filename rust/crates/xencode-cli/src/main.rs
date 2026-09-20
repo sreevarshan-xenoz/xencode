@@ -570,6 +570,15 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.agent_max_rounds = rounds;
                 }
+                "agent_command_timeout" => {
+                    let seconds: u64 = value
+                        .parse()
+                        .map_err(|_| format!("invalid number: {value}"))?;
+                    if !(1..=600).contains(&seconds) {
+                        return Err("agent_command_timeout must be 1..=600 seconds".to_string());
+                    }
+                    config.agent_command_timeout = seconds;
+                }
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;

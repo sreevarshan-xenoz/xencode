@@ -56,6 +56,11 @@ pub struct XencodeConfig {
     #[serde(default = "default_agent_max_rounds")]
     pub agent_max_rounds: usize,
 
+    /// Wall-clock seconds a foreground `run_command` may take before it is
+    /// killed. Slow work belongs in `background_start`.
+    #[serde(default = "default_agent_command_timeout")]
+    pub agent_command_timeout: u64,
+
     /// Ollama base URL.
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
@@ -137,6 +142,10 @@ fn default_agent_max_rounds() -> usize {
     16
 }
 
+fn default_agent_command_timeout() -> u64 {
+    30
+}
+
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -176,6 +185,7 @@ impl Default for XencodeConfig {
             show_line_numbers: true,
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
+            agent_command_timeout: default_agent_command_timeout(),
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
@@ -309,6 +319,7 @@ mod tests {
         assert!(config.show_line_numbers);
         assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.agent_max_rounds, 16);
+        assert_eq!(config.agent_command_timeout, 30);
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.llama_cpp_url, "http://localhost:8080");
         assert_eq!(config.llama_cpp_model_path, "");
@@ -338,6 +349,7 @@ mod tests {
             show_line_numbers: false,
             agent_approval: "edit-allow".to_string(),
             agent_max_rounds: 24,
+            agent_command_timeout: 5,
             ..XencodeConfig::default()
         };
         config.api_keys.openai_api_key = Some("sk-test-123".to_string());
@@ -375,6 +387,7 @@ mod tests {
         assert!(!config.rounded_borders);
         assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.agent_max_rounds, 16);
+        assert_eq!(config.agent_command_timeout, 30);
         assert_eq!(config.active_theme, "ocean");
 
         fs::remove_dir_all(&dir).unwrap();

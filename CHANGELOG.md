@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `run_command` for the agent (Milestone I, I2-02): the missing `t` in
+  edit→test→fix. The model runs one foreground `sh -c` line in the workspace
+  root and gets back `$ <command>`, `exit <code>`, then the combined
+  stdout+stderr — the last 8 KiB of it, because a failing build ends with the
+  reason. It is a `shell command` class call, so the approval prompt shows the
+  literal command line (there is no diff to show) and `edit-allow` still asks.
+  `agent_command_timeout` (default 30 s; new `Command Timeout` Settings row in
+  5-second steps, `xencode config set` accepts 1–600) kills anything that
+  overruns and tells the model nothing was captured, pointing it at
+  `background_start` for slow work
 - Agent checkpoints and `/rewind` (Milestone I, I2-01): every write or edit the
   user approves is snapshotted first — the exact prior bytes, or "this file did
   not exist" — grouped by chat turn in memory. `/rewind` undoes the last turn
