@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 526 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 540 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -447,12 +447,17 @@ turns the hub into an actual WebSocket client.
   leaking model/executable/args paths. 13 net-new tests (79 in server-rs);
   workspace at 526. The WS route still takes the username in its path and is
   unauthenticated — first-frame WS auth is G1-03.
-- [ ] G1-03 server-rs: WS route loses the username (`/ws/{session_id}`), first-frame
+- [x] G1-03 server-rs: WS route loses the username (`/ws/{session_id}`), first-frame
   `auth` with 5 s timeout, close codes 4401/4403/4404/4409; joins go through
   `WorkspaceManager::join`; `activity` relay is Editor+ and server-stamped;
   `MAX_SESSION_MEMBERS` (10) enforced, not advisory; shared `wire.rs` in
   collaboration-rs; the parallel in-memory session map is deleted. Duplex
-  (no-ports) wire tests.
+  (no-ports) wire tests. Presence (`SyncCoordinator`, per connection) and
+  membership (`WorkspaceManager`, per identity) are now distinct: roles survive
+  disconnects, `members` frames carry live peers. 12 e2e handshake tests +
+  5 wire round-trip tests (server-rs 88, collaboration-rs 29); workspace at
+  540. The 5 s auth timeout itself is not timing-tested — every rejection path
+  is covered, but a dedicated test would add 5 s to the suite for one branch.
 - [ ] G1-04 server-rs: `AuditSink` mirroring every mutation + denial to
   `~/.xencode/audit.jsonl` (`--audit-path`, `none` disables); one line per event,
   append-not-truncate across restarts, write failure disables the sink without

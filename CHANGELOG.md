@@ -34,6 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- The WebSocket is no longer an identity claim (Milestone G, G1-03): the route
+  is `/ws/{session_id}` — the username is gone from the URL — and the first
+  frame must be `auth` with a token the server issued (5 s timeout). Joins run
+  through `WorkspaceManager::join` (self-join lands as Editor; the session
+  creator keeps Admin), `activity` relay requires Editor+ — a Viewer gets an
+  `rbac_denied` error frame and a `Denied` audit entry — and the relayed
+  `user` is always the server's authenticated identity, never whatever the
+  client's JSON claims. `MAX_SESSION_MEMBERS` (10) is enforced with a 4409
+  close (existing members may still reconnect); rejections arrive as an error
+  frame plus a 44xx close (4401 bad token, 4404 no session). The wire format
+  lives once in `xencode-collaboration-rs::wire` (serde `type`-tagged enums
+  shared by server and future client), the server's parallel in-memory
+  session map is deleted, and presence (who is connected) is now distinct
+  from membership (who belongs). Covered by 12 end-to-end handshake tests
+  over in-process duplex pipes — no ports.
 - Server auth is real (Milestone G, G1-02): `xencode-server-rs` gained a
   `TokenStore` (random `xencode_<uuid v4 hex>` tokens, 24 h TTL, pruned on
   issue and lookup, constant-time compare) and an `Authed` bearer extractor.

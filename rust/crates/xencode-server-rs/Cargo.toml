@@ -13,9 +13,13 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 futures-util = "0.3"
+xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tokio-tungstenite = { version = "0.29", features = ["connect"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }

@@ -389,6 +389,11 @@ impl WorkspaceManager {
             .map(|ws| ws.members.len())
             .unwrap_or(0)
     }
+
+    /// Number of workspaces tracked (the server's live session count).
+    pub fn workspace_count(&self) -> usize {
+        self.workspaces.len()
+    }
 }
 
 #[cfg(test)]

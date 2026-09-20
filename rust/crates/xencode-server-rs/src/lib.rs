@@ -267,7 +267,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = json_body(response).await;
         assert!(json["id"].as_str().unwrap().starts_with("xencode-"));
-        assert!(json["members"].as_array().unwrap().is_empty());
+        // The authenticated creator is the session's admin.
+        assert_eq!(json["members"], serde_json::json!(["tester"]));
         assert!(!json["created_at"].as_str().unwrap().is_empty());
     }
 
