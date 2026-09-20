@@ -154,6 +154,16 @@ pub struct App<'a> {
     pub tasks_selected: usize,
     pub tasks_detail: bool,
     pub tasks_scroll: usize,
+    /// WorktreePanel state (D3-02): `worktree_dirty[i]` flags whether
+    /// `worktrees[i]` has uncommitted changes. Git calls are synchronous,
+    /// matching `refresh_git` (Ctrl+G) precedent.
+    pub worktrees: Vec<xencode_context_rs::WorktreeInfo>,
+    pub worktree_dirty: Vec<bool>,
+    pub worktree_selected: usize,
+    pub worktree_prompt: crate::focus::WorktreePrompt,
+    pub worktree_path_buf: String,
+    pub worktree_branch_buf: String,
+    pub worktree_status: String,
     pub commit_message: String,
     pub commit_cursor: usize,
     pub spinner_tick: usize,
@@ -637,6 +647,13 @@ impl<'a> App<'a> {
             tasks_selected: 0,
             tasks_detail: false,
             tasks_scroll: 0,
+            worktrees: Vec::new(),
+            worktree_dirty: Vec::new(),
+            worktree_selected: 0,
+            worktree_prompt: crate::focus::WorktreePrompt::None,
+            worktree_path_buf: String::new(),
+            worktree_branch_buf: String::new(),
+            worktree_status: String::new(),
             commit_message: String::new(),
             commit_cursor: 0,
             spinner_tick: 0,
@@ -1358,6 +1375,80 @@ impl<'a> App<'a> {
                 let _ = m.remove(id);
             }
         });
+    }
+
+    /// Re-read `git worktree list` for the current directory and mark each
+    /// worktree dirty via `dirty_paths`. Failures clear the list and land in
+    /// `worktree_status` (not a git repo is the common one).
+    pub fn refresh_worktrees(&mut self) {
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match xencode_context_rs::worktree_list(&root) {
+            Ok(list) => {
+                self.worktree_dirty = list
+                    .iter()
+                    .map(|w| !xencode_context_rs::dirty_paths(&w.path).is_empty())
+                    .collect();
+                self.worktrees = list;
+                self.worktree_selected = self
+                    .worktree_selected
+                    .min(self.worktrees.len().saturating_sub(1));
+            }
+            Err(e) => {
+                self.worktrees.clear();
+                self.worktree_dirty.clear();
+                self.worktree_status = format!("error: {e}");
+            }
+        }
+    }
+
+    /// Runs the queued `git worktree add` (branch field empty = let git
+    /// branch off the current HEAD at the directory name).
+    pub fn worktree_do_add(&mut self) {
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let path = std::path::PathBuf::from(&self.worktree_path_buf);
+        let branch = (!self.worktree_branch_buf.is_empty()).then_some(self.worktree_branch_buf.as_str());
+        self.worktree_prompt = crate::focus::WorktreePrompt::None;
+        match xencode_context_rs::worktree_add(&root, &path, branch, false) {
+            Ok(list) => {
+                self.worktree_status = format!("added worktree {}", path.display());
+                self.apply_worktree_list(list);
+            }
+            Err(e) => self.worktree_status = format!("error: {e}"),
+        }
+        self.worktree_path_buf.clear();
+        self.worktree_branch_buf.clear();
+    }
+
+    /// Removes the selected worktree; the main worktree is never removable
+    /// and git itself additionally refuses dirty worktrees (no force here).
+    pub fn worktree_do_remove(&mut self) {
+        self.worktree_prompt = crate::focus::WorktreePrompt::None;
+        let Some(wt) = self.worktrees.get(self.worktree_selected).cloned() else {
+            return;
+        };
+        if wt.is_main {
+            self.worktree_status = "main worktree is not removable".to_string();
+            return;
+        }
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match xencode_context_rs::worktree_remove(&root, &wt.path, false) {
+            Ok(list) => {
+                self.worktree_status = format!("removed worktree {}", wt.path.display());
+                self.apply_worktree_list(list);
+            }
+            Err(e) => self.worktree_status = format!("error: {e}"),
+        }
+    }
+
+    fn apply_worktree_list(&mut self, list: Vec<xencode_context_rs::WorktreeInfo>) {
+        self.worktree_dirty = list
+            .iter()
+            .map(|w| !xencode_context_rs::dirty_paths(&w.path).is_empty())
+            .collect();
+        self.worktrees = list;
+        self.worktree_selected = self
+            .worktree_selected
+            .min(self.worktrees.len().saturating_sub(1));
     }
 
     /// Proactive warning from the real-time watcher (`[WATCH]<kind>|<path>`).
