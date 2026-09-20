@@ -129,20 +129,28 @@ fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {
 // ── Header ──────────────────────────────────────────────────────────────────
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
-    let model = &app.config.default_model;
-    let theme_name = &app.config.active_theme;
-    let file_count = app.attached_files.len();
-    let git_count = app.git_status.len();
-
-    let left = " ⚡ Xencode TUI ".to_string();
-    let right = format!(
-        " {} │ {} │ 📎 {} │ Δ {} {}",
-        model,
-        theme_name,
-        file_count,
-        git_count,
-        if app.init_running { " ⏳init " } else { "" }
-    );
+    // Width ladder (H1-08): brand always, layout chip from 72 cols,
+    // branch + model from 60, focus badge from 40.
+    let w = area.width as usize;
+    let mut left = String::from(" ✦ xencode ");
+    if w >= 72 {
+        left.push_str(&format!(
+            "[{}] ",
+            crate::layout::effective_layout(&app.config.layout)
+        ));
+    }
+    if w >= 60 {
+        left.push_str(&format!("⎇ {} ", app.git_branch));
+        left.push_str(&app.config.default_model);
+        if app.init_running {
+            left.push_str(" ⏳init");
+        }
+    }
+    let right = if w >= 40 {
+        format!(" {} ", app.focus.display_name())
+    } else {
+        String::new()
+    };
 
     // Display width, not byte length: the header holds multi-byte glyphs.
     // Saturating so a narrow terminal cannot underflow the padding.
