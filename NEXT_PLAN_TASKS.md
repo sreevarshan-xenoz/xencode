@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 555 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 565 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -485,11 +485,19 @@ turns the hub into an actual WebSocket client.
 
 ### G3 — The hub becomes real
 
-- [ ] G3-01 tui: `collab_client.rs` worker (tokio-tungstenite) — login, connect,
+- [x] G3-01 tui: `collab_client.rs` worker (tokio-tungstenite) — login, connect,
   auth frame, read loop translated through pure `frame_to_tokens` into the
-  existing `[COLLAB]` ingestion grammar; 30 s ping keepalive, manual retry
+  `[COLLAB]` ingestion grammar; 30 s ping keepalive with a 60 s liveness
+  deadline (timings constant-defined, not real-time tested), manual retry only
   (no auto-reconnect); simulated session task and the two dead state fields
-  deleted.
+  (`collab_commit_stream`, `collab_shared_files`) deleted, `member:`/`sync:`/
+  `pending:` grammar replaced by `session:`, one `members:<json>` snapshot tag
+  and `error:`. The worker owns login (and creates a session via
+  `POST /sessions/create` when the id is empty), so there is no `collab_token`
+  app field — tokens never leave the worker. 10 unit tests incl. a duplex
+  `run_session` e2e (auth frame → auth_ok → 4409 close translated honestly);
+  no server-rs dev-dep in the TUI — that would be a dependency cycle.
+  Workspace at 565.
 - [ ] G3-02 tui: real hub UX — `c` create, `j` join-by-id, `Enter` connect,
   `r` retry, `Tab` field cycle, `Esc` disconnect+abort; fake port/latency/"TLS"
   telemetry replaced with server/transport/session/role from real state;

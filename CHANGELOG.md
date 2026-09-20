@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The Collaboration Hub gains a real client (Milestone G, G3-01):
+  `xencode-tui-rs::collab_client` logs in over HTTP, opens the WebSocket,
+  authenticates with the first-frame `auth` token (creating a session via
+  `POST /sessions/create` when none is chosen), and translates every server
+  frame through pure `frame_to_tokens` into the app's `[COLLAB]` grammar —
+  a `members:<json>` snapshot replaces the old per-member simulation, errors
+  arrive as `error:`. 30 s ping keepalive with a 60 s liveness deadline;
+  no auto-reconnect by design. The simulated session (fake alice/bob/carol
+  sync pulses) and its dead state fields are deleted; hub keys land with
+  G3-02
 - Persistent audit trail for collaboration servers (Milestone G, G1-04):
   `xencode-server-rs::audit::AuditSink` mirrors every `WorkspaceManager`
   event — creations, joins, role changes, and denials (including
