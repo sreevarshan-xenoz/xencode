@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, server, analyze, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 492 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 494 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -124,8 +124,14 @@
   removal of the main worktree is refused before any git call, and dirty linked
   worktrees stay protected by git itself (no `--force`). `r` refreshes; git calls
   are synchronous, matching the `Ctrl+G` refresh precedent.
-- [ ] D3-03 Agent integration: background tasks (D1) take an optional `cwd` so a task
+- [x] D3-03 Agent integration: background tasks (D1) take an optional `cwd` so a task
   can run inside a chosen worktree; worktree list included in the context bundle.
+  `TaskManager::start_with_cwd` (plain `start` delegates with `None`), the
+  `background_start` tool schema gained an optional string `cwd`, and the tool result
+  echoes `in <dir>` so the model knows where it ran (missing directory = `Spawn`
+  error string, no panic). `git_summary_text` now appends a `Worktrees:` block —
+  path, branch, `[dirty]`, `[main]`, capped at 8 — but only when the repo actually
+  has more than one worktree.
 - [ ] D3-04 CLI: `xencode worktree list | add <path> [<branch>] | remove <path>`.
 
 ### D4 — Close-out

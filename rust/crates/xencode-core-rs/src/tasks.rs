@@ -186,14 +186,28 @@ impl TaskManager {
 
     /// Spawn `command` through `sh -c` and start draining its output.
     pub async fn start(&mut self, name: &str, command: &str) -> Result<u64, TaskError> {
-        let mut child = Command::new("sh")
-            .arg("-c")
+        self.start_with_cwd(name, command, None).await
+    }
+
+    /// Like [`start`](Self::start) but runs the command in `cwd` (D3-03:
+    /// lets a task build/test inside a chosen git worktree). A missing
+    /// directory surfaces as `Spawn` from the OS.
+    pub async fn start_with_cwd(
+        &mut self,
+        name: &str,
+        command: &str,
+        cwd: Option<&std::path::Path>,
+    ) -> Result<u64, TaskError> {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(command)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(TaskError::Spawn)?;
+            .kill_on_drop(true);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+        let mut child = cmd.spawn().map_err(TaskError::Spawn)?;
 
         let id = self.store.allocate_id();
         let mut record = TaskRecord::new(id, name.to_string(), command.to_string());
@@ -423,6 +437,36 @@ mod tests {
         }
         assert_eq!(rec.status, TaskStatus::Exited(0));
         assert_eq!(rec.output(), ["hi"]);
+    }
+
+    /// D3-03: `start_with_cwd` runs the command inside the given directory.
+    #[tokio::test]
+    async fn start_with_cwd_runs_in_that_directory() {
+        let dir = std::env::temp_dir().join(format!("xencode-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut m = TaskManager::new();
+        let id = m
+            .start_with_cwd("pwd", "pwd", Some(&dir))
+            .await
+            .unwrap();
+        let mut rec = await_exit(&mut m, id).await;
+        for _ in 0..100 {
+            if !rec.output().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            rec = m.poll(id).await.unwrap();
+        }
+        // macOS leaves /tmp symlinked; compare against the canonical path.
+        let got = std::path::PathBuf::from(rec.output()[0].trim());
+        assert_eq!(got.canonicalize().unwrap(), dir.canonicalize().unwrap());
+        // A directory that doesn't exist must surface as a spawn error.
+        assert!(matches!(
+            m.start_with_cwd("nope", "pwd", Some(&dir.join("missing")))
+                .await,
+            Err(TaskError::Spawn(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

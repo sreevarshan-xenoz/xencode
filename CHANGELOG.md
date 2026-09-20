@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Background tasks can run in another directory (D3-03): `TaskManager::start_with_cwd`, an optional `cwd` on the `background_start` tool (echoed back as `in <dir>` in the result), and the context bundle's git summary now lists extra git worktrees with branch and dirty markers
 - Worktree panel (`Ctrl+O` or Feature Navigator, D3-02): lists git worktrees with branch, short HEAD and dirty marker (★ main / ⚡ dirty / ◯ clean), `a` walks a two-stage add prompt (path → branch), `d` removes via y/N confirm — the main worktree is refused before any git call and dirty worktrees stay protected by git's own guard; `r` refreshes
 - Git worktree helpers (`xencode-context-rs::worktree`, D3-01): pure `parse_worktree_list` for `git worktree list --porcelain` (spaces in paths, detached/locked/prunable/bare) plus explicit-arg `worktree_list`/`worktree_add`/`worktree_remove` shells sharing `gitinfo`'s error reporting
 - `xencode tasks` CLI (D2-02): file-backed background-task registry (`xencode-core-rs::tasks_file`) shared through `.xencode/tasks/` — `list [--json]`, `start <cmd> [--name]`, `poll <id> [--lines]`, `stop <id>`, `rm <id>`; tasks survive the starting process (EXIT-trap wrapper records exit codes, output captured to `<id>.out`), status is derived on read from exit file + killed flag + `/proc` liveness, and `rm` refuses still-running tasks

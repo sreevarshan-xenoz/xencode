@@ -345,6 +345,11 @@ pub fn background_tools() -> Vec<ToolDefinition> {
                     "command": {
                         "type": "string",
                         "description": "Shell command line, run through sh -c"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Directory to run the command in (e.g. a git \
+                                        worktree path); defaults to the session directory"
                     }
                 },
                 "required": ["command"]
