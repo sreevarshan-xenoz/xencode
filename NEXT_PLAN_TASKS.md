@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 513 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 526 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -439,11 +439,14 @@ turns the hub into an actual WebSocket client.
   events, add `join()` (idempotent self-join as Editor), `create_workspace_with_id`
   (server-chosen ids), and `log_denied` for denials decided outside the mutators.
   5 new unit tests (24 in crate); workspace at 513.
-- [ ] G1-02 server-rs: real `TokenStore` (random `xencode_<uuid v4 hex>`, 24 h TTL,
+- [x] G1-02 server-rs: real `TokenStore` (random `xencode_<uuid v4 hex>`, 24 h TTL,
   prune-on-issue, constant-time compare) + `Authed` bearer extractor; `/auth/login`
   rejects the silently-ignored `api_key` with a 400, `/auth/verify` becomes a real
-  lookup; sessions + llamacpp load/unload require auth; permissive CORS deleted;
-  `/api/llamacpp/status` stops leaking model/executable paths.
+  lookup; sessions + llamacpp load/unload require auth; unknown session ids now 404;
+  permissive CORS deleted; `/api/llamacpp/status` and public `/api/config` stop
+  leaking model/executable/args paths. 13 net-new tests (79 in server-rs);
+  workspace at 526. The WS route still takes the username in its path and is
+  unauthenticated — first-frame WS auth is G1-03.
 - [ ] G1-03 server-rs: WS route loses the username (`/ws/{session_id}`), first-frame
   `auth` with 5 s timeout, close codes 4401/4403/4404/4409; joins go through
   `WorkspaceManager::join`; `activity` relay is Editor+ and server-stamped;

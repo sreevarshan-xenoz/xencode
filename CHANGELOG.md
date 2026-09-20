@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `light` TUI theme (8th palette), selectable via Settings ←/→ or `active_theme = "light"` in config; theme cycling now runs through one shared `THEME_NAMES` list instead of three duplicated arrays, and the settings Theme row shows dots for all themes (Milestone E4)
 
 ### Changed
+- Server auth is real (Milestone G, G1-02): `xencode-server-rs` gained a
+  `TokenStore` (random `xencode_<uuid v4 hex>` tokens, 24 h TTL, pruned on
+  issue and lookup, constant-time compare) and an `Authed` bearer extractor.
+  `/auth/login` now rejects the previously-silently-ignored `api_key` with a
+  400 instead of minting a token anyway, `/auth/verify` resolves a token it
+  actually issued — the old prefix-and-length check that accepted any >20-char
+  `xencode_` string is gone. `POST /sessions/create`, `GET /sessions/{id}`
+  (which now 404s for unknown ids instead of an empty 200) and the llama.cpp
+  load/unload endpoints require a valid token; permissive CORS was deleted;
+  `/api/llamacpp/status` and the public `/api/config` no longer leak the
+  model path, executable or launch args
 - Collaboration RBAC groundwork (Milestone G, G1-01): the sole admin can no longer
   be *demoted* by an admin role-change (only removal was guarded), both guards now
   write `Denied` audit events, and `WorkspaceManager` gained `join` (idempotent

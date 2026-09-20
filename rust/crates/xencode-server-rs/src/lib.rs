@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod routes;
+pub mod tokens;
 pub mod ws;
 
 use axum::Router;
@@ -25,6 +26,19 @@ mod tests {
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    /// A router plus a freshly-issued token for its state, so auth-gated
+    /// routes can be exercised end-to-end.
+    async fn app_with_token() -> (Router, String) {
+        let state = Arc::new(ws::AppState::new());
+        let principal = state.tokens.lock().await.issue("tester");
+        (build_app_with_state(state), principal.token)
+    }
+
+    async fn json_body(response: axum::response::Response) -> serde_json::Value {
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
 
     #[tokio::test]
     async fn test_health_check() {
@@ -82,7 +96,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_session() {
+    async fn create_session_with_a_valid_token() {
+        let (app, token) = app_with_token().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/create")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// The regression this guards: session creation used to be open to anyone.
+    #[tokio::test]
+    async fn create_session_without_a_token_is_401() {
         let app = build_app();
         let response = app
             .oneshot(
@@ -95,13 +128,35 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn test_auth_login_success() {
+    async fn create_session_with_a_forged_token_is_401() {
         let app = build_app();
         let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/create")
+                    .header("Content-Type", "application/json")
+                    .header(
+                        "Authorization",
+                        "Bearer xencode_00000000000000000000000000000000",
+                    )
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_login_then_verify_round_trip() {
+        let app = build_app();
+        let response = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -113,15 +168,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(json["token"].as_str().unwrap().starts_with("xencode_"));
+        let json = json_body(response).await;
+        let token = json["token"].as_str().unwrap().to_string();
+        assert!(token.starts_with("xencode_"));
+        assert_eq!(json["username"], "alice");
+        assert!(!json["expires_at"].as_str().unwrap().is_empty());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/verify")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::json!({"token": token}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = json_body(response).await;
         assert_eq!(json["username"], "alice");
         assert!(!json["expires_at"].as_str().unwrap().is_empty());
     }
 
+    /// Login silently ignored `api_key` before; a caller relying on it must
+    /// be told it does nothing rather than getting a token that pretends to
+    /// be key-backed.
     #[tokio::test]
-    async fn test_auth_login_with_api_key() {
+    async fn auth_login_with_api_key_is_400() {
         let app = build_app();
         let response = app
             .oneshot(
@@ -134,11 +208,13 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// The regression this guards: any >20-char `xencode_` string used to
+    /// verify successfully.
     #[tokio::test]
-    async fn test_auth_verify_valid() {
+    async fn auth_verify_garbage_token_is_401() {
         let app = build_app();
         let response = app
             .oneshot(
@@ -153,32 +229,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["valid"], true);
-        assert!(!json["session_token"].as_str().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_auth_verify_invalid_token() {
-        let app = build_app();
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/auth/verify")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"token":"bad_token"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn test_auth_verify_short_token() {
+    async fn auth_verify_short_token_is_401() {
         let app = build_app();
         let response = app
             .oneshot(
@@ -195,44 +250,91 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_session_response_body() {
-        let app = build_app();
+    async fn create_session_response_body() {
+        let (app, token) = app_with_token().await;
         let response = app
             .oneshot(
                 Request::builder()
                     .method("POST")
                     .uri("/sessions/create")
                     .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {token}"))
                     .body(Body::from("{}"))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let json = json_body(response).await;
         assert!(json["id"].as_str().unwrap().starts_with("xencode-"));
         assert!(json["members"].as_array().unwrap().is_empty());
         assert!(!json["created_at"].as_str().unwrap().is_empty());
     }
 
+    /// A created session must be fetchable by its id with the same token.
     #[tokio::test]
-    async fn test_get_session_not_found() {
-        let app = build_app();
+    async fn created_session_is_fetchable() {
+        let (app, token) = app_with_token().await;
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/create")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = json_body(response).await;
+        let id = json["id"].as_str().unwrap().to_string();
+
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/sessions/no-such-session")
+                    .uri(format!("/sessions/{id}"))
+                    .header("Authorization", format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["id"], "no-such-session");
-        assert!(json["members"].as_array().unwrap().is_empty());
+        let json = json_body(response).await;
+        assert_eq!(json["id"], id);
+    }
+
+    #[tokio::test]
+    async fn get_session_requires_a_token() {
+        let app = build_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/whatever")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn get_session_unknown_id_is_404() {
+        let (app, token) = app_with_token().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions/no-such-session")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -248,8 +350,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let json = json_body(response).await;
         assert_eq!(json["online"], true);
         assert_eq!(json["sessions"], 0);
     }
@@ -262,8 +363,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let json = json_body(response).await;
         assert_eq!(json["status"], "online");
         assert_eq!(json["service"], "Xencode Server");
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
@@ -282,8 +382,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let json = json_body(response).await;
         let models = json["models"].as_array().unwrap();
         assert_eq!(models.len(), 4);
     }
@@ -301,8 +400,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let json = json_body(response).await;
         assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
         assert!(json["features"].as_array().unwrap().len() >= 3);
     }
@@ -322,8 +420,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
+    /// Permissive CORS was removed: no browser client exists, and the header
+    /// must not come back by accident.
     #[tokio::test]
-    async fn test_cors_headers_present() {
+    async fn no_cors_headers_are_emitted() {
         let app = build_app();
         let response = app
             .oneshot(
@@ -335,10 +435,25 @@ mod tests {
             )
             .await
             .unwrap();
-        // CORS preflight headers should allow all origins
-        assert!(response
+        assert!(!response
             .headers()
             .contains_key("access-control-allow-origin"));
+    }
+
+    #[tokio::test]
+    async fn llamacpp_load_requires_a_token() {
+        let app = build_app();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/llamacpp/load")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
