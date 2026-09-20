@@ -139,6 +139,21 @@ enum Commands {
         action: WorktreeAction,
     },
 
+    /// Repository insights from the .xencode snapshot: broken imports,
+    /// import cycles, hub files and orphans
+    Advise {
+        /// Only report findings whose file path contains this substring
+        filter: Option<String>,
+
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+
+        /// Maximum findings to show (0 shows all)
+        #[arg(long, default_value = "40")]
+        limit: usize,
+    },
+
     /// Start the collaboration server
     Server {
         /// Port to listen on
@@ -393,6 +408,11 @@ async fn main() {
         Commands::Memory { action } => run_memory(action),
         Commands::Tasks { action } => run_tasks(action),
         Commands::Worktree { action } => run_worktree(action),
+        Commands::Advise {
+            filter,
+            json,
+            limit,
+        } => run_advise(filter, json, limit),
         Commands::Server { port } => run_server(port).await,
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
@@ -1101,7 +1121,10 @@ fn run_tasks(action: TaskAction) -> Result<(), String> {
             let task = reg
                 .start(name.as_deref().unwrap_or(""), &command)
                 .map_err(|e| e.to_string())?;
-            println!("started task {} (pid {}): {}", task.id, task.pid, task.command);
+            println!(
+                "started task {} (pid {}): {}",
+                task.id, task.pid, task.command
+            );
             Ok(())
         }
         TaskAction::Poll { id, lines } => {
@@ -1180,7 +1203,93 @@ fn run_worktree(action: WorktreeAction) -> Result<(), String> {
     }
 }
 
-async fn run_server(port: u16) -> Result<(), String> {    use std::net::SocketAddr;
+/// Findings for `root`'s `.xencode` snapshot, narrowed by `filter`
+/// (substring of the file path). The read+analysis half of `xencode advise`,
+/// unit-tested without the print layer.
+fn compute_advise(
+    root: &std::path::Path,
+    filter: Option<&str>,
+) -> Result<Vec<xencode_context_rs::Advice>, String> {
+    use std::collections::BTreeMap;
+    let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+    let symbols: BTreeMap<String, xencode_context_rs::PerFileSymbols> =
+        xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
+            .unwrap_or_default();
+    if symbols.is_empty() {
+        return Err(format!(
+            "no project index in {} — start the TUI and run /init first",
+            xencode.display()
+        ));
+    }
+    let graph: Vec<xencode_context_rs::DepEdge> =
+        xencode_context_rs::read_json(&xencode_context_rs::deps_json_path(&xencode))
+            .unwrap_or_default();
+    let index: Option<xencode_context_rs::FilesIndex> =
+        xencode_context_rs::read_json(&xencode_context_rs::file_index_path(&xencode));
+    let rust_files: Vec<String> = index
+        .map(|i| {
+            i.files
+                .into_iter()
+                .filter(|f| f.language == "rust")
+                .map(|f| f.path)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut items = xencode_context_rs::advise(&rust_files, &symbols, &graph);
+    if let Some(needle) = filter {
+        items.retain(|a| a.file.contains(needle));
+    }
+    Ok(items)
+}
+
+fn run_advise(filter: Option<String>, json: bool, limit: usize) -> Result<(), String> {
+    let root = xencode_context_rs::default_root();
+    let filter = filter.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let mut items = compute_advise(&root, filter)?;
+    let total = items.len();
+    if limit > 0 {
+        items.truncate(limit);
+    }
+    if json {
+        let rendered: Vec<serde_json::Value> = items
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "file": a.file,
+                    "kind": format!("{:?}", a.kind),
+                    "message": a.message,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&rendered).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if items.is_empty() {
+        println!("no findings — the symbol graph is clean.");
+        return Ok(());
+    }
+    for (i, a) in items.iter().enumerate() {
+        println!(
+            "{:>2}. {:<19} {}",
+            i + 1,
+            format!("{:?}", a.kind),
+            a.message
+        );
+    }
+    if total > items.len() {
+        println!(
+            "… +{} more (raise --limit, or pass a path filter)",
+            total - items.len()
+        );
+    }
+    Ok(())
+}
+
+async fn run_server(port: u16) -> Result<(), String> {
+    use std::net::SocketAddr;
     let state = Arc::new(ServerState::new());
     let app = xencode_server_rs::build_app_with_state(state.clone());
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -1638,8 +1747,52 @@ async fn run_tui() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::format_image_text;
+    use super::{compute_advise, format_image_text};
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+
+    #[test]
+    fn compute_advise_reads_snapshot_filters_and_errors() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use xencode_context_rs::AdviceKind;
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "xencode-advise-cli-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod a;\nmod b;\nmod c;\n").unwrap();
+        std::fs::write(root.join("src/a.rs"), "use crate::b::bee;\n").unwrap();
+        std::fs::write(root.join("src/b.rs"), "use crate::a::ay;\n").unwrap();
+        std::fs::write(root.join("src/c.rs"), "pub fn cc() {}\n").unwrap();
+        std::fs::File::create(root.join("Cargo.toml")).unwrap();
+        xencode_context_rs::init_project(
+            &root,
+            std::sync::Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .expect("init");
+
+        let items = compute_advise(&root, None).unwrap();
+        assert!(items
+            .iter()
+            .any(|i| i.kind == AdviceKind::Cycle && i.file == "src/a.rs"));
+        assert!(items
+            .iter()
+            .any(|i| i.kind == AdviceKind::Orphan && i.file == "src/c.rs"));
+
+        let filtered = compute_advise(&root, Some("c.rs")).unwrap();
+        assert!(!filtered.is_empty());
+        assert!(filtered.iter().all(|i| i.file.contains("c.rs")));
+        assert!(compute_advise(&root, Some("nope")).unwrap().is_empty());
+
+        // No snapshot at all → actionable error, not an empty report.
+        let err = compute_advise(std::path::Path::new("/definitely-not-a-repo-xencode"), None)
+            .expect_err("should fail");
+        assert!(err.contains("no project index"), "{err}");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn image_text_line_shows_mime_dimensions_and_bytes() {
