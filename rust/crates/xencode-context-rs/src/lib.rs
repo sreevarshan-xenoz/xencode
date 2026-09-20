@@ -25,6 +25,7 @@ pub mod gitinfo;
 pub mod index;
 pub mod init;
 pub mod metrics;
+pub mod refresh;
 pub mod retrieve;
 pub mod scanner;
 pub mod stale;
@@ -67,6 +68,7 @@ pub use index::{
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use metrics::{append_metrics, read_metrics, CompactAction, RequestMetrics};
+pub use refresh::{refresh_rust_file, RefreshOutcome};
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};

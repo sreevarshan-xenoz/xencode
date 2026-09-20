@@ -416,7 +416,7 @@ fn manifest_mtimes_fresh(root: &Path, manifest: &Manifest, files: &FilesIndex) -
     true
 }
 
-fn file_mtime_millis(path: &Path) -> Option<u64> {
+pub(crate) fn file_mtime_millis(path: &Path) -> Option<u64> {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()

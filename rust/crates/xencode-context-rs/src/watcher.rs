@@ -21,6 +21,7 @@ use std::time::Duration;
 /// defaults plus the usual build/cache noise.
 pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
     ".git",
+    ".xencode",
     ".venv",
     "__pycache__",
     "node_modules",
