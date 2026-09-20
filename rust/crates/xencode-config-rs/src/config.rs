@@ -29,6 +29,23 @@ pub struct XencodeConfig {
     #[serde(default = "default_theme")]
     pub active_theme: String,
 
+    /// Body layout preset: "classic", "chat-first" or "zen".
+    /// Unknown values fall back to "classic" at render time.
+    #[serde(default = "default_layout")]
+    pub layout: String,
+
+    /// Draw panel borders with rounded corners.
+    #[serde(default)]
+    pub rounded_borders: bool,
+
+    /// Show vertical scrollbars on scrollable lists (chat, explorer).
+    #[serde(default = "default_true")]
+    pub show_scrollbars: bool,
+
+    /// Show a line-number gutter in the code editor.
+    #[serde(default = "default_true")]
+    pub show_line_numbers: bool,
+
     /// Ollama base URL.
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
@@ -98,6 +115,10 @@ fn default_theme() -> String {
     "ocean".to_string()
 }
 
+fn default_layout() -> String {
+    "classic".to_string()
+}
+
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -131,6 +152,10 @@ impl Default for XencodeConfig {
         Self {
             default_model: default_model(),
             active_theme: default_theme(),
+            layout: default_layout(),
+            rounded_borders: false,
+            show_scrollbars: true,
+            show_line_numbers: true,
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
@@ -171,8 +196,14 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl XencodeConfig {
-    /// Returns the path to the xencode config directory (`~/.xencode/`).
+    /// Returns the path to the xencode config directory: `$XCODE_CONFIG_DIR`
+    /// when set (tests and portable installs), else `~/.xencode/`.
     pub fn config_dir() -> Result<PathBuf, ConfigError> {
+        if let Ok(dir) = std::env::var("XCODE_CONFIG_DIR") {
+            if !dir.is_empty() {
+                return Ok(PathBuf::from(dir));
+            }
+        }
         dirs::home_dir()
             .map(|home| home.join(".xencode"))
             .ok_or(ConfigError::NoHomeDir)
@@ -252,6 +283,10 @@ mod tests {
     fn default_config_has_expected_values() {
         let config = XencodeConfig::default();
         assert_eq!(config.default_model, "qwen2.5:7b");
+        assert_eq!(config.layout, "classic");
+        assert!(!config.rounded_borders);
+        assert!(config.show_scrollbars);
+        assert!(config.show_line_numbers);
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.llama_cpp_url, "http://localhost:8080");
         assert_eq!(config.llama_cpp_model_path, "");
@@ -275,6 +310,10 @@ mod tests {
 
         let mut config = XencodeConfig {
             default_model: "llama3.1:8b".to_string(),
+            layout: "zen".to_string(),
+            rounded_borders: true,
+            show_scrollbars: false,
+            show_line_numbers: false,
             ..XencodeConfig::default()
         };
         config.api_keys.openai_api_key = Some("sk-test-123".to_string());
@@ -306,8 +345,42 @@ mod tests {
         // Other fields should have defaults
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.max_cache_size, 100);
+        assert_eq!(config.layout, "classic");
+        assert!(config.show_scrollbars);
+        assert!(config.show_line_numbers);
+        assert!(!config.rounded_borders);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The env override is process-global, so this is the one test that
+    /// touches `XCODE_CONFIG_DIR`; no other test in this binary calls
+    /// `config_dir()`.
+    #[test]
+    fn xcode_config_dir_env_overrides_the_default_location() {
+        let dir = temp_dir();
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        let result = (|| {
+            let path = XencodeConfig::config_path()?;
+            assert_eq!(path, dir.join("config.json"));
+            let config = XencodeConfig {
+                layout: "chat-first".to_string(),
+                ..XencodeConfig::default()
+            };
+            config.save()?;
+            let loaded = XencodeConfig::load()?;
+            assert_eq!(loaded, config);
+            // An empty override is not an override: home wins again.
+            std::env::set_var("XCODE_CONFIG_DIR", "");
+            assert_eq!(
+                XencodeConfig::config_dir()?,
+                dirs::home_dir().unwrap().join(".xencode")
+            );
+            Ok::<(), ConfigError>(())
+        })();
+        std::env::remove_var("XCODE_CONFIG_DIR");
+        result.unwrap();
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

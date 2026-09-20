@@ -544,6 +544,22 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .parse()
                         .map_err(|_| format!("invalid number: {value}"))?;
                 }
+                "layout" => config.layout = value.clone(),
+                "rounded_borders" => {
+                    config.rounded_borders = value
+                        .parse()
+                        .map_err(|_| format!("invalid boolean: {value}"))?;
+                }
+                "show_scrollbars" => {
+                    config.show_scrollbars = value
+                        .parse()
+                        .map_err(|_| format!("invalid boolean: {value}"))?;
+                }
+                "show_line_numbers" => {
+                    config.show_line_numbers = value
+                        .parse()
+                        .map_err(|_| format!("invalid boolean: {value}"))?;
+                }
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;
