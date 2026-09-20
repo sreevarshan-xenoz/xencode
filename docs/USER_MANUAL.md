@@ -263,6 +263,16 @@ the agent explains or re-plans instead of looping.
 `agent_max_rounds` (default 16) caps how many tool rounds one turn may take;
 after that the model is asked for a prose answer with no tools offered.
 
+Every approved write or edit is snapshotted first, so **`/rewind [turns]`**
+puts the files back: `/rewind` undoes the last turn that changed anything,
+`/rewind 3` the last three. Files the agent created are deleted, files it
+changed return byte-for-byte, and turns that wrote nothing are skipped
+instead of counted. The snapshots live in memory only — quitting discards
+them, and git is never touched, so your own commits remain the durable
+history. `/rewind` refuses to run while the agent is still generating, and
+if the rewound file is open in the editor with unsaved edits, it warns rather
+than throwing your work away.
+
 ### First-Time Setup
 
 On first run, Xencode will guide you through:

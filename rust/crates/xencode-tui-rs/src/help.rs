@@ -71,6 +71,10 @@ const COMMANDS: &[Binding] = &[
     ),
     ("/advise [filter]", "repository insights"),
     ("/bytebot <task>", "autonomous task execution"),
+    (
+        "/rewind [turns]",
+        "undo the agent's file changes (session-only)",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

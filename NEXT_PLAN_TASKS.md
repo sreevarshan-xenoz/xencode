@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 617 tests passing, zero warnings
+- [x] Workspace gates green — 13 crates, 624 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -598,7 +598,7 @@ outgoing editor-activity producer, configurable max session size.
   the policy (approve → execute, deny → `error:` the model must not retry),
   session grants shared with the loop, `agent_max_rounds` config (default 16).
   **617 tests passed, zero clippy warnings**
-- [ ] I2-01 — checkpoints + `/rewind`
+- [x] I2-01 — checkpoints + `/rewind`: pre-bytes snapshot of every approved write/edit, grouped per turn (session-only, git untouched), `/rewind [turns]`, editor buffer refreshed unless unsaved edits are at stake. **624 tests passed, zero clippy warnings**
 - [ ] I2-02 — `run_command` tool (timed, capped, approval-gated)
 - [ ] I2-03 — plan/TODO visibility (`update_plan` tool + checklist render)
 - [ ] I2-04 — real ByteBot replacing the scripted simulation
