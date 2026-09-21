@@ -13,7 +13,7 @@ and cloud models with a sequential provider fallback chain, runs an
 approval-gated agentic tool loop, and has deep terminal ergonomics.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/sreevarshan-xenoz/xencode/ci.yml?label=CI&logo=github&style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/actions)
-[![Rust](https://img.shields.io/badge/Rust-stable%201.80%2B-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
 [![Version](https://img.shields.io/badge/version-0.1.0-8A2BE2?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
@@ -44,6 +44,7 @@ and fix your code — driven entirely from your terminal.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
+- **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
@@ -107,12 +108,20 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more. Seven are real: the security auditor walks the workspace with the same vulnerability scanner `xencode analyze` uses, the performance profiler reports measured process CPU/memory, the session's own latency and throughput numbers, and `n/a` where nothing has been measured yet, the terminal assistant asks the configured model for commands and runs what you pick through the agent's approval gate, the multi-language panel tabulates the workspace with the real `scan_tree` walk (files, lines, share per language — secret and binary files counted but never read) and translates your text with one model call, the custom models panel edits real `model_profiles` in `config.json` — apply to the next turn with `Enter`, save with `s`, and `t` shows the provider's real reply or error, and the learning mode panel queues the files the project index says declare something and asks the model to teach that file and quiz you on it. The voice panel opens the microphone through the first of `arecord`/`pw-record`/`parec` on `PATH`: `Enter` records, `Enter` again stops, the level bar, peak and clip length are RMS over the PCM the recorder actually sent, and the clip lands in `.xencode/voice/clip-<unix>.wav` — text shows up only if a whisper CLI is installed, otherwise the panel names the clip and says there is no speech engine.
+- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more.
+- **The seven panels that used to play recordings are real** (Milestone J):
+  - *Security auditor* — `Enter` walks the workspace with the same file list `xencode analyze` uses and runs the pattern scanner per file, streaming findings and finishing with real totals; unreadable files and a failed walk surface as their own log lines.
+  - *Performance profiler* — this process's CPU (two `/proc/self/stat` reads 250 ms apart) and resident memory, the session's own average turn latency and tokens/s, per-provider health latency, and the last rows of `.xencode/cache/metrics.jsonl`. A gauge with no data renders `n/a`.
+  - *Terminal assistant* — asks the configured model for commands and runs the one you pick **through the agent's approval gate**, never around it.
+  - *Multi-language* — tabulates a real `scan_tree` walk (files, lines, share per language; secret and binary files counted, never read) and translates your text with one model call.
+  - *Custom models* — edits real `model_profiles` in `config.json`: `Enter` applies to the next turn, `s` saves, `t` shows the provider's real reply or its real error.
+  - *Learning mode* — queues the files the project index says declare something and asks the model to teach that file and quiz you on it.
+  - *Voice* — opens the microphone through the first of `arecord`/`pw-record`/`parec` on `PATH`. `Enter` records, `Enter` again stops; the level bar, peak and clip length are RMS over the PCM the recorder actually sent, and the clip lands in `.xencode/voice/clip-<unix>.wav`. Text appears only from a whisper CLI's stdout — with none installed the panel names the clip and says there is no speech engine.
 - **Approval-gated agent tool loop** — the chat model can call 11 tools (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`, `update_plan`, `background_start/poll/stop`, `repo_advise`); file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), paths outside the workspace are refused in every mode, every answer is logged in the transcript, the model's todo list renders above the chat (`/plan`), and `/rewind` puts the files back. `/bytebot <task>` delegates the same loop — its panel's steps are the real calls and their real outcomes. `agent_hooks` config runs your own shell commands before/after approved calls (per tool or `*`); a failing `before` hook vetoes the call entirely. `/spawn <task> [#branch]` runs the same delegated loop in a fresh sibling git worktree (`proj-spawn-1` on branch `xencode/spawn-1`), streams its live steps, posts its final answer back as `(spawn #<id> · <task>)`, and `/spawn status` lists the registered runs.
 - **MCP tool servers** — declare stdio servers under `mcp_servers` in config and `/mcp` starts them on request; their tools reach the model as `mcp__<server>__<tool>` behind the same approval gate (`External` class — always a `y`/`n`, never waved through by autonomy), with `mcp_timeout` bounding each call and a broken server failing in its own words.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
 - Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
-- Rich CLI with `advise`, `server`, `analyze`, `fetch`, `tasks`, `worktree`, and `plugin` subcommands.
+- CLI with 16 subcommands: `scan`, `config`, `models`, `cache`, `query`, `memory`, `tasks`, `worktree`, `advise`, `server`, `analyze`, `fetch`, `review`, `plugin`, `llamacpp`, `tui`.
 
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
@@ -127,8 +136,13 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 ### Prerequisites
 | Requirement | Used for | Get it |
 | --- | --- | --- |
-| **Ollama** | Local AI models (required) | [ollama.ai](https://ollama.ai/download) |
-| **Rust 1.80+** (stable) | Building the binary | [rustup.rs](https://rustup.rs) |
+| **Ollama** | Local models — the default path, so this is the one to install | [ollama.ai](https://ollama.ai/download) |
+| **Rust stable** | Building the binary — no MSRV is pinned; CI builds on `stable` | [rustup.rs](https://rustup.rs) |
+
+Ollama is what the binary talks to out of the box, not the only option: a local
+`llama-server` (`llamacpp:…`, managed by `xencode llamacpp`), Gemini, Qwen and
+any OpenAI-compatible endpoint through OpenRouter work instead — those need a
+key in `~/.xencode/config.json` and nothing local has to be running.
 
 ### Option A: Rust binary (recommended)
 
@@ -149,7 +163,15 @@ xencode --help
 
 ### Option B: One-liner installers
 
-The repository ships cross-platform installer scripts — [`install.sh`](install.sh) (Linux/macOS) and [`install.ps1`](install.ps1) (Windows). Download the script and run it, or review it first and execute locally:
+[`install.sh`](install.sh) (Linux/macOS) and [`install.ps1`](install.ps1)
+(Windows) do Option A for you, from a clone of this repository: they check for a
+Rust toolchain (installing one via rustup if it is missing), run
+`cargo build --release -p xencode-cli`, and on macOS/Linux also set Ollama up and
+start it if you do not have it. `install.sh` then smoke-tests the fresh binary and
+copies it to `/usr/local/bin` when that directory is writable, `$HOME/.local/bin`
+otherwise (adding it to your `PATH`); `install.ps1` puts the exe in
+`%LOCALAPPDATA%\xencode` and adds that directory to your user `PATH`. Review the
+script before running it.
 
 ```bash
 # Linux/macOS
@@ -205,8 +227,8 @@ xencode --version                # Show version
 
 ### In-chat commands
 
-These eight are the only strings the chat input intercepts — anything else is
-sent to the model as a prompt.
+These nine are the only strings the chat input intercepts (`SLASH_COMMANDS` in
+`xencode-tui-rs/src/app.rs`) — anything else is sent to the model as a prompt.
 
 ```
 /init [abort|status]        Index the repo / stop / inspect an index run
@@ -233,6 +255,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **General** | `xencode` | Launch Rust TUI (default experience) |
 | **General** | `xencode --version` | Show installed version |
 | **Query** | `xencode query "…"` | Run a one-shot query |
+| **Query** | `xencode query "…" --temperature 0.2 --max-tokens 512` | llama.cpp sampling per call: also `--top-k`, `--min-p`, `--mirostat`, `--grammar`, `--json-schema`, `--no-cache`, `--session`, `--model` |
 | **Scan** | `xencode scan . --max-depth 2` | Scan workspace |
 | **Config** | `xencode config show` | Show runtime config |
 | **Models** | `xencode models list` | List installed Ollama models (`health <name>` checks one) |
@@ -372,7 +395,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (751 tests)
+cargo test                          # Full workspace suite (751 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -388,6 +411,7 @@ CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/
 
 - **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml): Rust builder → slim runtime running `xencode server --port 8765`, health-checked against `/api/status`. This path is real.
 - **CI/CD** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs fmt → clippy → `cargo test --workspace` on every push and PR. [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs the same gate, then builds and pushes the image to `ghcr.io` and Trivy-scans it. There is no deploy stage: the server is a stateless single binary, so nothing applies Kubernetes manifests, and the `k8s/` and `monitoring/` directories that implied otherwise have been removed.
+- **Releases** — [`.github/workflows/release.yml`](.github/workflows/release.yml) fires on a `v*` tag (or by hand): release build → [`scripts/smoke-test.sh`](scripts/smoke-test.sh) against the built binary → a GitHub Release with that binary attached. `cargo build --release` locally is still the documented install path above; nothing in the manuals claims a package-manager channel that does not exist.
 
 ---
 
@@ -405,8 +429,11 @@ xencode/
 │       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
 │       └── ...              # core, config, cache, memory, models, collaboration, plugin
+├── docs/                    # User manual, install manual, server API, long-term roadmap
 ├── scripts/                 # Shell/PowerShell build + smoke-test helpers
 ├── images/                  # Screenshots
+├── install.sh / install.ps1 # One-liner installers (Linux/macOS, Windows)
+├── Dockerfile / docker-compose.yml
 └── .xencode.example.json    # Example of ~/.xencode/config.json
 ```
 
@@ -424,7 +451,7 @@ Current, and kept in step with the Rust implementation:
 | Active task list | [`NEXT_PLAN_TASKS.md`](NEXT_PLAN_TASKS.md) · [`NEXT_PLAN.md`](NEXT_PLAN.md) |
 | Route + auth reference | [`docs/api_documentation.md`](docs/api_documentation.md) (the collaboration server's HTTP/WebSocket surface) |
 | Installation and troubleshooting | [`docs/INSTALL_MANUAL.md`](docs/INSTALL_MANUAL.md) |
-| Long-term direction | [`docs/ROADMAP.md`](docs/ROADMAP.md) (a pre-migration snapshot; the top of the file says what the tree actually is) |
+| Long-term direction | [`docs/ROADMAP.md`](docs/ROADMAP.md) (what is shipped, what is icebox, and what is deliberately parked) |
 
 The Python-era archives that used to be listed here — `DOCUMENTATION.md`,
 `PRD.md`, `project details.md`, `docs/FEATURES.md`,
@@ -480,15 +507,27 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 ## 🗺️ Roadmap
 
-The Rust migration (all 8 phases, 14 crates) is **complete**. Near-term direction:
+The Rust migration (all 8 phases, 14 crates) is **complete**, and so is
+**Milestone J** (2026-09-21) — the pass that made every TUI panel tell the truth
+and gave the plugin surface a runtime. There is no open milestone: the last known
+gap between what these manuals promise and what this code does is closed, and
+what is left is choices, not bugs.
 
-- An `anthropic_api_key` field so the existing Anthropic client is reachable
-  without going through OpenRouter
-- Retry budgets and fallback-policy governance + provider health UX
-- Multimodal inputs and secure team workflows
-- Multi-model arena mode · git autopilot agent · session replay
+Under consideration, in [`docs/ROADMAP.md`](docs/ROADMAP.md):
 
-The roadmap file below is the pre-migration plan, kept for history.
+- **Text-to-speech output** for the voice panel (input has been real since J-07)
+- **Multi-model arena mode** — the same prompt to several models side by side.
+  Nothing fuses or votes across models today: the fallback chain is strictly
+  sequential, and calling it "ensemble reasoning" would be a lie
+- **Coordinating several agent runs** — `/spawn` already runs one delegated loop
+  in its own worktree; nothing schedules or merges many
+- **AI-generated commit messages** — the `Ctrl+S` panel takes text you type and
+  runs `git commit -am`; nothing proposes the message from the diff
+- **Session replay**, a git autopilot, a VS Code extension, a web interface
+
+Deliberately parked, not gaps to "fix": an `anthropic_api_key` field (see
+[Configuration](#-configuration--model-routing)) and wiring `crdt.rs` into the
+collaboration server — each is a decision to make, not an oversight.
 
 ---
 
