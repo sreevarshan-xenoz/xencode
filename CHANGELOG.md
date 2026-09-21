@@ -10,12 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Milestone J — opened
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 to J-05 have landed** — the
+the plugin registry loaded no runtime. **J-01 to J-06 have landed** — the
 security auditor and the profiler are real, the terminal assistant delegates to
 a model through the agent's approval gate, the multi-language panel tabulates
-a real `scan_tree` walk and translates through a real model call, and the custom
-models panel edits `model_profiles` in `config.json`, leaving two scripted
-panels.
+a real `scan_tree` walk and translates through a real model call, the custom
+models panel edits `model_profiles` in `config.json`, and the learning mode
+panel teaches files the project index actually found — leaving one scripted
+panel (voice) and the plugin runtime.
 `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
@@ -93,6 +94,25 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Learning Mode panel is real (Milestone J, J-06). It opened with one invented
+  lesson — "Rust Ownership Basics", a `calculate_length` snippet, an "exercise"
+  with nothing to submit it to — and a quiz it marked correct whenever option 1
+  was picked, because `learn_quiz_correct` compared the selection to `0`. Now
+  `Enter` reads `.xencode/index/symbols.json` and queues the files that declare
+  something (most declarations first, ties by path, five at a time), so the
+  lesson list belongs to this workspace: a file with no declarations is not a
+  lesson, and a workspace with no index gets "No project index — run /init
+  first" and no request. Each lesson shows that file's own text — capped at a
+  line boundary, with a note saying how much of it was sent — next to the
+  declarations the index recorded, then makes one model call asking for
+  `{explain, question, options, answer, why}` about that exact text. The
+  model's sentences are drawn under "The model says:"; the answer key is the
+  model's, the panel names which option was the key and prints its reason, and a
+  reply with no usable key in it is shown as the reply instead of becoming a
+  canned question. `p`/`n` walk the queue, `r` re-asks. Dropped `learn_exercise`
+  and the `learn_progress_pct` score (progress now means position in the queue);
+  fixed the header box, which fitted 1 of its 2 lines so the count never
+  showed.
 - Custom Models panel is real (Milestone J, J-05). Pressing `Enter` used to seed
   four invented profiles (`Code Assistant`, `Creative Writer`, `Bug Hunter`,
   `Code Reviewer`) with sliders and a "Profile saved!" line that wrote nothing.

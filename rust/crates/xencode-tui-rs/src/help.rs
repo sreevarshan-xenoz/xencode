@@ -172,7 +172,9 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("t", "one test request to the provider"),
         ],
         LearningMode => &[
-            ("Enter", "start lesson / answer quiz"),
+            ("Enter", "queue lessons from .xencode / grade the quiz"),
+            ("p / n", "previous / next file in the queue"),
+            ("r", "re-ask the model about this file"),
             ("← →", "pick quiz option"),
         ],
         ReviewDashboard => &[

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 706 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 714 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -787,9 +787,36 @@ workspace gates green.
   the real config), two config round-trip tests (unset knobs are absent from the
   JSON; a pre-profiles config still loads), and two render tests at 160×44.
   **706 tests passed.**
-- [ ] J-06 — **Learning mode**: lessons come from the repo — the context index
-  picks real files/symbols, the model explains that file, and the quiz is about
-  code that exists. Empty/unindexed workspace → the panel says so.
+- [x] J-06 — **Learning mode** (2026-09-21): the hardcoded "Rust Ownership
+  Basics" lesson is gone — five sentences about a language feature, a
+  `calculate_length` snippet that is not in this repo, an "exercise" nobody could
+  submit, and a quiz whose correct option was whatever happened to be first
+  (`learn_quiz_correct = selected == 0`, and the render even coloured option 0
+  green). `Enter` now reads `.xencode/index/symbols.json` and queues the files
+  that **declare something** — most declarations first, ties by path, capped at
+  5 — so the queue is the index's own list; a file the extractor found nothing in
+  is not a lesson, and no index at all means the panel prints "No project index —
+  run /init first" and spends no request. What goes on screen per lesson is the
+  file's own text (capped at a line boundary by `cap_at_line`, with a note saying
+  how many of how many bytes were sent) plus the declarations the index recorded;
+  `learn_show` does all of that with no provider involved, and `learn_ask_current`
+  then sends **that same text** — what the panel shows is what the model was
+  given. One call per lesson asks for `{explain, question, options, answer, why}`;
+  `parse_lesson_quiz` tolerates fences, prose, a quoted answer index, and
+  non-string options, and refuses a reply with no usable key (no explanation,
+  fewer than 2 options, an index past the end) — that reply is printed as the
+  reply rather than replaced by a canned question. Grading is against the model's
+  key, the panel names which option was the key, shows its `why`, and keeps the
+  model's sentences under "The model says:" so they cannot be read as facts the
+  tool verified. `p`/`n` walk the queue, `r` re-asks, and every character is
+  handled in the panel so `n`/`p`/`r` cannot fall through to a global chord
+  (E2-06). Also fixed a layout bug the rewrite exposed: the header box fitted 1 of
+  its 2 lines, so the lesson count had never been visible. Dead state removed:
+  `learn_exercise`, `learn_progress_pct` (the +20%-per-correct-answer score).
+  Covered by six app tests (queue order + no-index reason off a real `init_project`
+  run, the show path incl. an unreadable file, grading against a non-first key,
+  junk reply reported, parsing rules, no request when nothing is indexed) and two
+  render tests at 160×44. **714 tests passed.**
 - [ ] J-07 — **Voice interface**: `arecord`/`pw-record` capture on Enter, level
   bar driven by RMS computed from the captured PCM (real meters), then
   transcription through a whisper CLI if one is on `PATH`; with no STT backend

@@ -352,7 +352,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::WorktreePanel => key_worktree_panel(app, key),
         FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
-        FocusArea::LearningMode => key_learning(app, key),
+        FocusArea::LearningMode => key_learning(app, key, tx),
         FocusArea::CustomModels => key_custom_models(app, key, tx),
         FocusArea::VoiceInterface => key_voice(app, key, tx),
         FocusArea::TerminalAssistant => key_terminal_assistant(app, key, tx),
@@ -1167,20 +1167,27 @@ fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-fn key_learning(app: &mut App, key: KeyEvent) -> bool {
+/// Learning Mode is the workspace's own code now (J-06): Enter queues the files
+/// the project index says declare something and asks the model about the one on
+/// screen, `p`/`n` walk that queue, and the quiz is graded against the answer
+/// key the model sent. Every character is handled here so no letter can fall
+/// through to a global chord and open another panel (E2-06).
+fn key_learning(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    let options = app.learn_quiz_options.len();
     match key.code {
         KeyCode::Enter => {
-            if !app.learn_active {
-                app.start_learning_mode();
+            // Nothing queued yet (or the index refused) — Enter retries the
+            // queue; a lesson on screen means Enter grades the quiz instead.
+            if !app.learn_active || app.learn_lessons.is_empty() {
+                app.start_learning(xencode_context_rs::default_root(), tx.clone());
             } else if app.learn_quiz_active && !app.learn_quiz_answered {
-                // Check quiz answer
-                app.learn_quiz_answered = true;
-                // Simple check: first option is correct
-                app.learn_quiz_correct = app.learn_quiz_selected == 0;
-                if app.learn_quiz_correct {
-                    app.learn_progress_pct = (app.learn_progress_pct + 20.0).min(100.0);
-                }
+                app.learn_answer_quiz();
             }
+        }
+        KeyCode::Char('n') => app.learn_step(true, tx.clone()),
+        KeyCode::Char('p') => app.learn_step(false, tx.clone()),
+        KeyCode::Char('r') if app.learn_current_lesson > 0 => {
+            app.learn_go(app.learn_current_lesson, tx.clone())
         }
         KeyCode::Left
             if app.learn_quiz_active && !app.learn_quiz_answered && app.learn_quiz_selected > 0 =>
@@ -1190,10 +1197,11 @@ fn key_learning(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Right
             if app.learn_quiz_active
                 && !app.learn_quiz_answered
-                && app.learn_quiz_selected + 1 < app.learn_quiz_options.len() =>
+                && app.learn_quiz_selected + 1 < options =>
         {
             app.learn_quiz_selected += 1;
         }
+        KeyCode::Char(_) => {}
         _ => return false,
     }
     true

@@ -462,21 +462,41 @@ pub struct App<'a> {
     /// A test request is with the provider right now.
     pub models_busy: bool,
 
-    // Learning Mode state
+    // Learning Mode state: lessons are files the project index says exist, so
+    // the queue, the source on screen and the answer key all come from outside
+    // this panel. See `start_learning`.
     pub learn_active: bool,
+    /// The workspace the queue was built from, so `p`/`n` cannot drift onto a
+    /// different checkout mid-session.
+    pub learn_root: std::path::PathBuf,
+    /// The queue: `(repo-relative path, what it declares)`, from `.xencode`.
+    pub learn_lessons: Vec<(String, Vec<String>)>,
+    /// Index into `learn_lessons` for the lesson on screen.
     pub learn_current_lesson: usize,
     pub learn_total_lessons: usize,
+    /// The file this lesson is about — a path, not a invented title.
     pub learn_lesson_title: String,
+    /// Facts read off the index: what the file declares, and what was sent.
     pub learn_content: Vec<String>,
+    /// The file's own text, capped, and what the model was given.
     pub learn_code_example: String,
-    pub learn_exercise: String,
-    pub learn_progress_pct: f64,
+    /// The panel's own report: a refusal, a provider error, the model's why.
+    pub learn_status: String,
+    /// An explanation request is with the provider right now.
+    pub learn_busy: bool,
     pub learn_quiz_active: bool,
     pub learn_quiz_question: String,
     pub learn_quiz_options: Vec<String>,
     pub learn_quiz_selected: usize,
     pub learn_quiz_answered: bool,
     pub learn_quiz_correct: bool,
+    /// Which option the model called correct. `None` until it says so.
+    pub learn_quiz_answer: Option<usize>,
+    /// The model's own sentences about this file, kept apart from the facts the
+    /// index produced so the panel can say which is which.
+    pub learn_explain: Vec<String>,
+    /// The model's reason for its answer key, shown once graded.
+    pub learn_quiz_why: String,
 
     // Multi-Language state
     /// A walk or a translation request is in flight; the panel does one thing
@@ -1135,6 +1155,121 @@ async fn run_language_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
 /// rather than free-form entry because these are the numbers worth sending.
 const MODEL_TOKEN_STEPS: [u32; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
 
+/// Lessons the Learning panel queues from the project index, and how much of a
+/// file it puts on screen and into the prompt. Both caps exist because the
+/// panel is a popup, not a pager.
+const LEARN_LESSON_CAP: usize = 5;
+const LEARN_SOURCE_CAP: usize = 4_000;
+
+/// What the model sent back for one lesson. `answer` is the model's own key,
+/// which is the only reason the panel can call anything correct.
+struct LearnedLesson {
+    explain: Vec<String>,
+    question: String,
+    options: Vec<String>,
+    answer: usize,
+    why: String,
+}
+
+/// The lesson queue: files `.xencode/index/symbols.json` says declare
+/// something, most declarations first and ties by path so the order is the same
+/// every run. `Err` carries the reason there is nothing to teach from, which is
+/// what the panel shows instead of a lesson.
+fn learning_lessons(root: &std::path::Path) -> Result<Vec<(String, Vec<String>)>, String> {
+    let xencode = root.join(".xencode");
+    if !xencode_context_rs::file_index_path(&xencode).is_file() {
+        return Err("No project index — run /init first, then Enter again.".to_string());
+    }
+    let symbols: std::collections::BTreeMap<String, xencode_context_rs::PerFileSymbols> =
+        xencode_context_rs::read_json(&xencode_context_rs::symbols_json_path(&xencode))
+            .unwrap_or_default();
+    let mut lessons: Vec<(String, Vec<String>)> = symbols
+        .iter()
+        .filter_map(|(path, syms)| {
+            let mut declared: Vec<String> = syms
+                .structs
+                .iter()
+                .map(|name| format!("struct {name}"))
+                .collect();
+            declared.extend(syms.functions.iter().map(|name| format!("fn {name}")));
+            (!declared.is_empty()).then(|| (path.clone(), declared))
+        })
+        .collect();
+    lessons.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+    lessons.truncate(LEARN_LESSON_CAP);
+    if lessons.is_empty() {
+        return Err(
+            "The index lists no file that declares a struct or function — nothing real to teach."
+                .to_string(),
+        );
+    }
+    Ok(lessons)
+}
+
+/// Cut `text` to at most `max` bytes, at a line boundary.
+fn cap_at_line(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let window = &text[..max];
+    match window.rfind('\n') {
+        Some(keep) => text[..keep].to_string(),
+        None => window.to_string(),
+    }
+}
+
+/// Read the model's lesson out of its reply. Fences and surrounding prose are
+/// tolerated; a reply that carries no complete quiz — fewer than two options,
+/// an answer index past the end, no explanation — is `None`, so the panel can
+/// report it instead of guessing.
+fn parse_lesson_quiz(text: &str) -> Option<LearnedLesson> {
+    let cleaned = text.replace("```json", "").replace("```", "");
+    let start = cleaned.find('{')?;
+    let end = cleaned.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(&cleaned[start..=end]).ok()?;
+    let strings = |key: &str| -> Vec<String> {
+        let Some(items) = value[key].as_array() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .map(|item| match item {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    let explain = strings("explain");
+    let options = strings("options");
+    let question = value["question"].as_str().unwrap_or_default().trim();
+    // Weak models quote the index; accept "1" as readily as 1.
+    let answer = value["answer"].as_u64().or_else(|| {
+        value["answer"]
+            .as_str()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+    })? as usize;
+    if question.is_empty()
+        || explain.is_empty()
+        || options.len() < 2
+        || options.len() > 4
+        || answer >= options.len()
+    {
+        return None;
+    }
+    Some(LearnedLesson {
+        explain,
+        question: question.to_string(),
+        options,
+        answer,
+        why: value["why"].as_str().unwrap_or_default().trim().to_string(),
+    })
+}
+
 /// Commands the terminal panel will offer at once. More than a screenful is
 /// noise, so this is both what the model is asked for and what it gets.
 const TERM_SUGGESTION_CAP: usize = 8;
@@ -1512,19 +1647,24 @@ impl<'a> App<'a> {
             models_busy: false,
 
             learn_active: false,
+            learn_root: std::path::PathBuf::new(),
+            learn_lessons: Vec::new(),
             learn_current_lesson: 0,
             learn_total_lessons: 0,
             learn_lesson_title: String::new(),
             learn_content: Vec::new(),
             learn_code_example: String::new(),
-            learn_exercise: String::new(),
-            learn_progress_pct: 0.0,
+            learn_status: String::new(),
+            learn_busy: false,
             learn_quiz_active: false,
             learn_quiz_question: String::new(),
             learn_quiz_options: Vec::new(),
             learn_quiz_selected: 0,
             learn_quiz_answered: false,
             learn_quiz_correct: false,
+            learn_quiz_answer: None,
+            learn_explain: Vec::new(),
+            learn_quiz_why: String::new(),
 
             lang_busy: false,
             lang_scan_path: String::new(),
@@ -4102,49 +4242,188 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Start Learning Mode with lesson content.
-    pub fn start_learning_mode(&mut self) {
-        if self.learn_active {
+    /// `Enter` in the Learning panel: queue this workspace's own files as
+    /// lessons. What this replaced was one hardcoded Rust ownership lesson —
+    /// five sentences, a `calculate_length` snippet, and a quiz whose correct
+    /// option was always the first — about code that is not in this repo.
+    pub fn start_learning(&mut self, root: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
+        if self.learn_busy {
             return;
         }
         self.learn_active = true;
-        self.learn_current_lesson = 1;
-        self.learn_total_lessons = 5;
-        self.learn_lesson_title = "Rust Ownership Basics".to_string();
+        self.learn_root = root;
+        match learning_lessons(&self.learn_root) {
+            Err(reason) => {
+                self.learn_lessons.clear();
+                self.learn_current_lesson = 0;
+                self.learn_total_lessons = 0;
+                self.learn_lesson_title.clear();
+                self.learn_code_example.clear();
+                self.learn_reset_lesson();
+                self.learn_status = reason;
+            }
+            Ok(lessons) => {
+                self.learn_lessons = lessons;
+                self.learn_go(1, tx);
+            }
+        }
+    }
+
+    /// Put lesson `n` (1-based, as the panel counts it) on screen and ask the
+    /// model about it. Out of range, or a file that cannot be read: the panel
+    /// says so and spends no request.
+    pub fn learn_go(&mut self, n: usize, tx: mpsc::UnboundedSender<String>) {
+        if !self.learn_show(n) {
+            return;
+        }
+        self.learn_ask_current(tx);
+    }
+
+    /// The file work, with no provider involved: what the index says this file
+    /// declares, and the file's own text. Returns false when there is no lesson
+    /// `n` to show, having said why.
+    pub fn learn_show(&mut self, n: usize) -> bool {
+        let Some((path, declared)) = self.learn_lessons.get(n.wrapping_sub(1)).cloned() else {
+            if self.learn_lessons.is_empty() {
+                self.learn_status =
+                    "Nothing queued — press Enter to build the lessons.".to_string();
+            }
+            return false;
+        };
+        self.learn_current_lesson = n;
+        self.learn_total_lessons = self.learn_lessons.len();
+        self.learn_lesson_title = path.clone();
+        self.learn_reset_lesson();
+
+        let source = match std::fs::read_to_string(self.learn_root.join(&path)) {
+            Ok(text) => text,
+            Err(e) => {
+                self.learn_status = format!("The index names {path}, but reading it failed: {e}");
+                return false;
+            }
+        };
+        let shown = cap_at_line(&source, LEARN_SOURCE_CAP);
+        self.learn_code_example = shown.clone();
         self.learn_content = vec![
-            "In Rust, each value has a single 'owner' at any time.".to_string(),
-            "When the owner goes out of scope, the value is dropped.".to_string(),
-            "References allow borrowing without taking ownership.".to_string(),
-            "Mutable references (&mut T) are exclusive - only one at a time.".to_string(),
-            "Immutable references (&T) can coexist freely.".to_string(),
+            format!(
+                "{} declaration(s) the index found in {}.",
+                declared.len(),
+                path
+            ),
+            crate::agent_tools::truncate_one_line(&declared.join(" · "), 400),
+            if shown.len() == source.len() {
+                format!("Whole file sent: {} lines.", source.lines().count())
+            } else {
+                format!(
+                    "First {} of {} bytes sent — the file is longer than the panel shows.",
+                    shown.len(),
+                    source.len()
+                )
+            },
         ];
-        self.learn_code_example = [
-            "fn main() {",
-            "    let s = String::from(\"hello\");  // s owns the String",
-            "    let len = calculate_length(&s);   // borrow, not move",
-            "    println!(\"'{}' has length {}\", s, len);",
-            "}",
-            "",
-            "fn calculate_length(s: &String) -> usize {",
-            "    s.len()  // s is a reference, no ownership transfer",
-            "}",
-        ]
-        .join("\n");
-        self.learn_exercise =
-            "Fix the ownership error: let s2 = s; println!(\"{}\", s);".to_string();
-        self.learn_progress_pct = 20.0;
-        // Seed quiz for lesson 1
-        self.learn_quiz_active = true;
-        self.learn_quiz_question = "What owns a String value in Rust?".to_string();
-        self.learn_quiz_options = vec![
-            "The variable that declares it".to_string(),
-            "The heap allocator".to_string(),
-            "The garbage collector".to_string(),
-            "All references to it".to_string(),
-        ];
+        true
+    }
+
+    /// One request per lesson: explain this file, and set a quiz about it with
+    /// the answer key the panel grades against. What gets sent is what the
+    /// panel is showing — same path, same capped text.
+    fn learn_ask_current(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let path = self.learn_lesson_title.clone();
+        let source = self.learn_code_example.clone();
+        if path.is_empty() || source.is_empty() {
+            return;
+        }
+        self.learn_busy = true;
+        self.learn_status = format!("asking {} about {path}…", self.config.default_model);
+        let prompt = format!(
+            "The file `{path}` in this workspace contains:\n\n```rust\n{source}\n```\n\n\
+             Teach this file. Reply with ONLY a JSON object shaped like\n\
+             {{\"explain\": [\"…\", \"…\"], \"question\": \"…\", \"options\": [\"…\", \"…\", \"…\"], \
+             \"answer\": 0, \"why\": \"…\"}}\n\
+             where `explain` is 2–4 sentences about code that is actually in the file, `question` asks \
+             about this file specifically, `options` is 3–4 choices, `answer` is the 0-based index of \
+             the correct choice, and `why` is one sentence on why it is correct.",
+        );
+        let messages = one_shot_messages(&self.learn_root, prompt);
+        let call = SingleShot::from_config(&self.config);
+        tokio::spawn(async move {
+            let token = match call.ask(&messages).await {
+                Ok(reply) => format!("[LEARN]quiz:{reply}"),
+                Err(e) => format!("[LEARN]err:{e}"),
+            };
+            let _ = tx.send(token);
+        });
+    }
+
+    /// Drop the previous lesson's quiz and explanation; the new file has to
+    /// earn both.
+    fn learn_reset_lesson(&mut self) {
+        self.learn_content.clear();
+        self.learn_explain.clear();
+        self.learn_quiz_active = false;
+        self.learn_quiz_question.clear();
+        self.learn_quiz_options.clear();
         self.learn_quiz_selected = 0;
         self.learn_quiz_answered = false;
         self.learn_quiz_correct = false;
+        self.learn_quiz_answer = None;
+        self.learn_quiz_why.clear();
+    }
+
+    /// The model's reply becomes the quiz. A reply with no quiz in it is
+    /// reported as that reply rather than filled in with a canned question.
+    pub fn learn_apply_quiz(&mut self, reply: &str) {
+        self.learn_busy = false;
+        match parse_lesson_quiz(reply) {
+            Some(lesson) => {
+                self.learn_explain = lesson.explain;
+                self.learn_quiz_active = true;
+                self.learn_quiz_question = lesson.question;
+                self.learn_quiz_options = lesson.options;
+                self.learn_quiz_answer = Some(lesson.answer);
+                self.learn_quiz_why = lesson.why;
+                self.learn_status.clear();
+            }
+            None => {
+                self.learn_status = format!(
+                    "The model did not answer with a quiz. It said: {}",
+                    crate::agent_tools::truncate_one_line(reply.trim(), 200)
+                );
+            }
+        }
+    }
+
+    /// Enter on an unanswered quiz: grade against the key the model sent. The
+    /// panel has no answer of its own to fall back on.
+    pub fn learn_answer_quiz(&mut self) {
+        if !self.learn_quiz_active || self.learn_quiz_answered {
+            return;
+        }
+        // A quiz only becomes active together with its key, so one exists here.
+        let answer = self.learn_quiz_answer.unwrap_or(usize::MAX);
+        self.learn_quiz_answered = true;
+        self.learn_quiz_correct = self.learn_quiz_selected == answer;
+    }
+
+    /// `p` / `n`: walk the queue the index built.
+    pub fn learn_step(&mut self, forward: bool, tx: mpsc::UnboundedSender<String>) {
+        if self.learn_busy || self.learn_lessons.is_empty() {
+            return;
+        }
+        let total = self.learn_lessons.len();
+        let next = if forward {
+            let last = self.learn_current_lesson + 1 > total;
+            if last {
+                return;
+            }
+            self.learn_current_lesson + 1
+        } else {
+            if self.learn_current_lesson <= 1 {
+                return;
+            }
+            self.learn_current_lesson - 1
+        };
+        self.learn_go(next, tx);
     }
 
     /// Walk the workspace with the context engine and report what it actually
@@ -5240,6 +5519,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     app.lang_translate_error = true;
                     app.lang_translate_output = err.to_string();
                 }
+            } else if let Some(body) = token.strip_prefix("[LEARN]") {
+                if let Some(reply) = body.strip_prefix("quiz:") {
+                    app.learn_apply_quiz(reply);
+                } else if let Some(err) = body.strip_prefix("err:") {
+                    app.learn_busy = false;
+                    app.learn_status = format!(
+                        "provider said: {}",
+                        crate::agent_tools::truncate_one_line(err, 200)
+                    );
+                }
             } else if let Some(body) = token.strip_prefix("[PROFILE]") {
                 app.models_busy = false;
                 // The reply and the failure share one line on purpose: the
@@ -5626,12 +5915,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        first_output_line, format_advise_report, format_watch_warning, live_refresh_snapshot,
-        parse_llama_port, parse_porcelain_z, parse_term_suggestions, watch_warning_for, App,
-        FocusArea, LoopSink, SpawnRecord,
+        cap_at_line, first_output_line, format_advise_report, format_watch_warning,
+        learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
+        parse_porcelain_z, parse_term_suggestions, watch_warning_for, App, FocusArea, LoopSink,
+        SpawnRecord,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
+    use xencode_context_rs::init_project;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
 
     /// I2-01: `/rewind` is the user's undo for what the agent wrote. The
@@ -7127,6 +7418,194 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("xcode-{}-{}", tag, nanos));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Run the real indexer over a temp workspace with three Rust files:
+    /// `two.rs` declares three things, `one.rs` one, `quiet.rs` nothing.
+    fn indexed_root(tag: &str) -> std::path::PathBuf {
+        let root = temp_dir(tag);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src/two.rs"),
+            "pub struct Two {}\npub struct Dos {}\npub fn two() {}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/one.rs"), "pub fn one() {}\n").unwrap();
+        std::fs::write(root.join("src/quiet.rs"), "pub const MODE: u32 = 3;\n").unwrap();
+        init_project(
+            &root,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            |_| {},
+        )
+        .expect("init");
+        root
+    }
+
+    /// The queue is the index's own list: files that declare something, most
+    /// declarations first, ties by path. A file the extractor found nothing in
+    /// is not a lesson.
+    #[test]
+    fn learning_lessons_come_from_the_index_in_a_stable_order() {
+        let root = indexed_root("learn-queue");
+        let lessons = learning_lessons(&root).expect("a queue");
+        assert_eq!(
+            lessons
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/two.rs", "src/one.rs"],
+        );
+        assert!(lessons[0].1.contains(&"struct Two".to_string()));
+        assert!(lessons[0].1.contains(&"fn two".to_string()));
+
+        // No index: the panel gets a reason to show, not a lesson to fake.
+        let empty = temp_dir("learn-none");
+        assert_eq!(
+            learning_lessons(&empty),
+            Err("No project index — run /init first, then Enter again.".to_string())
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&empty).unwrap();
+    }
+
+    /// What the panel prints for a lesson is the file's own text and the
+    /// declarations the index recorded — including what it had to leave out.
+    #[test]
+    fn learn_show_prints_the_real_file_and_what_it_declares() {
+        let root = temp_dir("learn-show");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let long = format!("pub struct Big {{}}\n{}", "fn filler() {{}}\n".repeat(400));
+        std::fs::write(root.join("src/big.rs"), &long).unwrap();
+        init_project(
+            &root,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            |_| {},
+        )
+        .expect("init");
+
+        let mut app = App::for_tests();
+        app.learn_root = root.clone();
+        app.learn_lessons = learning_lessons(&root).unwrap();
+        assert!(app.learn_show(1));
+        assert_eq!(app.learn_lesson_title, "src/big.rs");
+        assert!(app.learn_code_example.contains("pub struct Big"));
+        assert!(app.learn_content[0].contains("declaration(s) the index found in src/big.rs"));
+        // The file is bigger than the cap, and the panel says how much it sent.
+        let cap_note = &app.learn_content[2];
+        assert!(cap_note.starts_with("First "), "{cap_note}");
+        assert!(
+            cap_note.contains("bytes sent — the file is longer"),
+            "{cap_note}"
+        );
+        assert!(!app.learn_busy, "showing a file asks nothing of a provider");
+
+        // A lesson past the end of the queue changes nothing.
+        app.learn_status.clear();
+        assert!(!app.learn_show(9));
+        assert!(app.learn_status.is_empty());
+
+        // The index names a file that has since gone: said out loud, and the
+        // previous lesson's text is not left standing as if it were this one.
+        std::fs::remove_file(root.join("src/big.rs")).unwrap();
+        assert!(!app.learn_show(1));
+        assert!(
+            app.learn_status.starts_with("The index names src/big.rs"),
+            "{}",
+            app.learn_status
+        );
+        assert!(app.learn_content.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The answer key is the model's, and grading is against it — not against
+    /// whichever option happens to be first, as it used to be.
+    #[test]
+    fn learn_quiz_grades_against_the_models_key() {
+        let mut app = App::for_tests();
+        app.learn_apply_quiz(
+            "```json\n{\"explain\":[\"App owns the panel state.\"],\"question\":\"Which type owns the plan?\",\"options\":[\"App\",\"Plan\",\"Frame\"],\"answer\":1,\"why\":\"The plan field is a Plan.\"}\n```",
+        );
+        assert!(app.learn_quiz_active);
+        assert_eq!(app.learn_quiz_answer, Some(1));
+        assert_eq!(app.learn_explain, vec!["App owns the panel state."]);
+        assert!(!app.learn_busy, "the reply ended the request");
+        app.learn_quiz_selected = 0;
+        app.learn_answer_quiz();
+        assert!(app.learn_quiz_answered);
+        assert!(!app.learn_quiz_correct);
+        app.learn_quiz_selected = 1;
+        app.learn_quiz_answered = false;
+        app.learn_answer_quiz();
+        assert!(app.learn_quiz_correct);
+        assert_eq!(app.learn_quiz_why, "The plan field is a Plan.");
+    }
+
+    #[test]
+    fn a_reply_without_a_quiz_is_reported_not_invented() {
+        let mut app = App::for_tests();
+        app.learn_apply_quiz("Sure! Ownership means each value has one owner.");
+        assert!(!app.learn_quiz_active, "no quiz in it, so no quiz shown");
+        assert!(
+            app.learn_status
+                .starts_with("The model did not answer with a quiz"),
+            "{}",
+            app.learn_status
+        );
+        assert!(
+            app.learn_status.contains("Ownership means"),
+            "the reply verbatim"
+        );
+    }
+
+    #[test]
+    fn lesson_quiz_parsing_needs_a_usable_answer_key() {
+        let with_answer = |answer: &str| {
+            format!("{{\"explain\":[\"a\"],\"question\":\"q\",\"options\":[\"x\",\"y\"],\"answer\":{answer}}}")
+        };
+        assert_eq!(parse_lesson_quiz(&with_answer("1")).unwrap().answer, 1);
+        assert_eq!(
+            parse_lesson_quiz(&with_answer("\"0\"")).unwrap().answer,
+            0,
+            "a quoted index is still an index"
+        );
+        assert!(
+            parse_lesson_quiz(&with_answer("2")).is_none(),
+            "past the end"
+        );
+        assert!(parse_lesson_quiz(
+            "{\"explain\":[],\"question\":\"q\",\"options\":[\"x\",\"y\"],\"answer\":0}"
+        )
+        .is_none());
+        assert!(parse_lesson_quiz(
+            "{\"explain\":[\"a\"],\"question\":\"q\",\"options\":[\"x\"],\"answer\":0}"
+        )
+        .is_none());
+        assert!(parse_lesson_quiz("prose, no json").is_none());
+
+        assert_eq!(cap_at_line("aaaa\nbbbb\n", 6), "aaaa");
+        assert_eq!(cap_at_line("short", 6), "short");
+        assert_eq!(cap_at_line("no-newline-at-all", 10), "no-newline");
+    }
+
+    /// The other half of J-06's done-when rule: an un-indexed workspace gets
+    /// the reason, and nothing is sent to a provider.
+    #[test]
+    fn learning_without_an_index_says_why_and_asks_nothing() {
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        let mut app = App::for_tests();
+        let root = temp_dir("learn-noindex");
+        app.start_learning(root.clone(), tx.clone());
+        assert!(app.learn_active, "the panel still opened");
+        assert!(app.learn_lessons.is_empty());
+        assert_eq!(
+            app.learn_status,
+            "No project index — run /init first, then Enter again."
+        );
+        assert!(!app.learn_busy, "nothing was sent to a provider");
+        // And walking an empty queue cannot conjure a lesson either.
+        app.learn_step(true, tx);
+        assert_eq!(app.learn_current_lesson, 0);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// Every number the profiler panel shows has to be measured or explained.

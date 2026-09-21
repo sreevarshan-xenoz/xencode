@@ -326,8 +326,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
             FocusArea::GitCommit | FocusArea::CollaborationHub |
             FocusArea::VoiceInterface |
-            FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
-            FocusArea::LearningMode => "Enter:start  Esc:close",
+            FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler => "Enter:start  Esc:close",
+            FocusArea::LearningMode => {
+                "Enter:lessons  p/n:file  ←→+Enter:quiz  r:re-ask  Esc:close"
+            }
             FocusArea::CustomModels => {
                 "n:new  -/+:temp  ←/→:tokens  Enter:apply  s:save  t:test  Esc:close"
             }
@@ -3791,7 +3793,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 📚 Learning Mode (Enter:start, Esc:close) ");
+        .title(" 📚 Learning Mode — lessons from this repo ");
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -3799,8 +3801,10 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // header + progress
-            Constraint::Min(1),    // content
+            // Two border rows plus both header lines: at Length(3) the queue
+            // count was clipped and the panel showed only the file name.
+            Constraint::Length(4),
+            Constraint::Min(1), // lesson text, model's words, quiz
         ])
         .split(inner);
 
@@ -3809,27 +3813,37 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 🎯 Lesson Progress ");
+        .title(" 🎯 Lesson Queue ");
 
     let bar_w = 25usize;
-    let filled = (app.learn_progress_pct / 100.0 * bar_w as f64).round() as usize;
+    let (seen, total) = (app.learn_current_lesson, app.learn_total_lessons);
+    // Progress means "how far through the queue the index built", not a score.
+    let pct = if total > 0 {
+        seen as f64 * 100.0 / total as f64
+    } else {
+        0.0
+    };
+    let filled = ((pct / 100.0) * bar_w as f64).round() as usize;
     let filled = filled.min(bar_w);
     let empty = bar_w.saturating_sub(filled);
-    let progress_str = format!(
-        "  {} / {}  |  [{}{}]  {:.0}%",
-        app.learn_current_lesson,
-        app.learn_total_lessons,
-        "█".repeat(filled),
-        "░".repeat(empty),
-        app.learn_progress_pct,
-    );
+    let progress_str = if total == 0 {
+        "  The project index queued 0 lessons.".to_string()
+    } else {
+        format!(
+            "  lesson {seen} of {total}  |  [{}{}]  {:.0}% of the queue",
+            "█".repeat(filled),
+            "░".repeat(empty),
+            pct,
+        )
+    };
 
     let header_lines = vec![
         Line::from(Span::styled(
-            format!(
-                "  Lesson {}: {}",
-                app.learn_current_lesson, app.learn_lesson_title
-            ),
+            if app.learn_lesson_title.is_empty() {
+                "  No file chosen yet".to_string()
+            } else {
+                format!("  {}", app.learn_lesson_title)
+            },
             Style::default()
                 .fg(app.theme.accent)
                 .add_modifier(Modifier::BOLD),
@@ -3852,25 +3866,66 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
         .title(" 📖 Content ");
 
     let mut content_lines: Vec<Line> = Vec::new();
+    if !app.learn_status.is_empty() {
+        let bad = app.learn_status.starts_with("provider said")
+            || app.learn_status.starts_with("The model did not")
+            || app.learn_status.starts_with("The index names")
+            || app.learn_status.starts_with("No project index");
+        content_lines.push(Line::from(Span::styled(
+            format!("  {}", app.learn_status),
+            Style::default().fg(if bad {
+                app.theme.danger
+            } else {
+                app.theme.message_system
+            }),
+        )));
+        content_lines.push(Line::from(""));
+    }
     if app.learn_content.is_empty() {
         content_lines.push(Line::from(Span::styled(
-            "  Press Enter to start learning.",
+            if app.learn_active {
+                "  Nothing queued. Enter builds lessons from .xencode/index."
+            } else {
+                "  Enter queues the files this workspace's index says declare something,"
+            },
             Style::default().fg(app.theme.message_system),
         )));
+        if !app.learn_active {
+            content_lines.push(Line::from(Span::styled(
+                "  then asks the model to teach that file.",
+                Style::default().fg(app.theme.message_system),
+            )));
+        }
     } else {
-        // Lesson points
+        // Facts the index and the file itself produced, before any model text.
         for point in &app.learn_content {
             content_lines.push(Line::from(Span::styled(
                 format!("  • {}", point),
                 Style::default().fg(app.theme.fg),
             )));
         }
-        content_lines.push(Line::from(""));
+
+        if !app.learn_explain.is_empty() {
+            content_lines.push(Line::from(""));
+            content_lines.push(Line::from(Span::styled(
+                "  The model says:",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for sentence in &app.learn_explain {
+                content_lines.push(Line::from(Span::styled(
+                    format!("    {sentence}"),
+                    Style::default().fg(app.theme.fg),
+                )));
+            }
+        }
 
         // Code example
         if !app.learn_code_example.is_empty() {
+            content_lines.push(Line::from(""));
             content_lines.push(Line::from(Span::styled(
-                "  Code Example:",
+                "  From the file:",
                 Style::default()
                     .fg(app.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -3881,28 +3936,13 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(app.theme.success),
                 )));
             }
-            content_lines.push(Line::from(""));
-        }
-
-        // Exercise prompt
-        if !app.learn_exercise.is_empty() {
-            content_lines.push(Line::from(Span::styled(
-                "  Exercise:",
-                Style::default()
-                    .fg(app.theme.warning)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            content_lines.push(Line::from(Span::styled(
-                format!("    {}", app.learn_exercise),
-                Style::default().fg(app.theme.warning),
-            )));
         }
 
         // Quiz section
         if app.learn_quiz_active {
             content_lines.push(Line::from(""));
             content_lines.push(Line::from(Span::styled(
-                "  Quiz:",
+                "  Quiz (the model's question and answer key):",
                 Style::default()
                     .fg(app.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -3914,8 +3954,11 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
             content_lines.push(Line::from(""));
             for (i, option) in app.learn_quiz_options.iter().enumerate() {
                 let is_selected = i == app.learn_quiz_selected;
+                let is_key = app.learn_quiz_answered && app.learn_quiz_answer == Some(i);
                 let prefix = if is_selected && !app.learn_quiz_answered {
                     "  \u{25B6} "
+                } else if is_key {
+                    "  \u{2713} "
                 } else {
                     "    "
                 };
@@ -3923,7 +3966,7 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                     Style::default()
                         .fg(app.theme.highlight_fg)
                         .bg(app.theme.highlight)
-                } else if app.learn_quiz_answered && i == 0 {
+                } else if is_key {
                     Style::default().fg(app.theme.success)
                 } else if app.learn_quiz_answered && is_selected && !app.learn_quiz_correct {
                     Style::default().fg(app.theme.danger)
@@ -3935,26 +3978,44 @@ fn draw_learning_mode(f: &mut Frame, app: &App, area: Rect) {
                     style,
                 )));
             }
+            content_lines.push(Line::from(""));
             if app.learn_quiz_answered {
-                content_lines.push(Line::from(""));
-                if app.learn_quiz_correct {
-                    content_lines.push(Line::from(Span::styled(
-                        "  Correct! +20% progress",
-                        Style::default().fg(app.theme.success),
-                    )));
+                let verdict = if app.learn_quiz_correct {
+                    "correct"
                 } else {
+                    "not the key"
+                };
+                content_lines.push(Line::from(Span::styled(
+                    format!(
+                        "  You picked {} — the model's key was option {}; {}.",
+                        app.learn_quiz_selected + 1,
+                        app.learn_quiz_answer.map(|a| a + 1).unwrap_or(0),
+                        verdict,
+                    ),
+                    Style::default().fg(if app.learn_quiz_correct {
+                        app.theme.success
+                    } else {
+                        app.theme.warning
+                    }),
+                )));
+                if !app.learn_quiz_why.is_empty() {
                     content_lines.push(Line::from(Span::styled(
-                        "  Not quite. Try again next time!",
-                        Style::default().fg(app.theme.warning),
+                        format!("  Why: {}", app.learn_quiz_why),
+                        Style::default().fg(app.theme.fg),
                     )));
                 }
             } else {
-                content_lines.push(Line::from(""));
                 content_lines.push(Line::from(Span::styled(
                     "  Select with \u{2190}\u{2192}, confirm with Enter",
                     Style::default().fg(app.theme.message_system),
                 )));
             }
+        } else if app.learn_busy {
+            content_lines.push(Line::from(""));
+            content_lines.push(Line::from(Span::styled(
+                "  Waiting for the model's quiz…",
+                Style::default().fg(app.theme.message_system),
+            )));
         }
     }
 
