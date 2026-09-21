@@ -152,6 +152,10 @@ const BYTEBOT_PREFIX: &str = "[BYTEBOT]";
 /// side derives progress from the step rows and posts the report to the chat.
 const SPAWN_PREFIX: &str = "[SPAWN]";
 
+/// Findings the security panel streams before it stops listing them. The
+/// totals it reports stay true — the cap only limits lines on screen.
+const FINDINGS_CAP: usize = 200;
+
 /// How a spawn's task is framed for the model. The worktree is the whole
 /// deal: everything it touches is inside it, and it must say that plainly.
 const SPAWN_BRIEF: &str = "Delegated task in your own git worktree — you are isolated \
@@ -747,6 +751,123 @@ pub fn format_advise_report(
         ));
     }
     out
+}
+
+/// Walk `root` and stream what the scanner actually found: one
+/// `[SECURITY]finding:` per hit, `[SECURITY]progress:` per scanned file,
+/// `[SECURITY]note:` for anything the panel should say, and a final
+/// `[SECURITY]done:` carrying the true totals. A walker or read failure is
+/// reported as `[SECURITY]failed:` in the scanner's own words.
+async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
+    let walked_root = root.clone();
+    let walked = tokio::task::spawn_blocking(move || {
+        let options = xencode_context_rs::ScanOptions::default();
+        xencode_context_rs::scanner::scan_tree(&walked_root, &options)
+    })
+    .await;
+    let outcome = match walked {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(e)) => {
+            let _ = tx.send(format!("[SECURITY]failed:{}", e));
+            return;
+        }
+        Err(e) => {
+            let _ = tx.send(format!("[SECURITY]failed:scan thread died: {}", e));
+            return;
+        }
+    };
+    let total = outcome.files.len();
+    let _ = tx.send(format!(
+        "[SECURITY]note:{} files · {} listed as secret · {} skipped",
+        outcome.files.len(),
+        outcome.secret_files.len(),
+        outcome.skipped
+    ));
+
+    // The walker counts secret-named files in `files` too and never reads them,
+    // so they are reported as a class instead of being opened line by line.
+    let mut reported = 0usize;
+    let mut shown = 0usize;
+    let mut by_severity = [0u32; 4]; // critical, high, medium, low
+    let mut bump = |severity: &str| match severity {
+        "Critical" => by_severity[0] += 1,
+        "High" => by_severity[1] += 1,
+        "Medium" => by_severity[2] += 1,
+        _ => by_severity[3] += 1,
+    };
+    for path in &outcome.secret_files {
+        reported += 1;
+        bump("Medium");
+        if shown < FINDINGS_CAP {
+            shown += 1;
+            let _ = tx.send(format!(
+                "[SECURITY]finding:Medium|secret-file|{}|listed by the walker, never read — check whether it belongs in the tree",
+                path
+            ));
+        }
+    }
+
+    let mut scanned = 0usize;
+    let mut unreadable = 0usize;
+    for entry in &outcome.files {
+        if entry.is_binary || entry.is_secret {
+            continue;
+        }
+        scanned += 1;
+        let path = root.join(&entry.path);
+        let findings = match xencode_analysis_rs::VulnerabilityScanner::scan_file(&path) {
+            Ok(findings) => findings,
+            Err(_) => {
+                unreadable += 1;
+                continue;
+            }
+        };
+        for finding in findings {
+            let severity = format!("{:?}", finding.severity);
+            reported += 1;
+            bump(&severity);
+            if shown >= FINDINGS_CAP {
+                continue;
+            }
+            shown += 1;
+            let cwe = finding
+                .cwe_id
+                .as_ref()
+                .map(|c| format!(" ({})", c))
+                .unwrap_or_default();
+            let _ = tx.send(format!(
+                "[SECURITY]finding:{}|{}|{}:{}|{}{} — {}",
+                severity,
+                finding.finding_type,
+                finding.file_path,
+                finding.line_number,
+                finding.message,
+                cwe,
+                finding.recommendation
+            ));
+        }
+        let _ = tx.send(format!(
+            "[SECURITY]progress:{:.2}",
+            scanned as f64 / total.max(1) as f64
+        ));
+    }
+
+    if reported > shown {
+        let _ = tx.send(format!(
+            "[SECURITY]note:list capped at {} findings — the severity totals are the full scan",
+            FINDINGS_CAP
+        ));
+    }
+    if unreadable > 0 {
+        let _ = tx.send(format!(
+            "[SECURITY]note:{} files could not be read and were skipped",
+            unreadable
+        ));
+    }
+    let _ = tx.send(format!(
+        "[SECURITY]done:{} findings across {} files|{},{},{},{}",
+        reported, scanned, by_severity[0], by_severity[1], by_severity[2], by_severity[3]
+    ));
 }
 
 impl<'a> App<'a> {
@@ -3173,6 +3294,9 @@ impl<'a> App<'a> {
     }
 
     /// Start Security Auditor scan simulation.
+    /// Scan the workspace with the real pattern scanner over the file list the
+    /// context engine's walker produces, so this panel and `xencode analyze`
+    /// cannot disagree about what is in the tree.
     pub fn start_security_scan(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.sec_scan_active {
             return;
@@ -3182,68 +3306,10 @@ impl<'a> App<'a> {
         self.sec_scan_summary = (0, 0, 0, 0);
         self.sec_scan_progress = 0.0;
         self.sec_scan_log.clear();
-        self.sec_scan_log
-            .push("🔍 Starting vulnerability scan...".to_string());
-
-        tokio::spawn(async move {
-            let findings = [
-                (
-                    "Critical",
-                    "Hardcoded API Key",
-                    "src/config.py:42",
-                    "❌ Found hardcoded AWS_SECRET_KEY",
-                ),
-                (
-                    "High",
-                    "SQL Injection",
-                    "src/queries.py:18",
-                    "🚨 Raw SQL concatenation detected",
-                ),
-                (
-                    "High",
-                    "Command Injection",
-                    "src/deploy.py:55",
-                    "🚨 Using os.system() with user input",
-                ),
-                (
-                    "Medium",
-                    "Weak Crypto",
-                    "src/crypto.py:10",
-                    "⚠️ MD5 used for password hashing",
-                ),
-                (
-                    "Medium",
-                    "XSS Vulnerability",
-                    "src/templates/user.html:22",
-                    "⚠️ Unsafe innerHTML assignment",
-                ),
-                (
-                    "Low",
-                    "Deprecated Package",
-                    "requirements.txt:1",
-                    "📦 PyCrypto v2.6.1 is end-of-life",
-                ),
-                (
-                    "Low",
-                    "Missing Rate Limit",
-                    "src/api.py:30",
-                    "🐢 No rate limiting on /login endpoint",
-                ),
-            ];
-
-            let total = findings.len();
-            for (i, (severity, category, location, detail)) in findings.iter().enumerate() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                let progress = (i as f64 + 1.0) / total as f64;
-                let _ = tx.send(format!("[SECURITY]progress:{:.2}", progress));
-                let _ = tx.send(format!(
-                    "[SECURITY]finding:{}|{}|{}|{}",
-                    severity, category, location, detail
-                ));
-            }
-
-            let _ = tx.send("[SECURITY]done".to_string());
-        });
+        let root = xencode_context_rs::default_root();
+        self.sec_scan_path = root.display().to_string();
+        let _ = tx.send(format!("[SECURITY]note:Scanning {}", self.sec_scan_path));
+        tokio::spawn(run_security_scan(root, tx));
     }
 
     /// Start Performance Profiler simulation.
@@ -4400,7 +4466,32 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             app.sec_scan_summary = (c, h, m, l);
                         }
                     }
-                } else if body == "done" {
+                } else if let Some(msg) = body.strip_prefix("note:") {
+                    app.sec_scan_log.push(msg.to_string());
+                } else if let Some(msg) = body.strip_prefix("failed:") {
+                    app.sec_scan_log.push(format!("scan failed: {}", msg));
+                    app.sec_scan_active = false;
+                } else if let Some(msg) = body.strip_prefix("done:") {
+                    app.sec_scan_progress = 1.0;
+                    // The scan's own totals win over the per-line count: the
+                    // list is capped on screen, the findings are not.
+                    let (summary, text) = match msg.split_once('|') {
+                        Some((text, counts)) => {
+                            let c: Vec<u32> = counts
+                                .split(',')
+                                .filter_map(|v| v.trim().parse().ok())
+                                .collect();
+                            let totals = if c.len() == 4 {
+                                (c[0], c[1], c[2], c[3])
+                            } else {
+                                app.sec_scan_summary
+                            };
+                            (totals, text)
+                        }
+                        None => (app.sec_scan_summary, msg),
+                    };
+                    app.sec_scan_summary = summary;
+                    app.sec_scan_log.push(text.to_string());
                     app.sec_scan_active = false;
                 }
             } else if let Some(body) = token.strip_prefix("[PROFILER]") {
@@ -6044,6 +6135,61 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The security panel's data has to come from the scanner, so a fixture
+    /// tree with one known credential line must produce that finding and
+    /// nothing from the scripted list it replaces (`src/config.py`,
+    /// "142 tests passed").
+    #[tokio::test]
+    async fn security_scan_streams_real_findings() {
+        let dir = std::env::temp_dir().join(format!(
+            "xcode-sec-scan-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("src/db.rs"),
+            "fn connect() {\n    let api_key = \"supersecretvalue123\";\n}\n",
+        )
+        .unwrap();
+        // Named as a secret by the walker, and scannable if it were opened.
+        std::fs::write(
+            dir.join(".env"),
+            "AWS_SECRET_ACCESS_KEY=aklsdjflaksdjflkjasdflkjas\n",
+        )
+        .unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_security_scan(dir.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            messages.iter().any(
+                |m| m.starts_with("[SECURITY]finding:Critical|hardcoded-secret|")
+                    && m.contains("src/db.rs")
+            ),
+            "no real finding in {messages:?}"
+        );
+        // The secret file is named, not opened: one classed finding, no line.
+        let secret_lines: Vec<&String> = messages.iter().filter(|m| m.contains(".env")).collect();
+        assert_eq!(secret_lines.len(), 1, "{secret_lines:?}");
+        assert!(secret_lines[0].starts_with("[SECURITY]finding:Medium|secret-file|.env|"));
+        // Totals ride on the done line so the summary survives the display cap.
+        let done = messages
+            .iter()
+            .find(|m| m.starts_with("[SECURITY]done:"))
+            .expect("no done line");
+        assert!(done.ends_with("|1,0,1,0"), "{done}");
+        assert!(!messages.iter().any(|m| m.contains("config.py")));
+        assert!(!messages.iter().any(|m| m.contains("tests passed")));
     }
 
     fn git(root: &std::path::Path, args: &[&str]) {

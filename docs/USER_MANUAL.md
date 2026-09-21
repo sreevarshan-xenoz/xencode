@@ -33,13 +33,15 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **Not implemented, whatever a panel shows.** Seven TUI panels are interface
-> mockups with scripted content: Voice Interface, Terminal Assistant, Security
-> Auditor, Performance Profiler, Custom Models, Learning Mode and
-> Multi-Language. They render and respond to keys; nothing listens, records,
-> profiles or detects. The real equivalents are `xencode analyze`
-> (security/code findings), `xencode advise` (repo insights) and the
-> performance dashboard (session metrics).
+> **Not implemented, whatever a panel shows.** Six TUI panels are still
+> interface mockups with scripted content: Voice Interface, Terminal Assistant,
+> Performance Profiler, Custom Models, Learning Mode and Multi-Language. They
+> render and respond to keys; nothing listens or profiles. The **Security
+> Auditor is real** — `Enter` walks the workspace and runs the same
+> `VulnerabilityScanner` behind `xencode analyze`, so an empty result means the
+> scanner found nothing, not that the panel is a demo. Real equivalents for the
+> rest: `xencode analyze` (code findings), `xencode advise` (repo insights) and
+> the performance dashboard (session metrics).
 
 ## Installation
 
@@ -194,7 +196,7 @@ do anything):
 | Collaboration Hub | Real WebSocket client: create/join sessions, live members with roles, server errors verbatim |
 | Voice Interface | 🎭 Mockup — a scripted session plays audio levels and transcript lines; no microphone is opened |
 | Terminal Assistant | 🎭 Mockup — a fixed list of suggested commands with risk badges; nothing runs |
-| Security Auditor | 🎭 Mockup — scripted findings and severity bars; use `xencode analyze` for real scanning |
+| Security Auditor | Real scan: `Enter` walks the workspace with the context engine and runs `VulnerabilityScanner::scan_file` on every readable file; findings stream in with their CWE ids and a log line gives the true totals. Files the walker lists as secret are reported, never read |
 | Performance Profiler | 🎭 Mockup — demo gauges and function timings; no profiler is attached |
 | Custom Models | 🎭 Mockup — sample profiles and sliders; saving writes nothing to config |
 | Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |

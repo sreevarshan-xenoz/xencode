@@ -3194,8 +3194,13 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
 fn security_findings_lines(app: &App) -> Vec<Line<'static>> {
     let mut find_lines: Vec<Line> = Vec::new();
     if app.sec_scan_results.is_empty() && !app.sec_scan_active {
+        let idle = if app.sec_scan_progress >= 1.0 {
+            "  No findings in the last scan. Press Enter to scan again."
+        } else {
+            "  Press Enter to start a vulnerability scan."
+        };
         find_lines.push(Line::from(Span::styled(
-            "  Press Enter to start a vulnerability scan.",
+            idle,
             Style::default().fg(app.theme.message_system),
         )));
     } else if app.sec_scan_results.is_empty() && app.sec_scan_active {
@@ -3255,11 +3260,19 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(75, 70, area);
     f.render_widget(Clear, popup_area);
 
+    let scanned = if app.sec_scan_path.is_empty() {
+        String::from(" 🛡️ Security Auditor (Enter:scan, Esc:close) ")
+    } else {
+        format!(
+            " 🛡️ Security Auditor · {} (Enter:scan, Esc:close) ",
+            app.sec_scan_path
+        )
+    };
     let block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🛡️ Security Auditor (Enter:scan, Esc:close) ");
+        .title(scanned);
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
