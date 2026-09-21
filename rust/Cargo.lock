@@ -3614,6 +3614,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-mcp-rs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "xencode-memory-rs"
 version = "0.1.0"
 dependencies = [
@@ -3702,6 +3713,7 @@ dependencies = [
  "xencode-config-rs",
  "xencode-context-rs",
  "xencode-core-rs",
+ "xencode-mcp-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
  "xencode-providers-rs",

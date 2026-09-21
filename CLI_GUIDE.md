@@ -46,7 +46,9 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
 `Ctrl+C` or `q` quit. Slash commands: `/init`, `/ctx`, `/advise`,
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
-`/rewind` (undo the agent's file changes for this session).
+`/rewind` (undo the agent's file changes for this session),
+`/mcp` (connect every MCP server declared in config; `/mcp status`,
+`/mcp stop`).
 
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
@@ -115,10 +117,12 @@ set `XCODE_CONFIG_DIR` to point Xencode at a different directory.
 ```bash
 xencode config show
 xencode config set default_model qwen3:4b
+xencode config set mcp_timeout 30
 xencode config reset
 ```
 
 `config set` keys (values are validated; `config show` prints the JSON):
+`mcp_servers` is a nested map, so it is edited directly in the JSON instead.
 
 | Key | Type | Notes |
 |-----|------|-------|
@@ -135,6 +139,8 @@ xencode config reset
 | `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |
+| `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
+| `mcp_servers` | object | MCP stdio servers to offer as tools: `"name" → { "command": "...", "args": [...], "env": {...} }` (credentials go in `env`, never `args`); nothing is started until you run `/mcp` |
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).
