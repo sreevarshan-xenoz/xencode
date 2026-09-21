@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **Dead Rust, deleted with no replacement.** `xencode-context-rs`
+  `cmd_output` (a command-output blob index that nothing ever wrote to or read
+  from), the never-implemented `Embedder` extension trait with its `cosine`
+  helper and `Bm25::max_score_per_doc`, `expand_dependencies`, and the unused
+  `CancelFlag` alias. `xencode-analysis-rs` lost `embeddings`
+  (`EmbeddingClient`), `vector_store` (`VectorStore`, `cosine_similarity`) and
+  `indexer` (`ChunkIndexer`, `DocumentChunk`) — the retrieval path in
+  `xencode-context-rs` never called them. Dropped the `serde_json` and `uuid`
+  dependencies those modules were the only users of; suite is 684 tests.
+- **Python-era tooling configs.** `.pre-commit-config.yaml` (bandit, ruff,
+  mypy, safety, detect-secrets against a baseline file that does not exist) and
+  `.bandit` (a findings baseline for code that is no longer in the tree). The
+  gates are `cargo fmt --check`, `cargo clippy --workspace --all-targets` and
+  `cargo test --workspace`, which CI already runs. Also untracked
+  `.xencode/technical_debt.db`, a 274 KiB SQLite artifact of the Python-era
+  `technical_debt_manager.py` (`debt_scans` / `debt_items` tables) that no Rust
+  code opens — `.gitignore` already covers `.xencode/`.
+
 ### Fixed
 - **Provider fallback chain (I4-01)** now honours its own eligibility rule:
   `retry::is_fallback_eligible` shipped with the feature but was never called,

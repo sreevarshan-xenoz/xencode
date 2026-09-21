@@ -10,9 +10,8 @@
 //!   No content reads, no model, fully deterministic.
 //! - `hybrid_rerank` reorders the structural top-K by a BM25 boost so that a
 //!   filename that merely mentions the query ranks below the file whose
-//!   symbols actually do the work.
-//! - `Embedder` is the trait an Ollama/llama.cpp embeddings endpoint will
-//!   implement in a later pass; `None` keeps the engine purely lexical.
+//!   symbols actually do the work. A real embeddings model would fold into
+//!   this function; nothing is wired until the eval harness says it pays.
 
 use crate::retrieve::{RetrievalIndex, RetrievedFile};
 use std::collections::HashMap;
@@ -161,12 +160,6 @@ impl Bm25 {
         }
         s
     }
-
-    pub fn max_score_per_doc(&self, query_terms: &[String]) -> Vec<f64> {
-        (0..self.tfs.len())
-            .map(|i| self.score(i, query_terms))
-            .collect()
-    }
 }
 
 /// Reorder structural top-K with a BM25 boost (hybrid). The structural score
@@ -205,34 +198,6 @@ pub fn hybrid_rerank(
             reasons,
         })
         .collect()
-}
-
-/// Extension point for real embedding models (M5+, post-evaluation). Returning
-/// `None` keeps the pipeline purely lexical; a future Ollama / llama.cpp
-/// embeddings client implements `Embedder` and `hybrid_score` folds the
-/// cosine similarity in without touching retrieval.
-pub trait Embedder {
-    fn embed(&self, text: &str) -> Option<Vec<f32>>;
-}
-
-/// Cosine similarity between two normalized vectors; `None` when either side is
-/// empty — the hybrid falls back to the pure lexical score.
-pub fn cosine(a: &[f32], b: &[f32]) -> Option<f32> {
-    if a.is_empty() || b.is_empty() || a.len() != b.len() {
-        return None;
-    }
-    let mut dot = 0.0f32;
-    let mut na = 0.0f32;
-    let mut nb = 0.0f32;
-    for (x, y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        na += x * x;
-        nb += y * y;
-    }
-    if na <= 0.0 || nb <= 0.0 {
-        return None;
-    }
-    Some(dot / (na.sqrt() * nb.sqrt()))
 }
 
 #[cfg(test)]
@@ -335,13 +300,5 @@ mod tests {
         let reranked = hybrid_rerank(&idx, &results, "login perform login");
         assert_eq!(reranked[0].path, "src/login.rs");
         assert!(reranked[0].reasons.iter().any(|r| r.starts_with("bm25")));
-    }
-
-    #[test]
-    fn cosine_matches_and_rejects_mismatched_vectors() {
-        assert_eq!(cosine(&[1.0, 0.0], &[0.0, 1.0]), Some(0.0));
-        assert!(cosine(&[1.0, 1.0], &[1.0, 1.0]).unwrap() > 0.99);
-        assert_eq!(cosine(&[1.0], &[1.0, 2.0]), None);
-        assert_eq!(cosine(&[], &[]), None);
     }
 }
