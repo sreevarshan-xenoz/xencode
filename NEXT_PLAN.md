@@ -15,10 +15,14 @@
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
 - ✅ **Rust migration complete**: 14 crates, 684 tests passing, zero warnings — the Rust workspace is the only active codebase
-- ✅ **Backlog emptied** (2026-09-21) — next focus not yet chosen. The known gaps
-  worth picking from: an `anthropic_api_key` so the existing Anthropic client is
-  reachable, a plugin runtime, and either wiring or deleting the seven scripted
-  TUI panels.
+- 🎯 **Current focus — Milestone J: every panel tells the truth** (opened 2026-09-21).
+  The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
+  surface; dead Rust, the Python-era tooling configs and the unused k8s /
+  Prometheus assets are already gone. Task breakdown and the done-when rule for
+  each item: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone J.
+- ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
+  unreachable until an `anthropic_api_key` is a decision someone makes, and
+  `crdt.rs` stays unwired (settled Milestone G deferral).
 
 ## Backlog (all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 
