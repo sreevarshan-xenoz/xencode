@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 733 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 751 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -672,7 +672,7 @@ outgoing editor-activity producer, configurable max session size.
 
 ## Milestone I — complete ✅
 
-## Milestone J — every panel tells the truth
+## Milestone J — every panel tells the truth — complete ✅
 
 **Decided 2026-09-21.** The I4-02 sweep left seven TUI panels playing hardcoded
 phrase lists — the same failure mode I2-04 fixed in ByteBot — plus a plugin
@@ -856,11 +856,31 @@ workspace gates green.
   loud, failed capture stops the meter, mute reaches the flag the reader thread
   reads, empty capture, and three panel renders at 160×44).
   **733 tests passed.**
-- [ ] J-08 — **Plugin runtime**: manifests become loadable. Registry builds a
-  real `XencodePlugin` implementation from each manifest and `PluginHost` routes
-  its declared prompt prefix and `before`/`after` hooks into the agent loop, so
-  `/plugin enable` has an observable effect and `/plugin status` reports what
-  actually took hold.
+- [x] J-08 — **Plugin runtime** (2026-09-21): manifests now load.
+  `PluginRuntime::load(dir, version)` discovers `plugin.json` /
+  `manifest.json`, skips a manifest whose `xencode_version` does not accept this
+  build (reported, not silently dropped), registers each remaining one as a
+  `ManifestPlugin` with the `Host`, and flattens the session into the two things
+  a plugin may actually change: a trimmed `prompt_prefix` and `before`/`after`
+  hooks. There is **no** dynamic linking and no plugin code — `entry_point` went
+  with the Python runtime it named, and `ManifestPlugin::handle_event` answers
+  nothing. Precedence is one rule with one path: a plugin's hook only lands
+  where `agent_hooks` in config.json is silent (`session_hooks()`), and plugin
+  text goes into the `system:` argument of `assemble_chat` for chat turns and
+  delegated runs alike, loaded once per session so the KV-stable head stays
+  byte-stable. `App::new()` loads from `default_plugin_dir()`
+  (`$XCODE_PLUGIN_DIR`, else `<data dir>/xencode/plugins` — the same directory
+  the CLI installs into); `App::for_tests()` loads from an empty one, so a
+  plugin on a developer's machine cannot move a test assertion.
+  Verified live, not only in tests: `xencode plugin install` printed
+  `guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)`
+  beside a pinned manifest reported as `NOT LOADED: needs xencode 0.1.0
+  (declared 9.9.9)`, `plugin remove ../../etc` was rejected as an invalid name,
+  and the running TUI's `/plugin` reported `1 loaded, 2 reported` with the same
+  two verdicts. Covered by 8 runtime tests, 5 TUI tests (including
+  `a_plugin_hook_runs_around_a_gated_tool_call`, which asserts the plugin's
+  command ran around a real gated `write_file` — policy `edit-allow`, the gate
+  itself untouched) and the manifest/registry suite. **751 tests passed.**
 
 Not in scope: `AnthropicProvider` stays as-is by explicit decision (documented
 gap, no key field); `crdt.rs` stays unwired (settled Milestone G decision); the

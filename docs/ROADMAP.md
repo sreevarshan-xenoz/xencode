@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19** — a snapshot, not the current
-> state. The workspace is 14 crates and 733 tests as of 2026-09-21; the counts
+> state. The workspace is 14 crates and 751 tests as of 2026-09-21; the counts
 > below are what they were on that date. See [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md)
 > for what is actually shipped today.
 
@@ -54,7 +54,11 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
   `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a WAV, and
   transcribes with a whisper CLI when one is installed. Output (text-to-speech)
   is still not built — the panel has no "speaking" state because nothing speaks
-- ~~**Plugin System**~~ — done in Rust (`xencode-plugin-rs`)
+- ~~**Plugin System**~~ — done in Rust (`xencode-plugin-rs`). A `plugin.json` *is*
+  the plugin: no dynamic linking, no plugin code. A version-compatible manifest
+  loads and reaches every agent turn through its `prompt_prefix` and
+  `before`/`after` hooks, which fill only the gaps `agent_hooks` in config.json
+  left open
 - **Agent Orchestration** (Multi-agent debugging)
 - **VS Code Extension** (Separate product)
 - **Web Interface** (Separate product)
@@ -97,8 +101,10 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemi
 
 ### 📋 Completed (was "Next Priorities")
 1. ✅ **Voice input** - real microphone capture with meters from the PCM, a kept WAV, and whisper transcription when an engine is installed (J-07); output/TTS still unbuilt
-2. ✅ **Plugin system** - `xencode-plugin-rs` with registry/host/manifest
-3. ✅ **Collaboration features** - HTTP/WebSocket server + CRDT sync
+2. ✅ **Plugin system** - `xencode-plugin-rs` with registry/host/manifest, and a
+   runtime (J-08) that loads a manifest's prompt prefix and hooks into the agent
+3. ✅ **Collaboration features** - HTTP/WebSocket server with bearer-token auth,
+   role gating and an audit trail (`crdt.rs` exists but is deliberately unwired)
 4. ✅ **API server** - axum routes/auth/ws in `xencode-server-rs`
 
 ## 📊 Success Metrics & Current Status

@@ -16,7 +16,7 @@ use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
     find_llama_server, start_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient,
 };
-use xencode_plugin_rs::PluginRegistry;
+use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
 use xencode_providers_rs::{ChatMessage, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
 
@@ -231,7 +231,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum PluginAction {
-    /// List installed plugins
+    /// List installed plugins and whether each one actually loads
     List,
     /// Install a plugin from a path
     Install {
@@ -1827,26 +1827,31 @@ fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), Str
 }
 
 fn run_plugin_action(action: PluginAction) -> Result<(), String> {
-    let plugin_dir = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("xencode")
-        .join("plugins");
+    let plugin_dir = default_plugin_dir();
+    let version = env!("CARGO_PKG_VERSION");
 
     match action {
         PluginAction::List => {
-            let registry = PluginRegistry::new(std::path::PathBuf::from(&plugin_dir));
-            let manifests = registry.discover();
-            if manifests.is_empty() {
+            // Not a listing of the plugin directory: this is the same load the
+            // TUI performs at startup, so "installed" and "took hold" cannot
+            // drift apart.
+            let runtime = PluginRuntime::load(&plugin_dir, version);
+            if runtime.reports().is_empty() {
                 println!("No plugins installed in: {}", plugin_dir.display());
                 println!("Use 'xencode plugin install <path>' to install a plugin.");
             } else {
-                println!("📦 Installed Plugins (from {}):", plugin_dir.display());
-                for m in &manifests {
-                    println!(
-                        "  {} v{} — {} (by {})",
-                        m.name, m.version, m.description, m.author
-                    );
+                println!(
+                    "📦 Plugins in {} (xencode {version}):",
+                    plugin_dir.display()
+                );
+                for report in runtime.reports() {
+                    println!("  {}", report.summary());
                 }
+                println!(
+                    "  {} of {} loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.",
+                    runtime.loaded_count(),
+                    runtime.reports().len()
+                );
             }
         }
         PluginAction::Install { path } => {
@@ -1872,15 +1877,29 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
                 std::fs::copy(&path, dest.join(path.file_name().unwrap()))
                     .map_err(|e| e.to_string())?;
             }
-            println!("✅ Plugin '{}' installed successfully.", name);
+            println!("✅ Plugin '{name}' installed to {}.", dest.display());
+            // Say right away whether the copied files are a plugin this build
+            // can load, rather than letting the user find out by silence.
+            let runtime = PluginRuntime::load(&plugin_dir, version);
+            match runtime.reports().iter().find(|r| r.name == name) {
+                Some(report) => println!("   {}", report.summary()),
+                None => println!(
+                    "   NOT LOADED: no plugin.json or manifest.json declaring this name — the files were copied but nothing loads from them."
+                ),
+            }
         }
         PluginAction::Remove { name } => {
-            let path = plugin_dir.join(&name);
+            // The name comes from the command line, so it passes the same guard
+            // a manifest name does: one normal path component, nothing that can
+            // walk out of the plugin directory.
+            let path = PluginRegistry::new(plugin_dir.clone())
+                .plugin_path(&name)
+                .ok_or_else(|| format!("Invalid plugin name: {name}"))?;
             if path.exists() {
                 std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to remove: {}", e))?;
-                println!("✅ Plugin '{}' removed.", name);
+                println!("✅ Plugin '{name}' removed.");
             } else {
-                return Err(format!("Plugin '{}' not found", name));
+                return Err(format!("Plugin '{name}' not found"));
             }
         }
     }

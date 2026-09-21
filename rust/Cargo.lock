@@ -3647,6 +3647,7 @@ name = "xencode-plugin-rs"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs",
  "serde",
  "serde_json",
  "tempfile",
@@ -3713,6 +3714,7 @@ dependencies = [
  "xencode-mcp-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
+ "xencode-plugin-rs",
  "xencode-providers-rs",
 ]
 

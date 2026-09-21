@@ -378,6 +378,7 @@ Type `/` in the chat input and press `Tab` to list them:
 /plan [clear]           Pin the agent's todo list, or clear it
 /rewind [turns]         Undo the agent's file writes for this session
 /mcp [status|stop]      Start the MCP servers declared in config, or query them
+/plugin [reload]        Report which plugins took effect / re-scan the dir
 /spawn <task> [#branch] Run a subagent in a fresh sibling git worktree
 ```
 
@@ -453,23 +454,39 @@ xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https +
 
 ### Plugin System
 
-Extend functionality with plugins:
+A plugin is a directory holding `plugin.json` (or `manifest.json`) in
+`$XCODE_PLUGIN_DIR`, else `<data dir>/xencode/plugins` — the same directory the
+TUI loads at startup.
 
 ```bash
-# List installed plugins
+# Report each plugin and whether it actually loads
 xencode plugin list
 
-# Install a plugin from a directory
+# Install a plugin from a directory (prints the same verdict)
 xencode plugin install ./my-plugin/
 
 # Remove a plugin
 xencode plugin remove my-plugin
 ```
 
-Plugins implement the `XencodePlugin` trait with lifecycle methods:
-- `initialize` — Called when plugin is loaded
-- `handle_event` — Process an event and return a response
-- `shutdown` — Clean up resources
+This build loads no executable plugin code, so a manifest *is* the plugin, and
+it can declare exactly two effects, both applied to every agent turn:
+
+- `prompt_prefix` — text placed ahead of the agent's system prompt.
+- `hooks` — `before` and `after` maps of tool name (or `*`) to an `sh -c`
+  command, the same shape as `agent_hooks` in `config.json`, run around
+  approval-gated tool calls. Where both declare the same tool, **config.json
+  wins**.
+
+`xencode_version` (default `*`) pins the versions a plugin accepts; one that
+does not match is reported as `NOT LOADED` rather than skipped silently. Inside
+the TUI, `/plugin` prints the same report and `/plugin reload` re-scans the
+directory after an install.
+
+The `XencodePlugin` trait, host and event routing live in `xencode-plugin-rs`
+as a library; `ManifestPlugin` is the implementation the runtime registers for
+each manifest, and it answers no events — there is no plugin code to answer
+them.
 
 ### Conversation Memory
 
@@ -593,21 +610,22 @@ $ xencode tui
 ```
 
 ### Example 4: Plugin Management
-```bash
-$ xencode plugin list
-No plugins installed in: ~/.local/share/xencode/plugins
-Use 'xencode plugin install <path>' to install a plugin.
-
-$ xencode plugin install ./my-custom-plugin/
-✅ Plugin 'my-custom-plugin' installed successfully.
+```console
+$ xencode plugin install ./guardrails/
+✅ Plugin 'guardrails' installed to /home/me/.local/share/xencode/plugins/guardrails.
+   guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)
 
 $ xencode plugin list
-📦 Installed Plugins (from ~/.local/share/xencode/plugins):
-  my-custom-plugin v1.0.0 — <manifest description> (by <manifest author>)
+📦 Plugins in /home/me/.local/share/xencode/plugins (xencode 0.1.0):
+  future v9.9.9 — NOT LOADED: needs xencode 0.1.0 (declared 9.9.9)
+  guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)
+  1 of 2 loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.
+
+$ xencode plugin remove ../../etc
+error: Invalid plugin name: ../../etc
 ```
-The listing reads the plugin **manifest**; the `XencodePlugin` trait, host and
-event routing live in `xencode-plugin-rs` as a library — the CLI does not
-instantiate or run plugin code.
+Every line above is real output. An empty plugin directory says
+`No plugins installed in: <dir>` and how to install one.
 
 ### Example 5: Short Query
 ```bash

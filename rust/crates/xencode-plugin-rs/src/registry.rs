@@ -46,8 +46,10 @@ impl PluginRegistry {
                 continue;
             }
 
-            // Look for manifest files
-            for manifest_name in &["plugin.json", "plugin.yaml", "manifest.json"] {
+            // Look for manifest files. JSON only: a `plugin.yaml` used to be on
+            // this list while the parser was `serde_json`, so it could never
+            // load and never said why.
+            for manifest_name in &["plugin.json", "manifest.json"] {
                 let manifest_path = path.join(manifest_name);
                 if manifest_path.exists() {
                     if let Ok(manifest) = PluginManifest::from_file(&manifest_path) {
@@ -64,16 +66,23 @@ impl PluginRegistry {
         manifests
     }
 
-    /// Load a plugin from its manifest.
-    /// For now returns the manifest; actual plugin loading requires dynamic linking.
-    pub fn load_plugin(&self, manifest: &PluginManifest) -> Result<PluginManifest, PluginError> {
+    /// Build the plugin a manifest describes.
+    ///
+    /// There is no dynamic linking in this build, so a manifest *is* the
+    /// plugin: its prompt prefix and declared hooks, wrapped in the trait the
+    /// host registers. A manifest whose name escapes the plugin directory, or
+    /// whose directory is not there, is refused here rather than loaded.
+    pub fn load_plugin(
+        &self,
+        manifest: &PluginManifest,
+    ) -> Result<crate::runtime::ManifestPlugin, PluginError> {
         let plugin_path = self
             .plugin_path(&manifest.name)
             .ok_or_else(|| PluginError::InvalidName(manifest.name.clone()))?;
         if !plugin_path.exists() {
             return Err(PluginError::NotFound(manifest.name.clone()));
         }
-        Ok(manifest.clone())
+        Ok(crate::runtime::ManifestPlugin::new(manifest.clone()))
     }
 
     /// Get the full path to a plugin's directory.
@@ -94,6 +103,7 @@ impl PluginRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin_trait::XencodePlugin as _;
     use std::fs;
 
     #[test]
@@ -113,13 +123,7 @@ mod tests {
         let manifest = PluginManifest {
             name: "my-plugin".to_string(),
             version: "1.0.0".to_string(),
-            description: "Test".to_string(),
-            author: "Author".to_string(),
-            license: "MIT".to_string(),
-            entry_point: "plugin.py".to_string(),
-            dependencies: vec![],
-            xencode_version: "*".to_string(),
-            permissions: vec!["read".to_string()],
+            ..Default::default()
         };
 
         let json = serde_json::to_string_pretty(&manifest).unwrap();
@@ -138,10 +142,8 @@ mod tests {
             description: "Test".to_string(),
             author: "Author".to_string(),
             license: "MIT".to_string(),
-            entry_point: "plugin.py".to_string(),
-            dependencies: vec![],
-            xencode_version: "*".to_string(),
             permissions: vec!["read".to_string()],
+            ..Default::default()
         }
     }
 
@@ -207,6 +209,40 @@ mod tests {
             .load_plugin(&manifest_named("../evil"))
             .expect_err("load_plugin accepted a traversing name");
         assert!(matches!(err, PluginError::InvalidName(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn load_plugin_rejects_a_manifest_whose_directory_is_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = PluginRegistry::new(tmp.path().to_path_buf());
+
+        let err = registry
+            .load_plugin(&manifest_named("not-installed"))
+            .expect_err("a manifest with no directory is not a plugin");
+        assert!(matches!(err, PluginError::NotFound(_)), "got {err:?}");
+    }
+
+    /// J-08: the registry hands back something the host can register, not a
+    /// copy of the manifest it was given.
+    #[test]
+    fn load_plugin_builds_the_plugin_a_manifest_describes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("guardrails");
+        fs::create_dir_all(&dir).unwrap();
+        let mut manifest = manifest_named("guardrails");
+        manifest.prompt_prefix = "Run the tests first.".to_string();
+        manifest
+            .hooks
+            .before
+            .insert("write_file".to_string(), "cargo check".to_string());
+
+        let registry = PluginRegistry::new(tmp.path().to_path_buf());
+        let plugin = registry.load_plugin(&manifest).unwrap();
+        assert_eq!(plugin.name(), "guardrails");
+        assert_eq!(plugin.version(), "1.0.0");
+        let (hooks, prefix) = plugin.declared();
+        assert_eq!(prefix, "Run the tests first.");
+        assert_eq!(hooks.before["write_file"], "cargo check");
     }
 
     #[test]
