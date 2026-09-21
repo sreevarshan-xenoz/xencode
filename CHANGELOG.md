@@ -112,6 +112,20 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   `App::for_tests()` turns config persistence off (`fix(tui)`).
 
 ### Documentation
+- **README re-verified against the code**, not just re-worded. Corrected: the
+  chat-input command list said "eight" while `SLASH_COMMANDS` has nine, and the
+  profiler's metrics file was given as `.xencode/metrics.jsonl` instead of
+  `.xencode/cache/metrics.jsonl` (`context-rs::metrics_path`); the prerequisites
+  table called Ollama "required" and pinned an "Rust 1.80+" MSRV that nothing in
+  the tree declares (CI builds `stable`). Added: the 16 real CLI subcommands,
+  `xencode query`'s llama.cpp sampling flags, what `install.sh` / `install.ps1`
+  actually do and where each puts the binary, the `release.yml` tag →
+  smoke-test → GitHub Release path, the seven Milestone J panels described
+  per-panel, and a "nothing scripted" highlight. The Roadmap section stopped
+  listing shipped work (retry budgets, provider health UX, multimodal, team
+  workflows) as future and now names what is genuinely unbuilt — TTS output,
+  arena mode, coordinating several agent runs, AI commit messages, session
+  replay — with the Anthropic key and CRDT wiring called out as parked decisions.
 - Milestone I close-out honesty sweep (I4-02): every manual was re-checked
   against the tree. Removed fiction: the credential vault and `xencode vault
   init|migrate|status` (no such commands), ensemble/multi-model "reasoning"

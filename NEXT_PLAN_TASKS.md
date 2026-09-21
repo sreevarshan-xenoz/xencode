@@ -702,7 +702,7 @@ workspace gates green.
   `/proc/self/stat` reads 250 ms apart, since CPU is a rate) and resident memory
   (`/proc/self/statm` against `/proc/meminfo`), plus what the session already
   knows — average turn latency, llama.cpp tokens/s and token counts, per-provider
-  health latency or its error, and the last 6 rows of `.xencode/metrics.jsonl`
+  health latency or its error, and the last 6 rows of `.xencode/cache/metrics.jsonl`
   (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with no data behind
   it renders `n/a`, never a zero, and the panel notes when there has been no
   turn, no health check or no metrics file. Dropped the `fastrand` dependency —
