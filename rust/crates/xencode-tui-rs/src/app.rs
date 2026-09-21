@@ -471,13 +471,24 @@ pub struct App<'a> {
     pub learn_quiz_correct: bool,
 
     // Multi-Language state
-    pub lang_active: bool,
-    pub lang_detection_results: Vec<(String, String, String)>, // (file, language, confidence)
-    pub lang_supported: Vec<(String, String)>,                 // (language, status)
+    /// A walk or a translation request is in flight; the panel does one thing
+    /// at a time.
+    pub lang_busy: bool,
+    /// The directory the last walk covered; empty means it never ran.
+    pub lang_scan_path: String,
+    /// (language, files, lines, share of the workspace's lines)
+    pub lang_detection_results: Vec<(String, u64, u64, f64)>,
+    /// What the walk could not answer: a failure, files skipped, files unread.
+    pub lang_notes: Vec<String>,
     pub lang_translate_input: String,
     pub lang_translate_output: String,
     pub lang_translate_source: String,
     pub lang_translate_target: String,
+    /// The last request failed, so the output line is an error and is drawn as
+    /// one rather than in the colour of an answer.
+    pub lang_translate_error: bool,
+    /// Which field owns the keyboard; `None` means the keys are commands.
+    pub lang_editing: Option<crate::focus::LangField>,
 
     // Panel scroll state
     pub provider_health_scroll: u16,
@@ -1028,6 +1039,90 @@ async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<Str
     let _ = tx.send("[PROFILER]done".to_string());
 }
 
+/// Walk the workspace and send a row per language the walker actually saw:
+/// files, lines, and the share of the project's lines that language holds.
+/// Nothing is estimated here — a file the walk refused to read counts as a file
+/// and contributes no lines, and that is said out loud in a note.
+async fn run_language_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
+    let walked_root = root.clone();
+    let walked = tokio::task::spawn_blocking(move || {
+        let options = xencode_context_rs::ScanOptions::default();
+        xencode_context_rs::scanner::scan_tree(&walked_root, &options)
+    })
+    .await;
+    let outcome = match walked {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(e)) => {
+            let _ = tx.send(format!("[LANG]failed:{e}"));
+            return;
+        }
+        Err(e) => {
+            let _ = tx.send(format!("[LANG]failed:scan thread died: {e}"));
+            return;
+        }
+    };
+
+    let mut per_lang: std::collections::BTreeMap<String, (u64, u64)> = Default::default();
+    for entry in &outcome.files {
+        let slot = per_lang
+            .entry(entry.language.as_str().to_string())
+            .or_insert((0, 0));
+        slot.0 += 1;
+        slot.1 += entry.loc;
+    }
+    let total_lines: u64 = per_lang.values().map(|(_, lines)| *lines).sum();
+    let mut rows: Vec<(String, u64, u64)> = per_lang
+        .into_iter()
+        .map(|(language, (files, lines))| (language, files, lines))
+        .collect();
+    // Biggest first; ties by name, so the order is the same every run.
+    rows.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    for (language, files, lines) in rows {
+        let share = if total_lines == 0 {
+            0.0
+        } else {
+            lines as f64 * 100.0 / total_lines as f64
+        };
+        let row = serde_json::json!({
+            "language": language, "files": files, "lines": lines,
+            "share": (share * 10.0).round() / 10.0,
+        });
+        let _ = tx.send(format!("[LANG]row:{row}"));
+    }
+
+    if outcome.files.is_empty() {
+        let _ = tx.send(format!(
+            "[LANG]note:the walk found no files under {}",
+            root.display()
+        ));
+    } else {
+        let _ = tx.send(format!(
+            "[LANG]note:{} files · {} lines · {} skipped by ignore rules",
+            outcome.files.len(),
+            total_lines,
+            outcome.skipped
+        ));
+    }
+    if !outcome.secret_files.is_empty() || !outcome.binary_files.is_empty() {
+        let _ = tx.send(format!(
+            "[LANG]note:{} listed as secret, {} binary — counted as files, never read, so they add no lines",
+            outcome.secret_files.len(),
+            outcome.binary_files.len()
+        ));
+    }
+    let unread = outcome
+        .files
+        .iter()
+        .filter(|e| !e.is_binary && !e.is_secret && e.loc == 0)
+        .count();
+    if unread > 0 {
+        let _ = tx.send(format!(
+            "[LANG]note:{unread} file(s) counted but unreadable — 0 lines"
+        ));
+    }
+    let _ = tx.send("[LANG]done".to_string());
+}
+
 /// Commands the terminal panel will offer at once. More than a screenful is
 /// noise, so this is both what the model is asked for and what it gets.
 const TERM_SUGGESTION_CAP: usize = 8;
@@ -1111,6 +1206,87 @@ fn format_row_time(ts_unix_ms: u64) -> String {
         (secs / 60) % 60,
         secs % 60
     )
+}
+
+/// One non-streaming provider request, built from the session config: the same
+/// clients, keys and llama.cpp options a chat turn uses. A panel that needs a
+/// single answer (terminal assistant, translation) asks through this instead of
+/// carrying its own copy of the plumbing.
+#[derive(Clone)]
+struct SingleShot {
+    model: String,
+    ollama_url: String,
+    llama_cpp_url: String,
+    timeout: u64,
+    openrouter_key: Option<String>,
+    qwen_key: Option<String>,
+    gemini_key: Option<String>,
+    llama_opts: LlamaCppOptions,
+}
+
+impl SingleShot {
+    fn from_config(config: &XencodeConfig) -> Self {
+        Self {
+            model: config.default_model.clone(),
+            ollama_url: config.ollama_url.clone(),
+            llama_cpp_url: config.llama_cpp_url.clone(),
+            timeout: config.response_timeout,
+            openrouter_key: config.api_keys.openrouter_api_key.clone(),
+            qwen_key: config.api_keys.qwen_api_key.clone(),
+            gemini_key: config.api_keys.google_gemini_api_key.clone(),
+            llama_opts: LlamaCppOptions {
+                temperature: config.llama_cpp_temperature,
+                top_k: config.llama_cpp_top_k,
+                min_p: config.llama_cpp_min_p,
+                max_tokens: config.llama_cpp_max_tokens,
+                grammar: None,
+                json_schema: None,
+                mirostat: None,
+            },
+        }
+    }
+
+    /// `Err` carries the provider's own words, because that is what the panel
+    /// shows — a generic "translation failed" would hide why.
+    async fn ask(&self, messages: &[ChatMessage]) -> Result<String, String> {
+        let client = OllamaClient::new(&self.ollama_url, self.timeout);
+        let llama_client = LlamaCppClient::new(&self.llama_cpp_url, self.timeout);
+        let manager = ProviderManager::new(
+            client,
+            self.openrouter_key.clone(),
+            self.qwen_key.clone(),
+            self.gemini_key.clone(),
+            None,
+        )
+        .with_llama_cpp(llama_client);
+        manager
+            .generate_with_options(&self.model, messages, Some(&self.llama_opts))
+            .await
+            .map_err(|e| format!("{} said: {}", self.model, e))
+    }
+}
+
+/// The frozen system head a chat turn sends (workspace instructions + anchor),
+/// so a panel's one-shot request starts from the same prefix and stays cheap.
+fn one_shot_messages(root: &std::path::Path, prompt: String) -> Vec<ChatMessage> {
+    let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+    let anchor =
+        std::fs::read_to_string(root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md")).ok();
+    vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: xencode_context_rs::stable_system_text(
+                CTX_SYSTEM,
+                agents.as_deref(),
+                anchor.as_deref(),
+            )
+            .into(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: prompt.into(),
+        },
+    ]
 }
 
 impl<'a> App<'a> {
@@ -1336,13 +1512,16 @@ impl<'a> App<'a> {
             learn_quiz_answered: false,
             learn_quiz_correct: false,
 
-            lang_active: false,
+            lang_busy: false,
+            lang_scan_path: String::new(),
             lang_detection_results: Vec::new(),
-            lang_supported: Vec::new(),
+            lang_notes: Vec::new(),
             lang_translate_input: String::new(),
             lang_translate_output: String::new(),
             lang_translate_source: "auto".to_string(),
-            lang_translate_target: "en".to_string(),
+            lang_translate_target: "English".to_string(),
+            lang_translate_error: false,
+            lang_editing: None,
 
             provider_health_scroll: 0,
             security_scroll: 0,
@@ -3571,54 +3750,13 @@ impl<'a> App<'a> {
         );
         // Same frozen system head as chat turns, so the instruction that shapes
         // the reply rides in the user message and the cache stays warm.
-        let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
-        let anchor =
-            std::fs::read_to_string(root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md"))
-                .ok();
-        let messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: xencode_context_rs::stable_system_text(
-                    CTX_SYSTEM,
-                    agents.as_deref(),
-                    anchor.as_deref(),
-                )
-                .into(),
-            },
-            ChatMessage {
-                role: "user".to_string(),
-                content: prompt.into(),
-            },
-        ];
-
-        let model = self.config.default_model.clone();
-        let ollama_url = self.config.ollama_url.clone();
-        let llama_cpp_url = self.config.llama_cpp_url.clone();
-        let timeout = self.config.response_timeout;
-        let or_key = self.config.api_keys.openrouter_api_key.clone();
-        let qwen_key = self.config.api_keys.qwen_api_key.clone();
-        let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
-        let llama_opts = LlamaCppOptions {
-            temperature: self.config.llama_cpp_temperature,
-            top_k: self.config.llama_cpp_top_k,
-            min_p: self.config.llama_cpp_min_p,
-            max_tokens: self.config.llama_cpp_max_tokens,
-            grammar: None,
-            json_schema: None,
-            mirostat: None,
-        };
+        let messages = one_shot_messages(&root, prompt);
+        let call = SingleShot::from_config(&self.config);
 
         tokio::spawn(async move {
-            let client = OllamaClient::new(&ollama_url, timeout);
-            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
-            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
-                .with_llama_cpp(llama_client);
-            match manager
-                .generate_with_options(&model, &messages, Some(&llama_opts))
-                .await
-            {
-                Err(e) => {
-                    let _ = tx.send(format!("[TERM]error:{} said: {}", model, e));
+            match call.ask(&messages).await {
+                Err(msg) => {
+                    let _ = tx.send(format!("[TERM]error:{msg}"));
                 }
                 Ok(text) => {
                     let suggestions = parse_term_suggestions(&text);
@@ -3860,49 +3998,95 @@ impl<'a> App<'a> {
         self.learn_quiz_correct = false;
     }
 
-    /// Start Multi-Language panel with detection results.
-    pub fn start_multi_language(&mut self) {
-        if self.lang_active {
+    /// Walk the workspace with the context engine and report what it actually
+    /// found per language. What this replaced was five files that do not exist
+    /// in this project and a six-row "supported languages" table the scanner
+    /// never produced.
+    pub fn start_language_scan(&mut self, tx: mpsc::UnboundedSender<String>) {
+        if self.lang_busy {
             return;
         }
-        self.lang_active = true;
-        self.lang_detection_results = vec![
-            (
-                "src/main.rs".to_string(),
-                "Rust".to_string(),
-                "99.2%".to_string(),
-            ),
-            (
-                "src/app.py".to_string(),
-                "Python".to_string(),
-                "98.7%".to_string(),
-            ),
-            (
-                "src/components.tsx".to_string(),
-                "TypeScript".to_string(),
-                "97.5%".to_string(),
-            ),
-            (
-                "templates/index.html".to_string(),
-                "HTML".to_string(),
-                "96.8%".to_string(),
-            ),
-            (
-                "styles/main.css".to_string(),
-                "CSS".to_string(),
-                "95.1%".to_string(),
-            ),
-        ];
-        self.lang_supported = vec![
-            ("Rust".to_string(), "✅".to_string()),
-            ("Python".to_string(), "✅".to_string()),
-            ("TypeScript".to_string(), "✅".to_string()),
-            ("JavaScript".to_string(), "✅".to_string()),
-            ("Go".to_string(), "🔄".to_string()),
-            ("Ruby".to_string(), "🚧".to_string()),
-        ];
-        self.lang_translate_input = String::new();
-        self.lang_translate_output = String::new();
+        self.lang_busy = true;
+        self.lang_detection_results.clear();
+        self.lang_notes.clear();
+        let root = xencode_context_rs::default_root();
+        self.lang_scan_path = root.display().to_string();
+        tokio::spawn(run_language_scan(root, tx));
+    }
+
+    /// `Tab` in the panel: the first press starts editing, later ones cycle.
+    pub fn cycle_lang_field(&mut self) {
+        self.lang_editing = Some(match self.lang_editing {
+            None => crate::focus::LangField::Input,
+            Some(field) => field.next(),
+        });
+    }
+
+    pub fn lang_char(&mut self, c: char) {
+        let Some(field) = self.lang_editing else {
+            return;
+        };
+        let target = match field {
+            crate::focus::LangField::Source => &mut self.lang_translate_source,
+            crate::focus::LangField::Target => &mut self.lang_translate_target,
+            crate::focus::LangField::Input => &mut self.lang_translate_input,
+        };
+        target.push(c);
+    }
+
+    pub fn lang_backspace(&mut self) {
+        let Some(field) = self.lang_editing else {
+            return;
+        };
+        let target = match field {
+            crate::focus::LangField::Source => &mut self.lang_translate_source,
+            crate::focus::LangField::Target => &mut self.lang_translate_target,
+            crate::focus::LangField::Input => &mut self.lang_translate_input,
+        };
+        target.pop();
+    }
+
+    /// One provider call with the text and both languages the panel was told.
+    /// The reply is shown as it came back — including an error, which is not
+    /// dressed up as a translation.
+    pub fn translate_text(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let text = self.lang_translate_input.trim().to_string();
+        if text.is_empty() {
+            self.lang_translate_output =
+                "Nothing to translate — Tab selects the Text field, then type.".to_string();
+            return;
+        }
+        if self.lang_busy {
+            return;
+        }
+        self.lang_busy = true;
+        self.lang_editing = None;
+        self.lang_translate_error = false;
+        let named = |value: &str, fallback: &str| {
+            let value = value.trim();
+            if value.is_empty() {
+                fallback.to_string()
+            } else {
+                value.to_string()
+            }
+        };
+        let prompt = format!(
+            "Translate the following text from {} to {}.\nReply with the translation only, no \
+             commentary, no quotes, no explanation.\n\n{}",
+            named(&self.lang_translate_source, "its own language"),
+            named(&self.lang_translate_target, "the same language"),
+            text,
+        );
+        self.lang_translate_output = format!("Asking {}…", self.config.default_model);
+        let messages = one_shot_messages(&xencode_context_rs::default_root(), prompt);
+        let call = SingleShot::from_config(&self.config);
+        tokio::spawn(async move {
+            let token = match call.ask(&messages).await {
+                Ok(reply) => format!("[TRANS]out:{}", reply.trim_end()),
+                Err(e) => format!("[TRANS]error:{e}"),
+            };
+            let _ = tx.send(token);
+        });
     }
     /// Dynamically discover models installed by the user in Ollama and configured cloud models.
     pub fn refresh_models(&mut self, tx: mpsc::UnboundedSender<String>) {
@@ -4876,6 +5060,36 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     if app.term_asst_suggestions.is_empty() {
                         app.term_asst_typing = true;
                     }
+                }
+            } else if let Some(body) = token.strip_prefix("[LANG]") {
+                if let Some(json) = body.strip_prefix("row:") {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                        app.lang_detection_results.push((
+                            v["language"].as_str().unwrap_or_default().to_string(),
+                            v["files"].as_u64().unwrap_or(0),
+                            v["lines"].as_u64().unwrap_or(0),
+                            v["share"].as_f64().unwrap_or(0.0),
+                        ));
+                    }
+                } else if let Some(note) = body.strip_prefix("note:") {
+                    app.lang_notes.push(note.to_string());
+                } else if let Some(why) = body.strip_prefix("failed:") {
+                    app.lang_notes
+                        .push(format!("the walk did not finish: {why}"));
+                    app.lang_busy = false;
+                } else if body == "done" {
+                    app.lang_busy = false;
+                }
+            } else if let Some(body) = token.strip_prefix("[TRANS]") {
+                app.lang_busy = false;
+                // Both arms write the same field on purpose: what came back,
+                // answer or error, is the panel's output line.
+                if let Some(reply) = body.strip_prefix("out:") {
+                    app.lang_translate_error = false;
+                    app.lang_translate_output = reply.to_string();
+                } else if let Some(err) = body.strip_prefix("error:") {
+                    app.lang_translate_error = true;
+                    app.lang_translate_output = err.to_string();
                 }
             } else if let Some(body) = token.strip_prefix("[SECURITY]") {
                 if body.starts_with("progress:") {
@@ -6636,6 +6850,115 @@ mod tests {
         assert!(done.ends_with("|1,0,1,0"), "{done}");
         assert!(!messages.iter().any(|m| m.contains("config.py")));
         assert!(!messages.iter().any(|m| m.contains("tests passed")));
+    }
+
+    /// J-04: every row this panel shows comes out of the walk. The five files
+    /// it used to list (`src/app.py`, `src/components.tsx`, …) do not exist in
+    /// any workspace, and neither did the six-row "supported" table.
+    #[tokio::test]
+    async fn language_scan_reports_the_walk_not_a_script() {
+        let dir = temp_dir("lang-scan");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.rs"), "fn a() {}\nfn b() {}\n").unwrap();
+        // The blank line is not a line of code, so this file is 2, not 3.
+        std::fs::write(dir.join("src/b.rs"), "fn c() {}\n\nfn d() {}\n").unwrap();
+        std::fs::write(dir.join("notes.md"), "Title\nsome text\n").unwrap();
+        // Named as a secret: listed, never read, so it adds a file and no lines.
+        std::fs::write(
+            dir.join(".env"),
+            "AWS_SECRET_ACCESS_KEY=aklsdjflaksdjflkjasdflkjas\n",
+        )
+        .unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_language_scan(dir.clone(), tx).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut notes: Vec<String> = Vec::new();
+        let mut done = false;
+        while let Ok(token) = rx.try_recv() {
+            if let Some(json) = token.strip_prefix("[LANG]row:") {
+                rows.push(serde_json::from_str(json).unwrap());
+            } else if let Some(note) = token.strip_prefix("[LANG]note:") {
+                notes.push(note.to_string());
+            } else if token == "[LANG]done" {
+                done = true;
+            }
+        }
+        assert!(done, "the scan never finished");
+
+        let rust = rows
+            .iter()
+            .find(|r| r["language"] == "rust")
+            .expect("no rust row");
+        assert_eq!(rust["files"], 2, "{rows:?}");
+        assert_eq!(rust["lines"], 4, "{rows:?}");
+        assert_eq!(rust["share"], 66.7, "{rows:?}");
+        assert_eq!(
+            rows.first().map(|r| &r["language"]),
+            Some(&serde_json::json!("rust")),
+            "the biggest language comes first: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["language"] == "markdown" && r["files"] == 1 && r["lines"] == 2),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().all(|r| r["language"] != "python"),
+            "a language with no files must not appear: {rows:?}"
+        );
+        // Files the walk could not count are said, not hidden in the totals.
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("listed as secret") && n.contains("no lines")),
+            "{notes:?}"
+        );
+        assert!(
+            notes.iter().any(|n| n.starts_with("4 files · 6 lines")),
+            "{notes:?}"
+        );
+        for canned in [
+            "src/app.py",
+            "components.tsx",
+            "templates/index.html",
+            "98.7",
+            "99.2",
+        ] {
+            assert!(!format!("{rows:?}").contains(canned), "{canned}");
+        }
+    }
+
+    /// A translation request with nothing to translate spends no provider call.
+    #[test]
+    fn translating_nothing_asks_nothing() {
+        let mut app = App::for_tests();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        app.translate_text(tx);
+        assert!(!app.lang_busy);
+        assert!(app.lang_translate_output.contains("Nothing to translate"));
+        assert!(rx.try_recv().is_err(), "no request should have started");
+
+        // Editing is a mode: letters go to the selected field, not to commands.
+        app.cycle_lang_field();
+        assert_eq!(app.lang_editing, Some(crate::focus::LangField::Input));
+        for c in "bonjour".chars() {
+            app.lang_char(c);
+        }
+        assert_eq!(app.lang_translate_input, "bonjour");
+        // Backspace deletes a character, so it has to be typed before the
+        // deletion and asserted after it — not compared with itself.
+        app.lang_translate_input.push('!');
+        app.lang_backspace();
+        assert_eq!(app.lang_translate_input, "bonjour");
+        app.cycle_lang_field();
+        assert_eq!(app.lang_editing, Some(crate::focus::LangField::Source));
+        app.lang_char('!');
+        assert_eq!(app.lang_translate_source, "auto!");
+        app.lang_editing = None;
+        app.lang_char('?');
+        assert_eq!(app.lang_translate_source, "auto!");
     }
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {

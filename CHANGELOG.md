@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Milestone J — opened
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 to J-03 have landed** — the
-security auditor and the profiler are real and the terminal assistant delegates
-to a model through the agent's approval gate, leaving four scripted panels.
+the plugin registry loaded no runtime. **J-01 to J-04 have landed** — the
+security auditor and the profiler are real, the terminal assistant delegates to
+a model through the agent's approval gate, and the multi-language panel tabulates
+a real `scan_tree` walk and translates through a real model call, leaving three
+scripted panels.
 `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
@@ -90,6 +92,28 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Multi-language panel is real (Milestone J, J-04). Its "language detection" was
+  a fixed table (`python 34.2%`, `javascript 27.1%`, …) for files that are not
+  in this workspace, and its "Supported Languages" list was hand-written. `Enter`
+  or `d` now runs `scanner::scan_tree` on the workspace root in
+  `spawn_blocking` and streams the languages that are *actually present* — file
+  count, line count from the scanner's own `count_loc` (blanks and
+  comment-leading lines excluded) and share of those lines — sorted by lines,
+  then name. The notes under the table carry the walk's fine print: total
+  files/lines, what ignore rules skipped, and the fact that secret and binary
+  files are listed but never read, so they add files and zero lines rather than
+  a made-up size. The language legend is
+  `scanner::Language::ALL` (a new const, so the panel reads the enum instead of
+  copying it), with `▸` marking what the walk found; two new scanner tests pin
+  that `ALL` and `language_for_extension` agree in both directions and that
+  every `as_str()` is unique and lowercase. Translation makes one real model
+  call through the same single-shot path as the terminal assistant: `Tab` selects
+  From / To / Text, typing edits that field, `Enter` asks the configured model
+  and prints its reply — or prints the provider's error, drawn as an error.
+  Empty text is refused without spending a request. Dead state went with the
+  scripted table: `lang_active`, `lang_supported`, `term_asst_active`,
+  `term_asst_cursor`, `open_terminal_assistant` and the sender-less
+  `[TERM]output:` protocol arm.
 - Terminal assistant panel is real (Milestone J, J-03). It used to open with
   five hardcoded "suggested commands" — including `docker system prune -af` and
   `rm -rf node_modules && npm install` — each with a risk badge, and nothing

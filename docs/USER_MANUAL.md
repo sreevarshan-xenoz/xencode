@@ -33,10 +33,10 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **Not implemented, whatever a panel shows.** Four TUI panels are still
-> interface mockups with scripted content: Voice Interface, Custom Models,
-> Learning Mode and Multi-Language. They render and respond to keys; nothing
-> listens. Three are real. The **Security Auditor** — `Enter` walks the
+> **Not implemented, whatever a panel shows.** Three TUI panels are still
+> interface mockups with scripted content: Voice Interface, Custom Models and
+> Learning Mode. They render and respond to keys; nothing
+> listens. Four are real. The **Security Auditor** — `Enter` walks the
 > workspace and runs the same `VulnerabilityScanner` behind `xencode analyze`,
 > so an empty result means the scanner found nothing, not that the panel is a
 > demo. The **Performance Profiler** — `Enter` samples this process's CPU and
@@ -46,7 +46,14 @@ The Rust binary (`xencode`) is the entry point.
 > of a number. The **Terminal Assistant** — you type what you want to do, it
 > makes one call to the configured model for candidate commands, and a command
 > you pick runs through the agent's approval gate exactly as the model's own
-> `run_command` would. None of the remaining four has a real backend
+> `run_command` would. The **Multi-Language** panel — `Enter` (or `d`) walks the
+> workspace with the same `scan_tree` the context engine uses and tabulates the
+> languages that are actually present: file count, non-blank non-comment lines
+> and share, with notes for what was skipped, listed as secret (counted, never
+> read) or binary. Its list of language names is the scanner's own `Language`
+> enum, and `Tab` + typing fill in From / To / Text before `Enter` makes one
+> model call for the translation — a provider error is shown as an error rather
+> than a fake answer. None of the remaining three has a real backend
 > yet — the closest working equivalents are the chat itself (a real model call)
 > and `xencode advise` for repo insights. The performance dashboard, a separate
 > panel, reports real session metrics.
@@ -208,7 +215,7 @@ do anything):
 | Performance Profiler | Real measurement: `Enter` reads this process's CPU (two `/proc/self/stat` samples 250 ms apart) and resident memory, then the session's own numbers — average turn latency, llama.cpp tokens/s, per-provider health, and the last 6 rows of `.xencode/metrics.jsonl` (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with nothing to show reads `n/a` |
 | Custom Models | 🎭 Mockup — sample profiles and sliders; saving writes nothing to config |
 | Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |
-| Multi-Language | 🎭 Mockup — a fixed sample language-detection table; nothing is detected |
+| Multi-Language | Real detection + real translation: `Enter`/`d` runs the context engine's `scan_tree` over the workspace and lists each language actually found with files, lines (blanks and comment leads excluded) and share, plus notes for skipped, secret-listed (never read) and binary files. The language list is `scanner::Language`, with `▸` marking what the walk found. `Tab` selects From / To / Text, typing edits it, `Enter` makes one model call and prints its reply — or the provider's own error |
 | PR Review | Per-file diff browsing, base toggle (real git diff) |
 | Background Tasks | Live registry of background commands (stop/remove) |
 | Worktrees | Git worktree list, add (path+branch) and remove with confirm (real git) |

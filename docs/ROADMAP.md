@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19** — a snapshot, not the current
-> state. The workspace is 14 crates and 695 tests as of 2026-09-21; the counts
+> state. The workspace is 14 crates and 700 tests as of 2026-09-21; the counts
 > below are what they were on that date. See [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md)
 > for what is actually shipped today.
 

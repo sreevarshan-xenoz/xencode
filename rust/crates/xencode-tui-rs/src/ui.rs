@@ -327,8 +327,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::GitCommit | FocusArea::CollaborationHub |
             FocusArea::VoiceInterface |
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
-            FocusArea::CustomModels | FocusArea::LearningMode |
-            FocusArea::MultiLanguage => "Enter:start  Esc:close",
+            FocusArea::CustomModels | FocusArea::LearningMode => "Enter:start  Esc:close",
+            FocusArea::MultiLanguage => {
+                "Enter:detect  Tab:pick a field  type:edit  Enter:translate  Esc:close"
+            }
             _ => "i:edit  m:models  s:settings  ?:help  Tab:switch  Ctrl+R:review  Ctrl+Y:pr-review  Ctrl+T:terminal  Ctrl+B:bytebot  Ctrl+D:dashboard  Ctrl+P:analyzer",
         }
     };
@@ -3945,7 +3947,7 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🌐 Multi-Language (Enter:detect, Esc:close) ");
+        .title(" 🌐 Multi-Language (Enter:detect  Tab:type  Enter:translate  Esc:close) ");
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -3953,124 +3955,207 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), // detection + supported
-            Constraint::Percentage(50), // translation
+            Constraint::Percentage(52), // what this workspace is written in
+            Constraint::Percentage(48), // what the scanner knows + translation
         ])
         .split(inner);
 
-    // ── Left: Detection + Supported Languages ───────────────────────────────
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(55), // detection
-            Constraint::Percentage(45), // supported
-        ])
-        .split(chunks[0]);
-
-    // Detection results
+    // ── Left: the walk's own numbers ────────────────────────────────────────
     let detect_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 🔍 Language Detection ");
+        .title(format!(
+            " 🔍 This workspace {} ",
+            if app.lang_scan_path.is_empty() {
+                String::new()
+            } else {
+                format!("· {}", app.lang_scan_path)
+            }
+        ));
 
     let mut detect_lines: Vec<Line> = Vec::new();
-    if app.lang_detection_results.is_empty() {
+    if app.lang_busy && app.lang_detection_results.is_empty() {
         detect_lines.push(Line::from(Span::styled(
-            "  Press Enter to scan workspace.",
+            "  Walking the workspace…",
+            Style::default().fg(app.theme.message_system),
+        )));
+    } else if app.lang_detection_results.is_empty() {
+        detect_lines.push(Line::from(Span::styled(
+            if app.lang_notes.is_empty() {
+                "  Nothing counted yet — press Enter to walk the workspace."
+            } else {
+                "  The walk listed no files. The reason is below."
+            },
             Style::default().fg(app.theme.message_system),
         )));
     } else {
-        for (file, lang, conf) in &app.lang_detection_results {
-            let color = match conf.trim_end_matches('%').parse::<f64>().unwrap_or(0.0) {
-                c if c >= 99.0 => app.theme.success,
-                c if c >= 90.0 => app.theme.info,
-                _ => app.theme.warning,
-            };
+        detect_lines.push(Line::from(Span::styled(
+            format!(
+                "  {:<12}{:>6}{:>9}{:>8}",
+                "language", "files", "lines", "share"
+            ),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for (language, files, lines, share) in &app.lang_detection_results {
             detect_lines.push(Line::from(vec![
-                Span::styled(format!("  {:<15}", file), Style::default().fg(app.theme.fg)),
-                Span::styled(format!("{}  {}", lang, conf), Style::default().fg(color)),
+                Span::styled(
+                    format!("  {:<12}{:>6}{:>9}", language, files, lines),
+                    Style::default().fg(app.theme.fg),
+                ),
+                Span::styled(
+                    format!("{:>5.1}%", share),
+                    Style::default().fg(app.theme.info),
+                ),
             ]));
         }
     }
+    // The walk's caveats ride under the table: an ignored-tree or an unreadable
+    // file has to be visible, not silently missing from the totals.
+    for note in &app.lang_notes {
+        detect_lines.push(Line::from(Span::styled(
+            format!("  {note}"),
+            Style::default().fg(app.theme.warning),
+        )));
+    }
     let detect_para = Paragraph::new(detect_lines)
         .block(detect_block)
-        .style(Style::default().fg(app.theme.fg));
-    f.render_widget(detect_para, left[0]);
+        .wrap(Wrap { trim: false });
+    f.render_widget(detect_para, chunks[0]);
 
-    // Supported languages
+    // ── Right: the scanner's vocabulary, then the translator ────────────────
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(9), // recognised languages
+            Constraint::Min(5),    // translation
+        ])
+        .split(chunks[1]);
+
+    let seen: std::collections::HashSet<&'static str> = xencode_context_rs::scanner::Language::ALL
+        .iter()
+        .map(|language| language.as_str())
+        .filter(|name| {
+            app.lang_detection_results
+                .iter()
+                .any(|(found, _, _, _)| found == name)
+        })
+        .collect();
     let supp_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 🌍 Supported Languages ");
-
+        .title(format!(
+            " 🌍 Languages the scanner names ({}) {} ",
+            xencode_context_rs::scanner::Language::ALL.len(),
+            if app.lang_detection_results.is_empty() {
+                "· nothing detected yet"
+            } else {
+                "· ▸ present here"
+            }
+        ));
+    // Four per row: this is the enum's own contents, so the list can never
+    // promise a language the walker cannot name.
+    let names: Vec<&'static str> = xencode_context_rs::scanner::Language::ALL
+        .iter()
+        .map(|language| language.as_str())
+        .collect();
     let mut supp_lines: Vec<Line> = Vec::new();
-    for (lang, status) in &app.lang_supported {
-        let color = match status.as_str() {
-            "✅" => app.theme.success,
-            "🔄" => app.theme.warning,
-            _ => app.theme.danger,
-        };
-        supp_lines.push(Line::from(vec![
-            Span::styled(format!("  {} ", status), Style::default().fg(color)),
-            Span::styled(lang, Style::default().fg(app.theme.fg)),
-        ]));
+    for group in names.chunks(4) {
+        let mut spans = Vec::new();
+        for name in group {
+            let present = seen.contains(name);
+            spans.push(Span::styled(
+                format!("{:>2}{:<12}", if present { "▸" } else { " " }, name),
+                Style::default().fg(if present {
+                    app.theme.success
+                } else {
+                    app.theme.message_system
+                }),
+            ));
+        }
+        supp_lines.push(Line::from(spans));
     }
-    let supp_para = Paragraph::new(supp_lines)
-        .block(supp_block)
-        .style(Style::default().fg(app.theme.fg));
-    f.render_widget(supp_para, left[1]);
-
-    // ── Right: Translation ──────────────────────────────────────────────────
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1), // translate input/output
-        ])
-        .split(chunks[1]);
+    let supp_para = Paragraph::new(supp_lines).block(supp_block);
+    f.render_widget(supp_para, right[0]);
 
     let trans_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 🔄 Quick Translate ");
-
-    let mut trans_lines: Vec<Line> = Vec::new();
-    trans_lines.push(Line::from(Span::styled(
-        format!(
-            "  Source: {}  Target: {}",
-            app.lang_translate_source, app.lang_translate_target
+        .title(" 🔄 Translate (one model call) ");
+    let field = |label: &str, value: &str, edited: bool| -> Line {
+        let mut spans = vec![Span::styled(
+            format!("  {label:<6}"),
+            Style::default().fg(if edited {
+                app.theme.accent
+            } else {
+                app.theme.message_system
+            }),
+        )];
+        spans.push(Span::styled(
+            if value.is_empty() && !edited {
+                "—".to_string()
+            } else {
+                value.to_string()
+            },
+            Style::default().fg(app.theme.fg).add_modifier(if edited {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        ));
+        if edited {
+            spans.push(Span::styled("▏", Style::default().fg(app.theme.accent)));
+        }
+        Line::from(spans)
+    };
+    let editing = app.lang_editing;
+    let mut trans_lines = vec![
+        field(
+            "From",
+            &app.lang_translate_source,
+            editing == Some(crate::focus::LangField::Source),
         ),
-        Style::default().fg(app.theme.accent),
-    )));
-    trans_lines.push(Line::from(""));
-    trans_lines.push(Line::from(Span::styled(
-        "  Input:  (type and press Enter)",
-        Style::default().fg(app.theme.fg),
-    )));
-    if app.lang_translate_input.is_empty() {
+        field(
+            "To",
+            &app.lang_translate_target,
+            editing == Some(crate::focus::LangField::Target),
+        ),
+        field(
+            "Text",
+            &app.lang_translate_input,
+            editing == Some(crate::focus::LangField::Input),
+        ),
+        Line::from(""),
+    ];
+    if app.lang_translate_output.is_empty() {
         trans_lines.push(Line::from(Span::styled(
-            "    > ",
+            if app.lang_busy {
+                "  Waiting for the model…"
+            } else {
+                "  Tab to a field, type, Enter asks the model. The reply appears here."
+            },
             Style::default().fg(app.theme.message_system),
         )));
     } else {
-        trans_lines.push(Line::from(Span::styled(
-            format!("    > {}", app.lang_translate_input),
-            Style::default().fg(app.theme.fg),
-        )));
-    }
-    if !app.lang_translate_output.is_empty() {
-        trans_lines.push(Line::from(""));
-        trans_lines.push(Line::from(Span::styled(
-            format!("  Output: {}", app.lang_translate_output),
-            Style::default().fg(app.theme.success),
-        )));
+        for line in app.lang_translate_output.lines() {
+            trans_lines.push(Line::from(Span::styled(
+                format!("  {line}"),
+                Style::default().fg(if app.lang_translate_error {
+                    app.theme.danger
+                } else {
+                    app.theme.success
+                }),
+            )));
+        }
     }
     let trans_para = Paragraph::new(trans_lines)
         .block(trans_block)
-        .style(Style::default().fg(app.theme.fg));
-    f.render_widget(trans_para, right[0]);
+        .wrap(Wrap { trim: false });
+    f.render_widget(trans_para, right[1]);
 }
 
 #[cfg(test)]

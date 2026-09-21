@@ -359,7 +359,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::CollaborationHub => key_collab(app, key, tx),
         FocusArea::PerformanceProfiler => key_profiler(app, key, tx),
         FocusArea::FeatureNavigator => key_feature_nav(app, key),
-        FocusArea::MultiLanguage => key_multi_language(app, key),
+        FocusArea::MultiLanguage => key_multi_language(app, key, tx),
         _ => false,
     }
 }
@@ -1331,12 +1331,29 @@ fn key_profiler(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     false
 }
 
-fn key_multi_language(app: &mut App, key: KeyEvent) -> bool {
-    if key.code == KeyCode::Enter && !app.lang_active {
-        app.start_multi_language();
+/// Multi-Language (J-04): `Enter`/`d` walks the workspace, `Tab` selects a form
+/// field and letters then type into it, `Enter` translates. Detection is the
+/// context engine's own walk; translation is one call to the configured model.
+fn key_multi_language(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    if app.lang_editing.is_some() {
+        match key.code {
+            KeyCode::Enter => app.translate_text(tx.clone()),
+            KeyCode::Tab => app.cycle_lang_field(),
+            KeyCode::Esc => app.lang_editing = None,
+            KeyCode::Backspace => app.lang_backspace(),
+            KeyCode::Char(c) => app.lang_char(c),
+            _ => return false,
+        }
         return true;
     }
-    false
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('d') if !app.lang_busy => {
+            app.start_language_scan(tx.clone())
+        }
+        KeyCode::Tab => app.cycle_lang_field(),
+        _ => return false,
+    }
+    true
 }
 
 fn key_feature_nav(app: &mut App, key: KeyEvent) -> bool {
