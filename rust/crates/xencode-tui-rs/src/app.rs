@@ -402,13 +402,27 @@ pub struct App<'a> {
 
     // Voice Interface state
     pub voice_active: bool,
-    pub voice_status: String, // "idle", "listening", "processing", "speaking"
-    pub voice_level: f64,     // simulated audio level 0.0-1.0
+    /// "idle", "listening" or "processing" — nothing else, because nothing
+    /// else happens: there is no text-to-speech in this product (J-07).
+    pub voice_status: String,
+    /// RMS of the last PCM chunk the recorder produced, after the display gain.
+    pub voice_level: f64,
+    pub voice_peak: f64,
+    pub voice_pcm_bytes: usize,
+    /// Speech text from a transcriber, and nothing else.
     pub voice_transcript: Vec<String>,
-    pub voice_commands: Vec<(String, String)>, // (command, result)
-    pub voice_confidence: f64,
+    /// What the session is about: the clip path, or why there is no text.
+    pub voice_note: String,
+    pub voice_clip: Option<std::path::PathBuf>,
+    /// Which recorder answered this session, by file name.
+    pub voice_recorder: String,
     pub voice_muted: bool,
-    pub voice_language: String,
+    pub voice_busy: bool,
+    /// Set by the app to end the capture loop in the blocking task.
+    pub voice_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Read and written across the capture task so `m` takes effect mid-clip.
+    pub voice_mute_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub voice_root: std::path::PathBuf,
 
     // Terminal Assistant state
     /// A suggestion request is with the provider right now.
@@ -1151,10 +1165,88 @@ async fn run_language_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
     let _ = tx.send("[LANG]done".to_string());
 }
 
+/// One capture session, start to finish, on a blocking thread: read the
+/// recorder, report a level per chunk, save the WAV, then transcribe it only if
+/// an engine is installed. Every token it sends describes something that
+/// happened; the failure paths are the interesting ones.
+fn run_voice_capture(
+    recorder: &std::path::Path,
+    args: &[std::ffi::OsString],
+    clip_dir: &std::path::Path,
+    stop: &std::sync::atomic::AtomicBool,
+    muted: &std::sync::atomic::AtomicBool,
+    tx: &mpsc::UnboundedSender<String>,
+) -> std::io::Result<()> {
+    let cap = crate::voice::capture(recorder, args, stop, muted, |level, bytes| {
+        let _ = tx.send(format!("[VOICE]level:{level:.4}|{bytes}"));
+    });
+
+    if let Some(err) = &cap.error {
+        let _ = tx.send(format!("[VOICE]err:{err}"));
+        return Ok(());
+    }
+    if cap.pcm.is_empty() {
+        let _ = tx.send(
+            "[VOICE]note:The recorder sent no audio. Check the input device, or unmute with m."
+                .to_string(),
+        );
+        return Ok(());
+    }
+
+    let ms = cap.ms();
+    let name = format!(
+        "clip-{}.wav",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
+    let clip = clip_dir.join(&name);
+    std::fs::write(
+        &clip,
+        crate::voice::wav_bytes(&cap.pcm, crate::voice::SAMPLE_RATE),
+    )?;
+    let _ = tx.send(format!(
+        "[VOICE]peak:{:.4}",
+        cap.levels.iter().cloned().fold(0.0f64, f64::max)
+    ));
+    let _ = tx.send(format!("[VOICE]clip:{}|{ms}", clip.display()));
+
+    match crate::voice::find_transcriber() {
+        Some(bin) => {
+            let _ = tx.send("[VOICE]status:processing".to_string());
+            match crate::voice::transcribe(&bin, &clip) {
+                Ok(text) => {
+                    let _ = tx.send(format!(
+                        "[VOICE]transcript:{}",
+                        crate::agent_tools::truncate_one_line(&text, 500)
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(format!("[VOICE]err:{e}"));
+                }
+            }
+        }
+        None => {
+            let _ = tx.send(format!(
+                "[VOICE]note:{}",
+                crate::voice::missing_transcriber_note(&clip)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `level:<rms>|<bytes>` from the capture thread. `None` on anything else, so a
+/// malformed reading cannot zero the meter.
+fn parse_voice_level(body: &str) -> Option<(f64, usize)> {
+    let (level, bytes) = body.split_once('|')?;
+    Some((level.parse().ok()?, bytes.parse().ok()?))
+}
+
 /// The token budgets `←`/`→` step a custom-model profile through. A ladder
 /// rather than free-form entry because these are the numbers worth sending.
 const MODEL_TOKEN_STEPS: [u32; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
-
 /// Lessons the Learning panel queues from the project index, and how much of a
 /// file it puts on screen and into the prompt. Both caps exist because the
 /// panel is a popup, not a pager.
@@ -1605,11 +1697,17 @@ impl<'a> App<'a> {
             voice_active: false,
             voice_status: "idle".to_string(),
             voice_level: 0.0,
+            voice_peak: 0.0,
+            voice_pcm_bytes: 0,
             voice_transcript: Vec::new(),
-            voice_commands: Vec::new(),
-            voice_confidence: 0.0,
+            voice_note: String::new(),
+            voice_clip: None,
+            voice_recorder: String::new(),
             voice_muted: false,
-            voice_language: "en-US".to_string(),
+            voice_busy: false,
+            voice_stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            voice_mute_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            voice_root: std::path::PathBuf::new(),
 
             term_asst_busy: false,
             term_asst_query: String::new(),
@@ -3777,56 +3875,148 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Start Voice Interface simulation with audio level and speech-to-text.
-    pub fn start_voice_session(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.voice_active {
+    /// Record a clip from the microphone (J-07). Enter starts a capture; Enter
+    /// again ends it early. Levels come from RMS of the bytes the recorder
+    /// actually sent, and text appears only if a whisper CLI is installed —
+    /// otherwise the panel keeps the clip and says why there is no text.
+    pub fn start_voice_session(
+        &mut self,
+        root: std::path::PathBuf,
+        tx: mpsc::UnboundedSender<String>,
+    ) {
+        if self.voice_busy {
             return;
         }
         self.voice_active = true;
+        self.voice_busy = true;
         self.voice_status = "listening".to_string();
-        self.voice_transcript.clear();
-        self.voice_commands.clear();
-        self.voice_transcript
-            .push("🎤 Microphone initialized".to_string());
+        self.voice_level = 0.0;
+        self.voice_peak = 0.0;
+        self.voice_pcm_bytes = 0;
+        self.voice_note.clear();
+        self.voice_clip = None;
+        self.voice_recorder.clear();
+        self.voice_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.voice_mute_flag
+            .store(self.voice_muted, std::sync::atomic::Ordering::Relaxed);
 
+        let Some(recorder) = crate::voice::find_recorder() else {
+            self.voice_note =
+                "No recorder on PATH — looked for arecord, pw-record, parec. Nothing was captured."
+                    .to_string();
+            self.voice_status = "idle".to_string();
+            self.voice_busy = false;
+            return;
+        };
+        self.voice_recorder = recorder
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| recorder.display().to_string());
+        let clip_dir = root.join(".xencode").join("voice");
+        if let Err(e) = std::fs::create_dir_all(&clip_dir) {
+            self.voice_note = format!("Cannot write clips to {}: {e}", clip_dir.display());
+            self.voice_status = "idle".to_string();
+            self.voice_busy = false;
+            return;
+        }
+
+        let stop = self.voice_stop.clone();
+        let muted = self.voice_mute_flag.clone();
+        let args = crate::voice::recorder_args_for(&recorder);
         tokio::spawn(async move {
-            let phrases = vec![
-                (
-                    "refactor user model",
-                    "✅ Model refactored — UserModel split into User + Profile",
-                ),
-                (
-                    "add validation for email",
-                    "✅ Added email validation regex to UserService",
-                ),
-                ("run tests", "✅ 142 tests passed, 0 failed"),
-                (
-                    "commit changes",
-                    "✅ Committed 'feat: add email validation'",
-                ),
-            ];
-
-            for (cmd, result) in &phrases {
-                // Simulate listening with audio levels
-                for level in [0.3, 0.6, 0.8, 0.9, 0.7, 0.4] {
-                    let _ = tx.send(format!("[VOICE]level:{}", level));
-                    tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+            let recorder_tx = tx.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                run_voice_capture(&recorder, &args, &clip_dir, &stop, &muted, &recorder_tx)
+            })
+            .await;
+            match outcome {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    let _ = tx.send(format!("[VOICE]err:clip could not be saved: {e}"));
                 }
-
-                let _ = tx.send("[VOICE]status:processing".to_string());
-                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-
-                let _ = tx.send("[VOICE]status:speaking".to_string());
-                let _ = tx.send(format!("[VOICE]transcript:{}", cmd));
-                let _ = tx.send(format!("[VOICE]command:{}|{}", cmd, result));
-                tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-
-                let _ = tx.send("[VOICE]status:listening".to_string());
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                Err(e) => {
+                    let _ = tx.send(format!("[VOICE]err:capture thread died: {e}"));
+                }
             }
-
             let _ = tx.send("[VOICE]status:idle".to_string());
         });
+    }
+
+    /// End the current capture early; the clip recorded so far is kept.
+    pub fn stop_voice_session(&self) {
+        if self.voice_busy {
+            self.voice_stop
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    pub fn toggle_voice_session(
+        &mut self,
+        root: std::path::PathBuf,
+        tx: mpsc::UnboundedSender<String>,
+    ) {
+        if self.voice_busy {
+            self.stop_voice_session();
+        } else {
+            self.start_voice_session(root, tx);
+        }
+    }
+
+    /// Mute is a real switch: the capture thread reads it and discards audio
+    /// instead of keeping it, so muting does not produce a silent clip later.
+    pub fn set_voice_muted(&mut self, muted: bool) {
+        self.voice_muted = muted;
+        self.voice_mute_flag
+            .store(muted, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn voice_apply_level(&mut self, body: &str) {
+        let Some((level, bytes)) = parse_voice_level(body) else {
+            return;
+        };
+        self.voice_level = level;
+        self.voice_pcm_bytes = bytes;
+        if level > self.voice_peak {
+            self.voice_peak = level;
+        }
+    }
+
+    pub fn voice_apply_clip(&mut self, body: &str) {
+        let Some((path, ms)) = body.split_once('|') else {
+            self.voice_note = format!("Malformed clip report: {body}");
+            return;
+        };
+        let Ok(ms) = ms.trim().parse::<u64>() else {
+            self.voice_note = format!("Malformed clip length in: {body}");
+            return;
+        };
+        self.voice_clip = Some(std::path::PathBuf::from(path));
+        self.voice_note = format!("Kept {} of audio at {}.", crate::voice::format_ms(ms), path);
+    }
+
+    pub fn voice_apply_transcript(&mut self, text: &str) {
+        self.voice_transcript.push(text.to_string());
+        self.voice_note.clear();
+    }
+
+    pub fn voice_apply_note(&mut self, note: &str) {
+        self.voice_note = note.to_string();
+        self.voice_level = 0.0;
+    }
+
+    pub fn voice_apply_error(&mut self, err: &str) {
+        self.voice_note = err.to_string();
+        self.voice_status = "idle".to_string();
+        self.voice_busy = false;
+        self.voice_level = 0.0;
+    }
+
+    /// A capture has ended. The panel keeps showing the clip and whatever the
+    /// transcriber (or its absence) reported; only the meter goes quiet.
+    pub fn voice_finish(&mut self) {
+        self.voice_busy = false;
+        self.voice_status = "idle".to_string();
+        self.voice_level = 0.0;
     }
 
     pub fn term_asst_char(&mut self, c: char) {
@@ -5431,29 +5621,25 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
                 app.llamacpp_action_msg = body.to_string();
             } else if let Some(body) = token.strip_prefix("[VOICE]") {
-                if body.starts_with("status:") {
-                    if let Some(s) = body.strip_prefix("status:") {
-                        let new_status = s.to_string();
-                        if new_status == "idle" {
-                            app.voice_active = false;
-                        }
+                if let Some(s) = body.strip_prefix("status:") {
+                    let new_status = s.to_string();
+                    if new_status == "idle" {
+                        app.voice_finish();
+                    } else {
                         app.voice_status = new_status;
                     }
-                } else if body.starts_with("level:") {
-                    if let Some(l) = body.strip_prefix("level:") {
-                        app.voice_level = l.trim().parse::<f64>().unwrap_or(0.0);
-                    }
-                } else if body.starts_with("transcript:") {
-                    if let Some(t) = body.strip_prefix("transcript:") {
-                        app.voice_transcript.push(t.to_string());
-                    }
-                } else if body.starts_with("command:") {
-                    if let Some(c) = body.strip_prefix("command:") {
-                        let parts: Vec<&str> = c.splitn(2, '|').collect();
-                        let cmd = parts.first().unwrap_or(&"").to_string();
-                        let result = parts.get(1).unwrap_or(&"").to_string();
-                        app.voice_commands.push((cmd, result));
-                    }
+                } else if let Some(l) = body.strip_prefix("level:") {
+                    app.voice_apply_level(l);
+                } else if let Some(p) = body.strip_prefix("peak:") {
+                    app.voice_peak = p.trim().parse::<f64>().unwrap_or(app.voice_peak);
+                } else if let Some(c) = body.strip_prefix("clip:") {
+                    app.voice_apply_clip(c);
+                } else if let Some(t) = body.strip_prefix("transcript:") {
+                    app.voice_apply_transcript(t);
+                } else if let Some(n) = body.strip_prefix("note:") {
+                    app.voice_apply_note(n);
+                } else if let Some(e) = body.strip_prefix("err:") {
+                    app.voice_apply_error(e);
                 }
             } else if let Some(body) = token.strip_prefix("[TERM]") {
                 if let Some(json) = body.strip_prefix("suggestion:") {
@@ -5902,7 +6088,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             || app.is_reviewing
             || app.health_check_in_progress
             || app.bytebot_running
-            || app.voice_active
+            || app.voice_busy
             || app.collab_sync_status == "connecting"
             || app.sec_scan_active
             || app.profiler_running
@@ -5917,8 +6103,8 @@ mod tests {
     use super::{
         cap_at_line, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
-        parse_porcelain_z, parse_term_suggestions, watch_warning_for, App, FocusArea, LoopSink,
-        SpawnRecord,
+        parse_porcelain_z, parse_term_suggestions, parse_voice_level, watch_warning_for, App,
+        FocusArea, LoopSink, SpawnRecord,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -7606,6 +7792,125 @@ mod tests {
         app.learn_step(true, tx);
         assert_eq!(app.learn_current_lesson, 0);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The meter token carries the reading and the running byte count. A
+    /// malformed one must not be allowed to blank the meter mid-sentence.
+    #[test]
+    fn a_level_reading_needs_both_its_number_and_its_count() {
+        assert_eq!(parse_voice_level("0.4210|3200"), Some((0.421, 3200)));
+        assert_eq!(parse_voice_level("0.4"), None);
+        assert_eq!(parse_voice_level("loud|3200"), None);
+        assert_eq!(parse_voice_level("0.4|many"), None);
+
+        let mut app = App::for_tests();
+        app.voice_apply_level("0.4210|3200");
+        assert_eq!(app.voice_level, 0.421);
+        assert_eq!(app.voice_pcm_bytes, 3200);
+        app.voice_apply_level("garbage");
+        assert_eq!(app.voice_level, 0.421, "a bad reading changes nothing");
+    }
+
+    /// The peak is the loudest chunk of the session, so a bar that has since
+    /// fallen is still visible as what the clip reached.
+    #[test]
+    fn the_voice_peak_holds_the_loudest_chunk() {
+        let mut app = App::for_tests();
+        app.voice_apply_level("0.6000|3200");
+        app.voice_apply_level("0.2000|6400");
+        assert_eq!(app.voice_level, 0.2);
+        assert_eq!(app.voice_peak, 0.6);
+        assert_eq!(app.voice_pcm_bytes, 6400);
+    }
+
+    /// A clip report is the honest end of a session with no speech engine: the
+    /// panel keeps the file it wrote and says it cannot transcribe. The
+    /// transcript list stays empty because nobody transcribed anything.
+    #[test]
+    fn a_clip_without_a_transcriber_reports_the_file_not_a_sentence() {
+        let mut app = App::for_tests();
+        app.voice_active = true;
+        app.voice_apply_clip("/tmp/.xencode/voice/clip-1.wav|1500");
+        assert_eq!(
+            app.voice_clip.as_ref().unwrap().display().to_string(),
+            "/tmp/.xencode/voice/clip-1.wav"
+        );
+        assert!(app.voice_note.contains("1.5 s"), "{}", app.voice_note);
+        assert!(app.voice_transcript.is_empty());
+
+        app.voice_apply_note(&crate::voice::missing_transcriber_note(
+            std::path::Path::new("/tmp/.xencode/voice/clip-1.wav"),
+        ));
+        assert!(
+            app.voice_note.contains("No speech-to-text engine"),
+            "{}",
+            app.voice_note
+        );
+        assert!(
+            app.voice_transcript.is_empty(),
+            "nothing was ever transcribed"
+        );
+
+        // A clip report the panel cannot parse is said out loud, not dropped.
+        app.voice_apply_clip("/tmp/clip-2.wav|soon");
+        assert!(app.voice_note.contains("Malformed"), "{}", app.voice_note);
+        assert_eq!(
+            app.voice_clip.as_ref().unwrap().display().to_string(),
+            "/tmp/.xencode/voice/clip-1.wav"
+        );
+    }
+
+    #[test]
+    fn a_failed_capture_stops_the_meter_and_says_why() {
+        let mut app = App::for_tests();
+        app.voice_busy = true;
+        app.voice_status = "listening".into();
+        app.voice_apply_level("0.5000|3200");
+        app.voice_apply_error("arecord failed to start: No such device");
+        assert!(!app.voice_busy);
+        assert_eq!(app.voice_status, "idle");
+        assert_eq!(app.voice_level, 0.0);
+        assert!(
+            app.voice_note.contains("No such device"),
+            "{}",
+            app.voice_note
+        );
+    }
+
+    /// Mute has to reach the thread that is reading the microphone, otherwise
+    /// `m` is a label and the clip still gets written.
+    #[test]
+    fn muting_switches_the_flag_the_capture_thread_reads() {
+        use std::sync::atomic::Ordering;
+        let mut app = App::for_tests();
+        assert!(!app.voice_mute_flag.load(Ordering::Relaxed));
+        app.set_voice_muted(true);
+        assert!(app.voice_muted);
+        assert!(app.voice_mute_flag.load(Ordering::Relaxed));
+        app.set_voice_muted(false);
+        assert!(!app.voice_mute_flag.load(Ordering::Relaxed));
+    }
+
+    /// A recorder that is not a recorder — the empty PCM case — produces no
+    /// clip at all, so there is nothing for the panel to claim it kept.
+    #[test]
+    fn a_capture_of_nothing_keeps_no_clip() {
+        let dir = temp_dir("voice-empty");
+        let pcm_file = dir.join("nothing.pcm");
+        std::fs::write(&pcm_file, []).unwrap();
+        let cat = crate::voice::which("cat").expect("cat is on PATH for this test");
+        let args = vec![pcm_file.into_os_string()];
+        let cap = crate::voice::capture(
+            &cat,
+            &args,
+            &std::sync::atomic::AtomicBool::new(false),
+            &std::sync::atomic::AtomicBool::new(false),
+            |_, _| {},
+        );
+        assert!(cap.error.is_none(), "{:?}", cap.error);
+        assert!(cap.pcm.is_empty());
+        assert!(cap.levels.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Every number the profiler panel shows has to be measured or explained.

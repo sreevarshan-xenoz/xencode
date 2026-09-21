@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-19** — a snapshot, not the current
-> state. The workspace is 14 crates and 714 tests as of 2026-09-21; the counts
+> state. The workspace is 14 crates and 733 tests as of 2026-09-21; the counts
 > below are what they were on that date. See [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md)
 > for what is actually shipped today.
 
@@ -50,9 +50,10 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ### 📦 Icebox / Long-Term Vision
 *Great ideas saved for later to maintain laser focus.*
-- **Voice Input/Output** — the Voice Interface panel exists, but its audio levels and
-  transcript are scripted; no microphone is opened. J-07 in `NEXT_PLAN_TASKS.md` is
-  the item that makes it real
+- **Voice Input/Output** — input is real since J-07: the panel records through
+  `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a WAV, and
+  transcribes with a whisper CLI when one is installed. Output (text-to-speech)
+  is still not built — the panel has no "speaking" state because nothing speaks
 - ~~**Plugin System**~~ — done in Rust (`xencode-plugin-rs`)
 - **Agent Orchestration** (Multi-agent debugging)
 - **VS Code Extension** (Separate product)
@@ -95,7 +96,7 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemi
 4. **Team-mode hardening** - RBAC + audit logs over the collaboration crate
 
 ### 📋 Completed (was "Next Priorities")
-1. ⚠️ **Voice input/output** - panel only: scripted levels and transcript (J-07 pending)
+1. ✅ **Voice input** - real microphone capture with meters from the PCM, a kept WAV, and whisper transcription when an engine is installed (J-07); output/TTS still unbuilt
 2. ✅ **Plugin system** - `xencode-plugin-rs` with registry/host/manifest
 3. ✅ **Collaboration features** - HTTP/WebSocket server + CRDT sync
 4. ✅ **API server** - axum routes/auth/ws in `xencode-server-rs`

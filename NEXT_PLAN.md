@@ -8,24 +8,26 @@
 ## Current Status
 
 - ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, smoke gate)
-- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys) + the scripted voice panel
+- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys) + the voice panel, scripted until J-07
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 14 crates, 714 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 14 crates, 733 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🎯 **Current focus — Milestone J: every panel tells the truth** (opened 2026-09-21).
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
-  Prometheus assets are already gone. **J-01 to J-06 are done** — the security
+  Prometheus assets are already gone. **J-01 to J-07 are done** — the security
   auditor scans the workspace, the profiler measures, the terminal assistant
   asks a model and runs what it picks through the agent's approval gate, the
   multi-language panel tabulates a real `scan_tree` walk and translates
   through a real model call, the custom models panel edits real
-  `model_profiles` in `config.json`, and the learning mode panel teaches files
-  the project index actually found — leaving one scripted panel (voice) and the
-  plugin runtime. Task breakdown and the done-when rule for each item:
+  `model_profiles` in `config.json`, the learning mode panel teaches files
+  the project index actually found, and the voice panel records from the
+  microphone and keeps a WAV, transcribing only when a whisper CLI exists —
+  which leaves the plugin runtime. No TUI panel ships scripted content now.
+  Task breakdown and the done-when rule for each item:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone J.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and

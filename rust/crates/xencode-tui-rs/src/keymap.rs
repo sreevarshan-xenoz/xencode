@@ -1242,15 +1242,16 @@ fn key_custom_models(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
 
 fn key_voice(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     match key.code {
-        KeyCode::Enter => {
-            if !app.voice_active {
-                app.start_voice_session(tx.clone());
-            }
+        // Enter starts a capture, and Enter again ends it early — the clip
+        // recorded so far is still kept (J-07).
+        KeyCode::Enter => app.toggle_voice_session(xencode_context_rs::default_root(), tx.clone()),
+        KeyCode::Esc if app.voice_busy => {
+            app.stop_voice_session();
         }
         // Both Space (status bar hint) and `m` toggle mute (E2-06/E6-01:
         // focus-first dispatch means the global `m` never fires here).
         KeyCode::Char(' ') | KeyCode::Char('m') => {
-            app.voice_muted = !app.voice_muted;
+            app.set_voice_muted(!app.voice_muted);
         }
         _ => return false,
     }
