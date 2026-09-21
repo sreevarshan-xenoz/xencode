@@ -93,7 +93,9 @@ fn parse_porcelain_z(stdout: &[u8]) -> HashMap<String, String> {
 const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
-pub const SLASH_COMMANDS: &[&str] = &["/init", "/ctx", "/advise", "/bytebot", "/plan", "/rewind"];
+pub const SLASH_COMMANDS: &[&str] = &[
+    "/init", "/ctx", "/advise", "/bytebot", "/plan", "/rewind", "/mcp",
+];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
 /// Returns the longest common prefix when it extends the token (pure —
@@ -254,6 +256,9 @@ pub struct App<'a> {
     pub agent_plan: crate::agent_tools::PlanHandle,
     /// `/plan` toggles this: pinned shows every item, unpinned the first few.
     pub plan_pinned: bool,
+    /// MCP servers started for this session (I3-01) and the tools they offer.
+    /// Empty until `/mcp` starts something.
+    pub mcp: Arc<crate::mcp::McpHub>,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -797,6 +802,7 @@ impl<'a> App<'a> {
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
+            mcp: Arc::new(crate::mcp::McpHub::new()),
             plan_pinned: false,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
@@ -1167,7 +1173,7 @@ impl<'a> App<'a> {
         if draft == "/" {
             self.push_toast(
                 crate::toast::ToastKind::Info,
-                "Commands: /init  /ctx  /advise  /bytebot  /plan  /rewind (Tab completes)"
+                "Commands: /init  /ctx  /advise  /bytebot  /plan  /rewind  /mcp (Tab completes)"
                     .to_string(),
             );
             return true;
@@ -1242,6 +1248,13 @@ impl<'a> App<'a> {
             if let Some(run) = self.arm_bytebot(&task) {
                 tokio::spawn(agent_rounds(run, tx));
             }
+            return;
+        }
+
+        // MCP servers: connect the configured ones, or ask about/stop them
+        // (I3-01). A declared server is only ever started here, on request.
+        if prompt == "/mcp" || prompt.starts_with("/mcp ") {
+            self.handle_mcp_command(&prompt, tx);
             return;
         }
 
@@ -1387,6 +1400,7 @@ impl<'a> App<'a> {
                 // produced output, so the floor is one second.
                 command_timeout: self.config.agent_command_timeout.max(1),
                 plan: self.agent_plan.clone(),
+                mcp: self.mcp.clone(),
             },
             task_runtime: self.task_runtime.clone(),
             tool_root: xencode_context_rs::default_root(),
@@ -2530,6 +2544,67 @@ impl<'a> App<'a> {
         }
     }
 
+    /// I3-01: the Model Context Protocol, tools only. `/mcp` connects every
+    /// server declared under `mcp_servers` in config.json and offers its tools
+    /// to the model for the session; `/mcp status` lists what is running and
+    /// what non-protocol noise it has printed; `/mcp stop` kills everything and
+    /// withdraws the tools. A configured-but-broken server must not stall TUI
+    /// startup, so nothing here is started unless the user asks.
+    fn handle_mcp_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let arg = prompt.strip_prefix("/mcp").unwrap_or("").trim();
+        match arg {
+            "status" => {
+                let mcp = self.mcp.clone();
+                tokio::spawn(async move {
+                    for line in mcp.status_lines().await {
+                        let _ = tx.send(format!("[MCP]{line}"));
+                    }
+                });
+            }
+            "stop" => {
+                let mcp = self.mcp.clone();
+                tokio::spawn(async move {
+                    let stopped = mcp.stop_all().await;
+                    let _ = tx.send(
+                        "[MCP]".to_owned()
+                            + &if stopped == 0 {
+                                "no MCP servers running.".to_string()
+                            } else {
+                                format!("stopped {stopped} MCP server(s) and withdrew their tools.")
+                            },
+                    );
+                });
+            }
+            "" => {
+                if self.config.mcp_servers.is_empty() {
+                    self.system_line(
+                        "No MCP servers configured — add a \"mcp_servers\" block to config.json, then run /mcp.",
+                    );
+                    return;
+                }
+                let specs: Vec<crate::mcp::ServerSpec> = self
+                    .config
+                    .mcp_servers
+                    .iter()
+                    .map(|(name, server)| crate::mcp::spec_from_config(name, server))
+                    .collect();
+                self.system_line(&format!("Connecting {} MCP server(s)…", specs.len()));
+                let mcp = self.mcp.clone();
+                let timeout = std::time::Duration::from_secs(self.config.mcp_timeout.max(1));
+                tokio::spawn(async move {
+                    for report in mcp.connect(&specs, timeout).await {
+                        let _ = tx.send(if report.connected {
+                            format!("[MCP]✓ {} · {}", report.server, report.detail)
+                        } else {
+                            format!("[MCP]✗ {} · {}", report.server, report.detail)
+                        });
+                    }
+                });
+            }
+            _ => self.system_line("usage: /mcp (connect all)  ·  /mcp status  ·  /mcp stop"),
+        }
+    }
+
     /// A rewind that touches the file the user is looking at must not leave
     /// a stale buffer in the editor — but unsaved edits are the user's, so
     /// those are never silently thrown away.
@@ -3549,6 +3624,8 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     tools.extend(xencode_providers_rs::file_tools());
     tools.extend(xencode_providers_rs::command_tools());
     tools.extend(xencode_providers_rs::plan_tools());
+    // Whatever `/mcp` started, read at the moment the turn begins.
+    tools.extend(approval.mcp.definitions());
 
     let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
     for round in 0..=max_rounds {
@@ -3620,6 +3697,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
                 &tool_root,
                 call,
                 &approval,
+                Some(&approval.mcp),
             )
             .await;
             let outcome = crate::agent_tools::call_outcome(&result);
@@ -4028,6 +4106,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     role: "system".to_string(),
                     content: format!("⚙{body}"),
                 });
+            } else if let Some(body) = token.strip_prefix("[MCP]") {
+                // `/mcp` reports (I3-01) arrive from the connect/status task.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("◈ {body}"),
+                });
             } else if let Some(body) = token.strip_prefix("[WATCH]") {
                 app.handle_watch_event(body);
             } else {
@@ -4251,15 +4335,21 @@ mod tests {
             turn: app.checkpoints.begin_turn(),
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
+            mcp: app.mcp.clone(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
             name: "edit_file".to_string(),
             arguments: serde_json::json!({"path": "keep.txt", "old": "mine", "new": "theirs"}),
         };
-        let wrote =
-            crate::agent_tools::execute_tool_call_approved(&app.task_runtime, &dir, &call, &ctx)
-                .await;
+        let wrote = crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            &dir,
+            &call,
+            &ctx,
+            Some(&app.mcp),
+        )
+        .await;
         assert!(wrote.starts_with("edited keep.txt"), "{wrote}");
         assert!(dir.join("keep.txt").exists());
 
@@ -4324,6 +4414,76 @@ mod tests {
             .any(|toast| toast.message.contains("while the agent is working")));
     }
 
+    /// I3-01: `/mcp` is the only way servers start, so with none configured it
+    /// must say so — and status/stop report the honest empty state, in the
+    /// model's stream rather than a dead-end.
+    #[tokio::test]
+    async fn mcp_command_without_servers_is_honest_about_it() {
+        let mut app = App::new();
+        assert!(
+            app.config.mcp_servers.is_empty(),
+            "the default config declares no servers"
+        );
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        app.handle_mcp_command("/mcp", tx.clone());
+        assert!(
+            app.messages
+                .last()
+                .unwrap()
+                .content
+                .contains("No MCP servers configured"),
+            "{}",
+            app.messages.last().unwrap().content
+        );
+
+        app.handle_mcp_command("/mcp status", tx.clone());
+        let said = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("status answer must arrive")
+            .expect("status channel stays open");
+        assert!(said.starts_with("[MCP]"), "{said}");
+        assert!(said.contains("no MCP servers running"), "{said}");
+
+        app.handle_mcp_command("/mcp stop", tx.clone());
+        let said = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("stop answer must arrive")
+            .expect("stop channel stays open");
+        assert!(said.starts_with("[MCP]"), "{said}");
+        assert!(said.contains("no MCP servers running"), "{said}");
+
+        app.handle_mcp_command("/mcp nope", tx);
+        assert!(
+            app.messages.last().unwrap().content.contains("usage: /mcp"),
+            "{}",
+            app.messages.last().unwrap().content
+        );
+    }
+
+    /// I3-01: the slash dispatcher hands `/mcp` off before any provider work,
+    /// so the command sits in the transcript like a user turn and the servers'
+    /// answer comes back on the same channel a generation would use.
+    #[tokio::test]
+    async fn mcp_slash_command_routes_to_the_handler() {
+        let mut app = App::new();
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+        app.set_chat_text("/mcp status");
+        app.submit_message(tx.clone());
+
+        assert!(!app.is_generating, "a status report arms no generation");
+        assert_eq!(app.messages.first().unwrap().role, "user");
+        assert_eq!(app.messages.first().unwrap().content, "/mcp status");
+
+        let said = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("status answer must arrive")
+            .expect("status channel stays open");
+        assert!(said.starts_with("[MCP]"), "{said}");
+        assert!(said.contains("no MCP servers running"), "{said}");
+    }
+
     /// I2-03: the list the agent posts belongs to the user as well — `/plan`
     /// pins it, `/plan clear` drops it. Seeded through the real gated path so
     /// the test also proves a plan costs no approval in `ask` mode.
@@ -4339,6 +4499,7 @@ mod tests {
             turn: app.checkpoints.begin_turn(),
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
+            mcp: app.mcp.clone(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -4351,9 +4512,14 @@ mod tests {
         };
         let dir = std::env::temp_dir().join(format!("xencode-plan-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let posted =
-            crate::agent_tools::execute_tool_call_approved(&app.task_runtime, &dir, &call, &ctx)
-                .await;
+        let posted = crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            &dir,
+            &call,
+            &ctx,
+            Some(&app.mcp),
+        )
+        .await;
         assert!(
             posted.starts_with("plan updated: 3 step(s), 1 done"),
             "{posted}"

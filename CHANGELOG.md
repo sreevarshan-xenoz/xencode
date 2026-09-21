@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- MCP tool servers (Milestone I, I3-01): a new `xencode-mcp-rs` crate speaks
+  the Model Context Protocol over stdio. Servers are declared in config under
+  `mcp_servers` (`command`, `args`, `env` — credentials never in `args`) and
+  are started only when you ask with `/mcp`; a broken or missing server reports
+  its own failure in a `[MCP]✗ …` line instead of stalling the TUI. Each live
+  tool is offered to the model as `mcp__<server>__<tool>` and routed through
+  the same approval gate as every other agent tool (`External` class — always
+  `y`/`n`, never waved through by autonomy), and `/mcp stop` withdraws the
+  tools of everything it stops. `/mcp status` lists what is running; the
+  per-handshake budget is `mcp_timeout` config (default 30 s, `config set
+  mcp_timeout`, `1`–`300`)
 - ByteBot is the real agent (Milestone I, I2-04): `/bytebot <task>` and the
   panel's Enter used to play a recording — six fixed steps, `sleep`s, and
   invented output like "🧪 Running test suite (142 tests)" and "✅ All tests

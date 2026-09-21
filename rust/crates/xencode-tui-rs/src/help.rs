@@ -76,6 +76,10 @@ const COMMANDS: &[Binding] = &[
         "/rewind [turns]",
         "undo the agent's file changes (session-only)",
     ),
+    (
+        "/mcp [status|stop]",
+        "connect/stop the configured MCP tool servers",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

@@ -30,7 +30,7 @@ out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRout
 when you want them, and combines multiple models through ensemble reasoning to
 get you better answers than any single model alone.
 
-At its core is a fast, single-file **Rust** binary (13 crates, 645 tests,
+At its core is a fast, single-file **Rust** binary (14 crates, 671 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -335,7 +335,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (645 tests)
+cargo test                          # Full workspace suite (671 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -362,7 +362,7 @@ Xencode ships production-oriented deployment assets:
 
 ```
 xencode/
-├── rust/                    # Rust workspace — 13 crates
+├── rust/                    # Rust workspace — 14 crates
 │   └── crates/
 │       ├── xencode-cli      # # CLI entry point (xencode binary)
 │       ├── xencode-tui-rs   # Ratatui TUI
@@ -433,7 +433,7 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 ## 🗺️ Roadmap
 
-The Rust migration (all 8 phases, 13 crates) is **complete**. Near-term direction:
+The Rust migration (all 8 phases, 14 crates) is **complete**. Near-term direction:
 
 - Repo-wide context indexing + routing intelligence
 - Smart fallback policy governance + provider health UX

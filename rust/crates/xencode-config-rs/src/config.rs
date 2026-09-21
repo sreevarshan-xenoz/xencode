@@ -120,6 +120,31 @@ pub struct XencodeConfig {
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
+
+    /// Model Context Protocol servers the agent may ask for tools from,
+    /// keyed by the name that becomes the `mcp__<name>__<tool>` prefix.
+    /// Empty by default: nothing is started, and nothing is reachable,
+    /// until the user declares a server.
+    #[serde(default)]
+    pub mcp_servers: std::collections::BTreeMap<String, McpServer>,
+
+    /// Wall-clock seconds an MCP request (handshake, tool list, tool call)
+    /// may take before the server is considered unresponsive.
+    #[serde(default = "default_mcp_timeout")]
+    pub mcp_timeout: u64,
+}
+
+/// One declared MCP server: a command we spawn and talk JSON-RPC to over its
+/// stdin/stdout. Credentials for a server go in `env`, not in `args`, so they
+/// do not end up in a shell history or a `ps` line.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct McpServer {
+    /// Executable to spawn (resolved through `PATH` like a shell would).
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 fn default_model() -> String {
@@ -174,6 +199,10 @@ fn default_memory_items() -> usize {
     50
 }
 
+fn default_mcp_timeout() -> u64 {
+    30
+}
+
 impl Default for XencodeConfig {
     fn default() -> Self {
         Self {
@@ -201,6 +230,8 @@ impl Default for XencodeConfig {
             memory_enabled: true,
             max_memory_items: default_memory_items(),
             api_keys: ApiKeys::default(),
+            mcp_servers: std::collections::BTreeMap::new(),
+            mcp_timeout: default_mcp_timeout(),
         }
     }
 }
@@ -334,6 +365,47 @@ mod tests {
         assert!(config.cache_enabled);
         assert!(config.memory_enabled);
         assert_eq!(config.max_memory_items, 50);
+        assert!(config.mcp_servers.is_empty());
+        assert_eq!(config.mcp_timeout, 30);
+    }
+
+    /// MCP servers are declared as a map in config.json, and a server with no
+    /// `args`/`env` of its own must still parse — that is the common case.
+    #[test]
+    fn mcp_servers_parse_from_config_json_and_survive_a_roundtrip() {
+        let dir = temp_dir();
+        let path = dir.join("mcp.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+                "mcp_timeout": 5,
+                "mcp_servers": {
+                    "docs": {"command": "mcp-docs", "args": ["--root", "/docs"],
+                              "env": {"DOCS_TOKEN": "t"}},
+                    "bare": {"command": "npx"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut config = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(config.mcp_timeout, 5);
+        assert_eq!(config.mcp_servers.len(), 2);
+        let docs = &config.mcp_servers["docs"];
+        assert_eq!(docs.command, "mcp-docs");
+        assert_eq!(docs.args, vec!["--root".to_string(), "/docs".to_string()]);
+        assert_eq!(docs.env.get("DOCS_TOKEN").map(String::as_str), Some("t"));
+        assert_eq!(config.mcp_servers["bare"].args, Vec::<String>::new());
+
+        // Saving must not lose the map, or a server disappears silently.
+        config.mcp_timeout = 9;
+        let out = dir.join("saved.json");
+        config.save_to(&out).unwrap();
+        let loaded = XencodeConfig::load_from(&out).unwrap();
+        assert_eq!(loaded, config);
+        assert_eq!(loaded.mcp_servers, config.mcp_servers);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

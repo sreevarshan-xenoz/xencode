@@ -579,6 +579,15 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.agent_command_timeout = seconds;
                 }
+                "mcp_timeout" => {
+                    let seconds: u64 = value
+                        .parse()
+                        .map_err(|_| format!("invalid number: {value}"))?;
+                    if !(1..=300).contains(&seconds) {
+                        return Err("mcp_timeout must be 1..=300 seconds".to_string());
+                    }
+                    config.mcp_timeout = seconds;
+                }
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;

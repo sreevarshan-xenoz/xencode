@@ -63,6 +63,9 @@ pub enum ToolClass {
     ReadOnly,
     Edit,
     Shell,
+    /// A tool belonging to an external MCP server: we cannot preview its
+    /// effect, cannot checkpoint it, and cannot undo it.
+    External,
 }
 
 /// The outcome of the policy for one call.
@@ -112,6 +115,7 @@ impl ApprovalRequest {
             ToolClass::ReadOnly => "read-only",
             ToolClass::Edit => "file change",
             ToolClass::Shell => "shell command",
+            ToolClass::External => "external tool",
         }
     }
 }
@@ -119,6 +123,10 @@ impl ApprovalRequest {
 /// What a tool call touches. Unknown tools count as Shell — the executor
 /// errors on them anyway, but they are never silently treated as read-only.
 pub fn tool_class(tool: &str) -> ToolClass {
+    // A server we did not write, whose effects we cannot preview or undo.
+    if crate::mcp::is_mcp_tool(tool) {
+        return ToolClass::External;
+    }
     match tool {
         "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files"
         | "update_plan" => ToolClass::ReadOnly,
@@ -205,17 +213,28 @@ pub fn classify(
     mode: ApprovalMode,
     granted: &[ToolClass],
 ) -> Permission {
+    let external = crate::mcp::is_mcp_tool(tool);
     // Path arguments are hard-denied outside the workspace in every mode:
-    // "all-allow" never means "anywhere on disk".
-    for key in ["path", "cwd"] {
-        if let Some(serde_json::Value::String(raw)) = args.get(key) {
-            if !raw.is_empty() && !path_allowed(root, raw) {
-                return Permission::Deny;
+    // "all-allow" never means "anywhere on disk". That rule is about *our* file
+    // tools; a server's own `path` argument means something in the server's
+    // filesystem, so refusing it here would break the server rather than
+    // protect the workspace. Those calls still always prompt, where the
+    // arguments are shown.
+    if !external {
+        for key in ["path", "cwd"] {
+            if let Some(serde_json::Value::String(raw)) = args.get(key) {
+                if !raw.is_empty() && !path_allowed(root, raw) {
+                    return Permission::Deny;
+                }
             }
         }
     }
     let class = tool_class(tool);
     let base = match class {
+        // A third-party binary's side effects are neither previewable nor
+        // rewindable, so no autonomy tier waves them through: the user sees
+        // every call. "Always allow for this session" (`a`) still applies.
+        ToolClass::External => Permission::Ask,
         ToolClass::ReadOnly => Permission::Allow,
         ToolClass::Edit if mode == ApprovalMode::Ask => Permission::Ask,
         ToolClass::Shell if mode != ApprovalMode::AllAllow => Permission::Ask,
@@ -825,7 +844,7 @@ pub async fn execute_tool_call_timed(
     call: &ToolCall,
     command_timeout: u64,
 ) -> String {
-    execute_tool_call_plan(rt, root, call, command_timeout, None).await
+    execute_tool_call_plan(rt, root, call, command_timeout, None, None).await
 }
 
 /// The dispatcher. `plan` is the chat's visible todo list: only the loop has
@@ -836,8 +855,20 @@ async fn execute_tool_call_plan(
     call: &ToolCall,
     command_timeout: u64,
     plan: Option<&PlanHandle>,
+    mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
     let args = call.arguments_object();
+    // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
+    // the hub knows which real tool that stands for.
+    if crate::mcp::is_mcp_tool(&call.name) {
+        return match mcp {
+            Some(hub) => {
+                hub.call(&call.name, serde_json::Value::Object(args.clone()))
+                    .await
+            }
+            None => err("MCP tools are only available in the chat loop"),
+        };
+    }
     match call.name.as_str() {
         "update_plan" => match plan {
             Some(handle) => {
@@ -965,6 +996,9 @@ pub struct ApprovalCtx {
     pub command_timeout: u64,
     /// The chat pane's todo list, written by `update_plan`.
     pub plan: PlanHandle,
+    /// The session's started MCP servers (I3-01): the turn offers their tools
+    /// and routes approved calls back to them. Empty until `/mcp` connects.
+    pub mcp: Arc<crate::mcp::McpHub>,
 }
 
 impl ApprovalCtx {
@@ -1020,16 +1054,19 @@ impl ApprovalCtx {
     }
 }
 
-/// Run an approved call, checkpointing the target first.
+/// Run an approved call, checkpointing the target first. `mcp` is the session's
+/// started servers: the loop has them, so a server tool outside it is an error
+/// rather than a silent no-op (same shape as `plan`).
 async fn run_and_checkpoint(
     rt: &TaskRuntime,
     root: &Path,
     call: &ToolCall,
     ctx: &ApprovalCtx,
+    mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
     let note = ctx.snapshot_before(root, call);
     let mut result =
-        execute_tool_call_plan(rt, root, call, ctx.command_timeout, Some(&ctx.plan)).await;
+        execute_tool_call_plan(rt, root, call, ctx.command_timeout, Some(&ctx.plan), mcp).await;
     if let Some(note) = note {
         if !result.starts_with("error:") {
             result.push('\n');
@@ -1047,13 +1084,14 @@ pub async fn execute_tool_call_approved(
     root: &Path,
     call: &ToolCall,
     ctx: &ApprovalCtx,
+    mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
     let args = call.arguments_object();
     match classify(root, &call.name, &args, ctx.mode, &ctx.granted()) {
         // Refused without asking: the path is outside what the agent may
         // touch in any mode, so a prompt would only invite a mistake.
         Permission::Deny => FORBIDDEN_RESULT.to_string(),
-        Permission::Allow => run_and_checkpoint(rt, root, call, ctx).await,
+        Permission::Allow => run_and_checkpoint(rt, root, call, ctx, mcp).await,
         Permission::Ask => {
             let class = tool_class(&call.name);
             let request = ApprovalRequest {
@@ -1069,10 +1107,10 @@ pub async fn execute_tool_call_approved(
                 return DENIED_RESULT.to_string();
             }
             match answer.await {
-                Ok(ApprovalAnswer::Approved) => run_and_checkpoint(rt, root, call, ctx).await,
+                Ok(ApprovalAnswer::Approved) => run_and_checkpoint(rt, root, call, ctx, mcp).await,
                 Ok(ApprovalAnswer::ApprovedForSession) => {
                     ctx.grant(class);
-                    run_and_checkpoint(rt, root, call, ctx).await
+                    run_and_checkpoint(rt, root, call, ctx, mcp).await
                 }
                 // A dropped responder means the prompt vanished with the app.
                 Ok(ApprovalAnswer::Denied) | Err(_) => DENIED_RESULT.to_string(),
@@ -2221,6 +2259,7 @@ mod tests {
                 turn,
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
+                mcp: Arc::new(crate::mcp::McpHub::new()),
             },
             prompts: rx,
         }
@@ -2258,7 +2297,9 @@ mod tests {
         answer: ApprovalAnswer,
     ) -> String {
         let running =
-            tokio::spawn(async move { execute_tool_call_approved(&rt, &root, &tool, &ctx).await });
+            tokio::spawn(
+                async move { execute_tool_call_approved(&rt, &root, &tool, &ctx, None).await },
+            );
         tokio::pin!(running);
         tokio::select! {
             maybe_prompt = prompts.recv() => {
@@ -2452,6 +2493,7 @@ mod tests {
             &root,
             &write_call("z.txt", "z\n"),
             &h.ctx,
+            None,
         )
         .await;
         assert_eq!(result, DENIED_RESULT);
@@ -2540,11 +2582,17 @@ mod tests {
                 turn: turn_group,
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
+                mcp: Arc::new(crate::mcp::McpHub::new()),
             };
             let content = format!("written in turn {turn}\n");
-            let result =
-                execute_tool_call_approved(&rt, &root, &write_call("loop.txt", &content), &ctx)
-                    .await;
+            let result = execute_tool_call_approved(
+                &rt,
+                &root,
+                &write_call("loop.txt", &content),
+                &ctx,
+                None,
+            )
+            .await;
             assert!(
                 result.starts_with("created loop.txt") || result.starts_with("updated loop.txt"),
                 "{result}"
@@ -2720,9 +2768,9 @@ mod tests {
         let pending = cmd_call("echo gated");
         let running = {
             let (rt, root, ctx) = (rt.clone(), root.clone(), h.ctx.clone());
-            tokio::spawn(
-                async move { execute_tool_call_approved(&rt, &root, &pending, &ctx).await },
-            )
+            tokio::spawn(async move {
+                execute_tool_call_approved(&rt, &root, &pending, &ctx, None).await
+            })
         };
         let (request, responder) = h.prompts.recv().await.expect("shell prompts in ask mode");
         assert_eq!(request.class, ToolClass::Shell);
@@ -2762,6 +2810,7 @@ mod tests {
                 {"text": "run cargo test"},
             ])),
             &h.ctx,
+            None,
         )
         .await;
         assert_eq!(
@@ -2851,6 +2900,7 @@ mod tests {
             &root,
             &plan_call(serde_json::json!([{"text": "x"}])),
             &h.ctx,
+            None,
         )
         .await;
         assert_eq!(answer, "plan updated: 1 step(s), 0 done");
