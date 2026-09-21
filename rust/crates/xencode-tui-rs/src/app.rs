@@ -752,7 +752,19 @@ impl<'a> App<'a> {
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
             .unwrap_or_else(|_| ConversationMemory::new(50));
         memory.start_session(None);
+        Self::with_config_and_memory(config, memory)
+    }
 
+    /// Isolated app for tests: default config, non-persistent conversation
+    /// memory. `App::new()` reads *and writes* the user's real
+    /// `<config dir>/conversation_memory.json` — the restored history makes
+    /// transcript assertions non-deterministic and the writes pollute the
+    /// user's home — so no test may call it.
+    pub fn for_tests() -> Self {
+        Self::with_config_and_memory(XencodeConfig::default(), ConversationMemory::new(50))
+    }
+
+    fn with_config_and_memory(config: XencodeConfig, memory: ConversationMemory) -> Self {
         let _client = OllamaClient::new(&config.ollama_url, config.response_timeout);
 
         let scan_opts = ScanOptions {
@@ -1254,7 +1266,12 @@ impl<'a> App<'a> {
             role: "user".to_string(),
             content: prompt.clone(),
         });
-        self.memory.add_message("user", &prompt, None);
+        // Only real conversation goes to persistent memory: a slash command is
+        // a local TUI verb, and persisting it replays it to the model (and into
+        // restored transcripts) forever.
+        if !prompt.starts_with('/') {
+            self.memory.add_message("user", &prompt, None);
+        }
 
         // Project context engine interception (/init, /init abort, /init status)
         if prompt.starts_with("/init") {
@@ -4695,7 +4712,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("keep.txt"), "mine\n").unwrap();
 
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (prompts, _rx) = mpsc::unbounded_channel();
         let ctx = crate::agent_tools::ApprovalCtx {
             mode: crate::agent_tools::ApprovalMode::AllAllow,
@@ -4759,7 +4776,7 @@ mod tests {
 
     #[tokio::test]
     async fn rewind_refuses_to_fight_a_running_generation() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.is_generating = true;
         let before = app.messages.len();
         app.handle_rewind_command("/rewind");
@@ -4776,7 +4793,7 @@ mod tests {
         );
 
         // I2-04: ByteBot writes through the same gate, so it counts too.
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.bytebot_running = true;
         app.handle_rewind_command("/rewind");
         assert!(app
@@ -4790,7 +4807,7 @@ mod tests {
     /// model's stream rather than a dead-end.
     #[tokio::test]
     async fn mcp_command_without_servers_is_honest_about_it() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         assert!(
             app.config.mcp_servers.is_empty(),
             "the default config declares no servers"
@@ -4837,15 +4854,16 @@ mod tests {
     /// answer comes back on the same channel a generation would use.
     #[tokio::test]
     async fn mcp_slash_command_routes_to_the_handler() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
         app.set_chat_text("/mcp status");
         app.submit_message(tx.clone());
 
         assert!(!app.is_generating, "a status report arms no generation");
-        assert_eq!(app.messages.first().unwrap().role, "user");
-        assert_eq!(app.messages.first().unwrap().content, "/mcp status");
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, "user");
+        assert_eq!(last.content, "/mcp status");
 
         let said = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
             .await
@@ -4855,12 +4873,36 @@ mod tests {
         assert!(said.contains("no MCP servers running"), "{said}");
     }
 
+    /// Slash commands are local TUI verbs: they render in the transcript but
+    /// must not enter persistent conversation memory, where they would be
+    /// replayed to the model forever. Real prompts still do.
+    #[tokio::test]
+    async fn slash_commands_stay_out_of_conversation_memory() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+
+        let before = app.memory.get_context(100_000).len();
+        app.set_chat_text("/mcp status");
+        app.submit_message(tx.clone());
+        assert_eq!(
+            app.memory.get_context(100_000).len(),
+            before,
+            "a slash command must not grow memory"
+        );
+
+        app.set_chat_text("plain prompt for memory");
+        app.submit_message(tx);
+        let after = app.memory.get_context(100_000);
+        assert_eq!(after.len(), before + 1);
+        assert_eq!(after.last().unwrap().content, "plain prompt for memory");
+    }
+
     /// I2-03: the list the agent posts belongs to the user as well — `/plan`
     /// pins it, `/plan clear` drops it. Seeded through the real gated path so
     /// the test also proves a plan costs no approval in `ask` mode.
     #[tokio::test]
     async fn plan_command_pins_and_clears_the_list_the_agent_posted() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (prompts, _rx) = mpsc::unbounded_channel();
         let ctx = crate::agent_tools::ApprovalCtx {
             mode: crate::agent_tools::ApprovalMode::Ask,
@@ -4952,7 +4994,7 @@ mod tests {
     /// `/plan` is a viewer, not a request: it must never open a chat turn.
     #[tokio::test]
     async fn plan_command_does_not_start_a_generation() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.set_chat_text("/plan");
         let (tx, _rx) = mpsc::unbounded_channel();
         app.submit_message(tx);
@@ -5091,7 +5133,7 @@ mod tests {
 
     #[test]
     fn text_entry_active_only_for_text_fields() {
-        let mut app = super::App::new();
+        let mut app = super::App::for_tests();
         app.focus = FocusArea::ChatInput;
         assert!(!app.text_entry_active());
         app.focus = FocusArea::GitCommit;
@@ -5112,7 +5154,7 @@ mod tests {
 
     #[test]
     fn collab_member_snapshots_replace_the_list_wholesale() {
-        let mut app = super::App::new();
+        let mut app = super::App::for_tests();
         app.collab_members = vec![("ghost".into(), "editor".into(), "connected".into())];
         app.apply_collab_token(
             r#"members:[{"username":"alice","role":"admin"},{"username":"bob","role":"viewer"}]"#,
@@ -5512,7 +5554,7 @@ mod tests {
     /// stays on screen, and no step row exists until a call does.
     #[test]
     fn bytebot_arms_a_real_run_from_the_typed_task() {
-        let mut app = super::App::new();
+        let mut app = super::App::for_tests();
         app.bytebot_history = vec!["previous command".to_string()];
         app.bytebot_command = "fix flaky tests".to_string();
         app.bytebot_cursor = app.bytebot_command.len();
@@ -5580,7 +5622,7 @@ mod tests {
     /// one is usage rather than a silent no-op.
     #[tokio::test]
     async fn bytebot_command_arms_the_panel_from_chat() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (tx, _rx) = mpsc::unbounded_channel();
         app.set_chat_text("/bytebot");
         app.submit_message(tx.clone());
@@ -5596,7 +5638,7 @@ mod tests {
 
     #[test]
     fn bytebot_steps_are_the_calls_and_progress_is_their_outcome() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.bytebot_running = true;
 
         app.bytebot_event("call:read_file src/app.rs");
@@ -5632,7 +5674,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiline_submit_keeps_newlines_and_clears_box() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (tx, _rx) = mpsc::unbounded_channel();
         // "/init abort" is intercepted before any provider call, so the
         // user-message capture can be asserted without spawning work.
@@ -5659,7 +5701,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_recall_walks_entries_and_restores_draft() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         let (tx, _rx) = mpsc::unbounded_channel();
         app.chat_input.insert_str("/init abort");
         app.submit_message(tx.clone());
@@ -5691,7 +5733,7 @@ mod tests {
     /// `stop|id` and `rm|id` mutate the shared registry off-thread.
     #[tokio::test]
     async fn tasks_command_mutates_registry_and_ignores_junk() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.task_runtime
             .lock()
             .await
@@ -5803,7 +5845,7 @@ mod tests {
 
     #[test]
     fn spawn_events_track_a_run_and_post_the_finish_report() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.spawns.push(SpawnRecord {
             id: 1,
             branch: "xencode/spawn-1".to_string(),
@@ -5851,7 +5893,7 @@ mod tests {
 
     #[test]
     fn spawn_events_surface_a_real_failure_without_inventing_an_answer() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.spawns.push(SpawnRecord {
             id: 2,
             branch: "xencode/spawn-2".to_string(),
@@ -5882,7 +5924,7 @@ mod tests {
 
     #[test]
     fn spawn_status_lists_every_registered_subagent() {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.spawns.push(SpawnRecord {
             id: 1,
             branch: "xencode/spawn-1".to_string(),

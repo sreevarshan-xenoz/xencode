@@ -1414,7 +1414,7 @@ mod tests {
     }
 
     fn app_with(focus: FocusArea) -> App<'static> {
-        let mut app = App::new();
+        let mut app = App::for_tests();
         app.focus = focus;
         app.input_mode = InputMode::Normal;
         app
