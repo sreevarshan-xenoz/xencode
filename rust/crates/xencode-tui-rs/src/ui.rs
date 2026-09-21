@@ -4023,7 +4023,7 @@ mod tests {
         use super::clamp_scrolls_on_resize;
         use crate::app::UiMessage;
 
-        let mut app = App::new();
+        let mut app = App::for_tests();
         for i in 0..20 {
             app.messages.push(UiMessage {
                 role: "user".to_string(),

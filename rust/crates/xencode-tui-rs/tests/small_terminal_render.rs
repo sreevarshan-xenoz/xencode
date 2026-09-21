@@ -41,7 +41,7 @@ const FOCI: &[(&str, FocusArea)] = &[
 /// An app carrying enough content that data-dependent branches actually render
 /// (empty-state paths skip most of the layout maths we care about here).
 fn populated(focus: FocusArea) -> App<'static> {
-    let mut app = App::new();
+    let mut app = App::for_tests();
     app.focus = focus;
     app.messages.push(UiMessage {
         role: "user".into(),
