@@ -121,6 +121,36 @@ pub enum Language {
 }
 
 impl Language {
+    /// Every variant the scanner can name. A panel that lists "supported
+    /// languages" reads this instead of keeping its own copy of the enum.
+    pub const ALL: &'static [Language] = &[
+        Language::Rust,
+        Language::Python,
+        Language::TypeScript,
+        Language::JavaScript,
+        Language::Go,
+        Language::Java,
+        Language::C,
+        Language::Cpp,
+        Language::Csharp,
+        Language::Ruby,
+        Language::Php,
+        Language::Shell,
+        Language::Html,
+        Language::Css,
+        Language::Json,
+        Language::Yaml,
+        Language::Markdown,
+        Language::Toml,
+        Language::Sql,
+        Language::Proto,
+        Language::Docker,
+        Language::Make,
+        Language::Config,
+        Language::Text,
+        Language::Other,
+    ];
+
     /// Stable lowercase identifier used in the index and summaries.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -476,6 +506,45 @@ mod tests {
         assert_eq!(detect_language(Path::new("Makefile")), Language::Make);
         assert_eq!(detect_language(Path::new("README.md")), Language::Markdown);
         assert_eq!(detect_language(Path::new("a.bin")), Language::Other);
+    }
+
+    /// The TUI's language panel lists `ALL` and marks which entries the walk
+    /// actually found, so a variant missing from `ALL` would silently look
+    /// unsupported while the scanner still counted it.
+    #[test]
+    fn all_matches_what_the_extension_map_can_produce() {
+        let exts = "rs py ts tsx mts cts js mjs cjs jsx go java kt kts c h cc cpp cxx hpp hh \
+                    cs rb php sh bash zsh fish ps1 html htm vue css scss sass less json jsonc \
+                    webmanifest yml yaml md mdx toml sql proto dockerfile mk make ini cfg conf \
+                    editorconfig txt log bin";
+        let mut reachable = std::collections::BTreeSet::new();
+        for ext in exts.split(' ') {
+            let lang = language_for_extension(ext);
+            assert!(
+                Language::ALL.contains(&lang),
+                "{ext} maps to {lang:?}, which ALL leaves out"
+            );
+            reachable.insert(lang.as_str());
+        }
+        for lang in Language::ALL {
+            assert!(
+                reachable.contains(lang.as_str()),
+                "{} is listed in ALL but no extension produces it",
+                lang.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn all_is_unique_and_as_str_is_stable_lowercase() {
+        let mut seen = std::collections::BTreeSet::new();
+        for lang in Language::ALL {
+            let name = lang.as_str();
+            assert_eq!(name, name.to_ascii_lowercase(), "{name} not lowercase");
+            assert!(!name.is_empty());
+            assert!(seen.insert(name), "duplicate name {name}");
+        }
+        assert_eq!(seen.len(), Language::ALL.len());
     }
 
     #[test]

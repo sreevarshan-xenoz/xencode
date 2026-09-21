@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 695 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 700 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -734,10 +734,29 @@ workspace gates green.
   parsing/risk escalation/cap, filter rows, empty question sends nothing,
   and two gate tests that assert a denied command never touches the disk.
   **695 tests passed.**
-- [ ] J-04 — **Multi-language**: detection = the real `scan_tree` language
-  breakdown of the workspace (files, bytes, comment density), supported list =
-  the languages `scanner::Language` actually has; translate = a real model call
-  with an explicit source/target.
+- [x] J-04 — **Multi-language** (2026-09-21): `Enter`/`d` runs the context
+  engine's own `scan_tree` on the default workspace root in `spawn_blocking` and
+  streams `[LANG]row` tokens, so the table is **languages present here** — files,
+  lines (the scanner's `count_loc`, i.e. blanks and comment-leading lines
+  excluded) and share of those lines, sorted by lines then name. Below it the
+  walk's own notes: `N files · M lines · K skipped by ignore rules`, and an
+  explicit line for secret/binary files, which the walker lists but never reads,
+  so they contribute files and **zero** lines; unreadable files are called out
+  too. The right-hand list is `scanner::Language::ALL` — a new const, added so a
+  panel can name the languages the scanner actually supports instead of keeping
+  a copy of the enum — with `▸` marking whatever the walk found; a test asserts
+  `ALL` and `language_for_extension` agree in both directions and that every
+  `as_str()` is a unique lowercase name. Translation is one real model call
+  through the same single-shot provider path the terminal assistant uses: `Tab`
+  picks From / To / Text, typing edits the selected field, `Enter` asks, and the
+  reply is printed verbatim or the provider's error is printed as an error
+  (`lang_translate_error` draws it in the failure colour). Empty text answers
+  "Nothing to translate" without spending a request. Dead state removed with the
+  scripted table: `lang_active`, `lang_supported`, and the hardcoded
+  `lang_detection_results` / detection-legend tuples. Covered by three tests —
+  a temp-dir walk that pins the numbers and proves `src/app.py` / `components.tsx`
+  can no longer appear, an empty-text/no-request test with the field-editing
+  cycle, and a render test at 160×44. **700 tests passed.**
 - [ ] J-05 — **Custom models**: replace the seeded profiles with persisted
   `model_profiles` in config (name, model id, temperature, max_tokens, top_p);
   `s` writes through `save_config()`, select applies to the next turn, and the

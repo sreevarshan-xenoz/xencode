@@ -122,9 +122,16 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("type", "edit selected field"),
             ("Esc", "stop editing / disconnect / close"),
         ],
-        PerformanceDashboard | ProjectAnalyzer | PerformanceProfiler | MultiLanguage => {
+        PerformanceDashboard | ProjectAnalyzer | PerformanceProfiler => {
             &[("Enter", "start / continue")]
         }
+        MultiLanguage => &[
+            ("Enter / d", "walk the workspace for language totals"),
+            ("Tab", "pick the field letters edit (From, To, Text)"),
+            ("type / Backspace", "edit that field"),
+            ("Enter", "translate the text with one model call"),
+            ("Esc", "leave the field"),
+        ],
         VoiceInterface => &[
             ("Enter", "start voice session"),
             ("Space / m", "toggle mute"),

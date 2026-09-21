@@ -89,6 +89,16 @@ fn populated(focus: FocusArea) -> App<'static> {
         "safe".into(),
         "error: the user denied this action".into(),
     )];
+    // J-04: the multi-language table is a walk's own numbers, so the sweep
+    // covers a counted language, a zero-line one and an error-colored reply.
+    app.lang_scan_path = "/tmp/workspace".into();
+    app.lang_detection_results = vec![("rust".into(), 21, 4200, 78.4), ("toml".into(), 1, 0, 0.0)];
+    app.lang_notes = vec!["4 files · 6 lines · 2 skipped by ignore rules".into()];
+    app.lang_translate_source = "auto".into();
+    app.lang_translate_target = "Tamil".into();
+    app.lang_translate_input = "good morning".into();
+    app.lang_translate_output = "vāṅkai maṇippu".into();
+    app.lang_editing = Some(xencode_tui_rs::focus::LangField::Target);
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -350,6 +360,39 @@ fn terminal_assistant_renders_the_reply_and_the_outcome() {
         "find all python files",
         "docker system prune",
         "rm -rf node_modules",
+    ] {
+        assert!(
+            !text.contains(canned),
+            "{canned} is scripted, not real: {text}"
+        );
+    }
+}
+
+/// J-04: the language table is the walk's numbers and the reply is the model's
+/// text. The detection list and the "supported languages" table this panel used
+/// to show were both hardcoded.
+#[test]
+fn multi_language_panel_shows_the_walk_and_the_form() {
+    let mut app = populated(FocusArea::MultiLanguage);
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("/tmp/workspace"), "the scanned path: {text}");
+    assert!(text.contains("rust"), "{text}");
+    assert!(text.contains("78.4%"), "{text}");
+    assert!(text.contains("2 skipped by ignore rules"), "{text}");
+    // The scanner's own vocabulary, from `Language::ALL`.
+    assert!(text.contains("Languages the scanner names (25)"), "{text}");
+    assert!(text.contains("typescript"), "{text}");
+    assert!(text.contains("▸rust"), "present here: {text}");
+    assert!(text.contains("Tamil"), "the edited field: {text}");
+    assert!(text.contains("good morning"), "{text}");
+    assert!(text.contains("vāṅkai maṇippu"), "the reply: {text}");
+    for canned in [
+        "src/app.py",
+        "components.tsx",
+        "Supported Languages",
+        "98.7%",
+        "Press Enter to scan workspace.",
     ] {
         assert!(
             !text.contains(canned),

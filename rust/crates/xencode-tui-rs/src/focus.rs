@@ -106,6 +106,33 @@ impl CollabField {
     }
 }
 
+/// Which Multi-Language form field typed characters edit — the same shape as
+/// `CollabField`: the panel's text entry is a mode, not a focus area.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum LangField {
+    Source,
+    Target,
+    Input,
+}
+
+impl LangField {
+    pub fn next(self) -> Self {
+        match self {
+            LangField::Source => LangField::Target,
+            LangField::Target => LangField::Input,
+            LangField::Input => LangField::Source,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LangField::Source => "From",
+            LangField::Target => "To",
+            LangField::Input => "Text",
+        }
+    }
+}
+
 /// How a settings row responds to ←/→ and Enter. The row's behavior comes
 /// from this table, not from its index — adding a row means adding an
 /// entry, never renumbering the panel (H1-04).
