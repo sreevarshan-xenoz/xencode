@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (14 crates, 689 tests,
+At its core is a fast, single-file **Rust** binary (14 crates, 695 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -107,7 +107,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more. Five of them (voice interface, terminal assistant, custom models, learning mode, multi-language) are interface mockups with scripted content — they render, they do not listen. Two are real: the security auditor walks the workspace with the same vulnerability scanner `xencode analyze` uses, and the performance profiler reports measured process CPU/memory, the session's own latency and throughput numbers, and `n/a` where nothing has been measured yet.
+- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more. Four of them (voice interface, custom models, learning mode, multi-language) are interface mockups with scripted content — they render, they do not listen. Three are real: the security auditor walks the workspace with the same vulnerability scanner `xencode analyze` uses, the performance profiler reports measured process CPU/memory, the session's own latency and throughput numbers, and `n/a` where nothing has been measured yet, and the terminal assistant asks the configured model for commands and runs what you pick through the agent's approval gate.
 - **Approval-gated agent tool loop** — the chat model can call 11 tools (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`, `update_plan`, `background_start/poll/stop`, `repo_advise`); file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), paths outside the workspace are refused in every mode, every answer is logged in the transcript, the model's todo list renders above the chat (`/plan`), and `/rewind` puts the files back. `/bytebot <task>` delegates the same loop — its panel's steps are the real calls and their real outcomes. `agent_hooks` config runs your own shell commands before/after approved calls (per tool or `*`); a failing `before` hook vetoes the call entirely. `/spawn <task> [#branch]` runs the same delegated loop in a fresh sibling git worktree (`proj-spawn-1` on branch `xencode/spawn-1`), streams its live steps, posts its final answer back as `(spawn #<id> · <task>)`, and `/spawn status` lists the registered runs.
 - **MCP tool servers** — declare stdio servers under `mcp_servers` in config and `/mcp` starts them on request; their tools reach the model as `mcp__<server>__<tool>` behind the same approval gate (`External` class — always a `y`/`n`, never waved through by autonomy), with `mcp_timeout` bounding each call and a broken server failing in its own words.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
@@ -369,7 +369,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (689 tests)
+cargo test                          # Full workspace suite (695 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -484,8 +484,8 @@ The Rust migration (all 8 phases, 14 crates) is **complete**. Near-term directio
 
 - An `anthropic_api_key` field so the existing Anthropic client is reachable
   without going through OpenRouter
-- Making the five remaining scripted TUI panels real: microphone input, a
-  terminal assistant backed by a model call
+- Making the four remaining scripted TUI panels real: microphone input, and
+  persisted custom-model profiles
 - A plugin runtime that loads and runs `XencodePlugin` implementations, not
   just their manifests
 - Retry budgets and fallback-policy governance + provider health UX

@@ -66,6 +66,29 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.attached_files.insert("./src/main.rs".into());
     app.chat_input
         .insert_str("some input text that is fairly long");
+    // J-03: these rows are a model's reply, so the sweep renders both risk
+    // labels, the selection marker and a real outcome in the history.
+    app.term_asst_query = "free some disk".into();
+    app.term_asst_typing = false;
+    app.term_asst_output = "Asking qwen2.5:7b — free some disk".into();
+    app.term_asst_suggestions = vec![
+        (
+            "du -sh *".into(),
+            "safe".into(),
+            "sizes of everything here".into(),
+        ),
+        (
+            "rm -rf ./target".into(),
+            "destructive".into(),
+            String::new(),
+        ),
+    ];
+    app.term_asst_selected = 1;
+    app.term_asst_history = vec![(
+        "df -h".into(),
+        "safe".into(),
+        "error: the user denied this action".into(),
+    )];
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -296,6 +319,42 @@ fn bytebot_panel_shows_real_calls_and_their_outcomes() {
     assert!(text.contains("did a thing"), "{text}");
     for scripted in ["Analyzing workspace", "Applying changes", "All tests pass"] {
         assert!(!text.contains(scripted), "{scripted} is not real: {text}");
+    }
+}
+
+/// J-03: the list on this screen is whatever the model answered, and the
+/// history is whatever the gate let run. The five canned commands this panel
+/// used to show — including `docker system prune -af` — cannot come back.
+#[test]
+fn terminal_assistant_renders_the_reply_and_the_outcome() {
+    let mut app = populated(FocusArea::TerminalAssistant);
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 40);
+    assert!(text.contains("free some disk"), "the question: {text}");
+    assert!(text.contains("du -sh *"), "{text}");
+    assert!(text.contains("sizes of everything here"), "{text}");
+    assert!(text.contains("rm -rf ./target"), "{text}");
+    assert!(
+        text.contains("[risk] rm -rf ./target"),
+        "the dangerous row is marked: {text}"
+    );
+    assert!(text.contains("[ok]   du -sh *"), "{text}");
+    assert!(text.contains("df -h"), "the run history: {text}");
+    assert!(
+        text.contains("the user denied"),
+        "a denial is shown as a denial: {text}"
+    );
+    for canned in [
+        "Press Enter to load suggestions",
+        "check disk usage",
+        "find all python files",
+        "docker system prune",
+        "rm -rf node_modules",
+    ] {
+        assert!(
+            !text.contains(canned),
+            "{canned} is scripted, not real: {text}"
+        );
     }
 }
 

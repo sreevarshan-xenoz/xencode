@@ -320,9 +320,12 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
+            FocusArea::TerminalAssistant => {
+                "type:ask  Enter:ask/run  j/k:select  y:run  f:filter  Esc:close"
+            }
             FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
             FocusArea::GitCommit | FocusArea::CollaborationHub |
-            FocusArea::VoiceInterface | FocusArea::TerminalAssistant |
+            FocusArea::VoiceInterface |
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
             FocusArea::CustomModels | FocusArea::LearningMode |
             FocusArea::MultiLanguage => "Enter:start  Esc:close",
@@ -3090,7 +3093,7 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 💡 Terminal Assistant (Enter:refresh, Esc:close) ");
+        .title(" 💡 Terminal Assistant (i:type, Enter:ask/run, f:filter, Esc:close) ");
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -3098,71 +3101,137 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // status
+            Constraint::Length(4), // query + last status line
             Constraint::Min(1),    // suggestions
             Constraint::Length(4), // history
         ])
         .split(inner);
 
-    // ── Status ──────────────────────────────────────────────────────────────
+    // ── Query / status ──────────────────────────────────────────────────────
     let status_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 🤖 AI Shell Helper ");
-    let status_text = if !app.term_asst_output.is_empty() {
-        &app.term_asst_output
+        .title(format!(
+            " 🤖 {} · asking through the agent's approval gate ",
+            app.config.default_model
+        ));
+    // While typing, this box *is* the input field: the caret is drawn where
+    // the next character lands, so the user can see what they are asking.
+    let mut status_lines: Vec<Line> = Vec::new();
+    if app.term_asst_typing {
+        let mut spans = vec![
+            Span::styled("  › ", Style::default().fg(app.theme.accent)),
+            Span::styled(
+                app.term_asst_query.clone(),
+                Style::default().fg(app.theme.fg),
+            ),
+        ];
+        if !app.term_asst_busy {
+            spans.push(Span::styled("▏", Style::default().fg(app.theme.accent)));
+        }
+        status_lines.push(Line::from(spans));
+    } else if !app.term_asst_query.is_empty() {
+        status_lines.push(Line::from(Span::styled(
+            format!("  › {}", app.term_asst_query),
+            Style::default().fg(app.theme.message_system),
+        )));
+    }
+    let idle_hint = "Type what you want to do, then Enter asks the model for commands.";
+    let output = if app.term_asst_output.is_empty() {
+        if app.term_asst_typing && app.term_asst_query.is_empty() {
+            idle_hint
+        } else {
+            ""
+        }
     } else {
-        "Press Enter to load command suggestions"
+        &app.term_asst_output
     };
-    let status_para = Paragraph::new(status_text)
+    if !output.is_empty() {
+        status_lines.push(Line::from(Span::styled(
+            format!("  {output}"),
+            Style::default().fg(if app.term_asst_busy {
+                app.theme.accent
+            } else if app.term_asst_output.is_empty() {
+                app.theme.message_system
+            } else {
+                app.theme.warning
+            }),
+        )));
+    }
+    let status_para = Paragraph::new(status_lines)
         .block(status_block)
-        .style(Style::default().fg(app.theme.fg));
+        .wrap(Wrap { trim: false });
     f.render_widget(status_para, chunks[0]);
 
-    // ── Command Suggestions ─────────────────────────────────────────────────
+    // ── Command suggestions ─────────────────────────────────────────────────
     let sugg_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 📋 Suggested Commands ");
+        .title(format!(
+            " 📋 Suggested Commands {} ",
+            if app.term_risk_filter == "All" {
+                String::new()
+            } else {
+                format!("· filtered: {}", app.term_risk_filter)
+            }
+        ));
 
+    let visible = app.term_visible_rows();
     let mut sugg_lines: Vec<Line> = Vec::new();
-    if app.term_asst_suggestions.is_empty() {
+    if app.term_asst_busy && app.term_asst_suggestions.is_empty() {
         sugg_lines.push(Line::from(Span::styled(
-            "  Press Enter to load suggestions. Ask questions like:",
+            "  Waiting for the model…",
             Style::default().fg(app.theme.message_system),
         )));
+    } else if visible.is_empty() {
         sugg_lines.push(Line::from(Span::styled(
-            "    • 'how to find large files'",
-            Style::default().fg(app.theme.message_system),
-        )));
-        sugg_lines.push(Line::from(Span::styled(
-            "    • 'check disk usage'",
-            Style::default().fg(app.theme.message_system),
-        )));
-        sugg_lines.push(Line::from(Span::styled(
-            "    • 'find all python files'",
+            if app.term_asst_suggestions.is_empty() {
+                "  No suggestions yet — type what you want to do and press Enter."
+            } else {
+                "  Nothing matches this filter; press f to show the rest."
+            },
             Style::default().fg(app.theme.message_system),
         )));
     } else {
-        for suggestion in &app.term_asst_suggestions {
-            let color = if suggestion.starts_with("✅") {
-                app.theme.success
-            } else if suggestion.starts_with("⚠️") {
-                app.theme.warning
-            } else {
-                app.theme.fg
-            };
-            sugg_lines.push(Line::from(Span::styled(
-                format!("  {}", suggestion),
-                Style::default().fg(color),
-            )));
+        for (row, &idx) in visible.iter().enumerate() {
+            let (command, risk, why) = &app.term_asst_suggestions[idx];
+            let selected = row == app.term_asst_selected.min(visible.len().saturating_sub(1));
+            let risky = risk.eq_ignore_ascii_case("destructive");
+            sugg_lines.push(Line::from(vec![
+                Span::styled(
+                    if selected { "▶ " } else { "  " },
+                    Style::default().fg(app.theme.accent),
+                ),
+                Span::styled(
+                    if risky { "[risk] " } else { "[ok]   " },
+                    Style::default().fg(if risky {
+                        app.theme.danger
+                    } else {
+                        app.theme.success
+                    }),
+                ),
+                Span::styled(
+                    command.clone(),
+                    Style::default().fg(app.theme.fg).add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+                ),
+            ]));
+            if !why.is_empty() {
+                sugg_lines.push(Line::from(Span::styled(
+                    format!("   {}", why),
+                    Style::default().fg(app.theme.message_system),
+                )));
+            }
         }
     }
     let sugg_para = Paragraph::new(sugg_lines)
         .block(sugg_block)
-        .style(Style::default().fg(app.theme.fg));
+        .wrap(Wrap { trim: false });
     f.render_widget(sugg_para, chunks[1]);
 
     // ── History ─────────────────────────────────────────────────────────────
@@ -3170,15 +3239,31 @@ fn draw_terminal_assistant(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 📜 Execution History ");
-    let hist_text = if app.term_asst_history.is_empty() {
-        "  No commands executed yet."
+        .title(" 📜 Commands This Session ");
+    // Newest last, and the inner rows are the ones that ran — through the
+    // approval gate, so an outcome here is a real result or a real denial.
+    let hist_lines: Vec<Line> = if app.term_asst_history.is_empty() {
+        vec![Line::from(Span::styled(
+            "  Nothing has been run from this panel yet.",
+            Style::default().fg(app.theme.message_system),
+        ))]
     } else {
-        "  Executed commands will appear here."
+        app.term_asst_history
+            .iter()
+            .rev()
+            .take(2)
+            .rev()
+            .map(|(command, risk, result)| {
+                Line::from(Span::styled(
+                    format!("  {} [{}] → {}", command, risk, result),
+                    Style::default().fg(app.theme.fg),
+                ))
+            })
+            .collect()
     };
-    let hist_para = Paragraph::new(hist_text)
+    let hist_para = Paragraph::new(hist_lines)
         .block(hist_block)
-        .style(Style::default().fg(app.theme.message_system));
+        .wrap(Wrap { trim: false });
     f.render_widget(hist_para, chunks[2]);
 }
 

@@ -411,13 +411,19 @@ pub struct App<'a> {
     pub voice_language: String,
 
     // Terminal Assistant state
-    pub term_asst_active: bool,
+    /// A suggestion request is with the provider right now.
+    pub term_asst_busy: bool,
     pub term_asst_query: String,
-    pub term_asst_cursor: usize,
-    pub term_asst_suggestions: Vec<String>,
+    /// The query field owns the keyboard: letters type instead of selecting.
+    pub term_asst_typing: bool,
+    /// (command, risk label, why the model suggested it)
+    pub term_asst_suggestions: Vec<(String, String, String)>,
+    pub term_asst_selected: usize,
     pub term_asst_output: String,
-    pub term_asst_history: Vec<(String, String, String)>, // (command, risk, explanation)
-    pub term_risk_filter: String,                         // "All", "Safe", "Destructive"
+    pub term_asst_history: Vec<(String, String, String)>, // (command, risk, outcome)
+    /// "All", "safe" or "destructive" — matches the labels `parse_term_suggestions`
+    /// emits, so the filter can only ever show rows that exist.
+    pub term_risk_filter: String,
 
     // Security Auditor state
     pub sec_scan_active: bool,
@@ -1022,6 +1028,75 @@ async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<Str
     let _ = tx.send("[PROFILER]done".to_string());
 }
 
+/// Commands the terminal panel will offer at once. More than a screenful is
+/// noise, so this is both what the model is asked for and what it gets.
+const TERM_SUGGESTION_CAP: usize = 8;
+
+/// Commands the panel will never label safe, whatever the model claimed. The
+/// model's risk label is a hint; this list can only raise the warning, never
+/// lower one.
+const DESTRUCTIVE_PATTERNS: &[&str] = &[
+    "rm -rf",
+    "rm -fr",
+    "sudo ",
+    "mkfs",
+    "dd if=",
+    "> /dev/sd",
+    "chmod -R",
+    "chown -R",
+    "--force",
+    "docker system prune",
+    "DROP TABLE",
+    "shutdown",
+    "reboot",
+    "killall",
+];
+
+/// Parse the model's reply into commands. Fences, prose and a bare object
+/// (instead of an array) are all tolerated; a reply with no commands in it
+/// yields an empty list, which the panel reports rather than papers over.
+fn parse_term_suggestions(text: &str) -> Vec<(String, String, String)> {
+    let cleaned = text.replace("```json", "").replace("```", "");
+    let parsed: Option<serde_json::Value> = match (cleaned.find('['), cleaned.rfind(']')) {
+        (Some(start), Some(end)) if end > start => serde_json::from_str(&cleaned[start..=end]).ok(),
+        _ => None,
+    };
+    let values = match parsed {
+        Some(serde_json::Value::Array(values)) => values,
+        Some(object @ serde_json::Value::Object(_)) => vec![object],
+        _ => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for value in values {
+        let command = value["command"].as_str().unwrap_or_default().trim();
+        if command.is_empty() {
+            continue;
+        }
+        let claimed = value["risk"]
+            .as_str()
+            .unwrap_or("safe")
+            .to_ascii_lowercase();
+        let destructive = claimed.contains("destruct")
+            || claimed.contains("danger")
+            || DESTRUCTIVE_PATTERNS.iter().any(|p| command.contains(p));
+        let why = value["why"]
+            .as_str()
+            .or_else(|| value["explanation"].as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        out.push((
+            command.to_string(),
+            if destructive { "destructive" } else { "safe" }.to_string(),
+            why,
+        ));
+        if out.len() == TERM_SUGGESTION_CAP {
+            break;
+        }
+    }
+    out
+}
+
 /// Metrics rows are stamped in epoch millis; rendered as UTC wall time without
 /// pulling in a date library. A row that never got a timestamp says so rather
 /// than showing a fake clock.
@@ -1211,10 +1286,13 @@ impl<'a> App<'a> {
             voice_muted: false,
             voice_language: "en-US".to_string(),
 
-            term_asst_active: false,
+            term_asst_busy: false,
             term_asst_query: String::new(),
-            term_asst_cursor: 0,
+            // The panel opens ready to be typed into: it has nothing to show
+            // until a query is asked.
+            term_asst_typing: true,
             term_asst_suggestions: Vec::new(),
+            term_asst_selected: 0,
             term_asst_output: String::new(),
             term_asst_history: Vec::new(),
             term_risk_filter: "All".to_string(),
@@ -1750,6 +1828,28 @@ impl<'a> App<'a> {
         tokio::spawn(agent_rounds(run, tx));
     }
 
+    /// This session's permission state: mode, shared grants, the overlay's
+    /// channel, checkpoints and budgets. Every caller that runs a tool — the
+    /// chat loop, ByteBot, a spawn, the terminal panel — goes through this, so
+    /// there is exactly one policy in the app.
+    fn approval_ctx(&self) -> crate::agent_tools::ApprovalCtx {
+        crate::agent_tools::ApprovalCtx {
+            mode: self.agent_mode(),
+            grants: self.agent_grants.clone(),
+            prompts: self.approval_tx.clone(),
+            checkpoints: self.checkpoints.clone(),
+            // One checkpoint group per user turn (I2-01): `/rewind` steps
+            // back whole turns, not individual tool calls.
+            turn: self.checkpoints.begin_turn(),
+            // A 0-second budget would kill every command before it
+            // produced output, so the floor is one second.
+            command_timeout: self.config.agent_command_timeout.max(1),
+            plan: self.agent_plan.clone(),
+            mcp: self.mcp.clone(),
+            hooks: self.config.agent_hooks.clone(),
+        }
+    }
+
     /// A tool-loop run carrying this session's providers, permission state,
     /// checkpoint group and budgets. Read at the moment a turn starts, so a
     /// settings change lands on the next turn; chat and ByteBot build the same
@@ -1759,21 +1859,7 @@ impl<'a> App<'a> {
             sink,
             model: self.config.default_model.clone(),
             context_messages,
-            approval: crate::agent_tools::ApprovalCtx {
-                mode: self.agent_mode(),
-                grants: self.agent_grants.clone(),
-                prompts: self.approval_tx.clone(),
-                checkpoints: self.checkpoints.clone(),
-                // One checkpoint group per user turn (I2-01): `/rewind` steps
-                // back whole turns, not individual tool calls.
-                turn: self.checkpoints.begin_turn(),
-                // A 0-second budget would kill every command before it
-                // produced output, so the floor is one second.
-                command_timeout: self.config.agent_command_timeout.max(1),
-                plan: self.agent_plan.clone(),
-                mcp: self.mcp.clone(),
-                hooks: self.config.agent_hooks.clone(),
-            },
+            approval: self.approval_ctx(),
             task_runtime: self.task_runtime.clone(),
             tool_root: xencode_context_rs::default_root(),
             // Keep at least one tool round; 0 would offer tools on no turn.
@@ -3410,56 +3496,180 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Start Terminal Assistant with command suggestions.
-    pub fn start_terminal_assistant(&mut self, tx: mpsc::UnboundedSender<String>) {
-        if self.term_asst_active {
+    pub fn term_asst_char(&mut self, c: char) {
+        self.term_asst_query.push(c);
+    }
+
+    pub fn term_asst_backspace(&mut self) {
+        self.term_asst_query.pop();
+    }
+
+    /// Indices into `term_asst_suggestions` that the risk filter lets through,
+    /// so selection and rendering agree about what is on screen.
+    pub fn term_visible_rows(&self) -> Vec<usize> {
+        (0..self.term_asst_suggestions.len())
+            .filter(|&i| {
+                self.term_risk_filter == "All"
+                    || self.term_asst_suggestions[i]
+                        .1
+                        .eq_ignore_ascii_case(&self.term_risk_filter)
+            })
+            .collect()
+    }
+
+    /// Ask the model once for commands that do what the query says. A reply
+    /// that is not a command list is shown as the reply, not converted into
+    /// invented suggestions.
+    pub fn ask_terminal(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let query = self.term_asst_query.trim().to_string();
+        if query.is_empty() {
+            self.term_asst_output =
+                "Nothing asked — type what you want to do, then Enter.".to_string();
             return;
         }
-        self.term_asst_active = true;
+        if self.term_asst_busy {
+            return;
+        }
+        self.term_asst_busy = true;
+        // Letters stop meaning "type" while the request is in flight; they mean
+        // nothing at all until the reply lands (see the `[TERM]ready` handler).
+        self.term_asst_typing = false;
         self.term_asst_suggestions.clear();
-        self.term_asst_output.clear();
-        self.term_asst_history.clear();
+        self.term_asst_selected = 0;
+        self.term_asst_output = format!("Asking {} — {}", self.config.default_model, query);
+
+        // Give the model something real to aim at: the workspace's own layout.
+        let root = xencode_context_rs::default_root();
+        let mut tops: Vec<String> = self
+            .file_tree
+            .iter()
+            .filter_map(|p| p.split('/').next().map(str::to_string))
+            .collect();
+        tops.sort();
+        tops.dedup();
+        tops.truncate(30);
+        let prompt = format!(
+            "The user wants to do this in a shell, in the workspace at {}:\n\
+             {}\n\n\
+             Top-level entries in that directory: {}\n\
+             git: {}\n\n\
+             Reply with a JSON array of at most {} objects and nothing else, each:\n\
+             {{\"command\": \"shell command\", \"risk\": \"safe\" or \"destructive\", \"why\": \"one line\"}}",
+            root.display(),
+            query,
+            if tops.is_empty() {
+                "(nothing indexed yet)".to_string()
+            } else {
+                tops.join(", ")
+            },
+            if self.git_branch.is_empty() {
+                "not a git repo".to_string()
+            } else {
+                format!("branch {}", self.git_branch)
+            },
+            TERM_SUGGESTION_CAP,
+        );
+        // Same frozen system head as chat turns, so the instruction that shapes
+        // the reply rides in the user message and the cache stays warm.
+        let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
+        let anchor =
+            std::fs::read_to_string(root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md"))
+                .ok();
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: xencode_context_rs::stable_system_text(
+                    CTX_SYSTEM,
+                    agents.as_deref(),
+                    anchor.as_deref(),
+                )
+                .into(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: prompt.into(),
+            },
+        ];
+
+        let model = self.config.default_model.clone();
+        let ollama_url = self.config.ollama_url.clone();
+        let llama_cpp_url = self.config.llama_cpp_url.clone();
+        let timeout = self.config.response_timeout;
+        let or_key = self.config.api_keys.openrouter_api_key.clone();
+        let qwen_key = self.config.api_keys.qwen_api_key.clone();
+        let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+        let llama_opts = LlamaCppOptions {
+            temperature: self.config.llama_cpp_temperature,
+            top_k: self.config.llama_cpp_top_k,
+            min_p: self.config.llama_cpp_min_p,
+            max_tokens: self.config.llama_cpp_max_tokens,
+            grammar: None,
+            json_schema: None,
+            mirostat: None,
+        };
 
         tokio::spawn(async move {
-            let _ = tx.send(
-                "[TERM]output:🧠 Terminal Assistant ready — type a query and press Enter"
-                    .to_string(),
-            );
-
-            let suggestions = vec![
-                (
-                    "find . -name \"*.py\" | xargs grep -l \"def \"",
-                    "🔍 Safe",
-                    "Find all Python files with function definitions",
-                ),
-                (
-                    "git log --oneline --graph --all",
-                    "✅ Safe",
-                    "Visual git history graph",
-                ),
-                (
-                    "du -sh */ 2>/dev/null | sort -rh",
-                    "✅ Safe",
-                    "Show directory sizes sorted by size",
-                ),
-                (
-                    "docker system prune -af",
-                    "⚠️ Destructive",
-                    "⚠ Removes ALL unused Docker data",
-                ),
-                (
-                    "rm -rf node_modules && npm install",
-                    "⚠️ Destructive",
-                    "⚠ Deletes node_modules and reinstalls",
-                ),
-            ];
-
-            for (cmd, risk, explanation) in &suggestions {
-                tokio::time::sleep(tokio::time::Duration::from_millis(600)).await;
-                let _ = tx.send(format!("[TERM]suggestion:{}|{}|{}", cmd, risk, explanation));
+            let client = OllamaClient::new(&ollama_url, timeout);
+            let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
+            let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
+                .with_llama_cpp(llama_client);
+            match manager
+                .generate_with_options(&model, &messages, Some(&llama_opts))
+                .await
+            {
+                Err(e) => {
+                    let _ = tx.send(format!("[TERM]error:{} said: {}", model, e));
+                }
+                Ok(text) => {
+                    let suggestions = parse_term_suggestions(&text);
+                    if suggestions.is_empty() {
+                        let _ = tx.send(format!(
+                            "[TERM]raw:{}",
+                            crate::agent_tools::truncate_one_line(&text, 300)
+                        ));
+                    }
+                    for (command, risk, why) in suggestions {
+                        let line =
+                            serde_json::json!({"command": command, "risk": risk, "why": why});
+                        let _ = tx.send(format!("[TERM]suggestion:{}", line));
+                    }
+                }
             }
-
             let _ = tx.send("[TERM]ready".to_string());
+        });
+    }
+
+    /// Run the selected command through the agent's own gate — same policy,
+    /// same modal, same hooks and checkpoints. The panel never has a shell of
+    /// its own.
+    pub fn run_terminal_suggestion(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let rows = self.term_visible_rows();
+        let Some(&idx) = rows.get(self.term_asst_selected) else {
+            self.term_asst_output = "Nothing selected — ask a question first.".to_string();
+            return;
+        };
+        let (command, risk, _) = self.term_asst_suggestions[idx].clone();
+        if self.term_asst_busy {
+            return;
+        }
+        self.term_asst_busy = true;
+        self.term_asst_output = format!("Waiting for approval: {}", command);
+        let ctx = self.approval_ctx();
+        let rt = self.task_runtime.clone();
+        let root = xencode_context_rs::default_root();
+        let call = xencode_providers_rs::ToolCall {
+            id: "terminal-panel".to_string(),
+            name: "run_command".to_string(),
+            arguments: serde_json::json!({ "command": command }),
+        };
+        tokio::spawn(async move {
+            let result =
+                crate::agent_tools::execute_tool_call_approved(&rt, &root, &call, &ctx, None).await;
+            let line = serde_json::json!({
+                "command": command, "risk": risk,
+                "result": crate::agent_tools::truncate_one_line(&result, 200),
+            });
+            let _ = tx.send(format!("[TERM]ran:{}", line));
         });
     }
 
@@ -4634,21 +4844,38 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     }
                 }
             } else if let Some(body) = token.strip_prefix("[TERM]") {
-                if body.starts_with("suggestion:") {
-                    if let Some(s) = body.strip_prefix("suggestion:") {
-                        let parts: Vec<&str> = s.splitn(3, '|').collect();
-                        let cmd = parts.first().unwrap_or(&"").to_string();
-                        let risk = parts.get(1).unwrap_or(&"").to_string();
-                        let explanation = parts.get(2).unwrap_or(&"").to_string();
-                        app.term_asst_suggestions
-                            .push(format!("{}  {} — {}", risk, cmd, explanation));
+                if let Some(json) = body.strip_prefix("suggestion:") {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                        app.term_asst_typing = false;
+                        app.term_asst_suggestions.push((
+                            v["command"].as_str().unwrap_or_default().to_string(),
+                            v["risk"].as_str().unwrap_or_default().to_string(),
+                            v["why"].as_str().unwrap_or_default().to_string(),
+                        ));
                     }
-                } else if body.starts_with("output:") {
-                    if let Some(o) = body.strip_prefix("output:") {
-                        app.term_asst_output = o.to_string();
+                } else if let Some(json) = body.strip_prefix("ran:") {
+                    app.term_asst_busy = false;
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+                        let command = v["command"].as_str().unwrap_or_default().to_string();
+                        let risk = v["risk"].as_str().unwrap_or_default().to_string();
+                        let result = v["result"].as_str().unwrap_or_default().to_string();
+                        app.term_asst_history
+                            .push((command.clone(), risk, result.clone()));
+                        app.term_asst_output = format!("{} — {}", command, result);
                     }
+                } else if let Some(msg) = body.strip_prefix("raw:") {
+                    app.term_asst_typing = true;
+                    app.term_asst_output =
+                        format!("The model did not answer with commands. It said: {}", msg);
+                } else if let Some(msg) = body.strip_prefix("error:") {
+                    app.term_asst_typing = true;
+                    // One line, because the status box is one line tall.
+                    app.term_asst_output = crate::agent_tools::truncate_one_line(msg, 300);
                 } else if body == "ready" {
-                    app.term_asst_active = false;
+                    app.term_asst_busy = false;
+                    if app.term_asst_suggestions.is_empty() {
+                        app.term_asst_typing = true;
+                    }
                 }
             } else if let Some(body) = token.strip_prefix("[SECURITY]") {
                 if body.starts_with("progress:") {
@@ -5028,8 +5255,8 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 mod tests {
     use super::{
         first_output_line, format_advise_report, format_watch_warning, live_refresh_snapshot,
-        parse_llama_port, parse_porcelain_z, watch_warning_for, App, FocusArea, LoopSink,
-        SpawnRecord,
+        parse_llama_port, parse_porcelain_z, parse_term_suggestions, watch_warning_for, App,
+        FocusArea, LoopSink, SpawnRecord,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -6526,6 +6753,167 @@ mod tests {
             .profiler_notes
             .iter()
             .any(|n| n.contains("no completed turn yet")));
+    }
+
+    /// J-03: the model's reply is the only source of a suggestion — this parser
+    /// is where the scripted five-command list used to be built. It accepts what
+    /// models actually send (fences, prose, a bare object) and a flattering risk
+    /// label can only ever be raised, never lowered.
+    #[test]
+    fn term_suggestions_come_from_the_reply_and_risk_only_escalates() {
+        let fenced = parse_term_suggestions(
+            "Sure:\n```json\n[{\"command\":\"du -sh *\",\"risk\":\"safe\",\"why\":\"sizes\"}]\n```",
+        );
+        assert_eq!(
+            fenced,
+            vec![(
+                "du -sh *".to_string(),
+                "safe".to_string(),
+                "sizes".to_string()
+            )]
+        );
+
+        let escalated =
+            parse_term_suggestions("[{\"command\":\"rm -rf node_modules\",\"risk\":\"safe\"}]");
+        assert_eq!(
+            escalated[0].1, "destructive",
+            "a command on the dangerous list is never shown as safe"
+        );
+
+        let kept = parse_term_suggestions(
+            "[{\"command\":\"git push --force\",\"explanation\":\"own warning, other key\"}]",
+        );
+        assert_eq!(kept[0].1, "destructive");
+        assert_eq!(kept[0].2, "own warning, other key");
+
+        assert!(parse_term_suggestions("I would not run anything for that.").is_empty());
+        assert!(parse_term_suggestions("[{\"why\":\"no command in this object\"}]").is_empty());
+
+        let items: Vec<String> = (0..12)
+            .map(|i| format!("{{\"command\":\"echo {i}\",\"risk\":\"safe\"}}"))
+            .collect();
+        assert_eq!(
+            parse_term_suggestions(&format!("[{}]", items.join(","))).len(),
+            super::TERM_SUGGESTION_CAP,
+            "a wall of suggestions is not a list anyone can read"
+        );
+    }
+
+    /// The panel starts empty (nothing canned is on screen before the model has
+    /// answered) and its filter can only ever narrow to rows that exist.
+    #[test]
+    fn terminal_panel_opens_asked_for_and_filters_by_risk() {
+        let app = App::for_tests();
+        assert!(
+            app.term_asst_suggestions.is_empty(),
+            "the panel no longer ships a scripted list"
+        );
+        assert!(app.term_asst_typing, "it opens ready to be typed into");
+        assert!(app.term_visible_rows().is_empty());
+
+        let mut app = App::for_tests();
+        app.term_asst_suggestions = vec![
+            ("df -h".to_string(), "safe".to_string(), String::new()),
+            (
+                "rm -rf ./build".to_string(),
+                "destructive".to_string(),
+                String::new(),
+            ),
+        ];
+        app.term_risk_filter = "destructive".to_string();
+        assert_eq!(app.term_visible_rows(), vec![1]);
+        app.term_risk_filter = "safe".to_string();
+        assert_eq!(app.term_visible_rows(), vec![0]);
+        app.term_risk_filter = "All".to_string();
+        assert_eq!(app.term_visible_rows(), vec![0, 1]);
+    }
+
+    /// An empty question must not spend a provider call — the panel asks when
+    /// the user asks, and never on its own.
+    #[test]
+    fn asking_nothing_sends_nothing() {
+        let mut app = App::for_tests();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        app.ask_terminal(tx);
+        assert!(!app.term_asst_busy);
+        assert!(app.term_asst_output.contains("Nothing asked"));
+        assert!(
+            rx.try_recv().is_err(),
+            "a question that was never asked must not reach a provider"
+        );
+    }
+
+    /// The panel's only route to a shell is the agent's own gate: an unapproved
+    /// command comes back as a denial and never executes (J-03).
+    #[tokio::test]
+    async fn terminal_panel_runs_commands_through_the_approval_gate() {
+        let mut app = App::for_tests();
+        app.config.agent_approval = "ask".to_string();
+        let marker = std::env::temp_dir().join(format!(
+            "xencode-term-gate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        app.term_asst_suggestions = vec![(
+            format!("touch {}", marker.display()),
+            "safe".to_string(),
+            String::new(),
+        )];
+
+        let (tx, mut done_rx) = mpsc::unbounded_channel();
+        app.run_terminal_suggestion(tx);
+
+        let (request, responder) = app
+            .approval_rx
+            .as_mut()
+            .expect("no approval channel")
+            .recv()
+            .await
+            .expect("the panel ran a command without asking");
+        assert_eq!(request.tool, "run_command");
+        let _ = responder.send(crate::agent_tools::ApprovalAnswer::Denied);
+
+        let token = done_rx.recv().await.expect("no [TERM] result");
+        let json = token
+            .strip_prefix("[TERM]ran:")
+            .unwrap_or_default()
+            .to_string();
+        let body: serde_json::Value = serde_json::from_str(&json).expect("result is not JSON");
+        assert!(
+            body["result"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("error: the user denied"),
+            "a denial has to read as a denial: {body}"
+        );
+        assert!(!marker.exists(), "a denied command must never run");
+    }
+
+    /// Same gate, no listener: with nothing to answer the prompt, the strictest
+    /// possible answer is the one the panel gets.
+    #[tokio::test]
+    async fn a_vanished_prompter_denies_instead_of_running() {
+        let mut app = App::for_tests();
+        app.config.agent_approval = "ask".to_string();
+        app.term_asst_suggestions = vec![(
+            "touch /tmp/xencode-panel-must-not-run".to_string(),
+            "safe".to_string(),
+            String::new(),
+        )];
+        app.approval_rx = None;
+
+        let (tx, mut done_rx) = mpsc::unbounded_channel();
+        app.run_terminal_suggestion(tx);
+        let token = done_rx.recv().await.expect("no [TERM] result");
+        let body: serde_json::Value =
+            serde_json::from_str(token.trim_start_matches("[TERM]ran:")).unwrap();
+        assert!(body["result"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("error: the user denied"));
+        assert!(!std::path::Path::new("/tmp/xencode-panel-must-not-run").exists());
     }
 
     fn git(root: &std::path::Path, args: &[&str]) {
