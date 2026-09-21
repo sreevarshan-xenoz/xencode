@@ -32,6 +32,13 @@
   hold. No TUI panel ships scripted content, and no manifest claims a
   capability this build lacks. Task breakdown and the done-when rule for each
   item: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone J.
+- ✅ **Docs archive purge** (2026-09-21, after J-08): 9,371 lines of documentation
+  describing the retired Python product are deleted, not filed away —
+  `DOCUMENTATION.md`, `PRD.md`, `project details.md`, `docs/FEATURES.md`,
+  `docs/ARCHITECTURE_DIAGRAMS.md`, `BROWSER_LOGIN_PLAN.md`, `docs/superpowers/`
+  and three unused screenshots. The survivors were re-checked against the tree
+  and `docs/ROADMAP.md` was rewritten from the code (its `xencode --git-*` flags
+  and `/smart`-style chat commands were never in the Rust CLI).
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).

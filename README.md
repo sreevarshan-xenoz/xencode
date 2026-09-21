@@ -319,7 +319,9 @@ flowchart TD
     I -- No --> H
 ```
 
-> Extended connectivity and deployment diagrams: [project details.md](project%20details.md)
+> Connectivity: the agent's file and shell tools are confined to the workspace
+> root (paths outside it are refused in every approval mode) and every mutation
+> stops at the approval gate — see [Approval-gated agent tool loop](#-features).
 
 ---
 
@@ -420,19 +422,16 @@ Current, and kept in step with the Rust implementation:
 | User manual | [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) |
 | CLI guide | [`CLI_GUIDE.md`](CLI_GUIDE.md) |
 | Active task list | [`NEXT_PLAN_TASKS.md`](NEXT_PLAN_TASKS.md) · [`NEXT_PLAN.md`](NEXT_PLAN.md) |
-| Route + auth reference | [`docs/api_documentation.md`](docs/api_documentation.md) (server section is current; the module sections below it are marked legacy) |
+| Route + auth reference | [`docs/api_documentation.md`](docs/api_documentation.md) (the collaboration server's HTTP/WebSocket surface) |
+| Installation and troubleshooting | [`docs/INSTALL_MANUAL.md`](docs/INSTALL_MANUAL.md) |
+| Long-term direction | [`docs/ROADMAP.md`](docs/ROADMAP.md) (a pre-migration snapshot; the top of the file says what the tree actually is) |
 
-Historical, **not** descriptions of this codebase — they predate the Rust
-migration and still document a Python stack, ensemble reasoning, and modules
-that no longer exist. Read them for intent only:
-
-| Archive | Was |
-| --- | --- |
-| [`DOCUMENTATION.md`](DOCUMENTATION.md) | Full Python-era documentation index |
-| [`PRD.md`](PRD.md) | Original product requirements |
-| [`project details.md`](project%20details.md) | Python-era architecture + feature inventory |
-| [`docs/FEATURES.md`](docs/FEATURES.md) | Post-migration idea backlog ("wild ideas"), not shipped features |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Long-term roadmap; many sections are marked historical |
+The Python-era archives that used to be listed here — `DOCUMENTATION.md`,
+`PRD.md`, `project details.md`, `docs/FEATURES.md`,
+`docs/ARCHITECTURE_DIAGRAMS.md`, `BROWSER_LOGIN_PLAN.md` — have been deleted.
+They described a dual-stack product, an `xencode.core.*` API, a distributed
+cache and per-panel architecture diagrams for code that is not in this tree,
+and nothing in the current docs links them.
 
 ---
 
