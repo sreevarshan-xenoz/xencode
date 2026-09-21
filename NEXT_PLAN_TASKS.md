@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 689 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 695 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -711,11 +711,29 @@ workspace gates green.
   had never been visible. No new OS dependencies. Covered by three profiler
   tests plus a render test that asserts the real rows and the `n/a`.
   **689 tests passed.**
-- [ ] J-03 — **Terminal assistant**: one real provider call per query, asking
-  for candidate commands with a risk label, parsed into the existing
-  `[TERM]suggestion:` shape; a command the user picks goes through the same
-  approval-gated `run_command` path as the agent's, never around it. Provider
-  error → the panel prints it.
+- [x] J-03 — **Terminal assistant** (2026-09-21): the scripted five-command
+  list — including `docker system prune -af` and `rm -rf node_modules`, which
+  this panel showed as "suggestions" with a risk badge — is gone. The panel now
+  opens as a question field: type what you want to do, `Enter` makes **one**
+  provider call per question, and the prompt gives the model something real to
+  aim at (the workspace path, its top-level entries from the context index, the
+  current git branch) and asks for a JSON array of `{command, risk, why}`,
+  capped at 8. `parse_term_suggestions` tolerates fences, prose and a bare
+  object; a reply with no commands in it is printed as the reply ("The model
+  did not answer with commands. It said: …") instead of being turned into
+  invented suggestions. Risk labels only ever escalate: a command matching
+  `DESTRUCTIVE_PATTERNS` is shown as `destructive` whatever the model claimed,
+  and `f` filters by that label. Running a selection goes through the agent's
+  own gate — `execute_tool_call_approved` with the session's `ApprovalCtx`, so
+  the same policy, modal, hooks and checkpoint group as a model-issued
+  `run_command`, and `approval_ctx()` is now the single place that context is
+  built. Nothing on screen is a claim about an outcome: a denial is history as
+  `error: the user denied…`, and an unanswered prompt (no listener) denies too.
+  Provider errors surface in the panel, flattened to one line. Also fixed: the
+  `[TERM]output:` protocol arm had no sender left. Covered by five tests —
+  parsing/risk escalation/cap, filter rows, empty question sends nothing,
+  and two gate tests that assert a denied command never touches the disk.
+  **695 tests passed.**
 - [ ] J-04 — **Multi-language**: detection = the real `scan_tree` language
   breakdown of the workspace (files, bytes, comment density), supported list =
   the languages `scanner::Language` actually has; translate = a real model call

@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Milestone J — opened
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 has landed** — the security
-auditor and the profiler are real, leaving five scripted panels. `NEXT_PLAN_TASKS.md` §
+the plugin registry loaded no runtime. **J-01 to J-03 have landed** — the
+security auditor and the profiler are real and the terminal assistant delegates
+to a model through the agent's approval gate, leaving four scripted panels.
+`NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
 ### Removed
@@ -88,6 +90,24 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Terminal assistant panel is real (Milestone J, J-03). It used to open with
+  five hardcoded "suggested commands" — including `docker system prune -af` and
+  `rm -rf node_modules && npm install` — each with a risk badge, and nothing
+  behind any of it. Now the panel opens as a question field: `Enter` makes
+  **one** call to the configured model, whose prompt carries the workspace path,
+  its top-level entries from the context index and the current git branch, and
+  asks for a JSON array of `{command, risk, why}` capped at 8. Fences, prose and
+  a bare object are all tolerated; a reply with no commands in it is shown as
+  the reply rather than converted into invented suggestions. Risk labels only
+  escalate — `DESTRUCTIVE_PATTERNS` overrides a command the model called safe,
+  and a label the model raised is never lowered. `f` filters by risk, `j`/`k`
+  select, `y`/`Enter` runs the selection **through `execute_tool_call_approved`
+  with the session's `ApprovalCtx`** — the same policy, modal, hooks and
+  checkpoint group as a model-issued `run_command`, with `approval_ctx()` now
+  the single place that context is built. Outcomes, denials included, land in
+  the panel's history; provider errors are printed, flattened to one line. A
+  `Ctrl+T`-style shell path was deliberately not added: the panel has no route
+  to a binary that the gate is not on.
 - Performance profiler panel is real (Milestone J, J-02): the table used to list
   six invented functions (`process_data`, `query_database`, …) with random CPU,
   memory and latency numbers. `Enter` now measures: process CPU from two

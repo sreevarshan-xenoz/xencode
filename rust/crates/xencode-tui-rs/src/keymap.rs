@@ -1251,21 +1251,39 @@ fn key_voice(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     true
 }
 
+/// The terminal assistant is a form now (J-03): letters type the query, Enter
+/// asks the model once, and once commands come back `↑↓`/`jk` pick one and
+/// Enter or `y` runs it — through the agent's approval gate, never around it.
+/// `f` cycles the risk filter, `i` returns to the query.
 fn key_terminal_assistant(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
-    match key.code {
-        KeyCode::Enter => {
-            if !app.term_asst_active {
-                app.start_terminal_assistant(tx.clone());
-            }
+    if app.term_asst_typing {
+        match key.code {
+            KeyCode::Enter => app.ask_terminal(tx.clone()),
+            KeyCode::Backspace => app.term_asst_backspace(),
+            KeyCode::Esc => app.term_asst_typing = false,
+            KeyCode::Char(c) => app.term_asst_char(c),
+            _ => return false,
         }
-        KeyCode::Char(' ') => {
-            // Cycle risk filter
+        return true;
+    }
+    let rows = app.term_visible_rows().len();
+    match key.code {
+        KeyCode::Enter | KeyCode::Char('y') if rows > 0 => app.run_terminal_suggestion(tx.clone()),
+        KeyCode::Up | KeyCode::Char('k') if rows > 0 => {
+            app.term_asst_selected = app.term_asst_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if rows > 0 => {
+            app.term_asst_selected = (app.term_asst_selected + 1).min(rows - 1);
+        }
+        KeyCode::Char('i') => app.term_asst_typing = true,
+        KeyCode::Char('f') => {
             app.term_risk_filter = match app.term_risk_filter.as_str() {
-                "All" => "Safe",
-                "Safe" => "Destructive",
+                "All" => "safe",
+                "safe" => "destructive",
                 _ => "All",
             }
             .to_string();
+            app.term_asst_selected = 0;
         }
         _ => return false,
     }

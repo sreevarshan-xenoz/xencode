@@ -129,7 +129,14 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Enter", "start voice session"),
             ("Space / m", "toggle mute"),
         ],
-        TerminalAssistant => &[("Enter", "start assistant"), ("Space", "cycle risk filter")],
+        TerminalAssistant => &[
+            ("type", "what you want to do"),
+            ("Enter", "ask the model / run the selected command"),
+            ("↑ ↓ / j k", "select a command"),
+            ("f", "cycle the risk filter"),
+            ("i", "edit the question again"),
+            ("y", "run selection (approval-gated)"),
+        ],
         GitCommit => &[
             ("type", "commit message"),
             ("Enter", "git commit -am (async)"),
