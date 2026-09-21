@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 700 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 706 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -757,10 +757,36 @@ workspace gates green.
   a temp-dir walk that pins the numbers and proves `src/app.py` / `components.tsx`
   can no longer appear, an empty-text/no-request test with the field-editing
   cycle, and a render test at 160×44. **700 tests passed.**
-- [ ] J-05 — **Custom models**: replace the seeded profiles with persisted
-  `model_profiles` in config (name, model id, temperature, max_tokens, top_p);
-  `s` writes through `save_config()`, select applies to the next turn, and the
-  test row shows the provider's real reply or error.
+- [x] J-05 — **Custom models** (2026-09-21): the four seeded profiles
+  (`Code Assistant`, `Creative Writer`, `Bug Hunter`, `Code Reviewer`) and the
+  dead `models_editing` / `models_saving` / `models_test_output` state are gone.
+  The panel now lists `model_profiles` from `config.json` — a new
+  `xencode_config_rs::ModelProfile { name, model, temperature, max_tokens }`
+  with `#[serde(default)]`, so a config written before this still loads and an
+  empty list renders "None yet — press `n`" instead of samples. `n` adds a
+  profile from the current session settings, `-`/`+` moves temperature over
+  0.0–2.0 in 0.1 steps, `←`/`→` steps `max_tokens` along a fixed ladder
+  (64…8192) — an unset knob starts from the value the session would send
+  anyway, so the first step is off a real baseline. `Enter` applies to the next
+  turn (in memory only: `default_model` + the llama.cpp knobs, the model
+  selector's position, and a `switch` to the llama.cpp server when the id points
+  at it); `s` is the only key that writes `config.json`, through `XencodeConfig::save`
+  rather than the silent `save_config()`, and reports `wrote N profile(s)` /
+  `config.json unchanged: {error}` — or says persistence is off when the session
+  has it off. `t` makes one request with exactly that profile's settings through
+  the same `SingleShot` path the terminal assistant and translator use, so the
+  status line carries the provider's own reply or its own error, flattened to
+  one line. **`top_p` was dropped from the plan**: no provider path in this
+  workspace sends it — `merge_llamacpp_options` is the only place sampling knobs
+  reach a request, and it takes temperature and max tokens for llama.cpp. The
+  panel says that out loud rather than pretending Ollama and cloud endpoints
+  obey the sliders, and an unset knob renders as "unset — the server decides".
+  Covered by three keymap tests (edit/apply ≠ save, empty list applies nothing,
+  save round-trips through a temp `XCODE_CONFIG_DIR` — shared with the settings
+  test behind a new `CONFIG_DIR` mutex so neither can race the other or touch
+  the real config), two config round-trip tests (unset knobs are absent from the
+  JSON; a pre-profiles config still loads), and two render tests at 160×44.
+  **706 tests passed.**
 - [ ] J-06 — **Learning mode**: lessons come from the repo — the context index
   picks real files/symbols, the model explains that file, and the quiz is about
   code that exists. Empty/unindexed workspace → the panel says so.

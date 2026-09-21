@@ -353,7 +353,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::AdvisePanel => key_advise_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key),
-        FocusArea::CustomModels => key_custom_models(app, key),
+        FocusArea::CustomModels => key_custom_models(app, key, tx),
         FocusArea::VoiceInterface => key_voice(app, key, tx),
         FocusArea::TerminalAssistant => key_terminal_assistant(app, key, tx),
         FocusArea::CollaborationHub => key_collab(app, key, tx),
@@ -1199,7 +1199,14 @@ fn key_learning(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
-fn key_custom_models(app: &mut App, key: KeyEvent) -> bool {
+/// Custom models are a real form now (J-05): the list is `model_profiles` from
+/// config, `n` starts one from the session's current settings, `←`/`→` and
+/// `-`/`+` move its parameters in memory, `Enter` applies them to the next
+/// turn, `s` is the only key that writes config.json, and `t` asks the provider
+/// itself. Every character is handled here, so no letter — `n` and `s` above
+/// all — can fall through to a global chord and open another panel (E2-06).
+fn key_custom_models(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
+    let count = app.model_profiles.len();
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             if app.models_selected > 0 {
@@ -1207,28 +1214,19 @@ fn key_custom_models(app: &mut App, key: KeyEvent) -> bool {
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if app.models_selected + 1 < app.models_profiles.len() {
+            if app.models_selected + 1 < count {
                 app.models_selected += 1;
             }
         }
-        KeyCode::Enter => {
-            if !app.models_editing {
-                app.start_custom_models();
-            }
-        }
-        KeyCode::Left if app.models_editing && app.models_selected > 0 => {
-            app.models_selected -= 1;
-        }
-        KeyCode::Right
-            if app.models_editing && app.models_selected + 1 < app.models_profiles.len() =>
-        {
-            app.models_selected += 1;
-        }
-        // Save profile — previously shadowed by the global Settings `s`.
-        KeyCode::Char('s') if app.models_editing => {
-            app.models_saving = true;
-            app.models_test_output = "Profile saved!".to_string();
-        }
+        KeyCode::Enter => app.apply_model_profile(tx.clone()),
+        KeyCode::Char('n') => app.add_model_profile(),
+        KeyCode::Char('-') => app.adjust_model_temperature(-0.1),
+        KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_model_temperature(0.1),
+        KeyCode::Left => app.step_model_max_tokens(false),
+        KeyCode::Right => app.step_model_max_tokens(true),
+        KeyCode::Char('s') => app.save_model_profiles(),
+        KeyCode::Char('t') => app.test_model_profile(tx.clone()),
+        KeyCode::Char(_) => {}
         _ => return false,
     }
     true
@@ -1437,6 +1435,11 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use tokio::sync::mpsc;
     use xencode_config_rs::XencodeConfig;
+
+    /// One guard for every test that repoints `XCODE_CONFIG_DIR`, which is
+    /// process-global: without it, two persistence tests would send each
+    /// other's writes to the wrong directory.
+    static CONFIG_DIR: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn press(app: &mut App, code: KeyCode) -> KeyFlow {
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -1676,19 +1679,116 @@ mod tests {
         assert_eq!(app.sec_filter_severity, "Critical");
     }
 
+    /// J-05: the list is config's, so `s` in this panel means "write config"
+    /// and never falls through to the global Settings chord (E2-06). The
+    /// parameter keys edit the profile in memory; nothing reaches the disk
+    /// without `s`, and `s` says so when persistence is off.
     #[test]
-    fn custom_models_s_saves_only_while_editing() {
+    fn custom_models_keys_edit_apply_and_save() {
+        use xencode_config_rs::ModelProfile;
         let mut app = app_with(FocusArea::CustomModels);
-        app.models_editing = false;
+        app.model_profiles = vec![ModelProfile {
+            name: "tight".to_string(),
+            model: "ollama:qwen2.5:7b".to_string(),
+            temperature: None,
+            max_tokens: None,
+        }];
+        app.models_dirty = true;
+
         press(&mut app, KeyCode::Char('s'));
-        // Not editing: `s` keeps its global meaning.
-        assert_eq!(app.focus, FocusArea::Settings);
+        assert_eq!(app.focus, FocusArea::CustomModels, "s is not Settings here");
+        assert!(
+            app.models_status.contains("nothing was written"),
+            "{}",
+            app.models_status
+        );
+        assert!(app.models_dirty, "an unsaved edit is still unsaved");
+
+        press(&mut app, KeyCode::Char('+'));
+        assert_eq!(app.model_profiles[0].temperature, Some(1.1));
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.model_profiles[0].max_tokens, Some(1024));
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.model_profiles[0].max_tokens, Some(512));
+
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.default_model, "ollama:qwen2.5:7b");
+        assert_eq!(app.config.llama_cpp_temperature, Some(1.1));
+        assert_eq!(app.config.llama_cpp_max_tokens, Some(512));
+        // The `s` above snapshotted the profile before it was tuned; apply
+        // must not have rewritten it. Only `s` moves the saved list.
+        assert_eq!(
+            app.config.model_profiles[0].temperature, None,
+            "apply ≠ save"
+        );
+        assert_eq!(app.config.model_profiles[0].max_tokens, None);
+    }
+
+    /// An empty list is the real state of a fresh config: nothing to apply, and
+    /// `n` starts from the session's own settings rather than a seeded row. `n`
+    /// and `s` must not reach the global chords that open the navigator or
+    /// Settings (E2-06).
+    #[test]
+    fn custom_models_without_profiles_says_so_instead_of_applying_nothing() {
+        let mut app = app_with(FocusArea::CustomModels);
+        let before = app.config.default_model.clone();
+        assert!(
+            app.model_profiles.is_empty(),
+            "a fresh config seeds nothing"
+        );
+        press(&mut app, KeyCode::Enter);
+        assert!(app.models_status.contains("no model_profiles"));
+        assert_eq!(app.config.default_model, before);
+        press(&mut app, KeyCode::Char('+'));
+        assert!(app.model_profiles.is_empty());
+
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.focus, FocusArea::CustomModels, "n is not the navigator");
+        assert_eq!(app.model_profiles.len(), 1);
+        assert_eq!(app.model_profiles[0].model, before);
+        assert!(app.models_dirty);
+
+        press(&mut app, KeyCode::Char('s'));
+        assert_eq!(app.focus, FocusArea::CustomModels, "s is not Settings");
+        assert_eq!(app.config.model_profiles, app.model_profiles);
+    }
+
+    /// `s` is the panel's only disk write, so this checks the file: what the
+    /// panel showed after editing is what came back out of config.json.
+    #[test]
+    fn custom_models_save_writes_the_profiles_it_shows() {
+        let _guard = CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        let dir =
+            std::env::temp_dir().join(format!("xencode-profiles-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
 
         let mut app = app_with(FocusArea::CustomModels);
-        app.models_editing = true;
+        // Opts back into persistence — into the temp XCODE_CONFIG_DIR above.
+        app.persist_config = true;
+        app.config = XencodeConfig::default();
+
+        press(&mut app, KeyCode::Char('n'));
+        press(&mut app, KeyCode::Char('-'));
+        press(&mut app, KeyCode::Right);
         press(&mut app, KeyCode::Char('s'));
-        assert_eq!(app.focus, FocusArea::CustomModels);
-        assert!(app.models_saving);
+
+        let saved = XencodeConfig::load_from(dir.join("config.json")).unwrap();
+        assert_eq!(saved.model_profiles, app.model_profiles);
+        assert_eq!(saved.model_profiles.len(), 1);
+        let profile = &saved.model_profiles[0];
+        assert_eq!(profile.model, "qwen2.5:7b");
+        assert_eq!(profile.temperature, Some(0.9));
+        assert_eq!(profile.max_tokens, Some(1024));
+        assert!(!app.models_dirty, "a successful save clears the marker");
+        assert!(
+            app.models_status.contains("wrote 1 profile"),
+            "{}",
+            app.models_status
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::env::set_var("XCODE_CONFIG_DIR", "");
     }
 
     #[test]
@@ -1786,10 +1886,11 @@ mod tests {
 
     #[test]
     fn settings_steps_persist_through_the_config_dir() {
-        // The only test that touches XCODE_CONFIG_DIR (process-global):
-        // pointing saves at a temp dir means this test — and any concurrent
+        // Pointing saves at a temp dir means this test — and any concurrent
         // save — never writes the user's real ~/.xencode.
         use crate::focus::{settings_row_index, SETTINGS_ITEMS};
+
+        let _guard = CONFIG_DIR.lock().unwrap_or_else(|e| e.into_inner());
 
         let dir =
             std::env::temp_dir().join(format!("xencode-settings-test-{}", std::process::id()));

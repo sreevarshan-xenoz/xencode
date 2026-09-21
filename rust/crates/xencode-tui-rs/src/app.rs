@@ -448,11 +448,19 @@ pub struct App<'a> {
     pub profiler_gauge_latency: Option<f64>, // average turn latency, ms
 
     // Custom Models state
-    pub models_editing: bool,
-    pub models_profiles: Vec<(String, String, f64, u32, f64)>, // (name, provider, temp, max_tokens, top_p)
+    /// The profiles as the panel holds them: read from `config.json` at
+    /// startup, edited by `-`/`+` and `←`/`→`, and written back only when `s`
+    /// succeeds. Nothing here is seeded.
+    pub model_profiles: Vec<xencode_config_rs::ModelProfile>,
     pub models_selected: usize,
-    pub models_test_output: String,
-    pub models_saving: bool,
+    /// Parameters moved since the last save, so the panel can say the list on
+    /// disk and the list on screen are no longer the same.
+    pub models_dirty: bool,
+    /// The last thing the panel did — applied, saved, refused, or the
+    /// provider's own words after a test request.
+    pub models_status: String,
+    /// A test request is with the provider right now.
+    pub models_busy: bool,
 
     // Learning Mode state
     pub learn_active: bool,
@@ -1123,6 +1131,10 @@ async fn run_language_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
     let _ = tx.send("[LANG]done".to_string());
 }
 
+/// The token budgets `←`/`→` step a custom-model profile through. A ladder
+/// rather than free-form entry because these are the numbers worth sending.
+const MODEL_TOKEN_STEPS: [u32; 8] = [64, 128, 256, 512, 1024, 2048, 4096, 8192];
+
 /// Commands the terminal panel will offer at once. More than a screenful is
 /// noise, so this is both what the model is asked for and what it gets.
 const TERM_SUGGESTION_CAP: usize = 8;
@@ -1312,6 +1324,8 @@ impl<'a> App<'a> {
 
     fn with_config_and_memory(config: XencodeConfig, memory: ConversationMemory) -> Self {
         let _client = OllamaClient::new(&config.ollama_url, config.response_timeout);
+        // `config` moves into the struct below; the panel needs its own copy.
+        let model_profiles = config.model_profiles.clone();
 
         let scan_opts = ScanOptions {
             max_depth: Some(5),
@@ -1491,11 +1505,11 @@ impl<'a> App<'a> {
             profiler_gauge_mem_total: None,
             profiler_gauge_latency: None,
 
-            models_editing: false,
-            models_profiles: Vec::new(),
+            model_profiles,
             models_selected: 0,
-            models_test_output: String::new(),
-            models_saving: false,
+            models_dirty: false,
+            models_status: String::new(),
+            models_busy: false,
 
             learn_active: false,
             learn_current_lesson: 0,
@@ -3912,45 +3926,180 @@ impl<'a> App<'a> {
         tokio::spawn(run_profiler(xencode, tx));
     }
 
-    /// Start Custom Models session (seeds profile data).
-    pub fn start_custom_models(&mut self) {
-        if self.models_editing {
+    /// The cursor, clamped to a row that exists. An empty list has no row,
+    /// which is the honest state before anyone writes `model_profiles`.
+    fn selected_profile_index(&self) -> Option<usize> {
+        if self.model_profiles.is_empty() {
+            None
+        } else {
+            Some(self.models_selected.min(self.model_profiles.len() - 1))
+        }
+    }
+
+    /// The profile the cursor is on, if there is one.
+    pub fn selected_model_profile(&self) -> Option<&xencode_config_rs::ModelProfile> {
+        self.selected_profile_index()
+            .map(|idx| &self.model_profiles[idx])
+    }
+
+    /// `n`: start a profile from what the session is using right now, so the
+    /// panel can create what it can also edit and save.
+    pub fn add_model_profile(&mut self) {
+        let name = format!("profile {}", self.model_profiles.len() + 1);
+        self.model_profiles.push(xencode_config_rs::ModelProfile {
+            name: name.clone(),
+            model: self.config.default_model.clone(),
+            temperature: self.config.llama_cpp_temperature,
+            max_tokens: self.config.llama_cpp_max_tokens,
+        });
+        self.models_selected = self.model_profiles.len() - 1;
+        self.models_dirty = true;
+        self.models_status = format!("{name} — from this session's settings. Tune it, then s.");
+    }
+
+    /// `-`/`+` move the selected profile's temperature. A profile with no
+    /// temperature starts from the value the session would send anyway, so the
+    /// first step is off a real baseline rather than an invented one.
+    pub fn adjust_model_temperature(&mut self, delta: f64) {
+        let Some(idx) = self.selected_profile_index() else {
+            return;
+        };
+        let base = self.model_profiles[idx]
+            .temperature
+            .or(self.config.llama_cpp_temperature)
+            .unwrap_or(1.0);
+        let next = (base + delta).clamp(0.0, 2.0);
+        self.model_profiles[idx].temperature = Some((next * 100.0).round() / 100.0);
+        self.models_dirty = true;
+        self.models_status.clear();
+    }
+
+    /// `←`/`→` step the selected profile's token budget along a fixed ladder —
+    /// the numbers a llama.cpp server is actually told to stop at.
+    pub fn step_model_max_tokens(&mut self, grow: bool) {
+        let Some(idx) = self.selected_profile_index() else {
+            return;
+        };
+        let base = self.model_profiles[idx]
+            .max_tokens
+            .or(self.config.llama_cpp_max_tokens)
+            .unwrap_or(512);
+        let last = MODEL_TOKEN_STEPS.len() - 1;
+        let at = MODEL_TOKEN_STEPS
+            .iter()
+            .position(|&step| step >= base)
+            .unwrap_or(last);
+        let at = if grow {
+            (at + 1).min(last)
+        } else {
+            at.saturating_sub(1)
+        };
+        self.model_profiles[idx].max_tokens = Some(MODEL_TOKEN_STEPS[at]);
+        self.models_dirty = true;
+        self.models_status.clear();
+    }
+
+    /// `Enter`: this profile's model and sampling become the session's, so the
+    /// next turn — chat, agent, or panel — sends them. Deliberately not a disk
+    /// write; `s` is the only key that touches config.json.
+    pub fn apply_model_profile(&mut self, tx: mpsc::UnboundedSender<String>) {
+        let Some(profile) = self.selected_model_profile().cloned() else {
+            self.models_status =
+                "Nothing to apply: config.json has no model_profiles yet.".to_string();
+            return;
+        };
+        self.config.default_model = profile.model.clone();
+        if profile.temperature.is_some() {
+            self.config.llama_cpp_temperature = profile.temperature;
+        }
+        if profile.max_tokens.is_some() {
+            self.config.llama_cpp_max_tokens = profile.max_tokens;
+        }
+        if let Some(pos) = self
+            .available_models
+            .iter()
+            .position(|model| model == &profile.model)
+        {
+            self.selected_model = pos;
+        }
+        let mut sent = Vec::new();
+        if let Some(temperature) = profile.temperature {
+            sent.push(format!("temperature {temperature}"));
+        }
+        if let Some(max_tokens) = profile.max_tokens {
+            sent.push(format!("max tokens {max_tokens}"));
+        }
+        self.models_status = if sent.is_empty() {
+            format!(
+                "next turn uses {} with the server's own sampling",
+                profile.model
+            )
+        } else {
+            format!("next turn uses {} · {}", profile.model, sent.join(" · "))
+        };
+        // Same hand-off the model selector does: a llama.cpp server only serves
+        // the model it has loaded, so ask it to swap.
+        if let Some(inner) = llama_model_target(&profile.model) {
+            self.llamacpp_control("switch", Some(inner.to_string()), tx);
+        }
+    }
+
+    /// `s`: write the panel's profiles into config through the one choke point
+    /// every settings write uses. This is the only place a config save reports
+    /// why it failed, because here the user asked for the write.
+    pub fn save_model_profiles(&mut self) {
+        self.config.model_profiles = self.model_profiles.clone();
+        if !self.persist_config {
+            self.models_status =
+                "config persistence is off in this session — nothing was written".to_string();
             return;
         }
-        self.models_editing = true;
-        self.models_saving = false;
-        self.models_profiles = vec![
-            (
-                "Code Assistant".to_string(),
-                "ollama".to_string(),
-                0.3,
-                4096,
-                0.9,
-            ),
-            (
-                "Creative Writer".to_string(),
-                "openrouter".to_string(),
-                0.8,
-                2048,
-                0.95,
-            ),
-            (
-                "Bug Hunter".to_string(),
-                "ollama".to_string(),
-                0.2,
-                8192,
-                0.8,
-            ),
-            (
-                "Code Reviewer".to_string(),
-                "openrouter".to_string(),
-                0.15,
-                4096,
-                0.85,
-            ),
-        ];
-        self.models_selected = 0;
-        self.models_test_output = String::new();
+        match self.config.save() {
+            Ok(()) => {
+                self.models_dirty = false;
+                self.models_status = format!(
+                    "wrote {} profile(s) to config.json",
+                    self.model_profiles.len()
+                );
+            }
+            Err(e) => self.models_status = format!("config.json unchanged: {e}"),
+        }
+    }
+
+    /// `t`: one request carrying exactly this profile's settings, so the row
+    /// shows the provider's real answer — or its real error.
+    pub fn test_model_profile(&mut self, tx: mpsc::UnboundedSender<String>) {
+        if self.models_busy {
+            return;
+        }
+        let Some(profile) = self.selected_model_profile().cloned() else {
+            self.models_status =
+                "Nothing to test: config.json has no model_profiles yet.".to_string();
+            return;
+        };
+        self.models_busy = true;
+        self.models_status = format!("asking {}…", profile.model);
+        let mut call = SingleShot::from_config(&self.config);
+        call.model = profile.model.clone();
+        call.llama_opts.temperature = profile.temperature.or(self.config.llama_cpp_temperature);
+        call.llama_opts.max_tokens = profile.max_tokens.or(self.config.llama_cpp_max_tokens);
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Reply with the single word: ready".to_string().into(),
+        }];
+        tokio::spawn(async move {
+            let token = match call.ask(&messages).await {
+                Ok(reply) => format!(
+                    "[PROFILE]ok:{}",
+                    crate::agent_tools::truncate_one_line(reply.trim(), 160)
+                ),
+                Err(e) => format!(
+                    "[PROFILE]err:{}",
+                    crate::agent_tools::truncate_one_line(&e, 200)
+                ),
+            };
+            let _ = tx.send(token);
+        });
     }
 
     /// Start Learning Mode with lesson content.
@@ -5091,6 +5240,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     app.lang_translate_error = true;
                     app.lang_translate_output = err.to_string();
                 }
+            } else if let Some(body) = token.strip_prefix("[PROFILE]") {
+                app.models_busy = false;
+                // The reply and the failure share one line on purpose: the
+                // panel's status is the provider's own words either way.
+                if let Some(reply) = body.strip_prefix("ok:") {
+                    app.models_status = format!("reply: {reply}");
+                } else if let Some(err) = body.strip_prefix("err:") {
+                    app.models_status = format!("test failed: {err}");
+                }
             } else if let Some(body) = token.strip_prefix("[SECURITY]") {
                 if body.starts_with("progress:") {
                     if let Some(p) = body.strip_prefix("progress:") {
@@ -5408,7 +5566,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             }
                         }
                         FocusArea::CustomModels => {
-                            if app.models_selected + 1 < app.models_profiles.len() {
+                            if app.models_selected + 1 < app.model_profiles.len() {
                                 app.models_selected += 1;
                             }
                         }

@@ -146,6 +146,32 @@ pub struct XencodeConfig {
     /// approved the call, and never for a policy `Deny`.
     #[serde(default)]
     pub agent_hooks: AgentHooks,
+
+    /// Named generation settings the TUI's Custom Models panel applies to the
+    /// next turn. The panel edits these values and writes them back with
+    /// [`XencodeConfig::save`]; nothing is seeded, so an empty list means the
+    /// panel has nothing to show rather than something invented.
+    #[serde(default)]
+    pub model_profiles: Vec<ModelProfile>,
+}
+
+/// One saved profile: a model id plus the sampling settings that reach a
+/// request. `None` means "send nothing for this knob and let the server's own
+/// default apply"; a value is passed to llama.cpp in the request body and, on
+/// an applied profile, becomes the session's llama.cpp default for every later
+/// turn. There is deliberately no `top_p` here because no provider path in this
+/// workspace sends it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ModelProfile {
+    /// Label shown in the panel.
+    pub name: String,
+    /// Model id in exactly the form `default_model` takes — `ollama:qwen2.5:7b`,
+    /// `openrouter:…`, `llamacpp:…` or a bare Ollama tag.
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 /// One declared MCP server: a command we spawn and talk JSON-RPC to over its
@@ -262,6 +288,7 @@ impl Default for XencodeConfig {
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
             agent_hooks: AgentHooks::default(),
+            model_profiles: Vec::new(),
         }
     }
 }
@@ -544,6 +571,55 @@ mod tests {
         let loaded = XencodeConfig::load_from(&path).unwrap();
         assert_eq!(loaded, config);
 
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A profile only exists if it survives a save and comes back out of the
+    /// file: the Custom Models panel writes through `save` and reads on startup.
+    #[test]
+    fn model_profiles_round_trip_and_omit_unset_knobs() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        let config = XencodeConfig {
+            model_profiles: vec![
+                ModelProfile {
+                    name: "tight".to_string(),
+                    model: "ollama:qwen2.5:7b".to_string(),
+                    temperature: Some(0.2),
+                    max_tokens: Some(2048),
+                },
+                ModelProfile {
+                    name: "server default".to_string(),
+                    model: "llamacpp:gemma".to_string(),
+                    temperature: None,
+                    max_tokens: None,
+                },
+            ],
+            ..XencodeConfig::default()
+        };
+        config.save_to(&path).unwrap();
+        assert_eq!(XencodeConfig::load_from(&path).unwrap(), config);
+
+        // A profile that sends no temperature must not write the key at all —
+        // an explicit 0.0 would mean greedy decoding, not "unset".
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let second = &json["model_profiles"][1];
+        assert!(
+            second.get("temperature").is_none() && second.get("max_tokens").is_none(),
+            "{second}"
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_config_written_before_profiles_still_loads() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"default_model":"qwen2.5:7b"}"#).unwrap();
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert!(config.model_profiles.is_empty());
         fs::remove_dir_all(&dir).unwrap();
     }
 
