@@ -833,6 +833,126 @@ async fn run_foreground(root: &Path, command: &str, timeout_secs: u64) -> String
     result
 }
 
+/// One of the two hook phases (I3-02).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HookPhase {
+    Before,
+    After,
+}
+
+impl HookPhase {
+    fn word(self) -> &'static str {
+        match self {
+            HookPhase::Before => "before",
+            HookPhase::After => "after",
+        }
+    }
+}
+
+/// The hook declared for a tool call's exact name, else the `*` catch-all.
+/// Returns the configured key and the command, so the transcript names what
+/// the user actually wrote.
+fn hook_for<'a>(
+    hooks: &'a xencode_config_rs::AgentHooks,
+    phase: HookPhase,
+    tool: &'a str,
+) -> Option<(&'a str, &'a str)> {
+    let table = match phase {
+        HookPhase::Before => &hooks.before,
+        HookPhase::After => &hooks.after,
+    };
+    table
+        .get(tool)
+        .map(|command| (tool, command.as_str()))
+        .or_else(|| table.get("*").map(|command| ("*", command.as_str())))
+}
+
+/// Run one hook command — `sh -c` in the workspace root on the same budget
+/// and output cap as `run_command`. The bool says whether it exited clean;
+/// the string is always an annotated line (status first, output tail only on
+/// a non-zero exit), so a capped or empty body can never look like success.
+async fn run_hook(
+    root: &Path,
+    name: &str,
+    tool: &str,
+    phase: HookPhase,
+    command: &str,
+    timeout_secs: u64,
+) -> (bool, String) {
+    let child = match tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            return (
+                false,
+                format!(
+                    "hook[{name}] {} {tool}: cannot run {command:?}: {e}",
+                    phase.word()
+                ),
+            );
+        }
+    };
+    let secs = timeout_secs.max(1);
+    let output = match tokio::time::timeout(
+        std::time::Duration::from_secs(secs),
+        child.wait_with_output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            return (
+                false,
+                format!(
+                    "hook[{name}] {} {tool}: failed to run {command:?}: {e}",
+                    phase.word()
+                ),
+            );
+        }
+        Err(_) => {
+            return (
+                false,
+                format!(
+                    "hook[{name}] {} {tool}: timed out after {secs}s and was killed",
+                    phase.word()
+                ),
+            );
+        }
+    };
+    let body = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let body = body.trim();
+    let (dropped, tail) = cap_tail(body, COMMAND_OUTPUT_CAP);
+    let ok = output.status.success();
+    let status = match output.status.code() {
+        Some(code) => format!("exit {code}"),
+        None => "killed by signal".to_string(),
+    };
+    let mut line = format!("hook[{name}] {} {tool}: {status}", phase.word());
+    if dropped {
+        line.push_str(&format!(
+            "\n(output capped to the last {} bytes of {})",
+            COMMAND_OUTPUT_CAP,
+            body.len()
+        ));
+    }
+    if !tail.is_empty() {
+        line.push('\n');
+        line.push_str(tail);
+    }
+    (ok, line)
+}
+
 pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -> String {
     execute_tool_call_timed(rt, root, call, DEFAULT_COMMAND_TIMEOUT).await
 }
@@ -999,6 +1119,9 @@ pub struct ApprovalCtx {
     /// The session's started MCP servers (I3-01): the turn offers their tools
     /// and routes approved calls back to them. Empty until `/mcp` connects.
     pub mcp: Arc<crate::mcp::McpHub>,
+    /// Pre/post shell hooks (I3-02): matched to each approved call by tool
+    /// name. Empty by default — no hooks, no change in behavior.
+    pub hooks: xencode_config_rs::AgentHooks,
 }
 
 impl ApprovalCtx {
@@ -1057,6 +1180,11 @@ impl ApprovalCtx {
 /// Run an approved call, checkpointing the target first. `mcp` is the session's
 /// started servers: the loop has them, so a server tool outside it is an error
 /// rather than a silent no-op (same shape as `plan`).
+///
+/// Hooks (I3-02) wrap this: a `before` hook runs first and — on a non-zero
+/// exit — vetoes the call before any checkpoint is taken or anything runs;
+/// an `after` hook runs last regardless of the call's outcome, its words
+/// appended to the result so the model and the transcript both see them.
 async fn run_and_checkpoint(
     rt: &TaskRuntime,
     root: &Path,
@@ -1064,6 +1192,22 @@ async fn run_and_checkpoint(
     ctx: &ApprovalCtx,
     mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
+    let mut before_note = String::new();
+    if let Some((name, command)) = hook_for(&ctx.hooks, HookPhase::Before, &call.name) {
+        let (ok, text) = run_hook(
+            root,
+            name,
+            &call.name,
+            HookPhase::Before,
+            command,
+            ctx.command_timeout,
+        )
+        .await;
+        if !ok {
+            return err(format!("pre-hook vetoed this call:\n{text}"));
+        }
+        before_note.push_str(&text);
+    }
     let note = ctx.snapshot_before(root, call);
     let mut result =
         execute_tool_call_plan(rt, root, call, ctx.command_timeout, Some(&ctx.plan), mcp).await;
@@ -1072,6 +1216,22 @@ async fn run_and_checkpoint(
             result.push('\n');
             result.push_str(&note);
         }
+    }
+    if !before_note.is_empty() {
+        result.insert_str(0, &format!("{before_note}\n"));
+    }
+    if let Some((name, command)) = hook_for(&ctx.hooks, HookPhase::After, &call.name) {
+        let (_, text) = run_hook(
+            root,
+            name,
+            &call.name,
+            HookPhase::After,
+            command,
+            ctx.command_timeout,
+        )
+        .await;
+        result.push('\n');
+        result.push_str(&text);
     }
     result
 }
@@ -2260,6 +2420,7 @@ mod tests {
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
+                hooks: xencode_config_rs::AgentHooks::default(),
             },
             prompts: rx,
         }
@@ -2583,6 +2744,7 @@ mod tests {
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
+                hooks: xencode_config_rs::AgentHooks::default(),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(
@@ -2789,6 +2951,144 @@ mod tests {
             start += 1;
         }
         text[start..].to_string()
+    }
+
+    // ── agent hooks (I3-02) ──────────────────────────────────────────
+
+    fn hooks(before: &[(&str, &str)], after: &[(&str, &str)]) -> xencode_config_rs::AgentHooks {
+        use std::collections::BTreeMap;
+        xencode_config_rs::AgentHooks {
+            before: before
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<BTreeMap<_, _>>(),
+            after: after
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
+
+    #[test]
+    fn hook_matching_prefers_the_exact_tool_name_keeps_phases_apart_and_has_a_wildcard() {
+        let h = hooks(&[("edit_file", "fmt"), ("*", "gate")], &[("*", "check")]);
+        // Exact tool name beats `*`.
+        assert_eq!(
+            hook_for(&h, HookPhase::Before, "edit_file"),
+            Some(("edit_file", "fmt"))
+        );
+        // `*` covers any tool without its own hook.
+        assert_eq!(
+            hook_for(&h, HookPhase::Before, "write_file"),
+            Some(("*", "gate"))
+        );
+        // Without a wildcard, a tool with no hook of its own gets nothing,
+        // so a `before` hook never spills into unrelated calls.
+        let narrow = hooks(&[("edit_file", "fmt")], &[]);
+        assert_eq!(hook_for(&narrow, HookPhase::Before, "run_command"), None);
+        // Phases are independent tables; `after` only has the wildcard.
+        assert_eq!(
+            hook_for(&h, HookPhase::After, "edit_file"),
+            Some(("*", "check"))
+        );
+        // MCP tools match by their full visible name, like everything else.
+        let mcp = hooks(&[("mcp__docs__search", "d")], &[]);
+        assert_eq!(
+            hook_for(&mcp, HookPhase::Before, "mcp__docs__search"),
+            Some(("mcp__docs__search", "d"))
+        );
+        // A default config hooks nothing at all.
+        assert_eq!(
+            hook_for(
+                &xencode_config_rs::AgentHooks::default(),
+                HookPhase::Before,
+                "write_file"
+            ),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_pre_hook_vetoes_the_call_before_anything_runs() {
+        let root = temp_root("hook-veto");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.hooks = hooks(&[("write_file", "echo blocked >&2; exit 7")], &[]);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("ought.txt", "landed"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            result.starts_with("error: pre-hook vetoed this call"),
+            "{result}"
+        );
+        assert!(
+            result.contains("hook[write_file] before write_file: exit 7"),
+            "{result}"
+        );
+        assert!(result.contains("blocked"), "{result}");
+        // Vetoing left the workspace and the rewind state untouched.
+        assert!(!root.join("ought.txt").exists(), "{result}");
+        assert_eq!(h.ctx.checkpoints.turns(), 0, "{result}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn passing_hooks_annotate_the_result_and_the_write_still_lands() {
+        let root = temp_root("hook-pass");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.hooks = hooks(
+            &[("write_file", "echo pre-ran")],
+            &[("write_file", "echo post-ran")],
+        );
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("notes.txt", "hello"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        // The pre-hook's words lead the result, before the tool's own.
+        assert!(
+            result.starts_with("hook[write_file] before write_file: exit 0\npre-ran"),
+            "{result}"
+        );
+        assert!(
+            result.contains("hook[write_file] after write_file: exit 0\npost-ran"),
+            "{result}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("notes.txt")).unwrap(),
+            "hello"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_after_hook_runs_even_after_a_failed_call_and_the_wildcard_sweeps() {
+        let root = temp_root("hook-after-fail");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.hooks = hooks(&[], &[("*", "echo swept")]);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &cmd_call("echo oops >&2; exit 3"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        // A failing command is not an `error:` result — the shell ran it ...
+        assert!(!result.starts_with("error:"), "{result}");
+        // ... and the after-hook still ran, caught by the wildcard.
+        assert!(
+            result.ends_with("hook[*] after run_command: exit 0\nswept"),
+            "{result}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     // ── update_plan (I2-03) ──────────────────────────────────────────

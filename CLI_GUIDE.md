@@ -48,7 +48,13 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
-`/mcp stop`).
+`/mcp stop`), and `/spawn <task> [#branch]` (run a subagent in a fresh
+git worktree next to the project, e.g. `proj-spawn-1` on branch
+`xencode/spawn-1`; a `#branch` suffix names the branch). The spawned
+agent's live steps stream in the transcript, its final answer is posted
+back with `(spawn #<id> · <task>)`, and `/spawn status` lists every
+registered run with its worktree location. Your main chat keeps working
+while the subagent works.
 
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
@@ -122,7 +128,7 @@ xencode config reset
 ```
 
 `config set` keys (values are validated; `config show` prints the JSON):
-`mcp_servers` is a nested map, so it is edited directly in the JSON instead.
+`mcp_servers` and `agent_hooks` are nested maps, so they are edited directly in the JSON instead.
 
 | Key | Type | Notes |
 |-----|------|-------|
@@ -141,6 +147,23 @@ xencode config reset
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `mcp_servers` | object | MCP stdio servers to offer as tools: `"name" → { "command": "...", "args": [...], "env": {...} }` (credentials go in `env`, never `args`); nothing is started until you run `/mcp` |
+| `agent_hooks` | object | shell hooks around **approved** agent tool calls: `"before"` and `"after"` maps from an exact tool name (or `"*"` for every tool) to a command run via `sh -c` in the workspace root. A failing `before` hook vetoes the call (nothing runs, no rewind point, output shown as `error: pre-hook vetoed this call`); a passing one has its output prepended to the result. The `after` hook always runs and its output is appended. Hook output is capped like `run_command` (stderr merged, tail kept) |
+
+Edit on `agent_hooks` directly in the JSON (`config set` has no nested-map key):
+
+```json
+{
+  "agent_hooks": {
+    "before": {
+      "write_file": "git status --short",
+      "run_command": "echo 'about to run a shell command'"
+    },
+    "after": {
+      "*": "true"
+    }
+  }
+}
+```
 
 ### `xencode cache <action>`
 Response cache management (`stats`, `clear`, …).

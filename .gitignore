@@ -112,3 +112,9 @@ secrets/
 # Local agent/session state
 .qoder/
 session-ses_*.md
+
+# Generated composition/brag session output — on-disk only, never committed
+brag-output/
+
+# Throwaway awk helper — on-disk only, never committed
+rust/sum.awk

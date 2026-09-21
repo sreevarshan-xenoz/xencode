@@ -611,8 +611,25 @@ outgoing editor-activity producer, configurable max session size.
   fails in its own words in a `[MCP]✗` line without stalling the TUI, and a
   stopped server's tools are withdrawn. `mcp_timeout` config (default 30 s,
   CLI `config set mcp_timeout`). **671 tests passed, zero clippy warnings**
-- [ ] I3-02 — pre/post tool-use hooks
-- [ ] I3-03 — `/spawn` subagent in a git worktree
+- [x] I3-02 — pre/post tool-use hooks: `agent_hooks` config declares
+  `before`/`after` shell commands (exact tool name, or `*` for every tool),
+  run via `sh -c` in the workspace root on **approved** agent tool calls. A
+  failing `before` hook vetoes the call before anything runs (file untouched,
+  no rewind checkpoint, result is `error: pre-hook vetoed ...`); a passing one
+  has its output prepended to the result. The `after` hook runs regardless of
+  the call's outcome and its output is appended. Hook output follows the same
+  cap as `run_command` (stderr merged, tail kept). **677 tests passed, zero clippy warnings**
+- [x] I3-03 — `/spawn` subagent in a git worktree: `/spawn <task> [#branch]`
+  creates a sibling `git worktree add` (`<dir>-spawn-<id>[-<branch>]`, branch
+  `#branch` or generated `xencode/spawn-<id>`), then runs the same delegated
+  agent loop as `/bytebot` isolated in that worktree (its own tool_root and a
+  fresh checkpoint store, so `/rewind` never touches it). Live status streams
+  are surfaced per call, and on completion the agent's final answer is posted
+  back in the main chat as `(spawn #<id> · <task>)` with a
+  `⏺ spawn #<id> done/failed — branch … at …, N/M call(s) completed` line.
+  `/spawn status` lists every registered run with worktree locations. The
+  user's task runs unimpeded in the main chat while the subagent works.
+  **682 tests passed, zero clippy warnings**
 - [ ] I4-01 — provider fallback chain (optional)
 - [ ] I4-02 — close-out docs + honesty sweep (incl. the README "ensemble
   reasoning" claim)
