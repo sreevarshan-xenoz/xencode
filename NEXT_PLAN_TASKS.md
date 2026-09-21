@@ -885,3 +885,38 @@ workspace gates green.
 Not in scope: `AnthropicProvider` stays as-is by explicit decision (documented
 gap, no key field); `crdt.rs` stays unwired (settled Milestone G decision); the
 provider-health and diff/worktree/task/insight panels are already real.
+
+## Docs archive purge — complete ✅
+
+**2026-09-21, after J-08.** The manuals were honest about the code but the repo
+still carried 9,371 lines of documentation describing a product this tree is not,
+linked from the entry-point docs. Deleted rather than archived:
+`DOCUMENTATION.md` (dual-stack Python + Rust, credential vault, ensemble
+reasoning, 12 crates/65 tests), `PRD.md`, `project details.md`,
+`docs/FEATURES.md`, `docs/ARCHITECTURE_DIAGRAMS.md` (an "API Gateway", a
+"Connection Pool Module" and a "Distributed Cache" — the Python package shape),
+`BROWSER_LOGIN_PLAN.md`, `docs/superpowers/` (executed migration plans, their
+specs and `- [ ]` agent-worker scratch, linked from nothing) and
+`images/4-6.jpg`.
+
+The files that stayed were re-checked against the tree, because the rule is
+"no fiction in manuals" and those docs had drifted:
+- `docs/ROADMAP.md` rewritten from the code. Its Phase 2 section listed
+  `xencode --git-commit`, `--git-review`, `--git-diff-analyze`,
+  `--git-branch suggest` and `/analyze` `/smart` `/context` chat commands that
+  the Rust CLI never defined (`Commands` in `xencode-cli/src/main.rs` has
+  `review`, not `--git-*`) — replaced with the real entry points:
+  `xencode review [--base main] [--format text|json]`, `Ctrl+R` per-file review,
+  `Ctrl+Y` PR dashboard, and `Ctrl+S` for the git commit panel, whose text
+  ("Staging N files…") and `[GIT_COMMIT_OK]` / `[GIT_COMMIT_ERR]` results come
+  from `ui.rs` / `keymap.rs`. Phase 3 and the Review Dashboard are now marked
+  shipped (Milestones E/F, per-file dashboard) instead of "not yet built", the
+  `ModelManager` class that does not exist is gone, the unreachable Anthropic
+  route left the architecture line, and the measured block is today's numbers.
+- `docs/api_documentation.md` trimmed to the server: the `xencode.core.*` module
+  reference, the benchmarking suite and the Python examples describe names no
+  file in `rust/` defines.
+- `docs/INSTALL_MANUAL.md` and README's diagram pointer retargeted off the
+  deleted files; README's "Historical archive" table is now a paragraph saying
+  those files were deleted, and its feature bullet stopped advertising Kubernetes
+  assets (`k8s/` is gone; `Dockerfile` + `docker-compose.yml` remain).

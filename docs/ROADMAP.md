@@ -7,59 +7,68 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-19** — a snapshot, not the current
-> state. The workspace is 14 crates and 751 tests as of 2026-09-21; the counts
-> below are what they were on that date. See [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md)
-> for what is actually shipped today.
+> **Verified against the tree on 2026-09-21** — 14 crates, 751 tests. Every line
+> below is marked with what the code does today, and the entry points are the
+> real ones (`xencode --help`, `?` in the TUI).
+> [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.
 
 ### Phase 1: The Foundation (✅ FROZEN / COMPLETE)
 *Core infrastructure is feature-complete. No further expansion here.*
 - [x] **Multi-model conversations** - Switch models mid-chat ✨
-- [x] **Context-aware responses** - Use conversation history intelligently ✨
-- [x] **Smart model selection** - Auto-choose best model for query type ✨
-- [x] **Project context awareness** - Local document knowledge base ✨
-- [x] **Code analysis system** - Intelligent code review and suggestions ✨
-- [x] **Core Classes** - `ConversationMemory`, `ResponseCache`, `ModelManager`
+- [x] **Context-aware responses** - Conversation memory + per-turn context assembly ✨
+- [x] **Smart model selection** - Routing from `ModelCapabilities`, sequential fallback across `agent_fallback_models` ✨
+- [x] **Project context awareness** - Repo-wide index + retrieval with a token budget (`xencode-context-rs`) ✨
+- [x] **Code analysis system** - Per-language heuristics + pattern-based OWASP scanner (`xencode-analysis-rs`) ✨
+- [x] **Core types** - `ConversationMemory` (`xencode-memory-rs`), `ResponseCache` (`xencode-cache-rs`), model profiles + health (`xencode-models-rs`)
 
 ---
 
-### Phase 2: The Perfect Git Loop (✅ Mostly Complete)
-*Goal: The world's best AI-powered Git assistant. "Developers never commit manually again."*
+### Phase 2: The Perfect Git Loop
+*Goal: The world's best AI-powered Git assistant.*
 
-#### 1. ✅ Smart Commit & Review (The Core Loop)
-- [x] **Smart Commit** - `xencode --git-commit` (Diff -> Semantic Message)
-- [x] **PR Reviewer** - `xencode --git-review` (Auto-review PRs for bugs/style)
-- [x] **Diff Analyzer** - `xencode --git-diff-analyze` (Catch bugs before commit)
-- [x] **Branch Assistant** - `xencode --git-branch suggest` (Smart branch naming)
+#### 1. Review (the core loop)
+- [x] **PR Reviewer** - `xencode review [--base main] [--format text|json]` — rename-aware diff triage with per-file analysis
+- [x] **Code Review panel** - `Ctrl+R`, per-file AI review of the current file (`xencode-tui-rs`)
+- [x] **Review Dashboard** - `Ctrl+Y`, per-file PR-level browsing (base toggle HEAD ↔ main)
+- [ ] **AI-generated commit message** - not built: the `Ctrl+S` git commit panel takes a message you type and runs `git commit -am` off the UI thread; nothing proposes the text from the diff
 
-#### 2. TUI Centricity (Git Interface)
-- [x] **Interactive Diff Viewer** - Rich TUI for reviewing changes before commit
-- [x] **Commit Wizard** - Interactive TUI flow for generated messages
-- [x] **Code Review panel** - per-file AI review in the TUI (`xencode-tui-rs`)
-- [/] **Review Dashboard** - PR-level review-comment browsing (not yet built)
+#### 2. Git in the TUI
+- [x] **Interactive Diff Viewer** - ratatui diff panel for reviewing changes before committing
+- [x] **Commit panel** - `Ctrl+S`: states how many files it will stage
+  (`Staging N files...`), runs `git commit -am` off the UI thread and reports the
+  result back as a `[GIT_COMMIT_OK]` / `[GIT_COMMIT_ERR]` chat line
+- [ ] **Branch Assistant** - not built as a CLI verb; worktrees are (`xencode worktree`, `/spawn`)
 
 ---
 
-### Phase 3: ⚡ The Offline Copilot (Next Up)
+### Phase 3: ⚡ The Offline Copilot (✅ Shipped as Milestones E/F)
 *Goal: Real-time assistance within the loop.*
-- [ ] **Real-time File Watcher** - Auto-analysis on save
-- [ ] **Proactive Warnings** - "You just introduced a bug"
-- [ ] **Refactor Suggestions** - Live improvement tips
+- [x] **Real-time File Watcher** — debounced `WorkspaceWatcher` (notify) feeds the TUI (Milestone E)
+- [x] **Proactive Warnings** — toasts for tracked/attached/open files, enriched with dep-graph dependents (Milestone E)
+- [x] **Refactor Suggestions** — `Ctrl+L` insights panel, `/advise`, `xencode advise` and the `repo_advise` agent tool, all reading one `advise_from_snapshot` path (Milestone F)
 
 ---
 
 ### 📦 Icebox / Long-Term Vision
 *Great ideas saved for later to maintain laser focus.*
-- **Voice Input/Output** — input is real since J-07: the panel records through
-  `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a WAV, and
-  transcribes with a whisper CLI when one is installed. Output (text-to-speech)
-  is still not built — the panel has no "speaking" state because nothing speaks
+- **Voice output (text-to-speech)** — input is real since J-07: the panel records
+  through `arecord`/`pw-record`/`parec`, meters from the captured PCM and keeps a
+  WAV, and transcribes with a whisper CLI when one is installed. Nothing speaks,
+  so the panel has no "speaking" state
+- **Anthropic without OpenRouter** — `xencode-providers-rs` has an Anthropic
+  client, but `ApiKeys` has no `anthropic_api_key` and both entry points pass
+  `None`, so an `anthropic:…` id cannot authenticate. Deliberately parked: adding
+  the key field is a decision, not a bug
 - ~~**Plugin System**~~ — done in Rust (`xencode-plugin-rs`). A `plugin.json` *is*
   the plugin: no dynamic linking, no plugin code. A version-compatible manifest
   loads and reaches every agent turn through its `prompt_prefix` and
   `before`/`after` hooks, which fill only the gaps `agent_hooks` in config.json
   left open
-- **Agent Orchestration** (Multi-agent debugging)
+- **Agent Orchestration** (multi-agent debugging) — `/spawn` already runs a
+  delegated agent loop in its own git worktree; nothing coordinates several runs
+- **CRDT session sync** — `crdt.rs` exists and is deliberately unwired (settled
+  Milestone G decision: session state stays in-memory)
+- **Commit message generation** — see Phase 2 above
 - **VS Code Extension** (Separate product)
 - **Web Interface** (Separate product)
 
@@ -67,7 +76,8 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ### Current Architecture
 ```
-xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemini / Qwen / OpenRouter
+xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / OpenRouter
+                                    ↘ retry + sequential fallback (agent_fallback_models)
 ```
 
 ### Target Architecture
@@ -87,25 +97,23 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemi
 
 ## 🎯 Implementation Progress
 
-### ✅ Completed (Phase 1)
-1. **Multi-model conversation system** - Query detection, model recommendation
-2. **Smart context injection** - Project awareness, file analysis
-3. **Code analysis mode** - Comprehensive code review system
-4. **Enhanced classes** - ConversationMemory, ResponseCache, ModelManager
+### ✅ Shipped since this file was written
+1. **Approval-gated agent tool loop** (Milestone I) — 11 tools, a modal prompt per
+   mutating call, checkpoints + `/rewind`, plan visibility, pre/post tool hooks,
+   `/spawn` in a worktree, MCP stdio servers, sequential provider fallback
+2. **Background tasks & worktrees** (Milestone D) — task registry, `Ctrl+K` panel,
+   `xencode tasks` / `xencode worktree`
+3. **Live refactor insights** (Milestone F) and **team-mode hardening**
+   (Milestone G) — bearer tokens + RBAC + a JSONL audit trail on HTTP and WS,
+   loopback-by-default bind with opt-in TLS
+4. **Every TUI panel tells the truth** (Milestone J, J-01…J-08) — the seven
+   scripted panels were replaced with real scans, measurements, model calls and
+   microphone capture, and plugin manifests now load
 
-### 🚀 Current Focus (Phase 3)
-1. **Real-time file watcher** - workspace watching + proactive warnings (not yet built)
-2. **Refactor suggestions** - live improvement tips over the context symbol graph
-3. **Multimodal inputs** - image/document input paths (not yet built)
-4. **Team-mode hardening** - RBAC + audit logs over the collaboration crate
-
-### 📋 Completed (was "Next Priorities")
-1. ✅ **Voice input** - real microphone capture with meters from the PCM, a kept WAV, and whisper transcription when an engine is installed (J-07); output/TTS still unbuilt
-2. ✅ **Plugin system** - `xencode-plugin-rs` with registry/host/manifest, and a
-   runtime (J-08) that loads a manifest's prompt prefix and hooks into the agent
-3. ✅ **Collaboration features** - HTTP/WebSocket server with bearer-token auth,
-   role gating and an audit trail (`crdt.rs` exists but is deliberately unwired)
-4. ✅ **API server** - axum routes/auth/ws in `xencode-server-rs`
+### 🚀 Next up
+No open milestone: Milestone J closed the last known gap between what the manuals
+promise and what the code does. The icebox above is where the next one comes
+from.
 
 ## 📊 Success Metrics & Current Status
 
@@ -116,142 +124,12 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Anthropic / Gemi
 - **Feature Usage**: 80% of users use 3+ advanced features
 - **Performance**: Sub-second response times for all operations
 
-### ✅ Phase 1 Achievements
-- **Code Analysis**: Found 304 real issues in codebase (100% accuracy)
-- **Smart Context**: Scans 15+ files, builds relevant context automatically
-- **Multi-Model**: Detects 5 query types, recommends optimal models
-- **Performance**: All systems respond in <1 second
-- **Integration Ready**: Modular design for easy integration
-
-### 📈 Metrics as measured (2026-09-19)
-- **Rust Migration**: 13/13 crates ported — complete
-- **Test Suite**: 421 passing, 0 failing, 4 ignored
-- **Compilation**: clean `cargo check` across the workspace (zero warnings)
-- **Code Quality**: AST/pattern analysis for syntax, style, and security issues (`xencode-analysis-rs`)
+### 📈 Metrics as measured (2026-09-21)
+- **Rust Migration**: 14/14 crates — complete; the Python stack is deleted
+- **Test Suite**: 751 passing, 0 failing, 4 ignored (`cargo test --workspace`)
+- **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo fmt --all --check` clean
+- **Code Quality**: per-language heuristics + pattern-based OWASP scanner
+  (`xencode-analysis-rs`)
 - **Context Awareness**: repo-wide indexing + per-turn retrieval (`xencode-context-rs`)
 - **Model Intelligence**: offline `ModelCapabilities` + status-driven fallback routing
-
-## 🚀 Let's Build the Future of AI Development!
-
-Ready to transform how developers work with AI? Next up: Phase 3 (file watcher,
-refactor suggestions, multimodal, team-mode hardening) — see
-[NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md). 🔥
-## 🔥 Phase 1 Implementation Details
-
-> Historical notes from the original Python implementation. All of this is
-> superseded by the Rust workspace (`rust/crates/*`).
-
-### ✅ Multi-Model System (`multi_model_system.py` — historical)
-**Features:**
-- Query type detection using keyword analysis
-- Model capability mapping with performance scores
-- Smart model recommendation algorithm
-- Conversation context preservation across model switches
-
-**Capabilities:**
-- Detects 5 query types: code, creative, analysis, explanation, general
-- Maps 4 model types: qwen3:4b, llama2:7b, codellama:7b, mistral:7b
-- Provides performance scores (speed 1-10, quality 1-10)
-- Suggests optimal model with reasoning
-
-### ✅ Smart Context System (`smart_context_system.py`)
-**Features:**
-- Project root detection using common indicators (.git, package.json, etc.)
-- Intelligent file scanning with relevance scoring
-- Content summarization for multiple file types
-- Context size management and optimization
-
-**Capabilities:**
-- Scans 15+ file types with smart filtering
-- Analyzes file relevance using keyword matching
-- Generates concise summaries for Python, JS, Markdown files
-- Manages context size within token limits (8192 default)
-
-### ✅ Code Analysis System (`code_analysis_system.py`)
-**Features:**
-- AST-based Python code analysis
-- Style checking (line length, whitespace, naming)
-- Security issue detection (bare except, potential bugs)
-- Performance and maintainability analysis
-
-**Capabilities:**
-- Supports Python, JavaScript, TypeScript analysis
-- Detects 7 issue types with 4 severity levels
-- Provides actionable suggestions for each issue
-- Generates comprehensive analysis reports
-
-## 🎯 Phase 2 Implementation Plan
-
-### 🔧 System Integration (Priority 1)
-**Goal**: Merge all Phase 1 features into main xencode system
-
-**Tasks:**
-1. **Enhanced CLI Commands**:
-   ```bash
-   xencode --analyze ./src/          # Code analysis
-   xencode --models                  # Multi-model management
-   xencode --context                 # Show current context
-   xencode --smart "query"           # Auto-select best model
-   ```
-
-2. **Chat Mode Integration**:
-   - Add `/analyze` command for code analysis
-   - Add `/model <name>` command for model switching
-   - Add `/context` command to show current context
-   - Add `/smart` toggle for automatic model selection
-
-3. **Context-Aware Responses**:
-   - Inject relevant project context into queries
-   - Use conversation memory for better responses
-   - Smart file inclusion based on query relevance
-
-### 🔧 Git Integration (Priority 2)
-**Goal**: Intelligent Git workflow assistance
-
-**Features:**
-1. **Smart Commit Messages**:
-   ```bash
-   xencode --git-commit              # Generate commit message from diff
-   xencode --git-commit --analyze    # Include code analysis in commit
-   ```
-
-2. **PR Review Assistant**:
-   ```bash
-   xencode --git-review PR-123       # Review pull request
-   xencode --git-diff                # Analyze current diff
-   ```
-
-3. **Branch Management**:
-   ```bash
-   xencode --git-branch "feature"    # Suggest branch name
-   xencode --git-merge               # Analyze merge conflicts
-   ```
-
-### 🔧 Enhanced Developer Tools (Priority 3)
-**Goal**: Real-time development assistance
-
-**Features:**
-1. **Live Coding Assistant**:
-   - File watching for real-time analysis
-   - Context-aware suggestions as you type
-   - Error detection and fix suggestions
-
-2. **Documentation Generator**:
-   - Auto-generate docstrings from code
-   - Create README files from project analysis
-   - Generate API documentation
-
-3. **Test Generation**:
-   - Auto-create unit tests from functions
-   - Generate integration tests from API endpoints
-   - Create test data and fixtures
-
-## 🚀 Ready for Phase 2!
-
-Phase 1 has established a solid foundation with enterprise-grade features. The next phase will integrate everything into a seamless developer experience that revolutionizes how we work with AI in development workflows.
-
-**Let's continue building the future of AI development tools!** 🔥✨
-
----
-
-> 📄 **Reference:** [`xencode-codebase-reference.html`](../xencode-codebase-reference.html) — Complete codebase reference with Rust crate details, TUI panel status, test coverage, architecture diagrams, backlog items, and phase-by-phase migration tracking.

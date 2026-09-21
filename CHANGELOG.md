@@ -71,6 +71,25 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   `.xencode/technical_debt.db`, a 274 KiB SQLite artifact of the Python-era
   `technical_debt_manager.py` (`debt_scans` / `debt_items` tables) that no Rust
   code opens — `.gitignore` already covers `.xencode/`.
+- **The Python-era documentation archive, deleted rather than kept as history.**
+  `DOCUMENTATION.md` (737 lines: a "dual-stack architecture — Python feature
+  system + Rust core runtime", a credential vault, ensemble reasoning, 12
+  crates/65 tests), `PRD.md`, `project details.md`, `docs/FEATURES.md` (a
+  "wild ideas" backlog whose migration status line still said 12 crates/65
+  tests), `docs/ARCHITECTURE_DIAGRAMS.md` (mermaid diagrams of an API Gateway, a
+  Connection Pool module and a Distributed Cache — the Python package shape, not
+  the 14-crate workspace) and `BROWSER_LOGIN_PLAN.md`. Also
+  `docs/superpowers/` (4,282 lines of executed migration plans, their specs and
+  agent-worker instructions, linked from nothing) and three unused screenshots
+  (`images/4-6.jpg`; the README shows 1-3). The README archive table that pointed
+  at them is gone, `docs/INSTALL_MANUAL.md` and the README's architecture pointer
+  now point at real files, and `docs/ROADMAP.md` was rewritten from the tree:
+  its `xencode --git-commit` / `--git-review` / `--git-branch suggest` flags and
+  `/analyze` / `/smart` chat commands never existed in the Rust CLI (the real
+  entry points are `xencode review` and the TUI's `Ctrl+R` / `Ctrl+Y` /
+  `Ctrl+S`), and `docs/api_documentation.md` lost its second half — the
+  `xencode.core.*` module reference and Python usage examples (307 → 48 lines,
+  the server's auth matrix kept). 9,371 lines of removed docs in total.
 
 ### Fixed
 - **`xencode plugin remove <name>` accepted a path.** The name was interpolated

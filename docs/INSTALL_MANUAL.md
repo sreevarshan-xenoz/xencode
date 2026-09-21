@@ -96,4 +96,5 @@ ollama pull qwen3:4b
 ---
 
 > 📄 **Reference:** [README.md](../README.md) for the crate layout and current test
-> counts; [docs/ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md) for architecture.
+> counts, and its agent-loop diagram for how a turn flows;
+> [CLI_GUIDE.md](../CLI_GUIDE.md) for every command and config key.
