@@ -27,45 +27,43 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to maintain a w
    cd xencode
    ```
 
-3. **Set up the development environment**:
+3. **Build the workspace** (from the `rust/` directory — everything lives in one
+   Cargo workspace there):
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   pip install -e .
-   ```
-
-4. **Install pre-commit hooks** (recommended):
-   ```bash
-   pip install pre-commit
-   pre-commit install
+   cd rust
+   cargo build
    ```
 
 ## Development Setup
 
 ### Required Dependencies
 
-- Python 3.8+
-- Ollama (for local model inference)
+- Rust (stable toolchain, edition 2021) — `rustup` recommended
 - Git
+- Ollama and/or llama.cpp (only needed to exercise local model inference)
 
 ### Optional Dependencies
 
-- Node.js (for Bytebot UI development)
-- Docker (for containerized testing)
+- Docker (for the collaboration server image)
+
+### Running the App Under Development
+
+```bash
+cd rust
+cargo run -p xencode-cli -- --help      # CLI
+cargo run -p xencode-cli -- tui         # TUI
+```
+
+The CLI reads and writes `~/.xencode/config.json`. Set `XCODE_CONFIG_DIR` to a
+scratch directory to keep experiments (config, audit log, conversation memory)
+out of your real home directory — and to keep test runs hermetic.
 
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=xencode --cov-report=html
-
-# Run specific test category
-pytest -m "unit"
-pytest -m "integration"
+cd rust
+cargo test --workspace            # all crates
+cargo test -p xencode-tui-rs      # one crate
 ```
 
 ## How to Contribute
@@ -75,7 +73,7 @@ pytest -m "integration"
 1. Check existing issues first
 2. Use the bug report template
 3. Include:
-   - Python version
+   - Rust toolchain version (`rustc --version`)
    - OS version
    - Steps to reproduce
    - Expected vs actual behavior
@@ -90,9 +88,10 @@ pytest -m "integration"
 
 ### Submitting Code
 
-1. **Create a branch** from `dev`:
+1. **Create a branch** from `main`:
    ```bash
-   git checkout dev
+   git checkout main
+   git pull
    git checkout -b feature/your-feature-name
    ```
 
@@ -100,47 +99,57 @@ pytest -m "integration"
 
 3. **Write tests** for new functionality
 
-4. **Run tests** to ensure everything passes:
+4. **Run the full gate** from `rust/` — all three must be clean:
    ```bash
-   pytest
+   cargo test --workspace
+   cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+   cargo fmt --all --check
    ```
 
-5. **Run linting**:
-   ```bash
-   ruff check xencode/
-   mypy xencode/
-   ```
+5. **Update the manuals** in the same pass. A user-facing change (new command,
+   flag, TUI slash command, behavior change) is not finished until `README.md`,
+   `QUICK_START.md`, `CLI_GUIDE.md` and `CHANGELOG.md` reflect it, and
+   `NEXT_PLAN_TASKS.md` records the step.
 
-6. **Commit your changes** with clear messages (see below)
+6. **Commit your changes** atomically — one logical change per commit, with a
+   clear message (see below)
 
 7. **Push and create a PR**
 
 ## Coding Standards
 
-### Python Style
+### Rust Style
 
-- Follow [PEP 8](https://pep8.org/)
-- Use [Black](https://black.readthedocs.io/) for formatting (line length: 88)
-- Use [Ruff](https://docs.astral.sh/ruff/) for linting
-- Type hints are required for all public APIs
+- `cargo fmt` is authoritative for formatting; CI fails on `cargo fmt --check`
+- `cargo clippy --workspace --all-targets -- -D warnings` must be clean
+  (`clippy::format-in-format-args` is allowed workspace-wide)
+- Prefer `thiserror`-style typed errors over stringly-typed `Result`s; the
+  workspace crates each own their error enum
+- `unwrap()`/`expect()` are fine in tests, not in product paths that can hit a
+  missing file, a network failure or a terminal that isn't there
 
 ### Code Organization
 
-- Keep functions small and focused (< 50 lines ideal)
-- Use descriptive variable and function names
-- Add docstrings for public APIs
-- Group related functionality into modules
+- The product is Rust only, under the `rust/` workspace. Do not reintroduce a
+  Python stack, `requirements.txt`, or Python linting/test tooling.
+- Put library code in the crate that owns the concern
+  (`xencode-config-rs`, `xencode-models-rs`, `xencode-providers-rs`, `xencode-mcp-rs`, …)
+  and keep `xencode-cli`/`xencode-tui-rs` as thin composition layers
+- Keep functions small and focused; use `mod.rs`-free module files
+- Write doc comments (`///`) on public items — the module-level `//!` header
+  should say *why* the module exists, not restate what each function does
 
 ### Commit Messages
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+Follow [Conventional Commits](https://www.conventionalcommits.org/), scoped to
+the crate or area the change touches:
 
 ```
-feat: add new ensemble reasoning method
-fix: resolve memory leak in cache system
-docs: update API documentation
-test: add tests for security auditor
-refactor: extract CLI commands into submodules
+feat(agent): provider fallback chain
+fix(tui): hermetic tests — slash commands leave memory
+docs: honesty sweep across manuals
+test(mcp): cover server start/stop routing
+refactor(config): move URL validation into a helper
 ```
 
 **Types:**
@@ -154,86 +163,64 @@ refactor: extract CLI commands into submodules
 
 ### Security Best Practices
 
-- **Never commit secrets** (API keys, passwords, tokens)
-- Use environment variables or the credential vault:
-  ```bash
-  # Initialize the vault (creates ~/.xencode/vault.json)
-  xencode vault init
-
-  # Migrate plaintext keys from config into the encrypted vault
-  xencode vault migrate --config-path ~/.xencode/config.json
-
-  # Check vault status
-  xencode vault status
-
-  # Migrate and replace keys with env-var references
-  xencode vault migrate --delete-after
-  ```
-- Run `bandit` security scanner:
-  ```bash
-  bandit -r xencode/
-  ```
-- Validate all user inputs
-- Use parameterized queries for database operations
+- **Never commit secrets.** API keys live in the `api_keys` object inside
+  `~/.xencode/config.json`, which is gitignored. `xencode config set` refuses
+  key names, so edit the file directly and restrict it (`chmod 600`) — there is
+  no encryption layer, so file permissions are the control.
+- Keep the agent's approval gate intact: tool classes that edit files or run
+  commands require approval unless the user has explicitly lowered it.
+- Validate all user inputs at boundaries (CLI args, config values, MCP results)
+- The collaboration server must authenticate every mutation with a bearer token
+  and record joins, mutations and denials in its audit log
 
 ## Testing
 
-### Test Categories
+### Test Layers
 
-- **Unit tests**: Test individual functions/classes
-- **Integration tests**: Test component interactions
-- **End-to-end tests**: Test complete workflows
+- **Unit tests**: `#[cfg(test)] mod tests` inside each crate, next to the code
+  they exercise
+- **Integration tests**: `crates/<crate>/tests/*.rs`
+- **Async tests**: `#[tokio::test]` for anything touching providers or the agent loop
 
-### Writing Tests
+Tests must not depend on the developer's home directory, a running Ollama, or
+the network. Use `App::for_tests()` for TUI tests (non-persistent conversation
+memory), an explicit `XCODE_CONFIG_DIR` pointing at a temp dir when the config
+loader is involved, and `ConversationMemory::new(n)` over
+`with_persistence` in tests.
 
-```python
-import pytest
-from xencode.module import MyClass
+```rust
+#[tokio::test]
+async fn slash_commands_stay_out_of_conversation_memory() {
+    let mut app = App::for_tests();
+    let (tx, _rx) = mpsc::unbounded_channel::<String>();
 
-class TestMyClass:
-    def test_basic_functionality(self):
-        """Test basic operation"""
-        obj = MyClass()
-        result = obj.do_something()
-        assert result is not None
-    
-    def test_edge_case(self):
-        """Test edge case handling"""
-        obj = MyClass()
-        with pytest.raises(ValueError):
-            obj.do_something_invalid()
+    let before = app.memory.get_context(100_000).len();
+    app.set_chat_text("/mcp status");
+    app.submit_message(tx);
+    assert_eq!(app.memory.get_context(100_000).len(), before);
+}
 ```
 
 ### Running Tests
 
 ```bash
-# All tests
-pytest
-
-# With coverage
-pytest --cov=xencode --cov-report=term-missing
-
-# Specific test file
-pytest tests/features/test_feature.py
-
-# Specific test function
-pytest tests/features/test_feature.py::TestClass::test_method
-
-# Slow tests only
-pytest -m slow
+cd rust
+cargo test --workspace                        # everything
+cargo test -p xencode-providers-rs            # one crate
+cargo test -p xencode-tui-rs focus            # tests matching a name
 ```
 
 ## Pull Request Guidelines
 
 ### PR Checklist
 
-- [ ] Tests added/updated
-- [ ] Documentation updated
-- [ ] Linting passes (`ruff check`)
-- [ ] Type checking passes (`mypy`)
-- [ ] Security scan passes (`bandit`)
+- [ ] `cargo test --workspace` passes
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args` is clean
+- [ ] `cargo fmt --all --check` is clean
+- [ ] Tests added/updated for new behavior
+- [ ] Manuals updated (`README.md`, `QUICK_START.md`, `CLI_GUIDE.md`, `CHANGELOG.md`, `NEXT_PLAN_TASKS.md`)
 - [ ] Commit messages follow conventions
-- [ ] Branch is up to date with `dev`
+- [ ] Branch is up to date with `main`
 
 ### PR Description Template
 
@@ -293,10 +280,12 @@ Email security concerns to: security@xenoz.com
 ### Security Best Practices for Contributors
 
 1. Never commit credentials or secrets
-2. Use the credential vault for sensitive data
+2. Keep API keys in `~/.xencode/config.json` (`chmod 600`) or environment
+   variables — never in the repo
 3. Validate all inputs
 4. Follow secure coding guidelines
-5. Run security scans before submitting PRs
+5. Keep tool approvals on by default for anything that edits files or runs
+   commands
 
 ## Questions?
 

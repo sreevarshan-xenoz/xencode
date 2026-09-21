@@ -1,90 +1,53 @@
 {
-  "_comment": "Xencode Configuration Example - Copy to .xencode.json and fill in your values",
-  
-  "providers": {
-    "ollama": {
-      "enabled": true,
-      "base_url": "http://localhost:11434",
-      "models": ["llama3.1:8b", "qwen3:4b", "mistral:7b", "phi3:mini"],
-      "timeout_ms": 30000
+  "_comment": "Example of ~/.xencode/config.json (or $XCODE_CONFIG_DIR/config.json). Copy it there, or set individual keys with `xencode config set <KEY> <VALUE>`. Only the keys below exist — unknown keys are ignored by the loader. Cloud providers are selected by model prefix: `qwen:...`, `google_gemini:...`, or an OpenRouter-style `vendor/model` id; the local model is `default_model`. `agent_fallback_models` is tried in order by the agent, only while nothing has streamed yet; a `vendor/model` entry needs `openrouter_api_key`.",
+  "default_model": "qwen2.5:7b",
+  "api_keys": {
+    "openai_api_key": null,
+    "openrouter_api_key": null,
+    "google_gemini_api_key": null,
+    "qwen_client_id": null,
+    "qwen_api_key": null
+  },
+  "agent_approval": "ask",
+  "agent_max_rounds": 16,
+  "agent_command_timeout": 30,
+  "agent_fallback_models": [
+    "qwen2.5:14b",
+    "openai/gpt-4o-mini"
+  ],
+  "agent_hooks": {
+    "before": {
+      "edit_file": "test -z \"$(git diff --name-only)\" || echo 'dirty tree' >&2"
     },
-    "openai": {
-      "enabled": true,
-      "api_key": "${OPENAI_API_KEY}",
-      "base_url": "https://api.openai.com/v1",
-      "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
-      "timeout_ms": 30000
-    },
-    "anthropic": {
-      "enabled": true,
-      "api_key": "${ANTHROPIC_API_KEY}",
-      "base_url": "https://api.anthropic.com/v1",
-      "models": ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"],
-      "timeout_ms": 60000
-    },
-    "google_gemini": {
-      "enabled": true,
-      "api_key": "${GOOGLE_API_KEY}",
-      "base_url": "https://generativelanguage.googleapis.com/v1beta",
-      "models": ["gemini-2.0-flash", "gemini-2.0-pro"],
-      "timeout_ms": 30000
-    },
-    "openrouter": {
-      "enabled": true,
-      "api_key": "${OPENROUTER_API_KEY}",
-      "base_url": "https://openrouter.ai/api/v1",
-      "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4", "google/gemini-2.0-flash"],
-      "timeout_ms": 30000
-    },
-    "qwen": {
-      "enabled": true,
-      "auth_method": "oauth2_device_flow",
-      "base_url": "https://chat.qwen.ai/v1",
-      "models": ["qwen-max", "qwen-plus", "qwen-turbo"],
-      "timeout_ms": 30000
-    },
-    "huggingface": {
-      "enabled": false,
-      "api_key": "${HUGGINGFACE_API_KEY}",
-      "base_url": "https://api-inference.huggingface.co/models",
-      "models": ["meta-llama/Meta-Llama-3-8B-Instruct", "mistralai/Mixtral-8x7B-Instruct-v0.1"],
-      "timeout_ms": 60000
+    "after": {
+      "*": "echo 'tool call finished'"
     }
   },
-
-  "default_provider": "ollama",
-  "default_model": "llama3.1:8b",
-
-  "ensemble": {
-    "enabled": true,
-    "method": "hybrid",
-    "models": ["llama3.1:8b", "qwen3:4b", "phi3:mini"],
-    "require_consensus": false
+  "mcp_servers": {
+    "fs": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/tmp"
+      ],
+      "env": {}
+    }
   },
-
-  "cache": {
-    "enabled": true,
-    "max_memory_mb": 512,
-    "max_disk_mb": 2048,
-    "compression": "lzma"
-  },
-
-  "security": {
-    "scan_on_save": true,
-    "severity_threshold": "medium",
-    "report_format": "detailed"
-  },
-
-  "analytics": {
-    "enabled": true,
-    "track_usage": true,
-    "track_performance": true
-  },
-
-  "agent": {
-    "default_model": "qwen3:4b",
-    "provider": "auto",
-    "use_rag": false,
-    "smart_model_selection": false
-  }
+  "mcp_timeout": 30,
+  "active_theme": "ocean",
+  "layout": "classic",
+  "rounded_borders": false,
+  "show_scrollbars": true,
+  "show_line_numbers": true,
+  "ollama_url": "http://localhost:11434",
+  "llama_cpp_url": "http://localhost:8080",
+  "llama_cpp_model_path": "",
+  "llama_cpp_executable": "",
+  "llama_cpp_args": [],
+  "cache_enabled": true,
+  "max_cache_size": 100,
+  "memory_enabled": true,
+  "max_memory_items": 50,
+  "response_timeout": 30
 }

@@ -2,18 +2,23 @@
 
 > Companion doc to [docs/ROADMAP.md](docs/ROADMAP.md). This file tracks the
 > current focus and immediate next milestones for Xencode. **Verified against
-> the tree on 2026-09-20** — see [docs/RUST_MIGRATION_STATUS.md](docs/RUST_MIGRATION_STATUS.md).
+> the tree on 2026-09-21** — day-to-day detail in
+> [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md).
 
 ## Current Status
 
-- ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, vault, smoke gate)
-- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys, voice MVP)
+- ✅ **Milestone A complete**: Reliability hardening (transport retries, diagnostics, model lock, smoke gate)
+- ✅ **Milestone B complete**: Agentic MVP stability (workflow loop, auto-fix suggestions, hotkeys) + the scripted voice panel
 - ✅ **Milestone C complete**: Deep dev workflow (git automation, diff panel, replay, NL terminal safety)
 - ✅ **Milestone D complete**: Background tasks & worktrees (task registry + `Ctrl+K` panel + agentic `background_*` tools + `xencode tasks`/`worktree` CLI + `Ctrl+O` worktree panel)
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
-- ✅ **Rust migration complete**: 13 crates, 645 tests passing, zero warnings — the Rust workspace is the only active codebase
-- ✅ **Backlog emptied** (2026-09-20) — next focus not yet chosen
+- ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
+- ✅ **Rust migration complete**: 14 crates, 692 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Backlog emptied** (2026-09-21) — next focus not yet chosen. The known gaps
+  worth picking from: an `anthropic_api_key` so the existing Anthropic client is
+  reachable, a plugin runtime, and either wiring or deleting the seven scripted
+  TUI panels.
 
 ## Backlog (all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 

@@ -6,7 +6,7 @@
 # Already installed? Skip to Usage!
 
 # If not, clone and run the installer:
-git clone <your-repo>
+git clone https://github.com/sreevarshan-xenoz/xencode
 cd xencode
 ./install.sh        # Linux/macOS — builds the Rust binary, checks Ollama
 ```
@@ -28,6 +28,12 @@ xencode
 
 Launches the immersive TUI. Run `/init` once per project for project-aware
 answers, then just ask.
+
+Local models need nothing else. For cloud models, put the keys in the
+`api_keys` object of `~/.xencode/config.json` (`xencode config show` prints
+it; `chmod 600` it — the file is plain JSON, there is no vault) and select a
+cloud model with `xencode config set default_model …`. See
+[CLI_GUIDE.md](CLI_GUIDE.md) for the accepted model prefixes.
 
 ## Usage
 
