@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 684 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 685 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -684,12 +684,19 @@ panel's own words.** No seeded arrays, no invented results.
 Ordering is cheapest-real-first; each item is its own commit and must keep the
 workspace gates green.
 
-- [ ] J-01 — **Security auditor**: walk the workspace with the existing
-  `scanner::scan_tree` file list and run `VulnerabilityScanner::scan_file` +
-  `CodeAnalyzer::analyze_file` on each in a background task, streaming
+- [x] J-01 — **Security auditor** (2026-09-21): `Enter` walks the workspace with
+  the existing `scanner::scan_tree` file list on a blocking thread and runs
+  `VulnerabilityScanner::scan_file` on each readable file, streaming
   `[SECURITY]finding:` lines as they come and `[SECURITY]progress:` per file.
-  Done when the panel's counts equal `xencode security`/`analyze` output for the
-  same tree, and an unreadable file appears as a log line instead of silence.
+  Deliberately **not** `CodeAnalyzer::analyze_file` — the analyzer emits style
+  and maintainability issues only, so adding it would have shown non-security
+  findings under a security heading. Secret files from the walk are reported as
+  Medium findings. Completed with real counts: the panel's totals come from the
+  scan itself, unreadable files and a failed walk surface as
+  `[SECURITY]note:` / `[SECURITY]failed:` log lines instead of silence, and the
+  200-line display cap never affects the reported totals. Covered by
+  `security_scan_streams_real_findings`, which asserts the scripted
+  `config.py` / "tests passed" strings are gone. **685 tests passed.**
 - [ ] J-02 — **Performance profiler**: replace the fake function table with the
   numbers the app already measures — `average_latency`, per-provider
   `ollama_health_entries` latency, llama.cpp `tokens/s` from

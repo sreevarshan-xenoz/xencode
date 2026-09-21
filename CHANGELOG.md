@@ -8,11 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Milestone J — opened
-Seven TUI panels still render hardcoded phrase lists (voice, terminal
-assistant, security auditor, profiler, custom models, learning mode,
-multi-language) and the plugin registry loads no runtime. Neither is fixed yet;
-`NEXT_PLAN_TASKS.md` § Milestone J tracks the work item by item, with a
-done-when rule per panel.
+Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
+security auditor, profiler, custom models, learning mode, multi-language) and
+the plugin registry loaded no runtime. **J-01 has landed** — the security
+auditor is real, leaving six scripted panels. `NEXT_PLAN_TASKS.md` §
+Milestone J tracks the work item by item, with a done-when rule per panel.
 
 ### Removed
 - **Unused deployment surface and stale design docs.** Deleted `k8s/`
@@ -88,6 +88,20 @@ done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Security auditor panel is real (Milestone J, J-01): `Enter` in the panel used
+  to print seven hardcoded findings about a `config.py` that is not in this
+  tree. It now walks the workspace with the same file list the context engine
+  uses (`scanner::scan_tree`, off the UI thread) and runs
+  `VulnerabilityScanner::scan_file` — the scanner behind `xencode analyze` — on
+  every readable file, streaming each hit as
+  `[SECURITY]finding:SEVERITY|type|file:line|message — recommendation`. Secret
+  files the walk flags come in as Medium findings, the progress bar is files
+  scanned over files found, and the log lines carry the real totals plus every
+  file it could not read. If the walk itself fails the panel says
+  `scan failed: <reason>` and goes idle instead of showing an empty scan as a
+  clean one. Findings are capped at 200 on screen; the reported counts stay the
+  true totals. `CodeAnalyzer` is *not* included — it reports style and
+  maintainability issues, not security ones.
 - `/spawn` subagent in a git worktree (Milestone I, I3-03): `/spawn
   <task> [#branch]` runs the delegated agent loop (`/bytebot`'s engine)
   inside a fresh sibling worktree next to the project — `<dir>-spawn-<id>`
