@@ -156,6 +156,14 @@ const SPAWN_PREFIX: &str = "[SPAWN]";
 /// totals it reports stay true — the cap only limits lines on screen.
 const FINDINGS_CAP: usize = 200;
 
+/// How long the profiler watches this process to turn two `/proc` reads into a
+/// CPU rate. Long enough to be measurable, short enough to not feel like a
+/// frozen UI.
+const PROFILER_SAMPLE_MS: u64 = 250;
+
+/// Persisted metric rows the profiler lists, newest first.
+const PROFILER_METRIC_ROWS: usize = 6;
+
 /// How a spawn's task is framed for the model. The worktree is the whole
 /// deal: everything it touches is inside it, and it must say that plainly.
 const SPAWN_BRIEF: &str = "Delegated task in your own git worktree — you are isolated \
@@ -421,13 +429,17 @@ pub struct App<'a> {
     pub sec_filter_severity: String, // "All", "Critical", "High", "Medium", "Low"
     pub sec_sort_mode: String,       // "severity" or "category"
 
-    // Performance Profiler state
+    // Performance Profiler state. Everything here is measured, not simulated:
+    /// `None` means the number does not exist yet (no turn has run, `/proc`
+    /// unreadable), which the panel renders as `n/a` rather than as zero.
     pub profiler_active: bool,
     pub profiler_running: bool,
-    pub profiler_functions: Vec<(String, f64, f64, u32)>, // (name, time_ms, mem_mb, calls)
-    pub profiler_gauge_cpu: f64,
-    pub profiler_gauge_mem: f64,
-    pub profiler_gauge_latency: f64,
+    pub profiler_rows: Vec<(String, String, String)>, // (source, metric, value)
+    pub profiler_notes: Vec<String>,
+    pub profiler_gauge_cpu: Option<f64>, // % of one core, this process
+    pub profiler_gauge_mem: Option<f64>, // resident set size, MB
+    pub profiler_gauge_mem_total: Option<f64>, // system memory, MB (bar scale)
+    pub profiler_gauge_latency: Option<f64>, // average turn latency, ms
 
     // Custom Models state
     pub models_editing: bool,
@@ -870,6 +882,162 @@ async fn run_security_scan(root: std::path::PathBuf, tx: mpsc::UnboundedSender<S
     ));
 }
 
+fn format_uptime(secs: f64) -> String {
+    let s = secs.max(0.0) as u64;
+    match (s / 3600, (s % 3600) / 60) {
+        (h, m) if h > 0 => format!("{}h {}m", h, m),
+        (0, m) if m > 0 => format!("{}m {}s", m, s % 60),
+        _ => format!("{}s", s),
+    }
+}
+
+/// Jiffies in `/proc/self/stat` are clock ticks; 100/s is the kernel's fixed
+/// USER_HZ for that file, so it is a divisor, not a guess about this machine.
+const CLOCK_TICKS_PER_SEC: f64 = 100.0;
+
+/// Read `utime + stime` (field 14 + 15) for this process, in seconds. The
+/// command name (field 2) can contain spaces and parentheses, so the fields
+/// are taken after the closing paren rather than by naive splitting.
+fn process_cpu_secs() -> Option<f64> {
+    let text = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let tail = text.rsplit_once(')')?.1;
+    let mut fields = tail.split_whitespace();
+    // tail starts at field 3 (state); utime is field 14 → 12th token, stime 13th.
+    let utime: f64 = fields.nth(11)?.parse().ok()?;
+    let stime: f64 = fields.next()?.parse().ok()?;
+    Some((utime + stime) / CLOCK_TICKS_PER_SEC)
+}
+
+/// Resident set of this process in MB (`/proc/self/statm` field 2, in 4 KiB
+/// pages) and total system memory in MB from `/proc/meminfo`.
+fn process_memory_mb() -> (Option<f64>, Option<f64>) {
+    let rss = std::fs::read_to_string("/proc/self/statm")
+        .ok()
+        .and_then(|text| {
+            text.split_whitespace()
+                .nth(1)?
+                .parse::<f64>()
+                .ok()
+                .map(|pages| pages * 4096.0 / 1048576.0)
+        });
+    let total = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|text| {
+            text.lines()
+                .find(|l| l.starts_with("MemTotal:"))?
+                .split_whitespace()
+                .nth(1)?
+                .parse::<f64>()
+                .ok()
+                .map(|kib| kib / 1024.0)
+        });
+    (rss, total)
+}
+
+/// Sample this process and the persisted per-request metrics, streaming the
+/// same `[PROFILER]` protocol the panel already speaks. CPU is a rate, so it
+/// needs two reads of `/proc` with a real interval between them.
+async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<String>) {
+    let sampled = tokio::task::spawn_blocking(move || {
+        let before = process_cpu_secs();
+        std::thread::sleep(std::time::Duration::from_millis(PROFILER_SAMPLE_MS));
+        let after = process_cpu_secs();
+        let cpu = match (before, after) {
+            (Some(b), Some(a)) if b <= a => {
+                Some((a - b) / (PROFILER_SAMPLE_MS as f64 / 1000.0) * 100.0)
+            }
+            _ => None,
+        };
+        let (rss, total) = process_memory_mb();
+        let rows = xencode_context_rs::read_metrics(&xencode);
+        (cpu, rss, total, rows)
+    })
+    .await;
+
+    let (cpu, rss, total, rows) = match sampled {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tx.send(format!("[PROFILER]failed:sample thread died: {}", e));
+            return;
+        }
+    };
+
+    match cpu {
+        Some(v) => {
+            let _ = tx.send(format!("[PROFILER]gauge:cpu|{:.1}", v));
+            let _ = tx.send(format!(
+                "[PROFILER]row:process|cpu over {} ms|{:.1}%",
+                PROFILER_SAMPLE_MS, v
+            ));
+        }
+        None => {
+            let _ = tx.send(
+                "[PROFILER]note:cpu unavailable — /proc/self/stat could not be read".to_string(),
+            );
+        }
+    }
+    match rss {
+        Some(v) => {
+            let _ = tx.send(format!("[PROFILER]gauge:mem|{:.1}", v));
+            if let Some(t) = total {
+                let _ = tx.send(format!("[PROFILER]gauge:memtotal|{:.0}", t));
+            }
+            let _ = tx.send(format!(
+                "[PROFILER]row:process|resident set|{:.1} MB{}",
+                v,
+                match total {
+                    Some(t) => format!(" of {:.0} MB", t),
+                    None => String::new(),
+                }
+            ));
+        }
+        None => {
+            let _ = tx.send(
+                "[PROFILER]note:memory unavailable — /proc/self/statm could not be read"
+                    .to_string(),
+            );
+        }
+    }
+
+    if rows.is_empty() {
+        let _ = tx
+            .send("[PROFILER]note:no metrics.jsonl yet — a llama.cpp turn records one".to_string());
+    } else {
+        let _ = tx.send(format!(
+            "[PROFILER]row:metrics|recorded turns|{}",
+            rows.len()
+        ));
+        for r in rows.iter().rev().take(PROFILER_METRIC_ROWS) {
+            let _ = tx.send(format!(
+                "[PROFILER]row:{}|turn {}|{}% kv · {} prompt · {:.0} tok/s · {} files",
+                r.profile,
+                format_row_time(r.ts_unix_ms),
+                (r.kv_reuse_ratio() * 100.0) as u64,
+                r.prompt_tokens,
+                r.generation_tok_s,
+                r.retrieved_files
+            ));
+        }
+    }
+    let _ = tx.send("[PROFILER]done".to_string());
+}
+
+/// Metrics rows are stamped in epoch millis; rendered as UTC wall time without
+/// pulling in a date library. A row that never got a timestamp says so rather
+/// than showing a fake clock.
+fn format_row_time(ts_unix_ms: u64) -> String {
+    if ts_unix_ms == 0 {
+        return "untimed".to_string();
+    }
+    let secs = ts_unix_ms / 1000;
+    format!(
+        "{:02}:{:02}:{:02}",
+        (secs / 3600) % 24,
+        (secs / 60) % 60,
+        secs % 60
+    )
+}
+
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
@@ -1062,10 +1230,12 @@ impl<'a> App<'a> {
 
             profiler_active: false,
             profiler_running: false,
-            profiler_functions: Vec::new(),
-            profiler_gauge_cpu: 0.0,
-            profiler_gauge_mem: 0.0,
-            profiler_gauge_latency: 0.0,
+            profiler_rows: Vec::new(),
+            profiler_notes: Vec::new(),
+            profiler_gauge_cpu: None,
+            profiler_gauge_mem: None,
+            profiler_gauge_mem_total: None,
+            profiler_gauge_latency: None,
 
             models_editing: false,
             models_profiles: Vec::new(),
@@ -3312,42 +3482,86 @@ impl<'a> App<'a> {
         tokio::spawn(run_security_scan(root, tx));
     }
 
-    /// Start Performance Profiler simulation.
+    /// Measure what this session actually did. Numbers the app already holds
+    /// (turn latency, provider health, llama.cpp timings) are read here; the
+    /// process's own CPU/memory and the persisted per-request metrics are
+    /// sampled in the background, because CPU needs two reads of `/proc` a
+    /// moment apart.
     pub fn start_profiler(&mut self, tx: mpsc::UnboundedSender<String>) {
         if self.profiler_running {
             return;
         }
         self.profiler_active = true;
         self.profiler_running = true;
-        self.profiler_functions.clear();
+        self.profiler_rows.clear();
+        self.profiler_notes.clear();
+        self.profiler_gauge_cpu = None;
+        self.profiler_gauge_mem = None;
+        self.profiler_gauge_mem_total = None;
+        self.profiler_gauge_latency = None;
 
-        tokio::spawn(async move {
-            let funcs = [
-                ("process_data", 245.3, 128.0, 1240u32),
-                ("validate_input", 180.1, 64.0, 890u32),
-                ("render_template", 95.7, 32.0, 450u32),
-                ("query_database", 320.4, 256.0, 67u32),
-                ("serialize_output", 45.2, 16.0, 340u32),
-                ("generate_report", 512.8, 512.0, 12u32),
-            ];
+        let uptime = (current_timestamp() - self.session_start_time).max(0.0);
+        self.profiler_rows.push((
+            "session".to_string(),
+            "uptime".to_string(),
+            format_uptime(uptime),
+        ));
+        self.profiler_rows.push((
+            "session".to_string(),
+            "chat lines".to_string(),
+            format!("{}", self.messages.len()),
+        ));
+        if self.average_latency > 0.0 {
+            self.profiler_gauge_latency = Some(self.average_latency);
+            self.profiler_rows.push((
+                "turn".to_string(),
+                "average latency".to_string(),
+                format!("{:.0} ms", self.average_latency),
+            ));
+        } else {
+            self.profiler_notes
+                .push("no completed turn yet — latency is n/a".to_string());
+        }
+        if let Some(ts) = &self.last_llamacpp_timings {
+            self.profiler_rows.push((
+                "llama.cpp".to_string(),
+                "generation".to_string(),
+                format!("{:.1} tok/s", ts.predicted_per_second),
+            ));
+            self.profiler_rows.push((
+                "llama.cpp".to_string(),
+                "prompt eval".to_string(),
+                format!("{:.1} tok/s", ts.prompt_per_second),
+            ));
+            self.profiler_rows.push((
+                "llama.cpp".to_string(),
+                "tokens in / out".to_string(),
+                format!("{} / {}", ts.tokens_evaluated, ts.tokens_generated),
+            ));
+        }
+        let mut health: Vec<(String, String, f64, Option<String>)> = self
+            .ollama_health_entries
+            .iter()
+            .map(|(provider, (status, latency, error))| {
+                (provider.clone(), status.clone(), *latency, error.clone())
+            })
+            .collect();
+        health.sort_by(|a, b| a.0.cmp(&b.0));
+        for (provider, status, latency, error) in health {
+            let value = match error {
+                Some(e) if !e.is_empty() => format!("{} — {}", status, e),
+                _ => format!("{:.0} ms ({})", latency, status),
+            };
+            self.profiler_rows
+                .push((provider, "last health check".to_string(), value));
+        }
+        if self.ollama_health_entries.is_empty() {
+            self.profiler_notes
+                .push("no provider health check this session".to_string());
+        }
 
-            for (i, (name, time_ms, mem_mb, calls)) in funcs.iter().enumerate() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-                let cpu = 30.0 + (i as f64 * 10.0) + (fastrand::i32(0..20) as f64 * 0.5);
-                let mem = 40.0 + (i as f64 * 8.0) + (fastrand::i32(0..15) as f64 * 0.5);
-                let latency = 50.0 + (i as f64 * 15.0) + (fastrand::i32(0..10) as f64);
-                let _ = tx.send(format!("[PROFILER]gauge:cpu|{:.0}", cpu));
-                let _ = tx.send(format!("[PROFILER]gauge:mem|{:.0}", mem));
-                let _ = tx.send(format!("[PROFILER]gauge:latency|{:.0}", latency));
-                let _ = tx.send(format!(
-                    "[PROFILER]func:{}|{}|{}|{}",
-                    name, time_ms, mem_mb, calls
-                ));
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-            let _ = tx.send("[PROFILER]done".to_string());
-        });
+        let xencode = xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR);
+        tokio::spawn(run_profiler(xencode, tx));
     }
 
     /// Start Custom Models session (seeds profile data).
@@ -4499,26 +4713,31 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     if let Some(g) = body.strip_prefix("gauge:") {
                         let parts: Vec<&str> = g.splitn(2, '|').collect();
                         if parts.len() >= 2 {
-                            let val = parts[1].parse::<f64>().unwrap_or(0.0);
+                            let val = parts[1].parse::<f64>().ok();
                             match parts[0] {
                                 "cpu" => app.profiler_gauge_cpu = val,
                                 "mem" => app.profiler_gauge_mem = val,
+                                "memtotal" => app.profiler_gauge_mem_total = val,
                                 "latency" => app.profiler_gauge_latency = val,
                                 _ => {}
                             }
                         }
                     }
-                } else if body.starts_with("func:") {
-                    if let Some(f) = body.strip_prefix("func:") {
-                        let parts: Vec<&str> = f.splitn(4, '|').collect();
-                        if parts.len() >= 4 {
-                            let name = parts[0].to_string();
-                            let time = parts[1].parse::<f64>().unwrap_or(0.0);
-                            let mem = parts[2].parse::<f64>().unwrap_or(0.0);
-                            let calls = parts[3].parse::<u32>().unwrap_or(0);
-                            app.profiler_functions.push((name, time, mem, calls));
-                        }
+                } else if let Some(r) = body.strip_prefix("row:") {
+                    let parts: Vec<&str> = r.splitn(3, '|').collect();
+                    if parts.len() == 3 {
+                        app.profiler_rows.push((
+                            parts[0].to_string(),
+                            parts[1].to_string(),
+                            parts[2].to_string(),
+                        ));
                     }
+                } else if let Some(msg) = body.strip_prefix("note:") {
+                    app.profiler_notes.push(msg.to_string());
+                } else if let Some(msg) = body.strip_prefix("failed:") {
+                    app.profiler_notes
+                        .push(format!("profiling failed: {}", msg));
+                    app.profiler_running = false;
                 } else if body == "done" {
                     app.profiler_running = false;
                 }
@@ -6190,6 +6409,123 @@ mod tests {
         assert!(done.ends_with("|1,0,1,0"), "{done}");
         assert!(!messages.iter().any(|m| m.contains("config.py")));
         assert!(!messages.iter().any(|m| m.contains("tests passed")));
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("xcode-{}-{}", tag, nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Every number the profiler panel shows has to be measured or explained.
+    /// CPU is a rate so it may legitimately fail to read; what it may not do
+    /// is fall back to the scripted table this replaced.
+    #[tokio::test]
+    async fn profiler_measures_the_process_and_its_metrics() {
+        let dir = temp_dir("profiler");
+        let row = xencode_context_rs::RequestMetrics::from_timings(
+            "BALANCED", 8192, 4000, 400, 120, 31.5, 900.0, 5,
+        );
+        xencode_context_rs::append_metrics(&dir, &row).unwrap();
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_profiler(dir.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // CPU and memory: a measured row, or an honest note about why not.
+        for what in ["cpu", "resident"] {
+            let measured = messages.iter().any(|m| m.contains(what));
+            let admitted = messages
+                .iter()
+                .any(|m| m.starts_with("[PROFILER]note:") && m.contains("could not be read"));
+            assert!(
+                measured || admitted,
+                "neither {} nor a note: {:?}",
+                what,
+                messages
+            );
+        }
+        assert!(messages
+            .iter()
+            .any(|m| m.starts_with("[PROFILER]gauge:cpu|")));
+        // The recorded turn, straight out of metrics.jsonl.
+        assert!(
+            messages.iter().any(|m| {
+                m.starts_with("[PROFILER]row:BALANCED|")
+                    && m.contains("90% kv")
+                    && m.contains("4000 prompt")
+                    && m.contains("32 tok/s")
+                    && m.contains("5 files")
+            }),
+            "no metrics row in {messages:?}"
+        );
+        assert!(messages.iter().any(|m| m == "[PROFILER]done"));
+        for scripted in ["process_data", "render_template", "generate_report"] {
+            assert!(
+                !messages.iter().any(|m| m.contains(scripted)),
+                "profiler still lists {scripted}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn profiler_says_so_without_recorded_metrics() {
+        let dir = temp_dir("profiler-empty");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        super::run_profiler(dir.clone(), tx).await;
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(messages
+            .iter()
+            .any(|m| m.starts_with("[PROFILER]note:no metrics.jsonl")));
+        assert!(!messages
+            .iter()
+            .any(|m| m.starts_with("[PROFILER]row:metrics|")));
+    }
+
+    /// The app-side half of the panel: session numbers exist, and latency
+    /// without a completed turn reads as `n/a` rather than 0 ms.
+    #[tokio::test]
+    async fn profiler_rows_come_from_app_state() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let lines = app.messages.len();
+        app.messages.push(super::UiMessage {
+            role: "user".to_string(),
+            content: "hi".to_string(),
+        });
+        app.start_profiler(tx);
+
+        assert!(app
+            .profiler_rows
+            .iter()
+            .any(|(s, m, _)| s == "session" && m == "uptime"));
+        let counted = app
+            .profiler_rows
+            .iter()
+            .find(|(s, m, _)| s == "session" && m == "chat lines")
+            .expect("no chat-lines row");
+        assert_eq!(counted.2, format!("{}", lines + 1));
+        assert_eq!(
+            app.profiler_gauge_latency, None,
+            "latency must stay unknown before the first turn"
+        );
+        assert!(app
+            .profiler_notes
+            .iter()
+            .any(|n| n.contains("no completed turn yet")));
     }
 
     fn git(root: &std::path::Path, args: &[&str]) {

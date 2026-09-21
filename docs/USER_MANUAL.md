@@ -33,15 +33,20 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **Not implemented, whatever a panel shows.** Six TUI panels are still
+> **Not implemented, whatever a panel shows.** Five TUI panels are still
 > interface mockups with scripted content: Voice Interface, Terminal Assistant,
-> Performance Profiler, Custom Models, Learning Mode and Multi-Language. They
-> render and respond to keys; nothing listens or profiles. The **Security
-> Auditor is real** — `Enter` walks the workspace and runs the same
-> `VulnerabilityScanner` behind `xencode analyze`, so an empty result means the
-> scanner found nothing, not that the panel is a demo. Real equivalents for the
-> rest: `xencode analyze` (code findings), `xencode advise` (repo insights) and
-> the performance dashboard (session metrics).
+> Custom Models, Learning Mode and Multi-Language. They render and respond to
+> keys; nothing listens. Two are real. The **Security Auditor** — `Enter` walks
+> the workspace and runs the same `VulnerabilityScanner` behind
+> `xencode analyze`, so an empty result means the scanner found nothing, not
+> that the panel is a demo. The **Performance Profiler** — `Enter` samples this
+> process's CPU and resident memory from `/proc`, reads the turn latency,
+> llama.cpp timings and provider health the session already measured, and lists
+> the last rows of `.xencode/metrics.jsonl`; anything with no data behind it
+> shows `n/a` instead of a number. None of the remaining five has a real backend
+> yet — the closest working equivalents are the chat itself (a real model call)
+> and `xencode advise` for repo insights. The performance dashboard, a separate
+> panel, reports real session metrics.
 
 ## Installation
 
@@ -197,7 +202,7 @@ do anything):
 | Voice Interface | 🎭 Mockup — a scripted session plays audio levels and transcript lines; no microphone is opened |
 | Terminal Assistant | 🎭 Mockup — a fixed list of suggested commands with risk badges; nothing runs |
 | Security Auditor | Real scan: `Enter` walks the workspace with the context engine and runs `VulnerabilityScanner::scan_file` on every readable file; findings stream in with their CWE ids and a log line gives the true totals. Files the walker lists as secret are reported, never read |
-| Performance Profiler | 🎭 Mockup — demo gauges and function timings; no profiler is attached |
+| Performance Profiler | Real measurement: `Enter` reads this process's CPU (two `/proc/self/stat` samples 250 ms apart) and resident memory, then the session's own numbers — average turn latency, llama.cpp tokens/s, per-provider health, and the last 6 rows of `.xencode/metrics.jsonl` (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with nothing to show reads `n/a` |
 | Custom Models | 🎭 Mockup — sample profiles and sliders; saving writes nothing to config |
 | Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |
 | Multi-Language | 🎭 Mockup — a fixed sample language-detection table; nothing is detected |

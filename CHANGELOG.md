@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
 the plugin registry loaded no runtime. **J-01 has landed** — the security
-auditor is real, leaving six scripted panels. `NEXT_PLAN_TASKS.md` §
+auditor and the profiler are real, leaving five scripted panels. `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
 ### Removed
@@ -88,6 +88,19 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Performance profiler panel is real (Milestone J, J-02): the table used to list
+  six invented functions (`process_data`, `query_database`, …) with random CPU,
+  memory and latency numbers. `Enter` now measures: process CPU from two
+  `/proc/self/stat` reads 250 ms apart, resident memory from `/proc/self/statm`
+  against `/proc/meminfo`, and the numbers the session already has — average
+  turn latency, llama.cpp tokens/s and token counts, per-provider health
+  latency (or the error that stopped it), and the last 6 rows of
+  `.xencode/metrics.jsonl` with KV reuse, prompt tokens, tok/s and retrieved
+  files. A gauge with no measurement renders `n/a` rather than `0`, and the
+  panel says when there has been no turn, no health check or no metrics file.
+  `fastrand` left the dependency list with the random numbers. Fixed the bug
+  that hid this: the Gauges box laid out 3 of its 5 lines, so the Memory and
+  Latency gauges had never been on screen.
 - Security auditor panel is real (Milestone J, J-01): `Enter` in the panel used
   to print seven hardcoded findings about a `config.py` that is not in this
   tree. It now walks the workspace with the same file list the context engine

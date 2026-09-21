@@ -3696,7 +3696,6 @@ name = "xencode-tui-rs"
 version = "0.1.0"
 dependencies = [
  "crossterm",
- "fastrand",
  "futures-util",
  "ratatui",
  "regex",

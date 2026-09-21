@@ -1845,23 +1845,18 @@ fn draw_performance_dashboard(f: &mut Frame, app: &App, area: Rect) {
         Line::from(format!("   Total LLM Calls:  {}", app.total_llm_calls)),
         Line::from(""),
         Line::from(Span::styled(
-            " System Utilization (simulated)",
+            " System Utilization (last profiler run)",
             Style::default()
                 .fg(app.theme.fg)
                 .add_modifier(Modifier::UNDERLINED),
         )),
-        Line::from(format!(
-            "   CPU:     [{}{}]  {:.0}%",
-            "\u{2588}".repeat((app.profiler_gauge_cpu / 10.0) as usize),
-            "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_cpu / 10.0) as usize)),
-            app.profiler_gauge_cpu
-        )),
-        Line::from(format!(
-            "   Memory:  [{}{}]  {:.0}%",
-            "\u{2588}".repeat((app.profiler_gauge_mem / 10.0) as usize),
-            "\u{2591}".repeat(10usize.saturating_sub((app.profiler_gauge_mem / 10.0) as usize)),
-            app.profiler_gauge_mem
-        )),
+        util_line("CPU", app.profiler_gauge_cpu, 100.0, "%"),
+        util_line(
+            "Memory",
+            app.profiler_gauge_mem,
+            app.profiler_gauge_mem_total.unwrap_or(0.0),
+            " MB",
+        ),
         Line::from(""),
         Line::from(Span::styled(
             " Session Timeline",
@@ -3356,6 +3351,33 @@ fn draw_security_auditor(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Performance Profiler Panel ──────────────────────────────────────────────
 
+/// One measured utilization line: a bar scaled against `max` and the true
+/// value, or `n/a` when the measurement does not exist yet. A missing number
+/// is never drawn as a zero.
+fn util_line(label: &str, value: Option<f64>, max: f64, unit: &str) -> Line<'static> {
+    let bar = |pct: f64| {
+        let filled = ((pct / 100.0).clamp(0.0, 1.0) * 10.0).round() as usize;
+        format!(
+            "[{}{}]",
+            "█".repeat(filled),
+            "░".repeat(10usize.saturating_sub(filled))
+        )
+    };
+    let text = match value {
+        Some(v) if max > 0.0 => format!(
+            "   {:<7} {}  {:>6.0}{}  ({:.0}%)",
+            label,
+            bar(v / max * 100.0),
+            v,
+            unit,
+            v / max * 100.0
+        ),
+        Some(v) => format!("   {:<7} {:>6.0}{}  (no scale)", label, v, unit),
+        None => format!("   {:<7} {:>6}{}", label, "n/a", unit),
+    };
+    Line::from(text)
+}
+
 fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(72, 68, area);
     f.render_widget(Clear, popup_area);
@@ -3382,53 +3404,68 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5), // gauges
-            Constraint::Min(1),    // function list
+            Constraint::Length(7), // gauges (5 lines + borders)
+            Constraint::Min(1),    // measurements
         ])
         .split(inner);
 
     // ── Gauges ──────────────────────────────────────────────────────────────
-    fn gauge_block(title: &str, value: f64, max: f64, color: ratatui::style::Color) -> Line<'_> {
+    fn gauge_line(
+        title: &str,
+        value: Option<f64>,
+        max: f64,
+        unit: &str,
+        color: ratatui::style::Color,
+    ) -> Line<'static> {
         let w = 15usize;
-        let pct = if max > 0.0 {
-            (value / max * 100.0).min(100.0).round()
-        } else {
-            0.0
+        let (bar, tail) = match value {
+            Some(v) if max > 0.0 => {
+                let pct = (v / max * 100.0).min(100.0);
+                let filled = (pct / 100.0 * w as f64).round() as usize;
+                (
+                    format!(
+                        "[{}{}]",
+                        "█".repeat(filled.min(w)),
+                        "░".repeat(w.saturating_sub(filled))
+                    ),
+                    format!("{:.1}{}", v, unit),
+                )
+            }
+            _ => ("[".to_owned() + &"░".repeat(w) + "]", "n/a".to_string()),
         };
-        let filled = (pct / 100.0 * w as f64).round() as usize;
-        let filled = filled.min(w);
-        let empty = w.saturating_sub(filled);
         Line::from(Span::styled(
-            format!(
-                " {}  [{}{}]  {:.0}%",
-                title,
-                "█".repeat(filled),
-                "░".repeat(empty),
-                pct
-            ),
+            format!(" {}  {}  {}", title, bar, tail),
             Style::default().fg(color),
         ))
     }
 
     let gauge_lines = vec![
         Line::from(Span::styled(
-            " System Metrics",
+            " This Process",
             Style::default()
                 .fg(app.theme.fg)
                 .add_modifier(Modifier::UNDERLINED),
         )),
         Line::from(""),
-        gauge_block("CPU     ", app.profiler_gauge_cpu, 100.0, app.theme.info),
-        gauge_block(
+        gauge_line(
+            "CPU     ",
+            app.profiler_gauge_cpu,
+            100.0,
+            "%",
+            app.theme.info,
+        ),
+        gauge_line(
             "Memory  ",
             app.profiler_gauge_mem,
-            100.0,
+            app.profiler_gauge_mem_total.unwrap_or(0.0),
+            " MB",
             app.theme.accent_secondary,
         ),
-        gauge_block(
+        gauge_line(
             "Latency ",
             app.profiler_gauge_latency,
             500.0,
+            " ms",
             app.theme.warning,
         ),
     ];
@@ -3443,39 +3480,33 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(app.theme.fg));
     f.render_widget(gauge_para, chunks[0]);
 
-    // ── Function List ───────────────────────────────────────────────────────
+    // ── Measurements ────────────────────────────────────────────────────────
     let func_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 📊 Profiled Functions ");
+        .title(" 📊 Measurements ");
 
     let mut func_lines: Vec<Line> = Vec::new();
-    if app.profiler_functions.is_empty() && !app.profiler_running {
+    if app.profiler_rows.is_empty() && !app.profiler_running {
         func_lines.push(Line::from(Span::styled(
-            "  Press Enter to start profiling.",
+            "  Press Enter to measure this session.",
             Style::default().fg(app.theme.message_system),
         )));
         func_lines.push(Line::from(Span::styled(
-            "  Profiles CPU time, memory, and call frequency.",
+            " Process usage, turn latency, provider health, recorded metrics.",
             Style::default().fg(app.theme.message_system),
-        )));
-    } else if app.profiler_functions.is_empty() && app.profiler_running {
-        func_lines.push(Line::from(Span::styled(
-            "  Profiling in progress...",
-            Style::default().fg(app.theme.accent),
         )));
     } else {
-        // Header
         func_lines.push(Line::from(vec![
             Span::styled(
-                "  Function",
+                "  Source",
                 Style::default()
                     .fg(app.theme.fg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "        Time(ms)  Mem(MB)  Calls",
+                "  Metric                    Value",
                 Style::default().fg(app.theme.fg),
             ),
         ]));
@@ -3483,19 +3514,18 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
             "  ".to_owned() + &"─".repeat(45),
             Style::default().fg(app.theme.border),
         )));
-
-        for (name, time_ms, mem_mb, calls) in &app.profiler_functions {
-            let hot = *time_ms > 200.0;
-            let color = if hot { app.theme.danger } else { app.theme.fg };
-            let hot_mark = if hot { " 🔥" } else { "  " };
+        for (source, metric, value) in app.profiler_rows.iter().take(24) {
             func_lines.push(Line::from(Span::styled(
-                format!(
-                    "  {:<15} {:>8.1} {:>8.1} {:>6}{}",
-                    name, time_ms, mem_mb, calls, hot_mark
-                ),
-                Style::default().fg(color),
+                format!("  {:<12} {:<24} {}", source, metric, value),
+                Style::default().fg(app.theme.fg),
             )));
         }
+    }
+    for note in app.profiler_notes.iter().rev().take(4) {
+        func_lines.push(Line::from(Span::styled(
+            format!("  · {}", note),
+            Style::default().fg(app.theme.message_system),
+        )));
     }
 
     let func_para = Paragraph::new(func_lines)
