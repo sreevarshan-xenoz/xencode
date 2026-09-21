@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Milestone J — opened
+Seven TUI panels still render hardcoded phrase lists (voice, terminal
+assistant, security auditor, profiler, custom models, learning mode,
+multi-language) and the plugin registry loads no runtime. Neither is fixed yet;
+`NEXT_PLAN_TASKS.md` § Milestone J tracks the work item by item, with a
+done-when rule per panel.
+
 ### Removed
 - **Unused deployment surface and stale design docs.** Deleted `k8s/`
   (`deployment.yaml` pinned the Python API's port 8000, `postgres.yaml` and

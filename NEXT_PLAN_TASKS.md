@@ -671,3 +671,58 @@ outgoing editor-activity producer, configurable max session size.
   **692 tests passed, zero clippy warnings, `cargo fmt --check` clean**
 
 ## Milestone I — complete ✅
+
+## Milestone J — every panel tells the truth
+
+**Decided 2026-09-21.** The I4-02 sweep left seven TUI panels playing hardcoded
+phrase lists — the same failure mode I2-04 fixed in ByteBot — plus a plugin
+surface that reads manifests and loads nothing. The rule for this milestone is
+the ByteBot rule: **a panel may only show data that came from the machine, the
+provider, or the repo, and when it cannot get that data it says so in the
+panel's own words.** No seeded arrays, no invented results.
+
+Ordering is cheapest-real-first; each item is its own commit and must keep the
+workspace gates green.
+
+- [ ] J-01 — **Security auditor**: walk the workspace with the existing
+  `scanner::scan_tree` file list and run `VulnerabilityScanner::scan_file` +
+  `CodeAnalyzer::analyze_file` on each in a background task, streaming
+  `[SECURITY]finding:` lines as they come and `[SECURITY]progress:` per file.
+  Done when the panel's counts equal `xencode security`/`analyze` output for the
+  same tree, and an unreadable file appears as a log line instead of silence.
+- [ ] J-02 — **Performance profiler**: replace the fake function table with the
+  numbers the app already measures — `average_latency`, per-provider
+  `ollama_health_entries` latency, llama.cpp `tokens/s` from
+  `last_llamacpp_timings`, and the last N `RequestMetrics` rows
+  (`read_metrics`: prompt tokens, cached tokens, KV-reuse, retrieved files).
+  Gauges show real values or `n/a` when no turn has run yet. No new OS deps.
+- [ ] J-03 — **Terminal assistant**: one real provider call per query, asking
+  for candidate commands with a risk label, parsed into the existing
+  `[TERM]suggestion:` shape; a command the user picks goes through the same
+  approval-gated `run_command` path as the agent's, never around it. Provider
+  error → the panel prints it.
+- [ ] J-04 — **Multi-language**: detection = the real `scan_tree` language
+  breakdown of the workspace (files, bytes, comment density), supported list =
+  the languages `scanner::Language` actually has; translate = a real model call
+  with an explicit source/target.
+- [ ] J-05 — **Custom models**: replace the seeded profiles with persisted
+  `model_profiles` in config (name, model id, temperature, max_tokens, top_p);
+  `s` writes through `save_config()`, select applies to the next turn, and the
+  test row shows the provider's real reply or error.
+- [ ] J-06 — **Learning mode**: lessons come from the repo — the context index
+  picks real files/symbols, the model explains that file, and the quiz is about
+  code that exists. Empty/unindexed workspace → the panel says so.
+- [ ] J-07 — **Voice interface**: `arecord`/`pw-record` capture on Enter, level
+  bar driven by RMS computed from the captured PCM (real meters), then
+  transcription through a whisper CLI if one is on `PATH`; with no STT backend
+  the panel reports the clip it recorded and that no transcription engine is
+  installed — never a canned transcript.
+- [ ] J-08 — **Plugin runtime**: manifests become loadable. Registry builds a
+  real `XencodePlugin` implementation from each manifest and `PluginHost` routes
+  its declared prompt prefix and `before`/`after` hooks into the agent loop, so
+  `/plugin enable` has an observable effect and `/plugin status` reports what
+  actually took hold.
+
+Not in scope: `AnthropicProvider` stays as-is by explicit decision (documented
+gap, no key field); `crdt.rs` stays unwired (settled Milestone G decision); the
+provider-health and diff/worktree/task/insight panels are already real.
