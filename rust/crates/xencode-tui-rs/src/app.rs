@@ -277,6 +277,9 @@ pub struct App<'a> {
     pub spinner_tick: usize,
     pub theme: ThemeColors,
     pub config: XencodeConfig,
+    /// Product builds persist config edits; `for_tests()` turns that off so a
+    /// keystroke in a test never rewrites the developer's `config.json`.
+    pub(crate) persist_config: bool,
     pub show_terminal: bool,
     /// Last focus that pointed at a body pane (explorer/editor/chat). Zen
     /// layout uses it as its focus-follows target; overlay focus never
@@ -756,12 +759,15 @@ impl<'a> App<'a> {
     }
 
     /// Isolated app for tests: default config, non-persistent conversation
-    /// memory. `App::new()` reads *and writes* the user's real
-    /// `<config dir>/conversation_memory.json` — the restored history makes
-    /// transcript assertions non-deterministic and the writes pollute the
-    /// user's home — so no test may call it.
+    /// memory, and config writes disabled. `App::new()` reads *and writes* the
+    /// user's real `<config dir>/conversation_memory.json` — the restored
+    /// history makes transcript assertions non-deterministic and the writes
+    /// pollute the user's home — so no test may call it.
     pub fn for_tests() -> Self {
-        Self::with_config_and_memory(XencodeConfig::default(), ConversationMemory::new(50))
+        let mut app =
+            Self::with_config_and_memory(XencodeConfig::default(), ConversationMemory::new(50));
+        app.persist_config = false;
+        app
     }
 
     fn with_config_and_memory(config: XencodeConfig, memory: ConversationMemory) -> Self {
@@ -853,6 +859,7 @@ impl<'a> App<'a> {
             commit_cursor: 0,
             spinner_tick: 0,
             theme,
+            persist_config: true,
             config,
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
@@ -1128,7 +1135,9 @@ impl<'a> App<'a> {
     /// Persist the working config to disk. One choke point for every
     /// settings write (H1-04).
     pub fn save_config(&mut self) {
-        let _ = self.config.save();
+        if self.persist_config {
+            let _ = self.config.save();
+        }
     }
 
     /// The agent tool-loop's approval mode, parsed from config with the
@@ -4437,7 +4446,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             if let Some(first) = app.available_models.first().cloned() {
                                 app.config.default_model = first;
                                 app.selected_model = 0;
-                                let _ = app.config.save();
+                                app.save_config();
                             }
                         }
                     }

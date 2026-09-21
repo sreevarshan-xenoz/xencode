@@ -542,12 +542,12 @@ fn key_model_selector(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
             }
         }
         KeyCode::Enter => {
-            if let Some(model) = app.available_models.get(app.selected_model) {
+            if let Some(model) = app.available_models.get(app.selected_model).cloned() {
                 app.config.default_model = model.clone();
-                let _ = app.config.save();
+                app.save_config();
                 // llama.cpp servers only serve their loaded model, so kick
                 // off a server-side swap so the next generation uses it.
-                if let Some(inner) = llama_model_target(model) {
+                if let Some(inner) = llama_model_target(&model) {
                     app.llamacpp_control("switch", Some(inner.to_string()), tx.clone());
                 }
                 app.focus = FocusArea::ChatInput;
@@ -1762,6 +1762,9 @@ mod tests {
         std::env::set_var("XCODE_CONFIG_DIR", &dir);
 
         let mut app = app_with(FocusArea::Settings);
+        // The point of this test is the round trip through disk, so it opts
+        // back into persistence — into the temp `XCODE_CONFIG_DIR` above.
+        app.persist_config = true;
         app.config = XencodeConfig::default();
 
         // Layout row: → cycles presets and wraps back around.
