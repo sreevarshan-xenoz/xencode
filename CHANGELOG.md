@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Removed
+- **Unused deployment surface and stale design docs.** Deleted `k8s/`
+  (`deployment.yaml` pinned the Python API's port 8000, `postgres.yaml` and
+  `secrets.template.yaml` fed `DATABASE_URL`/`REDIS_URL`/`JWT_SECRET_KEY` to
+  nothing) and `monitoring/prometheus.yml` (the Rust server exposes no metrics
+  route). `.github/workflows/ci-cd.yml` lost its `deploy-staging` and
+  `deploy-production` jobs and its `k8s/**` path trigger — it is now gate →
+  image build → push → Trivy; `ci.yml` remains the plain test gate. Also ten
+  Python-era documents under `docs/` (analytics, security-scanning,
+  performance dashboard, provider-health/phase-3/validation/terminal-test
+  summaries, `features/benchmark-wizard.md`, `phase5/fallback-engine.md`), all
+  of them describing modules and `localhost:8000` routes that are not in this
+  tree and linked from no current doc.
 - **Dead Rust, deleted with no replacement.** `xencode-context-rs`
   `cmd_output` (a command-output blob index that nothing ever wrote to or read
   from), the never-implemented `Embedder` extension trait with its `cosine`
