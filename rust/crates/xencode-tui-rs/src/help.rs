@@ -84,6 +84,10 @@ const COMMANDS: &[Binding] = &[
         "/spawn <task> [#branch]",
         "run a subagent in a fresh git worktree",
     ),
+    (
+        "/plugin [reload]",
+        "show which plugins took effect; reload re-scans the plugin dir",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

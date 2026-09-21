@@ -16,6 +16,7 @@ xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
 xencode-mcp-rs = { path = "../xencode-mcp-rs" }
+xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 tokio = { version = "1", features = ["full"] }

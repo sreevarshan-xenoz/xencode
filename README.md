@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (14 crates, 733 tests,
+At its core is a fast, single-file **Rust** binary (14 crates, 751 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -45,8 +45,8 @@ and fix your code — driven entirely from your terminal.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
-- **🔌 Extension surface** — a plugin trait, manifest and host with event routing in `xencode-plugin-rs`; the CLI's `plugin` commands install and list plugin **manifests** (no plugin runtime loads them yet).
-- **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an audit trail, plus Docker, Compose, and Kubernetes assets.
+- **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold.
+- **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), memory+disk cache, streaming with exponential backoff.
 
 ---
@@ -185,7 +185,7 @@ xencode analyze src/
 xencode server           # local-first: http://127.0.0.1:8765, ws://
 # then in the TUI: Ctrl+F → Collaboration Hub → c to create, j to join
 
-# 7) List installed plugin manifests
+# 7) See which plugins load — the TUI's /plugin reports the same load
 xencode plugin list
 ```
 
@@ -219,6 +219,7 @@ sent to the model as a prompt.
 /plan [clear]               Pin the model's todo list (or drop it)
 /rewind [turns]             Undo agent file writes for recent turns
 /mcp [status|stop]          Start the configured MCP servers / report / withdraw them
+/plugin [reload]            Show which plugins took effect / re-scan the plugin dir
 ```
 
 Press `?` in the TUI for the live keybinding and command overlay.
@@ -245,9 +246,9 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
 | **Review** | `xencode review [--base main]` | PR-level diff triage with per-file analysis |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
-| **Plugin** | `xencode plugin list` | List installed plugins |
-| **Plugin** | `xencode plugin install <path>` | Install a plugin |
-| **Plugin** | `xencode plugin remove <name>` | Remove a plugin |
+| **Plugin** | `xencode plugin list` | Report each plugin and whether it loads |
+| **Plugin** | `xencode plugin install <path>` | Install a plugin, then say if it loaded |
+| **Plugin** | `xencode plugin remove <name>` | Remove a plugin by name |
 
 > For the full CLI reference run `xencode --help`.
 
@@ -369,7 +370,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (733 tests)
+cargo test                          # Full workspace suite (751 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -484,10 +485,6 @@ The Rust migration (all 8 phases, 14 crates) is **complete**. Near-term directio
 
 - An `anthropic_api_key` field so the existing Anthropic client is reachable
   without going through OpenRouter
-- Making the last scripted TUI panel real: microphone input, level meters and
-  a transcription backend
-- A plugin runtime that loads and runs `XencodePlugin` implementations, not
-  just their manifests
 - Retry budgets and fallback-policy governance + provider health UX
 - Multimodal inputs and secure team workflows
 - Multi-model arena mode · git autopilot agent · session replay
@@ -519,6 +516,6 @@ Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
 <div align="center">
 
 Built with ❤️ by [Sreevarshan](mailto:sreevarshan@xenoz.com) and contributors ·
-For an always-on companion to this README, read the [full documentation](DOCUMENTATION.md).
+For an always-on companion to this README, read the [user manual](docs/USER_MANUAL.md).
 
 </div>

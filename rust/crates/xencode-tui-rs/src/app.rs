@@ -94,7 +94,7 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
-    "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp",
+    "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp", "/plugin",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -315,6 +315,10 @@ pub struct App<'a> {
     /// MCP servers started for this session (I3-01) and the tools they offer.
     /// Empty until `/mcp` starts something.
     pub mcp: Arc<crate::mcp::McpHub>,
+    /// Plugins loaded from the plugin directory when this app started (J-08).
+    /// What is in here — a prompt prefix and `before`/`after` hooks — is in
+    /// every agent turn; `reports()` says which manifests did not load and why.
+    pub plugins: xencode_plugin_rs::PluginRuntime,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -1534,22 +1538,56 @@ impl<'a> App<'a> {
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
             .unwrap_or_else(|_| ConversationMemory::new(50));
         memory.start_session(None);
-        Self::with_config_and_memory(config, memory)
+        let dir = xencode_plugin_rs::default_plugin_dir();
+        let mut app = Self::with_config_and_memory(config, memory, dir);
+        app.load_plugins();
+        app
     }
 
     /// Isolated app for tests: default config, non-persistent conversation
-    /// memory, and config writes disabled. `App::new()` reads *and writes* the
+    /// memory, config writes disabled, and a plugin directory that holds
+    /// nothing — a plugin someone installed on their own machine must not be
+    /// able to change what a test asserts. `App::new()` reads *and writes* the
     /// user's real `<config dir>/conversation_memory.json` — the restored
     /// history makes transcript assertions non-deterministic and the writes
     /// pollute the user's home — so no test may call it.
     pub fn for_tests() -> Self {
-        let mut app =
-            Self::with_config_and_memory(XencodeConfig::default(), ConversationMemory::new(50));
+        let mut app = Self::with_config_and_memory(
+            XencodeConfig::default(),
+            ConversationMemory::new(50),
+            std::path::PathBuf::new(),
+        );
         app.persist_config = false;
         app
     }
 
-    fn with_config_and_memory(config: XencodeConfig, memory: ConversationMemory) -> Self {
+    /// J-08: scan `plugins.dir()` and hold the result for the session. This is
+    /// the same load `xencode plugin list` runs, so what the CLI reports is what
+    /// the agent turns carry. `/plugin reload` calls it again.
+    fn load_plugins(&mut self) {
+        let dir = self.plugins.dir().to_path_buf();
+        self.plugins = xencode_plugin_rs::PluginRuntime::load(&dir, env!("CARGO_PKG_VERSION"));
+    }
+
+    /// Where plugins are loaded from, worded for a chat line. A test app has no
+    /// directory at all, and saying so beats printing an empty path.
+    fn plugin_dir_label(&self) -> String {
+        let dir = self.plugins.dir();
+        if dir.as_os_str().is_empty() {
+            "(none — this session loads no plugins)".to_string()
+        } else {
+            dir.display().to_string()
+        }
+    }
+
+    /// The one place an `App` is built. `plugin_dir` is where plugins are
+    /// loaded from; `App::new()` loads that directory, `for_tests()` hands in an
+    /// empty one so nothing on the developer's machine is read.
+    fn with_config_and_memory(
+        config: XencodeConfig,
+        memory: ConversationMemory,
+        plugin_dir: std::path::PathBuf,
+    ) -> Self {
         let _client = OllamaClient::new(&config.ollama_url, config.response_timeout);
         // `config` moves into the struct below; the panel needs its own copy.
         let model_profiles = config.model_profiles.clone();
@@ -1649,6 +1687,9 @@ impl<'a> App<'a> {
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
             mcp: Arc::new(crate::mcp::McpHub::new()),
+            // Nothing is loaded here: `App::new()` calls `load_plugins()`, and a
+            // test app is given an empty directory to load from.
+            plugins: xencode_plugin_rs::PluginRuntime::empty(plugin_dir),
             plan_pinned: false,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
@@ -2040,10 +2081,11 @@ impl<'a> App<'a> {
             return false;
         }
         if draft == "/" {
+            // Built from the command table so the hint can never list a
+            // command that does not exist, or miss one that does.
             self.push_toast(
                 crate::toast::ToastKind::Info,
-                "Commands: /init  /ctx  /advise  /bytebot  /spawn  /plan  /rewind  /mcp (Tab completes)"
-                    .to_string(),
+                format!("Commands: {} (Tab completes)", SLASH_COMMANDS.join("  ")),
             );
             return true;
         }
@@ -2138,6 +2180,12 @@ impl<'a> App<'a> {
             return;
         }
 
+        // Plugins: report what loaded, or re-scan the plugin directory (J-08).
+        if prompt == "/plugin" || prompt.starts_with("/plugin ") {
+            self.handle_plugin_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
 
         // Normal LLM generation — project context is injected on every turn:
@@ -2187,10 +2235,11 @@ impl<'a> App<'a> {
         // shows profile-default budgeting.
         let model = self.config.default_model.clone();
         let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+        let system = self.agent_system_prompt();
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
             context_window,
-            system: CTX_SYSTEM,
+            system: &system,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
@@ -2277,8 +2326,38 @@ impl<'a> App<'a> {
             command_timeout: self.config.agent_command_timeout.max(1),
             plan: self.agent_plan.clone(),
             mcp: self.mcp.clone(),
-            hooks: self.config.agent_hooks.clone(),
+            hooks: self.session_hooks(),
         }
+    }
+
+    /// Hooks the agent loop runs this session: the config's, with a loaded
+    /// plugin's declaration filling only the gaps (J-08). An explicit
+    /// `agent_hooks` block in config.json therefore always outranks a plugin,
+    /// and there is still exactly one hook path in the loop — a plugin cannot
+    /// run anything that the config's own hooks could not.
+    fn session_hooks(&self) -> xencode_config_rs::AgentHooks {
+        let mut hooks = self.config.agent_hooks.clone();
+        for (table, from) in [
+            (&mut hooks.before, &self.plugins.hooks().before),
+            (&mut hooks.after, &self.plugins.hooks().after),
+        ] {
+            for (tool, command) in from {
+                table.entry(tool.clone()).or_insert_with(|| command.clone());
+            }
+        }
+        hooks
+    }
+
+    /// The system block for this session's agent turns: whatever the loaded
+    /// plugins contributed (J-08) ahead of the built-in agent prompt. Plugins
+    /// are read once at startup, so the text is byte-identical turn to turn and
+    /// the KV-cache prefix the assembler relies on still holds.
+    fn agent_system_prompt(&self) -> std::borrow::Cow<'static, str> {
+        let prefix = self.plugins.prompt_prefix();
+        if prefix.trim().is_empty() {
+            return std::borrow::Cow::Borrowed(CTX_SYSTEM);
+        }
+        std::borrow::Cow::Owned(format!("{prefix}\n\n{CTX_SYSTEM}"))
     }
 
     /// A tool-loop run carrying this session's providers, permission state,
@@ -2764,10 +2843,11 @@ impl<'a> App<'a> {
         let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
         let model = self.config.default_model.clone();
         let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+        let system = self.agent_system_prompt();
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
             context_window,
-            system: CTX_SYSTEM,
+            system: &system,
             agents_md: live.agents_md.as_deref(),
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
@@ -3687,6 +3767,64 @@ impl<'a> App<'a> {
         }
     }
 
+    /// J-08: what the plugin directory contributed to this session. It reports
+    /// the load the running app actually performed — manifests that did not
+    /// load included, with the reason — plus the two effects a plugin can have:
+    /// prompt text and tool hooks. `/plugin reload` re-scans the directory
+    /// after `xencode plugin install`; the change lands on the next turn.
+    fn handle_plugin_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/plugin").unwrap_or("").trim();
+        if arg == "reload" {
+            self.load_plugins();
+            self.system_line(&format!(
+                "Reloaded plugins from {}.",
+                self.plugin_dir_label()
+            ));
+        } else if !arg.is_empty() {
+            self.system_line("usage: /plugin (what took effect)  ·  /plugin reload");
+            return;
+        }
+
+        self.system_line(&format!(
+            "Plugins in {}: {}",
+            self.plugin_dir_label(),
+            if self.plugins.reports().is_empty() {
+                "none installed.".to_string()
+            } else {
+                format!(
+                    "{} loaded, {} reported.",
+                    self.plugins.loaded_count(),
+                    self.plugins.reports().len()
+                )
+            }
+        ));
+        let summaries: Vec<String> = self
+            .plugins
+            .reports()
+            .iter()
+            .map(|report| report.summary())
+            .collect();
+        for summary in summaries {
+            self.system_line(&format!("  {summary}"));
+        }
+        if self.plugins.reports().is_empty() {
+            self.system_line(
+                "Install one with `xencode plugin install <path>`, then /plugin reload.",
+            );
+            return;
+        }
+        self.system_line(&format!(
+            "  Prompt: {} plugin line(s) ahead of the agent prompt on every turn.",
+            self.plugins.prompt_prefix().lines().count()
+        ));
+        let hooks = self.session_hooks();
+        self.system_line(&format!(
+            "  Hooks in effect: {} before, {} after (config.json wins where both declare a tool).",
+            hooks.before.len(),
+            hooks.after.len()
+        ));
+    }
+
     /// A rewind that touches the file the user is looking at must not leave
     /// a stale buffer in the editor — but unsaved edits are the user's, so
     /// those are never silently thrown away.
@@ -3724,7 +3862,8 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Sync the in-memory conversation into the canonical transcript store.    /// Appends only messages that aren't already at the tail, so repeated
+    /// Sync the in-memory conversation into the canonical transcript store.
+    /// Appends only messages that aren't already at the tail, so repeated
     /// `/ctx compact|archive` runs never double-count history.
     fn canonical_transcript(&mut self) -> (xencode_context_rs::Transcript, usize) {
         let root = xencode_context_rs::default_root();
@@ -6104,7 +6243,7 @@ mod tests {
         cap_at_line, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
         parse_porcelain_z, parse_term_suggestions, parse_voice_level, watch_warning_for, App,
-        FocusArea, LoopSink, SpawnRecord,
+        FocusArea, LoopSink, SpawnRecord, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -6278,6 +6417,214 @@ mod tests {
             .expect("status channel stays open");
         assert!(said.starts_with("[MCP]"), "{said}");
         assert!(said.contains("no MCP servers running"), "{said}");
+    }
+
+    /// J-08: a manifest in the plugin directory changes what the agent loop
+    /// actually carries — its text leads the system prompt, and its hooks join
+    /// the one hook path the loop uses, behind anything config.json declares.
+    #[test]
+    fn a_loaded_plugin_changes_the_system_prompt_and_the_hooks() {
+        let dir = temp_dir("plugin-effects");
+        let plugin = dir.join("guardrails");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("plugin.json"),
+            r#"{
+                "name": "guardrails",
+                "version": "1.0.0",
+                "prompt_prefix": "Run the tests before answering.",
+                "hooks": { "before": { "*": "cargo check", "write_file": "from the plugin" } }
+            }"#,
+        )
+        .unwrap();
+
+        let mut app = App::for_tests();
+        app.config
+            .agent_hooks
+            .before
+            .insert("write_file".to_string(), "from config".to_string());
+        app.plugins = xencode_plugin_rs::PluginRuntime::load(&dir, env!("CARGO_PKG_VERSION"));
+
+        let system = app.agent_system_prompt();
+        assert!(
+            system.starts_with("Run the tests before answering.\n\n"),
+            "{system}"
+        );
+        assert!(system.ends_with(CTX_SYSTEM));
+
+        let hooks = app.session_hooks();
+        assert_eq!(hooks.before["write_file"], "from config");
+        assert_eq!(hooks.before["*"], "cargo check");
+        // Every tool loop in the app gets its hooks from approval_ctx(), so
+        // this is the whole of the plugin's reach.
+        assert_eq!(app.approval_ctx().hooks.before["*"], "cargo check");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An app with no plugins sends the built-in prompt and nothing else: the
+    /// prefix mechanism must not add whitespace or a header of its own.
+    #[test]
+    fn no_plugins_leaves_the_system_prompt_byte_identical() {
+        let app = App::for_tests();
+        assert_eq!(&*app.agent_system_prompt(), CTX_SYSTEM);
+        assert!(app.session_hooks().before.is_empty());
+    }
+
+    /// The far end of J-08: not "the merged map has an entry" but "the tool run
+    /// executed the plugin's command". A plugin's hook travels the same path a
+    /// config hook does, around the same gated call — the approval gate is
+    /// built by `approval_ctx()` and untouched by this feature.
+    #[tokio::test]
+    async fn a_plugin_hook_runs_around_a_gated_tool_call() {
+        let dir = temp_dir("plugin-hook");
+        let plugin = dir.join("marker");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("plugin.json"),
+            format!(
+                r#"{{ "name": "marker", "version": "1.0.0",
+                      "hooks": {{ "after": {{ "write_file": "touch {}" }} }} }}"#,
+                plugin.join("ran").display()
+            ),
+        )
+        .unwrap();
+
+        let mut app = App::for_tests();
+        // A real user mode, not a bypass: file writes are auto-approved, so the
+        // call reaches the tool loop the same way a turn's does. The test never
+        // drains an approval prompt, and none is raised.
+        app.config.agent_approval = "edit-allow".to_string();
+        app.plugins = xencode_plugin_rs::PluginRuntime::load(&dir, env!("CARGO_PKG_VERSION"));
+        let workspace = temp_dir("plugin-hook-ws");
+        let ctx = app.approval_ctx();
+        let call = xencode_providers_rs::ToolCall {
+            id: "c1".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({"path": "note.txt", "content": "hi\n"}),
+        };
+        let wrote = crate::agent_tools::execute_tool_call_approved(
+            &app.task_runtime,
+            &workspace,
+            &call,
+            &ctx,
+            Some(&app.mcp),
+        )
+        .await;
+        assert!(wrote.starts_with("created note.txt"), "{wrote}");
+        assert!(
+            plugin.join("ran").exists(),
+            "the plugin's after hook never ran"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    /// `/plugin` is the observable half of J-08: it says which manifests loaded,
+    /// which did not and why, and `/plugin reload` picks up what was installed
+    /// while the TUI was running.
+    #[test]
+    fn plugin_command_reports_what_loaded_and_reload_picks_up_the_rest() {
+        let dir = temp_dir("plugin-report");
+        let mut app = App::for_tests();
+        app.plugins = xencode_plugin_rs::PluginRuntime::empty(dir.clone());
+
+        app.handle_plugin_command("/plugin");
+        let said: Vec<String> = app
+            .messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        assert!(
+            said.iter()
+                .any(|line| line.contains("Plugins in") && line.contains("none installed")),
+            "{said:?}"
+        );
+
+        let plugin = dir.join("guardrails");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("plugin.json"),
+            r#"{ "name": "guardrails", "version": "1.0.0", "prompt_prefix": "Run the tests." }"#,
+        )
+        .unwrap();
+        // A manifest pinned to a build this one is not must be named, not skipped.
+        let future = dir.join("future");
+        std::fs::create_dir_all(&future).unwrap();
+        std::fs::write(
+            future.join("plugin.json"),
+            r#"{ "name": "future", "version": "9.9.9", "xencode_version": "9.9.9" }"#,
+        )
+        .unwrap();
+
+        let seen = app.messages.len();
+        app.handle_plugin_command("/plugin reload");
+        let said: Vec<String> = app.messages[seen..]
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        assert!(
+            said.iter()
+                .any(|line| line.contains("guardrails v1.0.0 — loaded: prompt prefix")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|line| line.contains("future v9.9.9 — NOT LOADED")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|line| line.contains("Hooks in effect: 0 before, 0 after")),
+            "{said:?}"
+        );
+        assert!(app.agent_system_prompt().starts_with("Run the tests."));
+
+        app.handle_plugin_command("/plugin enable guardrails");
+        assert!(
+            app.messages
+                .last()
+                .unwrap()
+                .content
+                .contains("usage: /plugin"),
+            "{}",
+            app.messages.last().unwrap().content
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `/plugin` is a local verb: it reports without arming a generation.
+    #[tokio::test]
+    async fn plugin_slash_command_routes_to_the_handler() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        app.set_chat_text("/plugin");
+        app.submit_message(tx);
+        assert!(!app.is_generating, "a plugin report arms no generation");
+        // The report is written straight into the transcript, after the user's
+        // command and with nothing invented about it.
+        let said: Vec<(&str, &str)> = app
+            .messages
+            .iter()
+            .map(|message| (message.role.as_str(), message.content.as_str()))
+            .collect();
+        assert_eq!(
+            said.iter()
+                .rev()
+                .find(|(role, _)| *role == "user")
+                .map(|(_, content)| *content),
+            Some("/plugin")
+        );
+        let report = said
+            .iter()
+            .rev()
+            .find(|(_, text)| text.contains("Plugins in"));
+        assert!(
+            report.is_some_and(|(_, text)| text.contains("none installed")),
+            "{said:?}"
+        );
     }
 
     /// Slash commands are local TUI verbs: they render in the transcript but

@@ -48,7 +48,9 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
-`/mcp stop`), and `/spawn <task> [#branch]` (run a subagent in a fresh
+`/mcp stop`), `/plugin` (report which plugins loaded and what they changed;
+`/plugin reload` re-scans the plugin directory), and
+`/spawn <task> [#branch]` (run a subagent in a fresh
 git worktree next to the project, e.g. `proj-spawn-1` on branch
 `xencode/spawn-1`; a `#branch` suffix names the branch). The spawned
 agent's live steps stream in the transcript, its final answer is posted
@@ -264,11 +266,43 @@ reverse) is an error; the banner prints the real scheme — `ws://` stays
 `ws://`, only certificates earn `wss://`.
 
 ### `xencode plugin <action>`
-Plugin management: `list`, `install <path>`, `remove <name>`.
+`list`, `install <path>`, `remove <name>`. Plugins live in `$XCODE_PLUGIN_DIR`,
+else `<data dir>/xencode/plugins` — the same directory the TUI loads from at
+startup, so the two never disagree.
 
-```bash
-xencode plugin list
+A plugin is a directory holding `plugin.json` (or `manifest.json`). This build
+loads no executable plugin code: the manifest is the whole plugin, and the two
+things it can declare are a `prompt_prefix` (placed ahead of the agent's system
+prompt on every turn) and `hooks` — `before`/`after` maps of tool name (or `*`)
+to an `sh -c` command, the same shape as `agent_hooks` in config.json. A
+plugin's hook only lands where config.json is silent, so your own config always
+outranks it.
+
+```json
+{
+  "name": "guardrails",
+  "version": "1.2.0",
+  "prompt_prefix": "Run cargo test before answering.",
+  "xencode_version": "*",
+  "hooks": { "before": { "write_file": "echo pre" }, "after": { "*": "echo post" } }
+}
 ```
+
+`list` runs the load and reports what took hold instead of just listing
+directories:
+
+```console
+$ xencode plugin list
+📦 Plugins in /tmp/j08-probe/plugins (xencode 0.1.0):
+  future v9.9.9 — NOT LOADED: needs xencode 0.1.0 (declared 9.9.9)
+  guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)
+  1 of 2 loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.
+```
+
+`install <path>` copies the directory (or a single manifest) under that name and
+prints the same one-line verdict, so an install nothing can load is visible
+immediately. `remove <name>` deletes only that one directory; a name containing
+a path separator or `..` is rejected rather than resolved.
 
 ### `xencode fetch <url> [--format text|json]`
 Fetch a web page and extract research-ready text (title + body, scripts

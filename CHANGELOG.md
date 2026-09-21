@@ -7,20 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Milestone J — opened
+### Milestone J — complete ✅
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 to J-07 have landed** — the
+the plugin registry loaded no runtime. All eight items landed — the
 security auditor and the profiler are real, the terminal assistant delegates to
 a model through the agent's approval gate, the multi-language panel tabulates
 a real `scan_tree` walk and translates through a real model call, the custom
 models panel edits `model_profiles` in `config.json`, the learning mode
-panel teaches files the project index actually found, and the voice panel
+panel teaches files the project index actually found, the voice panel
 records from the microphone and keeps a WAV, transcribing only when a whisper
-CLI is installed. No TUI panel ships scripted content; the plugin runtime is
-what is left.
+CLI is installed, and a manifest now loads for real (J-08). No TUI panel ships
+scripted content and no plugin manifest claims a capability this build lacks.
 `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
+
+### Added
+- **Plugin runtime** (J-08). `xencode_plugin_rs::PluginRuntime::load(dir,
+  xencode_version)` discovers `plugin.json` / `manifest.json`, skips a manifest
+  whose `xencode_version` does not accept this build (reported, not silently
+  dropped), registers each remaining one with the `Host`, and flattens the
+  session into the two effects a plugin may have: a `prompt_prefix` and
+  `before`/`after` hooks. Plugin hooks only land where `agent_hooks` in
+  config.json is silent, so the config always wins and the approval gate is
+  untouched. There is no dynamic linking and no plugin code — `entry_point` left
+  with the Python runtime it named.
+- `xencode plugin list` / `install` print what actually took hold (`guardrails
+  v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)`, or
+  `NOT LOADED: needs xencode 0.1.0 (declared 9.9.9)`), and the TUI gained
+  `/plugin [reload]`, which reports the same verdicts plus the hook and prompt
+  totals in effect for the session.
+- New `default_plugin_dir()`: `$XCODE_PLUGIN_DIR`, else
+  `<data dir>/xencode/plugins` — the directory the CLI installs into is the one
+  the TUI loads from at startup.
 
 ### Removed
 - **Unused deployment surface and stale design docs.** Deleted `k8s/`
@@ -54,6 +73,10 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   code opens — `.gitignore` already covers `.xencode/`.
 
 ### Fixed
+- **`xencode plugin remove <name>` accepted a path.** The name was interpolated
+  straight into the plugin directory, so `../../etc` resolved outside it. Removal
+  now goes through the same `PluginRegistry::plugin_path` guard the installer
+  uses and rejects an invalid name (`fix(plugin)`).
 - **Provider fallback chain (I4-01)** now honours its own eligibility rule:
   `retry::is_fallback_eligible` shipped with the feature but was never called,
   so a response xencode could not decode walked every configured alternate
@@ -84,8 +107,9 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   assistant, security auditor, performance profiler, custom models, learning
   mode, multi-language) render scripted content; the plugin commands manage
   manifests with no runtime that loads `XencodePlugin`; `GET /api/models`
-  appends hardcoded remote entries; `k8s/postgres.yaml` and
-  `monitoring/prometheus.yml` describe infrastructure this build does not use.
+  appends hardcoded remote entries; `.xencode.example.json`, which described a
+  Python config shape and is now the real flat `config.json`. Each of those
+  gaps was closed by Milestone J (J-01…J-08) in this same unreleased cycle.
 - Recorded a routing gap: `xencode-providers-rs` has an Anthropic client but
   `ApiKeys` has no `anthropic_api_key` and both entry points pass `None`, so an
   `anthropic:…` model cannot authenticate — Claude ids work through
