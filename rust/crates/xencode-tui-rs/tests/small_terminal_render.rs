@@ -794,3 +794,38 @@ fn every_layout_preset_renders_at_any_size() {
         failures.len()
     );
 }
+
+/// J-01/J-02: these two panels show measurements, so the render must carry the
+/// real row text — and a gauge with nothing behind it reads `n/a`, not zero.
+#[test]
+fn measured_panels_render_real_rows() {
+    let mut app = populated(FocusArea::SecurityAuditor);
+    app.toasts.clear();
+    app.sec_scan_results.push((
+        "Critical".into(),
+        "hardcoded-secret".into(),
+        "src/db.rs:2".into(),
+    ));
+    app.sec_scan_summary = (1, 0, 0, 0);
+    app.sec_scan_log.push("1 findings across 41 files".into());
+    let text = render_text(&mut app, 110, 34);
+    assert!(text.contains("[Critical] hardcoded-secret"), "{text}");
+    assert!(text.contains("Total: 1"), "{text}");
+    assert!(text.contains("41 files"), "{text}");
+
+    let mut app = populated(FocusArea::PerformanceProfiler);
+    app.toasts.clear();
+    app.profiler_rows = vec![(
+        "process".into(),
+        "resident set".into(),
+        "22.6 MB of 15763 MB".into(),
+    )];
+    app.profiler_gauge_cpu = Some(16.0);
+    let text = render_text(&mut app, 110, 34);
+    assert!(text.contains("resident set"), "{text}");
+    assert!(text.contains("22.6 MB"), "{text}");
+    assert!(
+        text.contains("n/a"),
+        "latency has no measurement yet and must not render as 0: {text}"
+    );
+}

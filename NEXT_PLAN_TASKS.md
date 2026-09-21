@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 685 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 689 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -697,12 +697,20 @@ workspace gates green.
   200-line display cap never affects the reported totals. Covered by
   `security_scan_streams_real_findings`, which asserts the scripted
   `config.py` / "tests passed" strings are gone. **685 tests passed.**
-- [ ] J-02 — **Performance profiler**: replace the fake function table with the
-  numbers the app already measures — `average_latency`, per-provider
-  `ollama_health_entries` latency, llama.cpp `tokens/s` from
-  `last_llamacpp_timings`, and the last N `RequestMetrics` rows
-  (`read_metrics`: prompt tokens, cached tokens, KV-reuse, retrieved files).
-  Gauges show real values or `n/a` when no turn has run yet. No new OS deps.
+- [x] J-02 — **Performance profiler** (2026-09-21): the six fake functions are
+  gone. `Enter` now reports measurements: this process's CPU (two
+  `/proc/self/stat` reads 250 ms apart, since CPU is a rate) and resident memory
+  (`/proc/self/statm` against `/proc/meminfo`), plus what the session already
+  knows — average turn latency, llama.cpp tokens/s and token counts, per-provider
+  health latency or its error, and the last 6 rows of `.xencode/metrics.jsonl`
+  (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with no data behind
+  it renders `n/a`, never a zero, and the panel notes when there has been no
+  turn, no health check or no metrics file. Dropped the `fastrand` dependency —
+  the scripted gauge numbers were its only user. Also fixed a layout bug the
+  rewrite exposed: the Gauges box fitted 3 of its 5 lines, so Memory and Latency
+  had never been visible. No new OS dependencies. Covered by three profiler
+  tests plus a render test that asserts the real rows and the `n/a`.
+  **689 tests passed.**
 - [ ] J-03 — **Terminal assistant**: one real provider call per query, asking
   for candidate commands with a risk label, parsed into the existing
   `[TERM]suggestion:` shape; a command the user picks goes through the same
