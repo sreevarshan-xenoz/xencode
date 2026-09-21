@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 13 crates, 645 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 692 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -630,6 +630,44 @@ outgoing editor-activity producer, configurable max session size.
   `/spawn status` lists every registered run with worktree locations. The
   user's task runs unimpeded in the main chat while the subagent works.
   **682 tests passed, zero clippy warnings**
-- [ ] I4-01 — provider fallback chain (optional)
-- [ ] I4-02 — close-out docs + honesty sweep (incl. the README "ensemble
-  reasoning" claim)
+- [x] I4-01 — provider fallback chain: primary model first, then the ordered
+  `agent_fallback_models` alternates (CLI `config set agent_fallback_models
+  a,b`, comma list). Each candidate gets exactly one attempt and the chain
+  advances only when the error is fallback-eligible (`is_fallback_eligible`:
+  transport/provider failure, never a parse error) and **nothing has streamed
+  yet** — once a token arrives the turn stays on the provider that spoke it and
+  the real error surfaces as before. A `[FALLBACK]` system note is drained into
+  the transcript so a mid-chain bump is visible. `fallback_chain` dedupes the
+  primary out of the alternates. Shipped with 690 tests passing
+  (`providers-rs` +6, `config-rs` +1, CLI +1, TUI +2); the commit message
+  claimed the checklist was ticked here but it was not — corrected by 793cb6f's
+  close-out. **Correction (89e609a):** `is_fallback_eligible` had no caller in
+  88ef42b — the loop advanced on *any* pre-stream failure, so a decode error
+  burned the whole chain. The gate is now wired (`should_advance_fallback`) and
+  covered.
+- [x] I4-02 — close-out docs + honesty sweep. Every manual was re-read against
+  the tree and the fiction removed: the README **ensemble reasoning** claim
+  (replaced by the sequential chain), a credential vault and `xencode vault
+  init|migrate|status` (no such subcommands — keys are plain JSON in
+  `~/.xencode/config.json`), a v2.1.0 README badge (the crate is 0.1.0),
+  "language-aware AST analysis" (per-language heuristics), in-chat
+  `/help /models /model /project /status /clear /exit` (the eight real slash
+  commands), a first-run setup wizard, analytics/monitoring/API claims that no
+  route implements, k8s `postgres.yaml` + `DATABASE_URL` and
+  `monitoring/prometheus.yml` as if they were wired (they are not), and a
+  Documentation table now split into current vs archive.
+  `.xencode.example.json` — pure Python-era shape (providers map, `ensemble`,
+  `compression: lzma`) — is now the real flat `config.json`, validated through
+  `XencodeConfig::load_from`. `CONTRIBUTING.md` moved off Python (`venv`,
+  `requirements.txt`, `pytest`, `ruff`, `mypy`, `bandit`, the `dev` branch) to
+  the cargo gates on `main`. Recorded as a known gap: providers-rs has an
+  Anthropic client but `ApiKeys` has no `anthropic_api_key` and both entry
+  points pass `None`, so `anthropic:…` models cannot authenticate. Named the
+  seven scripted TUI panels, the manifest-only plugin surface, and the
+  hardcoded entries in `GET /api/models`. Verifying the sweep's own claim that
+  tests are hermetic turned up the rest of it: `save_config()` was reachable
+  from tests and rewrote the developer's `~/.xencode/config.json`, now gated by
+  `App::for_tests()` (f49e374).
+  **692 tests passed, zero clippy warnings, `cargo fmt --check` clean**
+
+## Milestone I — complete ✅

@@ -6,15 +6,15 @@
 
 # Xencode
 
-**The offline-first AI development assistant platform.**
+**The offline-first AI development assistant.**
 
-A Rust-first, dual-stack AI coding platform that routes requests across local
-and cloud models with zero-latency ensemble reasoning, agentic
-`plan → edit → test → fix` loops, and deep terminal ergonomics.
+A Rust terminal-native AI coding assistant that routes requests across local
+and cloud models with a sequential provider fallback chain, runs an
+approval-gated agentic tool loop, and has deep terminal ergonomics.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/sreevarshan-xenoz/xencode/ci.yml?label=CI&logo=github&style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/actions)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
-[![Version](https://img.shields.io/badge/version-2.1.0-8A2BE2?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
+[![Rust](https://img.shields.io/badge/Rust-stable%201.80%2B-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
+[![Version](https://img.shields.io/badge/version-0.1.0-8A2BE2?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 
@@ -26,11 +26,13 @@ and cloud models with zero-latency ensemble reasoning, agentic
 
 Xencode is an AI-powered development assistant built for engineers who care
 about privacy, control, and speed. It runs local models through [Ollama](https://ollama.ai)
-out of the box, falls back to cloud providers (Anthropic, Gemini, Qwen, OpenRouter)
-when you want them, and combines multiple models through ensemble reasoning to
-get you better answers than any single model alone.
+and llama.cpp out of the box, talks to cloud providers (Gemini, Qwen, and any
+OpenAI-compatible model through OpenRouter) when you opt in, and keeps a chat
+turn alive by walking a **sequential provider
+fallback chain** — primary model first, then the configured alternates — when a
+provider is down.
 
-At its core is a fast, single-file **Rust** binary (14 crates, 682 tests,
+At its core is a fast, single-file **Rust** binary (14 crates, 692 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -38,14 +40,14 @@ and fix your code — driven entirely from your terminal.
 
 ## ✨ Highlights
 
-- **🧠 Offline-first AI** — local Ollama models by default; cloud fallback only when you opt in.
-- **🤖 Agentic coding loop** — bounded `plan → edit → test → fix` cycles with error classification and targeted fixes.
-- **⚖️ Ensemble reasoning** — combine multiple models via vote, weighted, consensus, or hybrid strategies.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface (24 panels, three selectable layouts via `Ctrl+U`): agent, collaboration, audit, profiler, git, models, and more.
-- **🔒 Secure by design** — token-authenticated collaboration server and OWASP-based security scanning.
-- **🔌 Extensible platform** — plugin trait system, feature flags, and lifecycle management.
+- **🧠 Offline-first AI** — local Ollama models by default; cloud providers only when you opt in.
+- **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`.
+- **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
+- **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
+- **🔌 Extension surface** — a plugin trait, manifest and host with event routing in `xencode-plugin-rs`; the CLI's `plugin` commands install and list plugin **manifests** (no plugin runtime loads them yet).
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an audit trail, plus Docker, Compose, and Kubernetes assets.
-- **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), hybrid memory+disk cache, streaming with exponential backoff.
+- **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), memory+disk cache, streaming with exponential backoff.
 
 ---
 
@@ -54,9 +56,9 @@ and fix your code — driven entirely from your terminal.
 | Problem | Xencode |
 | --- | --- |
 | **Privacy** | Fully offline by default. Code, context, and models stay local. |
-| **Lock-in** | Bring your own models — Ollama, Anthropic, Gemini, Qwen, OpenRouter, OpenAI, Hugging Face. |
-| **Single-model blind spots** | Ensemble reasoning and multi-model voting produce more reliable answers. |
-| **Context loss** | Persistent conversation memory, hybrid cache, and RAG-indexed workspace context. |
+| **Lock-in** | Bring your own models — Ollama and llama.cpp locally; Gemini, Qwen, and OpenRouter (any OpenAI-compatible model id, including `vendor/model` Claude ids) in the cloud. |
+| **Provider outages** | A sequential fallback chain re-runs the turn on your alternate models when a provider fails before its first token. |
+| **Context loss** | Persistent conversation memory, memory+disk cache, and a lexical (BM25) workspace context index. |
 | **Slow terminal tools** | Native Rust core for a snappy, instantly responsive TUI/CLI. |
 
 ---
@@ -97,25 +99,26 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 ## ✨ Features
 
 ### AI + Agentic
-- Local-first model routing through Ollama with cloud fallback (Anthropic, Gemini, Qwen, OpenRouter, OpenAI, Hugging Face).
-- Multi-model **ensemble methods**: vote, weighted, consensus, hybrid.
+- Local-first model routing through Ollama and llama.cpp, with cloud providers (Gemini, Qwen, OpenRouter / any OpenAI-compatible model) on opt-in.
+- **Sequential provider fallback** across those models (`agent_fallback_models`) when a provider fails before streaming.
 - **Agentic orchestrator** for multi-step coding tasks with bounded retries.
 - **Zero-duplicate-token** streaming retry middleware with token-delivery tracking.
 - Error classification and targeted fix suggestions.
-- Session export/replay for reproducible execution history.
+- Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 24 interactive panels and overlays: ByteBot agent, collaboration hub, voice interface, security auditor, performance profiler, git commit, provider health, model selector, and more.
+- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more. Seven of them (voice interface, terminal assistant, security auditor, performance profiler, custom models, learning mode, multi-language) are interface mockups with scripted content — they render, they do not scan, listen or profile. Use `xencode analyze` and `xencode advise` for real findings.
 - **Approval-gated agent tool loop** — the chat model can call 11 tools (`read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command`, `update_plan`, `background_start/poll/stop`, `repo_advise`); file changes and shell commands stop at a modal prompt showing the exact diff or command line (`y` allow · `a` allow for the session · `n`/`Esc` deny), paths outside the workspace are refused in every mode, every answer is logged in the transcript, the model's todo list renders above the chat (`/plan`), and `/rewind` puts the files back. `/bytebot <task>` delegates the same loop — its panel's steps are the real calls and their real outcomes. `agent_hooks` config runs your own shell commands before/after approved calls (per tool or `*`); a failing `before` hook vetoes the call entirely. `/spawn <task> [#branch]` runs the same delegated loop in a fresh sibling git worktree (`proj-spawn-1` on branch `xencode/spawn-1`), streams its live steps, posts its final answer back as `(spawn #<id> · <task>)`, and `/spawn status` lists the registered runs.
-- Code analysis with language-aware AST parsing (Python, JavaScript/TypeScript, Rust).
-- Side-by-side diff inspection and hunk-level review flows.
-- Rich CLI with `advise`, `server`, `analyze`, and `plugin` subcommands.
+- **MCP tool servers** — declare stdio servers under `mcp_servers` in config and `/mcp` starts them on request; their tools reach the model as `mcp__<server>__<tool>` behind the same approval gate (`External` class — always a `y`/`n`, never waved through by autonomy), with `mcp_timeout` bounding each call and a broken server failing in its own words.
+- Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
+- Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
+- Rich CLI with `advise`, `server`, `analyze`, `fetch`, `tasks`, `worktree`, and `plugin` subcommands.
 
 ### Reliability + Ops
-- Hybrid cache (memory + disk) with compression and eviction.
-- Structured provider transport with retries, timeouts, and health checks.
-- Monitoring, analytics, and reporting across subsystems.
-- API service surfaces for analytics, monitoring, documents, code analysis, workspace, and plugins.
+- Two-tier cache (memory + disk) with LRU eviction.
+- Structured provider transport with status-code-driven retries, retry budgets, timeouts, and a provider-health panel.
+- Per-request context metrics appended to `.xencode/cache/metrics.jsonl`.
+- Collaboration server exposing sessions, a WebSocket relay, auth, model/provider status, and llama.cpp load/unload routes — bearer-token gated except the public ones.
 
 ---
 
@@ -125,7 +128,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 | Requirement | Used for | Get it |
 | --- | --- | --- |
 | **Ollama** | Local AI models (required) | [ollama.ai](https://ollama.ai/download) |
-| **Rust 1.75+** | Building the binary | [rustup.rs](https://rustup.rs) |
+| **Rust 1.80+** (stable) | Building the binary | [rustup.rs](https://rustup.rs) |
 
 ### Option A: Rust binary (recommended)
 
@@ -182,7 +185,7 @@ xencode analyze src/
 xencode server           # local-first: http://127.0.0.1:8765, ws://
 # then in the TUI: Ctrl+F → Collaboration Hub → c to create, j to join
 
-# 7) Extend Xencode with plugins
+# 7) List installed plugin manifests
 xencode plugin list
 ```
 
@@ -202,12 +205,23 @@ xencode --version                # Show version
 
 ### In-chat commands
 
+These eight are the only strings the chat input intercepts — anything else is
+sent to the model as a prompt.
+
 ```
-/help       Show all commands       /model <name>  Switch model
-/models     Show available models   /project    Show project context
-/status     System status           /clear      Clear conversation
-/exit       Leave chat mode
+/init [abort|status]        Index the repo / stop / inspect an index run
+/ctx [status|track|compact|eval|kv|archive]
+                            Context bundle: state, tracking, compaction, retrieval eval
+/advise [filter]            Live refactor insights (same report as Ctrl+L)
+/bytebot <task>             Delegate the task to the agent loop and watch its real calls
+/spawn <task> [#branch]     Run the delegated loop in a fresh git worktree
+/spawn status               List registered spawn runs and where they live
+/plan [clear]               Pin the model's todo list (or drop it)
+/rewind [turns]             Undo agent file writes for recent turns
+/mcp [status|stop]          Start the configured MCP servers / report / withdraw them
 ```
+
+Press `?` in the TUI for the live keybinding and command overlay.
 
 ---
 
@@ -220,8 +234,9 @@ xencode --version                # Show version
 | **Query** | `xencode query "…"` | Run a one-shot query |
 | **Scan** | `xencode scan . --max-depth 2` | Scan workspace |
 | **Config** | `xencode config show` | Show runtime config |
-| **Models** | `xencode models list` | List available models with health |
+| **Models** | `xencode models list` | List installed Ollama models (`health <name>` checks one) |
 | **Memory** | `xencode memory list` | List conversation sessions |
+| **Advise** | `xencode advise [FILTER] [--json] [--limit 40]` | Repo insights from the `.xencode` snapshot |
 | **Tasks** | `xencode tasks list` | File-backed background tasks (start/poll/stop/rm) |
 | **Worktree** | `xencode worktree list` | List/add/remove git worktrees |
 | **Cache** | `xencode cache stats` | Show cache statistics |
@@ -242,12 +257,12 @@ xencode --version                # Show version
 
 Xencode is organized as a layered runtime:
 
-- **Interface layer** — CLI, TUI, API entry points
-- **Orchestration layer** — agentic workflows and tool execution
-- **Policy layer** — validation, safety, routing, model/provider policy
-- **Execution layer** — local/cloud model providers, ensemble and inference logic
-- **Data layer** — context/memory/cache/vector stores + persistence
-- **Observability layer** — monitoring, analytics, reporting
+- **Interface layer** — CLI (`xencode-cli`) and ratatui TUI
+- **Orchestration layer** — agentic tool loop, approval gate, checkpoints, background tasks
+- **Policy layer** — permission classification, hook veto, retry/fallback eligibility, context budgeting
+- **Execution layer** — model providers (Ollama, llama.cpp, Gemini, Qwen, OpenRouter-compatible)
+- **Data layer** — context index, conversation memory, cache, transcripts under `.xencode/`
+- **Collaboration layer** — axum server: bearer tokens, RBAC relay, JSONL audit; the `xencode-collaboration-rs` / `-server-rs` crates
 
 ### Routing
 
@@ -256,27 +271,27 @@ flowchart TD
     U[User]
     CLI[xencode CLI]
     TUI[ratatui TUI]
-    API[axum server]
+    API[axum server\nsessions + WS relay]
 
-    ORCH[Agent Orchestrator\nPlan -> Edit -> Test -> Fix]
+    ORCH[TUI agent loop\nplan -> approve -> tool -> fix]
     CTX[Context + Memory + Cache]
-    SAFE[Security + Validation]
-    RES[Resolver + Transport]
-    LOCAL[Ollama Local Models]
+    SAFE[Approval gate + hooks + scanner]
+    RES[Providers + retry/fallback]
+    LOCAL[Ollama / llama.cpp]
     CLOUD[Cloud Providers]
-    OUT[Response + Diff + Reports]
+    OUT[Response + Diff + Transcript]
 
     U --> CLI
     U --> TUI
     U --> API
 
-    CLI --> ORCH
+    CLI --> RES
+    CLI --> SAFE
     TUI --> ORCH
-    API --> ORCH
-
     ORCH --> CTX
     ORCH --> SAFE
     ORCH --> RES
+    API --> RES
     RES --> LOCAL
     RES --> CLOUD
     LOCAL --> OUT
@@ -285,20 +300,22 @@ flowchart TD
 
 ### Agentic loop
 
+What actually runs per chat turn in the TUI (`agent_rounds` in
+`xencode-tui-rs/src/app.rs`):
+
 ```mermaid
 flowchart TD
-    A[Prompt Received] --> B[Task Classification]
-    B --> C[Context Retrieval]
-    C --> D[Plan Generation]
-    D --> E[Apply Edits]
-    E --> F[Run Tests/Lint]
-    F --> G{Pass?}
-    G -- Yes --> H[Summarize + Return]
-    G -- No --> I[Classify Failure]
-    I --> J[Generate Fix]
-    J --> K{Iteration Cap Hit?}
-    K -- No --> E
-    K -- Yes --> L[Stop with Diagnostics]
+    A[Prompt + assembled context] --> B[Model turn with tool schemas]
+    B --> C{Tool calls?}
+    C -- No --> H[Final answer streamed]
+    C -- Yes --> D[classify: ReadOnly / Edit / Shell / External]
+    D --> E{Approval mode}
+    E -- denied --> F[error: result, model told not to retry]
+    E -- allowed --> G[execute behind hooks + checkpoint]
+    G --> I{Rounds left under agent_max_rounds?}
+    F --> I
+    I -- Yes --> B
+    I -- No --> H
 ```
 
 > Extended connectivity and deployment diagrams: [project details.md](project%20details.md)
@@ -307,22 +324,39 @@ flowchart TD
 
 ## 🔧 Configuration & Model Routing
 
-- Multi-format configuration (YAML/TOML/JSON/INI) for every environment.
-- Local-first routing with retry/fallback transport policy.
-- Policy-driven model/provider behavior, including lock/override patterns in the provider resolver.
-- Security-first secret storage backed by an encrypted credential vault.
+- One JSON file: `~/.xencode/config.json`. Point Xencode elsewhere with
+  `XCODE_CONFIG_DIR` — the conversation memory and the server's audit log
+  resolve to the same directory.
+- Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
+  TUI Settings panel. Only the keys in the struct are read; unknown keys are
+  ignored.
+- Routing is by **model prefix** on `default_model` (and each fallback entry):
+  `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
+  for a local llama-server, anything else goes to Ollama on `ollama_url`.
+- **No Anthropic key field exists yet.** `xencode-providers-rs` has an
+  Anthropic client, but neither `ApiKeys` nor the app passes an Anthropic key,
+  so an `anthropic:…` model always fails with *"Anthropic API key not
+  configured"*. Reach Claude models through OpenRouter (`anthropic/…`) instead.
+- A failing provider walks `agent_fallback_models` in order — one attempt each,
+  only while nothing has streamed yet.
+- API keys are stored as plain strings in that JSON file. There is **no
+  encrypted vault** in the Rust implementation: protect the file with
+  permissions (`chmod 600 ~/.xencode/config.json`) and keep it out of git.
 
-Start from the example config:
+Start from the annotated example (it lists every real key):
 
 ```bash
-cp .xencode.example.json .xencode.json
+mkdir -p ~/.xencode
+cp .xencode.example.json ~/.xencode/config.json
+xencode config show        # confirm the loader accepted it
 ```
 
-Then point `xencode` at your Ollama server (`http://localhost:11434` by default) and add cloud keys only if you want cloud fallback — the vault will secure them:
+Then point `xencode` at your Ollama server (`http://localhost:11434` by default)
+and add cloud keys only if you want cloud access:
 
 ```bash
-xencode vault init
-xencode vault migrate   # sweeps plaintext keys out of config files
+xencode config set default_model qwen3:4b
+xencode config set agent_fallback_models qwen2.5:14b,openai/gpt-4o-mini
 ```
 
 See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_documentation.md](docs/api_documentation.md)
@@ -335,7 +369,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (682 tests)
+cargo test                          # Full workspace suite (692 tests)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -349,12 +383,12 @@ CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/
 
 ## 🐳 Deployment
 
-Xencode ships production-oriented deployment assets:
+Xencode ships container assets, with two honest caveats:
 
-- **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml) (Rust builder → slim runtime running `xencode server`)
-- **Kubernetes** — manifests in [`k8s/`](k8s/) (deployment, postgres, templated secrets)
-- **Monitoring** — Prometheus config in [`monitoring/`](monitoring/)
-- **CI/CD** — fmt → clippy → cargo test → Trivy security scan → ghcr.io push → staging/prod deploy in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)
+- **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml): Rust builder → slim runtime running `xencode server --port 8765`, health-checked against `/api/status`. This path is real.
+- **Kubernetes** — [`k8s/`](k8s/) has `deployment.yaml` and a templated secrets manifest. `postgres.yaml` and the `DATABASE_URL` the deployment injects are **not consumed**: no Rust code reads a database URL and sessions are in-memory, so restarting a pod drops them.
+- **Monitoring** — [`monitoring/prometheus.yml`](monitoring/prometheus.yml) is legacy: it scrapes `/metrics` and `/api/v1/monitoring/prometheus` on port 8000, neither of which the Rust server serves (it exposes no metrics route at all), and it points at an `alert_rules.yml` that is not in the repo. Treat it as a starting point, not a working setup.
+- **CI/CD** — fmt → clippy → cargo test → Trivy scan → ghcr.io push → staging → production in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). The deploy jobs validate secrets and run `kubectl`; they only work once you supply a kubeconfig and registry credentials.
 
 ---
 
@@ -362,35 +396,48 @@ Xencode ships production-oriented deployment assets:
 
 ```
 xencode/
-├── rust/                    # Rust workspace — 14 crates
+├── rust/                    # Rust workspace — the whole product, 14 crates
 │   └── crates/
-│       ├── xencode-cli      # # CLI entry point (xencode binary)
-│       ├── xencode-tui-rs   # Ratatui TUI
-│       ├── xencode-server-rs# Axum HTTP/WebSocket collaboration server
-│       ├── xencode-analysis-rs # Code analysis + security scanner + image intake
-│       └── ...
-├── k8s/                     # Kubernetes manifests
-├── monitoring/              # Prometheus + analytics
-├── scripts/                 # Build/smoke-test scripts (Rust)
+│       ├── xencode-cli      # CLI entry point (xencode binary)
+│       ├── xencode-tui-rs   # Ratatui TUI + agent loop
+│       ├── xencode-providers-rs # Providers, retry, fallback, tool schemas
+│       ├── xencode-context-rs   # Index, retrieval, budget, watcher, advise
+│       ├── xencode-mcp-rs       # MCP stdio client
+│       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
+│       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
+│       └── ...              # core, config, cache, memory, models, collaboration, plugin
+├── k8s/                     # Kubernetes manifests (postgres.yaml is unused by the Rust server)
+├── monitoring/              # Legacy Prometheus config — not wired to the Rust server
+├── scripts/                 # Shell/PowerShell build + smoke-test helpers
 ├── images/                  # Screenshots
-└── .xencode.example.json    # Example configuration
+└── .xencode.example.json    # Example of ~/.xencode/config.json
 ```
 
 ---
 
 ## 📖 Documentation
 
+Current, and kept in step with the Rust implementation:
+
 | Topic | Where |
 | --- | --- |
 | Getting started | [`QUICK_START.md`](QUICK_START.md) |
-| Manual installation | [`docs/INSTALL_MANUAL.md`](docs/INSTALL_MANUAL.md) |
 | User manual | [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) |
 | CLI guide | [`CLI_GUIDE.md`](CLI_GUIDE.md) |
-| API reference | [`docs/api_documentation.md`](docs/api_documentation.md) |
-| Architecture & diagrams | [`docs/ARCHITECTURE_DIAGRAMS.md`](docs/ARCHITECTURE_DIAGRAMS.md) + [`project details.md`](project%20details.md) |
-| Feature catalog | [`docs/FEATURES.md`](docs/FEATURES.md) |
-| Roadmap | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
-| Full documentation index | [`DOCUMENTATION.md`](DOCUMENTATION.md) |
+| Active task list | [`NEXT_PLAN_TASKS.md`](NEXT_PLAN_TASKS.md) · [`NEXT_PLAN.md`](NEXT_PLAN.md) |
+| Route + auth reference | [`docs/api_documentation.md`](docs/api_documentation.md) (server section is current; the module sections below it are marked legacy) |
+
+Historical, **not** descriptions of this codebase — they predate the Rust
+migration and still document a Python stack, ensemble reasoning, and modules
+that no longer exist. Read them for intent only:
+
+| Archive | Was |
+| --- | --- |
+| [`DOCUMENTATION.md`](DOCUMENTATION.md) | Full Python-era documentation index |
+| [`PRD.md`](PRD.md) | Original product requirements |
+| [`project details.md`](project%20details.md) | Python-era architecture + feature inventory |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | Post-migration idea backlog ("wild ideas"), not shipped features |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Long-term roadmap; many sections are marked historical |
 
 ---
 
@@ -409,8 +456,8 @@ ollama pull qwen3:4b               # small, fast starter model
 ```
 
 ### Slow responses
-- `/model phi3:mini` — switch to a faster local model.
-- `xencode models list` — check provider health.
+- `xencode config set default_model phi3:mini` — switch to a faster local model (restart the TUI to pick it up).
+- `xencode models health <name>` — check one model answers; in the TUI, `Ctrl+H` runs a health check and `Ctrl+F` → *Provider Health* opens the panel.
 
 ### Rust build errors
 ```bash
@@ -422,8 +469,14 @@ cd rust && cargo build -p xencode-cli 2>&1
 
 ## 🔒 Security
 
-- Store API keys via `xencode config`, never in tracked files.
-- OWASP Top 10 + CVE vulnerability scanning built into `xencode analyze`.
+- API keys live in `api_keys` inside `~/.xencode/config.json`. `xencode config set`
+  does not accept key names, so edit that file directly and keep it out of git —
+  there is no encryption layer, so file permissions are the control (`chmod 600`).
+- `xencode analyze` runs a pattern-based scanner over OWASP Top 10 categories
+  (hardcoded secrets, injection, weak crypto, path traversal, SSRF). It matches
+  source text — it does not consult a CVE database or your dependency tree.
+- The collaboration server authenticates every mutation with bearer tokens, gates
+  the relay by role, and appends joins, mutations and denials to an audit log.
 - Never commit plaintext credentials — use environment-specific secrets management and least-privilege access.
 
 Vulnerabilities can be reported privately to **security@xenoz.com** — see
@@ -435,12 +488,17 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 The Rust migration (all 8 phases, 14 crates) is **complete**. Near-term direction:
 
-- Repo-wide context indexing + routing intelligence
-- Smart fallback policy governance + provider health UX
+- An `anthropic_api_key` field so the existing Anthropic client is reachable
+  without going through OpenRouter
+- Making the seven scripted TUI panels real: microphone input, a live profiler,
+  an auditor wired to the analyzer — or removing them
+- A plugin runtime that loads and runs `XencodePlugin` implementations, not
+  just their manifests
+- Retry budgets and fallback-policy governance + provider health UX
 - Multimodal inputs and secure team workflows
-- Multi-model arena mode · git autopilot agent · workspace RAG · session replay
+- Multi-model arena mode · git autopilot agent · session replay
 
-Track progress in [docs/ROADMAP.md](docs/ROADMAP.md).
+The roadmap file below is the pre-migration plan, kept for history.
 
 ---
 

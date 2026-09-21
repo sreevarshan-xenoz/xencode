@@ -1,15 +1,18 @@
 # Manual Installation Guide
 
-Xencode has a **dual-stack architecture** — a Rust binary (primary) and a Python stack (legacy/plugins).
+Xencode is **Rust-only**: one Cargo workspace under `rust/crates/*` producing a
+single `xencode` binary. There is no Python stack to install.
 
 ---
 
 ## Install the Rust Binary
 
-The Rust binary is a single-file executable with no Python dependency. It provides the TUI, CLI, server, analysis, and plugin management.
+Quickest path: `./install.sh` (Linux/macOS) or `.\install.ps1` — it checks the
+toolchain, builds the release binary, sets Ollama up, pulls `qwen3:4b`,
+smoke-tests and installs `xencode` into `~/.local/bin`. To do it by hand:
 
 ### Prerequisites
-- **Rust 1.75+** toolchain (install from https://rustup.rs)
+- **Rust** (stable) toolchain — install from https://rustup.rs
 - **Ollama** for local AI models (install from https://ollama.ai)
 
 ### Build from Source
@@ -19,15 +22,15 @@ The Rust binary is a single-file executable with no Python dependency. It provid
 git clone https://github.com/sreevarshan-xenoz/xencode
 cd xencode
 
-# Build release binary (output: rust/target/release/xencode-cli.exe)
+# Build the release binary (package xencode-cli → binary named `xencode`)
 cd rust
 cargo build --release -p xencode-cli
 
 # Copy to PATH
 # Linux/macOS:
-cp target/release/xencode-cli /usr/local/bin/xencode
-# Windows:
-copy target\release\xencode-cli.exe C:\Windows\System32\xencode.exe
+cp target/release/xencode ~/.local/bin/        # or /usr/local/bin, needs sudo
+# Windows (PowerShell):
+copy target\release\xencode.exe $env:LOCALAPPDATA\Microsoft\WindowsApps\
 ```
 
 ### Verify Installation

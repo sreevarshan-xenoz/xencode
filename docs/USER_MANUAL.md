@@ -12,35 +12,47 @@
 
 ## Introduction
 
-Xencode is an AI-powered development assistant platform that integrates with local language models through Ollama. It provides intelligent code analysis, document processing, workspace collaboration, and plugin management with a focus on privacy and offline operation.
+Xencode is an AI-powered development assistant that talks to local language
+models through Ollama and llama.cpp (and, on opt-in, to cloud providers). It
+provides an approval-gated agent loop over your workspace, pattern-based code
+and security analysis, repository insights, a collaboration server and a
+plugin system, with a focus on privacy and offline operation.
 
 ### Architecture
-Xencode is a **Rust-only** workspace (`rust/crates/*`, 13 crates):
-- **Rust core** — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, Anthropic, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
+Xencode is a **Rust-only** workspace (`rust/crates/*`, 14 crates):
+- **Rust core** — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, llama.cpp, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
 
 The Rust binary (`xencode`) is the entry point.
 
 ### Key Features
-- **Rust TUI**: Ratatui-based terminal interface with 24 interactive feature panels and overlays
-- **Multi-Provider AI Routing**: Ollama local + Anthropic, Gemini, Qwen, OpenRouter cloud with token-aware exponential retry middleware
-- **Code Analysis**: Language-aware AST analysis (Python, JS/TS, Rust) + OWASP vulnerability scanning
+- **Rust TUI**: Ratatui-based terminal interface with 24 focus areas — 17 of them reachable from the `Ctrl+F` feature navigator
+- **Multi-Provider AI Routing**: Ollama and llama.cpp locally + Gemini, Qwen and OpenRouter (any OpenAI-compatible model id) in the cloud, with status-code-driven retry middleware and a sequential `agent_fallback_models` chain
+- **Code Analysis**: per-language heuristics (Python, JS/TS, Rust) + a pattern-based OWASP Top 10 scanner
 - **HTTP/WebSocket Server**: Axum-based collaboration server with token auth, role-based access control, a JSONL audit trail and local-first bind defaults (TLS opt-in)
 - **Plugin System**: Plugin trait, host, registry with lifecycle management
-- **Conversation Memory & Cache**: Persistent session history with compressed hybrid caching
+- **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
+
+> **Not implemented, whatever a panel shows.** Seven TUI panels are interface
+> mockups with scripted content: Voice Interface, Terminal Assistant, Security
+> Auditor, Performance Profiler, Custom Models, Learning Mode and
+> Multi-Language. They render and respond to keys; nothing listens, records,
+> profiles or detects. The real equivalents are `xencode analyze`
+> (security/code findings), `xencode advise` (repo insights) and the
+> performance dashboard (session metrics).
 
 ## Installation
 
 ### Rust Binary
 
 ```bash
-# Build from source (requires Rust 1.75+)
+# Build from source (requires a stable Rust toolchain)
 cd rust && cargo build --release -p xencode-cli
 ./target/release/xencode --help
 ```
 
 ### Prerequisites
-- **Rust 1.75+** (for building from source)
+- **Rust** (stable; the workspace uses `LazyLock`, so 1.80+) — for building from source
 - **Ollama** installed and running (`ollama serve`)
 - **A model** installed: `ollama pull qwen3:4b`
 - **4GB+ RAM** recommended
@@ -174,22 +186,22 @@ do anything):
 
 | Panel | Description |
 |-------|-------------|
-| Performance Dashboard | Session stats, file breakdown |
-| Provider Health | Health checks with status icons |
-| Project Analyzer | Workspace file type analysis |
-| Git Commit | Commit message input with cursor |
-| ByteBot Agent | Step-through autonomous task execution |
+| Performance Dashboard | Session stats, file breakdown (real metrics) |
+| Provider Health | Health checks with status icons (real requests) |
+| Project Analyzer | Workspace file type analysis (real scan) |
+| Git Commit | Type a message, Enter runs `git commit -am` (tracked modifications only — untracked files are never added); result returns as a chat line |
+| ByteBot Agent | Step-through autonomous task execution (real tool loop) |
 | Collaboration Hub | Real WebSocket client: create/join sessions, live members with roles, server errors verbatim |
-| Voice Interface | Audio level meter, commands, transcript |
-| Terminal Assistant | Shell command suggestions, risk badges |
-| Security Auditor | Vulnerability findings, severity bars |
-| Performance Profiler | Gauges, function timing, hot paths |
-| Custom Models | Profile list, parameter sliders |
-| Learning Mode | Lesson viewer, code examples |
-| Multi-Language | Language detection, translation |
-| PR Review | Per-file diff browsing, base toggle |
+| Voice Interface | 🎭 Mockup — a scripted session plays audio levels and transcript lines; no microphone is opened |
+| Terminal Assistant | 🎭 Mockup — a fixed list of suggested commands with risk badges; nothing runs |
+| Security Auditor | 🎭 Mockup — scripted findings and severity bars; use `xencode analyze` for real scanning |
+| Performance Profiler | 🎭 Mockup — demo gauges and function timings; no profiler is attached |
+| Custom Models | 🎭 Mockup — sample profiles and sliders; saving writes nothing to config |
+| Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |
+| Multi-Language | 🎭 Mockup — a fixed sample language-detection table; nothing is detected |
+| PR Review | Per-file diff browsing, base toggle (real git diff) |
 | Background Tasks | Live registry of background commands (stop/remove) |
-| Worktrees | Git worktree list, add (path+branch) and remove with confirm |
+| Worktrees | Git worktree list, add (path+branch) and remove with confirm (real git) |
 | Insights | Refactor findings from the live symbol graph (broken imports, cycles, hubs, orphans) |
 
 **Collaboration Hub keys (while the panel is focused):**
@@ -323,13 +335,34 @@ is not a separate engine and it is not a demo —
 - if the provider fails, the panel prints the error it got and the open step
   goes `failed`. Nothing is reported as done that xencode did not observe.
 
-### First-Time Setup
+### Slash Commands (the only ones)
 
-On first run, Xencode will guide you through:
-1. Verifying Ollama installation
-2. Checking available models
-3. Installing a recommended model if none found
-4. Configuring default settings
+Type `/` in the chat input and press `Tab` to list them:
+
+```
+/init [abort|status]    Index the project (context snapshot under .xencode/)
+/ctx <sub>              Context engine: status/track/compact/eval/kv/archive
+/advise [filter]        Repository insights from that index
+/bytebot <task>         Delegate the task to the agent loop
+/plan [clear]           Pin the agent's todo list, or clear it
+/rewind [turns]         Undo the agent's file writes for this session
+/mcp [status|stop]      Start the MCP servers declared in config, or query them
+/spawn <task> [#branch] Run a subagent in a fresh sibling git worktree
+```
+
+There is no `/help`, `/clear`, `/exit` or `/models`: press `?` (or `F1`) for
+the keybinding overlay, `Ctrl+C` (or `q`) to quit, and `m` for the model
+selector.
+
+### First Run
+
+There is no setup wizard. `xencode` opens the TUI against
+`~/.xencode/config.json` (created with defaults on first save), reads
+`default_model` and talks to the Ollama server at `ollama_url`. If Ollama is
+not running or no model is installed, the model list is simply empty and chat
+turns fail with the provider's error — `xencode models list` and `Ctrl+H`
+tell you which. `install.sh` is the step that installs Ollama and pulls the
+starter model; inside the TUI nothing is installed for you.
 
 ## Advanced Features
 
@@ -338,14 +371,14 @@ On first run, Xencode will guide you through:
 Analyze source code for style issues, bugs, and security vulnerabilities:
 
 ```bash
-# Analyze a directory (recursive)
+# Analyze a directory (recursive; junk dirs like target/ are skipped)
 xencode analyze src/
 
 # Analyze a single file with JSON output
 xencode analyze src/main.rs --format json
 
-# Results show: issue type, severity (Low/Medium/High/Critical),
-# file location, description, and suggestion
+# Image files take the intake path: format, dimensions and byte size
+xencode analyze ./assets/logo.png --format json
 ```
 
 ### Security Scanning
@@ -354,9 +387,13 @@ The Rust analyzer includes OWASP-focused vulnerability scanning:
 - Hardcoded secrets (passwords, API keys, tokens)
 - SQL injection patterns
 - Command injection risks
-- Weak cryptography (MD5, SHA1, weak RNG)
+- Weak cryptography (MD5, SHA1)
 - Path traversal vulnerabilities
 - SSRF patterns
+
+These are **regular expressions over source text**. There is no dataflow
+analysis and no CVE database: the scanner never consults your dependency tree,
+so a vulnerable library version is invisible to it.
 
 ### Collaboration Server
 
@@ -476,25 +513,17 @@ Options:
 
 ### Example 1: Code Analysis
 ```bash
-# Analyze a Python project for issues
-$ xencode analyze src/
-📊 Analysis Report for src/
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📄 main.py
-  ⚠️ [MEDIUM] Bare except clause on line 23
-     Suggestion: Use 'except Exception:' to catch only expected exceptions
-  ⚠️ [LOW] Line too long (>100 chars) on line 15
-     Suggestion: Break line into multiple lines
-
-📄 utils.py
-  🔴 [CRITICAL] Hardcoded API key on line 5
-     Suggestion: Remove the hardcoded value and use environment variables or a vault service
-  🔴 [HIGH] Mutable default argument on line 8
-     Suggestion: Use None as default and initialize inside the function
-
-📊 Summary: 4 issues found (1 critical, 1 high, 1 medium, 1 low)
+$ xencode analyze rust/crates/xencode-config-rs/src/config.rs
+Analysis of: rust/crates/xencode-config-rs/src/config.rs
+   Issues: 34
+  [low] Ln8: Public item missing documentation -- Add /// doc comment explaining purpose and usage
+  [medium] Ln409: Unwrap may cause panic on None/Err -- Use proper error handling with match or ? operator
+  [medium] Ln421: Unwrap may cause panic on None/Err -- Use proper error handling with match or ? operator
+  ...
 ```
+Findings carry `issue_type`, `severity` (`Low`/`Medium`/`High`/`Critical`),
+`file_path`, `line_number`, `message`, `suggestion` and `code_snippet` —
+`--format json` emits them as an array of those objects.
 
 ### Example 2: Collaboration Server
 ```bash
@@ -508,10 +537,18 @@ $ xencode server
 $ curl http://localhost:8765/
 {"status":"online","service":"Xencode Server","version":"0.1.0"}
 
-# List available models via API
+# List models as the server sees them
 $ curl http://localhost:8765/api/models
-{"models":{"qwen3:4b":{"name":"qwen3:4b","status":"healthy","response_time":"1.2s"}}}
+{"models":[{"name":"qwen3:4b","provider":"ollama","type":"local","size":...,"modified_at":"..."},
+           {"name":"gpt-4o","provider":"openai","type":"remote"},
+           {"name":"claude-3.5-sonnet","provider":"anthropic","type":"remote"}]}
 ```
+`/api/models` lists what Ollama and llama.cpp actually report **and** appends
+two hardcoded remote entries; when both local servers are offline it falls back
+to two sample Ollama names. Treat it as a demo payload, not a model registry.
+Routes: `/`, `/sessions/create`, `/sessions/{id}`, `/ws/{session_id}`,
+`/auth/login`, `/auth/verify`, `/api/config`, `/api/models`, `/api/status`,
+`/api/llamacpp/{status,load,unload}`.
 
 ### Example 3: Running the TUI
 ```bash
@@ -527,16 +564,19 @@ $ xencode tui
 ### Example 4: Plugin Management
 ```bash
 $ xencode plugin list
-🔌 Installed Plugins
-  No plugins installed.
+No plugins installed in: ~/.local/share/xencode/plugins
+Use 'xencode plugin install <path>' to install a plugin.
 
 $ xencode plugin install ./my-custom-plugin/
-✅ Plugin 'my-custom-plugin' installed successfully
+✅ Plugin 'my-custom-plugin' installed successfully.
 
 $ xencode plugin list
-🔌 Installed Plugins
-  my-custom-plugin v1.0.0 — Custom analysis plugin
+📦 Installed Plugins (from ~/.local/share/xencode/plugins):
+  my-custom-plugin v1.0.0 — <manifest description> (by <manifest author>)
 ```
+The listing reads the plugin **manifest**; the `XencodePlugin` trait, host and
+event routing live in `xencode-plugin-rs` as a library — the CLI does not
+instantiate or run plugin code.
 
 ### Example 5: Short Query
 ```bash
@@ -563,7 +603,7 @@ $ xencode query "What does this Rust code do?"
 #### Slow Responses
 **Problem:** Long response times
 **Solution:**
-1. Check model health: `xencode models health`
+1. Check model health: `xencode models health <name>`
 2. List installed models: `xencode models list`
 3. Check system resources: `htop` or Task Manager
 
@@ -583,8 +623,10 @@ $ xencode query "What does this Rust code do?"
 
 ### Getting Help
 
-- Use `/help` for command reference
-- Check system status with `/status`
+- Press `?` (or `F1`) in the TUI for the keybinding overlay; `xencode --help`
+  and `xencode <subcommand> --help` are the CLI reference
+- `Ctrl+H` in the TUI runs a provider health check; `xencode models default`
+  shows which model the picker chose
 - Report issues on GitHub: https://github.com/sreevarshan-xenoz/xencode/issues
 - Join discussions: https://github.com/sreevarshan-xenoz/xencode/discussions
 

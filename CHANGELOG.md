@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Provider fallback chain (I4-01)** now honours its own eligibility rule:
+  `retry::is_fallback_eligible` shipped with the feature but was never called,
+  so a response xencode could not decode walked every configured alternate
+  even though each reproduces the failure. The chain advances only on a clean,
+  eligible error (`fix(agent)`).
+- **TUI tests are hermetic.** `App::new()` read *and* wrote the developer's
+  real `~/.xencode/conversation_memory.json` and restored its last messages,
+  so a full-workspace run could fail a chat test with another test's transcript
+  (`left: "/init abort", right: "/mcp status"`). Added `App::for_tests()`
+  (non-persistent memory), made `ConversationMemory::memory_dir()` respect
+  `XCODE_CONFIG_DIR`, and stopped persisting slash commands to conversation
+  memory — a local TUI verb used to be replayed to the model forever. Tests no
+  longer write the developer's real `~/.xencode/config.json` either:
+  `App::for_tests()` turns config persistence off (`fix(tui)`).
+
+### Documentation
+- Milestone I close-out honesty sweep (I4-02): every manual was re-checked
+  against the tree. Removed fiction: the credential vault and `xencode vault
+  init|migrate|status` (no such commands), ensemble/multi-model "reasoning"
+  (the fallback chain is sequential), "language-aware AST analysis"
+  (per-language heuristics), in-chat `/help /models /model /project /status
+  /clear /exit` (eight real slash commands), a first-run setup wizard (there is
+  none), Python-era setup and linting in `CONTRIBUTING.md` (`venv`,
+  `requirements.txt`, `pytest`, `ruff`, `mypy`, `bandit`, a `dev` branch), and
+  `.xencode.example.json`, which described a Python config shape and is now the
+  real flat `config.json`, validated through the loader.
+- Stated plainly what is not real: seven TUI panels (voice interface, terminal
+  assistant, security auditor, performance profiler, custom models, learning
+  mode, multi-language) render scripted content; the plugin commands manage
+  manifests with no runtime that loads `XencodePlugin`; `GET /api/models`
+  appends hardcoded remote entries; `k8s/postgres.yaml` and
+  `monitoring/prometheus.yml` describe infrastructure this build does not use.
+- Recorded a routing gap: `xencode-providers-rs` has an Anthropic client but
+  `ApiKeys` has no `anthropic_api_key` and both entry points pass `None`, so an
+  `anthropic:…` model cannot authenticate — Claude ids work through
+  OpenRouter.
+- Counts and flags corrected: 14 crates, 692 tests; `xencode query --session`
+  (not `--session-id`); `xencode llamacpp list|set-path`, `cache clear`,
+  `memory show <id>`; `models health` requires a model name; README version
+  badge back to the real `0.1.0`.
+
 ### Added
 - `/spawn` subagent in a git worktree (Milestone I, I3-03): `/spawn
   <task> [#branch]` runs the delegated agent loop (`/bytebot`'s engine)

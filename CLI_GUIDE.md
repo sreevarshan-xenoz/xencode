@@ -66,7 +66,7 @@ xencode query "Explain microservices architecture"
 xencode query "Explain async programming" \
   --model qwen3:4b \
   --no-cache \
-  --session-id demo
+  --session demo
 
 # llama.cpp sampling controls
 xencode query "Write a haiku" \
@@ -74,7 +74,14 @@ xencode query "Write a haiku" \
   --top-k 40 \
   --min-p 0.05 \
   --max-tokens 256
+
+# Structured output: --grammar takes a GBNF file or string, --json-schema a
+# JSON schema. An invalid --json-schema is rejected up front (exit 1) rather
+# than silently degrading to a plain completion.
+xencode query "List three file formats" --json-schema '{"type":"object"}'
 ```
+Sampling flags apply when the resolved model is served by llama.cpp; the
+prompt alone (no flags) goes to the configured default model.
 
 ### `xencode analyze <path> [--format text|json]`
 Analyze a file or directory for code issues and vulnerabilities. Image
@@ -100,20 +107,24 @@ xencode scan . --format json | jq '.[].path'
 ```
 
 ### `xencode models <action>`
-Local model management (Ollama & llama.cpp).
+Local model management.
 
 ```bash
-xencode models list       # All installed Ollama models
-xencode models health <name>  # Check one model
-xencode models default     # Show the smart-selected default
+xencode models list           # Ollama models + models served by llama.cpp
+xencode models health <name>  # Check one model's health
+xencode models default        # Show the smart-selected default
 ```
 
 ### `xencode llamacpp <action>`
-llama.cpp server management: `status`, `start`, `stop`, `load`, `unload`.
+llama.cpp server management: `status`, `start`, `stop`, `load`, `unload`,
+`list`, `set-path`.
 
 ```bash
 xencode llamacpp status
-xencode llamacpp start --model mymodel.gguf --port 8080
+xencode llamacpp start --model mymodel.gguf --port 8080 [--exec /path/to/llama-server]
+xencode llamacpp set-path ~/models/mymodel.gguf   # persist the GGUF path
+xencode llamacpp list                             # models on a running server
+xencode llamacpp stop
 ```
 
 ### `xencode config <action>`
@@ -145,6 +156,7 @@ xencode config reset
 | `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |
+| `agent_fallback_models` | list | comma-separated ordered alternates for the agent's turns (I4-01), e.g. `xencode config set agent_fallback_models "qwen2.5:14b,google_gemini:gemini-2.0-flash"`. The configured default model is always tried first, so this list holds only fallbacks (duplicates of it are dropped). A candidate is abandoned — and the chain moves on — only when it failed **before emitting any token** and the error is not our own response-decode failure; a token already on screen, or a `Parse` error, fixes the model in place. Each candidate gets one attempt per step and the transcript records a `[FALLBACK]` line when the chain moves. `xencode query` is single-shot and does not use this chain. An empty list (the default) disables fallback. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `mcp_servers` | object | MCP stdio servers to offer as tools: `"name" → { "command": "...", "args": [...], "env": {...} }` (credentials go in `env`, never `args`); nothing is started until you run `/mcp` |
 | `agent_hooks` | object | shell hooks around **approved** agent tool calls: `"before"` and `"after"` maps from an exact tool name (or `"*"` for every tool) to a command run via `sh -c` in the workspace root. A failing `before` hook vetoes the call (nothing runs, no rewind point, output shown as `error: pre-hook vetoed this call`); a passing one has its output prepended to the result. The `after` hook always runs and its output is appended. Hook output is capped like `run_command` (stderr merged, tail kept) |
@@ -166,17 +178,19 @@ Edit on `agent_hooks` directly in the JSON (`config set` has no nested-map key):
 ```
 
 ### `xencode cache <action>`
-Response cache management (`stats`, `clear`, …).
+Response cache management: `stats`, `clear`.
 
 ```bash
 xencode cache stats
+xencode cache clear
 ```
 
 ### `xencode memory <action>`
-Conversation memory management (`list`, …).
+Conversation memory (persisted under `~/.xencode`): `list`, `show <session>`.
 
 ```bash
 xencode memory list
+xencode memory show <session-id>
 ```
 
 ### `xencode tasks <action>`
