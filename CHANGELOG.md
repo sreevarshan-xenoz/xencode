@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `/spawn` subagent in a git worktree (Milestone I, I3-03): `/spawn
+  <task> [#branch]` runs the delegated agent loop (`/bytebot`'s engine)
+  inside a fresh sibling worktree next to the project — `<dir>-spawn-<id>`
+  on the generated branch `xencode/spawn-<id>`, or `<dir>-spawn-<id>-<branch>`
+  when the task ends with a `#branch`. The subagent gets its own tool root
+  and a fresh checkpoint store (so `/rewind` in the main chat never touches
+  its files) while your own chat keeps working. Live tool calls stream in
+  the transcript; on completion the agent's final answer is posted as
+  `(spawn #<id> · <task>)` and a `⏺ spawn #<id> done/failed — branch … at …,
+  N/M call(s) completed` line names the worktree. `/spawn status` lists every
+  registered run with its worktree location
+- Agent pre/post tool-use hooks (Milestone I, I3-02): the `agent_hooks` config
+  key declares shell commands that run around *approved* agent tool calls — a
+  `before` map and an `after` map, each keyed by exact tool name or `*` for
+  every tool. Commands run via `sh -c` in the workspace root with the same
+  budget and output cap as `run_command` (stderr merged, tail kept). A
+  `before` hook that exits non-zero **vetoes the call**: nothing runs, no
+  rewind point is taken, and the model sees `error: pre-hook vetoed this
+  call:` plus the hook's output. A passing `before` hook has its output
+  prepended to the result; the `after` hook always runs and its output is
+  appended. Hooks are config-edited in the JSON like `mcp_servers`
 - MCP tool servers (Milestone I, I3-01): a new `xencode-mcp-rs` crate speaks
   the Model Context Protocol over stdio. Servers are declared in config under
   `mcp_servers` (`command`, `args`, `env` — credentials never in `args`) and

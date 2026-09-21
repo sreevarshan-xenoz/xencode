@@ -57,7 +57,7 @@ impl RetryConfig {
     }
 }
 
-/// Determines whether an error is retriable.
+/// Whether an error is retriable.
 ///
 /// Retriable errors:
 /// - Network errors (connectivity, timeout, DNS resolution)
@@ -101,6 +101,41 @@ fn is_name_resolution_failure(msg: &str) -> bool {
         || msg.contains("nodename nor servname provided") // macOS
         || msg.contains("no such host")                   // Windows / hyper
         || msg.contains("failed to lookup address")
+}
+
+/// Whether a failure is worth escaping by trying a *different* provider/model.
+///
+/// This is deliberately broader than [`is_retriable`], which decides whether
+/// the **same** provider is worth re-trying. Re-trying provider A against the
+/// same 4xx status is pointless; escaping to provider B is often the point —
+/// a 404 `model not found`, a wrong key, a provider outage, a quota ceiling.
+///
+/// The only error that gets one chance is [`ProviderError::Parse`]: it is our
+/// own decoder failing on data we already received, so another provider/model
+/// reproduces it equally. Everything else is provider-specific enough that a
+/// fallback candidate can plausibly succeed. (I4-01)
+pub fn is_fallback_eligible(err: &ProviderError) -> bool {
+    !matches!(err, ProviderError::Parse(_))
+}
+
+/// When a provider/model fails without emitting anything, follow a fallback
+/// order: the primary model first, then each configured alternate (I4-01).
+///
+/// Empty ids and a primary repeated in the list are dropped, so the chain is
+/// exactly "[primary, fallback₁, …]" with no duplicate tries.
+pub fn fallback_chain(primary: &str, configured: &[String]) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::with_capacity(configured.len() + 1);
+    let primary = primary.trim();
+    if !primary.is_empty() {
+        chain.push(primary.to_string());
+    }
+    for candidate in configured {
+        let candidate = candidate.trim();
+        if !candidate.is_empty() && !chain.iter().any(|c| c == candidate) {
+            chain.push(candidate.to_string());
+        }
+    }
+    chain
 }
 
 /// Spread a backoff delay over `[delay/2, delay]` ("equal jitter").
@@ -356,6 +391,96 @@ mod tests {
     fn is_not_retriable_parse_error() {
         let err = ProviderError::Parse("unexpected end of JSON".to_string());
         assert!(!is_retriable(&err));
+    }
+
+    // ── is_fallback_eligible (I4-01) ────────────────────────────────────────
+
+    /// Every provider-specific failure — network, server outage, rate limit,
+    /// auth, a model the provider does not serve, a missing key — is worth
+    /// escaping to a different provider/model.
+    #[test]
+    fn provider_specific_failures_are_fallback_eligible() {
+        let cases = [
+            ProviderError::Network("connection reset by peer".to_string()),
+            ProviderError::api("One", 500u16, "boom"),
+            ProviderError::api("One", 502u16, "bad gateway"),
+            ProviderError::api("One", 529u16, "overloaded"),
+            ProviderError::api("One", 404u16, "model not found"),
+            ProviderError::api("One", 401u16, "unauthorized"),
+            ProviderError::api("One", 400u16, "bad request"),
+            ProviderError::api_message("One API key not configured"),
+        ];
+        for (i, err) in cases.iter().enumerate() {
+            assert!(
+                is_fallback_eligible(err),
+                "case {i} should be fallback-eligible: {err}"
+            );
+        }
+    }
+
+    /// A parse failure is our decoder's, not the provider's — another model
+    /// reproduces it, so it gets no fallback try.
+    #[test]
+    fn parse_failures_are_not_fallback_eligible() {
+        let err = ProviderError::Parse("unexpected end of JSON".to_string());
+        assert!(!is_fallback_eligible(&err));
+    }
+
+    /// The critic: a 404/401 is *not* retriable against the same provider
+    /// (is_retriable), yet *is* worth a fallback try — the two predicates
+    /// answer different questions.
+    #[test]
+    fn fallback_eligibility_diverges_from_retriability() {
+        let not_found = ProviderError::api("One", 404u16, "model not found");
+        assert!(!is_retriable(&not_found));
+        assert!(is_fallback_eligible(&not_found));
+
+        let missing_key = ProviderError::api_message("Anthropic API key not configured");
+        assert!(!is_retriable(&missing_key));
+        assert!(is_fallback_eligible(&missing_key));
+    }
+
+    // ── fallback_chain (I4-01) ──────────────────────────────────────────────
+
+    #[test]
+    fn fallback_chain_leads_with_the_primary_once() {
+        let chain = fallback_chain(
+            "llama3.2",
+            &[
+                "qwen2.5:14b".to_string(),
+                "llama3.2".to_string(), // duplicate primary → dropped
+                "  ".to_string(),       // blank → dropped
+                "gemini:gemini-2.0-flash".to_string(),
+            ],
+        );
+        assert_eq!(
+            chain,
+            vec![
+                "llama3.2".to_string(),
+                "qwen2.5:14b".to_string(),
+                "gemini:gemini-2.0-flash".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_without_alternates_is_just_the_primary() {
+        assert_eq!(
+            fallback_chain("qwen3:4b", &[]),
+            vec!["qwen3:4b".to_string()]
+        );
+    }
+
+    #[test]
+    fn fallback_chain_handles_a_blank_primary_and_a_duplicate_alternate() {
+        assert_eq!(
+            fallback_chain("", &["a".to_string()]),
+            vec!["a".to_string()]
+        );
+        assert_eq!(
+            fallback_chain("m", &["m".to_string(), "other".to_string()]),
+            vec!["m".to_string(), "other".to_string()]
+        );
     }
 
     #[tokio::test]

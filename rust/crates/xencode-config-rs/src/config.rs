@@ -61,6 +61,14 @@ pub struct XencodeConfig {
     #[serde(default = "default_agent_command_timeout")]
     pub agent_command_timeout: u64,
 
+    /// Alternate models tried in order when the configured model fails before
+    /// producing any output (I4-01). A different provider/model can fix what a
+    /// permanent error on the primary cannot — a 404 `model not found`, a
+    /// wrong key, an outage, a quota ceiling. Empty by default: no fallback,
+    /// the error surfaces exactly as today.
+    #[serde(default)]
+    pub agent_fallback_models: Vec<String>,
+
     /// Ollama base URL.
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
@@ -132,6 +140,12 @@ pub struct XencodeConfig {
     /// may take before the server is considered unresponsive.
     #[serde(default = "default_mcp_timeout")]
     pub mcp_timeout: u64,
+
+    /// Pre/post shell hooks around approved agent tool calls (I3-02). Empty by
+    /// default: hooks only ever run on configured tools, only after the user
+    /// approved the call, and never for a policy `Deny`.
+    #[serde(default)]
+    pub agent_hooks: AgentHooks,
 }
 
 /// One declared MCP server: a command we spawn and talk JSON-RPC to over its
@@ -145,6 +159,20 @@ pub struct McpServer {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// Pre/post shell hooks (I3-02): commands run around approved agent tool
+/// calls, matched per tool name first and then by `*` as the catch-all.
+/// A `before` hook that exits non-zero vetoes the call (the tool never runs);
+/// an `after` hook runs regardless of the call's outcome.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AgentHooks {
+    /// Tool name (or `*`) → `sh -c` command to run before the approved call.
+    #[serde(default)]
+    pub before: std::collections::BTreeMap<String, String>,
+    /// Tool name (or `*`) → `sh -c` command to run after the call.
+    #[serde(default)]
+    pub after: std::collections::BTreeMap<String, String>,
 }
 
 fn default_model() -> String {
@@ -215,6 +243,7 @@ impl Default for XencodeConfig {
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
             agent_command_timeout: default_agent_command_timeout(),
+            agent_fallback_models: Vec::new(),
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
@@ -232,6 +261,7 @@ impl Default for XencodeConfig {
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
+            agent_hooks: AgentHooks::default(),
         }
     }
 }
@@ -351,6 +381,7 @@ mod tests {
         assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.agent_max_rounds, 16);
         assert_eq!(config.agent_command_timeout, 30);
+        assert!(config.agent_fallback_models.is_empty());
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.llama_cpp_url, "http://localhost:8080");
         assert_eq!(config.llama_cpp_model_path, "");
@@ -405,6 +436,89 @@ mod tests {
         let loaded = XencodeConfig::load_from(&out).unwrap();
         assert_eq!(loaded, config);
         assert_eq!(loaded.mcp_servers, config.mcp_servers);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Hooks ride along in config.json the way MCP servers do: a missing
+    /// `agent_hooks` key stays empty (hooks only run when declared), and a
+    /// declared one must survive a save/load roundtrip.
+    #[test]
+    fn agent_hooks_parse_and_roundtrip() {
+        let dir = temp_dir();
+        let path = dir.join("hooks.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+                "agent_hooks": {
+                    "before": {"edit_file": "cargo fmt --check", "write_file": "cargo check"},
+                    "after": {"*": "cargo test --quiet"}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut config = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(config.agent_hooks.before["edit_file"], "cargo fmt --check");
+        assert_eq!(config.agent_hooks.before["write_file"], "cargo check");
+        assert_eq!(config.agent_hooks.after["*"], "cargo test --quiet");
+
+        // Saving must not lose the hooks, or a gate silently disappears.
+        config
+            .agent_hooks
+            .before
+            .insert("run_command".to_string(), "true".to_string());
+        let out = dir.join("saved.json");
+        config.save_to(&out).unwrap();
+        let loaded = XencodeConfig::load_from(&out).unwrap();
+        assert_eq!(loaded, config);
+        assert_eq!(loaded.agent_hooks, config.agent_hooks);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_default_config_has_no_hooks_at_all() {
+        let config = XencodeConfig::default();
+        assert!(config.agent_hooks.before.is_empty());
+        assert!(config.agent_hooks.after.is_empty());
+    }
+
+    /// `agent_fallback_models` (I4-01) parses an ordered list and survives a
+    /// save/load roundtrip; the default stays empty so a missing key behaves
+    /// exactly as before the feature existed.
+    #[test]
+    fn agent_fallback_models_parse_and_roundtrip() {
+        let dir = temp_dir();
+        let path = dir.join("fallback.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{"agent_fallback_models": ["qwen2.5:14b", "gemini:gemini-2.0-flash"]}"#,
+        )
+        .unwrap();
+
+        let mut config = XencodeConfig::load_from(&path).unwrap();
+        // Order is the chain's order: primary → fallback₁ → fallback₂.
+        assert_eq!(
+            config.agent_fallback_models,
+            vec!["qwen2.5:14b", "gemini:gemini-2.0-flash"]
+        );
+        config
+            .agent_fallback_models
+            .push("ollama/deepseek-coder".to_string());
+
+        let out = dir.join("saved.json");
+        config.save_to(&out).unwrap();
+        let loaded = XencodeConfig::load_from(&out).unwrap();
+        assert_eq!(loaded, config);
+        assert_eq!(
+            loaded.agent_fallback_models,
+            vec![
+                "qwen2.5:14b",
+                "gemini:gemini-2.0-flash",
+                "ollama/deepseek-coder"
+            ]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

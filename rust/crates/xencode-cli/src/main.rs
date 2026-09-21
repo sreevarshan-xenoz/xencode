@@ -499,6 +499,17 @@ fn run_scan(
     Ok(())
 }
 
+/// Split a `config set` list value (I4-01): comma-separated, trimmed, empties
+/// dropped. Used by `agent_fallback_models`, whose order is the try order.
+fn parse_comma_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn run_config(action: ConfigAction) -> Result<(), String> {
     match action {
         ConfigAction::Show => {
@@ -578,6 +589,11 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         return Err("agent_command_timeout must be 1..=600 seconds".to_string());
                     }
                     config.agent_command_timeout = seconds;
+                }
+                // Comma-separated ordered fallbacks (I4-01); the primary model
+                // is tried first regardless, so the list holds only alternates.
+                "agent_fallback_models" => {
+                    config.agent_fallback_models = parse_comma_list(&value);
                 }
                 "mcp_timeout" => {
                     let seconds: u64 = value
@@ -1916,11 +1932,26 @@ async fn run_tui() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_advise, format_image_text, resolve_audit_path, resolve_bind};
+    use super::{
+        compute_advise, format_image_text, parse_comma_list, resolve_audit_path, resolve_bind,
+    };
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
 
     fn path(p: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(p)
+    }
+
+    /// `config set agent_fallback_models "a, b,, c"` yields the ordered,
+    /// trimmed, non-empty list — the order is the try order (I4-01).
+    #[test]
+    fn comma_list_parses_ordered_trimmed_and_drops_empties() {
+        assert_eq!(parse_comma_list("a, b,, c"), vec!["a", "b", "c"]);
+        assert_eq!(
+            parse_comma_list(" qwen2.5:14b ,gemini:gemini-2.0-flash , "),
+            vec!["qwen2.5:14b", "gemini:gemini-2.0-flash"]
+        );
+        assert!(parse_comma_list("").is_empty());
+        assert!(parse_comma_list("  , ,").is_empty());
     }
 
     #[test]

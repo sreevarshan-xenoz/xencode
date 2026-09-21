@@ -80,6 +80,10 @@ const COMMANDS: &[Binding] = &[
         "/mcp [status|stop]",
         "connect/stop the configured MCP tool servers",
     ),
+    (
+        "/spawn <task> [#branch]",
+        "run a subagent in a fresh git worktree",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

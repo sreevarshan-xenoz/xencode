@@ -94,7 +94,7 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
-    "/init", "/ctx", "/advise", "/bytebot", "/plan", "/rewind", "/mcp",
+    "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -135,6 +135,9 @@ enum LoopSink {
     /// Report to the ByteBot panel: calls become step rows, the model's text
     /// for a round becomes one log line.
     ByteBot,
+    /// Report to the `/spawn` registry: each delegated subagent (I3-03) has
+    /// its own id, and a finished run posts its report into the chat.
+    Spawn(u64),
 }
 
 /// ByteBot panel events. `call:<summary>` opens a step row, `done:<outcome>`
@@ -142,6 +145,41 @@ enum LoopSink {
 /// reports a real failure. Progress is derived from the step rows on the app
 /// side — nothing here invents it.
 const BYTEBOT_PREFIX: &str = "[BYTEBOT]";
+
+/// `/spawn` subagent events, one prefix per run id:
+/// `[SPAWN]<id>:call:<summary>`, `:done:<outcome>`, `:log:<text>`,
+/// `:err:<text>` (real failure) and finally `:finish:<final text>`. The app
+/// side derives progress from the step rows and posts the report to the chat.
+const SPAWN_PREFIX: &str = "[SPAWN]";
+
+/// How a spawn's task is framed for the model. The worktree is the whole
+/// deal: everything it touches is inside it, and it must say that plainly.
+const SPAWN_BRIEF: &str = "Delegated task in your own git worktree — you are isolated \
+                           from the main checkout, so read before you edit and test what \
+                           you change; your changes land in this worktree only. Post your \
+                           steps with update_plan as you go. Stop when it is done or when \
+                           you are blocked, and say which; never report an outcome you \
+                           did not observe.\n\nTask: ";
+
+/// One `/spawn <task> [#branch]` subagent (I3-03). Kept on the app so
+/// `/spawn status` is honest without a provider: the record mutates only from
+/// the events `agent_rounds` reports, exactly like the ByteBot panel.
+pub struct SpawnRecord {
+    pub id: u64,
+    pub branch: String,
+    pub path: std::path::PathBuf,
+    pub task: String,
+    pub running: bool,
+    pub failed: bool,
+    pub steps: Vec<(String, String)>,
+}
+
+impl SpawnRecord {
+    fn finished_line(&self) -> String {
+        let done = self.steps.iter().filter(|(_, s)| s == "done").count();
+        format!("{done}/{} call(s) completed", self.steps.len())
+    }
+}
 
 /// How a delegated run is framed for the model. Deliberately short: the tools
 /// themselves are taught by `TOOL_HINT`, which rides on the system turn.
@@ -174,6 +212,9 @@ struct AgentRun {
     /// Offered until the final round, which is tool-less so a run always ends
     /// with a text answer.
     max_rounds: usize,
+    /// Alternate models tried in order when the primary fails before emitting
+    /// any output (I4-01). Set from `agent_fallback_models` config.
+    fallback_models: Vec<String>,
     ollama_url: String,
     llama_cpp_url: String,
     timeout: u64,
@@ -306,6 +347,11 @@ pub struct App<'a> {
     pub bytebot_running: bool,
     pub bytebot_log: Vec<String>,
     pub bytebot_history: Vec<String>, // previously executed commands
+    /// `/spawn` subagent registry (I3-03): every delegated run is isolated in
+    /// its own git worktree, and the record below is what `/spawn status`
+    /// reads. Grows over the session; ids never collide.
+    pub spawns: Vec<SpawnRecord>,
+    pub spawn_next_id: u64,
 
     // Project context (M0) state
     /// Whether the "run /init" hint was already shown this session, so a
@@ -823,6 +869,8 @@ impl<'a> App<'a> {
             bytebot_running: false,
             bytebot_log: Vec::new(),
             bytebot_history: Vec::new(),
+            spawns: Vec::new(),
+            spawn_next_id: 1,
             context_hint_shown: false,
             init_running: false,
             init_progress: 0.0,
@@ -1173,7 +1221,7 @@ impl<'a> App<'a> {
         if draft == "/" {
             self.push_toast(
                 crate::toast::ToastKind::Info,
-                "Commands: /init  /ctx  /advise  /bytebot  /plan  /rewind  /mcp (Tab completes)"
+                "Commands: /init  /ctx  /advise  /bytebot  /spawn  /plan  /rewind  /mcp (Tab completes)"
                     .to_string(),
             );
             return true;
@@ -1248,6 +1296,12 @@ impl<'a> App<'a> {
             if let Some(run) = self.arm_bytebot(&task) {
                 tokio::spawn(agent_rounds(run, tx));
             }
+            return;
+        }
+
+        // /spawn: a delegated subagent isolated in its own git worktree (I3-03)
+        if prompt == "/spawn" || prompt.starts_with("/spawn ") {
+            self.handle_spawn_command(&prompt, tx);
             return;
         }
 
@@ -1401,11 +1455,13 @@ impl<'a> App<'a> {
                 command_timeout: self.config.agent_command_timeout.max(1),
                 plan: self.agent_plan.clone(),
                 mcp: self.mcp.clone(),
+                hooks: self.config.agent_hooks.clone(),
             },
             task_runtime: self.task_runtime.clone(),
             tool_root: xencode_context_rs::default_root(),
             // Keep at least one tool round; 0 would offer tools on no turn.
             max_rounds: self.config.agent_max_rounds.clamp(1, 64),
+            fallback_models: self.config.agent_fallback_models.clone(),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
@@ -1859,8 +1915,19 @@ impl<'a> App<'a> {
     /// and with the tool vocabulary appended. No chat history — a delegated
     /// run starts from the repository, not from whatever was said before.
     fn bytebot_context(&self, task: &str) -> Vec<ChatMessage> {
-        let root = xencode_context_rs::default_root();
-        let live = xencode_context_rs::collect_live_context(&root, task, CTX_PROFILE);
+        self.delegated_context(&xencode_context_rs::default_root(), task, BYTEBOT_BRIEF)
+    }
+
+    /// The shared delegated-run prompt builder. `root` is where the run's
+    /// tools operate — the main checkout for ByteBot, a fresh worktree for
+    /// `/spawn` (I3-03) — so context is collected inside that sandbox.
+    fn delegated_context(
+        &self,
+        root: &std::path::Path,
+        task: &str,
+        brief: &str,
+    ) -> Vec<ChatMessage> {
+        let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
         let model = self.config.default_model.clone();
         let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
@@ -1874,7 +1941,7 @@ impl<'a> App<'a> {
             retrieved: live.blocks,
             attached_block: "",
             history: &[],
-            prompt: &format!("{BYTEBOT_BRIEF}{task}"),
+            prompt: &format!("{brief}{task}"),
         });
         let mut messages: Vec<ChatMessage> = assembly
             .turns
@@ -1890,6 +1957,187 @@ impl<'a> App<'a> {
             }
         }
         messages
+    }
+
+    /// Start a `/spawn <task> [#branch]` subagent (I3-03): create a fresh
+    /// git worktree (a sibling of this checkout) and return an `AgentRun`
+    /// whose tool sandbox is that worktree. The caller spawns — arming only
+    /// mutates state and does the git call, so a test can check what `/spawn
+    /// status` promises without firing a provider request.
+    fn arm_spawn(&mut self, task: &str, branch: Option<&str>) -> Option<(u64, String, AgentRun)> {
+        let task = task.trim();
+        if task.is_empty() {
+            self.system_line("usage: /spawn <task>   (#branch creates a named worktree)");
+            return None;
+        }
+        let id = self.spawn_next_id;
+        let root = xencode_context_rs::default_root();
+        let branch_name = branch
+            .map(|b| {
+                b.strip_prefix('#')
+                    .unwrap_or(b)
+                    .replace([' ', '/', '\\'], "-")
+            })
+            .unwrap_or_else(|| format!("xencode/spawn-{id}"));
+        let worktree_path = match spawn_worktree(&root, id, &branch_name) {
+            Ok(path) => path,
+            Err(e) => {
+                self.system_line(&format!("⏺ spawn #{id} could not start: {e}"));
+                return None;
+            }
+        };
+        self.spawn_next_id += 1;
+        self.spawns.push(SpawnRecord {
+            id,
+            branch: branch_name.clone(),
+            path: worktree_path.clone(),
+            task: task.to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+        });
+        // The worktree list (Ctrl+O) should show it immediately.
+        self.refresh_worktrees();
+
+        // A per-spawn checkpoint store: `/rewind` in the main chat reaches the
+        // main checkout's turns, never a spawned worktree's edits.
+        let context_messages = self.delegated_context(&worktree_path, task, SPAWN_BRIEF);
+        let mut run = self.agent_run(LoopSink::Spawn(id), context_messages);
+        run.tool_root = worktree_path;
+        run.approval.checkpoints = std::sync::Arc::new(crate::agent_tools::CheckpointStore::new());
+        Some((id, branch_name, run))
+    }
+
+    /// Resolve the worktree for a `#[branch]`-suffixed `/spawn` task. Pure
+    /// parsing, so the git call below can be held to one doc'd rule: the
+    /// trailing token, when it starts with `#`, is the branch.
+    fn parse_spawn(task_and_branch: &str) -> (&str, Option<&str>) {
+        let mut words = task_and_branch.split_whitespace();
+        let Some(last) = words.next_back() else {
+            return (task_and_branch, None);
+        };
+        if last.starts_with('#') {
+            let task = task_and_branch[..task_and_branch.len() - last.len()].trim();
+            (task, Some(last))
+        } else {
+            (task_and_branch, None)
+        }
+    }
+
+    /// Apply one `/spawn` loop event. Pure state, tested without a model. A
+    /// finished run posts its report into the chat transcript.
+    pub fn spawn_event(&mut self, id: u64, body: &str) {
+        let Some(i) = self.spawns.iter().position(|s| s.id == id) else {
+            return;
+        };
+        if let Some(summary) = body.strip_prefix("call:") {
+            self.spawns[i]
+                .steps
+                .push((summary.to_string(), "running".to_string()));
+            return;
+        }
+        if let Some(outcome) = body.strip_prefix("done:") {
+            if let Some(last) = self.spawns[i].steps.last_mut() {
+                last.1 = outcome.to_string();
+            }
+            return;
+        }
+        if let Some(text) = body.strip_prefix("log:") {
+            // One-line model text while the run is live; not shown on /spawn
+            // status, which answers the where/what/whether question.
+            let _ = text;
+            return;
+        }
+        if let Some(text) = body.strip_prefix("err:") {
+            self.spawns[i].failed = true;
+            if let Some(last) = self.spawns[i].steps.last_mut() {
+                if last.1 == "running" {
+                    last.1 = "failed".to_string();
+                }
+            }
+            self.system_line(&format!("⏺ spawn #{id} failed — {text}"));
+            return;
+        }
+        if let Some(text) = body.strip_prefix("finish:") {
+            self.spawns[i].running = false;
+            let (id, task, line, final_text) = {
+                let rec = &self.spawns[i];
+                let line = format!(
+                    "⏺ spawn #{id} {} — branch `{}` at `{}`, {}",
+                    if rec.failed { "failed" } else { "done" },
+                    rec.branch,
+                    rec.path.display(),
+                    rec.finished_line()
+                );
+                (rec.id, rec.task.clone(), line, text.to_string())
+            };
+            self.system_line(&line);
+            if !final_text.trim().is_empty() {
+                self.messages.push(UiMessage {
+                    role: "assistant".to_string(),
+                    content: format!("(spawn #{id} · {task})\n{final_text}"),
+                });
+            }
+        }
+    }
+
+    /// Handle `/spawn`, `/spawn status` and `/spawn <task> [#branch]`.
+    fn handle_spawn_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let arg = prompt
+            .strip_prefix("/spawn")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if arg == "status" {
+            if self.spawns.is_empty() {
+                self.system_line("No subagents spawned yet — try `/spawn <task>`.");
+                return;
+            }
+            let lines: Vec<String> = self
+                .spawns
+                .iter()
+                .map(|rec| {
+                    let state = if rec.running {
+                        "running"
+                    } else if rec.failed {
+                        "failed "
+                    } else {
+                        "done   "
+                    };
+                    let task = crate::agent_tools::truncate_one_line(&rec.task, 60);
+                    format!(
+                        "#{} {} `{}` @ {} · {} · {} call(s)",
+                        rec.id,
+                        state,
+                        rec.branch,
+                        rec.path.display(),
+                        task,
+                        rec.steps.len()
+                    )
+                })
+                .collect();
+            for line in lines {
+                self.system_line(&line);
+            }
+            return;
+        }
+        if arg == "stop" || arg == "abort" {
+            self.system_line("No spawn is cancellable mid-run yet — let it finish, or close the worktree with Ctrl+O.");
+            return;
+        }
+        let (task, branch) = Self::parse_spawn(&arg);
+        let task = task.trim();
+        if task.is_empty() {
+            self.system_line("usage: /spawn <task>   (#branch creates a named worktree)");
+            return;
+        }
+        if let Some((id, branch, run)) = self.arm_spawn(task, branch) {
+            self.system_line(&format!(
+                "⏺ Spawn #{id} started — branch `{branch}` at `{}`",
+                run.tool_root.display()
+            ));
+            tokio::spawn(agent_rounds(run, tx));
+        }
     }
 
     /// Apply one ByteBot loop event. Pure state, so the panel's honesty —
@@ -3596,6 +3844,90 @@ impl<'a> App<'a> {
 /// The final round is tool-less so a run always ends with a text answer, and
 /// every call is gated — a write or a shell command stops at the approval
 /// overlay rather than running silently.
+/// Create the git worktree a `/spawn` will work in: a sibling of `root`
+/// named `<dirname>-spawn-<id>[-<branch>]`, on a fresh branch. Returns the
+/// worktree path. Pure enough to test against a temp repo without the TUI.
+pub fn spawn_worktree(
+    root: &std::path::Path,
+    id: u64,
+    branch: &str,
+) -> Result<std::path::PathBuf, String> {
+    let dirname = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace");
+    let mut leaf = format!("{dirname}-spawn-{id}");
+    if branch != format!("xencode/spawn-{id}") {
+        leaf.push('-');
+        leaf.push_str(branch);
+    }
+    let parent = root.parent().unwrap_or(root);
+    let path = parent.join(leaf);
+    xencode_context_rs::worktree_add(root, &path, Some(branch), true)?;
+    Ok(path)
+}
+
+/// One assistant step through the provider: the primary model first, then each
+/// configured fallback in order (I4-01). A candidate is abandoned only when it
+/// fails **before emitting any token** — once a token has streamed (or a tool
+/// step returned), switching models would duplicate output and double-execute
+/// tools, so the failure is surfaced as-is. Chat sees a `⚠` line for each
+/// switch; ByteBot/spawn stay silent and their panels only hear about a total
+/// chain failure.
+#[allow(clippy::too_many_arguments)]
+async fn agent_step_with_fallback(
+    manager: &ProviderManager,
+    model: &str,
+    fallback_models: &[String],
+    context_messages: &[ChatMessage],
+    history: &[xencode_providers_rs::AgentTurn],
+    offer: &[xencode_providers_rs::ToolDefinition],
+    llama_opts: &LlamaCppOptions,
+    sink: LoopSink,
+    tx: &mpsc::UnboundedSender<String>,
+    spoken: &mut String,
+) -> Result<xencode_providers_rs::AgentStep, xencode_providers_rs::ProviderError> {
+    let chain = xencode_providers_rs::retry::fallback_chain(model, fallback_models);
+    for (index, candidate) in chain.iter().enumerate() {
+        // Fresh per candidate: only a failure with a clean slate is allowed to
+        // move on. A token delivered here, even on a failing attempt, fixes the
+        // model in place.
+        let mut emitted_any = false;
+        let attempt = manager
+            .generate_stream_with_tools(
+                candidate,
+                context_messages,
+                history,
+                offer,
+                Some(llama_opts),
+                |token| {
+                    emitted_any = true;
+                    if sink == LoopSink::Chat {
+                        let _ = tx.send(token.to_string());
+                    } else {
+                        spoken.push_str(token);
+                    }
+                },
+            )
+            .await;
+        match attempt {
+            Ok(step) => return Ok(step),
+            Err(e) => {
+                if emitted_any {
+                    return Err(e);
+                }
+                let Some(next) = chain.get(index + 1) else {
+                    return Err(e);
+                };
+                if sink == LoopSink::Chat {
+                    let _ = tx.send(format!("[FALLBACK]{candidate} error: {e} · trying {next}"));
+                }
+            }
+        }
+    }
+    unreachable!("fallback chain is never empty; loop returns inside")
+}
+
 async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -3605,6 +3937,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         task_runtime,
         tool_root,
         max_rounds,
+        fallback_models,
         ollama_url,
         llama_cpp_url,
         timeout,
@@ -3628,47 +3961,61 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     tools.extend(approval.mcp.definitions());
 
     let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
+    let mut final_text = String::new();
+    let spawn_id = match sink {
+        LoopSink::Spawn(id) => Some(id),
+        _ => None,
+    };
     for round in 0..=max_rounds {
         let offer: &[xencode_providers_rs::ToolDefinition] =
             if round == max_rounds { &[] } else { &tools };
         // Chat streams deltas straight to the transcript; ByteBot wants one
         // row per assistant turn, so its text is collected instead.
         let mut spoken = String::new();
-        let step = match manager
-            .generate_stream_with_tools(
-                &model,
-                &context_messages,
-                &history,
-                offer,
-                Some(&llama_opts),
-                |token| {
-                    if sink == LoopSink::Chat {
-                        let _ = tx.send(token.to_string());
-                    } else {
-                        spoken.push_str(token);
-                    }
-                },
-            )
-            .await
+        let step = match agent_step_with_fallback(
+            &manager,
+            &model,
+            &fallback_models,
+            &context_messages,
+            &history,
+            offer,
+            &llama_opts,
+            sink,
+            &tx,
+            &mut spoken,
+        )
+        .await
         {
             Ok(step) => step,
             // Errors leave no partial tool state. The chat finalizes the turn
             // on [DONE] like before; ByteBot has no transcript to bury it in,
             // so the panel says what failed.
             Err(e) => {
-                if sink == LoopSink::ByteBot {
+                if let Some(id) = spawn_id {
+                    let _ = tx.send(format!("{SPAWN_PREFIX}{id}:err:{e}"));
+                } else if sink == LoopSink::ByteBot {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}err:{e}"));
                 }
                 break;
             }
         };
-        if sink == LoopSink::ByteBot {
+        if sink == LoopSink::ByteBot || spawn_id.is_some() {
             let text = if step.text.is_empty() {
                 std::mem::take(&mut spoken)
             } else {
                 step.text.clone()
             };
-            if !text.trim().is_empty() {
+            if let Some(id) = spawn_id {
+                // The last round's answer becomes the finish report; a run that
+                // broke out on an error leaves it empty and says so via err:.
+                final_text = text.clone();
+                if !text.trim().is_empty() {
+                    let _ = tx.send(format!(
+                        "{SPAWN_PREFIX}{id}:log:{}",
+                        crate::agent_tools::truncate_one_line(&text, 200)
+                    ));
+                }
+            } else if !text.trim().is_empty() {
                 let _ = tx.send(format!(
                     "{BYTEBOT_PREFIX}log:{}",
                     crate::agent_tools::truncate_one_line(&text, 200)
@@ -3690,6 +4037,9 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
                 }
                 LoopSink::ByteBot => {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}call:{summary}"));
+                }
+                LoopSink::Spawn(id) => {
+                    let _ = tx.send(format!("{SPAWN_PREFIX}{id}:call:{summary}"));
                 }
             }
             let result = crate::agent_tools::execute_tool_call_approved(
@@ -3720,6 +4070,9 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
                 LoopSink::ByteBot => {
                     let _ = tx.send(format!("{BYTEBOT_PREFIX}done:{}", outcome.label()));
                 }
+                LoopSink::Spawn(id) => {
+                    let _ = tx.send(format!("{SPAWN_PREFIX}{id}:done:{}", outcome.label()));
+                }
             }
             history.push(xencode_providers_rs::AgentTurn::ToolResult {
                 id: call.id.clone(),
@@ -3736,6 +4089,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let _ = tx.send(match sink {
         LoopSink::Chat => "[DONE]".to_string(),
         LoopSink::ByteBot => "[BYTEBOT_DONE]".to_string(),
+        LoopSink::Spawn(id) => format!("{SPAWN_PREFIX}{id}:finish:{final_text}"),
     });
 }
 
@@ -3833,6 +4187,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         while let Ok(token) = rx.try_recv() {
             if let Some(body) = token.strip_prefix("[REVIEW]") {
                 app.append_review(body);
+            } else if let Some(body) = token.strip_prefix("[SPAWN]") {
+                // `<id>:<event>` — a `/spawn` subagent reporting in (I3-03).
+                if let Some((id, rest)) = body.split_once(':') {
+                    if let Ok(id) = id.parse::<u64>() {
+                        app.spawn_event(id, rest);
+                    }
+                }
             } else if let Some(body) = token.strip_prefix("[BYTEBOT]") {
                 app.bytebot_event(body);
             } else if token == "[BYTEBOT_DONE]" {
@@ -4112,6 +4473,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     role: "system".to_string(),
                     content: format!("◈ {body}"),
                 });
+            } else if let Some(body) = token.strip_prefix("[FALLBACK]") {
+                // Provider fallback chain (I4-01): the primary model failed
+                // before emitting anything, so the turn is retried on the next
+                // configured model. `⚠` keeps it a system note, not a bubble.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("⚠ {body}"),
+                });
             } else if let Some(body) = token.strip_prefix("[WATCH]") {
                 app.handle_watch_event(body);
             } else {
@@ -4312,6 +4681,7 @@ mod tests {
     use super::{
         first_output_line, format_advise_report, format_watch_warning, live_refresh_snapshot,
         parse_llama_port, parse_porcelain_z, watch_warning_for, App, FocusArea, LoopSink,
+        SpawnRecord,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -4336,6 +4706,7 @@ mod tests {
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
+            hooks: app.config.agent_hooks.clone(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -4500,6 +4871,7 @@ mod tests {
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
+            hooks: app.config.agent_hooks.clone(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -5144,6 +5516,12 @@ mod tests {
         app.bytebot_history = vec!["previous command".to_string()];
         app.bytebot_command = "fix flaky tests".to_string();
         app.bytebot_cursor = app.bytebot_command.len();
+        // The fallback chain rides into the run (I4-01): the primary model
+        // first, then these alternates, in this order.
+        app.config.agent_fallback_models = vec![
+            "qwen2.5:14b".to_string(),
+            "gemini:gemini-2.0-flash".to_string(),
+        ];
 
         let run = app
             .arm_bytebot("fix flaky tests")
@@ -5160,6 +5538,14 @@ mod tests {
         );
         assert_eq!(run.sink, LoopSink::ByteBot);
         assert_eq!(run.max_rounds, app.config.agent_max_rounds.clamp(1, 64));
+        assert_eq!(
+            run.fallback_models,
+            vec![
+                "qwen2.5:14b".to_string(),
+                "gemini:gemini-2.0-flash".to_string()
+            ],
+            "the configured alternates ride along in order"
+        );
         // The brief and the tool vocabulary ride along; the model is not
         // asked to guess that it may edit files.
         let system = run.context_messages.first().expect("system turn");
@@ -5396,5 +5782,194 @@ mod tests {
         assert!(!symbols.contains_key("src/b.rs"));
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // I3-03 /spawn tests ───────────────────────────────────────────
+
+    #[test]
+    fn spawn_parsing_treats_a_hash_lead_trail_as_an_optional_branch() {
+        let (task, branch) = App::parse_spawn("add tests #feat");
+        assert_eq!(task, "add tests");
+        assert_eq!(branch, Some("#feat"));
+        // No # token: everything is the task, branches stay generated.
+        let (task, branch) = App::parse_spawn("run the whole suite");
+        assert_eq!(task, "run the whole suite");
+        assert_eq!(branch, None);
+        // A lone #branch leaves no task — the handler will say usage.
+        let (task, branch) = App::parse_spawn("#bump");
+        assert_eq!(task, "");
+        assert_eq!(branch, Some("#bump"));
+    }
+
+    #[test]
+    fn spawn_events_track_a_run_and_post_the_finish_report() {
+        let mut app = App::new();
+        app.spawns.push(SpawnRecord {
+            id: 1,
+            branch: "xencode/spawn-1".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-1"),
+            task: "add tests for spawn".to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+        });
+        app.spawn_event(1, "call:read_file src/app.rs");
+        app.spawn_event(1, "done:done");
+        app.spawn_event(1, "call:write_file src/app.rs");
+        app.spawn_event(1, "done:done");
+        app.spawn_event(1, "finish:done! the tests pass");
+
+        assert!(!app.spawns[0].running);
+        assert!(!app.spawns[0].failed);
+        assert_eq!(app.spawns[0].steps.len(), 2);
+        // The report lands in the chat: a system line for where/what, then an
+        // assistant message with the agent's final answer.
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, "assistant");
+        assert_eq!(
+            last.content,
+            "(spawn #1 · add tests for spawn)\ndone! the tests pass"
+        );
+        let sys = app
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "system")
+            .unwrap();
+        assert!(sys.content.contains("spawn #1 done"), "{}", sys.content);
+        assert!(
+            sys.content.contains("2/2 call(s) completed"),
+            "{}",
+            sys.content
+        );
+        assert!(
+            sys.content.contains("branch `xencode/spawn-1`"),
+            "{}",
+            sys.content
+        );
+    }
+
+    #[test]
+    fn spawn_events_surface_a_real_failure_without_inventing_an_answer() {
+        let mut app = App::new();
+        app.spawns.push(SpawnRecord {
+            id: 2,
+            branch: "xencode/spawn-2".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-2"),
+            task: "run the tests".to_string(),
+            running: true,
+            failed: false,
+            steps: Vec::new(),
+        });
+        app.spawn_event(2, "call:run_command cargo test");
+        app.spawn_event(2, "err:connection refused");
+        app.spawn_event(2, "finish:");
+
+        assert!(app.spawns[0].failed);
+        assert!(!app.spawns[0].running);
+        // The running step is marked failed, not left hanging as running.
+        assert_eq!(app.spawns[0].steps[0].1, "failed");
+        // No invented text: err: reported the truth and finish was empty, so
+        // no assistant message is pushed after an empty final text.
+        assert!(!app.messages.iter().any(|m| m.role == "assistant"));
+        assert!(app
+            .messages
+            .iter()
+            .rev()
+            .any(|m| m.role == "system"
+                && m.content.contains("spawn #2 failed — connection refused")));
+    }
+
+    #[test]
+    fn spawn_status_lists_every_registered_subagent() {
+        let mut app = App::new();
+        app.spawns.push(SpawnRecord {
+            id: 1,
+            branch: "xencode/spawn-1".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-1"),
+            task: "still working".to_string(),
+            running: true,
+            failed: false,
+            steps: vec![("read_file src/app.rs".to_string(), "running".to_string())],
+        });
+        app.spawns.push(SpawnRecord {
+            id: 2,
+            branch: "xencode/spawn-2".to_string(),
+            path: std::path::PathBuf::from("/tmp/xencode-spawn-2"),
+            task: "finished work".to_string(),
+            running: false,
+            failed: false,
+            steps: vec![("write_file src/lib.rs".to_string(), "done".to_string())],
+        });
+        let before = app.messages.len();
+        app.handle_spawn_command("/spawn status", mpsc::unbounded_channel().0);
+        let lines: Vec<&str> = app.messages[before..]
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("#1 running"), "{}", lines[0]);
+        assert!(lines[0].contains("`xencode/spawn-1`"), "{}", lines[0]);
+        assert!(lines[1].contains("#2 done    "), "{}", lines[1]);
+        assert!(lines[1].contains("1 call(s)"), "{}", lines[1]);
+    }
+
+    #[test]
+    fn spawn_worktree_creates_a_sibling_branch_worktree() {
+        let tmp = std::env::temp_dir().join(format!("xencode-spawn-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let repo = tmp.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        std::fs::write(repo.join("f.txt"), "hi").unwrap();
+        git(&repo, &["add", "f.txt"]);
+        git(
+            &repo,
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-m",
+                "init",
+            ],
+        );
+
+        // A named branch lands in `proj-spawn-<id>-<branch>` as a sibling.
+        let named = super::spawn_worktree(&repo, 1, "feat").unwrap();
+        assert_eq!(named, tmp.join("proj-spawn-1-feat"));
+        let list = xencode_context_rs::worktree_list(&repo).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[1].branch.as_deref(), Some("feat"));
+        // The committed content is checked out in the worktree.
+        assert_eq!(std::fs::read_to_string(named.join("f.txt")).unwrap(), "hi");
+
+        // The generated default branch gets a clean leaf without a suffix.
+        let default = super::spawn_worktree(&repo, 2, "xencode/spawn-2").unwrap();
+        assert_eq!(default, tmp.join("proj-spawn-2"));
+        assert_eq!(
+            xencode_context_rs::worktree_list(&repo).unwrap()[2]
+                .branch
+                .as_deref(),
+            Some("xencode/spawn-2")
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }
