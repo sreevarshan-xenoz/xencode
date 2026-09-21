@@ -3886,11 +3886,12 @@ pub fn spawn_worktree(
 
 /// One assistant step through the provider: the primary model first, then each
 /// configured fallback in order (I4-01). A candidate is abandoned only when it
-/// fails **before emitting any token** — once a token has streamed (or a tool
-/// step returned), switching models would duplicate output and double-execute
-/// tools, so the failure is surfaced as-is. Chat sees a `⚠` line for each
-/// switch; ByteBot/spawn stay silent and their panels only hear about a total
-/// chain failure.
+/// fails **before emitting any token** *and* the error is fallback-eligible
+/// ([`xencode_providers_rs::retry::is_fallback_eligible`]) — once a token has
+/// streamed (or a tool step returned), switching models would duplicate output
+/// and double-execute tools, and an error in our own decoder is reproduced by
+/// every candidate. Chat sees a `⚠` line for each switch; ByteBot/spawn stay
+/// silent and their panels only hear about a total chain failure.
 #[allow(clippy::too_many_arguments)]
 async fn agent_step_with_fallback(
     manager: &ProviderManager,
@@ -3930,7 +3931,7 @@ async fn agent_step_with_fallback(
         match attempt {
             Ok(step) => return Ok(step),
             Err(e) => {
-                if emitted_any {
+                if !should_advance_fallback(&e, emitted_any) {
                     return Err(e);
                 }
                 let Some(next) = chain.get(index + 1) else {
@@ -3943,6 +3944,17 @@ async fn agent_step_with_fallback(
         }
     }
     unreachable!("fallback chain is never empty; loop returns inside")
+}
+
+/// Whether a failed candidate releases the turn to the next one.
+///
+/// Two things fix a model in place: output the user has already seen (a
+/// switch would duplicate it) and tool work already done (a switch would
+/// double-execute it). A [`xencode_providers_rs::ProviderError::Parse`] fixes it
+/// too — that is our own decoder failing on bytes we received, so every
+/// candidate reproduces it and walking the chain only burns them.
+fn should_advance_fallback(err: &xencode_providers_rs::ProviderError, emitted_any: bool) -> bool {
+    !emitted_any && xencode_providers_rs::retry::is_fallback_eligible(err)
 }
 
 async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
@@ -5616,6 +5628,29 @@ mod tests {
             .toasts
             .iter()
             .any(|toast| toast.message.contains("already working")));
+    }
+
+    /// I4-01: what stops the chain. A candidate that streamed anything keeps
+    /// the turn, and so does an error in our own decoder — the next model
+    /// would hit it just the same.
+    #[test]
+    fn only_a_clean_fallback_eligible_failure_advances_the_chain() {
+        use xencode_providers_rs::ProviderError;
+
+        let provider_down = ProviderError::api("OpenRouter", 503u16, "overloaded");
+        assert!(
+            super::should_advance_fallback(&provider_down, false),
+            "a clean provider failure should move to the alternate"
+        );
+        assert!(
+            !super::should_advance_fallback(&provider_down, true),
+            "tokens already on screen fix the model in place"
+        );
+        let bad_decode = ProviderError::Parse("OpenRouter: empty response".to_string());
+        assert!(
+            !super::should_advance_fallback(&bad_decode, false),
+            "our own parse failure is not the provider's fault; the chain stops"
+        );
     }
 
     /// `/bytebot <task>` from the chat is the same run, and an argument-less
