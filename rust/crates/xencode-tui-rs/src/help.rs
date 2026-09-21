@@ -163,9 +163,13 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("s", "toggle sort severity ↔ category"),
         ],
         CustomModels => &[
-            ("↑ ↓ / ← →", "select profile"),
-            ("Enter", "open profile editor"),
-            ("s", "save profile (while editing)"),
+            ("↑ ↓ / j k", "select profile"),
+            ("n", "new profile from the current session"),
+            ("- +", "temperature down / up"),
+            ("← →", "max tokens down / up"),
+            ("Enter", "apply to the next turn"),
+            ("s", "write profiles to config.json"),
+            ("t", "one test request to the provider"),
         ],
         LearningMode => &[
             ("Enter", "start lesson / answer quiz"),

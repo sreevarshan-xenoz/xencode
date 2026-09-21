@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Milestone J — opened
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 to J-04 have landed** — the
+the plugin registry loaded no runtime. **J-01 to J-05 have landed** — the
 security auditor and the profiler are real, the terminal assistant delegates to
-a model through the agent's approval gate, and the multi-language panel tabulates
-a real `scan_tree` walk and translates through a real model call, leaving three
-scripted panels.
+a model through the agent's approval gate, the multi-language panel tabulates
+a real `scan_tree` walk and translates through a real model call, and the custom
+models panel edits `model_profiles` in `config.json`, leaving two scripted
+panels.
 `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
@@ -92,6 +93,29 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Custom Models panel is real (Milestone J, J-05). Pressing `Enter` used to seed
+  four invented profiles (`Code Assistant`, `Creative Writer`, `Bug Hunter`,
+  `Code Reviewer`) with sliders and a "Profile saved!" line that wrote nothing.
+  The panel now lists `model_profiles` from `config.json` — a new
+  `ModelProfile { name, model, temperature, max_tokens }` in `xencode-config-rs`,
+  `#[serde(default)]` so an older config still loads — and an empty list renders
+  "None yet — press n" instead of samples. `n` adds a profile from the current
+  session's settings, `-`/`+` moves temperature over 0.0–2.0, `←`/`→` steps the
+  token budget along 64…8192, and an unset knob starts from the value the session
+  would send anyway. `Enter` applies to the next turn in memory only (model id,
+  the llama.cpp knobs, the selector's position, plus a `switch` when the id
+  points at the llama.cpp server); `s` is the only key that writes `config.json`,
+  and it reports what happened — `wrote N profile(s)`, `config.json unchanged:
+  {error}`, or that persistence is off in this session. `t` sends one request
+  with exactly that profile's settings through the shared `SingleShot` path, so
+  the status line is the provider's own reply or its own error. `top_p` was
+  **deliberately left out**: `merge_llamacpp_options` is the only place sampling
+  knobs reach a request, and it carries temperature and max tokens to llama.cpp —
+  nothing in this workspace sends top_p, so the panel states that llama.cpp is
+  where these numbers land rather than implying Ollama and cloud endpoints obey
+  them. Dead state removed with the seeds: `models_editing`, `models_saving`,
+  `models_test_output`, `models_profiles` (the 5-tuple list) and
+  `start_custom_models`.
 - Multi-language panel is real (Milestone J, J-04). Its "language detection" was
   a fixed table (`python 34.2%`, `javascript 27.1%`, …) for files that are not
   in this workspace, and its "Supported Languages" list was hand-written. `Enter`

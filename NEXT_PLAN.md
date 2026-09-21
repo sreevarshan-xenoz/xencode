@@ -14,16 +14,17 @@
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 14 crates, 700 tests passing, zero warnings — the Rust workspace is the only active codebase
+- ✅ **Rust migration complete**: 14 crates, 706 tests passing, zero warnings — the Rust workspace is the only active codebase
 - 🎯 **Current focus — Milestone J: every panel tells the truth** (opened 2026-09-21).
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
-  Prometheus assets are already gone. **J-01 to J-04 are done** — the security
+  Prometheus assets are already gone. **J-01 to J-05 are done** — the security
   auditor scans the workspace, the profiler measures, the terminal assistant
-  asks a model and runs what it picks through the agent's approval gate, and
-  the multi-language panel tabulates a real `scan_tree` walk and translates
-  through a real model call — leaving three scripted panels. Task breakdown and
-  the done-when rule for each item:
+  asks a model and runs what it picks through the agent's approval gate, the
+  multi-language panel tabulates a real `scan_tree` walk and translates
+  through a real model call, and the custom models panel edits real
+  `model_profiles` in `config.json` — leaving two scripted panels. Task
+  breakdown and the done-when rule for each item:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone J.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and

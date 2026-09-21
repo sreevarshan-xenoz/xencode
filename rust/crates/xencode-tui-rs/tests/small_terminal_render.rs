@@ -99,6 +99,25 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.lang_translate_input = "good morning".into();
     app.lang_translate_output = "vāṅkai maṇippu".into();
     app.lang_editing = Some(xencode_tui_rs::focus::LangField::Target);
+    // J-05: profiles are config's rows, so the sweep covers a tuned profile,
+    // an unset one (drawn as "unset", never as 0) and a status line.
+    app.model_profiles = vec![
+        xencode_config_rs::ModelProfile {
+            name: "tight".into(),
+            model: "ollama:qwen2.5:7b".into(),
+            temperature: Some(0.2),
+            max_tokens: Some(2048),
+        },
+        xencode_config_rs::ModelProfile {
+            name: "server default".into(),
+            model: "llamacpp:gemma-3n-e4b".into(),
+            temperature: None,
+            max_tokens: None,
+        },
+    ];
+    app.models_selected = 0;
+    app.models_dirty = true;
+    app.models_status = "next turn uses ollama:qwen2.5:7b · temperature 0.2".into();
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -398,6 +417,55 @@ fn multi_language_panel_shows_the_walk_and_the_form() {
             !text.contains(canned),
             "{canned} is scripted, not real: {text}"
         );
+    }
+}
+
+/// J-05: the rows are config's profiles and the parameters are the ones a
+/// request will carry. The four seeded profiles this panel used to open with
+/// are gone, and an unset knob reads "unset" instead of drawing a zero bar.
+#[test]
+fn custom_models_panel_shows_config_profiles() {
+    let mut app = populated(FocusArea::CustomModels);
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("tight"), "{text}");
+    assert!(text.contains("ollama:qwen2.5:7b"), "the model id: {text}");
+    assert!(text.contains("unsaved"), "the dirty marker: {text}");
+    assert!(text.contains("temperature 0.2"), "the status line: {text}");
+    assert!(text.contains("0.20"), "{text}");
+    assert!(text.contains("2048"), "{text}");
+    for canned in [
+        "Code Assistant",
+        "Creative Writer",
+        "Bug Hunter",
+        "Code Reviewer",
+        "Top-P",
+        "Profile saved!",
+        "Press Enter to load profiles",
+    ] {
+        assert!(!text.contains(canned), "{canned} is scripted: {text}");
+    }
+
+    // The second row carries no parameters, which must read as the server
+    // deciding rather than as 0.
+    app.models_selected = 1;
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("unset"), "{text}");
+    assert!(text.contains("llamacpp:gemma-3n-e4b"), "{text}");
+}
+
+/// A fresh config has no profiles, and the panel says so rather than inventing
+/// rows to fill the space.
+#[test]
+fn custom_models_panel_renders_the_empty_config_honestly() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::CustomModels;
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("No model_profiles in config.json"), "{text}");
+    assert!(text.contains("press n"), "how to get one: {text}");
+    for canned in ["Code Assistant", "Top-P"] {
+        assert!(!text.contains(canned), "{canned} is scripted: {text}");
     }
 }
 

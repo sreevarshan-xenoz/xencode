@@ -33,10 +33,10 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **Not implemented, whatever a panel shows.** Three TUI panels are still
-> interface mockups with scripted content: Voice Interface, Custom Models and
+> **Not implemented, whatever a panel shows.** Two TUI panels are still
+> interface mockups with scripted content: Voice Interface and
 > Learning Mode. They render and respond to keys; nothing
-> listens. Four are real. The **Security Auditor** — `Enter` walks the
+> listens. Five are real. The **Security Auditor** — `Enter` walks the
 > workspace and runs the same `VulnerabilityScanner` behind `xencode analyze`,
 > so an empty result means the scanner found nothing, not that the panel is a
 > demo. The **Performance Profiler** — `Enter` samples this process's CPU and
@@ -213,7 +213,7 @@ do anything):
 | Terminal Assistant | Real delegation: type what you want to do and `Enter` makes one call to the configured model, which answers with up to 8 `command · risk · why` rows built from the workspace it was told about. `f` filters by risk, `j`/`k` select, `y`/`Enter` runs the selection — through the agent's approval gate, so the same modal and policy as a model-issued `run_command`, and the outcome (a denial included) is listed in the panel's history. A provider error is printed rather than papered over |
 | Security Auditor | Real scan: `Enter` walks the workspace with the context engine and runs `VulnerabilityScanner::scan_file` on every readable file; findings stream in with their CWE ids and a log line gives the true totals. Files the walker lists as secret are reported, never read |
 | Performance Profiler | Real measurement: `Enter` reads this process's CPU (two `/proc/self/stat` samples 250 ms apart) and resident memory, then the session's own numbers — average turn latency, llama.cpp tokens/s, per-provider health, and the last 6 rows of `.xencode/metrics.jsonl` (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with nothing to show reads `n/a` |
-| Custom Models | 🎭 Mockup — sample profiles and sliders; saving writes nothing to config |
+| Custom Models | Real profiles: the panel lists `model_profiles` from `config.json` (empty on a fresh install, which it says out loud rather than filling with samples). `n` adds one seeded from the current session settings, `-`/`+` moves temperature (0.0–2.0) and `←`/`→` steps the token budget along 64…8192; `Enter` applies it to the next turn — model id plus both knobs, and a llama.cpp profile also asks the server to load that model — without touching disk; `s` writes the whole list through `XencodeConfig::save`; `t` sends one request with exactly that profile's settings and prints the provider's real reply or its real error. Unset knobs render as "the server decides" and are sent as nothing |
 | Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |
 | Multi-Language | Real detection + real translation: `Enter`/`d` runs the context engine's `scan_tree` over the workspace and lists each language actually found with files, lines (blanks and comment leads excluded) and share, plus notes for skipped, secret-listed (never read) and binary files. The language list is `scanner::Language`, with `▸` marking what the walk found. `Tab` selects From / To / Text, typing edits it, `Enter` makes one model call and prints its reply — or the provider's own error |
 | PR Review | Per-file diff browsing, base toggle (real git diff) |

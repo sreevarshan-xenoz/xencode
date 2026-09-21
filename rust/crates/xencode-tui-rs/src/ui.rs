@@ -327,7 +327,10 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             FocusArea::GitCommit | FocusArea::CollaborationHub |
             FocusArea::VoiceInterface |
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler |
-            FocusArea::CustomModels | FocusArea::LearningMode => "Enter:start  Esc:close",
+            FocusArea::LearningMode => "Enter:start  Esc:close",
+            FocusArea::CustomModels => {
+                "n:new  -/+:temp  ←/→:tokens  Enter:apply  s:save  t:test  Esc:close"
+            }
             FocusArea::MultiLanguage => {
                 "Enter:detect  Tab:pick a field  type:edit  Enter:translate  Esc:close"
             }
@@ -3623,15 +3626,24 @@ fn draw_performance_profiler(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Custom Models Panel ─────────────────────────────────────────────────────
 
+/// One of the two parameter bars. `None` renders as `unset`, not as zero: a
+/// profile that sends nothing lets the server decide, and showing `0.00` would
+/// claim the opposite.
+fn param_bar(fraction: f64, width: usize) -> String {
+    let filled = ((fraction.clamp(0.0, 1.0)) * width as f64).round() as usize;
+    let filled = filled.min(width);
+    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+}
+
 fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(70, 65, area);
+    let popup_area = centered_rect(74, 70, area);
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent))
-        .title(" 🧩 Custom Models (↑↓ select, Esc:close) ");
+        .title(" 🧩 Custom Models (n:new, -/+ ←/→ tune, Enter:apply, s:save, t:test) ");
 
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
@@ -3639,8 +3651,8 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(40), // profiles list
-            Constraint::Percentage(60), // details
+            Constraint::Percentage(38), // profiles list
+            Constraint::Percentage(62), // details
         ])
         .split(inner);
 
@@ -3649,10 +3661,10 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 📋 Profiles ");
+        .title(format!(" 📋 Profiles ({}) ", app.model_profiles.len()));
 
     let mut profile_items: Vec<ListItem> = Vec::new();
-    for (i, (name, provider, temp, tokens, _top_p)) in app.models_profiles.iter().enumerate() {
+    for (i, profile) in app.model_profiles.iter().enumerate() {
         let style = if i == app.models_selected {
             Style::default()
                 .fg(app.theme.highlight_fg)
@@ -3661,16 +3673,23 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(app.theme.fg)
         };
-        let provider_icon = if provider == "ollama" { "🦙" } else { "🌐" };
-        profile_items.push(ListItem::new(Line::from(Span::styled(
-            format!(" {} {}  t={:.1}  tk={}", provider_icon, name, temp, tokens),
-            style,
-        ))));
+        let edited = if app.models_dirty && i == app.models_selected {
+            " ·unsaved"
+        } else {
+            ""
+        };
+        profile_items.push(ListItem::new(vec![
+            Line::from(Span::styled(format!(" {}{}", profile.name, edited), style)),
+            Line::from(Span::styled(
+                format!("   {}", profile.model),
+                Style::default().fg(app.theme.message_system),
+            )),
+        ]));
     }
 
     if profile_items.is_empty() {
         profile_items.push(ListItem::new(Line::from(Span::styled(
-            "  Press Enter to load profiles",
+            "  None yet — press n",
             Style::default().fg(app.theme.message_system),
         ))));
     }
@@ -3687,68 +3706,77 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(app.theme.border))
         .title(" 🔧 Parameters ");
 
+    let slider_w = 20usize;
     let mut detail_lines: Vec<Line> = Vec::new();
-    if let Some((name, provider, temp, tokens, top_p)) =
-        app.models_profiles.get(app.models_selected)
-    {
+    if let Some(profile) = app.selected_model_profile() {
         detail_lines.push(Line::from(Span::styled(
-            format!("  {} (via {})", name, provider),
+            profile.name.clone(),
             Style::default()
                 .fg(app.theme.accent)
                 .add_modifier(Modifier::BOLD),
         )));
+        detail_lines.push(Line::from(format!("  model    {}", profile.model)));
         detail_lines.push(Line::from(""));
 
-        // Temperature slider
-        let slider_w = 20usize;
-        let t_filled = ((temp / 2.0) * slider_w as f64).round() as usize;
-        let t_filled = t_filled.min(slider_w);
-        let t_empty = slider_w.saturating_sub(t_filled);
-        detail_lines.push(Line::from(format!(
-            "  Temperature: [{}{}] {:.2}",
-            "█".repeat(t_filled),
-            "░".repeat(t_empty),
-            temp
+        let temp_line = match profile.temperature {
+            Some(temp) => format!(
+                "  temp     [{}] {:.2}",
+                param_bar(temp / 2.0, slider_w),
+                temp
+            ),
+            None => "  temp     unset — the server decides".to_string(),
+        };
+        detail_lines.push(Line::from(temp_line));
+        let tokens_line = match profile.max_tokens {
+            Some(tokens) => format!(
+                "  tokens   [{}] {}",
+                param_bar(tokens as f64 / 8192.0, slider_w),
+                tokens
+            ),
+            None => "  tokens   unset — the server decides".to_string(),
+        };
+        detail_lines.push(Line::from(tokens_line));
+    } else {
+        detail_lines.push(Line::from(Span::styled(
+            "  No model_profiles in config.json yet.",
+            Style::default().fg(app.theme.warning),
         )));
-
-        // Max tokens
-        let tk_filled = ((*tokens as f64 / 8192.0) * slider_w as f64).round() as usize;
-        let tk_filled = tk_filled.min(slider_w);
-        let tk_empty = slider_w.saturating_sub(tk_filled);
-        detail_lines.push(Line::from(format!(
-            "  Max Tokens:  [{}{}] {}",
-            "█".repeat(tk_filled),
-            "░".repeat(tk_empty),
-            tokens
-        )));
-
-        // Top-P
-        let p_filled = ((top_p / 1.0) * slider_w as f64).round() as usize;
-        let p_filled = p_filled.min(slider_w);
-        let p_empty = slider_w.saturating_sub(p_filled);
-        detail_lines.push(Line::from(format!(
-            "  Top-P:       [{}{}] {:.2}",
-            "█".repeat(p_filled),
-            "░".repeat(p_empty),
-            top_p
-        )));
-
         detail_lines.push(Line::from(""));
-        if !app.models_test_output.is_empty() {
-            detail_lines.push(Line::from(Span::styled(
-                format!("  Test: {}", app.models_test_output),
-                Style::default().fg(app.theme.message_system),
-            )));
-        } else {
-            detail_lines.push(Line::from(Span::styled(
-                "  Use ↑↓ to select profiles.",
-                Style::default().fg(app.theme.message_system),
-            )));
-        }
+        detail_lines.push(Line::from("  Press n to start one from the model this"));
+        detail_lines.push(Line::from("  session uses now, then s to keep it."));
+    }
+
+    detail_lines.push(Line::from(""));
+    for hint in [
+        "  -/+ temp · ←/→ tokens · n new profile",
+        "  Enter apply · s save · t test",
+        "  A llama.cpp server gets both numbers;",
+        "  Ollama and cloud use their own defaults.",
+    ] {
+        detail_lines.push(Line::from(Span::styled(
+            hint,
+            Style::default().fg(app.theme.message_system),
+        )));
+    }
+
+    if !app.models_status.is_empty() {
+        let failed = app.models_status.starts_with("test failed")
+            || app.models_status.contains("unchanged")
+            || app.models_status.contains("nothing was written");
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
+            format!("  {}", app.models_status),
+            Style::default().fg(if failed {
+                app.theme.danger
+            } else {
+                app.theme.success
+            }),
+        )));
     }
 
     let detail_para = Paragraph::new(detail_lines)
         .block(detail_block)
+        .wrap(Wrap { trim: false })
         .style(Style::default().fg(app.theme.fg));
     f.render_widget(detail_para, chunks[1]);
 }
