@@ -435,32 +435,6 @@ pub fn rank_files(graph: &[DepEdge], files: &[String]) -> Vec<(String, u64)> {
     ranked
 }
 
-/// BFS over forward dependency edges from `seeds`, up to `max_hops` deep.
-/// Returns every reachable file (excluding the seeds), sorted.
-pub fn expand_dependencies(graph: &[DepEdge], seeds: &[&str], max_hops: usize) -> BTreeSet<String> {
-    let fwd = dependency_map(graph);
-    let mut visited: BTreeSet<String> = BTreeSet::new();
-    let mut current: Vec<String> = seeds.iter().map(|s| s.to_string()).collect();
-    for _ in 0..max_hops {
-        if current.is_empty() {
-            break;
-        }
-        let mut next: Vec<String> = Vec::new();
-        for file in &current {
-            if let Some(deps) = fwd.get(file) {
-                for dep in deps {
-                    if !visited.contains(dep) && dep != file {
-                        visited.insert(dep.clone());
-                        next.push(dep.clone());
-                    }
-                }
-            }
-        }
-        current = next;
-    }
-    visited
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,7 +703,7 @@ fn helper() {}
     }
 
     #[test]
-    fn expands_dependency_hops_and_reverse_lookup() {
+    fn dependency_and_dependent_maps_are_inverses() {
         let files = [
             ("lib.rs", "pub mod a;\npub mod b;\npub mod c;\n"),
             ("a.rs", "use crate::b::f;\npub fn af() {}\n"),
@@ -739,17 +713,6 @@ fn helper() {}
         let rust_files = rust_paths(&files);
         let symbols = symbols_from(&files);
         let graph = build_graph(&rust_files, &symbols);
-
-        let one_hop = expand_dependencies(&graph, &["a.rs"], 1);
-        assert_eq!(
-            one_hop.into_iter().collect::<Vec<_>>(),
-            vec!["b.rs".to_string()]
-        );
-        let two_hops = expand_dependencies(&graph, &["a.rs"], 2);
-        assert_eq!(
-            two_hops.into_iter().collect::<Vec<_>>(),
-            vec!["b.rs".to_string(), "c.rs".to_string()]
-        );
 
         let deps = dependent_map(&graph);
         assert_eq!(deps["c.rs"], vec!["b.rs".to_string()]);

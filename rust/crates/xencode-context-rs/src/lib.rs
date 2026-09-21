@@ -14,7 +14,6 @@
 
 pub mod advise;
 pub mod budget;
-pub mod cmd_output;
 pub mod compact;
 pub mod context;
 pub mod conversation;
@@ -39,9 +38,6 @@ pub use advise::{
     orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
 pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
-pub use cmd_output::{
-    capture_output, deduce_files, read_raw, render_summary, CmdIndex, CmdRecord, DETAIL_LINES_CAP,
-};
 pub use compact::{
     hard_compact_prompt, parse_hard_compact_reply, should_compact, soft_compact, CompactReport,
     CompactionKind,
@@ -56,7 +52,7 @@ pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
     MAX_DOC_BYTES, MAX_DOC_CHARS,
 };
-pub use embed::{cosine, hybrid_rerank, pseudo_document, tokenize, Bm25, Embedder};
+pub use embed::{hybrid_rerank, pseudo_document, tokenize, Bm25};
 pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
@@ -74,8 +70,8 @@ pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
-    build_graph, dependency_map, dependent_map, expand_dependencies, extract_rust_symbols,
-    rank_files, resolve_import, DepEdge, PerFileSymbols,
+    build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
+    DepEdge, PerFileSymbols,
 };
 pub use watcher::{
     map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,
@@ -86,12 +82,8 @@ pub use worktree::{
 };
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 
 /// Root directory used by the context engine inside a project.
 pub fn default_root() -> std::path::PathBuf {
     std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf())
 }
-
-/// Shared cancellation flag type passed to [`init_project`].
-pub type CancelFlag = std::sync::Arc<AtomicBool>;
