@@ -133,8 +133,10 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("Esc", "leave the field"),
         ],
         VoiceInterface => &[
-            ("Enter", "start voice session"),
-            ("Space / m", "toggle mute"),
+            ("Enter", "record a clip from the microphone"),
+            ("Enter again", "end the capture early; the clip is kept"),
+            ("Space / m", "mute — the recorder runs, audio is discarded"),
+            ("Esc", "stop if recording, otherwise close"),
         ],
         TerminalAssistant => &[
             ("type", "what you want to do"),

@@ -10,13 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Milestone J — opened
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and
-the plugin registry loaded no runtime. **J-01 to J-06 have landed** — the
+the plugin registry loaded no runtime. **J-01 to J-07 have landed** — the
 security auditor and the profiler are real, the terminal assistant delegates to
 a model through the agent's approval gate, the multi-language panel tabulates
 a real `scan_tree` walk and translates through a real model call, the custom
-models panel edits `model_profiles` in `config.json`, and the learning mode
-panel teaches files the project index actually found — leaving one scripted
-panel (voice) and the plugin runtime.
+models panel edits `model_profiles` in `config.json`, the learning mode
+panel teaches files the project index actually found, and the voice panel
+records from the microphone and keeps a WAV, transcribing only when a whisper
+CLI is installed. No TUI panel ships scripted content; the plugin runtime is
+what is left.
 `NEXT_PLAN_TASKS.md` §
 Milestone J tracks the work item by item, with a done-when rule per panel.
 
@@ -94,6 +96,29 @@ Milestone J tracks the work item by item, with a done-when rule per panel.
   badge back to the real `0.1.0`.
 
 ### Added
+- Voice Interface is real (Milestone J, J-07). `Enter` used to play a scripted
+  session: four hardcoded phrases with invented results (`run tests` →
+  "✅ 142 tests passed, 0 failed"), an audio level cycling through
+  `0.3, 0.6, 0.8, 0.9, 0.7, 0.4` regardless of any microphone, and a "speaking"
+  state for a product with no text-to-speech. Now `Enter` spawns the first
+  recorder found on `PATH` (`arecord`, then `pw-record`, then `parec`) with a
+  fixed argv that streams raw 16-bit mono 16 kHz — no shell string, so this
+  never touches the agent's `run_command` approval path — and every 100 ms
+  chunk of what it actually sent yields one RMS reading, which drives the level
+  bar, the session peak and the clip length. `Enter` again, or `Esc` while
+  recording, ends the capture early and keeps the clip; `m`/`Space` mutes by
+  discarding audio rather than saving a silent file. The PCM is written to
+  `.xencode/voice/clip-<unix>.wav` through a hand-built RIFF header. Speech text
+  comes only from a whisper CLI's stdout (`whisper`, `whisper-cpp`,
+  `whisper-cli`); with none installed the panel names the clip it kept and says
+  there is no speech engine, and an engine that fails, prints nothing or dies
+  contributes its own error or nothing at all. Deleted with this: the canned
+  phrase list, the fake level cycle, and the dead `voice_commands`,
+  `voice_confidence` and `voice_language` state. Verified against the real
+  microphone path — `arecord` on this machine produced a valid 1.85 s
+  16-bit mono WAV and the no-engine note — and covered without a microphone by
+  nine `voice` module tests that substitute `cat` on a prepared PCM file, six
+  app tests for the level/clip/error/mute reductions, and three panel renders.
 - Learning Mode panel is real (Milestone J, J-06). It opened with one invented
   lesson — "Rust Ownership Basics", a `calculate_length` snippet, an "exercise"
   with nothing to submit it to — and a quiz it marked correct whenever option 1

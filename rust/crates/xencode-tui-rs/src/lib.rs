@@ -11,6 +11,7 @@ pub mod review;
 pub mod theme;
 pub mod toast;
 pub mod ui;
+pub mod voice;
 pub mod widgets;
 
 pub use app::run_app;

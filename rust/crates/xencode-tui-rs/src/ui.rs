@@ -325,8 +325,8 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             }
             FocusArea::PerformanceDashboard | FocusArea::ProjectAnalyzer |
             FocusArea::GitCommit | FocusArea::CollaborationHub |
-            FocusArea::VoiceInterface |
             FocusArea::SecurityAuditor | FocusArea::PerformanceProfiler => "Enter:start  Esc:close",
+            FocusArea::VoiceInterface => "Enter:record  Enter again:stop  m:mute  Esc:close",
             FocusArea::LearningMode => {
                 "Enter:lessons  p/n:file  ←→+Enter:quiz  r:re-ask  Esc:close"
             }
@@ -2966,23 +2966,18 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let popup_area = centered_rect(65, 60, area);
     f.render_widget(Clear, popup_area);
 
-    let status_icon = match app.voice_status.as_str() {
-        "listening" => "🎤",
-        "processing" => {
-            let idx = app.spinner_tick % spinner::SPINNER_FRAMES.len();
-            // Return as &str slice
-            if idx < 5 {
-                "🔄"
-            } else {
-                "⚡"
-            }
+    let status_icon = if app.voice_muted && app.voice_busy {
+        "🔇"
+    } else {
+        match app.voice_status.as_str() {
+            "listening" => "🎤",
+            "processing" => "🔄",
+            _ => "🎙️",
         }
-        "speaking" => "🔊",
-        _ => "🎙️",
     };
 
     let title = format!(
-        " 🎙️ Voice Interface [{}] (Enter:start, Esc:close) ",
+        " 🎙️ Voice Interface [{}] (Enter:record/stop  m:mute  Esc:close) ",
         status_icon
     );
     let block = Block::default()
@@ -2997,8 +2992,8 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // audio meter + status
-            Constraint::Length(6), // recent commands
+            Constraint::Length(5), // meter + status
+            Constraint::Length(6), // what the session produced
             Constraint::Min(1),    // transcript
         ])
         .split(inner);
@@ -3011,50 +3006,87 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
         .title(" 📡 Audio Input ");
 
     let bar_width = 30usize;
-    let bar = gauge::bar((app.voice_level * 100.0).round() as u64, 100, bar_width);
+    let shown_level = if app.voice_muted {
+        0.0
+    } else {
+        app.voice_level
+    };
+    let bar = gauge::bar((shown_level * 100.0).round() as u64, 100, bar_width);
     let meter = format!(
-        " Level: [{}] {:.0}%\n Status: {} {}",
+        " Level: [{}] {:.0}%\n Peak: {:.0}%  Length: {}  {}",
         bar,
-        app.voice_level * 100.0,
-        status_icon,
-        app.voice_status,
+        shown_level * 100.0,
+        app.voice_peak * 100.0,
+        crate::voice::format_pcm_ms(app.voice_pcm_bytes),
+        if app.voice_muted {
+            "muted — audio discarded"
+        } else {
+            app.voice_status.as_str()
+        },
     );
     let status_para = Paragraph::new(meter)
         .block(status_block)
         .style(Style::default().fg(app.theme.fg));
     f.render_widget(status_para, chunks[0]);
 
-    // ── Recent Commands ─────────────────────────────────────────────────────
-    let cmd_block = Block::default()
+    // ── What this session did ───────────────────────────────────────────────
+    let session_block = Block::default()
         .border_set(panel_border_set(app.config.rounded_borders))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.border))
-        .title(" 📋 Recent Commands ");
+        .title(" 📋 Session ");
 
-    let mut cmd_lines: Vec<Line> = Vec::new();
-    if app.voice_commands.is_empty() {
-        cmd_lines.push(Line::from(Span::styled(
-            "  Press Enter to start voice recognition",
+    let mut session_lines: Vec<Line> = Vec::new();
+    if !app.voice_active {
+        session_lines.push(Line::from(Span::styled(
+            "  Enter records from the microphone and the meter follows the",
+            Style::default().fg(app.theme.message_system),
+        )));
+        session_lines.push(Line::from(Span::styled(
+            "  level of what the recorder actually sent.",
             Style::default().fg(app.theme.message_system),
         )));
     } else {
-        for (cmd, result) in app.voice_commands.iter().rev().take(3) {
-            cmd_lines.push(Line::from(Span::styled(
-                format!("  🗣️  {}", cmd),
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            cmd_lines.push(Line::from(Span::styled(
-                format!("     {}", result),
-                Style::default().fg(app.theme.fg),
+        session_lines.push(Line::from(Span::styled(
+            format!(
+                "  Recorder: {}",
+                if app.voice_recorder.is_empty() {
+                    "none found on PATH"
+                } else {
+                    app.voice_recorder.as_str()
+                }
+            ),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )));
+        let note_color = if app.voice_note.contains("No speech-to-text")
+            || app.voice_note.contains("No recorder")
+            || app.voice_note.contains("no audio")
+            || app.voice_note.contains("failed")
+            || app.voice_note.contains("exited")
+            || app.voice_note.contains("heard nothing")
+        {
+            app.theme.warning
+        } else {
+            app.theme.message_system
+        };
+        for line in app.voice_note.lines().take(3) {
+            session_lines.push(Line::from(Span::styled(
+                format!("  {line}"),
+                Style::default().fg(note_color),
             )));
         }
+        session_lines.push(Line::from(Span::styled(
+            "  Transcripts appear only from an installed speech engine.",
+            Style::default().fg(app.theme.message_system),
+        )));
     }
-    let cmd_para = Paragraph::new(cmd_lines)
-        .block(cmd_block)
-        .style(Style::default().fg(app.theme.fg));
-    f.render_widget(cmd_para, chunks[1]);
+    let session_para = Paragraph::new(session_lines)
+        .block(session_block)
+        .style(Style::default().fg(app.theme.fg))
+        .wrap(Wrap { trim: false });
+    f.render_widget(session_para, chunks[1]);
 
     // ── Transcript Log ──────────────────────────────────────────────────────
     let trans_block = Block::default()
@@ -3066,27 +3098,25 @@ fn draw_voice_interface(f: &mut Frame, app: &App, area: Rect) {
     let mut trans_lines: Vec<Line> = Vec::new();
     if app.voice_transcript.is_empty() {
         trans_lines.push(Line::from(Span::styled(
-            "  No speech detected yet.",
+            if app.voice_busy {
+                "  Listening — nothing transcribed yet."
+            } else {
+                "  No speech text. Nothing here is invented; see Session for why."
+            },
             Style::default().fg(app.theme.message_system),
         )));
     } else {
         for entry in &app.voice_transcript {
-            let color = if entry.starts_with('✅') {
-                app.theme.success
-            } else if entry.starts_with('❌') {
-                app.theme.danger
-            } else {
-                app.theme.fg
-            };
             trans_lines.push(Line::from(Span::styled(
-                format!("  {}", entry),
-                Style::default().fg(color),
+                format!("  🗣️  {entry}"),
+                Style::default().fg(app.theme.fg),
             )));
         }
     }
     let trans_para = Paragraph::new(trans_lines)
         .block(trans_block)
-        .style(Style::default().fg(app.theme.fg));
+        .style(Style::default().fg(app.theme.fg))
+        .wrap(Wrap { trim: false });
     f.render_widget(trans_para, chunks[2]);
 }
 

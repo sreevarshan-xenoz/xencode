@@ -301,7 +301,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("📝 Git Commit", "Stage and commit changes"),
     ("🤖 ByteBot Agent", "Autonomous task execution"),
     ("👥 Collaboration Hub", "Team collaboration tools"),
-    ("🎙️ Voice Interface", "Voice-to-code commands"),
+    ("🎙️ Voice Interface", "Record a clip, transcribe if able"),
     ("💡 Terminal Assistant", "AI-powered shell helper"),
     ("🛡️ Security Auditor", "Vulnerability scanning"),
     ("⚡ Performance Profiler", "Code profiling tools"),

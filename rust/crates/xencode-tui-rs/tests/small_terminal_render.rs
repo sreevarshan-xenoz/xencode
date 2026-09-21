@@ -516,6 +516,76 @@ fn learning_panel_lessons_come_from_the_repo() {
     }
 }
 
+/// J-07: the meter is RMS of bytes the recorder sent, so the panel must show
+/// the reading, the peak it reached and the length of what it holds.
+#[test]
+fn voice_panel_meters_follow_the_captured_pcm() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::VoiceInterface;
+    app.toasts.clear();
+    app.voice_active = true;
+    app.voice_busy = true;
+    app.voice_status = "listening".into();
+    app.voice_recorder = "arecord".into();
+    app.voice_level = 0.421;
+    app.voice_peak = 0.6;
+    app.voice_pcm_bytes = 6400;
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("42%"), "current level: {text}");
+    assert!(text.contains("60%"), "peak: {text}");
+    assert!(text.contains("200 ms"), "clip length: {text}");
+    assert!(text.contains("Recorder: arecord"), "{text}");
+    assert!(text.contains("listening"), "{text}");
+}
+
+/// The case this machine is actually in: a clip was recorded and there is no
+/// speech engine installed. The honest panel says both, and shows no text.
+#[test]
+fn voice_panel_without_a_speech_engine_shows_the_clip_and_the_reason() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::VoiceInterface;
+    app.toasts.clear();
+    app.voice_active = true;
+    app.voice_recorder = "arecord".into();
+    app.voice_peak = 0.6;
+    app.voice_pcm_bytes = 6400;
+    app.voice_note =
+        "No speech-to-text engine on PATH (looked for whisper). Clip kept at /tmp/clip-1.wav."
+            .into();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("No speech-to-text engine on PATH"), "{text}");
+    assert!(text.contains("/tmp/clip-1.wav"), "{text}");
+    assert!(text.contains("No speech text"), "{text}");
+    for canned in [
+        "Microphone initialized",
+        "142 tests passed",
+        "refactor user model",
+        "Voice-to-code",
+        "Recent Commands",
+    ] {
+        assert!(!text.contains(canned), "{canned} is scripted: {text}");
+    }
+}
+
+/// Before the first capture there is nothing to show, and the panel says what
+/// Enter will do instead of pretending a session is live.
+#[test]
+fn voice_panel_before_a_session_explains_enter() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::VoiceInterface;
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("Enter records from the microphone"), "{text}");
+    assert!(text.contains("Level: ["), "the meter is drawn: {text}");
+    for canned in [
+        "refactor user model",
+        "add validation for email",
+        "0.0%  listening",
+    ] {
+        assert!(!text.contains(canned), "{canned} is scripted: {text}");
+    }
+}
+
 /// Nothing indexed: the panel reports why it has no lesson instead of showing
 /// one it made up.
 #[test]

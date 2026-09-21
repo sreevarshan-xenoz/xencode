@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 714 tests passing, zero warnings
+- [x] Workspace gates green — 14 crates, 733 tests passing, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -817,11 +817,45 @@ workspace gates green.
   run, the show path incl. an unreadable file, grading against a non-first key,
   junk reply reported, parsing rules, no request when nothing is indexed) and two
   render tests at 160×44. **714 tests passed.**
-- [ ] J-07 — **Voice interface**: `arecord`/`pw-record` capture on Enter, level
+- [x] J-07 — **Voice interface**: `arecord`/`pw-record` capture on Enter, level
   bar driven by RMS computed from the captured PCM (real meters), then
   transcription through a whisper CLI if one is on `PATH`; with no STT backend
   the panel reports the clip it recorded and that no transcription engine is
   installed — never a canned transcript.
+  **Done** (`xencode-tui-rs/src/voice.rs`, new module): the recorder is the first
+  of `arecord`, `pw-record`, `parec` found on `PATH` (a `which` that walks `$PATH`
+  itself — there was no PATH lookup anywhere in the workspace to reuse), spawned
+  with a fixed argv list that streams raw S16_LE mono 16 kHz on stdout. No shell
+  string is built, so this stays in the same category as the `git` and
+  `llama-server` spawns elsewhere and nowhere near the agent's `run_command`
+  approval path. Every 100 ms chunk (3200 bytes) yields one meter reading — RMS
+  over the samples, ×8 as a stated display gain because a voice RMS sits near
+  0.02 and an unamplified bar reads dead — so the bar, the peak and the clip
+  length are all arithmetic over bytes the recorder sent. Enter again, or Esc
+  while a capture runs, ends it early and keeps what it has; `m`/Space is a real
+  mute, draining the pipe and discarding audio rather than producing a silent
+  clip. The PCM goes into `<root>/.xencode/voice/clip-<unix>.wav` through a
+  hand-built 44-byte RIFF header (Python's `wave` opens it: 1 channel, 16-bit,
+  16000 Hz). Text appears in the transcript only from a whisper CLI's stdout;
+  with none installed the panel states that and names the clip, and a transcriber
+  that fails, prints nothing, or dies contributes its own words or nothing at
+  all. Removed with this: the four canned phrase/result pairs (including
+  `run tests → ✅ 142 tests passed, 0 failed`), the fixed 0.3–0.9 level cycle,
+  and the dead `voice_commands`, `voice_confidence`, `voice_language` state, plus
+  the "speaking" status this product has no text-to-speech to earn. Verified live
+  against the real microphone path, not just fakes: `arecord` was found, a
+  capture stopped at ~2 s reported RMS readings that started saturated and decayed
+  to ~0.12, wrote a valid 1.85 s WAV, and printed the no-engine note; the
+  substituted-recorder tests use `cat` on a prepared PCM file, so no test needs a
+  microphone or mutates `PATH`. Covered by nine module tests (RMS incl. the
+  trailing odd byte, meter scaling, WAV header field by field, ms from byte
+  count, chunk-per-reading with levels and totals, muted capture keeps nothing,
+  an unstartable recorder names itself, empty output, the missing-engine note)
+  and ten app/render tests (level token parses or changes nothing, peak holds,
+  clip report vs. no engine leaves the transcript empty, malformed clip said out
+  loud, failed capture stops the meter, mute reaches the flag the reader thread
+  reads, empty capture, and three panel renders at 160×44).
+  **733 tests passed.**
 - [ ] J-08 — **Plugin runtime**: manifests become loadable. Registry builds a
   real `XencodePlugin` implementation from each manifest and `PluginHost` routes
   its declared prompt prefix and `before`/`after` hooks into the agent loop, so
