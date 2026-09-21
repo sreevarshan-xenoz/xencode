@@ -306,7 +306,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("🛡️ Security Auditor", "Vulnerability scanning"),
     ("⚡ Performance Profiler", "Code profiling tools"),
     ("🧩 Custom Models", "Model configuration & tuning"),
-    ("📚 Learning Mode", "Interactive code tutorials"),
+    ("📚 Learning Mode", "Lessons from this repo's own files"),
     ("🌐 Multi-Language", "Language detection & tools"),
     ("🔍 PR Review", "Per-file diff browsing"),
     ("⏳ Background Tasks", "Running & finished commands"),

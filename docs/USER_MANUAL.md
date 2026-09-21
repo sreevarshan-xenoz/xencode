@@ -33,10 +33,10 @@ The Rust binary (`xencode`) is the entry point.
 - **Conversation Memory & Cache**: Persistent session history + two-tier (memory and disk) cache with LRU eviction
 - **Team Mode**: `xencode server` issues real bearer tokens (`POST /auth/login`), enforces Viewer/Editor/Admin roles on both HTTP and the WebSocket, and appends every action to an audit log
 
-> **Not implemented, whatever a panel shows.** Two TUI panels are still
-> interface mockups with scripted content: Voice Interface and
-> Learning Mode. They render and respond to keys; nothing
-> listens. Five are real. The **Security Auditor** — `Enter` walks the
+> **Not implemented, whatever a panel shows.** One TUI panel is still
+> an interface mockup with scripted content: **Voice Interface**. It renders and
+> responds to keys; nothing listens. Six are real.
+> The **Security Auditor** — `Enter` walks the
 > workspace and runs the same `VulnerabilityScanner` behind `xencode analyze`,
 > so an empty result means the scanner found nothing, not that the panel is a
 > demo. The **Performance Profiler** — `Enter` samples this process's CPU and
@@ -53,8 +53,16 @@ The Rust binary (`xencode`) is the entry point.
 > read) or binary. Its list of language names is the scanner's own `Language`
 > enum, and `Tab` + typing fill in From / To / Text before `Enter` makes one
 > model call for the translation — a provider error is shown as an error rather
-> than a fake answer. None of the remaining three has a real backend
-> yet — the closest working equivalents are the chat itself (a real model call)
+> than a fake answer. The **Custom Models** panel — the list is
+> `model_profiles` from `config.json`, `Enter` applies a profile to the next
+> turn, `s` is the only key that writes the file, and `t` shows the provider's
+> own reply or its own error. The **Learning Mode** panel — `Enter` queues the
+> files `.xencode/index/symbols.json` says declare something, shows the chosen
+> file's own text and its recorded declarations, and asks the model once to
+> teach that file and set a quiz with its answer key; `p`/`n` walk the queue.
+> With no project index the panel says so and spends no request. The one
+> panel still without a backend is voice — the closest working equivalents to
+> the rest are the chat itself (a real model call)
 > and `xencode advise` for repo insights. The performance dashboard, a separate
 > panel, reports real session metrics.
 
@@ -214,7 +222,7 @@ do anything):
 | Security Auditor | Real scan: `Enter` walks the workspace with the context engine and runs `VulnerabilityScanner::scan_file` on every readable file; findings stream in with their CWE ids and a log line gives the true totals. Files the walker lists as secret are reported, never read |
 | Performance Profiler | Real measurement: `Enter` reads this process's CPU (two `/proc/self/stat` samples 250 ms apart) and resident memory, then the session's own numbers — average turn latency, llama.cpp tokens/s, per-provider health, and the last 6 rows of `.xencode/metrics.jsonl` (KV reuse, prompt tokens, tok/s, retrieved files). A gauge with nothing to show reads `n/a` |
 | Custom Models | Real profiles: the panel lists `model_profiles` from `config.json` (empty on a fresh install, which it says out loud rather than filling with samples). `n` adds one seeded from the current session settings, `-`/`+` moves temperature (0.0–2.0) and `←`/`→` steps the token budget along 64…8192; `Enter` applies it to the next turn — model id plus both knobs, and a llama.cpp profile also asks the server to load that model — without touching disk; `s` writes the whole list through `XencodeConfig::save`; `t` sends one request with exactly that profile's settings and prints the provider's real reply or its real error. Unset knobs render as "the server decides" and are sent as nothing |
-| Learning Mode | 🎭 Mockup — one hardcoded Rust ownership lesson |
+| Learning Mode | Real lessons: `Enter` reads `.xencode/index/symbols.json` and queues the files that actually declare something — most declarations first, ties by path, five at a time. The panel shows that file's own text (capped at a line boundary, with a note saying how much was sent) and the declarations the index recorded, then makes one model call asking it to teach that file and reply with `{explain, question, options, answer, why}`; the model's sentences are labelled as its own. `p`/`n` walk the queue, `r` re-asks, `←→` + `Enter` answer the quiz, and grading uses the model's answer key — a reply with no usable key in it is printed as the reply, never replaced by a canned question. No project index → the panel says "run /init first" and sends nothing |
 | Multi-Language | Real detection + real translation: `Enter`/`d` runs the context engine's `scan_tree` over the workspace and lists each language actually found with files, lines (blanks and comment leads excluded) and share, plus notes for skipped, secret-listed (never read) and binary files. The language list is `scanner::Language`, with `▸` marking what the walk found. `Tab` selects From / To / Text, typing edits it, `Enter` makes one model call and prints its reply — or the provider's own error |
 | PR Review | Per-file diff browsing, base toggle (real git diff) |
 | Background Tasks | Live registry of background commands (stop/remove) |

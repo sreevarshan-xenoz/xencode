@@ -118,6 +118,35 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.models_selected = 0;
     app.models_dirty = true;
     app.models_status = "next turn uses ollama:qwen2.5:7b · temperature 0.2".into();
+    // J-06: a lesson is an index row plus a file's own text, so the sweep
+    // covers the graded quiz, the model's key on a later option, and the
+    // explanation kept apart from the index's facts.
+    app.learn_active = true;
+    app.learn_lessons = vec![
+        (
+            "src/two.rs".into(),
+            vec!["struct Two".into(), "fn two".into()],
+        ),
+        ("src/one.rs".into(), vec!["fn one".into()]),
+    ];
+    app.learn_current_lesson = 1;
+    app.learn_total_lessons = 2;
+    app.learn_lesson_title = "src/two.rs".into();
+    app.learn_content = vec![
+        "2 declaration(s) the index found in src/two.rs.".into(),
+        "struct Two · fn two".into(),
+        "Whole file sent: 3 lines.".into(),
+    ];
+    app.learn_code_example = "pub struct Two {}\npub fn two() {}\n".into();
+    app.learn_explain = vec!["Two is the pair the queue ranked first.".into()];
+    app.learn_quiz_active = true;
+    app.learn_quiz_question = "Which file ranked first?".into();
+    app.learn_quiz_options = vec!["src/two.rs".into(), "src/one.rs".into()];
+    app.learn_quiz_answer = Some(0);
+    app.learn_quiz_selected = 1;
+    app.learn_quiz_answered = true;
+    app.learn_quiz_correct = false;
+    app.learn_quiz_why = "It declares two, not one.".into();
     // Keep the toast overlay exercised in every panel/size combination too.
     app.toasts.push(xencode_tui_rs::toast::Toast {
         message: "src/x.rs changed on disk — affects main.rs".into(),
@@ -452,6 +481,58 @@ fn custom_models_panel_shows_config_profiles() {
     let text = render_text(&mut app, 160, 44);
     assert!(text.contains("unset"), "{text}");
     assert!(text.contains("llamacpp:gemma-3n-e4b"), "{text}");
+}
+
+/// The Learning panel's lesson is a file and its own text; the quiz is the
+/// model's question, options and key. The ownership lesson that used to open
+/// here described code that is not in this repo.
+#[test]
+fn learning_panel_lessons_come_from_the_repo() {
+    let mut app = populated(FocusArea::LearningMode);
+    app.toasts.clear();
+    let text = render_text(&mut app, 160, 44);
+    assert!(text.contains("Which file ranked first?"), "{text}");
+    assert!(text.contains("It declares two"), "{text}");
+    assert!(
+        text.contains("2 declaration(s) the index found in src/two.rs."),
+        "{text}"
+    );
+    assert!(text.contains("lesson 1 of 2"), "the real queue: {text}");
+    assert!(
+        text.contains("pub struct Two {}"),
+        "the file's own text: {text}"
+    );
+    assert!(
+        text.contains("Two is the pair"),
+        "the model's words: {text}"
+    );
+    for canned in [
+        "Rust Ownership Basics",
+        "calculate_length",
+        "single 'owner'",
+        "Correct! +20%",
+    ] {
+        assert!(!text.contains(canned), "{canned} is scripted: {text}");
+    }
+}
+
+/// Nothing indexed: the panel reports why it has no lesson instead of showing
+/// one it made up.
+#[test]
+fn learning_panel_without_an_index_shows_the_reason() {
+    let mut app = App::for_tests();
+    app.focus = FocusArea::LearningMode;
+    app.toasts.clear();
+    app.learn_active = true;
+    app.learn_status = "No project index — run /init first, then Enter again.".into();
+    let text = render_text(&mut app, 160, 44);
+    assert!(
+        text.contains("The project index queued 0 lessons"),
+        "{text}"
+    );
+    assert!(text.contains("run /init first"), "{text}");
+    assert!(text.contains("Nothing queued"), "{text}");
+    assert!(!text.contains("Rust Ownership"), "{text}");
 }
 
 /// A fresh config has no profiles, and the panel says so rather than inventing
