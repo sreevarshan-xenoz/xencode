@@ -383,12 +383,8 @@ CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/
 
 ## 🐳 Deployment
 
-Xencode ships container assets, with two honest caveats:
-
 - **Docker** — [`Dockerfile`](Dockerfile) + [`docker-compose.yml`](docker-compose.yml): Rust builder → slim runtime running `xencode server --port 8765`, health-checked against `/api/status`. This path is real.
-- **Kubernetes** — [`k8s/`](k8s/) has `deployment.yaml` and a templated secrets manifest. `postgres.yaml` and the `DATABASE_URL` the deployment injects are **not consumed**: no Rust code reads a database URL and sessions are in-memory, so restarting a pod drops them.
-- **Monitoring** — [`monitoring/prometheus.yml`](monitoring/prometheus.yml) is legacy: it scrapes `/metrics` and `/api/v1/monitoring/prometheus` on port 8000, neither of which the Rust server serves (it exposes no metrics route at all), and it points at an `alert_rules.yml` that is not in the repo. Treat it as a starting point, not a working setup.
-- **CI/CD** — fmt → clippy → cargo test → Trivy scan → ghcr.io push → staging → production in [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml). The deploy jobs validate secrets and run `kubectl`; they only work once you supply a kubeconfig and registry credentials.
+- **CI/CD** — [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs fmt → clippy → `cargo test --workspace` on every push and PR. [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs the same gate, then builds and pushes the image to `ghcr.io` and Trivy-scans it. There is no deploy stage: the server is a stateless single binary, so nothing applies Kubernetes manifests, and the `k8s/` and `monitoring/` directories that implied otherwise have been removed.
 
 ---
 
@@ -406,8 +402,6 @@ xencode/
 │       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
 │       └── ...              # core, config, cache, memory, models, collaboration, plugin
-├── k8s/                     # Kubernetes manifests (postgres.yaml is unused by the Rust server)
-├── monitoring/              # Legacy Prometheus config — not wired to the Rust server
 ├── scripts/                 # Shell/PowerShell build + smoke-test helpers
 ├── images/                  # Screenshots
 └── .xencode.example.json    # Example of ~/.xencode/config.json
