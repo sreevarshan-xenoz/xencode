@@ -50,11 +50,32 @@
   a unit test, is what fixed the root login, the 18080 port and the
   `READY`-means-serving gate. Tasks: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone K.
+- 🔜 **Milestone M planned** (2026-09-23): *stop being an island — the plugin,
+  hooks, skills and MCP track.* Research against the tree found the honest state:
+  a "plugin" today is a `plugin.json` manifest that can only contribute a prompt
+  prefix and two hooks — `PluginRuntime::handle_event` returns `None`
+  unconditionally, so no plugin ever receives an event — and the manifest's
+  `permissions` field is parsed and **never enforced**. MCP is a client only,
+  stdio only, tools only, hand-rolled with no `rmcp` dependency. Hooks are
+  real and can veto, but the command string is static: a hook is never told
+  which tool ran or with what arguments. The track fixes compatibility with the
+  conventions the rest of the ecosystem already settled on (hook stdin payloads,
+  `SKILL.md`, agents-as-markdown, git-installable plugins) before adding the
+  two big new surfaces — xencode as an MCP *server* and xencode over ACP. Tasks:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone M.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).
+- 🔜 **Milestone L planned** (2026-09-23): *any machine you can SSH into, and an
+  agent that finishes its own work.* Two tracks — the remote-backend track
+  generalizes the Colab bridge into a `Backend` trait plus a BYO-SSH `xencode
+  remote` command and hardware/OOM guards; the agent track ships a test/lint
+  auto-repair loop, an `edit_file` failure fallback, and cost metering over the
+  metrics that already exist. Research behind the shape (including the paid GPU
+  clouds deliberately **not** integrated) is in
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone L.
 
-## Backlog (all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
+## Backlog (A–K all shipped — tracked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md))
 
 0. **Milestone D — Background tasks & worktree support** — ✅ complete 2026-09-20:
    a background-task registry + TUI task panel + `tasks`/`worktree` CLI, and git

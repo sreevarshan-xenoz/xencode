@@ -1084,3 +1084,333 @@ changes: a remote model is still a model, and agent tools still go through
 `colab ssh` bridge (no public URL, ToS-safe on every tier); public tunnels stay
 documented as an advanced paid-tier-only way to fill in Settings → Remote URL
 manually — the account-risk choice is the user's, never baked in.
+
+## Milestone L — any machine you can SSH into, and an agent that finishes its own work (planned 2026-09-23)
+
+> Status: **planned, nothing built.** Two independent tracks. The agent track
+> (L-7..L-9) ships first because it improves every provider at once, including
+> the free Colab path that already works.
+
+### Why
+
+Milestone K turned out not to be a Colab feature. What actually got built was
+five generic ones wearing a Colab costume — provision a box, install and start
+an OpenAI-compatible server on loopback, hold a private tunnel to it, persist
+state across the provider killing the box, reconnect with one key. Of
+`xencode-colab-rs`'s 2,968 lines, roughly 600 are Colab-specific (`colab new`,
+`colab sessions`, the one-bridge 429 slot, the 12-hour reap). The rest is
+bootstrap/poll/retry/reconnect logic any second backend would reuse verbatim.
+
+Separately, the agent still stops short of finishing: after an edit it reports
+success without running the project's tests, an `edit_file` whose `old` string
+isn't unique hard-fails with no recovery path, and `RequestMetrics` already
+records tokens per request that nobody ever reads.
+
+### Research: which remote backends were considered and rejected
+
+Web research on 2026-09-23 across twenty-plus GPU backends, two independent
+passes. Both are cited below; where they disagree, that is said rather than
+averaged.
+
+- **Architecturally impossible for this pattern** — Kaggle, Hugging Face
+  Spaces, Replicate, Modal, Salad. No SSH or no private port path, so the model
+  server is reachable only over a public URL — the exact ngrok-shaped free-tier
+  ToS violation Milestone K ruled out. Modal's "tunnels" are unauthenticated
+  public TLS URLs; Salad is container-groups only with no user VM.
+- **No GPU, or the wrong shape** — Oracle Always Free is Arm **CPU** only (and
+  the A1 allotment was cut to 2 OCPU / 12 GB); GCP/AWS/Azure have no free GPU
+  and need card + quota ceremony; Hetzner sells GPUs only as flat monthly
+  dedicated servers, which is not a burst `up` command.
+- **Viable, and still not built** — Vast.ai, Lightning AI, RunPod, Fly.io
+  Machines, DigitalOcean/Vultr/Scaleway. Each is prepaid-credit or
+  spot-preemptible: a machine that can be reclaimed mid-response and a zero
+  balance that deletes the volume. **The two research passes directly contradict
+  each other on RunPod** — one found root SSH plus A5000 at ~$0.16/hr and ranked
+  it the best paid backend, the other read RunPod's SSH docs and found that port
+  forwarding specifically requires a public IPv4 on the pod, with proxy "Basic
+  SSH" not supporting forwards. That cannot be settled without a paid account,
+  and "expose a public IP on a box running our model server" is a security
+  regression, so the feature is not built on a contested fact. Stopped-but-not-
+  deleted pods and detached network volumes also bill silently — an
+  abandonment-billing hazard this project has to support for real users.
+- **What replaces all of them: `bring-your-own-SSH`.** L-2 gives "I have a 24 GB
+  workstation / a Mac Studio / a server under my desk" with zero new vendor
+  surface, zero billing hazard, zero ToS risk — and it is the thing that
+  actually forces the L-1 trait extraction to be real rather than theoretical.
+
+Priced facts above are from vendor pages as of 2026-09-23 and will drift. The
+Metal path in L-3 is **UNVERIFIED**: it cannot be tested on this machine, which
+has no Apple hardware, so it ships as a detected-and-reported branch, not as a
+promised runtime.
+
+### Do not build (decided, with reasons)
+
+- **Managed GPU-cloud backends** — see the RunPod contradiction and the
+  billing-abandonment risk above.
+- **An embedding / vector index, or Cursor-style remote repo indexing.**
+  `xencode-context-rs` has deterministic retrieval *and* a retrieval eval that
+  measures it. Swapping in embeddings would regress quality silently.
+- **A llama-swap clone** (multi-model VRAM juggling) — solves a server
+  administration problem, not an agent problem.
+- **Speculative decoding** — a ~25-30% tok/s win for a large, fragile launch
+  surface on hardware that is already the bottleneck.
+- **Terminal computer-use, cloud PR-review bots, A2A.**
+- **A new plugin/extension format of our own** — see the plugin track, which
+  lands separately once its research is in.
+
+### Standing constraints for this milestone
+
+Unchanged from Milestone K: Rust-only under `rust/crates/*`; external tools
+(`ssh`, `colab`, a future vendor CLI) stay optional and the feature reports
+itself unpowered when they are missing; nothing is interpolated into a shell
+unvalidated; the approval gate still guards every agent tool call and a remote
+model is still just a model; **no public tunnels**; live verification against a
+real machine, not mocks, and `down`/teardown so nothing is left billing. Keys
+stay plain strings in `config.json` — there is no encrypted vault, so L-4's
+loopback-only and `--api-key` work is what keeps a *remote* server from being
+reachable by anyone else on that machine.
+
+### Tasks
+
+Numbered by dependency, not by ship order. **Ship order: Track A (L-7 → L-9)
+first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
+
+#### Track R — any machine you can SSH into
+
+- [ ] **L-1 — extract a `Backend` trait from `xencode-colab-rs`.** Split the
+      generic half of `orchestrate.rs` + `lifecycle.rs` (bootstrap,
+      poll-until-serving, forward spawn/hold, state file, reconnect) behind a
+      trait with three seams: `provision()` (create/attach the compute),
+      `transport()` (return the argv that carries `ssh -N -L`-style forwarding),
+      `reap_hint()` (the provider-specific "why is it gone" line, e.g. Colab's
+      12 h). Colab becomes impl #1 in the same crate; `state.rs` gains a
+      `backend` field so `colab.json` migrates without losing a live bridge. No
+      user-visible behavior change in this step.
+      **Done-when:** `xencode colab up|status|down|reconnect` behaves
+      byte-identically to today (re-run the live T4 bring-up, not just the 49
+      hermetic tests), and the Colab-specific file is under ~800 lines.
+- [ ] **L-2 — `xencode remote add|list|use|up|status|down`, the BYO-SSH
+      backend.** `add` records a host (`user@host[:port]`, optional
+      `~/.ssh/config` alias) plus a runtime choice into a per-host profile; `up`
+      runs the L-3 probe, pushes the same bootstrap L-1 keeps generic, starts
+      the server on loopback, holds the forward, writes state, points
+      `remote_base_url` at it. Reuses `point_config_at_forward` unchanged so the
+      `remote:<model>` route works with no provider changes.
+      **Done-when:** proven end-to-end against a **second real machine** — bring
+      the same GGUF up somewhere that is not Colab, answer a real
+      `xencode query -m 'remote:…'`, `down` cleanly, and `status` after a killed
+      tunnel says so instead of lying.
+- [ ] **L-3 — remote capability probe.** Run detection **on the box** —
+      `nvidia-smi`, `lspci` for AMD, `system_profiler`/`sysctl` for Apple, plus
+      RAM and free disk — and pick the runtime from the result: CUDA tarball →
+      `llama-server`; AMD → `ollama` (it handles ROCm where the CUDA build
+      cannot); Apple → Metal; otherwise CPU, with the model size capped
+      accordingly. Report the chosen branch and the numbers it was chosen from.
+      **Done-when:** forcing each branch (real CUDA box, real CPU-only box;
+      Metal **UNVERIFIED** — no Apple hardware here) yields a server that
+      actually answers `/v1/models`, and a wrong-branch guess is impossible
+      because the decision is printed.
+- [ ] **L-4 — SSH hardening: TOFU pinning + connection reuse.** First contact
+      pins the host key into xencode's own `known_hosts` under the config dir
+      (`accept-new` semantics, refuse on change); `ControlMaster`/`ControlPersist`
+      plus `ServerAliveInterval` make the bootstrap's many short `ssh` calls
+      share one connection. Never set `StrictHostKeyChecking=no`, and if the
+      remote's uid isn't ours, pass llama.cpp `--api-key` and re-check that the
+      server bound to `127.0.0.1` and not `0.0.0.0`.
+      **Done-when:** a host-key change is refused with an actionable message,
+      the bootstrap makes one TCP connection instead of ~10, and a second user
+      on the remote box cannot read the endpoint.
+- [ ] **L-5 — `xencode hw probe`: local hardware → launch flags.** Read
+      VRAM/RAM/cores from `lspci`, `/proc/meminfo`, `/sys/class/drm` and emit a
+      recommended quant, context size and `-ngl` layer count — including the two
+      silent killers the numbers hide: KV cache on top of weights, and a
+      concurrent `cargo` build evicting the mmap. Feed the same generator into
+      L-2/L-3 so model choice stops being a guess.
+      **Done-when:** its recommendation for this laptop (i5-1035G1, 15 GB,
+      MX250) is a size that actually loads and answers, and every field it reads
+      is documented.
+- [ ] **L-6 — budget preflight and OOM recovery.** Before launch, refuse a
+      model whose measured footprint exceeds available memory and say what would
+      fit. On an exit-137 / killed-server signature, step quant or context down
+      and retry once, then escalate with a concrete "or `xencode remote add …` /
+      `xencode colab up`" suggestion instead of hanging.
+      **Done-when:** deliberately asking for a model two sizes too big produces
+      the refusal before download, and a real OOM produces the stepped-down
+      retry rather than a silent hang.
+
+#### Track A — the agent finishes its own work
+
+- [ ] **L-7 — test/lint auto-repair loop with an exit-code "done" gate.** After
+      the agent's edits, run the project's own test and lint commands (discovered
+      from `Cargo.toml`/the workspace, over the existing approval gate), feed
+      failures back to the model, and iterate a bounded number of times. The
+      gate is the process exit code, never the model's claim that it is done.
+      **Done-when:** a seeded compile error in a scratch crate is repaired by
+      the loop and terminates on `cargo test` genuinely exiting 0; the iteration
+      cap is configurable and its exhaustion is reported as an incomplete task,
+      not as success; the approval gate is unchanged.
+- [ ] **L-8 — `edit_file` failure fallback.** Today a non-unique or
+      non-matching `old` string hard-fails. Return structured "why it didn't
+      match" — the count of matches plus each candidate with line numbers and
+      surrounding context — so the next turn self-corrects, and retry once
+      automatically when the failure was ambiguity rather than absence.
+      **Done-when:** an ambiguous edit on a real duplicated line converges in
+      one retry, and the existing exact-match contract stays exact — no silent
+      fuzzy write.
+- [ ] **L-9 — cost metering over the metrics that already exist.** Aggregate
+      `RequestMetrics` (prompt/cached/completion tokens, tok/s, context usage,
+      compaction) into per-model and per-session spend with a configurable
+      budget: a `/cost` command, a TUI status row, and a warning as the budget is
+      crossed.
+      **Done-when:** numbers come from written `metrics.jsonl` records and match
+      a hand-summed session, an unknown price is shown as unknown rather than
+      invented, and a price table update is data, not code.
+
+#### Track E — extend both (after either track lands)
+
+- [ ] **L-10 — resumable, disk-aware GGUF download.** Check free disk before
+      starting, resume a partial file instead of restarting, and surface progress
+      in the TUI — it is the longest and least observable step of a bring-up.
+      **Done-when:** killing a download mid-file and re-running `up` resumes it,
+      and a too-small target refuses before writing anything.
+- [ ] **L-11 — free hosted inference routes (`groq:…`, `nvidia:…`).** Route
+      through the existing OpenAI-compatible path with a per-prefix base URL so a
+      first-run user gets real capacity without renting anything. Groq's free
+      tier is roughly 30 RPM / 1,000 req/day behind an **8K TPM** ceiling that is
+      smaller than one agent prompt; NVIDIA NIM is roughly 40 RPM behind a 429
+      backoff. **Rate numbers are web-verified as of 2026-09-23 and will drift**
+      — keep them in a dated table, not in prose.
+      **Done-when:** a real prompt is answered through each route from a clean
+      config, the 8K-TPM trap is handled and documented rather than surfacing as
+      a confusing 429, and no key is ever written by a test.
+- [ ] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
+      diagnostics from an LSP server rather than only `cargo check`, so
+      non-cargo languages get the same L-7 treatment.
+      **Done-when:** it demonstrably catches something `cargo check` does not,
+      in a language the agent currently edits blind — otherwise it does not ship.
+
+## Milestone M — stop being an island: hooks, skills, plugins, MCP, ACP (planned 2026-09-23)
+
+> Status: **planned, nothing built.** Ask from the same research pass as L: "what
+> other features like the Colab bridge could we add — and what about plugins, MCP
+> and third-party support?"
+
+### Why
+
+The Colab bridge was valuable because it connected xencode to compute it did not
+own. The same instinct applied to software says the bigger isolation is protocol
+-level: xencode cannot be extended by anyone else's tooling, and cannot be *used*
+by anyone else's agent. Before planning that, the extension surface was read
+rather than assumed. What is actually in the tree:
+
+| Seam | Real state (verified 2026-09-23) |
+|---|---|
+| **Plugins** | Manifest only. `PluginManifest` (`xencode-plugin-rs/src/manifest.rs:32-53`) carries name/version/`xencode_version` pin, `prompt_prefix`, `before`/`after` hooks. `PluginRuntime::load` merges those two outputs into the agent loop (`app.rs:2362-2383`). **`handle_event` returns `Ok(None)` unconditionally** (`runtime.rs:113-118`) — no plugin has ever received an event. The `XencodePlugin`/host traits exist but nothing dynamically loads through them. |
+| **Plugin `permissions`** | Parsed (`manifest.rs:47`) and **never checked anywhere**. A manifest can claim capabilities the host does not enforce. |
+| **MCP** | Client only, **stdio only, tools only** — resources/prompts/sampling deliberately not negotiated (`xencode-mcp-rs/src/client.rs:1,9`, `lib.rs:2`). Hand-rolled JSON-RPC; no `rmcp` or any MCP crate in any `Cargo.toml`. Tools surface as `mcp__<server>__<tool>` capped at 64 chars (`xencode-tui-rs/src/mcp.rs:51-63`). Servers start only on `/mcp`; config `mcp_servers` is command/args/env with no HTTP, no headers, no auth (`config.rs:190,239`). **No MCP server mode.** |
+| **Hooks** | Real and load-bearing: `agent_hooks.before/after` maps a tool name or `*` to `sh -c` (`config.rs:252-260`), runs post-approval in the workspace root (`agent_tools.rs:874-954`), and a failing `before` hook vetoes (`:1206`). **But the command is static** — `run_hook` spawns `sh -c` with piped stdout/stderr and never a stdin write, so a hook cannot learn which tool ran or what it was about to change. |
+| **Approval gate** | `classify()` (`agent_tools.rs:209-248`) with ask/edit-allow/all-allow modes, hard-deny outside the workspace / `.git` / config dir, MCP tools always `External → Ask`, session-scoped grants. No persistent allowlist. |
+| **Subagents** | `/spawn` runs a subagent in a git worktree (`app.rs:167-177`) — execution exists, declarative agent definitions do not. |
+| **AGENTS.md** | Read into the context head alongside `anchor.md` (`xencode-context-rs/src/context.rs:96-103`). |
+| **Collaboration** | Server routes, bearer auth, RBAC, audit and WS are wired, and the TUI hub connects for real. `crdt.rs` is referenced by nothing but its own `lib.rs` re-export — still the settled Milestone G deferral. |
+| **Absent, verified** | No LSP anywhere. No sandbox (no seccomp/landlock — worktree isolation is all there is). No OTel. No custom user slash commands. No skills format. No downloadable themes or statusline (8 hardcoded themes). |
+
+### The strategy that falls out of that table
+
+Every candidate here has a compatibility version that is cheaper than an
+invention, and in 2026 the ecosystem has already picked winners on three of them:
+**Claude-Code-shaped hook events with a JSON payload on stdin** (Codex copied
+it, so the shape is the de-facto standard), **`SKILL.md` for skills** (Cursor and
+others converged), and **git-repo `marketplace.json` for distribution** — which
+means a registry is a git repo, not a binary service worth building. So the plan
+is: make xencode readable by other tools' conventions first, then expose xencode
+itself over MCP and ACP. Do not invent a fourth format.
+
+Two surfaces are genuinely new capability rather than compatibility, and they are
+the two biggest items: **MCP server mode** (another agent calls xencode's
+read/search/edit/run tools) and **ACP** (xencode's agent runs inside Zed, Neovim,
+or Emacs instead of only a terminal). ACP is real and growing in 2026 — Zed and
+JetBrains both ship it and a Rust SDK exists at 0.2.x — but the spec is pre-1.0,
+so it is last, not first.
+
+### The trap that decides the order of the big two
+
+Headless MCP and ACP callers **cannot answer an approval prompt**. xencode's
+approval gate is the thing that makes it safe to run `run_command` at all, so a
+naive `mcp serve` either hangs every write into a timeout or quietly auto-
+approves — the second option is not a feature gap, it is a vulnerability. M-5 and
+M-7 therefore inherit a prerequisite they cannot skip: an explicit, non-
+interactive permission policy (per-tool, session-scoped, defaulting to read-only)
+that is auditable and that never widens the interactive TUI path.
+
+### Do not build (decided, with reasons)
+
+- **A plugin marketplace or registry service.** Distribution that already works
+  is a git repo plus a manifest; building a server for it is maintaining infra,
+  not product.
+- **A new plugin config or skill format.** `plugin.json` and `SKILL.md` are the
+  conventions; a third dialect buys incompatibility and nothing else.
+- **Dynamic native or WASM plugin code loading.** Turns every third-party plugin
+  into arbitrary code execution with no sandbox behind it (there is none), for
+  demand nobody has asked for. The manifest model stays.
+- **Completing the CRDT wiring.** Still no product pull — settled since G.
+- **OTel/telemetry now.** L-9's cost metering over the existing `metrics.jsonl`
+  answers the question people actually ask.
+- **A full command sandbox** (Landlock/seccomp/bubblewrap). Reconsidered only if
+  M-5 ships and exposes write tools to external callers; that is the one change
+  that would make it load-bearing rather than nice.
+
+### Tasks
+
+Small-to-large, and deliberately: M-1..M-4 are compatibility work that makes
+xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
+
+- [ ] **M-1 — give hooks their payload.** Write `{tool, args, phase, session_id,
+      workspace}` JSON to the hook process's stdin in `run_hook`, keeping the
+      existing non-zero-exit veto and the current output annotation. Adopt the
+      event names other agents already use so a hook written for one runs here.
+      **Done-when:** a hook script that reads stdin can name the tool and veto a
+      specific `write_file` by its path — and no secret ever travels in argv,
+      where `/proc` would leak it.
+- [ ] **M-2 — enforce what a manifest declares.** Either check `permissions` at
+      load and refuse or degrade with a clear message, or delete the field. A
+      parsed-but-ignored security-relevant field is worse than an absent one.
+      **Done-when:** `/plugin` reports the enforced decision, and a test proves a
+      disallowed capability cannot reach the agent loop.
+- [ ] **M-3 — skills: `SKILL.md` loader.** Discover `~/.xencode/skills/*/SKILL.md`
+      and `.xencode/skills/*/SKILL.md`, parse frontmatter, inject only the
+      name/description menu into the prompt head, and load a full body on demand
+      through the existing plugin prompt plumbing. `/skills` lists what loaded.
+      **Done-when:** installing a skill measurably changes behavior on a real
+      prompt, and a directory of 30 skills costs the prompt a menu, not 30 bodies.
+- [ ] **M-4 — `xencode plugin install <git-url>`.** Clone, pin the commit, verify
+      the manifest, show a diff of what it declares before it can contribute a
+      prompt prefix, then copy into the config dir. `remove` and `update`
+      complete the cycle.
+      **Done-when:** install → load → the prefix is visible in `/plugin`, an
+      unpinned install says which commit it pinned, and a manifest that gains a
+      new `prompt_prefix` on update is shown as a diff rather than applied
+      silently.
+- [ ] **M-5 — `xencode mcp serve`: xencode as an MCP server.** Expose `read_file`,
+      `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` over
+      stdio using the official `rmcp` SDK (replacing the hand-rolled client only
+      if it earns it — the client stays as-is unless a shared dependency makes
+      that free). **Requires the non-interactive permission policy above.**
+      **Done-when:** an external MCP client lists and calls xencode's tools
+      read-only against a real workspace, every write path is refused by default
+      with an actionable reason, and the 64-char tool-name limit is handled the
+      same way the client already handles it.
+- [ ] **M-6 — finish the MCP client: resources, prompts, and HTTP with headers.**
+      Negotiate the capabilities the client currently declines, and add an
+      HTTP/SSE transport with auth headers so a hosted server is reachable.
+      **Done-when:** one real third-party server is connected over each
+      transport, a resource and a prompt from it surface in the TUI, and a token
+      in config is masked in every render the same way `mask_secret` masks keys.
+- [ ] **M-7 — `xencode acp`: run the agent inside an editor.** Put the existing
+      turn loop behind the ACP Rust SDK over stdio, mapping xencode's approval
+      requests onto ACP permission requests and the plan/tool stream onto ACP
+      session updates.
+      **Done-when:** a real chat plus an approved edit round-trips inside Zed (or
+      a second ACP client), with a **live** ACP version pinned in `Cargo.toml` —
+      the spec is pre-1.0 and this item is explicitly allowed to be blocked by
+      upstream churn rather than half-shipped.
