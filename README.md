@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 815 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 822 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -385,8 +385,11 @@ flowchart TD
 - A failing provider walks `agent_fallback_models` in order — one attempt each,
   only while nothing has streamed yet.
 - API keys are stored as plain strings in that JSON file. There is **no
-  encrypted vault** in the Rust implementation: protect the file with
-  permissions (`chmod 600 ~/.xencode/config.json`) and keep it out of git.
+  encrypted vault** in the Rust implementation. Xencode writes the file
+  owner-only (`0600`) and atomically, so a crash mid-save cannot leave a torn
+  config; a config that an older version left readable by others is tightened
+  the next time a setting is saved (`xencode config set`). Keep it out of git
+  regardless — file permissions are the only layer.
 
 Start from the annotated example (it lists every real key):
 
@@ -414,7 +417,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (815 passing, 4 ignored)
+cargo test                          # Full workspace suite (822 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -511,8 +514,10 @@ cd rust && cargo build -p xencode-cli 2>&1
 ## 🔒 Security
 
 - API keys live in `api_keys` inside `~/.xencode/config.json`. `xencode config set`
-  does not accept key names, so edit that file directly and keep it out of git —
-  there is no encryption layer, so file permissions are the control (`chmod 600`).
+  does not accept key names, so edit that file directly and keep it out of git.
+  Xencode saves it as `0600`, so there is no encryption layer to rely on and no
+  need to `chmod` it by hand — but anything that can read your user can read
+  your keys.
 - `xencode analyze` runs a pattern-based scanner over OWASP Top 10 categories
   (hardcoded secrets, injection, weak crypto, path traversal, SSRF). It matches
   source text — it does not consult a CVE database or your dependency tree.

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — your configuration file is no longer readable by everyone
+`~/.xencode/config.json` holds provider API keys as plain text, and every
+version so far wrote it with the operating system's default file permissions —
+`644`, readable by any other user on the machine and by anything that can read
+a backup or synced copy of your home directory. The manuals told you to
+`chmod 600` it by hand; nothing stopped the next save from leaving whatever
+mode the editor happened to create. Saving now goes through one helper that
+writes to a fresh private file in the same directory, flushes it to disk, and
+renames it into place, so a crash part-way through leaves the previous config
+intact rather than a truncated one, and the file that appears is readable only
+by you. A config that was already group- or world-readable is tightened the
+next time a setting is saved. The same helper now backs every other piece of
+state Xencode keeps on disk — the response cache, the project index and
+transcript under `.xencode/`, conversation memory, Colab session state, and the
+background-task registry that other `xencode tasks` processes read at any moment.
+
 ### Docs — what the orchestrator proposal was still missing (Milestone S revision)
 The response to the recorded appendix added four items the original thirty-eight did not
 contain, and they are the parts the idea needed to be an architecture rather than a

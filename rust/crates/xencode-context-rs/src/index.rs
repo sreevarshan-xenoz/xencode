@@ -62,21 +62,16 @@ impl Default for FilesIndex {
     }
 }
 
-/// Serialize `value` to `path` atomically (temp file + rename).
+/// Serialize `value` to `path` with a temp file + sync + rename, so a reader
+/// (or a crash mid-write) never sees a half-written index.
 pub fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), std::io::Error> {
     let json = serde_json::to_string_pretty(value)?;
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, json.as_bytes())?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    xencode_core_rs::write_atomic(path, json.as_bytes())
 }
 
 /// Write a plain-text string atomically (used by `state.md`).
 pub fn write_str_atomic(path: &Path, text: &str) -> Result<(), std::io::Error> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, text.as_bytes())?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    xencode_core_rs::write_atomic(path, text.as_bytes())
 }
 
 /// Deserialize `path` as JSON; `None` when missing or corrupt.

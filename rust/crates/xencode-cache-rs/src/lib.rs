@@ -254,7 +254,7 @@ impl ResponseCache {
             if let Some(entry) = self.entries.get(key) {
                 let path = cache_dir.join(format!("{key}.json"));
                 let json = serde_json::to_string(entry).map_err(CacheError::Json)?;
-                std::fs::write(path, json).map_err(CacheError::Io)?;
+                xencode_core_rs::write_atomic(&path, json.as_bytes()).map_err(CacheError::Io)?;
             }
         }
         Ok(())

@@ -131,7 +131,7 @@ impl ConversationMemory {
                 last_updated: Utc::now().to_rfc3339(),
             };
             let json = serde_json::to_string_pretty(&data).map_err(MemoryError::Json)?;
-            std::fs::write(memory_file, json).map_err(MemoryError::Io)?;
+            xencode_core_rs::write_atomic(memory_file, json.as_bytes()).map_err(MemoryError::Io)?;
         }
         Ok(())
     }

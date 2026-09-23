@@ -63,21 +63,15 @@ impl ColabState {
             .map_err(|e| format!("could not parse {}: {e}", path.display()))
     }
 
-    /// Write the state file (creating the config dir), atomically-ish via
-    /// temp-file + rename so a crash mid-write never leaves a torn JSON.
+    /// Write the state file (creating the config dir) via the shared atomic
+    /// helper, so a crash mid-write never leaves a torn JSON and the file
+    /// holding the SSH key path stays owner-readable.
     pub fn save(&self) -> Result<(), String> {
         let path = Self::state_path()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
-        }
         let json =
             serde_json::to_string_pretty(self).map_err(|e| format!("serialize state: {e}"))?;
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, &json).map_err(|e| format!("could not write {}: {e}", tmp.display()))?;
-        fs::rename(&tmp, &path)
-            .map_err(|e| format!("could not finalize {}: {e}", path.display()))?;
-        Ok(())
+        xencode_core_rs::write_atomic(&path, json.as_bytes())
+            .map_err(|e| format!("could not write {}: {e}", path.display()))
     }
 
     /// Remove the state file. Missing file is not an error.

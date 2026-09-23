@@ -443,24 +443,19 @@ impl XencodeConfig {
     }
 
     /// Save configuration to `~/.xencode/config.json`.
+    ///
+    /// The write is atomic and the resulting file is owner-only: this config
+    /// holds provider API keys as plain text, so a partly-written file or a
+    /// world-readable one is a leak either way.
     pub fn save(&self) -> Result<(), ConfigError> {
         let path = Self::config_path()?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(ConfigError::Io)?;
-        }
-        let json = serde_json::to_string_pretty(self).map_err(ConfigError::Json)?;
-        std::fs::write(&path, json).map_err(ConfigError::Io)?;
-        Ok(())
+        self.save_to(&path)
     }
 
     /// Save configuration to a specific file path.
     pub fn save_to(&self, path: impl AsRef<std::path::Path>) -> Result<(), ConfigError> {
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(ConfigError::Io)?;
-        }
         let json = serde_json::to_string_pretty(self).map_err(ConfigError::Json)?;
-        std::fs::write(path, json).map_err(ConfigError::Io)?;
+        xencode_core_rs::write_atomic(path.as_ref(), json.as_bytes()).map_err(ConfigError::Io)?;
         Ok(())
     }
 
@@ -871,5 +866,54 @@ mod tests {
         let json = config.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["default_model"], "qwen2.5:7b");
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    fn set_mode(path: &std::path::Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn saving_config_leaves_it_readable_only_by_the_owner() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        let mut config = XencodeConfig::default();
+        config.api_keys.openai_api_key = Some("sk-test-plaintext-key".to_string());
+        config.save_to(&path).unwrap();
+
+        assert_eq!(mode_of(&path), 0o600);
+        assert_eq!(
+            XencodeConfig::load_from(&path)
+                .unwrap()
+                .api_keys
+                .openai_api_key
+                .as_deref(),
+            Some("sk-test-plaintext-key")
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn saving_config_tightens_a_file_that_was_world_readable() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        set_mode(&path, 0o644);
+        assert_eq!(mode_of(&path), 0o644);
+
+        XencodeConfig::default().save_to(&path).unwrap();
+
+        assert_eq!(mode_of(&path), 0o600);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

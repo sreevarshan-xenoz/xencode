@@ -3538,6 +3538,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "xencode-core-rs",
 ]
 
 [[package]]
@@ -3577,6 +3578,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "xencode-config-rs",
+ "xencode-core-rs",
 ]
 
 [[package]]
@@ -3597,6 +3599,7 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "xencode-core-rs",
 ]
 
 [[package]]
@@ -3610,6 +3613,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror",
+ "xencode-core-rs",
  "zip",
 ]
 
@@ -3619,6 +3623,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
@@ -3642,6 +3647,7 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "xencode-core-rs",
 ]
 
 [[package]]

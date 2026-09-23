@@ -31,9 +31,10 @@ answers, then just ask.
 
 Local models need nothing else. For cloud models, put the keys in the
 `api_keys` object of `~/.xencode/config.json` (`xencode config show` prints
-it; `chmod 600` it — the file is plain JSON, there is no vault) and select a
-cloud model with `xencode config set default_model …`. See
-[CLI_GUIDE.md](CLI_GUIDE.md) for the accepted model prefixes.
+it; the file is plain JSON, there is no vault) and select a cloud model with
+`xencode config set default_model …`. Xencode writes that file `0600`, and any
+`config set` re-saves it that way — if you created it by hand, `chmod 600` it
+yourself. See [CLI_GUIDE.md](CLI_GUIDE.md) for the accepted model prefixes.
 
 ## Usage
 
