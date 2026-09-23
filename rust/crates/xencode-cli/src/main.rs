@@ -274,6 +274,38 @@ enum ColabAction {
         #[arg(long)]
         generate_key: bool,
     },
+    /// Bring a Colab VM up: create the session, install the runtime, and hold
+    /// an SSH forward so the VM's OpenAI endpoint appears on the laptop
+    Up {
+        /// Session name (defaults to config colab.session)
+        #[arg(long)]
+        session: Option<String>,
+        /// GPU accelerator (T4, L4, G4, H100, A100) for colab new
+        #[arg(long)]
+        gpu: Option<String>,
+        /// Inference runtime on the VM: llama.cpp (pinned llama-server + GGUF,
+        /// heavier install, one-shot) or ollama (tags flow into the model picker)
+        #[arg(long)]
+        runtime: Option<String>,
+        /// Model repo/tag installed on the VM (defaults to config colab.model)
+        #[arg(long)]
+        model: Option<String>,
+        /// Weights source: hf (llama.cpp only; drive/gcs are refused with a fix)
+        #[arg(long)]
+        weights: Option<String>,
+        /// Local port the SSH forward exposes (defaults to config / 18000)
+        #[arg(long)]
+        local_port: Option<u16>,
+        /// VM-side port the runtime binds (0 = runtime-native: llama.cpp 8080,
+        /// ollama 11434; defaults to config)
+        #[arg(long)]
+        remote_port: Option<u16>,
+    },
+    /// Report the Colab bridge state: forward pid, `colab sessions`, and a
+    /// /v1/models probe on the forward
+    Status,
+    /// Tear the Colab bridge down: kill the forward, `colab stop`, clear state
+    Down,
 }
 
 #[derive(Subcommand)]
@@ -993,7 +1025,150 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
 async fn run_colab(action: ColabAction) -> Result<(), String> {
     match action {
         ColabAction::Preflight { generate_key } => run_colab_preflight(generate_key).await,
+        ColabAction::Up {
+            session,
+            gpu,
+            runtime,
+            model,
+            weights,
+            local_port,
+            remote_port,
+        } => {
+            run_colab_up_cli(
+                session,
+                gpu,
+                runtime,
+                model,
+                weights,
+                local_port,
+                remote_port,
+            )
+            .await
+        }
+        ColabAction::Status => run_colab_status_cli().await,
+        ColabAction::Down => run_colab_down_cli().await,
     }
+}
+
+async fn run_colab_up_cli(
+    session: Option<String>,
+    gpu: Option<String>,
+    runtime: Option<String>,
+    model: Option<String>,
+    weights: Option<String>,
+    local_port: Option<u16>,
+    remote_port: Option<u16>,
+) -> Result<(), String> {
+    let config = XencodeConfig::load().map_err(|e| e.to_string())?;
+    if !config.colab.enabled {
+        return Err(
+            "colab is disabled — set it: `xencode config set colab_enabled true`".to_string(),
+        );
+    }
+
+    // Flags override config; config provides the defaults.
+    let session = session
+        .or(if config.colab.session.is_empty() {
+            None
+        } else {
+            Some(config.colab.session.clone())
+        })
+        .unwrap_or("xencode-vm".to_string());
+    let runtime = runtime.unwrap_or(config.colab.runtime.clone());
+    let model = model
+        .or(if config.colab.model.is_empty() {
+            None
+        } else {
+            Some(config.colab.model.clone())
+        })
+        .unwrap_or("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string());
+    let weights_source = weights.unwrap_or(config.colab.weights_source.clone());
+    let local_port = local_port.unwrap_or(config.colab.local_port);
+    let remote_port = remote_port.unwrap_or(config.colab.remote_port);
+
+    // Gate on the bridge being usable; preflight also ensures the SSH key.
+    let report = xencode_colab_rs::preflight(true)
+        .await
+        .map_err(|e| format!("colab preflight: {e}"))?;
+    if !report.ready() {
+        let failed: Vec<String> = report
+            .checks
+            .iter()
+            .filter(|c| !c.ok)
+            .map(|c| {
+                format!(
+                    "{} — {}",
+                    c.name,
+                    c.fix.as_deref().unwrap_or(c.detail.as_str())
+                )
+            })
+            .collect();
+        return Err(format!(
+            "colab preflight not ready — run `xencode colab preflight` to see fixes:\n  {}",
+            failed.join("\n  ")
+        ));
+    }
+
+    let bins = xencode_colab_rs::resolve_binaries()?;
+    let config_dir = XencodeConfig::config_dir().map_err(|e| e.to_string())?;
+    let key = config_dir.join(xencode_colab_rs::KEY_FILENAME);
+
+    let opts = xencode_colab_rs::UpOptions {
+        session: session.clone(),
+        gpu: gpu.unwrap_or("T4".to_string()),
+        runtime: runtime.clone(),
+        model: model.clone(),
+        weights_source,
+        local_port,
+        remote_port,
+    };
+
+    let url = xencode_colab_rs::run_colab_up(&bins, &key, &opts).await?;
+
+    // Point the provider URLs at the forward so the picker and the
+    // remote:/llama/ollama routes see the VM, then persist the change.
+    let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
+    let base = url.trim_end_matches("/v1");
+    xencode_colab_rs::point_config_at_forward(&mut config, &runtime, base);
+    config
+        .save()
+        .map_err(|e| format!("colab up: could not save config: {e}"))?;
+
+    println!("Colab up — {url}");
+    println!("  session:   {session}");
+    println!("  runtime:   {runtime}");
+    println!("  model:     {model}");
+    println!(
+        "  provider:  {} -> {}",
+        if runtime == "ollama" {
+            "ollama_url"
+        } else {
+            "llama_cpp_url"
+        },
+        base
+    );
+    println!(
+        "  remote:    {} (OpenAI-compatible)",
+        config.remote_base_url
+    );
+    println!("  The VM endpoint is live. `xencode colab status` shows the bridge.");
+    Ok(())
+}
+
+async fn run_colab_status_cli() -> Result<(), String> {
+    let bins = xencode_colab_rs::resolve_binaries()?;
+    let report = xencode_colab_rs::run_colab_status(&bins, "xencode-vm").await;
+    for line in &report.lines {
+        println!("  {line}");
+    }
+    Ok(())
+}
+
+async fn run_colab_down_cli() -> Result<(), String> {
+    let bins = xencode_colab_rs::resolve_binaries()?;
+    let summary = xencode_colab_rs::run_colab_down(&bins).await?;
+    println!("{summary}");
+    Ok(())
 }
 
 async fn run_colab_preflight(generate_key: bool) -> Result<(), String> {
