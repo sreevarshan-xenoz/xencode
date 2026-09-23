@@ -536,11 +536,14 @@ T4 rather than a mock.
 Nothing is currently *committed* to build next. What exists instead is planning:
 two planned tracks (**L** — remote backends and a self-finishing agent; **M** —
 ecosystem compatibility) and four research option spaces (**N**, **O**, **P**,
-**Q**) recorded deliberately unranked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md),
-208 candidates between them. Cutting that pool into the next milestone is an open
-decision — and those passes turned up live gaps between promise and code, which
-they list as defects rather than features, including this manual's own habit of
-overstating the security scanner and error handling.
+**Q**) recorded in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md), 208 candidates
+between them. The candidates were never ranked by worth, and still are not; what
+was added afterwards is an **order** — fifteen dependency waves (**Milestone R**),
+starting with the defects that make today's output untrustworthy and ending with
+the product surface. So the open question is no longer *what comes first* but
+*which of a wave is worth doing*. Those passes also turned up live gaps between
+promise and code, which they list as defects rather than features, including this
+manual's own habit of overstating the security scanner and error handling.
 
 Under consideration, in [`docs/ROADMAP.md`](docs/ROADMAP.md):
 
