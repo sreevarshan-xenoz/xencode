@@ -5693,8 +5693,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         let tx = tx.clone();
         tokio::spawn(async move {
             let root = xencode_context_rs::default_root();
-            let Ok(mut watcher) = xencode_context_rs::WorkspaceWatcher::spawn(&root, &[]) else {
-                return;
+            let mut watcher = match xencode_context_rs::WorkspaceWatcher::spawn(&root, &[]) {
+                Ok(watcher) => watcher,
+                Err(err) => {
+                    // Watching is optional, but saying nothing is not an option:
+                    // on a workspace this size the usual cause is the inotify
+                    // watch limit, and silence there is indistinguishable from
+                    // "no file changed".
+                    let _ = tx.send(format!("[WATCHOFF]{err}"));
+                    return;
+                }
             };
             loop {
                 let batch = watcher.next_batch(Duration::from_millis(250));
@@ -6108,6 +6116,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 app.messages.push(UiMessage {
                     role: "system".to_string(),
                     content: format!("⚠ {body}"),
+                });
+            } else if let Some(body) = token.strip_prefix("[WATCHOFF]") {
+                // The real-time watcher could not start, so no `⚠ stale context`
+                // warning will ever arrive on its own. Say so once, plainly.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("⚠ file watching is off: {body}"),
                 });
             } else if let Some(body) = token.strip_prefix("[WATCH]") {
                 app.handle_watch_event(body);

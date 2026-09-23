@@ -15,7 +15,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Directories that are never reported to callers. Mirrors the TUI's scan
 /// defaults plus the usual build/cache noise.
@@ -33,6 +33,17 @@ pub const DEFAULT_EXCLUDED_DIRS: &[&str] = &[
 
 /// How long the channel must stay silent before a queued batch is emitted.
 pub const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(250);
+
+/// Upper bound on a caller's quiet window. A long window is not a preference:
+/// it delays every warning by that much without coalescing anything extra,
+/// because the events from one save arrive within a few milliseconds.
+pub const MAX_QUIET_WINDOW: Duration = Duration::from_millis(1000);
+
+/// How long a batch may be held while events keep arriving before it is
+/// reported anyway. Without this, a `git checkout` or a build that touches
+/// files faster than the quiet window starves the caller: the watcher sees
+/// constant activity and reports nothing until the workspace goes quiet.
+pub const MAX_STORM_LATENCY: Duration = Duration::from_millis(2000);
 
 /// Coarse event tri-state — a normalized version of `notify::EventKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -117,12 +128,21 @@ pub struct WatcherSession {
 
 impl WatcherSession {
     /// Block up to `quiet_for`. Returns the debounced batch the moment the
-    /// channel has been silent that long (empty when nothing arrived), so a
-    /// steady stream of events just keeps this call alive and coalescing.
+    /// channel has been silent that long (empty when nothing arrived). A busy
+    /// workspace cannot postpone this forever: `quiet_for` is capped at
+    /// [`MAX_QUIET_WINDOW`], and a batch that has been growing for
+    /// [`MAX_STORM_LATENCY`] is reported even while events are still arriving.
     pub fn next_batch(&mut self, quiet_for: Duration) -> Vec<WatchEvent> {
+        let quiet_for = quiet_for.min(MAX_QUIET_WINDOW);
+        let deadline = Instant::now() + MAX_STORM_LATENCY;
         loop {
             match self.rx.recv_timeout(quiet_for) {
-                Ok(event) => self.debounce.push(event),
+                Ok(event) => {
+                    self.debounce.push(event);
+                    if Instant::now() >= deadline {
+                        return self.debounce.drain();
+                    }
+                }
                 Err(_) => return self.debounce.drain(),
             }
         }
@@ -261,6 +281,75 @@ mod tests {
         let a = batch.iter().find(|e| e.path == "src/a.rs").unwrap();
         assert_eq!(a.kind, WatchKind::Modified);
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn a_storm_is_reported_instead_of_waiting_for_quiet() {
+        // Events keep arriving far faster than the quiet window, which is what
+        // a build or a large checkout looks like from here. The old behaviour
+        // was to coalesce forever and report nothing.
+        let (tx, rx) = mpsc::channel();
+        let mut session = WatcherSession {
+            rx,
+            debounce: Debounce::default(),
+        };
+        std::thread::spawn(move || {
+            for i in 0..200 {
+                if tx
+                    .send(WatchEvent {
+                        path: format!("src/gen_{i}.rs"),
+                        kind: WatchKind::Modified,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        let started = Instant::now();
+        let batch = session.next_batch(Duration::from_millis(50));
+        let elapsed = started.elapsed();
+
+        assert!(!batch.is_empty(), "storm produced no events at all");
+        assert!(
+            elapsed < Duration::from_millis(3_500),
+            "waited {elapsed:?} for a batch while events were still arriving; \
+             the storm deadline never fired"
+        );
+    }
+
+    #[test]
+    fn an_overlong_quiet_window_is_capped() {
+        // A caller asking for a 10 s window must not hold a change for 10 s:
+        // bursts arrive within milliseconds, so the extra time only delays the
+        // warning without merging anything additional.
+        // The sender is deliberately kept alive: a closed channel returns
+        // immediately, which would prove nothing about how long the wait is.
+        let (tx, rx) = mpsc::channel();
+        let held_open = tx.clone();
+        let mut session = WatcherSession {
+            rx,
+            debounce: Debounce::default(),
+        };
+        tx.send(WatchEvent {
+            path: "src/a.rs".into(),
+            kind: WatchKind::Modified,
+        })
+        .unwrap();
+
+        let started = Instant::now();
+        let batch = session.next_batch(Duration::from_secs(10));
+        let elapsed = started.elapsed();
+
+        assert_eq!(batch.len(), 1);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "waited out the caller's 10 s window ({elapsed:?}) instead of capping \
+             the quiet period at {MAX_QUIET_WINDOW:?}"
+        );
+        drop(held_open);
     }
 
     #[test]
