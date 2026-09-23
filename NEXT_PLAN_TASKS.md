@@ -1414,3 +1414,446 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       a second ACP client), with a **live** ACP version pinned in `Cargo.toml` —
       the spec is pre-1.0 and this item is explicitly allowed to be blocked by
       upstream churn rather than half-shipped.
+
+## Milestone N — the full option space (research appendix, drafted 2026-09-23)
+
+> **This is a map, not a queue.** Six research passes (Sept 2026) covered the
+> areas L and M did not. Everything they surfaced is recorded here — including
+> the items later passes will cut — so triage is a deliberate, revisitable step
+> rather than something that happens implicitly while planning. Ranking lives at
+> the bottom; the record comes first.
+>
+> Every "what exists today" claim below was read out of the tree, not assumed,
+> with file:line. Web claims carry their source; anything the passes could not
+> confirm is marked **UNVERIFIED**.
+
+### N-0 — Eleven facts about the current tree that changed how the options read
+
+1. **There is no AST parsing anywhere.** Symbol extraction is four regexes over
+   Rust text (`xencode-context-rs/src/symbols.rs:55-68`), whose own header comment
+   says "Tree-sitter may replace the extraction layer later" (`symbols.rs:16`).
+   `scan_tree` is a file walker with extension-based language tagging
+   (`scanner.rs:187,342`). The analyzer is per-line regex
+   (`xencode-analysis-rs/src/analyzer.rs:32-100`). `tree-sitter`, `syn` and `quote`
+   appear in zero `Cargo.toml`s. So every structural claim the refactor-insights
+   panel makes is textual underneath, and `edit_file`/`search_files` are
+   exact-string and per-line regex (`agent_tools.rs:22,445-516`).
+2. **Nothing evaluates the agent.** `eval.rs` measures *file-retrieval* quality
+   only — recall@k, precision@k, MRR over a gold set at `.xencode/eval/gold.json`,
+   A/B'd from `/ctx eval` (`eval.rs:6-9,66-82`; `app.rs:3381-3397`). There is no
+   end-to-end agent benchmark, zero snapshot/insta crates in the workspace, no
+   golden full-run regression test, and no model A/B on real tasks. The system
+   prompt is one frozen string, `AGENT_SYSTEM_PROMPT` (`context.rs:33`), with no
+   versioning.
+3. **A cloned repo's `AGENTS.md` is delivered in the trusted position.** It is
+   concatenated into the stable prefix between the system identity line and
+   `STABLE_END_MARKER` (`context.rs:96-119`), and that line reads "Follow the
+   project guidelines below exactly" (`context.rs:33-35`). `grep` for
+   `untrust|sanitiz|injection|defang` across `context-rs`, `agent_tools.rs`,
+   `xencode-mcp-rs` and `xencode-plugin-rs` returns **zero hits**: no
+   prompt-injection guard exists.
+4. **`~/.xencode/config.json` is written with default permissions.**
+   `XencodeConfig::save()` uses `std::fs::write` with no `set_permissions` in the
+   call path (`config.rs:444-454`), so plaintext `api_keys` land world-readable
+   under the usual umask. `set_permissions` is used elsewhere (`mcp.rs:452`,
+   `xencode-colab-rs/src/lib.rs:98`), so this is an omission, not a constraint.
+5. **The approval gate inspects path *arguments*, never command *contents* — and
+   that is the correct design, with a consequence.** `classify` hard-denies only
+   `path`/`cwd` args outside the workspace or in `.git`/config dir
+   (`agent_tools.rs:217-227`, `path_allowed` `:186-205`, lexical, symlinks
+   unresolved). `ToolClass::Shell` is `Ask` in every mode except `all-allow`
+   (`:238`), so a human sees the literal command string. `ReadOnly → Allow` is
+   unconditional and there is no taint tracking across turns. The exposure is not
+   "no gate"; it is that the gate's only defense for a shell call is a human
+   reading a string — and fact 3 is the vector aimed at that reading.
+6. **Images are never decoded.** `images.rs` detects format by magic bytes
+   (`:91`), reads header dimensions (`:134`), caps at 20 MiB (`:23`) and encodes a
+   data URL (`:302`) — no decode, no resize, no recompress. A 4K screenshot goes
+   to the provider as-is. This is a token-budget defect, not a missing feature.
+7. **Scanned PDFs silently yield empty text**, and the code knows it:
+   `documents.rs:16-18` lists OCR as a follow-up.
+8. **The TUI cannot show an image.** ratatui 0.29 + crossterm 0.28 only; no
+   graphics protocol (kitty/sixel/iTerm), no OSC-52, no clipboard integration, no
+   screenshot capture. The markdown renderer is hand-rolled with **no syntax
+   highlighting** (`markdown.rs:1-5`). 8 hardcoded themes (`theme.rs:7-16`), 3
+   layout presets (`layout.rs:14`), mouse scroll/click hit-testing exists
+   (`app.rs:6138-6280`).
+9. **Voice is record-only.** `voice.rs` is real — `arecord` subprocess (`:115`),
+   16 kHz S16_LE WAV, 15 s cap (`:26`), transcription by shelling to a whisper CLI
+   on PATH (`:145-157`). **No TTS anywhere** (zero hits for
+   tts/speak/piper/kokoro/sherpa).
+10. **Memory has no cross-session retrieval.** `xencode-memory-rs` stores
+    session-keyed raw message lists to `~/.xencode/conversation_memory.json`,
+    50-message cap with the oldest drained (`lib.rs:9,176-179`); `xencode memory`
+    lists/inspects sessions. No distilled facts, no relevance retrieval.
+11. **Compaction is already better than most products, and its byproducts are
+    useful.** Soft at ≥70% usage (drop oldest 30%, `[d]`-decision entries always
+    survive, no model call), hard at ≥90% (one model call folding into a layered
+    markdown summary with the last 6 turns verbatim) — `compact.rs:17-18,54-116`,
+    parsed back into `ContextState` (`:129`). Before a rewrite it snapshots the
+    canonical transcript to `.xencode/cache/transcript/<ts>.json`
+    (`compact.rs:8-11`) — a free corpus of **recorded real traffic**, not mocks.
+    Context is 7 budget-capped tiers (`context.rs:20-25`).
+
+**The constraint that quietly limits several features here:** `context.rs:29-80`
+builds a byte-identical prefix (SYSTEM + `AGENTS.md` + `anchor.md`, closed by the
+marker, SHA-256 drift-checked) *specifically so llama.cpp can reuse the KV
+prefix*. Any feature that varies the per-turn file set — nested instruction files,
+prompt hot-swapping, cross-session memory injected into the head — voids that
+reuse unless it is placed below the marker or the cache boundary is made explicit.
+`RequestMetrics.cached_tokens` (`metrics.rs:24-42`) already measures the damage.
+
+**And one from N-0 worth keeping straight:** the `VulnerabilityScanner`'s
+five regex families are mostly Python-flavored (`security.rs:11-40,49-220` —
+`os.system`/`eval`, md5/sha1/DES/RC4, SQL concat, path traversal, SSRF), it shells
+out to nothing (`cargo audit`/`deny`/`semgrep`/`gitleaks`: zero hits), and it never
+opens secret-named files — by design, twice: the walker never reads them
+(`scanner.rs:47`) and the scan loop skips `entry.is_secret` (`app.rs:887-889`). So a
+key in a file that does *not* look like a secret is content-scanned while `.env`
+never is.
+
+### N-1 — Code intelligence and structural editing
+
+- **CI-1 `ast_edit` agent tool via ast-grep as a subprocess** — structural
+  search/replace with metavar patterns, `--json` results, `fix` mode.
+  Effort S (~1 day). Trap: needs the ast-grep binary (same "reports itself
+  unpowered" pattern as `colab`/`ssh`), and a wrong pattern matches zero sites
+  and looks like success. Done-when: `fn $A($B) -> $C` rewrites 3 seeded call
+  sites in one call and the diff equals a hand-check.
+- **CI-2 tree-sitter symbol extraction replacing the `symbols.rs` regexes**
+  (Rust + TS + Python grammars). M (~1 wk). Trap: grammar/runtime ABI version
+  pinning and a C toolchain requirement at build time. Done-when: a strict
+  superset of the regex symbols on this repo, zero false positives inside macros
+  or comments.
+- **CI-3 `edit_symbol(path, symbol, new_body)`** — range-scoped replacement
+  validated by reparse. M, after CI-2. Trap: tree-sitter error recovery hides
+  broken output; must reject a file whose edited region parses with ERROR nodes.
+  Done-when: a corrupt-edit test proves the rejection.
+- **CI-4 codemod mode** — the agent emits one ast-grep YAML rule, xencode applies
+  it repo-wide behind a preview diff + approval. S-M after CI-1. Trap: repo-wide
+  apply on a dirty tree. Done-when: a 20-site rename in one tool call.
+- **CI-5 Rust toolchain kit as gated tools** — `cargo fix --allow-dirty
+  --clippy`, `clippy --message-format=json` summarized, `cargo fmt`,
+  `cargo-shear`. S each. Trap: `cargo fix` overwrites edits made since the last
+  build — sequence after build-green, before commit. Done-when: the L-7 loop
+  drives a clippy count to 0 with JSON evidence before/after.
+- **CI-6 `what_breaks` impact analysis** — reverse-dependency list for an edit
+  target from the existing dep graph. M. Trap: regex-grade accuracy on call
+  sites, so label the confidence explicitly. Done-when: editing `symbols.rs`
+  surfaces its known consumers.
+- **CI-7 DAP debug loop through lldb-dap over MCP, not a custom client** —
+  breakpoint / continue / inspect-locals as tools. M-L (~1-2 wk). Trap: a stateful
+  subprocess against stateless tool calls, timeouts, and debug binaries required.
+  Done-when: the agent stops at a breakpoint in a failing test and prints a
+  local's value. (There is no usable Rust DAP *client* crate; Microsoft's `dap`
+  builds adapters. LLDB shipping an MCP mode is **UNVERIFIED** — the docs page
+  could not be deep-fetched.)
+
+### N-2 — Developer workflow and product surface
+
+- **WF-1 NDJSON event stream mode** (`query --stream --format ndjson`): token and
+  tool events, versioned. S-M. This is the primitive other tooling builds on —
+  `claude -p --output-format stream-json` and `codex exec --json` prove the shape,
+  and today `--format json` emits one blob. Trap: schema churn; version it
+  explicitly. Done-when: a script pipes it and CLI_GUIDE documents every event.
+- **WF-2 GitHub PR surface over REST** (`xencode pr create|review <n>`, comment
+  threads into the existing ReviewDashboard, `GH_TOKEN` or device flow; no `gh`
+  dependency). M. Trap: auth sprawl, rate limits, vendor lock-in. Done-when:
+  a PR opens from a TUI branch and a review thread reads back, without `gh`.
+- **WF-3 session resume/naming + redacted transcript export** (`--resume <name>`,
+  `/share`). S-M. Trap: transcripts contain secrets — reuse `mask_secret`.
+  Done-when: resume restores context across processes and export passes a
+  redaction test.
+- **WF-4 build/test autodiscovery** — probe README/CI files/`justfile`/`mise`,
+  write the recipe into `anchor.md`, and *prove* it by running it. M. Trap: false
+  confidence; require exit 0. Done-when: a fresh clone yields a working
+  test command from one command.
+- **WF-5 `cargo-dist` release pipeline + binstall + AUR.** S. Trap: signing keys
+  in CI. Done-when: a tag produces `cargo binstall xencode`.
+- **WF-6 shell completions + man page generated from clap.** S. Trap: drift —
+  generate them in CI, never by hand. Done-when: tab completion works in fish/zsh.
+- **WF-7 CI watchdog** (`xencode ci watch` over Actions REST feeding failed logs
+  into the agent). M. Trap: polling and pagination cost. Done-when: after a push
+  the terminal reports pass/fail plus one failed-test summary unaided.
+- **WF-8 `xencode-action`** — the review command as a GitHub Action commenting on
+  PRs. M. Trap: token scoping is a supply-chain risk; depends on WF-2.
+- **WF-9 signed-commit passthrough.** S. Trap: GPG agent env inside a TUI.
+  Done-when: agent-made commits verify on GitHub.
+- **WF-10 stacked-diff assist over worktrees.** L. Trap: rebase correctness, and
+  GitHub's stacked-PRs preview may commoditize it — revisit after that matures.
+
+### N-3 — Agent quality, evaluation, context engineering
+
+- **EV-1 local task-eval harness** — 10-30 seeded scratch git repos, a `task.md`
+  each, graded by `cargo test`/exit code, run headless through the real agent
+  loop. M (~1-2 wk). Trap: grade the diff, not the chat; and the agent can read
+  its own grader. Done-when: a pass rate is reported and the suite runs in CI
+  without network. **This is the item that makes L-7 measurable instead of
+  plausible.**
+- **EV-2 turn trace + TUI inspector** — per-turn JSONL beside `metrics.jsonl`
+  (prompt hash, tools, rounds, tokens, cost) and a `/trace` pane. S (2-4 d).
+  Trap: tool output contains secrets. Done-when: the last 50 turns are browsable
+  with per-task token totals.
+- **EV-3 prompt registry with versioning** — named prompt files, version hashed
+  into metrics and eval rows. S (2-3 d). Trap: see the KV-prefix constraint in
+  N-0. Done-when: `/ctx` shows the active version and eval output groups by it.
+- **EV-4 cross-session memory with relevance retrieval** — distilled facts scored
+  through the existing `retrieve()` signals. M (~1 wk). Trap: stale facts poison
+  context; needs expiry and review. Done-when: an eval-style test shows the right
+  fact injected within budget.
+- **EV-5 sub-directory instruction files** — walk from the edited file's dir to
+  root, budget-capped. S (2-3 d). Trap: the KV-prefix contract. Done-when: an
+  edit in a nested dir provably loads its directives.
+- **EV-6 notes-to-self scratchpad** — a `write_note` tool in a compaction-exempt
+  tier, like `[d]`. S (2-4 d). Trap: unbounded growth; cap and fold into hard
+  compaction. Done-when: notes survive a hard compaction and appear in assembly.
+- **EV-7 failure reflection → human-promoted lesson** — after N failed rounds or a
+  `/rewind`, the agent *drafts* a lesson and the user approves it into
+  `AGENTS.md`. S (3-4 d). Trap: auto-commit is drift, not learning.
+  Done-when: the draft cannot land without explicit approval.
+- **EV-8 playback regression below the HTTP boundary** — recorded *real* provider
+  responses replayed through real tool execution in seeded temp repos. M (~1 wk).
+  Trap: house-rule optics — the fixtures must be documented as captures of real
+  traffic (the `compact.rs` transcript snapshots are already such a corpus), not
+  as mocks. Done-when: a previously-flaky bug is pinned by a committed fixture.
+- **EV-9 API prompt-cache accounting** — `cache_control` breakpoints at the stable
+  prefix; `cached_tokens` is already metered. S-M (3-5 d). Trap: markers in the
+  wrong place void reuse — measure with the existing kv-reuse ratio.
+  Done-when: a multi-turn session shows a measured cost drop.
+- **EV-10 judge-assisted eval reports**, LLM ranking only near-miss outcomes that
+  an exit code already graded. S (3 d). Trap: position/verbosity/self-preference
+  bias are documented; the judge may never flip an exit-code failure.
+- **EV-11 tamper-evident audit log** — hash-chain `audit.jsonl` (prev-hash + seq;
+  the `seq` exists, the chain does not). S. Trap: do not build a Merkle tree.
+  Done-when: a verify command detects a mid-file edit.
+
+### N-4 — Security and the agent's own trust model
+
+Ranked by what the tree actually shows, not by how alarming it sounds.
+
+- **SE-1 `chmod 0600` on config save** (fact 4). Tiny. Done-when: a test asserts
+  the mode, and an already-existing world-readable file is tightened on save.
+- **SE-2 untrusted-content marking** — every repo file, command output, MCP result
+  and `git log` string carries a source attribute; the system prompt states that
+  only user turns carry instructions. S (~200 lines in `context-rs`). Trap:
+  markers are hygiene, not a wall — models do ignore them. Done-when: markers
+  survive compaction and are covered by tests.
+- **SE-3 the `AGENTS.md` trust split** (fact 3) — a repo-provided `AGENTS.md` is
+  *data* until the user trusts that content hash once, with a persistent trust
+  store. M. Trap: it breaks the exact workflow `AGENTS.md` exists for, so the
+  prompt must be unmissable and the decision durable. **Done-when: an untrusted
+  `AGENTS.md` cannot raise permissions, proven by test.**
+- **SE-4 lethal-trifecta gate in `classify`** — if a turn has read
+  `~/.ssh`/`~/.xencode`/env/secret-named content, a later network-writing command
+  escalates or denies. M. Trap: cross-turn taint tracking is leaky; keep it a
+  coarse session bit. Done-when: a planted exfil scenario is blocked by test.
+- **SE-5 secret *content* scanning** — scan into `run_security_scan` and every
+  `write_file`/`edit_file` approval, redacting transcript copies. M. Trap: false
+  positives on fixtures need an allowlist file; a pure-Rust library option is
+  early-stage (**UNVERIFIED** quality). Done-when: a planted key is caught and
+  `examples/` is ignored.
+- **SE-6 `xencode deps` supply-chain report** — shell to `cargo deny` (+
+  `cargo-shear`), parse JSON, stream findings like the security scan; lockfile
+  diffing on a PR. S-M. Trap: report only — auto-fixing dependencies is how the
+  supply chain becomes the attack. Done-when: it runs on this workspace.
+- **SE-7 Landlock/bubblewrap wrapper for `run_command`** — workspace + `~/.cargo`
+  writable, network off by default, per-command `--net` approval. L. Trap: silent
+  fallback when the kernel lacks Landlock; the test matrix is painful. The
+  `landlock` crate is alive (0.4.x). Done-when: `cat ~/.ssh/id_rsa` fails *inside*
+  an approved command, on this machine.
+
+Context for the ordering: a Jan-2026 SoK catalogued 42 injection techniques and
+found adaptive attacks still exceeding 85% success against *filter-based*
+defenses, with the consensus that architectural mitigations beat detection
+([arXiv 2601.17548](https://arxiv.org/abs/2601.17548),
+[OWASP cheat sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html),
+[CaMeL](https://simonw.substack.com/p/camel-offers-a-promising-new-direction)).
+That is why SE-2/SE-3/SE-4 are ranked above SE-7 despite being less glamorous.
+
+### N-5 — Multimodal and the terminal surface
+
+- **MM-1 image resize/recompress before send** (fact 6): decode, cap ~1568 px,
+  JPEG q80. S-M. Done-when: attached bytes are under ~1 MiB and a token-count
+  before/after is in the commit message. **A fix, not a feature.**
+- **MM-2 screenshot→attach hotkey** via `grim`/`spectacle` into the existing
+  attach path. M (~200 lines). Trap: Wayland-only tooling — degrade with a clear
+  message the way `voice.rs` does. Done-when: one keypress lands a screenshot in
+  the attached block and the provider accepts it.
+- **MM-3 local VLM vision over the existing bridge** — a Qwen2.5-VL-class `mmproj`
+  model on the Colab T4 or a `remote:` host, plus a `describe_image` tool. M.
+  Trap: there is no "is this model vision-capable" gate today, so failures are
+  opaque; add one. Done-when: `xencode query` on a real screenshot answers
+  through `remote:`.
+- **MM-4 inline image preview** via `ratatui-image` (official org; kitty/sixel/
+  iTerm with a half-block fallback). M. Trap: must not break the narrow-terminal
+  render tests. Done-when: renders on a supporting terminal, degrades to a
+  metadata line otherwise.
+- **MM-5 Wayland image paste** (`wl-paste -t image/png`) with text keeping
+  priority. S. Done-when: paste does the obvious thing for both.
+- **MM-6 clipboard copy of code blocks/diffs** — `wl-copy` with an OSC-52
+  fallback that is probed, never assumed. S.
+- **MM-7 syntax highlighting in the markdown renderer** (`two-face` +
+  `tree-sitter-highlight`, or syntect). M. Trap: `render_markdown` returns
+  `Vec<Line>` and must stay streaming-safe.
+- **MM-8 `xencode report`** — one self-contained HTML file from a session or scan,
+  with an embedded SVG chart (`plotters`). M. Trap: stop at HTML; PDF/DOCX is the
+  scope creep that kills it.
+- **MM-9 Mermaid diagram generation** — model emits Mermaid, validate and render
+  to SVG for the report (the `merman` crate renders Mermaid headlessly in Rust;
+  a CLI alternative exists but its URL was not verified this pass); no terminal
+  render. M. Trap: the grammar is large, so invalid output falls back to a code
+  block.
+- **MM-10 OCR for scanned PDFs** — closes `documents.rs:16-18`'s own TODO, via a
+  VLM (MM-3) rather than a Tesseract dependency. S-M after MM-3.
+- **MM-11 browser verification as a documented Playwright-MCP recipe** — the
+  existing stdio MCP client makes this nearly free and adds no Python. S-M,
+  mostly docs. Trap: say plainly that Playwright MCP is a Node subprocess.
+  Done-when: the agent loads a dev server, screenshots, attaches.
+
+### N-6 — Local-first, tailnet, cross-device, and non-code work
+
+`tailscale` is installed and up on this machine, and Tailscale's own guidance to
+bind services to localhost (so identity headers can't be forged) is already
+xencode's loopback-by-default posture. Since the 1.52 redesign, `tailscale serve`
+is not HTTP-only — `--tcp`, `--tls-terminated-tcp`, `--proxy-protocol` and a
+Layer-3 mode are documented, so raw TCP is a supported use case; plain `ssh -L` to
+a `100.x` address also works today. What Serve adds for free is auto-TLS on
+`host.tailnet.ts.net`, MagicDNS, ACLs and identity headers that make an API key
+redundant.
+
+- **LF-1 `xencode tail serve up|status|down`** — publish a model endpoint (or a
+  build log / HTML report) to the tailnet, reusing the colab `preflight`/`state`
+  shape with `tailscale` optional and reporting itself unpowered. M (~500 lines).
+  Trap: Serve config **persists across reboots** (only `serve disable` clears
+  it), a team/family tailnet is not "only me", and tagged devices get no identity
+  headers. Done-when: a phone browser reaches the laptop's `/v1/models` over
+  `ts.net`, and `status` prints the *actual* ACL granting access instead of
+  asserting privacy.
+- **LF-2 approval round-trip to a phone** — self-hosted ntfy + nonce, **timeout =
+  deny**. M. Trap: treating "the user is away" as license to auto-approve is the
+  inverse of the point. Done-when: an unreachable prompt denies after N minutes
+  and the transcript names who was asked. (Claude Code's Remote Control expires
+  dialogs at 5 min to the no-action default — the right prior art.)
+- **LF-3 outbound-only controller window over the tailnet** — a phone as a *window*
+  into a local session, queueing prompts across drops, gate intact. L. Trap: two
+  keyboards, and any third-party relay breaks local-first.
+- **LF-4 `xencode run --detach`** — durable queue, resume-after-crash, and stop
+  conditions on wall-clock and cost as well as rounds. L. Trap: keep status
+  *derived* (exit file + `/proc`, as `tasks.json` already does) rather than
+  stored, or it lies after a crash; lid-close suspend is the silent killer here.
+  Done-when: SIGKILL mid-job then `--resume` continues from the last completed
+  round, and each cap verifiably stops a runaway.
+- **LF-5 `sql` tool + DB panel with read-only enforced in the driver** —
+  `rusqlite` bundled / `sqlx` for Postgres, `SQLITE_OPEN_READ_ONLY`, a role with
+  `default_transaction_read_only=on`, statement timeout, row/byte caps, no
+  multi-statement. S-M. Trap: regex on the SQL string is theater. Done-when: an
+  adversarial prompt cannot mutate a checksummed database.
+- **LF-6 session bundle on git as the multi-machine bus.** S. Trap: concurrent
+  writers — sessions are JSONL, so sync plus a lock is enough; do not design a
+  protocol.
+- **LF-7 weight provenance** — SHA256 + HF revision pin, verify-on-load, and a
+  visible verified/unsigned badge in the model panel. S-M. Trap: hashing after
+  download proves nothing about the *source*; say what it does and does not
+  establish.
+- **LF-8 offline conformance suite** — a CI run with networking off proving every
+  panel degrades honestly instead of rendering zeros for measurements that never
+  happened. S. This is the testable version of "local-first" as a product claim.
+- **LF-9 Google Workspace MCP as opt-in, read-only** (Gmail/Calendar MCP servers
+  exist but are Developer Preview, need a GCP project, and relay through a cloud).
+  S. Trap: it contradicts the local-first story, so it ships labeled as the
+  exception it is. Done-when: it lists mail and events and refuses to send.
+
+### Cross-cutting do-not-build register (consolidated from L, M and N)
+
+Managed GPU clouds (L); embeddings/vector index and Cursor-style remote indexing
+(L, N-3); llama-swap clone (L); speculative decoding (L); terminal computer-use
+clicking loops and hosted computer-use with live display (N-5); cloud PR bots as a
+substitute for the local review loop (L); A2A (L); a plugin marketplace service or
+a new plugin/skill format (M); dynamic native or WASM plugin loading (M); full
+OTLP stack when JSONL is inspectable (M, N-3); completing the CRDT wiring (M, N-6);
+regex prompt-injection *detectors* — sub-50% mitigation per the SoK (N-4); a
+container or microVM sandbox, which kills the local-first premise (N-4);
+`cargo audit` where deny/OSV supersede it (N-4); auto-updating dependencies (N-4);
+an agent that sends email (N-6); Telegram/Discord as a primary control path — an
+inbound-capable agent is RCE for anyone who can message it (N-6); Tailscale Funnel
+for any model or session endpoint — public by definition, three ports, no identity
+headers (N-6); Syncthing integration — Android-side maintainer churn and invisible
+conflict resolution (N-6); a bespoke always-on daemon when systemd user units give
+cgroups, journald and a watchdog free (N-6); a native VS Code/Zed extension since
+M-7 ACP covers both (N-2); Docker-based CI replay (N-2); a `gh` subprocess wrapper
+with its untestable auth surface (N-2); real PDF/DOCX/PPTX generation (N-5);
+TTS voice-out (N-5); user theme files (N-5); an embedded rust-analyzer/LSP host for
+call graphs, where index startup dwarfs the agent loop (N-1); a hand-rolled DAP
+client (N-1); libcst/jscodeshift integration, which violates the Rust-only
+directive (N-1); cargo-mutants in the default loop (N-1); local cross-encoder
+reranking (N-3); multi-agent A/B swarm harnesses (N-3); golden-transcript replay
+that *replaces* real connections (N-3); an autonomous self-modifying system prompt
+(N-3); SWE-bench/Terminal-Bench runner integration (N-3); model attestation and
+SLSA-for-weights, still an IETF draft-00 with nothing to verify against (N-6).
+
+### Triage status
+
+**Not yet ranked.** The ranking pass is deliberately a separate, later decision —
+this appendix records the option space so the cut is visible and revisitable
+rather than implicit. Inputs it will have to weigh: the three defect-shaped items
+(SE-1, MM-1, and the `AGENTS.md` trust position SE-3) versus capability-shaped
+items; EV-1 as the measurement that makes L-7's claim checkable; and the
+KV-prefix constraint in N-0 as a tax on several otherwise cheap features.
+Milestones L and M already carry a ranking; this appendix does not.
+
+### Where to re-check this appendix (primary sources, consulted 2026-09-23)
+
+Repo facts are verifiable by the file:line above. The external claims came from:
+
+- **Code intelligence** — [ast-grep](https://github.com/ast-grep/ast-grep) and
+  [its docs](https://ast-grep.github.io/) ·
+  [tree-sitter Rust migration post](https://ast-grep.github.io/blog/tree-sitter-rust-migration) ·
+  [grammar ABI versioning discussion](https://github.com/tree-sitter/tree-sitter/discussions/1768) ·
+  [`cargo fix`](https://doc.rust-lang.org/cargo/commands/cargo-fix.html) ·
+  [`cargo-shear`](https://github.com/Boshen/cargo-shear) ·
+  [LLDB MCP docs](https://lldb.llvm.org/use/mcp.html) ·
+  [codemods on Martin Fowler](https://martinfowler.com/articles/codemods-api-refactoring.html)
+- **Dev workflow** — [cargo-dist](https://axodotdev.github.io/cargo-dist/) ·
+  [mise devcontainer generation](https://mise.jdx.dev/cli/generate/devcontainer.html) ·
+  [ACP v2 draft](https://agentclientprotocol.com/announcements/acp-v2-draft) ·
+  [State of CLI coding agents mid-2026](https://blog.arcbjorn.com/state-of-cli-coding-agents-2026) ·
+  [GitHub stacked PRs](https://explainx.ai/blog/github-stacked-pull-requests-public-preview-july-2026) ·
+  [claude-code-action](https://github.com/anthropics/claude-code-action)
+- **Eval and context** — [Terminal-Bench](https://www.tbench.ai/) ·
+  [harness scaling, arXiv 2601.11868](https://arxiv.org/abs/2601.11868) ·
+  [LLM-as-judge reliability](https://deepeval.com/blog/llm-as-a-judge) ·
+  [Claude compaction docs](https://platform.claude.com/docs/en/build-with-claude/compaction) ·
+  [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) ·
+  [llama.cpp prompt caching issue 19494](https://github.com/ggml-org/llama.cpp/issues/19494) ·
+  [From Memory to Skills](https://arxiv.org/html/2607.16621v1)
+- **Security** — [injection SoK, arXiv 2601.17548](https://arxiv.org/abs/2601.17548) ·
+  [Unit 42 on in-the-wild agent injection](https://unit42.paloaltonetworks.com/ai-agent-prompt-injection/) ·
+  [OWASP prompt-injection prevention cheat sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html) ·
+  [CaMeL summary](https://simonw.substack.com/p/camel-offers-a-promising-new-direction) ·
+  [gitleaks](https://github.com/gitleaks/gitleaks) ·
+  [cargo audit vs deny vs vet workflow](https://safeguard.sh/resources/blog/cargo-audit-deny-advisories-workflow) ·
+  [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing) ·
+  [bubblewrap layered sandboxing](https://labs.esokia.com/post/sandboxing-claude-code-cli-linux-bubblewrap/)
+- **Multimodal** — [ratatui-image](https://github.com/ratatui/ratatui-image) ·
+  [llama.cpp multimodal / mmproj](https://www.aidoczh.com/llama-cpp/docs/models/multimodal/) ·
+  [PaddleOCR-VL](https://arxiv.org/html/2510.14528v2) ·
+  [chromiumoxide vs the alternatives](https://dev.to/vhub_systems_ed5641f65d59/puppeteer-in-rust-chromiumoxide-and-headlesschrome-vs-the-python-alternative-4ji0) ·
+  [Anthropic computer-use tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool) ·
+  [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) ·
+  [typst on docs.rs](https://docs.rs/typst)
+- **Local-first** — [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) ·
+  [serve CLI reference (`--tcp`, `--tls-terminated-tcp`)](https://tailscale.com/docs/reference/tailscale-cli/serve) ·
+  [Tailscale Funnel limits](https://tailscale.com/docs/features/tailscale-funnel) ·
+  [self-host a local AI stack on a tailnet](https://tailscale.com/blog/self-host-a-local-ai-stack) ·
+  [Claude Code Remote Control](https://code.claude.com/docs/en/remote-control) ·
+  [ntfy.sh](https://ntfy.sh/) ·
+  [Mutagen](https://mutagen.io/documentation/synchronization/) ·
+  [Syncthing-Android maintainer handover](https://news.ycombinator.com/item?id=46184730) ·
+  [Google Workspace MCP servers (Developer Preview)](https://developers.google.com/workspace/guides/configure-mcp-servers) ·
+  [model provenance attestation draft-00](https://datatracker.ietf.org/doc/draft-sharif-ai-model-lifecycle-attestation/00/)
+
+Two notes on trusting this list: several 2026 pages could not be deep-fetched
+during the passes (quota), so any figure the appendix marks **UNVERIFIED** is
+snippet-level and must be re-read before it is relied on. Vendor rate limits
+(L-11, free-tier quotas) drift by design in particular.
+
