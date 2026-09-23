@@ -138,6 +138,7 @@ suspends accounts that use them). The CLI is Linux/macOS only; Windows users
 type a public-tunnel URL (paid tier) into Settings → Remote URL instead.
 
 ```bash
+xencode config set colab_enabled true  # opt in — `up` refuses while the bridge is off
 xencode colab preflight                # is the bridge usable? (exit 0 when green)
 xencode colab preflight --generate-key # also create ~/.xencode/colab_ed25519 if missing
 xencode colab up                       # create the VM, install the runtime, hold the tunnel
@@ -151,12 +152,31 @@ xencode colab down                     # kill the forward, colab stop, clear sta
 `colab sessions`, ssh/ssh-keygen on PATH, and the ed25519 key pair. Every
 failing check prints a runnable fix line.
 
+Prerequisites — the bridge rides two tools Xencode does not ship:
+
+```bash
+# 1. the official Google CLI (>= 0.7.0), however you install it, on PATH
+colab --version
+# 2. Google application-default credentials, with all four scopes the two
+#    backends need — userinfo.email for the session backend and colaboratory
+#    for the keep-alive RPC, or calls fail with 401/403 that look like a
+#    permissions bug. gcloud refuses a list missing cloud-platform.
+gcloud auth application-default login \
+  --scopes=openid,https://www.googleapis.com/auth/cloud-platform,\
+https://www.googleapis.com/auth/userinfo.email,\
+https://www.googleapis.com/auth/colaboratory
+```
+
+`xencode colab preflight` is the source of truth for what is missing; run it
+before blaming the tunnel.
+
 `up` is the happy-path bring-up: `colab new --gpu <gpu> -s <name>` when the
 session is absent, pushes an ssh bootstrap that installs the runtime bound to
-`127.0.0.1` only *inside* the VM, holds an `ssh -N -L` forward, waits until
-`/v1/models` answers, and writes `~/.xencode/colab.json` — then points the
-provider URLs at the forward (`llama_cpp_url`/`ollama_url` for the runtime,
-`remote_base_url` for the OpenAI-compatible remote). Flags override config;
+`127.0.0.1` only *inside* the VM, holds an `ssh -N -l root -L` forward, waits
+until `/v1/models` answers, and writes `~/.xencode/colab.json` — then points
+the provider URLs at the forward (`llama_cpp_url`/`ollama_url` for the runtime,
+`remote_base_url` for the OpenAI-compatible remote). The ssh user is `root`
+because Colab injects the bridge key for root only. Flags override config;
 `config colab_*` keys fill the rest:
 
 ```bash
@@ -165,23 +185,41 @@ xencode colab up --reconnect          # rebuild a broken bridge from colab.json 
 xencode colab up --runtime ollama     # tag flow into the model picker; respins the VM
 xencode colab up --gpu L4 --model Qwen/Qwen2.5-7B-Instruct-GGUF
 xencode colab up --local-port 18001   # laptop side of the forward
-xencode colab up --remote-port 8080   # VM-side port (0 = runtime-native)
+xencode colab up --remote-port 18080  # VM-side port (0 = runtime-native)
 xencode colab up --weights hf         # llama.cpp weights from Hugging Face
+xencode colab up --quant Q6_K         # which GGUF quant to serve (default Q4_K_M)
 ```
+
+`up` refuses unless the bridge is switched on (`xencode config set
+colab_enabled true`), and defaults the session name to `xencode-vm` and the
+model to `Qwen/Qwen2.5-7B-Instruct-GGUF` when neither a flag nor config supplies
+one.
+
+`up` is patient by design: Colab gives a runtime exactly one SSH bridge and the
+slot of a bridge that just died takes a while to free, so both the bootstrap and
+the forward retry through that window (`Already-active SSH session` /
+`banner exchange` errors, up to 8 attempts 20 s apart). `READY` from the VM
+means the server actually serves — after the download it polls `/v1/models`
+inside the VM before reporting, so a model that needs ~40 s to load on a T4
+cannot look up-and-fail. The bootstrap budget is 40 minutes.
 
 `up --reconnect` is the one-key repair path driven by `colab.json`: if the
 forward's endpoint already answers `/v1/models` it returns immediately (no
-colab or ssh calls at all); otherwise it re-creates the session if the VM was
-reaped server-side (never when the session still exists), re-runs the
+colab or ssh calls at all — a dead forward pid is re-spawned and re-probed
+before anything is re-fetched); otherwise it re-creates the session if the VM
+was reaped server-side (never when the session still exists), re-runs the
 bootstrap, and re-spawns the forward, then re-probes and rewrites state.
 Without a `colab.json` it errors with a pointer to a full `xencode colab up`.
 
-`runtime` chooses what is installed on the VM: `llama.cpp` (pinned
-`llama-cpp-python[server]` + a GGUF pulled from Hugging Face, one-shot
-heavier install) or `ollama` (`ollama serve` + the pull — its tags then flow
-into the model picker for free via the existing provider list). `weights` is
-`hf` for llama.cpp; `drive`/`gcs` are refused with a fix message. Session
-names are validated before they touch a shell (`[A-Za-z0-9_-]`, 1–64 chars).
+`runtime` chooses what is installed on the VM: `llama.cpp` (pinned prebuilt
+llama.cpp release — CUDA build when `nvidia-smi` answers, the plain x64 build
+otherwise — serving one GGUF fetched from Hugging Face) or `ollama`
+(`ollama serve` + the pull — its tags then flow into the model picker for free
+via the existing provider list). llama.cpp listens on `127.0.0.1:18080` by
+default because Colab's own runtime proxy permanently holds `8080` on the VM.
+`weights` is `hf` for llama.cpp; `drive`/`gcs` are refused with a fix message.
+Session names are validated before they touch a shell (`[A-Za-z0-9_-]`,
+1–64 chars).
 
 `status` never fails hard — it reports three cells (forward pid alive,
 session listed by `colab sessions`, and a `/v1/models` probe on the forward)
@@ -190,6 +228,22 @@ hours and the endpoint is down it flags a likely Colab reaper and prints the
 one-key fix (`xencode colab up --reconnect`). `down` is idempotent: kills the
 recorded forward pid, runs `colab stop -s <name>`, and clears state; with no
 `colab.json` it reports `nothing to tear down`.
+
+Once `up` is green the tunnel is an ordinary provider — there is no Colab-specific
+client path. `up` writes `llama_cpp_url` (or `ollama_url` for that runtime) and
+`remote_base_url = <forward>/v1`, so the `remote:` prefix, the TUI model picker
+and the Remote row in Provider Health (Ctrl+F) all speak through the same
+forward:
+
+```bash
+xencode query -m 'remote:/root/xencode-llama/model.gguf' "Capital of France?"
+curl -s http://127.0.0.1:18000/v1/models     # what the VM actually serves
+```
+
+llama.cpp reports the GGUF path it was started with as its model id, so on the
+`llama.cpp` runtime that id is `$HOME/xencode-llama/model.gguf` inside the VM —
+`/root/...` because Colab injects the bridge key for root. Read it from
+`/v1/models` rather than assuming it.
 
 ### `xencode config <action>`
 Configuration management. Config lives in `~/.xencode/config.json`;
@@ -210,6 +264,14 @@ xencode config reset
 | `default_model` | string | e.g. `qwen3:4b` |
 | `ollama_url`, `llama_cpp_url` | string | provider endpoints |
 | `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it |
+| `colab_enabled` | bool | Gates the whole Colab bridge; `false` → `xencode colab *` refuses |
+| `colab_session` | string | Session name for `xencode colab up`; empty = create one |
+| `colab_runtime` | string | `llama.cpp` or `ollama` — what gets installed on the VM |
+| `colab_model` | string | HF GGUF repo (llama.cpp) or ollama tag |
+| `colab_quant` | string | GGUF quant to serve; empty = `Q4_K_M` |
+| `colab_weights_source` | string | `hf` (llama.cpp); `drive`/`gcs` accepted but refused at bring-up |
+| `colab_local_port`, `colab_remote_port` | number | Laptop side of the forward / VM-side port (`0` = runtime-native: llama.cpp `18080`, ollama `11434`) |
+| `colab_auto_connect` | bool | Persisted but not acted on yet — nothing reconnects without an explicit `xencode colab up` |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_args` | string | split on whitespace |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
