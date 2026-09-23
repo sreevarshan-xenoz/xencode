@@ -25,8 +25,8 @@ use xencode_config_rs::XencodeConfig;
 use crate::bootstrap::bootstrap_script;
 use crate::orchestrate::{
     colab_new_argv, colab_sessions_argv, colab_stop_argv, effective_remote_port, exec_ssh_argv,
-    now_rfc3339, parse_sessions, probe_models, spawn_forward, terminate, validate_session_name,
-    Binaries,
+    forward_url, now_rfc3339, parse_sessions, probe_models, spawn_forward, started_age_hours,
+    terminate, validate_session_name, Binaries,
 };
 use crate::state::{load_state, remove_state, save_state, ColabState};
 
@@ -38,6 +38,9 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(1200);
 /// `/v1/models` probes after the forward is up. The server may still be
 /// finishing a cold model load; keep trying briefly.
 const PROBE_ATTEMPTS: u32 = 40;
+/// Colab reaps idle free-tier VMs; a bridge this old is likely pointing at a
+/// dead VM even when a stale pid survives.
+const VM_MAX_AGE_HOURS: f64 = 12.0;
 
 /// Everything `up` needs, resolved by the CLI from flags + config.
 #[derive(Debug, Clone)]
@@ -109,6 +112,75 @@ pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Resu
         url: Some(url.clone()),
     };
     save_state(&state).map_err(|e| format!("colab up: {e}"))?;
+
+    Ok(url)
+}
+
+/// One-key reconnect: repair a bridge whose forward died or whose VM got
+/// reaped without re-asking for flags — the recorded `colab.json` decides.
+///
+/// 1. If a session is still listed server-side, reuse it (no `colab new`).
+/// 2. If the endpoint on the recorded port already answers, we are done
+///    (only the pid had died — a fast no-op reconnect).
+/// 3. Otherwise re-run the bootstrap on the live VM and re-spawn the forward.
+pub async fn run_colab_reconnect(
+    bins: &Binaries,
+    key: &Path,
+    opts: &UpOptions,
+) -> Result<String, String> {
+    let state = load_state()?.ok_or_else(|| {
+        "colab reconnect: no colab.json — run `xencode colab up` first".to_string()
+    })?;
+    let session = opts.session.clone();
+    validate_session_name(&session).map_err(|e| format!("colab reconnect: {e}"))?;
+    if opts.model.is_empty() {
+        return Err("colab reconnect: --model is required (what should the VM serve?)".to_string());
+    }
+    let remote_port = effective_remote_port(&opts.runtime, opts.remote_port);
+    let local_port = opts.local_port;
+
+    // The forward process may be gone while the VM still serves — nothing to
+    // rebuild, just note the stale pid and move on.
+    let endpoint_already = probe_models(local_port, 1, None).await.is_ok();
+    if endpoint_already {
+        let url = state.url.clone().unwrap_or_else(|| forward_url(local_port));
+        return Ok(url);
+    }
+
+    // Session gone server-side (or `colab sessions` refusing to name it):
+    // the VM was reaped. Recreate it like `up` would, then keep going.
+    ensure_session(bins, &session, opts.gpu.as_str()).await?;
+
+    let script = bootstrap_script(
+        &opts.runtime,
+        &opts.model,
+        &opts.weights_source,
+        remote_port,
+    )?;
+    run_bootstrap(bins, key, &session, &script).await?;
+
+    let (url, child) = spawn_forward(bins, &session, key, local_port, remote_port).await?;
+    let forward_pid = child.id().expect("a just-spawned forward always has a pid");
+
+    probe_models(local_port, PROBE_ATTEMPTS, None)
+        .await
+        .map_err(|e| {
+            terminate(forward_pid);
+            format!("colab reconnect: forward came up but the endpoint did not answer: {e}")
+        })?;
+
+    let new_state = ColabState {
+        session: Some(session),
+        forward_pid: Some(forward_pid),
+        keepalive_pid: None,
+        local_port: Some(local_port),
+        remote_port: Some(remote_port),
+        runtime: Some(opts.runtime.clone()),
+        model: Some(opts.model.clone()),
+        started_at: Some(now_rfc3339()),
+        url: Some(url.clone()),
+    };
+    save_state(&new_state).map_err(|e| format!("colab reconnect: {e}"))?;
 
     Ok(url)
 }
@@ -204,6 +276,14 @@ pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusRep
     }
     if let Some(ts) = &state.started_at {
         lines.push(format!("started: {ts}"));
+    }
+    if let Some(age) = state.started_at.as_deref().and_then(started_age_hours) {
+        if age > VM_MAX_AGE_HOURS && !endpoint_ok {
+            lines.push(format!(
+                "vm: reaped (started {age:.0}h ago — Colab drops idle VMs after \
+                 ~12h). Run `xencode colab up --reconnect` for a fresh VM."
+            ));
+        }
     }
 
     StatusReport {
@@ -405,6 +485,7 @@ fn first_line(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrate::pid_alive;
     use crate::testutil::{temp_dir, with_env, write_script};
 
     /// A fake `colab` that answers `sessions`, records `new`/`stop` calls, and
@@ -472,9 +553,34 @@ esac
     /// `probe_models` needs to see. Serves a handful of connections then stops.
     async fn serve_v1_models(port: u16) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        let listener = bind_v1_models(port).await;
+        for _ in 0..5 {
+            let (mut sock, _) = match listener.accept().await {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let mut buf = [0u8; 256];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock
+                .write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+            let _ = sock.shutdown().await;
+        }
+    }
+
+    /// Bind the probe responder on `port` and return the listener: the binding
+    /// is resolved before the caller proceeds, so a fast-path probe (single
+    /// attempt) never races a lazy `tokio::spawn` inside the responder.
+    async fn bind_v1_models(port: u16) -> tokio::net::TcpListener {
+        tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
-            .expect("bind probe port");
+            .expect("bind probe port")
+    }
+
+    /// Serve the probe responder on an already-bound listener (owning the
+    /// accept loop so the caller can hand the listener to a spawned task).
+    async fn serve_bound(listener: tokio::net::TcpListener) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         for _ in 0..5 {
             let (mut sock, _) = match listener.accept().await {
                 Ok(s) => s,
@@ -663,6 +769,125 @@ esac
         );
 
         kill_forward(&state).await;
+        srv.abort();
+    }
+
+    #[tokio::test]
+    async fn reconnect_noops_when_the_endpoint_is_already_serving() {
+        let session = "life7";
+        let bin_dir = temp_dir(&format!("rc-{session}"));
+        let xcode_dir = temp_dir(&format!("rc-cfg-{session}"));
+        fake_colab(&bin_dir);
+        fake_ssh(&bin_dir);
+        let _g = with_env(&bin_dir, &xcode_dir);
+        std::env::set_var("MARKER", marker(session));
+        std::env::set_var("SESSION_NAME", session);
+        let key = xcode_dir.join("colab_ed25519");
+        std::fs::write(&key, "key").expect("write key");
+
+        // A state whose forward pid is dead but whose endpoint already serves.
+        let state = ColabState {
+            session: Some(session.to_string()),
+            forward_pid: Some(3), // unlikely to be alive
+            keepalive_pid: None,
+            local_port: Some(18040),
+            remote_port: Some(8080),
+            runtime: Some("llama.cpp".to_string()),
+            model: Some("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string()),
+            started_at: Some("2099-01-02T03:04:05Z".to_string()),
+            url: Some("http://127.0.0.1:18040/v1".to_string()),
+        };
+        save_state(&state).expect("seed state");
+
+        // Bind synchronously (await) so the fast-path single probe has a live
+        // listener by the time reconnect runs — no bind/accept race.
+        let listener = bind_v1_models(18040).await;
+        let srv = tokio::spawn(serve_bound(listener));
+        let opts = opts_for(session, "llama.cpp", 18040);
+        let url = run_colab_reconnect(&bins_in(&bin_dir), &key, &opts)
+            .await
+            .expect("reconnect no-ops on a live endpoint");
+        assert_eq!(url, "http://127.0.0.1:18040/v1");
+
+        // The fast path must not touch colab/session/bootstrap at all.
+        let mdir = marker(session);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let calls = std::fs::read_to_string(format!("{mdir}/calls")).unwrap_or_default();
+        assert!(
+            calls.is_empty(),
+            "no colab calls on no-op reconnect: {calls}"
+        );
+        assert!(
+            !std::path::Path::new(&format!("{mdir}/ssh-calls")).exists(),
+            "no ssh forward re-spawn on no-op reconnect"
+        );
+
+        srv.abort();
+    }
+
+    #[tokio::test]
+    async fn reconnect_recovers_the_forward_when_only_the_pid_died() {
+        let session = "life8";
+        let bin_dir = temp_dir(&format!("rc-{session}"));
+        let xcode_dir = temp_dir(&format!("rc-cfg-{session}"));
+        fake_colab(&bin_dir);
+        fake_ssh(&bin_dir);
+        let _g = with_env(&bin_dir, &xcode_dir);
+        std::env::set_var("MARKER", marker(session));
+        std::env::set_var("SESSION_NAME", session);
+        let key = xcode_dir.join("colab_ed25519");
+        std::fs::write(&key, "key").expect("write key");
+
+        // Session survives server-side, so reconnect must not `colab new`.
+        std::fs::create_dir_all(marker(session)).expect("marker dir");
+        std::fs::write(format!("{}/session-online", marker(session)), "yes").expect("online");
+
+        // Stale state with a dead forward pid and no live endpoint.
+        let state = ColabState {
+            session: Some(session.to_string()),
+            forward_pid: Some(3),
+            keepalive_pid: None,
+            local_port: Some(18050),
+            remote_port: Some(8080),
+            runtime: Some("llama.cpp".to_string()),
+            model: Some("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string()),
+            started_at: Some("2099-01-02T03:04:05Z".to_string()),
+            url: Some("http://127.0.0.1:18050/v1".to_string()),
+        };
+        save_state(&state).expect("seed state");
+
+        // The endpoint comes up only *after* the dead forward would have been
+        // rebuilt — so the initial single-attempt probe fails (reconnect must
+        // not take the fast path), then the retry probe succeeds.
+        let srv = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            serve_v1_models(18050).await;
+        });
+        let opts = opts_for(session, "llama.cpp", 18050);
+        let url = run_colab_reconnect(&bins_in(&bin_dir), &key, &opts)
+            .await
+            .expect("reconnect re-spawns the forward");
+        assert_eq!(url, "http://127.0.0.1:18050/v1");
+
+        let calls = std::fs::read_to_string(format!("{}/calls", marker(session))).expect("calls");
+        assert!(
+            !calls.contains("new "),
+            "no colab new when session survives: {calls}"
+        );
+        assert!(
+            wait_for_ssh(&format!("{}/ssh-calls", marker(session))).await,
+            "forward re-spawned"
+        );
+
+        let new_state = ColabState::load().expect("state").expect("exists");
+        assert!(
+            new_state.forward_pid.is_some_and(|pid| pid != 3),
+            "forward pid refreshed, got {:?}",
+            new_state.forward_pid
+        );
+        assert!(new_state.forward_pid.is_some_and(pid_alive));
+
+        kill_forward(&new_state).await;
         srv.abort();
     }
 

@@ -371,6 +371,64 @@ pub fn now_rfc3339() -> String {
     )
 }
 
+/// Age in hours of a `started_at` stamp (`YYYY-MM-DDTHH:MM:SS({+,-}HH:MM|Z)`)
+/// relative to the wall clock, or `None` when the stamp is unparseable.
+/// Colab reaps idle VMs (free tier keeps sessions ~12h), so `status` uses this
+/// to tell "VM reaped" apart from a transient blip.
+pub fn started_age_hours(started_at: &str) -> Option<f64> {
+    let b = started_at.as_bytes();
+    if b.len() < 20 {
+        return None;
+    }
+    let year: i64 = started_at.get(0..4)?.parse().ok()?;
+    let mon: i64 = started_at.get(5..7)?.parse().ok()?;
+    let day: i64 = started_at.get(8..10)?.parse().ok()?;
+    let hour: i64 = started_at.get(11..13)?.parse().ok()?;
+    let min: i64 = started_at.get(14..16)?.parse().ok()?;
+    let sec: i64 = started_at.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&mon) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 61 {
+        return None;
+    }
+
+    // Offset seconds past `+HH:MM`/`-HH:MM`; `Z`/`z` (or a bare timestamp
+    // without one) is UTC.
+    let offset = match b.get(19) {
+        Some(b'Z') | Some(b'z') => 0,
+        Some(b'+') | Some(b'-') => {
+            if b.len() < 25 {
+                return None;
+            }
+            let oh: i64 = started_at.get(20..22)?.parse().ok()?;
+            let om: i64 = started_at.get(23..25)?.parse().ok()?;
+            if oh > 14 || om > 59 {
+                return None;
+            }
+            if b[19] == b'-' {
+                -(oh * 3600 + om * 60)
+            } else {
+                oh * 3600 + om * 60
+            }
+        }
+        _ => 0,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // Days-from-civil (Howard Hinnant's algorithm): epoch day for the date's
+    // UTC instant, then combine with clock and offset.
+    let y = year - if mon <= 2 { 1 } else { 0 };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (if mon > 2 { mon - 3 } else { mon + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let epoch_day = era * 146097 + doe - 719468;
+    let stamp = epoch_day * 86400 + hour * 3600 + min * 60 + sec - offset;
+    Some((now - stamp) as f64 / 3600.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,5 +648,39 @@ mod tests {
         assert_eq!(bytes[4], b'-', "dash after year: {ts}");
         assert_eq!(bytes[7], b'-', "dash after month: {ts}");
         assert_eq!(bytes[10], b'T', "T separator: {ts}");
+
+        // Round-trip: `now_rfc3339` must parse back to ~0h of age.
+        let age = started_age_hours(&ts).expect("our own stamp parses");
+        assert!(
+            (0.0..=2.0).contains(&age),
+            "recent stamp ages as nearly zero, got {age}h"
+        );
+    }
+
+    #[test]
+    fn started_age_hours_pins_offsets_and_parses() {
+        // A stamp for 2026-09-23T06:00:00+00:00. When the local offset is
+        // +1000-ish it is ~16h back; the point is the parse is reproducible
+        // against a fixed UTC instant, so check the offset math directly:
+        // UTC-noon is stored as -0500 afternoon on the same day.
+        let utc_noon = "2026-09-23T12:00:00Z";
+        let neg = "2026-09-23T07:00:00-05:00";
+        let plus = "2026-09-23T17:00:00+05:00";
+        let a = started_age_hours(utc_noon).expect("Z parses");
+        let b = started_age_hours(neg).expect("-05:00 parses");
+        let c = started_age_hours(plus).expect("+05:00 parses");
+        // All three denote the same instant, so ages agree to ~1e-6 h.
+        for (lbl, v) in [("Z", a), ("-05:00", b), ("+05:00", c)] {
+            assert!(
+                (v - a).abs() < 1e-6,
+                "same instant in {lbl} ages like Z: got {v}, Z {a}"
+            );
+        }
+
+        let junk = started_age_hours("not a date");
+        assert!(junk.is_none(), "garbage -> None");
+
+        let future = started_age_hours("2099-01-02T03:04:05Z").expect("future parses");
+        assert!(future < 0.0, "future stamp ages negative: {future}");
     }
 }
