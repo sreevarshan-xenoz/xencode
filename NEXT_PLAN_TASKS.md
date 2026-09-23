@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 828 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 831 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2819,7 +2819,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 828-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 831-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -4691,8 +4691,20 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   in the shipped tree reads `audit.jsonl` back yet** — the sink only appends —
   so the first reader of it (the `xencode doctor` work in `DB-6`, and `CX-1`'s
   aggregator later) takes this helper rather than opening the file itself.
-- [ ] `DB-7`, `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QO-2`,
-  `QTR-2`, `AM-3`
+- [x] `DB-7` — 2026-09-23. `install_panic_hook` in `xencode-tui-rs/src/panic.rs`
+  is installed at the top of `run_tui()`, before raw mode is switched on: on a
+  panic it writes the message, the source location and a `RUST_BACKTRACE`-honouring
+  backtrace to `~/.xencode/last_panic.log` through `DB-1`'s helper (so the record
+  is `0600` and cannot be torn), restores raw mode, mouse capture, the alternate
+  screen and the cursor, and then runs the default hook so the message is
+  legible. **`color_eyre` was not added:** the plan named it, but what it was for
+  — a backtrace when `RUST_BACKTRACE` is set, and a readable failure report — is
+  what `std::backtrace::Backtrace::capture` plus the CLI's existing `error: …`
+  print already give, without six new crates in a binary whose selling point is
+  being one file. Reopen the item to overrule that. Verified: the hook and a real
+  panic are covered by test; `xencode tui` under a pty starts, renders and writes
+  no crash file on a clean run, and its conversation memory landed `0600`.
+- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QO-2`, `QTR-2`, `AM-3`
 
 #### W1 — Make the agent observable — 15 items
 

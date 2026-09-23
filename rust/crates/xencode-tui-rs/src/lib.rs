@@ -7,6 +7,7 @@ pub mod keymap;
 pub mod layout;
 pub mod markdown;
 pub mod mcp;
+pub mod panic;
 pub mod review;
 pub mod theme;
 pub mod toast;

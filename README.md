@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 828 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 831 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -417,7 +417,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (828 passing, 4 ignored)
+cargo test                          # Full workspace suite (831 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -507,6 +507,16 @@ ollama pull qwen3:4b               # small, fast starter model
 ```bash
 rustup update
 cd rust && cargo build -p xencode-cli 2>&1
+```
+
+### The interface crashed
+If the TUI panics, your terminal comes back normal — readable and scrollable,
+mouse and cursor as your shell expects — and the crash is written to
+`~/.xencode/last_panic.log` (owner-only) with the message, the source location,
+and a backtrace when you ask for one:
+
+```bash
+RUST_BACKTRACE=1 xencode tui
 ```
 
 ---
