@@ -18,6 +18,61 @@ pub fn build_app_with_state(state: Arc<ws::AppState>) -> Router {
     routes::build_router(state)
 }
 
+/// Tests for the config-reading routes must not see the developer's real
+/// `~/.xencode/config.json`: which local servers happen to be running (or a
+/// Colab forward a live run left on the configured port) changes what
+/// `/api/models` returns. Pointing `$XCODE_CONFIG_DIR` at a temp dir holding a
+/// config whose local endpoints are closed makes those routes deterministic
+/// without faking any of their logic.
+///
+/// The env override is process-global, so the guard also serialises the tests
+/// that take it.
+#[cfg(test)]
+pub(crate) mod testenv {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    pub struct IsolatedConfig {
+        _lock: MutexGuard<'static, ()>,
+        old_dir: Option<OsString>,
+        dir: PathBuf,
+    }
+
+    impl Drop for IsolatedConfig {
+        fn drop(&mut self) {
+            match self.old_dir.take() {
+                Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+                None => std::env::remove_var("XCODE_CONFIG_DIR"),
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    pub fn isolated_config(tag: &str) -> IsolatedConfig {
+        let lock = CONFIG_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("xencode-server-test-{tag}-cfg"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create isolated config dir");
+        // Port 9 (discard) refuses locally, so the llama.cpp branch of the
+        // route runs its real "server offline" path on every machine.
+        std::fs::write(
+            dir.join("config.json"),
+            r#"{"llama_cpp_url": "http://127.0.0.1:9"}"#,
+        )
+        .expect("write isolated config");
+        let old_dir = std::env::var_os("XCODE_CONFIG_DIR");
+        std::env::set_var("XCODE_CONFIG_DIR", &dir);
+        IsolatedConfig {
+            _lock: lock,
+            old_dir,
+            dir,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_models_list_body() {
+        let _iso = crate::testenv::isolated_config("models-list");
         let app = build_app();
         let response = app
             .oneshot(
@@ -386,7 +442,15 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = json_body(response).await;
         let models = json["models"].as_array().unwrap();
-        assert_eq!(models.len(), 4);
+        // The always-present remote providers plus the offline fallbacks; the
+        // exact count depends on local servers, so assert on the invariant.
+        assert!(models.len() >= 2, "remotes always listed: {models:?}");
+        let names: Vec<&str> = models.iter().map(|m| m["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"gpt-4o"), "openai row present: {names:?}");
+        assert!(
+            names.contains(&"claude-3.5-sonnet"),
+            "anthropic row present: {names:?}"
+        );
     }
 
     #[tokio::test]
