@@ -378,3 +378,38 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         _ => FocusArea::ChatInput,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A settings row that renders its value must never render the secret:
+    /// only a fixed-width bullet run plus a four-char tail, enough to tell two
+    /// keys apart and nothing enough to read one.
+    #[test]
+    fn masked_secrets_keep_only_a_four_char_tail() {
+        assert_eq!(mask_secret("sk-colab-abcdef123456"), "••••••••••••3456");
+        let masked = mask_secret("sk-super-secret-value");
+        assert!(masked.ends_with("lue"), "keeps the tail: {masked}");
+        assert!(
+            !masked.contains("super") && !masked.contains("secret"),
+            "never leaks the middle: {masked}"
+        );
+        // Bullets stand in for the hidden prefix at a bounded width, so a long
+        // key cannot push the row off the panel.
+        assert!(mask_secret(&"a".repeat(200)).chars().count() <= 16);
+    }
+
+    #[test]
+    fn short_and_empty_secrets_mask_to_a_fixed_placeholder() {
+        assert_eq!(mask_secret(""), "••••");
+        assert_eq!(mask_secret("abc"), "••••");
+        // A value short enough to be fully revealed by the tail gets the bare
+        // placeholder instead: the four-char tail is the whole key.
+        assert_eq!(mask_secret("abcd"), "••••");
+        assert_eq!(mask_secret("abcde"), "••••");
+        assert_eq!(mask_secret("sk-12345"), "••••");
+        // One char over the boundary is the first value that leaks a tail.
+        assert_eq!(mask_secret("123456789"), "•••••6789");
+    }
+}
