@@ -139,12 +139,36 @@
   group their alternation wrong, so a line containing the bare word `input` — or
   `url` — reports High severity path-traversal/SSRF. Appendix:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone Q.
+- 🤖 **Milestone S recorded** (2026-09-23): the third external proposal list, and the
+  first one that could be **measured rather than reasoned about**. Thirty-eight items
+  describing an `/orchestrator` mode that runs Codex, Claude Code, Gemini CLI, OpenCode
+  and Agy as workers under one plan, one permission broker, one shared memory and one
+  merge decision — "Xencode becomes the orchestration layer above coding agents." All
+  five are installed on this machine, so the appendix records what their own `--help`
+  says, not what the proposal assumed. Three findings: the vendors have already
+  converged on one headless contract, so the adapter layer is a normaliser and three of
+  its proposed methods exist in none of them; roughly a third of the list is **already
+  shipped by the vendors being orchestrated** (their own daemons, session stores,
+  subagent definitions, review commands, health checks, and — in Claude Code's case — an
+  importer for another agent's config); and the permission broker has exactly one real
+  seam today, which is the same surface **M-5** exposes, so that item moves earlier in
+  the wave order. The proposal also reverses one standing rejection on good grounds: the
+  agent task graph was parked because one local inference process saturates this laptop,
+  and cloud workers do not have that problem — what replaces it is one machine verifying
+  everyone's output, which is written down as the new ceiling instead of glossed over.
+  13 of the 38 were already in the plan, 13 survive narrowed, 10 are new, 2 are rejected,
+  and **22 new IDs (AR-1…AR-8, OR-1…OR-14)** join the waves — starting with a measurement
+  (run each installed agent headless and write down what actually arrives) that gates
+  everything after it. Nothing in the appendix is built or scheduled to be built: it is
+  recorded, placed in the wave order, and left gated on that first measurement.
+  Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone S.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
-  fifteen dependency waves, **W0…W14**, over all **258 recorded plan items** — the
-  208 research candidates, the 31 further Q IDs that fold into them, and the 19
-  committed L/M tasks — with every ID placed exactly once (verified by script) and
+  fifteen dependency waves at the time — **eighteen now, W0…W17**, after Milestone S
+  below — over **280 recorded plan items** (258 then, 22 added by S): the
+  208 research candidates, the 31 further Q IDs that fold into them, the 19
+  committed L/M tasks, and S's 22 — with every ID placed exactly once (verified by script) and
   **no renumbering**, so each item keeps the appendix that produced it as its
   provenance. The sequence: correctness → observability → model substrate → code
   intelligence → retrieval → verification → evidence → trust → outward research →
