@@ -523,6 +523,7 @@ mod tests {
         assert_eq!(config.colab.runtime, "llama.cpp");
         assert_eq!(config.colab.weights_source, "hf");
         assert_eq!(config.colab.model, "");
+        assert!(config.colab.quant.is_empty(), "empty = bridge default");
         assert!(!config.colab.auto_connect);
     }
 
@@ -544,6 +545,7 @@ mod tests {
         loaded.colab.runtime = "ollama".to_string();
         loaded.colab.model = "qwen3:8b".to_string();
         loaded.colab.weights_source = "gcs".to_string();
+        loaded.colab.quant = "Q6_K".to_string();
         loaded.colab.auto_connect = true;
         loaded.save_to(&path).unwrap();
 
@@ -551,6 +553,7 @@ mod tests {
         assert_eq!(again.colab, loaded.colab);
         assert_eq!(again.colab.session, "xencode-t4a");
         assert_eq!(again.colab.runtime, "ollama");
+        assert_eq!(again.colab.quant, "Q6_K");
         assert!(again.colab.auto_connect);
         fs::remove_dir_all(&dir).unwrap();
     }

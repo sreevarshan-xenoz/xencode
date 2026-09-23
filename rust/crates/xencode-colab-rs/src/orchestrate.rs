@@ -158,6 +158,12 @@ pub async fn spawn_forward(
         .args(&argv[1..])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
+        // The forward outlives this function, so it must hold no handle the
+        // caller owns: an inherited stderr keeps a `xencode colab up | grep`
+        // pipeline open until the tunnel dies (seen live), and leaks ssh's
+        // host-key warning into the user's terminal. Bridge refusals are
+        // already reported through the exit status in `spawn_forward_ready`.
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("could not spawn ssh forward: {e}"))?;
     Ok((forward_url(local_port), child))
