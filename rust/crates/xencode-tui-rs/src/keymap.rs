@@ -406,6 +406,7 @@ fn on_esc(app: &mut App) {
     match app.focus {
         FocusArea::Settings => {
             if app.settings_url_editing {
+                forget_secret(app);
                 app.settings_url_editing = false;
             } else {
                 app.settings_reset_active = false;
@@ -579,13 +580,27 @@ fn settings_current(app: &App) -> &'static crate::focus::SettingRow {
     &items[app.settings_cursor.min(items.len() - 1)]
 }
 
-/// Rows whose value is typed into the buffer (Text/Number kinds). Only
+/// Rows whose value is typed into the buffer (Text/Number/Secret kinds). Only
 /// these claim ←/→ for cursor movement while editing.
 fn settings_row_typable(app: &App) -> bool {
     matches!(
         settings_current(app).kind,
-        crate::focus::SettingKind::Text | crate::focus::SettingKind::Number
+        crate::focus::SettingKind::Text
+            | crate::focus::SettingKind::Number
+            | crate::focus::SettingKind::Secret
     )
+}
+
+/// A finished Secret edit must not leave the plaintext key sitting in the
+/// editor buffer once the row no longer owns it.
+fn forget_secret(app: &mut App) {
+    if matches!(
+        settings_current(app).kind,
+        crate::focus::SettingKind::Secret
+    ) {
+        app.settings_url_buffer.clear();
+        app.settings_url_cursor = 0;
+    }
 }
 
 fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
@@ -607,12 +622,14 @@ fn key_settings(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
                 // belongs to one row's field, and silently retargeting it
                 // to whatever row the cursor landed on would commit it to
                 // the wrong config value.
+                forget_secret(app);
                 app.settings_url_editing = false;
                 if app.settings_cursor > 0 {
                     app.settings_cursor -= 1;
                 }
             }
             KeyCode::Down => {
+                forget_secret(app);
                 app.settings_url_editing = false;
                 if app.settings_cursor + 1 < row_count {
                     app.settings_cursor += 1;
@@ -657,40 +674,64 @@ fn settings_enter(app: &mut App, tx: &Tx) {
     if app.settings_url_editing {
         // Commit the edit for the row that owns the buffer.
         let buf = app.settings_url_buffer.clone();
-        match row_label {
-            "Ollama URL" => app.config.ollama_url = buf,
-            "Llama.cpp URL" => app.config.llama_cpp_url = buf,
-            "Llama.cpp Model" => app.config.llama_cpp_model_path = buf,
-            "Llama Temp" => {
-                app.config.llama_cpp_temperature =
-                    buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+        if matches!(settings_current(app).kind, SettingKind::Secret) {
+            // An emptied key field means "remove the key", not "store nothing".
+            crate::app::set_secret_value(
+                &mut app.config,
+                row_label,
+                (!buf.trim().is_empty()).then(|| buf.trim().to_string()),
+            );
+        } else {
+            match row_label {
+                "Ollama URL" => app.config.ollama_url = buf,
+                "Llama.cpp URL" => app.config.llama_cpp_url = buf,
+                "Llama.cpp Model" => app.config.llama_cpp_model_path = buf,
+                "Remote URL" => app.config.remote_base_url = buf.trim().to_string(),
+                "Llama Temp" => {
+                    app.config.llama_cpp_temperature =
+                        buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+                }
+                "Llama Top-K" => {
+                    app.config.llama_cpp_top_k = buf.trim().parse().ok();
+                }
+                "Llama Min-P" => {
+                    app.config.llama_cpp_min_p =
+                        buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+                }
+                "Llama Max Tokens" => {
+                    app.config.llama_cpp_max_tokens = buf.trim().parse().ok();
+                }
+                _ => {}
             }
-            "Llama Top-K" => {
-                app.config.llama_cpp_top_k = buf.trim().parse().ok();
-            }
-            "Llama Min-P" => {
-                app.config.llama_cpp_min_p =
-                    buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
-            }
-            "Llama Max Tokens" => {
-                app.config.llama_cpp_max_tokens = buf.trim().parse().ok();
-            }
-            _ => {}
         }
+        forget_secret(app);
         app.settings_url_editing = false;
         app.save_config();
-        // Refresh models and health check when a URL/model path changed.
+        // A changed endpoint changes the model picker and the health panel;
+        // a changed key only changes whether a provider answers.
         if matches!(
             row_label,
             "Ollama URL" | "Llama.cpp URL" | "Llama.cpp Model"
         ) {
             app.refresh_models(tx.clone());
+        }
+        if matches!(
+            row_label,
+            "Ollama URL"
+                | "Llama.cpp URL"
+                | "Llama.cpp Model"
+                | "Remote URL"
+                | "Remote Key"
+                | "Gemini Key"
+                | "Qwen Key"
+                | "OpenRouter Key"
+        ) {
             app.run_health_check(tx.clone());
         }
         return;
     }
     match settings_current(app).kind {
-        SettingKind::Text | SettingKind::Number => {
+        SettingKind::Text | SettingKind::Number | SettingKind::Secret => {
             // Start editing this row's value.
             app.settings_url_editing = true;
             app.settings_url_buffer = settings_edit_seed(app, row_label);
@@ -721,6 +762,12 @@ fn settings_edit_seed(app: &App, label: &str) -> String {
         "Ollama URL" => app.config.ollama_url.clone(),
         "Llama.cpp URL" => app.config.llama_cpp_url.clone(),
         "Llama.cpp Model" => app.config.llama_cpp_model_path.clone(),
+        "Remote URL" => app.config.remote_base_url.clone(),
+        "Remote Key" | "Gemini Key" | "Qwen Key" | "OpenRouter Key" => {
+            crate::app::secret_value(&app.config, label)
+                .map(str::to_string)
+                .unwrap_or_default()
+        }
         "Llama Temp" => app
             .config
             .llama_cpp_temperature
