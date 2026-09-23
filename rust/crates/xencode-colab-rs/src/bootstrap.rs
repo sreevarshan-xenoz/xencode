@@ -78,6 +78,18 @@ echo "weights: $GGUF_NAME"
 curl -fL --retry 3 -o "$DIR/model.gguf" "https://huggingface.co/$HF_REPO/resolve/main/${{GGUF_NAME}}"
 nohup "$SERVER" -m "$DIR/model.gguf" --host 127.0.0.1 --port {port} -c 4096 $OFFLOAD \
   > "${{HOME}}/xencode-llama.log" 2>&1 &
+# READY must mean "serving", not "spawned": llama.cpp binds its socket only
+# after the weights are loaded (39 s for a 0.5B on a T4, measured live), so a
+# forward that probes too early hits an empty port.
+WAITED=0
+until curl -fsS "http://127.0.0.1:{port}/v1/models" >/dev/null 2>&1; do
+  sleep 5; WAITED=$((WAITED + 5))
+  if [ "$WAITED" -ge 900 ]; then
+    echo "server did not start serving within 900s; last log lines:"
+    tail -n 20 "${{HOME}}/xencode-llama.log"
+    exit 1
+  fi
+done
 echo "READY {port}"
 "#,
         build = LLAMA_CPP_BUILD,

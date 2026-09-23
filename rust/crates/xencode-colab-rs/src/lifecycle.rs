@@ -32,12 +32,22 @@ use crate::state::{load_state, remove_state, save_state, ColabState};
 
 /// Timeout for one `colab sessions` / `colab new` / `colab stop` run.
 const CMD_TIMEOUT: Duration = Duration::from_secs(60);
-/// The VM bootstrap (pip install + model download + server start) can take
-/// minutes on a cold VM; give it room.
-const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(1200);
-/// `/v1/models` probes after the forward is up. The server may still be
-/// finishing a cold model load; keep trying briefly.
-const PROBE_ATTEMPTS: u32 = 40;
+/// The VM bootstrap (runtime download + model download + load until the server
+/// really serves) runs to completion before it reports `READY`. Measured live:
+/// a 0.5B GGUF took ~20 s to fetch and 39 s to load on a T4; a 7-8B Q4 is
+/// ~4.7 GB, so the budget has to be generous — and output is captured, so a
+/// long bootstrap is silent but bounded.
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(2400);
+/// `/v1/models` probes after the forward is up, ~30 s at 250 ms apart. The
+/// bootstrap now only reports `READY` once the server serves, so this window
+/// covers the forward itself — plus the Colab bridge's occasional `503` while
+/// the runtime is loaded but the proxy has not caught up (seen live).
+const PROBE_ATTEMPTS: u32 = 120;
+/// Probes on reconnect's speculative forward-only attempt, ~5 s. Here we are
+/// only asking "does the VM still serve", and a loaded runtime answers on the
+/// first try — so a short window fails fast into the full repair instead of
+/// spending the whole bring-up budget on a guess.
+const FORWARD_ONLY_PROBE_ATTEMPTS: u32 = 20;
 /// Colab gives a runtime exactly one SSH bridge, and the slot of a bridge that
 /// just died takes a while to release (measured live on a free-tier T4:
 /// `HTTP 429 … Already-active SSH session` survived ~45 s). Both the bootstrap
@@ -145,7 +155,11 @@ pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Resu
 /// 1. If a session is still listed server-side, reuse it (no `colab new`).
 /// 2. If the endpoint on the recorded port already answers, we are done
 ///    (only the pid had died — a fast no-op reconnect).
-/// 3. Otherwise re-run the bootstrap on the live VM and re-spawn the forward.
+/// 3. Re-spawn the forward and probe through it: a dead forward is the usual
+///    breakage and the VM typically still serves, so this path must not pay
+///    for a bootstrap (measured live: the full one re-fetches the weights).
+/// 4. Only when a fresh forward reaches an empty port does the VM side get
+///    rebuilt — the runtime died with the forward, or the VM was reaped.
 pub async fn run_colab_reconnect(
     bins: &Binaries,
     key: &Path,
@@ -174,6 +188,26 @@ pub async fn run_colab_reconnect(
     // the VM was reaped. Recreate it like `up` would, then keep going.
     ensure_session(bins, &session, opts.gpu.as_str()).await?;
 
+    // Forward before bootstrap. The tunnel is cheap and the VM usually still
+    // serves through a new one; rebuilding the VM side would re-download the
+    // weights for nothing. On failure, fall through: an empty port behind a
+    // live forward means the runtime itself has to come back.
+    if let Ok((url, child)) =
+        spawn_forward_ready(bins, &session, key, local_port, remote_port).await
+    {
+        let pid = child.id().expect("a just-spawned forward always has a pid");
+        if probe_models(local_port, FORWARD_ONLY_PROBE_ATTEMPTS, None)
+            .await
+            .is_ok()
+        {
+            record_bridge(&session, pid, local_port, remote_port, opts, &url)?;
+            return Ok(url);
+        }
+        // Release the runtime's single SSH slot for the bootstrap below.
+        terminate(pid);
+        tokio::time::sleep(BRIDGE_RETRY_GAP).await;
+    }
+
     let quant = if opts.quant.is_empty() {
         DEFAULT_QUANT
     } else {
@@ -198,8 +232,23 @@ pub async fn run_colab_reconnect(
             format!("colab reconnect: forward came up but the endpoint did not answer: {e}")
         })?;
 
-    let new_state = ColabState {
-        session: Some(session),
+    record_bridge(&session, forward_pid, local_port, remote_port, opts, &url)?;
+
+    Ok(url)
+}
+
+/// Persist the bridge a reconnect rebuilt, so `status` / `down` / the next
+/// reconnect all point at the live forward pid.
+fn record_bridge(
+    session: &str,
+    forward_pid: u32,
+    local_port: u16,
+    remote_port: u16,
+    opts: &UpOptions,
+    url: &str,
+) -> Result<(), String> {
+    save_state(&ColabState {
+        session: Some(session.to_string()),
         forward_pid: Some(forward_pid),
         keepalive_pid: None,
         local_port: Some(local_port),
@@ -207,11 +256,9 @@ pub async fn run_colab_reconnect(
         runtime: Some(opts.runtime.clone()),
         model: Some(opts.model.clone()),
         started_at: Some(now_rfc3339()),
-        url: Some(url.clone()),
-    };
-    save_state(&new_state).map_err(|e| format!("colab reconnect: {e}"))?;
-
-    Ok(url)
+        url: Some(url.to_string()),
+    })
+    .map_err(|e| format!("colab reconnect: {e}"))
 }
 
 /// One line of `status` output.
@@ -437,10 +484,17 @@ async fn run_bootstrap(
     ))
 }
 
-/// True when an error is Colab refusing a *second* concurrent bridge rather
-/// than anything the user did wrong.
+/// True when an error is Colab's single-bridge slot being unavailable rather
+/// than anything the user did wrong — worth waiting out and retrying. Two
+/// shapes, both seen live on a free-tier T4 after killing a forward:
+/// the proxy refusing a second bridge (`HTTP 429 … Already-active SSH
+/// session`), and ssh connecting to the bridge but never getting an SSH
+/// banner because the dying bridge still owns the runtime's sshd slot
+/// (`Connection timed out during banner exchange`).
 fn bridge_busy(text: &str) -> bool {
-    text.contains("Already-active SSH session") || text.contains("HTTP 429")
+    text.contains("Already-active SSH session")
+        || text.contains("HTTP 429")
+        || text.contains("banner exchange")
 }
 
 /// The tail of a subprocess' output — what actually went wrong is at the end;
@@ -744,6 +798,26 @@ esac
         }
     }
 
+    /// The two bridge refusals seen on a real free-tier runtime are retried;
+    /// a genuine failure (bad key, dead session) is not.
+    #[test]
+    fn only_bridge_slot_errors_are_worth_waiting_out() {
+        assert!(bridge_busy(
+            "colab up: VM bootstrap failed (exit 1) — HTTP 429 Already-active SSH session"
+        ));
+        assert!(bridge_busy(
+            "colab up: VM bootstrap failed (exit 255) — Connection timed out during banner exchange"
+        ));
+        assert!(
+            !bridge_busy("sree@colab-vm: Permission denied (publickey)"),
+            "an auth failure must surface, not retry"
+        );
+        assert!(
+            !bridge_busy("colab up: VM bootstrap did not report READY"),
+            "a broken runtime must surface, not retry"
+        );
+    }
+
     #[tokio::test]
     async fn raw_probe_against_raw_listener_roundtrips() {
         // Bare TCP echo of the /v1/models probe against a minimal HTTP/1.0
@@ -995,9 +1069,15 @@ esac
             !calls.contains("new "),
             "no colab new when session survives: {calls}"
         );
+        let argv_calls = wait_for_ssh(&format!("{}/ssh-calls", marker(session))).await;
+        assert!(argv_calls, "forward re-spawned");
+        // Forward before bootstrap: the VM still served, so rebuilding it would
+        // have re-fetched the weights for nothing.
+        let pushed =
+            std::fs::read_to_string(format!("{}/ssh-calls", marker(session))).expect("ssh calls");
         assert!(
-            wait_for_ssh(&format!("{}/ssh-calls", marker(session))).await,
-            "forward re-spawned"
+            !pushed.contains("bash -s"),
+            "reconnect must not re-bootstrap a serving VM: {pushed}"
         );
 
         let new_state = ColabState::load().expect("state").expect("exists");
