@@ -120,6 +120,25 @@
   15 GiB, which is why an agent graph degenerates into a pipeline here rather than
   running concurrently. Appendix:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone P.
+- 🗺️ **Milestone Q recorded** (2026-09-23): the fourth option-space appendix — a
+  second external hundred-proposal list, this one around five "hidden dimensions"
+  (project DNA, time, system, trust, experimentation) rather than agent
+  capability. Dispositioned row by row against the tree: **25** of the hundred
+  were already planned under existing IDs, **35** narrowed to something smaller
+  and buildable, **10** are genuinely new candidates, **30** rejected — recorded
+  as 25 do-not-build rows, since several share one argument and three were
+  already registered. The five dimensions collapse into
+  three constraints already on the record (CI-2/LSP-4, GH-1/GH-8, QA-1/QA-2).
+  63 options result, 32 net-new, pool **176 → 208**, unranked as before. Checking
+  the list's premises against this box corrected four of them: it has a
+  **MX250** so the "no GPU" framing is wrong (2 GiB, cap 6.1 — enough for
+  inference experiments, not for training); `~/.xencode/config.json` is mode
+  **644 with plaintext keys** while `org.freedesktop.secrets` is present and
+  un-used; the eval fixture `gold.json` lists a `cmd_output.rs` that is not in
+  the tree, so that entry can never be reached; and two security-scanner regexes
+  group their alternation wrong, so a line containing the bare word `input` — or
+  `url` — reports High severity path-traversal/SSRF. Appendix:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone Q.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).

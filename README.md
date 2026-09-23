@@ -535,9 +535,9 @@ T4 rather than a mock.
 
 Nothing is currently *committed* to build next. What exists instead is planning:
 two planned tracks (**L** — remote backends and a self-finishing agent; **M** —
-ecosystem compatibility) and three research option spaces (**N**, **O**, **P**)
-recorded deliberately unranked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md), 176
-candidates between them. Cutting that pool into the next milestone is an open
+ecosystem compatibility) and four research option spaces (**N**, **O**, **P**,
+**Q**) recorded deliberately unranked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md),
+208 candidates between them. Cutting that pool into the next milestone is an open
 decision — and those passes turned up live gaps between promise and code, which
 they list as defects rather than features, including this manual's own habit of
 overstating the security scanner and error handling.
