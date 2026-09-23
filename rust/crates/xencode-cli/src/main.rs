@@ -2251,6 +2251,12 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::
 }
 
 async fn run_tui() -> Result<(), String> {
+    // A panic from here on would otherwise leave raw mode and the alternate
+    // screen switched on, hiding its own message: restore the terminal first
+    // and record the crash where `xencode doctor` can find it.
+    if let Some(record) = xencode_tui_rs::panic::default_record_path() {
+        xencode_tui_rs::panic::install_panic_hook(record);
+    }
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
     let mut stdout = io::stdout();
     crossterm::execute!(

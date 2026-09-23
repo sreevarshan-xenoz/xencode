@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a crash in the interface gives your terminal back and leaves a trace
+When the TUI hit a bug it panicked with raw mode and the alternate screen still
+switched on, so its own error message went onto a screen you could no longer
+scroll or type into, your shell came back with keypresses misbehaving, and
+nothing recorded that any of it had happened. A crash now puts the terminal back
+first — normal input, no mouse capture, cursor visible — and writes the message,
+the source location, and a backtrace if `RUST_BACKTRACE` was set to
+`~/.xencode/last_panic.log`, readable only by you. The file is there for the
+next release's health check to report; until then it is the one place a crash
+can be described after the fact.
+
 ### Fixed — a log left half-written by a crash is still readable
 `.xencode/cache/metrics.jsonl`, the file the TUI profiler reads, is appended one
 record per line. A process killed mid-append — or a disk that filled — used to
