@@ -63,6 +63,19 @@
   `SKILL.md`, agents-as-markdown, git-installable plugins) before adding the
   two big new surfaces — xencode as an MCP *server* and xencode over ACP. Tasks:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone M.
+- 🗺️ **Milestone N recorded** (2026-09-23): the option-space appendix, not a
+  queue. Six more research passes — code intelligence, developer workflow, agent
+  evaluation, security/injection defense, multimodal surfaces, and the
+  local-first/tailnet cluster — are written up in full with roughly fifty
+  candidate features, each with effort, trap and done-when, plus a consolidated
+  do-not-build register. It is deliberately **unranked**: ranking is a separate
+  pass, so the cut is visible and revisitable instead of implicit in planning.
+  It also surfaced eleven verified facts about the current tree, three of which
+  read as defects rather than missing features — repo-controlled `AGENTS.md`
+  text sits in the position we instruct the model to obey exactly,
+  `config.json` with plaintext keys is written world-readable, and attached
+  images go to a provider undecoded and unresized. Appendix:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone N.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).
