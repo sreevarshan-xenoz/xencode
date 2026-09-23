@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Milestone K — remote providers + Google Colab — active 🚧
+### Milestone K — remote providers + Google Colab — complete ✅
 A GPU you do not own as an inference backend: `remote:` routes any
 OpenAI-compatible endpoint (dedicated to the Colab SSH-forward case in the
 docs), Settings gains real provider-key editing with masked `Secret` rows,
@@ -19,6 +19,22 @@ caught in code: `google-colab-cli` 0.6.0 shipped without the `ssh`
 subcommand (upstream issue #102); preflight requires >= 0.7.0.
 
 ### Added
+- **Colab bridge proven on a live VM, and fixed by what the run showed**
+  (K-2c/K-3 follow-up). A free-tier T4 was brought up, served a Q4_K_M GGUF
+  through llama.cpp, and answered real `xencode query -m 'remote:…'` calls over
+  the forward; Provider Health went green, `up --reconnect` restored a killed
+  forward, and `down` left no session and no orphan process. Six defects came
+  out of that run: the bridge now logs in as **root** (Colab injects the key
+  for root only, so the old default could never authenticate), the VM-side port
+  moved to **18080** (Colab's own proxy permanently holds `8080`), the
+  bootstrap reports `READY` only once `/v1/models` serves (a 0.5B model took
+  ~39 s to load, so a spawn-time `READY` raced the probe), `--quant` /
+  `config colab_quant` choose the GGUF quant, bridge-slot errors
+  (`Already-active SSH session`, `banner exchange` timeouts) are retried rather
+  than failing the bring-up, `--reconnect` tries the forward before re-running
+  the bootstrap (9 s vs a full re-download), and the detached forward no longer
+  inherits stderr — a piped `xencode colab up | grep` used to hang until the
+  tunnel died.
 - **Colab survivability: 12-hour-reap detection + one-key reconnect** (K-3).
   `xencode colab status` now compares the recorded `started_at` age against
   the endpoint: older than 12 hours (Colab's per-VM runtime limit) with a
@@ -36,11 +52,12 @@ subcommand (upstream issue #102); preflight requires >= 0.7.0.
 - **Colab VM lifecycle** (K-2c). `xencode colab up` brings a Colab VM up
   end-to-end: creates the session (`colab new --gpu <gpu> -s <name>`) when
   absent, pushes an ssh bootstrap that installs and starts the chosen runtime
-  bound to `127.0.0.1` only (llama.cpp — pinned `llama-cpp-python[server]` +
-  HF GGUF on 8080 — or ollama — `ollama serve` on 11434, its tags flow into
-  the model picker), holds the `-N -L` forward, waits for `/v1/models`, writes
-  `~/.xencode/colab.json`, and points `llama_cpp_url`/`ollama_url`/
-  `remote_base_url` at the forward. `xencode colab status` reports forward
+  bound to `127.0.0.1` only (llama.cpp — pinned prebuilt llama.cpp release +
+  one HF GGUF on 18080 — or ollama — `ollama serve` on 11434, its tags flow into
+  the model picker), holds the `-N -l root -L` forward, waits for `/v1/models`,
+  writes `~/.xencode/colab.json`, and points
+  `llama_cpp_url`/`ollama_url`/`remote_base_url` at the forward.
+  `xencode colab status` reports forward
   pid / `colab sessions` listing / endpoint probe and never fails hard;
   `xencode colab down` is idempotent (kill forward, `colab stop`, clear
   state). Flag > `config colab_*` fallbacks; session names validated before

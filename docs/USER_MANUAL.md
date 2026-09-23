@@ -114,6 +114,13 @@ xencode analyze src/main.rs --format json
 # Start the collaboration server
 xencode server --port 8765
 
+# Rent a Colab GPU and serve a model through it
+xencode config set colab_enabled true
+xencode colab preflight --generate-key
+xencode colab up
+xencode colab status
+xencode colab down
+
 # Manage plugins
 xencode plugin list
 xencode plugin install ./my-plugin/
@@ -452,6 +459,42 @@ xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https +
 - Sessions live in memory only: after a server restart the peers are
   gone — only the audit log survives.
 
+### Google Colab GPU bridge
+
+Rent a Colab VM and serve a model from it, without exposing anything: the VM's
+OpenAI endpoint arrives on your laptop through the official `colab ssh` bridge,
+and Xencode points the Remote provider at it.
+
+```bash
+xencode config set colab_enabled true
+xencode colab preflight --generate-key
+xencode colab up
+xencode colab status
+xencode colab down
+```
+
+- Prerequisites are the `colab` CLI (`google-colab-cli` >= 0.7.0, which is the
+  first release with `colab ssh`) and `gcloud` application-default
+  credentials; `preflight` checks both plus `ssh`, and prints a runnable fix
+  line per failing check. It creates `~/.xencode/colab_ed25519` with
+  `--generate-key`.
+- `up` creates the session if absent, installs llama.cpp (CUDA build when the
+  VM reports a GPU) or Ollama, serves one GGUF from Hugging Face on
+  `127.0.0.1:18080` inside the VM, and holds a forward at
+  `http://127.0.0.1:18000/v1`. It reports ready only once `/v1/models`
+  actually answers.
+- After that the VM is an ordinary provider: pick it with `m` in the TUI,
+  address it as `remote:<served-model-id>` (`/v1/models` on the forward lists
+  the ids), and watch the Remote row in Provider Health (Ctrl+F).
+- Free-tier VMs last about 12 hours and their disk is wiped. `status` says
+  when the recorded VM is old enough to have been reaped; `xencode colab up
+  --reconnect` rebuilds from `~/.xencode/colab.json` — reusing the forward if
+  the endpoint still answers, re-creating the VM if not.
+- `down` kills the forward, runs `colab stop` and clears state. Run it: an
+  unreleased VM keeps consuming compute units.
+- No public URL exists by design — Colab's terms forbid tunnel brokers on the
+  free tier, and the forward keeps the endpoint bound to loopback.
+
 ### Plugin System
 
 A plugin is a directory holding `plugin.json` (or `manifest.json`) in
@@ -542,6 +585,7 @@ Commands:
   memory    Manage conversation memory
   tasks     Manage background tasks (file-backed, survives this process)
   worktree  Manage git worktrees of the current repository
+  colab     Google Colab bridge: preflight, then up / status / down for a model server running on a Colab VM
   advise    Repository insights from the .xencode snapshot: broken imports, import cycles, hub files and orphans
   server    Start the collaboration server
   analyze   Analyze code for issues and vulnerabilities

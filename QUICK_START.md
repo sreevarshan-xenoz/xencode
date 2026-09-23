@@ -77,6 +77,29 @@ The panel shows only the real connection state — transport, session id,
 live members with roles. Flags, tokens, TLS and the audit log are in
 `CLI_GUIDE.md`.
 
+### Rented GPU (Google Colab)
+No GPU locally? Rent one for the length of a session and Xencode talks to it
+over an SSH tunnel. Requires the official `google-colab-cli` (>= 0.7.0) on PATH
+and Google application-default credentials — both are checked for you, and
+`CLI_GUIDE.md` → `xencode colab <action>` has the setup commands.
+
+```bash
+xencode config set colab_enabled true    # the bridge is opt-in; up refuses without it
+xencode colab preflight --generate-key   # CLI version, auth, ssh key — fix lines for anything missing
+xencode colab up                         # T4 + llama.cpp + Qwen/Qwen2.5-7B-Instruct-GGUF by default
+xencode query -m 'remote:/root/xencode-llama/model.gguf' "Capital of France?"
+xencode colab status                     # forward, session, endpoint + a 12h-reap warning
+xencode colab down                       # ALWAYS run this: an unstopped VM keeps billing
+```
+
+`up` writes `remote_base_url` (and the matching local runtime URL) into
+`~/.xencode/config.json`, so after it succeeds the VM is just another provider:
+select it in the TUI model picker (`m`) or watch it in Provider Health
+(Ctrl+F → Provider Health). Colab gives a free-tier VM about 12 hours and wipes
+its disk, so when the row goes red run `xencode colab up --reconnect` — it
+reuses the VM if it lives and re-creates it if it was reaped, from the recorded
+`colab.json` alone.
+
 ## Commands
 
 ### In the TUI

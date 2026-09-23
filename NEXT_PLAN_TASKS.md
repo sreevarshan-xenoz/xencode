@@ -2,7 +2,7 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Verified 2026-09-19.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Verified 2026-09-23.
 
 ## Rust Migration — Complete ✅
 
@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 811 tests passing, 4 ignored, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
+- [x] Workspace gates green — 15 crates, 815 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -923,7 +923,13 @@ The files that stayed were re-checked against the tree, because the rule is
 
 ---
 
-## Milestone K — a GPU you do not own: remote providers + Google Colab — active 🚧
+## Milestone K — a GPU you do not own: remote providers + Google Colab — complete ✅
+
+> Every item below was finished and the whole path was proven against a real
+> free-tier Colab VM on 2026-09-23: a T4 was rented, llama.cpp served a Q4_K_M
+> GGUF on it, `xencode query -m 'remote:…'` answered through the SSH forward,
+> Provider Health went green, `--reconnect` recovered a killed tunnel in 9 s,
+> and `down` left no session and no orphan. No step of that was mocked.
 
 > Research verified by live experiment on 2026-09-23 against this machine and a
 > real free-tier Colab account, not from blog posts. Phase 0 (the Settings →
@@ -998,11 +1004,12 @@ OpenAI-compatible server.
   `colab ssh --help` probe), backend auth (`colab sessions`), ssh/ssh-keygen on
   PATH, and an ed25519 key pair under the config dir (`--generate-key`). The
   report prints a fix line per failing check and exits non-zero. Lives in the
-  new `xencode-colab-rs` crate (8 hermetic tests with fake colab CLIs).
-- **Still missing:** the rest of the Colab *lifecycle* — provision, bootstrap
-  the inference server, hold the forward, survive reconnects, report health,
-  tear down — plus the Settings section that drives it and the model-picker
-  surfacing.
+  new `xencode-colab-rs` crate (49 hermetic tests, every one of them driving a
+  fake `colab`/`ssh` script on `$PATH` — no network, no real VM).
+- **Still open, deliberately:** `colab_auto_connect` is stored and round-tripped
+  but nothing reads it — bring-up stays an explicit `xencode colab up`. The
+  `drive`/`gcs` weights sources are validated and refused with a fix message
+  rather than implemented; `hf` covers the case the milestone was for.
 
 ### Tasks
 
@@ -1024,13 +1031,26 @@ OpenAI-compatible server.
       `#[serde(default)]`. State in `~/.xencode/colab.json`: session, ssh /
       forward / keep-alive pids, ports, runtime, model, started_at, url.
 - [x] **K-2c — `xencode colab up|status|down`.** `up`: `colab new --gpu T4`,
-      SSH bootstrap (pinned `llama-server` + GGUF on `127.0.0.1:8080`, **or**
+      SSH bootstrap (pinned prebuilt `llama-server` + GGUF on
+      `127.0.0.1:18080` — Colab's own proxy holds 8080 — **or**
       `ollama serve` on 11434 — the ollama choice makes tags flow into the
-      model picker for free via the existing `refresh_models()`), hold `-N -L`,
-      keep-alive per the official CLI, write `colab.json`, point
-      `remote_base_url` (or `llama_cpp_url` / `ollama_url`) at the forward.
-      `status`: parse `colab sessions` + GET `/v1/models` on the forward.
-      `down`: kill forward, `colab stop`, clear state.
+      model picker for free via the existing `refresh_models()`), hold
+      `ssh -N -l root -L`, keep-alive per the official CLI, write `colab.json`,
+      point `remote_base_url` (or `llama_cpp_url` / `ollama_url`) at the
+      forward. `status`: parse `colab sessions` + GET `/v1/models` on the
+      forward. `down`: kill forward, `colab stop`, clear state.
+- [x] **K-2d — the same path, run for real (`c014c30`, `692c494`, `2a27501`).**
+      Brought up an actual free-tier T4 and served a real GGUF through the
+      forward. Six things only a live run shows: the ssh login must be **root**
+      (Colab injects the key for root only), port **18080** (8080 is occupied
+      by Colab's node proxy), `READY` must mean *serving* — the model needs
+      ~40 s to load, so a spawn-time `READY` raced the probe — a dead
+      bridge slot (`Already-active SSH session` / `banner exchange`) has to be
+      waited out instead of failing the bring-up, `--reconnect` should try the
+      forward before re-downloading anything, and the detached forward must not
+      inherit stderr or it keeps a caller's pipeline open forever. Also
+      `--quant` / `config colab_quant`, and the two `xencode-server-rs` models
+      tests made hermetic so a live bridge can't change what they assert.
 - [x] **K-3 — survivability (reap + reconnect).** 12-hour-reap detection in
       `colab status` (started-at age vs endpoint, reaped hint) and one-key
       reconnect (`xencode colab up --reconnect`): fast path reuses a live
@@ -1041,11 +1061,17 @@ OpenAI-compatible server.
       entry: seeded like the keyed providers, probes `{remote_base_url}/models`,
       Connection Details lists the Remote URI, detail line under the row shows
       the forward URL).
-- [ ] **K-4 — tests + docs.** Config round-trip for the Colab block, wiremock
+- [x] **K-4 — tests + docs.** Config round-trip for the Colab block, wiremock
       fake OpenAI Colab endpoint (extend `remote_endpoint.rs`), masked-key
       rendering (baseline exists from K-1b; the fake `colab` CLI on `$PATH`
       landed with K-2a); then README / QUICK_START / CLI_GUIDE / USER_MANUAL /
       CHANGELOG and the `.xencode.example.json` in the same pass.
+      Done: the shipped example now has a test that loads it through the real
+      loader and pins its Colab defaults, `mask_secret`'s boundary is covered,
+      and the manuals describe what the live run actually did — root login,
+      18080, READY-means-serving, bridge-slot retries, forward-first
+      reconnect, `--quant`, and the `colab_enabled` gate that `up` refuses
+      without.
 
 ### Standing constraints for this milestone
 

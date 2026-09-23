@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 811 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 815 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -47,6 +47,7 @@ and fix your code — driven entirely from your terminal.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold.
+- **☁️ Rented GPUs, no infrastructure** — `xencode colab up` brings a Google Colab VM up with llama.cpp or Ollama serving an OpenAI endpoint and tunnels it to `127.0.0.1` over the official `colab ssh` bridge; the model picker, `remote:…` routing and Provider Health treat it like any other provider. No public URL, nothing exposed.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
 - **🐎 Performance first** — zero duplicate tokens on retry (token-delivery tracking), memory+disk cache, streaming with exponential backoff.
 
@@ -269,6 +270,9 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
 | **Review** | `xencode review [--base main]` | PR-level diff triage with per-file analysis |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
+| **Colab** | `xencode colab preflight` | Is the bridge usable? (CLI version, auth, ssh key) |
+| **Colab** | `xencode colab up` | Bring up a VM + inference server and tunnel it to localhost (`--reconnect` repairs a broken bridge) |
+| **Colab** | `xencode colab status` / `down` | Forward/session/endpoint health, then kill the forward and release the VM |
 | **Plugin** | `xencode plugin list` | Report each plugin and whether it loads |
 | **Plugin** | `xencode plugin install <path>` | Install a plugin, then say if it loaded |
 | **Plugin** | `xencode plugin remove <name>` | Remove a plugin by name |
@@ -358,7 +362,18 @@ flowchart TD
   ignored.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
-  for a local llama-server, anything else goes to Ollama on `ollama_url`.
+  for a local llama-server, `remote:…` for any OpenAI-compatible server at
+  `remote_base_url`, anything else goes to Ollama on `ollama_url`.
+- **Google Colab as a GPU you don't configure.** `xencode colab up` rents a
+  Colab VM, installs a pinned llama.cpp (CUDA when the VM has a GPU) or Ollama
+  on it, and holds an SSH forward so the VM's OpenAI endpoint appears at
+  `http://127.0.0.1:18000/v1` — then it writes that into `remote_base_url` and
+  the runtime URL, so `remote:…` models, the model picker and Provider Health
+  all use it with no other change. The tunnel is the official `colab ssh`
+  bridge: no public URL, nothing listenable from outside your machine.
+  Free-tier VMs are reaped after 12 hours — `xencode colab status` says so and
+  `xencode colab up --reconnect` rebuilds the bridge; `xencode colab down`
+  releases the VM, which you should always run when finished.
 - **No Anthropic key field exists yet.** `xencode-providers-rs` has an
   Anthropic client, but neither `ApiKeys` nor the app passes an Anthropic key,
   so an `anthropic:…` model always fails with *"Anthropic API key not
@@ -395,7 +410,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (811 passing, 4 ignored)
+cargo test                          # Full workspace suite (815 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

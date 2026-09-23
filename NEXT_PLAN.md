@@ -14,7 +14,7 @@
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 15 crates, 811 tests passing, 4 ignored, zero warnings — the Rust workspace is the only active codebase (Milestone K added `xencode-colab-rs`)
+- ✅ **Rust migration complete**: 15 crates, 815 tests passing, 4 ignored, zero warnings — the Rust workspace is the only active codebase (Milestone K added `xencode-colab-rs`)
 - ✅ **Milestone J complete** (2026-09-21): every panel tells the truth.
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
@@ -39,6 +39,17 @@
   and three unused screenshots. The survivors were re-checked against the tree
   and `docs/ROADMAP.md` was rewritten from the code (its `xencode --git-*` flags
   and `/smart`-style chat commands were never in the Rust CLI).
+- ✅ **Milestone K complete** (2026-09-23): a GPU you do not own. `remote:…`
+  routes any OpenAI-compatible endpoint, Settings edits provider endpoints and
+  masked keys, and `xencode colab up|status|down|preflight` rents a Colab VM,
+  installs llama.cpp (CUDA) or Ollama on it and tunnels the endpoint to
+  `127.0.0.1` over the official `colab ssh` bridge — no public URL. Verified end
+  to end against a live free-tier T4: a real GGUF answered `xencode query -m
+  'remote:…'` through the forward, Provider Health went green, `--reconnect`
+  rebuilt a killed tunnel in 9 s, and `down` left nothing billing. That run, not
+  a unit test, is what fixed the root login, the 18080 port and the
+  `READY`-means-serving gate. Tasks: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+  § Milestone K.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).
