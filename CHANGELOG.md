@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the file watcher now reports what it could not do
+Two ways this feature could fail without saying anything. If the workspace could
+not be watched at all — on a repository this size, usually because the operating
+system's limit on watched paths is already used up — the watcher quietly gave up,
+and "nothing changed" looked exactly like "watching is off". It now says so once
+in chat: `⚠ file watching is off: <reason>`. Second, the watcher waits for a pause
+in file activity before reporting a batch of changes, and a large pause never
+came: a `git checkout` or a build that keeps touching files held the batch
+indefinitely. The pause it will wait for is now capped at one second, and a batch
+that has been growing for two seconds is reported even while activity continues.
+Asking for a longer pause than the cap no longer delays a warning by that much,
+because changes from one save arrive within milliseconds anyway.
+
 ### Changed — the retrieval scorecard measures something harder
 `/ctx eval` grades the file finder against a set of questions whose answers are
 known-good files in this repository. One of those questions pointed at
