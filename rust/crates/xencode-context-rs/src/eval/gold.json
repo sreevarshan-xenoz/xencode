@@ -18,8 +18,8 @@
       "expected": ["rust/crates/xencode-context-rs/src/stale.rs"]
     },
     {
-      "query": "command output compression summary raw",
-      "expected": ["rust/crates/xencode-context-rs/src/cmd_output.rs"]
+      "query": "command output kept to its tail when oversized",
+      "expected": ["rust/crates/xencode-tui-rs/src/agent_tools.rs"]
     },
     {
       "query": "compact decision marker soft hard",
@@ -40,6 +40,38 @@
     {
       "query": "symbols extract dependency edges graph",
       "expected": ["rust/crates/xencode-context-rs/src/symbols.rs"]
+    },
+    {
+      "query": "recall and reciprocal rank measured over a gold set",
+      "expected": ["rust/crates/xencode-context-rs/src/eval.rs"]
+    },
+    {
+      "query": "text pulled out of a docx or pdf file",
+      "expected": ["rust/crates/xencode-context-rs/src/documents.rs"]
+    },
+    {
+      "query": "a burst of editor saves becomes one change event",
+      "expected": ["rust/crates/xencode-context-rs/src/watcher.rs"]
+    },
+    {
+      "query": "worktree list with a detached head or spaces in the path",
+      "expected": ["rust/crates/xencode-context-rs/src/worktree.rs"]
+    },
+    {
+      "query": "secret files are flagged without their contents being read",
+      "expected": ["rust/crates/xencode-context-rs/src/scanner.rs"]
+    },
+    {
+      "query": "refreshing a path that is not rust does nothing",
+      "expected": ["rust/crates/xencode-context-rs/src/refresh.rs"]
+    },
+    {
+      "query": "a metrics row cut off by a crash is dropped and the earlier ones survive",
+      "expected": ["rust/crates/xencode-context-rs/src/metrics.rs"]
+    },
+    {
+      "query": "which state sections may be rewritten and where the decision marker lives",
+      "expected": ["rust/crates/xencode-context-rs/src/state.rs"]
     }
   ]
 }

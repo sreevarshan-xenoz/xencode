@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 835 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 835 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3882,18 +3882,35 @@ here is inherited from the reviewer's assumptions.
     `input` was reported High / CWE-22. QO-2 — **landed 2026-09-23**, both
     patterns grouped and pinned by tests. Every health scorecard, dashboard,
     attack-path and privacy item (22, 25, 51, 52) was trash-in until this landed.
-11. **The retrieval eval has a false negative baked into it.**
-    `xencode-context-rs/src/eval/gold.json` expects
+11. **The retrieval eval had a false negative baked into it.**
+    `xencode-context-rs/src/eval/gold.json` expected
     `rust/crates/xencode-context-rs/src/cmd_output.rs`, which **does not exist
     anywhere in the tree** (the other nine paths do). Any MRR/recall@k number
-    reported from this corpus is depressed by a permanently-unreachable gold
-    entry. This is a bug, not a research finding.
-12. **The BM25 arm indexes no text.** `embed.rs:69-88`'s pseudo-document is path
-    segments + declared symbol names; file content is never tokenised, and
+    reported from this corpus was depressed by a permanently-unreachable gold
+    entry. This was a bug, not a research finding. QN-1 — **landed 2026-09-23**:
+    the entry is retargeted to the file that actually cuts command output
+    (`xencode-tui-rs/src/agent_tools.rs`), the corpus is 18 probes, and
+    `eval.rs`'s guard test now reads each expected file off disk, so a
+    gold path that does not exist fails the suite by name. Measured against a
+    real index of this workspace (155 files, 107 with symbols, 127 dependency
+    edges): deterministic recall@1 0.278 / recall@5 0.500 / MRR 0.366; hybrid
+    rerank 0.389 / 0.500 / 0.444. Every one of the 18 answers ranks **first** in
+    a four-file haystack built from its own filename and declared symbols, so
+    the misses above are the retriever failing to discriminate across a whole
+    repo, not bad pairings — which is what QN-2 has to move.
+12. **The BM25 arm indexes no text, and can only reorder what already made the
+    top five.** `embed.rs:69-88`'s pseudo-document is path segments + declared
+    symbol names; file content is never tokenised, and
     `STOP` (`:21-25`) drops the wh-words while keeping `without`/`not`/`never`
     as content terms that match nothing. So "lexical retrieval is weak on
     questions" is true here for a reason nobody stated: the lexical arm is a
-    filename search wearing a BM25 costume.
+    filename search wearing a BM25 costume. Measured with QN-1: recall@5 is
+    **identical** (0.500) with and without the rerank stage, because
+    `evaluate` hands `hybrid_rerank` the already-truncated top-K and
+    `embed.rs:165-168` says out loud that it only reorders within it. Adding
+    text to the pseudo-document changes nothing for a file the structural pass
+    never surfaced — QN-2's fix has to reach the candidate stage, not just the
+    ranking one.
 13. **No generation on this box is pinned, and the UI implies otherwise.**
     Grep across all crates: `seed` appears in **no request payload anywhere**.
     `llama_cpp_temperature`/`top_k` default to `None`
@@ -4138,7 +4155,7 @@ context.
 - **QN-1 — Fix `gold.json` and widen the corpus.** *Effort: S.* Delete or retarget
   the `cmd_output.rs` entry (fact Q-1.11) and add negation/conditional and
   conceptual-vocabulary probes. *Trap:* fabricated fixtures — every new entry
-  must be a path that exists.
+  must be a path that exists. *(Done 2026-09-23 — see W0 progress.)*
 - **QN-2 — Put real text in the pseudo-documents and flip hybrid into the live
   path.** *Effort: S–M.* Doc-comment/head-of-file tokens into `embed.rs`'s
   pseudo-document (fact Q-1.12), then move `hybrid_rerank` from eval-only into
@@ -4717,7 +4734,25 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   path traversal it should. Two genuine hits kept: `let _ = fetch(url);` and
   `read_to_string(filename)`. Four tests in `security.rs` now pin both directions,
   and each was re-run against the old pattern to confirm it actually fails there.
-- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QTR-2`, `AM-3`
+- [x] `QN-1` — 2026-09-23. The gold corpus is 18 probes and every path in it is
+  a file that exists. The `cmd_output.rs` entry was retargeted to
+  `xencode-tui-rs/src/agent_tools.rs`, which is where command output is actually
+  cut down (`run_command_keeps_the_tail_of_oversized_output`), and nine probes
+  were added that cannot be answered from a filename alone — three of them
+  negation or conditional phrasings ("secret files are flagged without their
+  contents being read", "refreshing a path that is not rust does nothing", "a
+  metrics row cut off by a crash is dropped and the earlier ones survive"). The
+  guard test was rewritten rather than kept: `default_gold_is_reachable_by_deterministic_signals`
+  demanded every answer surface on filename signals, which is why the corpus had
+  drifted into ten self-confirming filename probes and nobody noticed one of them
+  pointed at a missing file.
+  `every_gold_answer_is_reachable_from_its_own_file` now reads each expected
+  file off disk, takes the symbols it really declares, and requires it to rank
+  first against three unrelated files; pointing it back at `cmd_output.rs` fails
+  with that path named. Measured before/after on a real index of this workspace
+  and recorded in fact Q-1.11, along with the finding that the hybrid rerank
+  cannot change recall@5 at all.
+- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`, `AM-3`
 
 #### W1 — Make the agent observable — 15 items
 
