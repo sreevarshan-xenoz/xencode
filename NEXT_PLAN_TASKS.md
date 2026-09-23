@@ -926,7 +926,9 @@ The files that stayed were re-checked against the tree, because the rule is
 ## Milestone K — a GPU you do not own: remote providers + Google Colab — active 🚧
 
 > Research verified by live experiment on 2026-09-23 against this machine and a
-> real free-tier Colab account, not from blog posts.
+> real free-tier Colab account, not from blog posts. Phase 0 (the Settings →
+> Providers editing surface) landed the same day; the routing half had landed
+> the day before.
 
 ### Why
 
@@ -952,50 +954,80 @@ OpenAI-compatible server.
   Only port 8080 routes, and it routes to Colab's own agent (that is what the
   SSH bridge rides). Guides that sell "Colab + cloudflared" are solving a problem
   this path does not have.
-- **Already in the tree:** `OpenAICompatibleProvider` (`providers-rs
-  src/compatible.rs:26`) speaks `/v1/chat/completions` over SSE with a bearer
-  token, and `llama_cpp_url` is already user-editable — so a forwarded
-  `llama-server` answers a prompt with *zero* new provider code. What is missing
-  is that **no API key can be edited from the TUI at all** (Settings only shows
-  key *presence*, `ui.rs:1108`) and OpenRouter/compatible base URLs are hardcoded
-  (`lib.rs:885`, `:944`, `:1243`).
-- **Environment floor:** `colab ssh` needs **google-colab-cli >= 0.7.0**; the 0.6.0
-  installed here has no `ssh` subcommand, and its `exec` is broken independently
-  (`jupyter-kernel-client` 1.0.2 dropped `KernelClient`; 0.9.0 is the last
-  release exporting both names). K-2 targets `new`/`sessions`/`ssh` only, so the
-  broken `exec` path is not a dependency.
-- **Hard limits to design around:** free notebooks run **at most 12 h**, GPU is
-  not guaranteed and has no published quota, idle reaping is held off by the
-  CLI's keep-alive daemon, and the VM disk is wiped between sessions.
+
+### The connectivity decision that decides everything (checked every corner)
+
+- **Public tunnels (ngrok / cloudflare / pinggy) burned inside the VM get you
+  suspended on the free tier.** Colab's own FAQ lists "remote control such as
+  SSH shells, remote desktops" and "bypassing the notebook UI to interact
+  primarily via a web UI" as disallowed on free managed runtimes, and real
+  users report Google locking the *whole account* for the ngrok-backdoor
+  pattern. The same FAQ explicitly states a paid subscription or a positive
+  compute-unit balance *removes* those restrictions.
+- **The front door that exists:** nothing is tunneled; the move is
+  `colab ssh --proxy-mode` riding Google's authenticated proxy, exactly what
+  the official Colab-in-VS-Code extension does (its auth is a localhost
+  loopback OAuth exchange, not a poke through the VM firewall).
+- **Version trap:** `google-colab-cli` **0.6.0 on PyPI is missing the `ssh`
+  subcommand** (upstream issue #102; present only since 0.7.x). Preflight must
+  assert >= 0.7.0. The CLI is Linux/macOS-only, so Windows users fall back to
+  typing a public-tunnel URL (paid tier) into Settings → Remote URL.
+- **Sister project, not a dependency:** Google also ships an official **Colab
+  MCP server** (`googlecolab/colab-mcp`, Mar 2026) for driving notebooks as a
+  code-execution *workspace* for agents. Different feature (inference backend
+  vs execution sandbox); note for a future `xencode-mcp-rs` integration, out of
+  scope here.
+
+### What is in the tree today
+
+- **K-1a (landed, `eca4204`):** `remote:` routes any OpenAI-compatible endpoint
+  through `OpenAICompatibleProvider` (`providers-rs src/compatible.rs:26`,
+  dispatch at `lib.rs:472`) in all three `ProviderManager` paths; config fields
+  are `remote_base_url` (`config.rs:90`) + `api_keys.remote_api_key` (doc comment
+  there names the Colab SSH-forward case explicitly); `xencode tests/remote_endpoint.rs`
+  fakes a Colab endpoint with a `Bearer colab-token` via wiremock.
+- **K-1b (landed, `68f2a4a`):** Settings → Providers edits real values — Remote
+  URL as a text row, Remote/Gemini/Qwen/OpenRouter keys as masked `Secret` rows
+  (bullets while editing, last-four tail on display; empty commit clears, Esc
+  discards the buffer). Endpoint rows refresh the picker, all provider rows
+  re-run the health check on save. Persistence stays behind `App::save_config()`
+  so `for_tests()` writes a temp dir, never the real config.
+- **Still missing:** a Colab *lifecycle* layer — provision, bootstrap the
+  inference server, hold the forward, survive reconnects, report health, tear
+  down — plus the Settings section that drives it and the model-picker surfacing.
 
 ### Tasks
 
-- [ ] **K-1a — custom endpoint in config + routing.** `custom_base_url` /
-      `custom_api_key` and the Colab fields (`enabled`, `session`, `local_port`,
-      `weights_source`, `model`) as `#[serde(default)]` so pre-existing
-      `config.json` still loads; `config set` arms; a model prefix routed through
-      `OpenAICompatibleProvider` with the configured base URL in all three
-      `ProviderManager` paths (`generate_inner`, `generate_stream_inner`,
-      `generate_stream_with_tools`).
-- [ ] **K-1b — Settings can edit providers.** A Provider section that states the
-      three kinds plainly — Local (Ollama / llama.cpp), Cloud (Gemini / Qwen /
-      OpenRouter), Remote endpoint / Colab — including **masked API key editing**,
-      which the TUI has never offered. Persistence stays behind `App::save_config()`
-      so `for_tests()` keeps writing to a temp dir, not the real config.
+- [x] **K-1a — custom endpoint in config + routing** (`eca4204`).
+- [x] **K-1b — Settings can edit providers, masked keys included**
+      (`68f2a4a`). The three kinds are now editable in one panel: Local
+      (Ollama / llama.cpp), Cloud (Gemini / Qwen / OpenRouter), Remote / Colab.
 - [ ] **K-2a — `xencode colab preflight`.** Report, in one pass: CLI present and
       >= 0.7.0, auth works (`colab sessions`), an ed25519 key exists under
       `~/.xencode/` (generate it if asked), and what to run when a check fails.
-- [ ] **K-2b — `xencode colab up|status|down`.** Allocate `--gpu T4`, bootstrap
-      over SSH (pinned `llama-server` release + GGUF), start it on
-      `127.0.0.1:8080`, hold the `-L` forward, record pidfiles + session in
-      `~/.xencode/colab.json`, point `llama_cpp_url` at it; `down` reverses it.
-      `weights_source = hf | drive | gcs` so re-download, Drive cache and a GCS
-      bucket are all selectable rather than decided for the user.
-- [ ] **K-3 — survivability.** A provider-health row for the forward, a dead-VM /
-      12-hour-reap detection, and one-key reconnect.
-- [ ] **K-4 — tests + docs.** Config round-trip, wiremock fake OpenAI server,
-      a fake `colab` binary on `$PATH` for the parser, masked-key rendering; then
-      README / QUICK_START / CLI_GUIDE / USER_MANUAL / CHANGELOG in the same pass.
+- [ ] **K-2b — new crate `xencode-colab-rs` (orchestration + state).** Wraps the
+      optional `colab`/`ssh` tools (same "report itself unpowered" pattern as
+      J-07's recorders). New `ColabConfig` in `xencode-config-rs`:
+      `enabled, session, local_port, remote_port, runtime ("llama.cpp"|"ollama"),
+      model, weights_source ("hf"|"drive"|"gcs"), auto_connect` — all
+      `#[serde(default)]`. State in `~/.xencode/colab.json`: session, ssh /
+      forward / keep-alive pids, ports, runtime, model, started_at, url.
+- [ ] **K-2c — `xencode colab up|status|down`.** `up`: `colab new --gpu T4`,
+      SSH bootstrap (pinned `llama-server` + GGUF on `127.0.0.1:8080`, **or**
+      `ollama serve` on 11434 — the ollama choice makes tags flow into the
+      model picker for free via the existing `refresh_models()`), hold `-N -L`,
+      keep-alive per the official CLI, write `colab.json`, point
+      `remote_base_url` (or `llama_cpp_url` / `ollama_url`) at the forward.
+      `status`: parse `colab sessions` + GET `/v1/models` on the forward.
+      `down`: kill forward, `colab stop`, clear state.
+- [ ] **K-3 — survivability.** A provider-health row for the forward
+      (`draw_provider_health` / `run_health_check` currently have no Remote/Colab
+      entry), dead-VM / 12-hour-reap detection, one-key reconnect.
+- [ ] **K-4 — tests + docs.** Config round-trip for the Colab block, wiremock
+      fake OpenAI Colab endpoint (extend `remote_endpoint.rs`), a fake `colab`
+      binary on `$PATH` for the parser, masked-key rendering (baseline exists
+      from K-1b); then README / QUICK_START / CLI_GUIDE / USER_MANUAL /
+      CHANGELOG and the `.xencode.example.json` in the same pass.
 
 ### Standing constraints for this milestone
 
@@ -1004,4 +1036,7 @@ CLI in J-07) — the product remains Rust and the feature reports itself unpower
 when they are missing rather than shelling out blindly. Session names are
 validated, never interpolated into a shell. Nothing about the approval gate
 changes: a remote model is still a model, and agent tools still go through
-`execute_tool_call_approved`.
+`execute_tool_call_approved`. The default connectivity path is the official
+`colab ssh` bridge (no public URL, ToS-safe on every tier); public tunnels stay
+documented as an advanced paid-tier-only way to fill in Settings → Remote URL
+manually — the account-risk choice is the user's, never baked in.
