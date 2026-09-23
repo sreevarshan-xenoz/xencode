@@ -5,14 +5,21 @@
 //! `ProxyCommand`:
 //!
 //! ```text
-//! ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 -i <key> \
+//! ssh -N -L 127.0.0.1:18000:127.0.0.1:8080 -i <key> \
 //!     -o ProxyCommand="colab ssh --proxy-mode -s <session> -i <key>" \
 //!     root@colab
 //! ```
 //!
 //! OpenSSH runs `ProxyCommand` through the user's shell, so every value we
 //! interpolate into it ([`shell_quote`]) is single-quoted — a session name is
-//! user-typed and must never be interpreted as shell syntax.
+//! user-typed and must never be interpreted as shell syntax. The `-L` source
+//! port is the laptop's `local_port`; the destination is `127.0.0.1` inside
+//! the VM, where the runtime is pinned (llama.cpp 8080, ollama 11434) unless
+//! the config overrides it.
+//!
+//! Beyond the forward itself, the same ssh is used to *bootstrap* the VM
+//! (`-N` omitted, `bash -s` fed on stdin) — the bridge is ssh's transport, so
+//! a remote command is just ssh without the tunnel flag.
 
 use std::path::{Path, PathBuf};
 
@@ -159,6 +166,211 @@ pub fn pid_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
+/// Terminate a process we spawned: SIGTERM first, escalate to SIGKILL after a
+/// short grace period. Idempotent against an already-dead pid.
+pub fn terminate(pid: u32) {
+    if pid == 0 || !pid_alive(pid) {
+        return;
+    }
+    // SAFETY: kill(2) on a pid we spawned; a zombie only errno ESRCH.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    for _ in 0..5 {
+        if !pid_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if pid_alive(pid) {
+        // SAFETY: as above.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+}
+
+/// Session names flow through OpenSSH's `ProxyCommand` (a shell string, even
+/// though we single-quote it) and into the VM's process list, so they are
+/// restricted to a safe charset before anything interpolates them. Colab
+/// itself does not impose one; we do.
+pub fn validate_session_name(name: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid session name {name:?}: use 1-64 chars of [A-Za-z0-9_-]"
+        ))
+    }
+}
+
+/// The port the inference server listens on *inside* the VM. `configured` is
+/// the config's `remote_port`; `0` means "use the runtime's native port"
+/// (llama.cpp pins 8080, ollama 11434) so a config written before the runtime
+/// was chosen still boots the right endpoint.
+pub fn effective_remote_port(runtime: &str, configured: u16) -> u16 {
+    if configured != 0 {
+        return configured;
+    }
+    match runtime {
+        "ollama" => 11434,
+        _ => 8080,
+    }
+}
+
+/// Parse `colab sessions` output into the session names it lists. Lines look
+/// like `[name] endpoint | Hardware: X | Shape: Y | Variant: Z`; the
+/// "no active sessions" notice has the reserved `[colab]` name and is dropped.
+pub fn parse_sessions(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let name = line
+                .strip_prefix('[')
+                .and_then(|rest| rest.split(']').next())
+                .map(|n| n.trim())
+                .unwrap_or("");
+            if name.is_empty() || name == "colab" {
+                None
+            } else {
+                Some(name.to_string())
+            }
+        })
+        .collect()
+}
+
+/// argv of `colab sessions` (backend reachability + the session list).
+pub fn colab_sessions_argv(colab: &Path) -> Vec<String> {
+    vec![colab.display().to_string(), "sessions".to_string()]
+}
+
+/// argv of `colab new --gpu <gpu> -s <session>` — verified against the real
+/// CLI (`--session/-s`, `--gpu T4|L4|G4|H100|A100`). `new` also spawns the
+/// official keep-alive daemon, which is what keeps the VM alive.
+pub fn colab_new_argv(colab: &Path, session: &str, gpu: &str) -> Vec<String> {
+    vec![
+        colab.display().to_string(),
+        "new".to_string(),
+        "--gpu".to_string(),
+        gpu.to_string(),
+        "-s".to_string(),
+        session.to_string(),
+    ]
+}
+
+/// argv of `colab stop -s <session>` (tears the VM down and kills its
+/// keep-alive daemon).
+pub fn colab_stop_argv(colab: &Path, session: &str) -> Vec<String> {
+    vec![
+        colab.display().to_string(),
+        "stop".to_string(),
+        "-s".to_string(),
+        session.to_string(),
+    ]
+}
+
+/// The argv of a *remote command* over the same colab bridge: ssh without
+/// `-N`, ending in the target `colab-vm` + a single command string. `bash -s`
+/// (reading the bootstrap from stdin) is the shell form we run.
+pub fn exec_ssh_argv(bins: &Binaries, session: &str, key: &Path, command: &str) -> Vec<String> {
+    vec![
+        bins.ssh.display().to_string(),
+        "-i".to_string(),
+        key.display().to_string(),
+        "-o".to_string(),
+        proxy_command_opt(&bins.colab, session, key),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=no".to_string(),
+        "-o".to_string(),
+        "UserKnownHostsFile=/dev/null".to_string(),
+        "-o".to_string(),
+        "ServerAliveInterval=15".to_string(),
+        "-o".to_string(),
+        "ServerAliveCountMax=2".to_string(),
+        "colab-vm".to_string(),
+        command.to_string(),
+    ]
+}
+
+/// A minimal HTTP GET of `/v1/models` on the forward's local port, retried
+/// `attempts` times with a short gap — the liveness probe `status` reuses and
+/// `up` waits on after spawning the tunnel. `Ok` once the endpoint answers
+/// HTTP 200 any way, `Err` with the last failure after exhausting retries.
+pub async fn probe_models(
+    local_port: u16,
+    attempts: u32,
+    roundtrip: Option<std::time::Duration>,
+) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut last_err = "no attempt".to_string();
+    for _ in 0..attempts {
+        match tokio::time::timeout(
+            roundtrip.unwrap_or(std::time::Duration::from_secs(3)),
+            async {
+                let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{local_port}"))
+                    .await
+                    .map_err(|e| format!("connect to forward: {e}"))?;
+                stream
+                    .write_all(b"GET /v1/models HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                    .await
+                    .map_err(|e| format!("write probe: {e}"))?;
+                let mut buf = Vec::new();
+                stream
+                    .read_to_end(&mut buf)
+                    .await
+                    .map_err(|e| format!("read probe: {e}"))?;
+                let head = String::from_utf8_lossy(&buf[..buf.len().min(16)]);
+                if head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200") {
+                    Ok(())
+                } else {
+                    Err(format!("forward answered {head:?}"))
+                }
+            },
+        )
+        .await
+        {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => last_err = e,
+            Err(_) => last_err = "probe timed out".to_string(),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    Err(format!(
+        "endpoint did not answer /v1/models after {attempts} attempt(s): {last_err}"
+    ))
+}
+
+/// Current local time formatted as RFC3339 (`YYYY-MM-DDTHH:MM:SS+ZZ:ZZ`) — the
+/// `started_at` stamp. Deterministic enough for state, no datetime dep.
+pub fn now_rfc3339() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as libc::time_t)
+        .unwrap_or(0);
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: localtime_r fills `tm` from an epoch seconds value; the struct
+    // outlives the call.
+    unsafe { libc::localtime_r(&now, &mut tm) };
+    let off = tm.tm_gmtoff;
+    let sign = if off < 0 { '-' } else { '+' };
+    let abs = off.unsigned_abs();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{sign}{:02}:{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+        abs / 3600,
+        (abs % 3600) / 60,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,5 +491,104 @@ mod tests {
         // Give the kernel a beat to mark the process gone.
         std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(!pid_alive(pid), "reaped process reported dead");
+    }
+
+    #[test]
+    fn terminate_kills_an_uncooperative_process() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        // Our own SIGTERM target: a plain sleep ignores SIGTERM until we SIGKILL.
+        terminate(pid);
+        child.wait().expect("terminate reaps");
+        assert!(!pid_alive(pid), "terminate left the process alive");
+        // Idempotent on a dead pid.
+        terminate(pid);
+    }
+
+    #[test]
+    fn session_names_are_restricted_to_a_safe_charset() {
+        assert!(validate_session_name("xencode-t4").is_ok());
+        assert!(validate_session_name("a").is_ok());
+        assert!(validate_session_name("ab_c-D9").is_ok());
+        assert!(validate_session_name("").is_err());
+        assert!(validate_session_name("has space").is_err());
+        assert!(validate_session_name("$(rm)").is_err());
+        assert!(validate_session_name(&"x".repeat(65)).is_err());
+        assert!(validate_session_name("unïcode").is_err());
+    }
+
+    #[test]
+    fn effective_remote_port_uses_runtime_native_when_unconfigured() {
+        assert_eq!(effective_remote_port("llama.cpp", 0), 8080);
+        assert_eq!(effective_remote_port("ollama", 0), 11434);
+        assert_eq!(effective_remote_port("llama.cpp", 9000), 9000);
+        assert_eq!(effective_remote_port("ollama", 7000), 7000);
+    }
+
+    #[test]
+    fn parse_sessions_keeps_names_and_drops_the_notice() {
+        let out = "\
+[xencode-t4] http://colab-xyz.web.app | Hardware: T4 | Shape: STANDARD | Variant: GPU
+[mine2] http://colab-abc.web.app | Hardware: None | Shape: STANDARD | Variant: DEFAULT
+[colab] No active sessions found on server.
+";
+        assert_eq!(parse_sessions(out), vec!["xencode-t4", "mine2"]);
+        assert!(parse_sessions("").is_empty());
+        assert!(parse_sessions("[colab] No active sessions found on server.").is_empty());
+    }
+
+    #[test]
+    fn colab_subcommand_argv_matches_the_real_cli() {
+        assert_eq!(
+            colab_sessions_argv(Path::new("/bin/colab")),
+            vec!["/bin/colab", "sessions"]
+        );
+        assert_eq!(
+            colab_new_argv(Path::new("/bin/colab"), "xencode-t4", "T4"),
+            vec!["/bin/colab", "new", "--gpu", "T4", "-s", "xencode-t4"]
+        );
+        assert_eq!(
+            colab_stop_argv(Path::new("/bin/colab"), "xencode-t4"),
+            vec!["/bin/colab", "stop", "-s", "xencode-t4"]
+        );
+    }
+
+    #[test]
+    fn exec_ssh_argv_runs_a_remote_command_over_the_bridge() {
+        let bins = Binaries {
+            colab: PathBuf::from("/bin/colab"),
+            ssh: PathBuf::from("/usr/bin/ssh"),
+        };
+        let argv = exec_ssh_argv(&bins, "mine", Path::new("/k/k"), "bash -s");
+        assert_eq!(argv[0], "/usr/bin/ssh");
+        assert!(!argv.contains(&"-N".to_string()), "no tunnel flag");
+        assert_eq!(argv.last().map(String::as_str), Some("bash -s"));
+        assert!(
+            argv.iter().any(|a| a.starts_with("ProxyCommand=")),
+            "bridge present"
+        );
+        assert!(argv.iter().any(|a| a == "BatchMode=yes"));
+    }
+
+    #[tokio::test]
+    async fn probe_models_fails_when_nothing_is_listening() {
+        // Pick a port that is overwhelmingly free then never bind it.
+        let err = probe_models(1, 2, None)
+            .await
+            .expect_err("nothing listening");
+        assert!(err.contains("/v1/models"), "error names the probe: {err}");
+    }
+
+    #[test]
+    fn now_rfc3339_looks_like_a_timestamp() {
+        let ts = now_rfc3339();
+        let bytes = ts.as_bytes();
+        assert!(bytes.len() >= 19, "at least YYYY-MM-DDTHH:MM:SS: {ts}");
+        assert_eq!(bytes[4], b'-', "dash after year: {ts}");
+        assert_eq!(bytes[7], b'-', "dash after month: {ts}");
+        assert_eq!(bytes[10], b'T', "T separator: {ts}");
     }
 }
