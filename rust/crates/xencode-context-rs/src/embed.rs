@@ -74,17 +74,20 @@ pub fn pseudo_document(path: &str, symbols: &crate::symbols::PerFileSymbols) -> 
     }
     // Path tokens count double: path hits are cheap, reliable signal.
     toks.extend(tokenize(path));
-    for name in &symbols.structs {
-        toks.extend(symbol_tokens(name));
-    }
-    for name in &symbols.functions {
-        toks.extend(symbol_tokens(name));
-    }
-    for name in &symbols.imports {
-        toks.extend(symbol_tokens(name));
-    }
-    for name in &symbols.exports {
-        toks.extend(symbol_tokens(name));
+    for names in [
+        &symbols.structs,
+        &symbols.enums,
+        &symbols.traits,
+        &symbols.types,
+        &symbols.functions,
+        &symbols.impls,
+        &symbols.mods,
+        &symbols.imports,
+        &symbols.exports,
+    ] {
+        for name in names {
+            toks.extend(symbol_tokens(name));
+        }
     }
     toks
 }
@@ -238,6 +241,8 @@ mod tests {
                 functions: vec!["layout()".to_string()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         idx.symbols.insert(
@@ -247,6 +252,8 @@ mod tests {
                 functions: vec!["authenticate()".to_string(), "sessions()".to_string()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         let bm25 = Bm25::build(&idx);
@@ -272,6 +279,8 @@ mod tests {
                 functions: vec![],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         idx.symbols.insert(
@@ -281,6 +290,8 @@ mod tests {
                 functions: vec!["perform_login()".to_string()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         // Structural scores are equal (both filename exactly "login"); rerank

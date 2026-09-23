@@ -2430,6 +2430,10 @@ mod tests {
         std::fs::write(root.join("src/a.rs"), "use crate::b::bee;\n").unwrap();
         std::fs::write(root.join("src/b.rs"), "use crate::a::ay;\n").unwrap();
         std::fs::write(root.join("src/c.rs"), "pub fn cc() {}\n").unwrap();
+        // Nothing declares or imports this one, so it is the only real orphan in
+        // the tree: `mod c;` in lib.rs connects c.rs, which the graph could not
+        // see until module declarations counted as edges.
+        std::fs::write(root.join("src/unreferenced.rs"), "pub fn u() {}\n").unwrap();
         std::fs::File::create(root.join("Cargo.toml")).unwrap();
         xencode_context_rs::init_project(
             &root,
@@ -2444,11 +2448,14 @@ mod tests {
             .any(|i| i.kind == AdviceKind::Cycle && i.file == "src/a.rs"));
         assert!(items
             .iter()
+            .any(|i| i.kind == AdviceKind::Orphan && i.file == "src/unreferenced.rs"));
+        assert!(!items
+            .iter()
             .any(|i| i.kind == AdviceKind::Orphan && i.file == "src/c.rs"));
 
-        let filtered = compute_advise(&root, Some("c.rs")).unwrap();
+        let filtered = compute_advise(&root, Some("unreferenced.rs")).unwrap();
         assert!(!filtered.is_empty());
-        assert!(filtered.iter().all(|i| i.file.contains("c.rs")));
+        assert!(filtered.iter().all(|i| i.file.contains("unreferenced.rs")));
         assert!(compute_advise(&root, Some("nope")).unwrap().is_empty());
 
         // No snapshot at all → actionable error, not an empty report.

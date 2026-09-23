@@ -353,6 +353,9 @@ xencode worktree remove ../feature-x
 ### `xencode advise [FILTER] [--json] [--limit 40]`
 Repository insights from the `.xencode` snapshot written by the TUI's
 `/init`: broken imports, import cycles, hub files and orphans.
+The dependency graph behind them is built from `use` statements, `mod`
+declarations and `impl Trait for Type` blocks, so a file an orphan report
+names is one none of those reach in either direction.
 `FILTER` is a positional substring matched against each finding's file
 path; `--limit 0` shows everything. Errors with exit 1 when the project
 has no index yet.

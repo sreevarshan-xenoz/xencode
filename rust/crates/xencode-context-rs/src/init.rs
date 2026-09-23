@@ -264,7 +264,17 @@ pub fn init_project(
     if !rust_files.is_empty() {
         let symbol_count: usize = symbols
             .values()
-            .map(|s| s.structs.len() + s.functions.len() + s.imports.len() + s.exports.len())
+            .map(|s| {
+                s.structs.len()
+                    + s.enums.len()
+                    + s.traits.len()
+                    + s.impls.len()
+                    + s.types.len()
+                    + s.functions.len()
+                    + s.imports.len()
+                    + s.exports.len()
+                    + s.mods.len()
+            })
             .sum();
         emit(
             &mut progress,

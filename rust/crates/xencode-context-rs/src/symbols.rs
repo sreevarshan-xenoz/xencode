@@ -3,18 +3,22 @@
 //! Pass 2 of the context engine, still fully deterministic and zero-LLM.
 //! This is the seed of the Xencode "repository map" (Aider-style):
 //!
-//!   - regex extraction of `structs` / `functions` / `imports` / `exports`
-//!     from Rust source files (`symbols.json`)
+//!   - regex extraction of `structs` / `enums` / `traits` / `impls` / `types` /
+//!     `functions` / `imports` / `exports` / `mods` from Rust source files
+//!     (`symbols.json`)
 //!   - module resolution (`crate::`, `super::`, `self::`, plain-relative)
 //!     against the known Rust file set, producing a file→file
-//!     dependency graph (`deps.json`)
+//!     dependency graph (`deps.json`), from `use` statements, `mod`
+//!     declarations and `impl Trait for Type` blocks
 //!   - deterministic centrality ranking + dependency expansion, which M2's
 //!     retrieval/budgeter consumes as its structural signal
 //!
 //! Resolution is intentionally cheap and best-effort: `use` statements that
 //! point at external crates (not resolvable to a file in this workspace) are
-//! simply not turned into edges. Tree-sitter may replace the extraction layer
-//! later; the on-disk schemas are stable.
+//! simply not turned into edges, and neither is an `impl` of a trait that two
+//! indexed files both define — a name with no single owner is refused, not
+//! guessed. Tree-sitter may replace the extraction layer later; the on-disk
+//! schemas are stable.
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -23,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 /// Symbol inventory for one source file (`symbols.json` value).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PerFileSymbols {
+    /// `struct` declarations, public or not.
     #[serde(default)]
     pub structs: Vec<String>,
     #[serde(default)]
@@ -30,9 +35,31 @@ pub struct PerFileSymbols {
     /// Raw `use` statements (trimmed, `use`/`;` removed).
     #[serde(default)]
     pub imports: Vec<String>,
-    /// Names re-exported via `pub use`.
+    /// Names made visible by `pub use`, i.e. the last path segment of each
+    /// re-export (`pub use database::Pool` → `Pool`, not `database`).
     #[serde(default)]
     pub exports: Vec<String>,
+    /// Module declarations: the names in `mod x;` / `pub mod x;`. These carry no
+    /// `use` keyword, so they are invisible to `imports`, but they are the edge
+    /// from a crate root (or a `mod.rs`) to the file that module lives in —
+    /// without them a module tree contributes no edges at all. Inline
+    /// `mod name { … }` blocks declare nothing new and are not collected.
+    #[serde(default)]
+    pub mods: Vec<String>,
+    /// `enum` declarations, public or not.
+    #[serde(default)]
+    pub enums: Vec<String>,
+    /// Traits *defined* here. Paired with `impls` to resolve which file a trait
+    /// is implemented from.
+    #[serde(default)]
+    pub traits: Vec<String>,
+    /// Trait names this file implements (`impl MyTrait for Foo` → `MyTrait`),
+    /// excluding inherent `impl Foo {}` blocks.
+    #[serde(default)]
+    pub impls: Vec<String>,
+    /// `type Alias = …` declarations.
+    #[serde(default)]
+    pub types: Vec<String>,
 }
 
 /// A resolved file→file dependency edge (`deps.json` entry).
@@ -50,21 +77,60 @@ struct RegexCache {
     functions: Regex,
     imports: Regex,
     exports: Regex,
+    mods: Regex,
+    enums: Regex,
+    traits: Regex,
+    impls: Regex,
+    types: Regex,
 }
+
+/// Prefixes that can appear before `fn`, `struct`, `enum`, `trait` or `type` in
+/// any order: visibility, `const`, `async`, `unsafe`, `default`, `auto`, and
+/// `extern` with an optional ABI (`extern "C" fn`).
+const ITEM_PREFIX: &str = r#"(?:pub(?:\([^)]*\))?\s+|crate\s+|const\s+|async\s+|unsafe\s+|default\s+|auto\s+|extern(?:\s*"[^"]*")?\s+)*"#;
 
 fn regexes() -> &'static RegexCache {
     static CACHE: std::sync::OnceLock<RegexCache> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| RegexCache {
-        structs: Regex::new(
-            r"(?m)^\s*pub(?:\([^)]*\))?\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)",
-        )
+        // `pub` is not required: a private `struct` is still a declaration this
+        // file owns, and hiding it made the inventory of any module-private type
+        // empty.
+        structs: Regex::new(&format!(
+            r"(?m)^\s*{ITEM_PREFIX}struct\s+([A-Za-z_][A-Za-z0-9_]*)"
+        ))
         .unwrap(),
-        functions: Regex::new(
-            r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
-        )
+        functions: Regex::new(&format!(
+            r"(?m)^\s*{ITEM_PREFIX}fn\s+([A-Za-z_][A-Za-z0-9_]*)"
+        ))
         .unwrap(),
         imports: Regex::new(r"(?m)^\s*(?:pub\s+)?use\s+([^;]+);").unwrap(),
-        exports: Regex::new(r"(?m)^\s*pub\s+use\s+([A-Za-z_][A-Za-z0-9_]*)(?:::|;)").unwrap(),
+        // The whole path, not its first segment: the name a `pub use` re-exports
+        // is what the crate exports, and `export_names` reads it off the end.
+        exports: Regex::new(r"(?m)^\s*pub\s+use\s+([^;]+);").unwrap(),
+        // Trailing `;` is load-bearing: `mod tests { … }` is an inline namespace,
+        // not a file declaration. Read as one it would claim any module that
+        // happens to share the block's name — `tests.rs` is common enough — as a
+        // child of every file that has a test block.
+        mods: Regex::new(
+            r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
+        )
+        .unwrap(),
+        enums: Regex::new(&format!(
+            r"(?m)^\s*{ITEM_PREFIX}enum\s+([A-Za-z_][A-Za-z0-9_]*)"
+        ))
+        .unwrap(),
+        traits: Regex::new(&format!(
+            r"(?m)^\s*{ITEM_PREFIX}trait\s+([A-Za-z_][A-Za-z0-9_]*)"
+        ))
+        .unwrap(),
+        // The trait of an `impl Trait for Type`, and nothing else: an inherent
+        // `impl Type {}` names a type this file can already reach, so it is not a
+        // dependency. Generic arguments on either side are dropped with it.
+        impls: Regex::new(r"(?m)^\s*(?:unsafe\s+)?impl(?:<[^{;]*?>)?\s+([A-Za-z_][A-Za-z0-9_:]*)\s*(?:<[^{;]*?>)?\s+for\b").unwrap(),
+        types: Regex::new(&format!(
+            r"(?m)^\s*{ITEM_PREFIX}type\s+([A-Za-z_][A-Za-z0-9_]*)\s*="
+        ))
+        .unwrap(),
     })
 }
 
@@ -73,38 +139,132 @@ fn regexes() -> &'static RegexCache {
 pub fn extract_rust_symbols(content: &str) -> PerFileSymbols {
     let c = regexes();
 
-    let mut structs: Vec<String> = c
-        .structs
-        .captures_iter(content)
-        .map(|m| m[1].to_string())
-        .collect();
-    let mut functions: Vec<String> = c
-        .functions
-        .captures_iter(content)
-        .map(|m| m[1].to_string())
-        .collect();
-    let mut imports: Vec<String> = c
-        .imports
-        .captures_iter(content)
-        .map(|m| m[1].trim().to_string())
-        .collect();
+    let collect = |re: &Regex| -> Vec<String> {
+        let mut names: Vec<String> = re
+            .captures_iter(content)
+            .map(|m| m[1].trim().to_string())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    };
+
+    // `exports` is the one list that is not a bare capture: a `pub use` can name
+    // several items at once, so its payload expands to more than one entry.
     let mut exports: Vec<String> = c
         .exports
         .captures_iter(content)
-        .map(|m| m[1].to_string())
+        .flat_map(|m| export_names(&m[1]))
         .collect();
+    exports.sort();
+    exports.dedup();
 
-    for list in [&mut structs, &mut functions, &mut imports, &mut exports] {
-        list.sort();
-        list.dedup();
-    }
+    let mut impls: Vec<String> = c
+        .impls
+        .captures_iter(content)
+        .filter_map(|m| trait_impl_target(&m[1]))
+        .collect();
+    impls.sort();
+    impls.dedup();
 
     PerFileSymbols {
-        structs,
-        functions,
-        imports,
+        structs: collect(&c.structs),
+        functions: collect(&c.functions),
+        imports: collect(&c.imports),
         exports,
+        mods: collect(&c.mods),
+        enums: collect(&c.enums),
+        traits: collect(&c.traits),
+        impls,
+        types: collect(&c.types),
     }
+}
+
+/// The names a `pub use` payload re-exports: the last segment of each path
+/// (`database::Pool` → `Pool`), honouring ` as ` aliases and brace groups
+/// (`foo::{A, B::C}` → `A`, `C`). A glob (`foo::*`) re-exports names this file
+/// does not list, so it contributes none.
+fn export_names(raw: &str) -> Vec<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Vec::new();
+    }
+    let items: Vec<String> = if let Some((head, tail)) = s.split_once('{') {
+        let Some((inner, _)) = tail.split_once('}') else {
+            return Vec::new();
+        };
+        inner
+            .split(',')
+            .map(|item| format!("{head}{item}"))
+            .collect()
+    } else {
+        vec![s.to_string()]
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let item = item.trim();
+            if item.is_empty() || item.contains('*') || item.contains('{') || item.contains('}') {
+                return None;
+            }
+            let last = match item.rsplit_once(" as ") {
+                Some((_, alias)) => alias,
+                None => item.rsplit("::").next()?,
+            };
+            let last = last.trim();
+            if is_ident(last) {
+                Some(last.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The trait an `impl Trait for Type` implements, from the trait path's last
+/// segment (`std::fmt::Debug` → `Debug`).
+fn trait_impl_target(path: &str) -> Option<String> {
+    let last = path.rsplit("::").next()?.trim();
+    is_ident(last).then(|| last.to_string())
+}
+
+/// The directory a file's own submodules live in. `src/lib.rs`, `src/main.rs`
+/// and `src/api/mod.rs` all describe modules whose children sit beside them, so
+/// for those it is the file's directory; for any other file `src/wire.rs` the
+/// children live in the directory named after it (`src/wire/`).
+fn module_dir(file: &str) -> String {
+    let base = dir_of(file);
+    let name = file.rsplit('/').next().unwrap_or(file);
+    if matches!(name, "mod.rs" | "lib.rs" | "main.rs") {
+        base
+    } else {
+        let stem = name.strip_suffix(".rs").unwrap_or(name);
+        if base.is_empty() {
+            stem.to_string()
+        } else {
+            format!("{base}/{stem}")
+        }
+    }
+}
+
+/// The file a `mod name;` declaration in `file` refers to, if it is one of the
+/// known files. Rust accepts either `dir/name.rs` or `dir/name/mod.rs` for a
+/// module declared in `dir/`, where `dir` is the directory the declaring file's
+/// *module* owns (see `module_dir`).
+fn resolve_mod_decl(file: &str, name: &str, files: &HashSet<&str>) -> Option<String> {
+    let base = module_dir(file);
+    [join_rel(&base, name, false), join_rel(&base, name, true)]
+        .into_iter()
+        .find(|candidate| files.contains(candidate.as_str()))
 }
 
 /// Which namespace an import resolves relative to.
@@ -228,7 +388,10 @@ fn module_base(file: &str, qual: &Qualifier) -> String {
     match qual {
         // `crate::` base is supplied separately (root of the enclosing crate).
         Qualifier::Crate => String::new(),
-        Qualifier::SelfMod | Qualifier::Plain => dir_of(file),
+        // `self::` is the current module, whose children live in `module_dir`.
+        // For `src/wire.rs` that is `src/wire`, not the `src` a bare path tries.
+        Qualifier::SelfMod => module_dir(file),
+        Qualifier::Plain => dir_of(file),
         Qualifier::Super { up } => {
             let mut dir = if is_mod_rs {
                 parent_of(&dir_of(file))
@@ -354,6 +517,21 @@ pub(crate) fn crate_root_for<'a>(file: &str, roots: &'a [String]) -> Option<&'a 
     candidates.last().map(|r| r.as_str())
 }
 
+/// The file that declares trait `name`, when exactly one known file does.
+/// Two files declaring the same trait name is a real possibility in a
+/// multi-crate workspace, and guessing between them would invent an edge, so
+/// an ambiguous name yields none.
+fn resolve_trait_decl<'a>(
+    file: &str,
+    name: &str,
+    trait_files: &'a BTreeMap<&'a str, Vec<&'a str>>,
+) -> Option<&'a str> {
+    let [only] = trait_files.get(name)?.as_slice() else {
+        return None;
+    };
+    (*only != file).then_some(*only)
+}
+
 /// Build the file→file dependency graph from extracted symbols.
 /// Edges are sorted + deduped for deterministic output.
 pub fn build_graph(
@@ -362,6 +540,17 @@ pub fn build_graph(
 ) -> Vec<DepEdge> {
     let file_set: HashSet<&str> = rust_files.iter().map(|s| s.as_str()).collect();
     let roots = crate_roots(rust_files);
+
+    // Trait name → the files defining it, for `impl Trait for Type` edges.
+    let mut trait_files: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (file, sym) in symbols {
+        for name in &sym.traits {
+            trait_files
+                .entry(name.as_str())
+                .or_default()
+                .push(file.as_str());
+        }
+    }
 
     let mut edges: Vec<DepEdge> = Vec::new();
     for file in rust_files {
@@ -375,6 +564,31 @@ pub fn build_graph(
                     from: file.clone(),
                     to,
                     via,
+                });
+            }
+        }
+        // Module declarations, in file order after the imports so the reason a
+        // tree is connected ("this file declares that module") stays separate
+        // from "this file names that path in a use statement".
+        for name in &sym.mods {
+            if let Some(to) = resolve_mod_decl(file, name, &file_set) {
+                edges.push(DepEdge {
+                    from: file.clone(),
+                    to,
+                    via: format!("mod {name}"),
+                });
+            }
+        }
+        // An `impl Trait for Type` depends on the file that declares the trait.
+        // Rust lets you write that impl with no `use` of the trait in sight (a
+        // prelude or a re-export can bring it in), so imports alone never showed
+        // the relationship.
+        for name in &sym.impls {
+            if let Some(to) = resolve_trait_decl(file, name, &trait_files) {
+                edges.push(DepEdge {
+                    from: file.clone(),
+                    to: to.to_string(),
+                    via: format!("impl {name}"),
                 });
             }
         }
@@ -451,43 +665,152 @@ mod tests {
     }
 
     #[test]
-    fn extracts_structs_functions_imports_exports() {
+    fn extracts_declared_items_regardless_of_visibility() {
         let content = r#"
 pub struct User {
     id: u64,
 }
 
+struct Session;
+
 #[derive(Debug)]
-pub struct Session;
+pub enum Choice { A, B }
+
+pub trait Speak { fn say(&self) -> String; }
+
+type Handle = User;
 
 pub fn connect() {}
 
 pub async fn refresh() {}
 
+const fn tick() -> u64 { 0 }
+
+pub unsafe extern "C" fn callback() {}
+
 use std::collections::HashMap;
 
+// These examples are deliberately not `crate::`-anchored: this text lives in a
+// file the indexer reads, so an anchored path here would be reported as one of
+// this workspace's own broken imports.
 pub use database::Pool;
+pub use net::{http::Client, ws};
+pub use legacy::Old as Newer;
+pub use bundle::*;
 
 fn helper() {}
 "#;
         let sym = extract_rust_symbols(content);
+        // A private `struct` is still something this file declares.
         assert_eq!(sym.structs, vec!["Session".to_string(), "User".to_string()]);
+        assert_eq!(sym.enums, vec!["Choice".to_string()]);
+        assert_eq!(sym.traits, vec!["Speak".to_string()]);
+        assert_eq!(sym.types, vec!["Handle".to_string()]);
+        // `const fn` and `extern "C" fn` are functions too; the `fn say` inside
+        // the trait's own line is not.
         assert_eq!(
             sym.functions,
             vec![
+                "callback".to_string(),
                 "connect".to_string(),
                 "helper".to_string(),
-                "refresh".to_string()
+                "refresh".to_string(),
+                "tick".to_string(),
             ]
         );
         assert_eq!(
             sym.imports,
             vec![
+                "bundle::*".to_string(),
                 "database::Pool".to_string(),
-                "std::collections::HashMap".to_string()
+                "legacy::Old as Newer".to_string(),
+                "net::{http::Client, ws}".to_string(),
+                "std::collections::HashMap".to_string(),
             ]
         );
-        assert_eq!(sym.exports, vec!["database".to_string()]);
+        // The exported *name*, not the module it came from; a glob exports names
+        // this file cannot list, so it contributes none.
+        assert_eq!(
+            sym.exports,
+            vec![
+                "Client".to_string(),
+                "Newer".to_string(),
+                "Pool".to_string(),
+                "ws".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn trait_impls_name_the_trait_and_not_the_type() {
+        let content = r#"
+pub struct Dog;
+pub struct LoudDog;
+pub struct Kit;
+
+impl Dog { pub fn bark(&self) {} }
+
+impl Speak for Dog {}
+impl crate::speak::Speak for LoudDog {}
+impl<T: Clone> Pack<T> for Kit {}
+impl std::fmt::Debug for Dog { fn fmt(&self, _: &mut std::fmt::Formatter) -> std::fmt::Result {} }
+"#;
+        let sym = extract_rust_symbols(content);
+        // The inherent `impl Dog` is absent and the generic arguments are
+        // stripped, so what is left is the trait each impl depends on.
+        assert_eq!(
+            sym.impls,
+            vec!["Debug".to_string(), "Pack".to_string(), "Speak".to_string(),]
+        );
+    }
+
+    #[test]
+    fn implements_trait_reaches_the_file_that_declares_it() {
+        let files = [
+            ("src/lib.rs", "pub mod speak;\npub mod dog;\n"),
+            (
+                "src/speak.rs",
+                "pub trait Speak { fn say(&self) -> String; }\npub struct Echo;\nimpl Speak for Echo {}\n",
+            ),
+            (
+                "src/dog.rs",
+                "pub struct Dog;\nimpl crate::speak::Speak for Dog {}\n",
+            ),
+        ];
+        let rust_files = rust_paths(&files);
+        let symbols = symbols_from(&files);
+        let graph = build_graph(&rust_files, &symbols);
+        let edges: Vec<(&str, &str, &str)> = graph
+            .iter()
+            .filter(|e| e.via.starts_with("impl "))
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.via.as_str()))
+            .collect();
+        // dog.rs implements a trait it never `use`s, and speak.rs implements its
+        // own trait in place — only the first is an edge.
+        assert_eq!(edges, vec![("src/dog.rs", "src/speak.rs", "impl Speak")]);
+    }
+
+    #[test]
+    fn an_ambiguous_trait_name_yields_no_edge() {
+        // Two crates in one workspace may each declare `Shape`; guessing which one
+        // an impl refers to would invent a dependency.
+        let files = [
+            ("a/lib.rs", "pub mod shape;\npub mod widget;\n"),
+            ("a/shape.rs", "pub trait Shape {}\n"),
+            ("b/lib.rs", "pub mod shape;\n"),
+            ("b/shape.rs", "pub trait Shape {}\n"),
+            (
+                "a/widget.rs",
+                "pub struct Widget;\nimpl b::shape::Shape for Widget {}\n",
+            ),
+        ];
+        let rust_files = rust_paths(&files);
+        let symbols = symbols_from(&files);
+        let graph = build_graph(&rust_files, &symbols);
+        assert!(
+            !graph.iter().any(|e| e.via.starts_with("impl ")),
+            "{graph:?}"
+        );
     }
 
     #[test]
@@ -517,6 +840,14 @@ fn helper() {}
         assert_eq!(
             edges,
             vec![
+                // Module declarations: `pub mod x;` is the only thing that
+                // connects a crate root to its modules, and a `mod.rs` to its
+                // submodules, so a module tree is invisible without them.
+                (
+                    "api/mod.rs".to_string(),
+                    "api/models.rs".to_string(),
+                    "mod models".to_string()
+                ),
                 (
                     "api/models.rs".to_string(),
                     "db/conn.rs".to_string(),
@@ -526,6 +857,21 @@ fn helper() {}
                     "db/conn.rs".to_string(),
                     "api/models.rs".to_string(),
                     "crate::api::models".to_string()
+                ),
+                (
+                    "db/mod.rs".to_string(),
+                    "db/conn.rs".to_string(),
+                    "mod conn".to_string()
+                ),
+                (
+                    "lib.rs".to_string(),
+                    "api/mod.rs".to_string(),
+                    "mod api".to_string()
+                ),
+                (
+                    "lib.rs".to_string(),
+                    "db/mod.rs".to_string(),
+                    "mod db".to_string()
                 ),
             ]
         );
@@ -538,9 +884,10 @@ fn helper() {}
             ("src/app/mod.rs", "pub mod foo;\npub mod bar;\n"),
             (
                 "src/app/foo.rs",
-                "use super::bar::Baz;\nuse crate::srv::serve;\npub struct Foo {}\n",
+                "use super::bar::Baz;\nuse crate::srv::serve;\nuse self::detail::D;\npub struct Foo {}\n",
             ),
             ("src/app/bar.rs", "pub struct Bar;\n"),
+            ("src/app/foo/detail.rs", "pub struct D;\n"),
             ("src/srv/mod.rs", "pub fn serve() {}\n"),
         ];
         let rust_files = rust_paths(&files);
@@ -553,17 +900,20 @@ fn helper() {}
             .map(|e| (e.to.clone(), e.via.clone()))
             .collect();
 
+        // `self::detail` is `src/app/foo/detail.rs`: the module `foo` owns a
+        // directory, so its children are not the file's siblings.
         assert_eq!(
             edges_a,
             vec![
                 ("src/app/bar.rs".to_string(), "super::bar".to_string()),
+                ("src/app/foo/detail.rs".to_string(), "detail".to_string()),
                 ("src/srv/mod.rs".to_string(), "crate::srv".to_string()),
             ]
         );
     }
 
     #[test]
-    fn resolves_module_tree_with_mod_and_sibling_files() {
+    fn resolves_module_tree_with_mod_and_qualified_imports() {
         let files = [
             ("src/lib.rs", "pub mod core;\n"),
             ("src/core/mod.rs", "pub mod util;\npub use util::helper;\n"),
@@ -571,7 +921,7 @@ fn helper() {}
                 "src/core/util.rs",
                 "use super::trait_b::Thing;\nuse self::sibling::S;\npub fn helper() {}\n",
             ),
-            ("src/core/sibling.rs", "pub struct S;\n"),
+            ("src/core/util/sibling.rs", "pub struct S;\n"),
             ("src/core/trait_b/mod.rs", "pub struct Thing;\n"),
         ];
         let rust_files = rust_paths(&files);
@@ -596,13 +946,26 @@ fn helper() {}
             "src/core/trait_b/mod.rs".to_string(),
             "super::trait_b".to_string()
         )));
-        // util.rs self::sibling -> file in the same dir.
+        // util.rs self::sibling -> a child of the `util` module, which lives in
+        // the directory named after the file.
         assert!(edges.contains(&(
             "src/core/util.rs".to_string(),
-            "src/core/sibling.rs".to_string(),
+            "src/core/util/sibling.rs".to_string(),
             "sibling".to_string()
         )));
-        assert_eq!(edges.len(), 3, "only the three resolved edges expected");
+        // `pub mod core;` in lib.rs and `pub mod util;` in core/mod.rs are the
+        // two module-declaration edges; the three below come from `use`.
+        assert!(edges.contains(&(
+            "src/lib.rs".to_string(),
+            "src/core/mod.rs".to_string(),
+            "mod core".to_string()
+        )));
+        assert!(edges.contains(&(
+            "src/core/mod.rs".to_string(),
+            "src/core/util.rs".to_string(),
+            "mod util".to_string()
+        )));
+        assert_eq!(edges.len(), 5, "only the five resolved edges expected");
     }
 
     #[test]
@@ -619,12 +982,18 @@ fn helper() {}
         let symbols = symbols_from(&files);
 
         let graph = build_graph(&rust_files, &symbols);
-        assert_eq!(graph.len(), 1);
-        assert_eq!(graph[0].from, "src/app.rs");
-        assert_eq!(graph[0].to, "src/app/other.rs");
+        // Two, not one: `pub mod app;` in lib.rs is a real edge. The point of
+        // this test is that nothing external or globbed sneaks in.
+        assert_eq!(graph.len(), 2, "{graph:?}");
+        let resolved = graph
+            .iter()
+            .find(|e| e.via != "mod app")
+            .expect("the crate-internal import should resolve");
+        assert_eq!(resolved.from, "src/app.rs");
+        assert_eq!(resolved.to, "src/app/other.rs");
         // Longest module prefix wins: `app::other` resolves through the
         // existing `src/app/other.rs` module file.
-        assert_eq!(graph[0].via, "crate::app::other");
+        assert_eq!(resolved.via, "crate::app::other");
     }
 
     #[test]
@@ -690,16 +1059,23 @@ fn helper() {}
         let ranked_again = rank_files(&graph, &rust_files);
         assert_eq!(ranked, ranked_again, "ranking must be deterministic");
 
-        // Both participating files have in-degree 1 (score 2) + out-degree 1
-        // (score 3 total); the rest have score 0.
+        // A file is worth 2 per dependents and 1 per thing it imports. With the
+        // module tree visible, that ranking changes shape: the two files that
+        // import each other are each imported by a third file now (their
+        // `mod.rs`), so they rise from 3 to 5; each `mod.rs` has one submodule
+        // and one parent; and `lib.rs`, which imports nothing but declares two
+        // modules, is no longer a zero-scoring leaf.
         let by_path: BTreeMap<String, u64> = ranked.into_iter().collect();
-        assert_eq!(by_path["db/conn.rs"], 3);
-        assert_eq!(by_path["api/models.rs"], 3);
-        assert_eq!(by_path["lib.rs"], 0);
+        assert_eq!(by_path["db/conn.rs"], 5);
+        assert_eq!(by_path["api/models.rs"], 5);
+        assert_eq!(by_path["api/mod.rs"], 3);
+        assert_eq!(by_path["db/mod.rs"], 3);
+        assert_eq!(by_path["lib.rs"], 2);
         // Ranking order: highest score first; ties by path.
         let order: Vec<String> = ranked_again.into_iter().map(|(p, _)| p).collect();
         assert_eq!(order[0], "api/models.rs".to_string());
         assert_eq!(order[1], "db/conn.rs".to_string());
+        assert_eq!(order[2], "api/mod.rs".to_string());
     }
 
     #[test]
@@ -715,9 +1091,58 @@ fn helper() {}
         let graph = build_graph(&rust_files, &symbols);
 
         let deps = dependent_map(&graph);
-        assert_eq!(deps["c.rs"], vec!["b.rs".to_string()]);
+        // c.rs is named by b.rs's import and declared by lib.rs's `pub mod c;`.
+        assert_eq!(deps["c.rs"], vec!["b.rs".to_string(), "lib.rs".to_string()]);
         let fwd = dependency_map(&graph);
         assert_eq!(fwd["b.rs"], vec!["c.rs".to_string()]);
+    }
+
+    #[test]
+    fn a_module_declared_by_a_plain_file_lives_under_the_directory_named_after_it() {
+        // `src/wire.rs` is the module `crate::wire`, so the module it declares is
+        // `src/wire/frame.rs` — not a sibling `src/frame.rs`.
+        let files = [
+            ("src/lib.rs", "pub mod wire;\n"),
+            ("src/wire.rs", "mod frame;\npub struct Wire;\n"),
+            ("src/wire/frame.rs", "pub struct Frame;\n"),
+        ];
+        let rust_files = rust_paths(&files);
+        let symbols = symbols_from(&files);
+        let graph = build_graph(&rust_files, &symbols);
+        let edges: Vec<(&str, &str, &str)> = graph
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.via.as_str()))
+            .collect();
+        assert_eq!(
+            edges,
+            vec![
+                ("src/lib.rs", "src/wire.rs", "mod wire"),
+                ("src/wire.rs", "src/wire/frame.rs", "mod frame"),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_module_blocks_declare_no_file_and_yield_no_edge() {
+        // Nearly every Rust file has `mod tests { … }`. If that counted as a
+        // module declaration the graph would gain one self-ish edge per file.
+        let files = [
+            (
+                "src/lib.rs",
+                "pub mod api;\nmod tests {\n    fn t() {}\n}\n",
+            ),
+            ("src/api.rs", "pub struct Api;\n"),
+        ];
+        let rust_files = rust_paths(&files);
+        let symbols = symbols_from(&files);
+        assert_eq!(symbols["src/lib.rs"].mods, vec!["api".to_string()]);
+
+        let graph = build_graph(&rust_files, &symbols);
+        let edges: Vec<(&str, &str, &str)> = graph
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), e.via.as_str()))
+            .collect();
+        assert_eq!(edges, vec![("src/lib.rs", "src/api.rs", "mod api")]);
     }
 
     #[test]
@@ -727,5 +1152,10 @@ fn helper() {}
         assert!(sym.functions.is_empty());
         assert!(sym.imports.is_empty());
         assert!(sym.exports.is_empty());
+        assert!(sym.mods.is_empty());
+        assert!(sym.enums.is_empty());
+        assert!(sym.traits.is_empty());
+        assert!(sym.impls.is_empty());
+        assert!(sym.types.is_empty());
     }
 }

@@ -276,6 +276,9 @@ fn score_file(
             .functions
             .iter()
             .chain(syms.structs.iter())
+            .chain(syms.enums.iter())
+            .chain(syms.traits.iter())
+            .chain(syms.types.iter())
             .chain(syms.exports.iter())
         {
             let lower = symbol.to_ascii_lowercase();
@@ -338,6 +341,8 @@ mod tests {
                 functions: fns.iter().map(|s| s.to_string()).collect(),
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         )
     }

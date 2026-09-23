@@ -207,6 +207,8 @@ mod tests {
                 functions: vec!["retrieve".into(), "word_tokens".into()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         idx.symbols.insert(
@@ -216,6 +218,8 @@ mod tests {
                 functions: vec!["est_tokens".into(), "truncate_to_tokens".into()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         idx.symbols.insert(
@@ -225,6 +229,8 @@ mod tests {
                 functions: vec!["submit_message".into()],
                 imports: vec![],
                 exports: vec![],
+                mods: vec![],
+                ..Default::default()
             },
         );
         idx
