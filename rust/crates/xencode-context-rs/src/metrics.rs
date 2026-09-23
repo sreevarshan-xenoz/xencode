@@ -131,14 +131,11 @@ pub fn append_metrics(xencode_dir: &Path, m: &RequestMetrics) -> std::io::Result
     writeln!(file, "{line}")
 }
 
-/// Read every row recorded so far; corrupt lines are skipped.
+/// Read every row recorded so far. A run that was killed while appending
+/// leaves a partial last line, and `metrics.jsonl` is still readable
+/// otherwise, so that line is dropped rather than failing the read.
 pub fn read_metrics(xencode_dir: &Path) -> Vec<RequestMetrics> {
-    let Ok(text) = fs::read_to_string(metrics_path(xencode_dir)) else {
-        return Vec::new();
-    };
-    text.lines()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
+    xencode_core_rs::read_jsonl_tolerant(&metrics_path(xencode_dir)).rows
 }
 
 #[cfg(test)]
@@ -190,6 +187,29 @@ mod tests {
         let dir = temp_dir();
         fs::create_dir_all(&dir).unwrap();
         assert!(read_metrics(&dir.join(".xencode")).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_row_cut_off_by_a_crash_is_dropped_and_the_earlier_ones_survive() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut m = RequestMetrics::new("BALANCED", 8192);
+        m.cached_tokens = 4912;
+        append_metrics(&xencode, &m).unwrap();
+        // Simulate the process being killed mid-append: the bytes written so
+        // far stop inside the next record.
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .append(true)
+            .open(metrics_path(&xencode))
+            .unwrap();
+        f.write_all(b"{\"profile\":\"LOW\",\"max_context").unwrap();
+        f.flush().unwrap();
+
+        let rows = read_metrics(&xencode);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cached_tokens, 4912);
         fs::remove_dir_all(dir).unwrap();
     }
 
