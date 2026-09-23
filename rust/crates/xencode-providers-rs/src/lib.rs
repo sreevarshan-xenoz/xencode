@@ -246,10 +246,18 @@ fn llamacpp_target(model: &str) -> Option<&str> {
         })
 }
 
+/// Extract the inner model identifier if `model` routes to the custom
+/// OpenAI-compatible endpoint (`remote:<model>`).
+fn remote_target(model: &str) -> Option<&str> {
+    model.strip_prefix("remote:")
+}
+
 /// ProviderManager abstracts over local and cloud models.
 ///
-/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud), Gemini (cloud),
-/// and Anthropic (cloud).
+/// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud),
+/// Gemini (cloud), Anthropic (cloud), and any OpenAI-compatible `/chat/completions`
+/// server the user pointed at (`remote:`, which is also how a Colab GPU reaches
+/// the laptop).
 ///
 /// Features:
 /// - Automatic provider routing based on model prefix
@@ -262,6 +270,9 @@ pub struct ProviderManager {
     qwen_api_key: Option<String>,
     gemini_api_key: Option<String>,
     anthropic_api_key: Option<String>,
+    /// API root of the `remote:` endpoint; `None` until one is configured.
+    remote_base_url: Option<String>,
+    remote_api_key: Option<String>,
     retry_config: RetryConfig,
     client: reqwest::Client,
     /// Per-request silence bound (seconds). Streaming responses get a
@@ -288,11 +299,25 @@ impl ProviderManager {
             qwen_api_key,
             gemini_api_key,
             anthropic_api_key,
+            remote_base_url: None,
+            remote_api_key: None,
             retry_config: RetryConfig::default(),
             client,
             request_timeout_secs: 0,
             llamacpp_timings: Mutex::new(None),
         }
+    }
+
+    /// Point the `remote:` prefix at an OpenAI-compatible server. An empty or
+    /// whitespace `base_url` leaves the route unconfigured, so a `remote:`
+    /// request reports that instead of dialling a guessed host.
+    pub fn with_remote(mut self, base_url: &str, api_key: Option<String>) -> Self {
+        let base_url = base_url.trim();
+        if !base_url.is_empty() {
+            self.remote_base_url = Some(base_url.to_string());
+            self.remote_api_key = api_key.filter(|key| !key.trim().is_empty());
+        }
+        self
     }
 
     /// Set a llama.cpp client for local GGUF/llama-server inference.
@@ -328,6 +353,7 @@ impl ProviderManager {
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
     /// - `llamacpp:` / `llama.cpp:` / `llama:` → llama.cpp server
+    /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
     ///
@@ -383,6 +409,23 @@ impl ProviderManager {
         self.llamacpp_timings.lock().unwrap().clone()
     }
 
+    /// The configured OpenAI-compatible endpoint, or a message saying how to
+    /// configure one. Never falls back to a default host: a mistyped or absent
+    /// URL must fail loudly rather than POST the prompt somewhere else.
+    fn remote_provider(&self) -> Result<compatible::OpenAICompatibleProvider, ProviderError> {
+        match self.remote_base_url.as_deref() {
+            Some(base_url) => Ok(compatible::OpenAICompatibleProvider::new(
+                base_url,
+                self.remote_api_key.clone(),
+            )),
+            None => Err(ProviderError::api_message(
+                "No remote endpoint configured — set Settings → Remote Endpoint \
+                 URL, or run `xencode config set remote_url <url>`"
+                    .to_string(),
+            )),
+        }
+    }
+
     /// Inner generate without retry wrapping (used by retry logic).
     async fn generate_inner(
         &self,
@@ -426,6 +469,13 @@ impl ProviderManager {
             return self.generate_llamacpp(inner_model, messages, options).await;
         }
 
+        // Custom OpenAI-compatible endpoint (models prefixed with "remote:")
+        if let Some(inner_model) = remote_target(model) {
+            let provider = self.remote_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            return provider.generate(inner_model, &rendered, "Remote").await;
+        }
+
         // OpenRouter route (models with a slash, e.g. "openai/gpt-4")
         if model.contains('/') && self.openrouter_api_key.is_some() {
             return self.generate_nonstream_openrouter(model, messages).await;
@@ -462,6 +512,7 @@ impl ProviderManager {
     /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
+    /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
     ///
@@ -634,6 +685,15 @@ impl ProviderManager {
                 .await;
         }
 
+        // Custom OpenAI-compatible endpoint, with full tool-calling support
+        if let Some(inner_model) = remote_target(model) {
+            let provider = self.remote_provider()?;
+            let rendered = tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
+            return provider
+                .generate_stream_with_tools(inner_model, &rendered, tools, "Remote", callback)
+                .await;
+        }
+
         // OpenRouter route
         if model.contains('/') && self.openrouter_api_key.is_some() {
             return self
@@ -699,6 +759,16 @@ impl ProviderManager {
             return self
                 .generate_stream_llamacpp(inner_model, messages, options, callback)
                 .await;
+        }
+
+        // Custom OpenAI-compatible endpoint
+        if let Some(inner_model) = remote_target(model) {
+            let provider = self.remote_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            let step = provider
+                .generate_stream_with_tools(inner_model, &rendered, &[], "Remote", callback)
+                .await?;
+            return Ok(step.text);
         }
 
         // OpenRouter route

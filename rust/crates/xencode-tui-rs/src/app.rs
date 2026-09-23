@@ -233,6 +233,8 @@ struct AgentRun {
     openrouter_key: Option<String>,
     qwen_key: Option<String>,
     gemini_key: Option<String>,
+    remote_base_url: String,
+    remote_api_key: Option<String>,
     llama_opts: LlamaCppOptions,
 }
 
@@ -1460,10 +1462,12 @@ struct SingleShot {
     model: String,
     ollama_url: String,
     llama_cpp_url: String,
+    remote_base_url: String,
     timeout: u64,
     openrouter_key: Option<String>,
     qwen_key: Option<String>,
     gemini_key: Option<String>,
+    remote_api_key: Option<String>,
     llama_opts: LlamaCppOptions,
 }
 
@@ -1473,10 +1477,12 @@ impl SingleShot {
             model: config.default_model.clone(),
             ollama_url: config.ollama_url.clone(),
             llama_cpp_url: config.llama_cpp_url.clone(),
+            remote_base_url: config.remote_base_url.clone(),
             timeout: config.response_timeout,
             openrouter_key: config.api_keys.openrouter_api_key.clone(),
             qwen_key: config.api_keys.qwen_api_key.clone(),
             gemini_key: config.api_keys.google_gemini_api_key.clone(),
+            remote_api_key: config.api_keys.remote_api_key.clone(),
             llama_opts: LlamaCppOptions {
                 temperature: config.llama_cpp_temperature,
                 top_k: config.llama_cpp_top_k,
@@ -1501,7 +1507,8 @@ impl SingleShot {
             self.gemini_key.clone(),
             None,
         )
-        .with_llama_cpp(llama_client);
+        .with_llama_cpp(llama_client)
+        .with_remote(&self.remote_base_url, self.remote_api_key.clone());
         manager
             .generate_with_options(&self.model, messages, Some(&self.llama_opts))
             .await
@@ -2381,6 +2388,8 @@ impl<'a> App<'a> {
             openrouter_key: self.config.api_keys.openrouter_api_key.clone(),
             qwen_key: self.config.api_keys.qwen_api_key.clone(),
             gemini_key: self.config.api_keys.google_gemini_api_key.clone(),
+            remote_base_url: self.config.remote_base_url.clone(),
+            remote_api_key: self.config.api_keys.remote_api_key.clone(),
             llama_opts: LlamaCppOptions {
                 temperature: self.config.llama_cpp_temperature,
                 top_k: self.config.llama_cpp_top_k,
@@ -5258,6 +5267,8 @@ impl<'a> App<'a> {
                 let or_key = self.config.api_keys.openrouter_api_key.clone();
                 let qwen_key = self.config.api_keys.qwen_api_key.clone();
                 let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
+                let remote_url = self.config.remote_base_url.clone();
+                let remote_key = self.config.api_keys.remote_api_key.clone();
                 let llama_opts = LlamaCppOptions {
                     temperature: self.config.llama_cpp_temperature,
                     top_k: self.config.llama_cpp_top_k,
@@ -5272,7 +5283,8 @@ impl<'a> App<'a> {
                     let client = OllamaClient::new(&ollama_url, timeout);
                     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
                     let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
-                        .with_llama_cpp(llama_client);
+                        .with_llama_cpp(llama_client)
+                        .with_remote(&remote_url, remote_key);
                     let _ = manager
                         .generate_stream_with_options(
                             &model,
@@ -5413,6 +5425,8 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         openrouter_key,
         qwen_key,
         gemini_key,
+        remote_base_url,
+        remote_api_key,
         llama_opts,
     } = run;
 
@@ -5420,7 +5434,8 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
     let manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
         .with_llama_cpp(llama_client)
-        .with_request_timeout(timeout);
+        .with_request_timeout(timeout)
+        .with_remote(&remote_base_url, remote_api_key);
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
