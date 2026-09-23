@@ -121,8 +121,9 @@ What exists is planning, tracked in
 [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md): two planned tracks — **L** (any
 machine you can SSH into, and an agent that finishes its own work) and **M**
 (ecosystem compatibility: hooks, skills, agents-as-markdown, MCP server, ACP) —
-plus three deliberately **unranked** research appendices, **N**, **O** and **P**,
-which between them record 176 candidate features, a do-not-build register for
+plus four deliberately **unranked** research appendices — **N**, **O**, **P**
+and **Q** (an external hundred-proposal review, dispositioned item by item) —
+which between them record 208 candidate features, a do-not-build register for
 each family, and the defects found while checking claims against the code. The
 next milestone is a cut through that pool, and the cut needs an axis — effort,
 defect closure, or how much of the local-first story each item protects — which

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — Milestone Q: the second hundred, dispositioned
+A second external proposal list (100 items around project DNA, time, system,
+trust and experimentation) was checked item by item against the Rust tree rather
+than adopted: 25 were already planned under existing IDs, 35 narrowed, 10 new,
+30 rejected, recorded as 25 do-not-build register rows, and taking the research
+pool from 176 to 208 options — **unranked**, as with N, O and P. Four of the
+list's premises did not survive contact with this machine: it assumes no GPU (the
+box has an MX250, 2 GiB), the plaintext-key `config.json` at mode 644 is
+described as a missing capability when the OS keyring is present and simply
+unused, the eval fixture `gold.json` names a `cmd_output.rs` that is not in the
+tree, and two `xencode-analysis-rs` security regexes group their alternation
+wrong, so any line containing the bare word `input` — or `url` — reports High
+severity. Nothing was built; recording the defects is not fixing them.
+
 ### Docs — two promises the code never made
 The research passes behind Milestones N–P checked manual claims against the
 implementation, and two did not hold. `README.md` advertised "error
