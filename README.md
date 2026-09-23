@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (14 crates, 751 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 768 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -395,7 +395,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (751 passing, 4 ignored)
+cargo test                          # Full workspace suite (768 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
@@ -419,16 +419,17 @@ CI runs fmt + clippy + the full suite on every push — see [`.github/workflows/
 
 ```
 xencode/
-├── rust/                    # Rust workspace — the whole product, 14 crates
+├── rust/                    # Rust workspace — the whole product, 15 crates
 │   └── crates/
 │       ├── xencode-cli      # CLI entry point (xencode binary)
 │       ├── xencode-tui-rs   # Ratatui TUI + agent loop
 │       ├── xencode-providers-rs # Providers, retry, fallback, tool schemas
 │       ├── xencode-context-rs   # Index, retrieval, budget, watcher, advise
 │       ├── xencode-mcp-rs       # MCP stdio client
+│       ├── xencode-colab-rs     # Google Colab bridge: preflight + VM lifecycle
 │       ├── xencode-server-rs    # Axum HTTP/WebSocket collaboration server
 │       ├── xencode-analysis-rs  # Code analysis + pattern scanner + image intake
-│       └── ...              # core, config, cache, memory, models, collaboration, plugin
+│       └── ...              # core, config, cache, memory, models, colab, collaboration, plugin
 ├── docs/                    # User manual, install manual, server API, long-term roadmap
 ├── scripts/                 # Shell/PowerShell build + smoke-test helpers
 ├── images/                  # Screenshots

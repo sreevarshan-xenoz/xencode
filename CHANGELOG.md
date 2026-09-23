@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Milestone K — remote providers + Google Colab — active 🚧
+A GPU you do not own as an inference backend: `remote:` routes any
+OpenAI-compatible endpoint (dedicated to the Colab SSH-forward case in the
+docs), Settings gains real provider-key editing with masked `Secret` rows,
+and the Colab bridge gets its preflight gate. The connectivity decision that
+shapes the milestone: single supported transport is the official
+`google-colab-cli` `colab ssh --proxy-mode` WebSocket SSH bridge — no public
+tunnel, which Colab's free tier forbids (account suspension). Version trap
+caught in code: `google-colab-cli` 0.6.0 shipped without the `ssh`
+subcommand (upstream issue #102); preflight requires >= 0.7.0.
+
+### Added
+- **Colab preflight gate** (K-2a). `xencode colab preflight` verifies in one
+  pass that the bridge is usable before any VM is brought up: the `colab` CLI
+  on PATH, version >= 0.7.0 (version string *and* a functional `colab ssh
+  --help` probe catch the 0.6.0 trap), backend auth via `colab sessions`,
+  ssh/ssh-keygen on PATH, and an ed25519 key pair under the xencode config dir
+  (`xencode colab preflight --generate-key` creates it). Each failing check
+  prints a runnable fix; the command exits non-zero when any check fails.
+  Lives in the new `xencode-colab-rs` crate.
+- **`xencode config set remote_url` / `remote_key`** (Milestone K ¶). Any
+  OpenAI-compatible endpoint can now be pointed at from config — the Remote /
+  Colab provider kind routes through `OpenAICompatibleProvider` in every
+  `ProviderManager` path (`remote_base_url` + `api_keys.remote_api_key`).
+- **Settings edits provider endpoints and keys** (K-1b). The Providers section
+  edits real values instead of reporting key presence: Remote URL as a text
+  row, Remote/Gemini/Qwen/OpenRouter keys as masked `Secret` rows with a
+  last-four tail on display. Commit saves through `App::save_config()`;
+  empties clear the key; `Esc` discards the editing buffer so a plaintext key
+  never lingers.
+
 ### Milestone J — complete ✅
 Seven TUI panels rendered hardcoded phrase lists (voice, terminal assistant,
 security auditor, profiler, custom models, learning mode, multi-language) and

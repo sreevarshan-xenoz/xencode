@@ -129,6 +129,25 @@ xencode llamacpp list                             # models on a running server
 xencode llamacpp stop
 ```
 
+### `xencode colab <action>`
+Google Colab bridge: run the inference server on a Colab VM (T4 GPU etc.)
+and reach it from this machine. The only supported transport is the official
+`google-colab-cli` `colab ssh --proxy-mode` WebSocket SSH bridge — never a
+public tunnel (Colab's free tier forbids ngrok/cloudflared-style tunnels and
+suspends accounts that use them). The CLI is Linux/macOS only; Windows users
+type a public-tunnel URL (paid tier) into Settings → Remote URL instead.
+
+```bash
+xencode colab preflight                # is the bridge usable? (exit 0 when green)
+xencode colab preflight --generate-key # also create ~/.xencode/colab_ed25519 if missing
+```
+
+`preflight` checks in one pass: the `colab` CLI on PATH, version >= 0.7.0
+(0.6.0 shipped without the `ssh` subcommand), backend auth via
+`colab sessions`, ssh/ssh-keygen on PATH, and the ed25519 key pair. Every
+failing check prints a runnable fix line. The VM lifecycle commands
+(`up`/`status`/`down`) land in Milestone K.
+
 ### `xencode config <action>`
 Configuration management. Config lives in `~/.xencode/config.json`;
 set `XCODE_CONFIG_DIR` to point Xencode at a different directory.
@@ -147,6 +166,7 @@ xencode config reset
 |-----|------|-------|
 | `default_model` | string | e.g. `qwen3:4b` |
 | `ollama_url`, `llama_cpp_url` | string | provider endpoints |
+| `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_args` | string | split on whitespace |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
