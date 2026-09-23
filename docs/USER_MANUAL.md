@@ -218,7 +218,7 @@ do anything):
 | Panel | Description |
 |-------|-------------|
 | Performance Dashboard | Session stats, file breakdown (real metrics) |
-| Provider Health | Health checks with status icons (real requests) |
+| Provider Health | Health checks with status icons (real requests): Ollama, llama.cpp and each keyed API get a row, and so does the Remote/Colab forward — it probes `remote_base_url`'s `/models` (the same endpoint `xencode colab status` waits on) and shows the forward URI under the row, while Connection Details lists the configured Remote URI or says it is not configured. With no remote URL set the row reads "Remote URL not configured (Settings → Remote URL)" instead of hiding |
 | Project Analyzer | Workspace file type analysis (real scan) |
 | Git Commit | Type a message, Enter runs `git commit -am` (tracked modifications only — untracked files are never added); result returns as a chat line |
 | ByteBot Agent | Step-through autonomous task execution (real tool loop) |

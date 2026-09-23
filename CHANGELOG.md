@@ -28,7 +28,11 @@ subcommand (upstream issue #102); preflight requires >= 0.7.0.
   calls); otherwise the session is re-created if Colab reaped it, the
   bootstrap re-runs, and the forward re-spawns until `/v1/models` answers —
   no re-typing of the original flags. Missing `colab.json` fails fast with
-  a fix suggestion.
+  a fix suggestion. The TUI Provider Health panel gains a Remote/Colab
+  forward row: seeded like the other providers (unconfigured remote URLs
+  read "Remote URL not configured (Settings → Remote URL)"), the health
+  check probes `{remote_base_url}/models` with a 5s cap, and Connection
+  Details lists the configured Remote URI.
 - **Colab VM lifecycle** (K-2c). `xencode colab up` brings a Colab VM up
   end-to-end: creates the session (`colab new --gpu <gpu> -s <name>`) when
   absent, pushes an ssh bootstrap that installs and starts the chosen runtime
