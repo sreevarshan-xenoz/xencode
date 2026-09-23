@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 xencode-config-rs = { path = "../xencode-config-rs" }
-tokio = { version = "1", features = ["process", "time", "macros", "rt"] }
+tokio = { version = "1", features = ["process", "time", "macros", "rt", "net", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"

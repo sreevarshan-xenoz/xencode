@@ -13,16 +13,24 @@
 //! prohibits ngrok/cloudflared style public tunnels (account suspension), so
 //! nothing here ever starts one.
 //!
-//! `unsafe` is forbidden everywhere except [`orchestrate::pid_alive`], the
-//! single `libc::kill` probe; `preflight` and `state` forbid it themselves.
+//! `unsafe` is forbidden everywhere except three narrowly-scoped `libc`
+//! touchpoints in [`orchestrate`]: `pid_alive` / `terminate` (the `kill`
+//! probe + signal) and `now_rfc3339` (`localtime_r`). `preflight`, `state`,
+//! `bootstrap`, and `lifecycle` forbid it themselves.
 
+pub mod bootstrap;
+pub mod lifecycle;
 pub mod orchestrate;
 pub mod preflight;
 pub mod state;
 
+pub use bootstrap::bootstrap_script;
+pub use lifecycle::{
+    point_config_at_forward, run_colab_down, run_colab_status, run_colab_up, UpOptions,
+};
 pub use orchestrate::{
     forward_argv, forward_url, pid_alive, proxy_argv, resolve_binaries, shell_quote, spawn_forward,
-    Binaries,
+    terminate, Binaries,
 };
 pub use preflight::{preflight, which, Check, PreflightReport};
 pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};
@@ -60,9 +68,10 @@ pub(crate) mod testutil {
 
     /// Lock + swap `$PATH` and `$XCODE_CONFIG_DIR` to a hermetic fake world
     /// (PATH becomes *only* `bin_dir`, so real-host binaries cannot leak into
-    /// "missing tool" scenarios). Restored on drop.
+    /// "missing tool" scenarios). Restored on drop. Recovering from a poisoned
+    /// lock keeps one panicking test from cascading failures into the rest.
     pub fn with_env(bin_dir: &Path, xcode_dir: &Path) -> EnvGuard {
-        let lock = ENV_LOCK.lock().unwrap();
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let old_path = std::env::var_os("PATH");
         let old_xcode = std::env::var_os("XCODE_CONFIG_DIR");
         std::env::set_var("PATH", bin_dir);
