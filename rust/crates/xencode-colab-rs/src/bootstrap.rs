@@ -11,19 +11,37 @@
 
 use crate::orchestrate::shell_quote;
 
-/// llama.cpp runtime: pinned `llama-cpp-python[server]` (its `llama-server`
-/// executable and Python module bundle one another; installing the wheel also
-/// fetches the bundled `llama-server` binary) + a GGUF pulled from Hugging
-/// Face. The `hf` weights source is the bootstrap path; `drive`/`gcs` are
-/// refused here (mounting those from a bare VM needs extra plumbing) — the
-/// error tells the user how to proceed.
+/// Pinned llama.cpp nightly build whose release carries prebuilt Ubuntu
+/// binaries. `releases/latest` is the empty `v0.4.1` stub (a `nightly-tag.txt`
+/// and nothing else), so the build number must be explicit — verified against
+/// the GitHub API on 2026-09-23, where `b11120` ships
+/// `llama-b11120-bin-ubuntu-cuda-12.8-x64.tar.gz` and friends.
+pub const LLAMA_CPP_BUILD: &str = "b11120";
+
+/// Where Colab's free-tier runtime keeps its NVIDIA driver libraries. A bare
+/// `bash -s` login does not get them on the loader path, so `nvidia-smi`
+/// reports "couldn't find libnvidia-ml.so" and a GPU build silently falls back
+/// to CPU work — measured live on a T4 runtime on 2026-09-23.
+const NVIDIA_LIB_DIR: &str = "/usr/lib64-nvidia";
+
+/// llama.cpp runtime: the pinned prebuilt `llama-server` (CUDA build when the
+/// runtime really has a GPU, plain x64 when it does not) plus one GGUF file
+/// resolved straight from the Hugging Face API. Nothing is compiled on the VM,
+/// which is the difference between a bring-up that takes a minute and one that
+/// spends twenty building wheels.
 ///
-/// The model id is a Hugging Face repo id (e.g. `Qwen/Qwen2.5-7B-Instruct
-/// -GGUF`). llama.cpp no longer ships prebuilt linux binaries on the release
-/// channel (the v0.4.1 release carries only a nightly-tag marker), so the
-/// server comes from the PyPI wheel instead — verified against live PyPI
-/// (`llama-cpp-python` latest is 0.3.35 at the time of writing).
-pub fn llama_cpp_bootstrap(model: &str, weights_source: &str, port: u16) -> Result<String, String> {
+/// The model id is a Hugging Face repo id (`Qwen/Qwen2.5-7B-Instruct-GGUF`) and
+/// `quant` the file-name fragment to pick within it (`Q4_K_M`); a repo with no
+/// matching file falls back to its first GGUF rather than to a failure.
+/// The `hf` weights source is the bootstrap path; `drive`/`gcs` are refused
+/// here (mounting those from a bare VM needs extra plumbing) — the error tells
+/// the user how to proceed.
+pub fn llama_cpp_bootstrap(
+    model: &str,
+    weights_source: &str,
+    quant: &str,
+    port: u16,
+) -> Result<String, String> {
     if weights_source != "hf" {
         return Err(format!(
             "llama.cpp bootstrap supports weights_source=\"hf\" only \
@@ -34,19 +52,39 @@ pub fn llama_cpp_bootstrap(model: &str, weights_source: &str, port: u16) -> Resu
     }
     Ok(format!(
         r#"set -euo pipefail
-# xencode bootstrap — llama.cpp on 127.0.0.1:{port}
-pip install --quiet --upgrade pip
-pip install --quiet "llama-cpp-python[server]==0.3.35"
-pip install --quiet huggingface-cli
+# xencode bootstrap — llama-server {build} on 127.0.0.1:{port}
+export LD_LIBRARY_PATH="{nvidia_lib}:/usr/local/cuda-12.8/lib64:${{LD_LIBRARY_PATH:-}}"
+DIR="${{HOME}}/xencode-llama"
+rm -rf "$DIR"; mkdir -p "$DIR"
+if nvidia-smi -L >/dev/null 2>&1; then
+  ASSET='llama-{build}-bin-ubuntu-cuda-12.8-x64.tar.gz'; OFFLOAD='--n-gpu-layers 99'
+else
+  ASSET='llama-{build}-bin-ubuntu-x64.tar.gz'; OFFLOAD=''
+  echo "no GPU visible in this runtime — serving on CPU (colab new --gpu T4 gets a real one)"
+fi
+curl -fsSL -o "$DIR/llama.tar.gz" "https://github.com/ggml-org/llama.cpp/releases/download/{build}/${{ASSET}}"
+tar -xzf "$DIR/llama.tar.gz" -C "$DIR"
+SERVER=$(find "$DIR" -name llama-server -type f | head -n1)
+test -n "$SERVER" || {{ echo "llama-server missing from ${{ASSET}}"; exit 1; }}
+LIBDIR=$(dirname "$(find "$DIR" -name 'libggml*.so' | head -n1)")
+export LD_LIBRARY_PATH="${{LIBDIR}}:${{LD_LIBRARY_PATH:-}}"
 HF_REPO={repo}
-mkdir -p "${{HOME}}/xencode-gguf"
-huggingface-cli download "$HF_REPO" --local-dir "${{HOME}}/xencode-gguf"
-GGUF=$(find "${{HOME}}/xencode-gguf" -name '*.gguf' | head -n1)
-test -n "$GGUF" || {{ echo "no .gguf found in ${{HF_REPO}}"; exit 1; }}
-nohup python3 -m llama_cpp.server --model "$GGUF" --host 127.0.0.1 --port {port} > "${{HOME}}/xencode-llama.log" 2>&1 &
+FILES=$(curl -fsSL "https://huggingface.co/api/models/$HF_REPO" \
+  | python3 -c 'import json,sys;[print(f["rfilename"]) for f in json.load(sys.stdin)["siblings"]]')
+GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | grep -i {quant} | head -n1)
+if [ -z "$GGUF_NAME" ]; then GGUF_NAME=$(printf '%s\n' "$FILES" | grep -i '\.gguf$' | head -n1); fi
+test -n "$GGUF_NAME" || {{ echo "no .gguf in $HF_REPO"; exit 1; }}
+echo "weights: $GGUF_NAME"
+curl -fL --retry 3 -o "$DIR/model.gguf" "https://huggingface.co/$HF_REPO/resolve/main/${{GGUF_NAME}}"
+nohup "$SERVER" -m "$DIR/model.gguf" --host 127.0.0.1 --port {port} -c 4096 $OFFLOAD \
+  > "${{HOME}}/xencode-llama.log" 2>&1 &
 echo "READY {port}"
 "#,
+        build = LLAMA_CPP_BUILD,
+        nvidia_lib = NVIDIA_LIB_DIR,
+        port = port,
         repo = shell_quote(model),
+        quant = shell_quote(quant),
     ))
 }
 
@@ -77,10 +115,11 @@ pub fn bootstrap_script(
     runtime: &str,
     model: &str,
     weights_source: &str,
+    quant: &str,
     port: u16,
 ) -> Result<String, String> {
     match runtime {
-        "llama.cpp" => llama_cpp_bootstrap(model, weights_source, port),
+        "llama.cpp" => llama_cpp_bootstrap(model, weights_source, quant, port),
         "ollama" => Ok(ollama_bootstrap(model, port)),
         other => Err(format!(
             "unknown colab runtime {other:?} (expected \"llama.cpp\" or \"ollama\")"
@@ -94,20 +133,29 @@ mod tests {
 
     #[test]
     fn llama_cpp_script_pins_the_server_binds_loopback_and_quotes_model() {
-        let script =
-            llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", 8080).expect("hf supported");
-        // The pinned wheel that ships the llama-server binary.
-        assert!(script.contains("llama-cpp-python[server]==0.3.35"));
-        // Model id single-quoted into the script, never raw.
+        let script = llama_cpp_bootstrap("Qwen/Qwen2.5-7B-Instruct-GGUF", "hf", "Q4_K_M", 18080)
+            .expect("hf supported");
+        // The pinned prebuilt release, no on-VM compilation.
+        assert!(script.contains(&format!("releases/download/{LLAMA_CPP_BUILD}/")));
+        assert!(script.contains(&format!(
+            "llama-{LLAMA_CPP_BUILD}-bin-ubuntu-cuda-12.8-x64.tar.gz"
+        )));
+        // Model id and quant single-quoted into the script, never raw.
         assert!(script.contains("'Qwen/Qwen2.5-7B-Instruct-GGUF'"));
-        assert!(script.contains("--host 127.0.0.1 --port 8080"));
-        assert!(script.contains("READY 8080"));
-        assert!(script.contains("nohup python3 -m llama_cpp.server"));
+        assert!(script.contains("'Q4_K_M'"));
+        assert!(script.contains("--host 127.0.0.1 --port 18080"));
+        assert!(script.contains("READY 18080"));
+        // The GPU layer-offload flag only reaches the server when the runtime
+        // really has a GPU; the driver dir has to be on the loader path first.
+        assert!(script.contains("/usr/lib64-nvidia"));
+        assert!(script.contains("nvidia-smi -L"));
+        assert!(script.contains("--n-gpu-layers 99"));
+        assert!(script.contains("nohup \"$SERVER\""));
     }
 
     #[test]
     fn llama_cpp_refuses_non_hf_weights_with_a_fix() {
-        let err = llama_cpp_bootstrap("repo/id", "gcs", 8080).expect_err("gcs refused");
+        let err = llama_cpp_bootstrap("repo/id", "gcs", "Q4_K_M", 18080).expect_err("gcs refused");
         assert!(err.contains("weights_source"), "names the field: {err}");
         assert!(err.contains("hf"), "points at the supported source: {err}");
     }
@@ -123,7 +171,7 @@ mod tests {
 
     #[test]
     fn bootstrap_script_rejects_unknown_runtime() {
-        let err = bootstrap_script("kobold", "m", "hf", 8080).expect_err("unknown");
+        let err = bootstrap_script("kobold", "m", "hf", "Q4_K_M", 18080).expect_err("unknown");
         assert!(err.contains("kobold"));
         assert!(err.contains("llama.cpp"));
         assert!(err.contains("ollama"));

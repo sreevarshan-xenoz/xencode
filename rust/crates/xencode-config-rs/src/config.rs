@@ -53,6 +53,10 @@ pub struct ColabConfig {
     /// Where the runtime fetches weights: "hf", "drive" or "gcs".
     #[serde(default = "default_colab_weights")]
     pub weights_source: String,
+    /// GGUF quantization to serve (llama.cpp): a file-name fragment like
+    /// "Q4_K_M". Empty = the bridge default. ollama tags carry their own.
+    #[serde(default)]
+    pub quant: String,
     /// Re-establish the forward automatically when xencode starts a session.
     #[serde(default)]
     pub auto_connect: bool,
@@ -374,6 +378,7 @@ impl Default for ColabConfig {
             runtime: default_colab_runtime(),
             model: String::new(),
             weights_source: default_colab_weights(),
+            quant: String::new(),
             auto_connect: false,
         }
     }
