@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 822 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 828 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2819,7 +2819,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 822-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 828-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -4681,7 +4681,17 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   session state and the background-task registry. A config that was already
   world-readable is tightened to `0600` by the next save; proven by test and by a
   live `xencode config set`.
-- [ ] `DB-5`, `DB-7`, `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QO-2`,
+- [x] `DB-5` — 2026-09-23. Append-only JSONL stays; `read_jsonl_tolerant` in
+  `xencode-core-rs/src/jsonl.rs` now tells a crash apart from a broken writer.
+  A file whose last line stops mid-record (what a kill or a full disk leaves)
+  drops that line and reads everything before it, reporting `torn_tail`; a
+  corrupt line in the middle is counted in `bad_lines` instead of being passed
+  over in silence, because that says the writer is wrong. `read_metrics` uses
+  it, so `/profiler` still shows the turns recorded before a crash. **Nothing
+  in the shipped tree reads `audit.jsonl` back yet** — the sink only appends —
+  so the first reader of it (the `xencode doctor` work in `DB-6`, and `CX-1`'s
+  aggregator later) takes this helper rather than opening the file itself.
+- [ ] `DB-7`, `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QO-2`,
   `QTR-2`, `AM-3`
 
 #### W1 — Make the agent observable — 15 items

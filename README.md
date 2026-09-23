@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 822 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 828 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -116,7 +116,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more.
 - **The seven panels that used to play recordings are real** (Milestone J):
   - *Security auditor* — `Enter` walks the workspace with the same file list `xencode analyze` uses and runs the pattern scanner per file, streaming findings and finishing with real totals; unreadable files and a failed walk surface as their own log lines.
-  - *Performance profiler* — this process's CPU (two `/proc/self/stat` reads 250 ms apart) and resident memory, the session's own average turn latency and tokens/s, per-provider health latency, and the last rows of `.xencode/cache/metrics.jsonl`. A gauge with no data renders `n/a`.
+  - *Performance profiler* — this process's CPU (two `/proc/self/stat` reads 250 ms apart) and resident memory, the session's own average turn latency and tokens/s, per-provider health latency, and the last rows of `.xencode/cache/metrics.jsonl` (a row cut off by a crash is skipped, the rows before it still count). A gauge with no data renders `n/a`.
   - *Terminal assistant* — asks the configured model for commands and runs the one you pick **through the agent's approval gate**, never around it.
   - *Multi-language* — tabulates a real `scan_tree` walk (files, lines, share per language; secret and binary files counted, never read) and translates your text with one model call.
   - *Custom models* — edits real `model_profiles` in `config.json`: `Enter` applies to the next turn, `s` saves, `t` shows the provider's real reply or its real error.
@@ -417,7 +417,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (822 passing, 4 ignored)
+cargo test                          # Full workspace suite (828 passing, 4 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

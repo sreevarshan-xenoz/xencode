@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a log left half-written by a crash is still readable
+`.xencode/cache/metrics.jsonl`, the file the TUI profiler reads, is appended one
+record per line. A process killed mid-append — or a disk that filled — used to
+leave a final line that was only part of a record, and a reader had no way to
+tell that interrupted line from a record that was genuinely wrong. Reading a
+log now drops the partial last line and reports that it did, while a corrupt
+line anywhere else in the file is counted rather than passed over, because that
+says something is broken in the writer. The profiler keeps the turns it had
+already recorded.
+
 ### Fixed — your configuration file is no longer readable by everyone
 `~/.xencode/config.json` holds provider API keys as plain text, and every
 version so far wrote it with the operating system's default file permissions —
