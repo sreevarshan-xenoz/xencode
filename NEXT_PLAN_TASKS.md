@@ -1795,7 +1795,7 @@ SLSA-for-weights, still an IETF draft-00 with nothing to verify against (N-6).
 
 **Ranked by dependency, not by value — see §Milestone R.** This appendix recorded
 the option space so the cut would be visible and revisitable rather than implicit;
-the ordering question was answered on 2026-09-23 as fifteen dependency waves, which
+the ordering question was answered on 2026-09-23 as a dependency-ordered sequence of waves, which
 place all 55 N items by what depends on what: CI into W3, SE into W0/W7, EV into
 W1/W10, WF into W1/W5/W14, LF into W2/W12/W14, MM into W0/W8/W14. What R
 deliberately does **not** settle is the question this section used to pose — which
@@ -4556,9 +4556,9 @@ file — **to two of these ten research passes' own reports.**
   tables were received during this pass and neither was adopted; cutting 208
   candidates by worth needs an axis about what xencode is *for*, which this file
   is not allowed to answer. On 2026-09-23 the owner answered the narrower question
-  instead — the **ordering** — as fifteen dependency waves (§Milestone R), which is
+  instead — the **ordering** — as eighteen dependency waves (§Milestone R), which is
   a topological answer and deliberately not a valuation. So: the sequence is
-  decided, W0–W14 are each still a *set* rather than a queue, and the two external
+  decided, W0–W17 are each still a *set* rather than a queue, and the two external
   tables remain unadopted.
 
 ### Q-16 Primary sources
@@ -4582,7 +4582,7 @@ must not be quoted.
 
 ---
 
-## Milestone R — the axis: fifteen dependency waves over the recorded options (drafted 2026-09-23)
+## Milestone R — the axis: eighteen dependency waves over the recorded options (drafted 2026-09-23, extended with Milestone S on the same day)
 
 ### R-0 What changed, and what did not
 
@@ -4590,7 +4590,7 @@ Every appendix from N onward ended on the same sentence: **not yet ranked — th
 needs an axis**. The axis arrived on 2026-09-23 as a fifteen-wave dependency sequence
 over the pool, and it is recorded here as the execution layer. It is not a new
 backlog and nothing is renumbered: an item keeps the prefix of the appendix that
-produced it, so **provenance (L/M/N/O/P/Q) survives ordering (W0…W14)**.
+produced it, so **provenance (L/M/N/O/P/Q/S) survives ordering (W0…W17)**.
 
 The claim in one line: **correctness → observability → model substrate → code
 intelligence → verification → trust → knowledge → autonomy → multi-agent**. The
@@ -4601,14 +4601,17 @@ graph first is a jet engine on a shopping cart.
 
 This is a placement, not a re-litigation. Nothing here re-argues an option already
 dispositioned in N, O, P or Q, and the do-not-build register is unchanged apart from
-one live conflict (§R-3).
+one live conflict (§R-3). The one exception is the re-arguing Milestone S forced: its
+cloud workers are not bound by the hardware that made multi-agent pipelines the honest
+answer, so two parked graph items are scoped back in (§R-2 item 8).
 
-**Inventory.** The universe is **258 IDs**: N 55 + O 73 + P 48 + Q 63 + L-1…L-12 +
-M-1…M-7. It is 258 rather than the headline **208** because that number counts Q at
+**Inventory.** The universe is **280 IDs**: N 55 + O 73 + P 48 + Q 63 + S 22 +
+L-1…L-12 + M-1…M-7. It is 280 rather than the headline **208** because that number counts Q at
 its **32 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
-counted and 2 are deterministic bug fixes — and leaves out the 19 L/M items, which
-were committed tasks before any appendix existed. Every ID is placed **exactly once**
-below, checked by script against the file rather than by eye: **250 scheduled** into W0…W14, **8 not scheduled** (7 register rejections
+counted and 2 are deterministic bug fixes — leaves out the 19 L/M items, which
+were committed tasks before any appendix existed, and predates Milestone S's 22.
+Every ID is placed **exactly once**
+below, checked by script against the file rather than by eye: **272 scheduled** into W0…W17, **8 not scheduled** (7 register rejections
 carried forward, plus MI-5, which is contested), and QN-5 sitting inside W10 as
 conditional.
 
@@ -4628,14 +4631,17 @@ conditional.
 | W11 | Self-diagnosis, cost and operations | 17 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 58 |
+| W14 | Product surface and ecosystem | 57 |
+| W15 | Measure the other agents before planning on them (new, from S) | 3 |
+| W16 | One worker at a time, then brokered (new, from S) | 9 |
+| W17 | Many workers at once (new, from S) | 11 |
 | — | declined / contested | 8 |
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 61 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 130 | makes the agent better at the work; nearly all of it waits on the substrate |
-| ecology | 58 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
+| core substrate | 72 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 139 | makes the agent better at the work; nearly all of it waits on the substrate |
+| ecology | 60 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
 | park | 9 | declined, conditional, or contested (§R-3) |
 
 ### R-1 The waves
@@ -4934,7 +4940,7 @@ Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores 
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
 | **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
 
-#### W14 — Product surface and ecosystem — 58 items
+#### W14 — Product surface and ecosystem — 57 items
 
 No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
 
@@ -4954,7 +4960,6 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **LF-9** | Google Workspace MCP as opt-in, read-only | ecology | Workspace MCP, opt-in read-only |
 | **M-3** | skills: a `SKILL.md` loader | ecology | SKILL.md loader |
 | **M-4** | `xencode plugin install <git-url>` | ecology | xencode plugin install <git-url> |
-| **M-5** | `xencode mcp serve`: xencode as an MCP server | ecology | xencode mcp serve |
 | **M-6** | finish the MCP client: resources, prompts, and HTTP with headers | ecology | finish the MCP client |
 | **M-7** | `xencode acp`: run the agent inside an editor | ecology | xencode acp (the sole interop investment, QX-5 agrees) |
 | **MM-2** | screenshot→attach hotkey via `grim`/`spectacle` into the existing | ecology | screenshot->attach hotkey |
@@ -4998,6 +5003,62 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **WF-8** | `xencode-action` — the review command as a GitHub Action commenting | ecology | xencode-action |
 | **WF-9** | signed-commit passthrough | ecology | signed-commit passthrough |
 | **WF-10** | stacked-diff assist over worktrees | ecology | stacked-diff assist over worktrees |
+
+#### W15 — Measure the other agents before planning on them — 3 items
+
+From Milestone S. This is **measurement, not construction**, which is why it is a wave of
+its own and not the head of W16: every claim in §S-0 came from a `--help` screen, and an
+advertised flag is not a behaviour. `AR-1` is the gate — until its matrix exists, no
+`OR-` item below is a commitment (§S-7, and the Milestone K rule that green unit tests
+prove nothing about a remote connection).
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AR-1** | Headless interop probe across the installed agent CLIs | core | the gate for all of W16/W17; needs the user's own logged-in accounts and a real (tiny, read-only) spend |
+| **AR-2** | Discover installed agents, versions, and how each was installed | core | PATH + `mise` reality; never installs, never upgrades |
+| **AR-3** | Contract probe: the flags each agent actually advertises | core | replaces "capability detection by name"; feeds `OR-6`'s routing |
+
+#### W16 — One worker at a time, then brokered — 9 items
+
+From Milestone S. Needs W1 (`WF-1` events, `EVd-1` ledger, `CX-2` schema), W5 (a verdict
+worth collecting) and W7 (`CAP-1`'s vocabulary, `SE-4`'s trifecta gate). `M-5` moved here
+from W14 because `OR-3` cannot exist without it: it is the only measured
+seam (`--permission-prompt-tool` → an MCP tool) by which xencode can answer a worker's
+approval request instead of pre-granting one.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AR-4** | Launch one worker headless, normalise its events into our schema | core | one event shape; unprobed fields marked as xencode's, not theirs |
+| **AR-5** | Worker identity, and what xencode owns versus the vendor | core | id into ledger + metrics; task state only, never a session mirror |
+| **AR-6** | The process ceiling: start, interrupt, wall-clock, hard kill | core | rides the existing background-task manager; no orphans |
+| **AR-7** | The handoff package, built only from observed facts | core | no self-reported progress; `EVd-3`'s rule |
+| **AR-8** | Worker health, reported read-only | core | shows an expired login, never fixes one |
+| **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2) |
+| **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count |
+| **OR-3** | The permission broker | core | real brokering for one vendor, pre-grant for the rest; never widens a mode itself |
+| **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
+
+#### W17 — Many workers at once — 11 items
+
+From Milestone S. Needs W6 (evidence), W11 (`CX-7`'s budgets that act, `CX-4`'s price
+lookup) and W12 (`LF-2`'s approval round-trip), and it is where `MA-4`/`MA-5` come back in
+scoped form (§R-2 item 8). Deliberately the last construction wave: the first thing it
+makes possible is also the first thing that can spend real money across five autonomous
+processes at once.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **OR-4** | Leases, not shared checkouts | capability | one worktree per worker + a declared file set; conflict refused at scheduling |
+| **OR-5** | The merge decision, with a human gate | capability | `GH-6`'s detection + `WF-9`; never silent, never auto-resolved by a worker |
+| **OR-6** | Capability-gated routing | capability | reads `AR-3`'s probed contract, never a vendor name |
+| **OR-7** | Re-dispatch a dead worker onto another agent | capability | uses `AR-7`'s package; provider fallback already exists for transport failures |
+| **OR-8** | Shared memory as a scoped capability | capability | `QK-3`'s classes + per-worker `SE-2` marking — memory for a stranger is a wider injection surface |
+| **OR-9** | Team recipes as TOML data | capability | recipes, not a team engine |
+| **OR-10** | Plan, simulate, and dry-run first by default | capability | folds item 33's separate mode into the default render |
+| **OR-11** | Explain every routing choice | capability | and label an estimate as an estimate |
+| **OR-13** | The Local-Only profile | capability | refuses external workers by name; rides `LF-8`'s no-network measurement in W14 |
+| **OR-12** | The worker panel | ecology | every number traces to a row; unobservable renders as unknown, never as idle |
+| **OR-14** | `/orchestrator` as a mode, plus its command surface | ecology | turning it off leaves plain xencode untouched |
 
 #### Not scheduled — 8 items
 
@@ -5059,6 +5120,24 @@ the shape of the program.
    topology), and **AM-5 folds into LF-2** — the plan states "AM-5 is LF-2" — so the
    inbound-trigger work is W12 with the approval round-trip while AM-1/2/4/6 stay in
    W14.
+8. **`MA-4` and `MA-5` are un-rejected in one scoped form, and the reason is a
+   measurement, not a change of taste.** Both were parked because of this box: one
+   llama.cpp process saturates 8 cores / 15 GiB, so a general agent graph was parallel
+   in name only. Cloud workers are separate processes calling a remote API, so that
+   reason does not reach them and their graph is genuinely concurrent. The scoped
+   revival is `OR-2` (the task graph and scheduler for external workers) and the
+   concurrency that follows in W17; `MA-4`/`MA-5` themselves stay parked, because for
+   *local* subagents the old reason is still exactly true. The new ceiling is named in
+   §S-4: verification throughput, the local planner's quality, and real money.
+9. **`M-5` moved waves because Milestone S changed what depends on it.** Milestone M
+   presented MCP-server and ACP as two independent "big new surfaces", with ACP last
+   because the spec is pre-1.0. `M-5` is now upstream of `OR-3`: measured, the only way
+   xencode can answer an external worker's approval request is to be an MCP server that
+   the worker is told to ask (`claude --permission-prompt-tool`), so an item that was
+   interop polish became the single seam a whole product category hangs on (§S-3). It
+   moves from W14 to W16, which is earlier but still after W7's trust layer — not
+   because it got easier, and not before `SE-4`'s trifecta check exists to govern what
+   it exposes.
 
 ### R-3 Contested and declined
 
@@ -5066,7 +5145,15 @@ the shape of the program.
 |---|---|---|
 | **MI-5** | parked, needs an owner decision | Does L’s rejection of speculative decoding cover the rented-VRAM case, or was it about consumer hardware being the bottleneck? If the latter, MI-5 belongs in W2 beside CX-5/CX-6, which the plan already says must ship with it or not at all. |
 | **QN-5** | conditional, inside W10 | A dense retrieval arm only if QN-4’s verify-pattern work proves the gap. The register declines embeddings/vector indexes until then. |
-| **MA-4, MA-5, MD-3, MD-4, MEM-4, MEM-5, CAP-3** | not scheduled | Already dispositioned as REJECT-or-park in P; the wave order does not reopen them. |
+| **MA-4, MA-5** | still parked; un-rejected only in scoped form | The hardware reason that parked them is true for local subagents and false for cloud workers, so the graph survives as `OR-2` in W16 (§R-2 item 8). The open question is no longer whether they can run at once — it is whether one machine can verify what they produce at once, which `AR-1`’s cost figure and W5’s throughput answer |
+| **MD-3, MD-4, MEM-4, MEM-5, CAP-3** | not scheduled | Already dispositioned as REJECT-or-park in P; the wave order does not reopen them. |
+
+Milestone S adds seven more decisions to the do-not-build register — an agent
+marketplace, installing or authenticating anything on the user’s behalf, mirroring vendor
+session stores, trusting a worker’s self-reported progress, silent merges or
+worker-resolved conflicts, three invented adapter methods, and routing from a capability
+table nobody probed. They are argued once in **§S-8** rather than repeated here, and
+nothing in that list may be re-proposed inside a wave.
 
 ### R-4 The first sprint
 
@@ -5116,6 +5203,397 @@ parent's commit message, or it will look unstarted forever. Three further pairs 
 *dependencies* rather than folds and must not be merged out of sight: EV-3 is QM-1's
 integrity layer, EVd-7 reuses EV-11's hash-chain primitive, and QM-6 works only under
 EV-7's human gate.
+
+Milestone S's twenty-two IDs add no folds of their own: where a proposal was already
+covered, it was dispositioned to the existing ID and given no new number (§S-6), so an
+`AR-`/`OR-` commit always names work that is genuinely new. One traceability rule is
+specific to the new waves, though. **W15 is measurement, so a W15 commit's artifact is a
+matrix in this file, not a passing test** — and until `AR-1`'s row exists, a commit that
+starts any `OR-` item is out of order rather than merely early.
+
+## Milestone S — "run the other agents": the orchestrator proposal, checked against what those agents already do (research appendix, drafted 2026-09-23)
+
+> **Status: research only, nothing built.** Third external proposal list, after N/O
+> (option space) and Q (the second hundred). Thirty-eight numbered items plus a
+> proposed subsystem name, under one headline the owner wrote unprompted: *"Xencode
+> should not become another coding agent that happens to launch Claude/Codex. Xencode
+> becomes the orchestration layer above coding agents."* A `/orchestrator` TUI mode
+> discovers Codex, Claude Code, Gemini CLI, OpenCode and Agy, gives each a task from a
+> dependency graph, brokers their permissions, shares project memory between them,
+> merges what they produce and verifies it.
+>
+> This is the **strongest idea in the whole corpus**, and it is the only one that adds
+> a product *category* rather than a capability. It is also the one where the owner's
+> premise was most checkable in ten minutes, because the five agents he wants to
+> orchestrate are all installed on this machine.
+
+### S-0 The measurement that reframes the proposal
+
+Research passes N–Q could only reason about external agents from documentation. That is
+no longer an excuse: **every CLI in the proposal is on this box**, so the table below is
+read off `--help` and `--version` output on 2026-09-23, not from a description of the
+ecosystem. `crush` was probed too because it is installed; it was not proposed.
+
+| | codex | claude | gemini | opencode | agy | crush |
+|---|---|---|---|---|---|---|
+| version probed | 0.156.1 | 2.1.280 | 0.60.0 | 1.18.31 | 1.2.9 | (prints no version) |
+| headless one-shot | `codex exec` | `-p/--print` | `-p/--prompt` | `opencode run` | `--print` | `crush run` |
+| machine-readable event stream | `--json` (JSONL) | `--output-format stream-json` | `-o stream-json` | `--format json` | `--output-format stream-json` | not seen |
+| approval ladder | `--sandbox read-only\|workspace-write\|danger-full-access`, `--ask-for-approval always\|never\|auto` | `--permission-mode`, `--allowed-tools`, `--disallowed-tools` | `--approval-mode default\|auto_edit\|yolo\|plan` | not in `run --help` | `--mode accept-edits\|plan`, `--dangerously-skip-permissions` | `--yolo` |
+| own OS-level sandbox | `--sandbox`, `codex sandbox` | not seen | `-s/--sandbox` | not seen | `--sandbox` | not seen |
+| daemon / server the vendor runs | `codex app-server daemon`, `--remote <ADDR>` | `claude agents`, `--bg`, `claude attach <id>` | not seen | `opencode serve --port --hostname`, `opencode attach <url>` | `--remote-control` | not seen |
+| **ACP** | not seen | not seen | not seen | **`opencode acp`** | not seen | not seen |
+| MCP **client** config | `codex mcp` | `--mcp-config`, `claude mcp` | present | `opencode mcp` | not seen | not seen |
+| **permission requests routed to an MCP tool** | not seen | **`--permission-prompt-tool`** | not seen | not seen | not seen | not seen |
+| vendor's own subagent definitions | not seen | `--agents <json>` (`{"reviewer": {...}}`) | not seen | `opencode agent create/list` | `--agent` | not seen |
+| vendor's own non-interactive review | `codex review` | `--from-pr` | not seen | not seen | not seen | not seen |
+| vendor's own session store + resume | `resume`, `fork`, `queue`, `archive`, `migrate-rollouts` | `--resume`, `--fork-session`, `--session-id <uuid>`, `--no-session-persistence` | `-r/--resume` | `--session`, `--continue`, `--fork` | `--conversation`, `--continue`, `--project` | not seen |
+| vendor's own doctor | `codex doctor` | `claude doctor` | not seen | `opencode debug` | `--log-file` | `--debug` |
+| structured final answer schema | `--output-schema`, `-o --output-last-message` | not seen | not seen | not seen | `--json-schema` | not seen |
+| session/turn import from a rival | not seen | `claude import [source]` ("Import config from another AI coding agent") | not seen | not seen | not seen | not seen |
+
+Three things follow from that table, and they are the substance of this appendix.
+
+### S-1 The adapter layer is thin, because the ecosystem already standardised
+
+The proposal's `AgentAdapter` interface — `detect() install() start() stop() pause()
+resume() send() read_output() interrupt() status() capabilities() permissions()` — was
+drawn as if five vendors had five incompatible shapes. Measured, the opposite is true:
+all six converge on *one-shot headless prompt + JSONL event stream + an approval ladder
+whose rungs are the same three places (read-only → edit-allowed → everything-allowed) +
+resumable sessions*, and three of them share the literal vocabulary (`stream-json` in
+Claude, Gemini and Agy). The adapter that has to be written is a **normaliser over about
+six flag vocabularies and one event schema**, not a per-vendor protocol. Two of the
+proposal's twelve methods are dropped outright, because no vendor has them: `pause()`
+and `resume()` at process level (their `resume` means *continue the conversation*, not
+*unfreeze the process*), and `install()` (see S-8). That shrinks the runtime surface to
+launch / stream / interrupt / session-id, which is what `xencode-core-rs/src/tasks.rs`
+already does for background jobs — so a worker is a row type on the existing task
+manager, not a new subsystem.
+
+### S-2 A third of the list is already shipped — by the vendors being orchestrated
+
+This is the finding the proposal could not have known. Items 5, 9, 17, 22, 23, 30 and
+parts of 12, 16, 28 and 31 describe machinery that already exists inside Codex and
+Claude Code: a shared local app-server daemon with a session browser and a message
+queue, background sessions you can attach to and fork, per-vendor subagent definitions
+as JSON, a non-interactive `review` command, a health `doctor`, structured-output
+schemas, and — the sharp one — `claude import`, which imports *another agent's* config.
+Building xencode versions of those is building worse copies of things the user already
+has, five times over. **What none of them can do is the only thing worth building:**
+hold state that is not theirs, decide with knowledge of all of them, and veto any of
+them. So the differentiation claim in the proposal survives, but only for the items
+where xencode is the third party — see S-5.
+
+### S-3 Permission brokering is real, single-vendor, and currently unverifiable
+
+The proposal's most load-bearing promise (items 14, 15, 35: "Xencode becomes the
+permission broker") was the one most likely to be fiction, because xencode has no OS
+sandbox — the tree's `Milestone M` table says so and it is true: enforcement is lexical
+path checks in `agent_tools.rs` and a worktree root for spawns, and a child process is
+not confined by it. Measured today there is exactly **one** real interception seam:
+Claude Code's `--permission-prompt-tool`, which routes its permission requests to an MCP
+tool. Which means:
+
+- `M-5 — xencode mcp serve` stops being a nice interop item and becomes **the seam the
+  entire orchestrator hangs on**. Without it, xencode cannot answer a worker's approval
+  request; with it, one approval really can control everything (item 15) for at least
+  one vendor. That inverts Milestone M's ordering claim that ACP and MCP-server are the
+  two big new surfaces — under S, M-5 is upstream of a product category.
+- For every other vendor there is no interception, only **pre-grant**: a launch flag
+  that fixes a policy before the process starts. Item 35's diagram (xencode's sandbox
+  layer beneath Codex/Claude/Gemini) is therefore false as drawn, and stays false until
+  `SE-7` (Landlock/bubblewrap) ships. Two sandboxes can still nest honestly — launch the
+  vendor under `--sandbox read-only` *and* wrap the process in SE-7's wrapper — and that
+  is the only version of item 35 worth planning.
+- Hard rule, because it is the failure mode of this whole feature: **xencode never
+  inherits or escalates a vendor's approval mode.** Each vendor's default is that
+  vendor's business; the broker sets the *lowest* mode that completes the task, and any
+  widening is a user-visible approval on xencode's own gate (`SE-4`'s lethal-trifecta
+  check is exactly what five autonomous processes with `--yolo` constitute).
+
+### S-4 The constraint that dies, and the one that replaces it
+
+`MA-4` (raise `--parallel`) and `MA-5` (the general AgentGraph) are parked in §R-1's
+"not scheduled" table, and the recorded reason was hardware: *"`--parallel 1` on 8 cores
+/ 15 GiB is what keeps this a pipeline rather than a graph"* — one local llama.cpp
+process saturates the box, so parallel subagents were parallel in name only. **That
+reason does not apply here, and the plan has to say so out loud** (corrected in §R-2):
+an external CLI calling a cloud API spends local CPU on JSON parsing, not inference.
+Five Codex workers in five worktrees really do run at once. Item 9's dependency-aware
+scheduling is therefore revived from the `MA-5` rejection — not for local subagents, for
+external workers.
+
+What replaces the old ceiling, in order of how soon it bites:
+
+1. **Verification is still one machine and still serial-ish.** `cargo test`, `clippy`,
+   `llvm-cov` and the local judge all run here, so N workers produce more pending
+   verification than W5's engine can drain. Parallelism buys throughput only up to the
+   verification queue, and that queue is the real limit — which is why item 13's merge
+   manager is a *scheduler* problem, not a git problem.
+2. **The planner is still the local model.** Task decomposition (item 8) at ~24 tok/s
+   on a small open model is the weakest link in the whole design, and it is the one
+   every downstream routing decision trusts. Unmeasured, "Xencode decided: Claude →
+   architecture, Codex → backend" is a coin flip with a nice UI.
+3. **Cloud cost stops being free.** The local-first position means today's spend is
+   roughly zero; this feature spends other people's API money by the fan-out, so item 21
+   and `CX-7`'s acting budgets become *prerequisites*, not operations polish.
+4. **Provider terms.** Mass-spawning a logged-in consumer agent account across parallel
+   sessions is the same category of risk as the Colab ToS note in Milestone K. Nobody
+   has read those terms for this use; recorded as an open check in `AR-1`, not an
+   assumption.
+
+### S-5 What is genuinely new to xencode (the whole point, in six lines)
+
+1. **A cross-vendor event normalisation** so that one trace, one ledger and one cost
+   number cover workers from different vendors (`AR-4`, `EVd-1`, `CX-2`).
+2. **A single arbitration point** that knows all workers and can veto any of them
+   (`OR-3`, `OR-5`) — structurally impossible between the vendors themselves.
+3. **Shared memory scoped as a capability, not a transcript dump** (`OR-8`), which the
+   vendors do not have because they do not share a context store.
+4. **A neutral, verifiable handoff package** built from observed facts rather than an
+   agent's self-report (`AR-7`).
+5. **A budget and permission ceiling over *other people's* autonomous processes**
+   (`AR-6`, `OR-3`) — the one item none of them enforces on each other.
+6. **The merge decision, with evidence and a human gate** (`OR-5`, `WF-9`).
+
+Everything else in the list is either existing xencode work with a new label (S-6) or
+someone else's existing product feature (S-2).
+
+### S-6 Disposition of the 38
+
+Verdicts as in Q: **planned** = an existing L–R ID already covers it; **new** = adds an
+option not otherwise in the tree; **narrowed** = survives only in a reduced form;
+**reject** = do not build (§S-8).
+
+| # | Proposal | Verdict | Lands as / why not |
+|---|---|---|---|
+| 1 | `/orchestrator` is a mode, not a separate product | new | `OR-14` — the command surface. The framing is adopted wholesale; "normal xencode is unchanged" is the design constraint that keeps this cheap |
+| 2 | `AgentAdapter` with 12 methods | narrowed | `AR-1`, `AR-4`, `AR-6`. Twelve methods measured down to four (launch/stream/interrupt/session); `pause()`/`resume()`/`install()` dropped — no vendor has them (S-1) |
+| 3 | Auto-discover installed agents | new | `AR-2` — PATH discovery + version read. On this box five are `mise`-managed and two are `~/.local/bin`, so discovery must read the toolchain manager, not guess it |
+| 4 | Settings becomes an Agent Control Center | narrowed | No new settings tree. Two sections on the existing `SettingRow`/`FocusArea` enums + `UX-6`'s palette; any config shape change pays `DB-2`'s version ladder first |
+| 5 | Agent marketplace | reject | Same decision Milestone M already made for plugins: "distribution that already works is a git repo plus a manifest". Also: these are third-party binaries we do not own and must not resell a catalogue of (§S-8) |
+| 6 | Agent capability detection | narrowed | `AR-3` — a probe of each CLI's advertised flags, not an inferred capability table. The S-0 table *is* the output format; it is 20 minutes of `--help`, and it never claims a capability a probe did not see |
+| 7 | Agent profiles (Architect/Implementer/Researcher…) | planned | `MI-7` task-shaped model profiles, `AC-3` rule-based task-shape router. `MD-3`'s rejection (per-mode prompts void KV reuse) does not apply — a worker's prompt is not in our KV cache, which is the one place profiles are free |
+| 8 | Task decomposition into a master task tree | new | `OR-1`, **gated on `EV-1`** — decomposition quality must be measured on a real task before anything downstream trusts it (S-4.2) |
+| 9 | Dependency-aware scheduling over the graph | new | `OR-2`. Revives `MA-5`'s scheduling for external workers only; §R-2's correction records that the `--parallel 1` reason for rejecting it does not apply to cloud workers |
+| 10 | Agents communicate only through Xencode, as structured events | planned | `WF-1`'s NDJSON stream + `EVd-1`'s ledger; new only in that `AR-4` must normalise vendor events into that schema first |
+| 11 | Shared project memory all workers read and challenge | planned | `EV-4`, `MEM-1`, `MEM-2`, `QM-1`, with `QK-3`'s source classes in front. One new consequence: memory written for one worker and read by another is a **wider injection surface** than our own context, and `SE-2`'s marking has to be per-worker (`OR-8`) |
+| 12 | Git/worktree isolation, one branch per worker | planned | Already shipped in part: `/spawn` runs a subagent in a worktree (`app.rs:2905-2955`), `worktree.rs`, `WF-10`'s stacked diffs. New: `AR-5` — a vendor CLI keeps its own state outside our worktree (session files, logs, `~/.codex`), so isolation needs an env/root contract, not just a branch |
+| 13 | Automatic merge manager | narrowed | `GH-6`'s conflict assistant + `WF-9` + `OR-5`. **Never silent** (the proposal says this itself and it is the rule): `git merge-tree` to detect, a human gate to land. And item 13's "Conflict resolution task → Reviewer: Claude" is a re-ask, not a resolution — see §S-8 |
+| 14 | Per-agent permission profiles, first-class | narrowed | `CAP-1`'s capability vocabulary is already the plan for this. The word "control" is wrong: brokering is real for one vendor and pre-grant-only for the rest (S-3) |
+| 15 | One approval controls everything (Approval Center) | planned | `LF-2`'s round-trip + `MD-1`'s modes + a queue in `OR-3`. Real today for Claude via `--permission-prompt-tool` over `M-5`; a queue over nothing-but-launch-flags is a display, and is honest only if it says so |
+| 16 | Agent dashboard | new | `OR-12` — a `FocusArea` panel over `AR-6`'s state and `EVd-1`'s rows. The mock in the proposal renders five states xencode cannot yet observe; `AR-6` is the item, the panel is its report |
+| 17 | Agent timeline / flight recorder | planned | `EV-2`'s turn trace + `QA-3`'s decision markers. The proposal's own closing table already identified this overlap correctly |
+| 18 | Agent-to-agent review loops (planner → implementer → reviewer → verifier → fixer) | planned | `MA-2`'s serial pipeline + `MA-1`'s clean-context reviewer + `L-7`'s exit-code done-gate. New only in that the roles can now be filled by external workers (`AR-7`) |
+| 19 | Agent voting; expose disagreement, never majority-rule | planned | `QM-4` — "report disagreement, never resolve". The proposal independently restates a rule the plan already committed to, which is the best possible sign for it |
+| 20 | Specialist swarms (`/orchestrator team security\|feature\|debugging\|…`) | narrowed | `OR-9` — named recipes as TOML data over `OR-2`, which is exactly `MA-2`'s shape. A recipe is data; a team engine is `MA-5` returning by the side door |
+| 21 | Agent budgets (tokens, wall-clock, tasks, $/day) | planned | `CX-7` (budgets that act), `CX-5` (spend ledger), `CX-4` (price lookup, never a vendored table). New: `AR-6`'s per-worker wall-clock and interrupt, which is the only budget xencode can actually enforce on someone else's process |
+| 22 | Agent fallback (worker dies → hand the task to another) | narrowed | Provider-side fallback and retriability already exist (`retry.rs`, the Provider Health panel, `QTR-2`'s fix). `OR-7`: a worker's *crash* is observable and re-dispatchable; "can another agent do this?" is not — nobody asks the model that question truthfully |
+| 23 | Agent health monitoring (installed / authenticated / responsive / rate-limited) | new | `AR-8` — cheap and real: binary present, version, auth state, last-error. `codex doctor` and `claude doctor` exist and could be read as a signal, but they are interactive TUIs today; `DB-6`'s `xencode doctor` is the aggregation point |
+| 24 | Provider-aware installer (detect OS, package manager, install, verify, authenticate) | reject | Two independent reasons: the user manages this box with `mise` and the tree has `WF-5`/`binstall` for its own distribution, so a second installer is a toolchain-manager conflict; and "authenticate accounts" is not a step xencode may ever take, whatever the item number says |
+| 25 | Configuration profiles (Local Only / Maximum Intelligence / Secure Repository) | planned | `MI-7` + `CAP-1`. "Local Only" is this project's default posture (`PR-2`, `LF-8`) and gets stated as a profile; the other two are the same policy set with the egress gate opened by name |
+| 26 | Cost intelligence per agent + cost-aware routing | planned | `CX-1`…`CX-7`. Per-worker attribution needs one field on `CX-2`'s schema extension, which is where `AR-5`'s identity lands |
+| 27 | "Ask Xencode" routing: the user names the task, not the agent | planned | `AC-3` + `OR-1` + `OR-11`. This is the UX the whole proposal is for, and it is also the one that fails loudest when `EV-1` has not measured anything |
+| 28 | Explicit control commands (`assign`, `pause`, `stop`, `retry`, `inspect`, `status`, `graph`, `logs`, `permissions`, `costs`) | new | `OR-14`. `pause` again has no vendor primitive; the rest map onto `AR-6`/`EVd-1` |
+| 29 | Manual take-over: `/orchestrator attach codex`, `Ctrl+]` back | narrowed | `OR-10`. xencode's TUI is one ratatui surface and cannot host a rival TUI in-process; measured alternatives are the vendor's own (`claude attach <id>`, `opencode attach <url>`, `codex agents --remote`) so take-over means *suspend ours, hand the terminal over*, which is doable and is not what the mock implies |
+| 30 | Session handoff with progress, failure reason, changed files, tests | new | `AR-7`. The "Progress: 72%" in the proposal is the part to drop: no worker reports a truthful percentage, so the handoff is built only from what xencode can observe — the diff, the tests it ran itself, the last events, and the fact that the process stopped |
+| 31 | `.xencode/agents/…` + `.xencode/orchestrator/{agents,tasks,graph,permissions}.json`, `events.jsonl` | narrowed | `AR-5`. Mirror task state only — **never** copy vendor session stores, which are theirs, undocumented, and full of transcripts we did not write. Every new file inherits `DB-1`'s atomic write, `DB-5`'s torn-line discard, `SE-1`'s `0600` and `SE-5`'s secret scanning, because `events.jsonl` from five vendors *will* contain their API keys and their users' pastes |
+| 32 | Dry run: `/orchestrator plan` shows agents, tasks, cost, then asks | new | `OR-10`'s default render. Cheapest trust feature in the list, no new substrate, and it should be the way every run starts |
+| 33 | Simulation mode: build the graph without running agents | narrowed | Fold into `OR-10` — plan and simulate are one thing here, since neither runs a worker. `QD-5` is the actual simulator and it is about the code graph, not the task graph |
+| 34 | A YAML policy file per project | narrowed | `CAP-1` supplies the vocabulary and the enforcement point; the syntax should be the existing TOML config, not a fourth format (Milestone M's "do not invent a dialect" rule applies verbatim) |
+| 35 | Agent sandboxing under xencode's permission layer | planned | `SE-7` / `QTR-3` — and it is honest only after those ship (S-3). Until then the isolation story is a worktree, a lexical path check and the vendor's own sandbox, and the UI must say that |
+| 36 | "Why did Xencode choose this agent?" | new | `OR-11` — print the routing reasons next to every decision. Small, and the difference between a control plane and a surprise box |
+| 37 | Agent performance history by language/task/repo | narrowed | `QM-5` (per-model aggregates with `n` printed) + `QO-4`'s harness. The same objection the Q pass measured for ownership applies here: one author, one machine, a corpus this small cannot fill a per-language table with numbers that mean anything — print `n` or do not print the rate |
+| 38 | The final architecture and the name "Xencode Agent Runtime (XAR)" | narrowed | `S-11`. The component list maps onto `AR-*`/`OR-*` almost one-to-one; the name does not survive contact with the tree (§S-11) |
+
+Totals: **38 proposals → 13 planned, 13 narrowed, 10 new, 2 rejected**, and **22 new
+IDs** (`AR-1…AR-8`, `OR-1…OR-14`). Thirteen of the 38 were already in the tree under an
+existing ID, which is a higher collision rate than Q's (25/100) on a list one-third the
+size — and the honest explanation is that S is the first proposal written *with* the
+roadmap in front of it rather than around it, so it names the overlaps itself instead of
+leaving them to be found.
+
+### S-7 The one item that decides whether any of this gets built
+
+Everything above is architecture. One measurement decides whether it is any of those
+things, and it is the cheapest real-connection check in this file:
+
+> **`AR-1` — the interop probe.** Launch each installed vendor CLI headless on a tiny
+> **read-only** prompt ("plan a rename of `X` across these two files; change nothing"),
+> with its own sandbox at `read-only`/`plan`, and record what actually arrives: does the
+> event stream carry tool names, file paths, approval requests and token usage? Can
+> `--permission-prompt-tool` really reach an MCP server we run? What does a worker look
+> like when it is denied? Then ask the same of its cost: what one fan-out of five workers
+> on one repo actually spends.
+
+That is `Milestone K`'s rule applied to a new feature: unit tests prove nothing here, and
+the whole proposal rests on seams that `--help` *advertises* but has not yet been shown
+to deliver. Two of its rows above are already marked "not seen" precisely because
+advertising a flag and having it behave as described are different claims; `AR-1` is what
+tells them apart. Until it runs, `OR-*` are design sketches with good provenance and
+must not enter a wave as commitments.
+
+### S-8 Do not build (decided, with reasons)
+
+- **An agent marketplace, catalogue, or version index of third-party agents.** They
+  ship their own updaters (`codex update`, `opencode upgrade`), we do not own their
+  distribution, and a xencode-curated list of other companies' autonomous binaries is a
+  supply-chain liability with no product pull.
+- **Installing or authenticating anything on the user's behalf.** Not a budget question:
+  this box's agents are `mise`-managed by the user's own hand, and account auth is a
+  browser flow that belongs to a human. `AR-8` may *report* a missing or unauthenticated
+  agent; it stops there.
+- **A local mirror of vendor session stores** (`S-6 #31` taken literally). Undocumented,
+  changing, and full of other people's transcripts.
+- **Progress percentages and self-reported completion from workers.** `EVd-3`'s
+  checks-ran verdict already settled this: a claim is not evidence. A worker that says
+  "72% done" contributes a diff and an exit status, nothing else.
+- **Silent automatic merges, or automatic conflict resolution by another agent.** A
+  conflict is a decision, and the reviewer who caused half of it does not get to settle
+  it. `OR-5` detects, presents and gates.
+- **`AgentAdapter.install() / pause() / resume()` as interface methods** (S-1) — invented
+  because the interface was drawn before the CLIs were read.
+- **A per-worker capability inferred from its name.** `AR-3` probes flags; nothing in the
+  router may consult a table of vibes (that is `Q-14`'s objection in a new costume).
+
+### S-9 Tasks (drafted, none started — and none buildable before `AR-1`)
+
+The prefixes follow the appendix convention: `AR-` for the runtime that talks to one
+worker, `OR-` for the thing that decides what workers to talk to.
+
+- [ ] **AR-1 — the interop probe** (S-7). Run each installed CLI headless on a read-only
+      task and write down what its stream really contains.
+      **Done-when:** a matrix in this file, one row per installed agent, saying per row
+      which of {tool names, file paths, approval requests, token usage, session id,
+      denial behaviour} was *observed* rather than advertised — plus one measured cost
+      figure for a five-worker fan-out. No `OR-` item may be scheduled before this row
+      exists, and no row may be filled in from documentation.
+- [ ] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
+      record how each was installed (`mise`, `~/.local/bin`, other) without installing,
+      upgrading or touching any of them.
+      **Done-when:** on this box it lists codex/claude/gemini/opencode/agy/crush with the
+      six versions from S-0 and says nothing about the rest of the filesystem.
+- [ ] **AR-3 — contract probe, not capability table.** For a discovered agent, extract
+      the flags it actually advertises (headless mode, stream format, approval ladder,
+      sandbox) into the S-0 row shape.
+      **Done-when:** an agent whose help text lacks a flag is reported as *lacking* it,
+      and the router cannot see a capability that no probe recorded.
+- [ ] **AR-4 — one worker, one event schema.** Launch a vendor headless, normalise its
+      JSONL into xencode's `WF-1` event shape, and mark the provenance of every field a
+      vendor did not supply.
+      **Done-when:** two different vendors' runs render in the same trace view, and any
+      field invented to make them line up is visibly xencode's, not theirs.
+- [ ] **AR-5 — worker identity and state files.** Give every worker an id that survives
+      into `EVd-1`'s ledger and `CX-2`'s metrics, and define what xencode owns versus the
+      vendor (task record, not session mirror).
+      **Done-when:** every new file is written with `DB-1`'s atomic write, `DB-5`'s
+      torn-line discard and `0600` per `SE-1`, and a redaction pass proves an
+      authentication token that appeared in a stream did not land on disk (S-6 #31).
+- [ ] **AR-6 — the process ceiling.** Track each worker as a row on the existing
+      background-task manager: start, interrupt, wall-clock limit, output tail, and a
+      hard kill that reaches the vendor's own children.
+      **Done-when:** a wedged worker cannot outlive its task, and killing it leaves no
+      orphan — verified against a real run, not a test fixture.
+- [ ] **AR-7 — the handoff package.** Build "what the next worker needs to know" purely
+      from observed facts: the diff, the tests xencode itself ran and their exit codes,
+      the last normalised events, and why the previous worker stopped.
+      **Done-when:** a second worker resumes a real task from this package alone, and the
+      package contains no self-reported progress or completion claim.
+- [ ] **AR-8 — worker health.** Report installed / version / authenticated / responsive /
+      rate-limited per agent, read-only, and never silently fix anything.
+      **Done-when:** an expired auth is *shown* as an expired auth, and the only offered
+      next step is a command the human runs in their own terminal.
+- [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
+      tree, and score the split with `EV-1` before any router consumes it.
+      **Done-when:** the decomposition's quality number is recorded with the baseline it
+      was compared against, and a worse-than-baseline result stops `OR-2`'s scheduling
+      rather than shipping anyway.
+- [ ] **OR-2 — the task graph and scheduler.** Nodes with dependencies, parallel
+      readiness, and a queue whose capacity is `min(workers, verification throughput)`.
+      **Done-when:** a four-node graph with two independent branches runs both and the
+      third waits, and the serial bottleneck is named in the output rather than hidden.
+- [ ] **OR-3 — the permission broker.** Answer a worker's approval request where the
+      vendor supports it (Claude's `--permission-prompt-tool` over `M-5`), pre-grant the
+      lowest sufficient mode where it does not, and never widen a mode on a worker's own
+      authority.
+      **Done-when:** a real denied write is visible at xencode's gate rather than
+      silently skipped, and no launch line in the run log contains an approval flag
+      xencode did not choose.
+- [ ] **OR-4 — leases, not shared checkouts.** One worktree per worker with a declared
+      file set, and a conflict refused at scheduling time rather than discovered at merge
+      time.
+      **Done-when:** two workers asked for the same file and the second was told to wait
+      before it was launched, not after it had written.
+- [ ] **OR-5 — the merge decision.** `git merge-tree` detection, a rendered conflict, an
+      evidence-backed verdict per branch, and a human gate to land anything.
+      **Done-when:** nothing merges without a decision a named human made, and a clean
+      four-branch merge still shows which tests were re-run after integration (never the
+      worker's own run).
+- [ ] **OR-6 — capability-gated routing.** Choose a worker only from probed capabilities
+      (`AR-3`) plus current load and cost ceiling — never a vendor name.
+      **Done-when:** a task requiring a capability exactly one agent has cannot be routed
+      to the others even when they are idle.
+- [ ] **OR-7 — re-dispatch on failure.** When a worker dies, re-queue it on another
+      agent using `AR-7`'s package, with the failure reason recorded from the process, not
+      from prose.
+      **Done-when:** a killed worker's task completes elsewhere without losing the diff,
+      and the retry is visible in the ledger as a second attempt on one task.
+- [ ] **OR-8 — shared memory as a scoped capability.** Architecture/decisions/constraints
+      published to workers through `QK-3`'s source classes, with `SE-2` marking per
+      worker.
+      **Done-when:** one worker's finding reaches another as *marked, attributable*
+      content, and a worker cannot read memory the policy did not hand it.
+- [ ] **OR-9 — team recipes as data.** Named role→worker→gate recipes in existing TOML,
+      over `OR-2`. No team engine.
+      **Done-when:** a recipe is a file a person can read and diff, and removing it
+      removes nothing else.
+- [ ] **OR-10 — plan, simulate, dry-run-first.** Every orchestrator entry point renders
+      agents, tasks, parallel groups, estimated wall-clock and estimated cost, and
+      launches nothing until approved.
+      **Done-when:** the plan view is the default, "no changes will be made" is true and
+      provable, and the estimate is checked against the run afterwards.
+- [ ] **OR-11 — explainable routing.** Print the reasons behind every worker choice, and
+      say plainly when a reason came from a measurement that does not exist yet.
+      **Done-when:** each choice lists the facts behind it, and a `CX-4`-style estimate is
+      labelled as an estimate.
+- [ ] **OR-12 — the worker panel.** Agents, tasks, graph, costs, logs and pending
+      approvals as `FocusArea` panels over `AR-6`/`EVd-1` state.
+      **Done-when:** every number shown traces to a real row, and a worker xencode cannot
+      observe renders as unknown rather than as idle.
+- [ ] **OR-13 — the Local-Only profile.** A profile that refuses every external worker and
+      keeps only local providers, with the refusal explained on screen.
+      **Done-when:** the profile is the documented default posture, and `LF-8`'s conformance
+      run passes under it.
+- [ ] **OR-14 — `/orchestrator` as a mode, with its own command surface.** On/off, status,
+      agents, tasks, graph, logs, permissions, costs, inspect, retry, stop, and terminal
+      handover to a vendor's own session.
+      **Done-when:** turning it off leaves plain xencode exactly as it was found, and
+      "attach" only ever means handing the real terminal to a process that has one
+      (`S-6 #29`).
+
+### S-10 Where this sits in the wave order
+
+Recorded in §R: `AR-1…AR-3` are **measurement, not construction**, so they sit in a wave
+of their own (W15) ahead of everything else in this appendix; `AR-4…AR-8`, `OR-1…OR-3`
+depend on W1 (events, ledger), W5 (verification) and W7 (`CAP-1`, `SE-4`, `SE-7`) and sit
+in a new W16; `OR-4…OR-14` need W6, W11 and W12 and sit in W17, with `OR-13` riding
+`LF-8`'s no-network measurement from W14. Two existing items change status because of S:
+**`M-5` (`xencode mcp serve`) moves out of W14 into W16**, in front of `OR-3`, because it
+is the broker's only seam (S-3), and **`MA-4`/`MA-5` get a scoped un-rejection** for
+external workers only (§R-2 item 8). `S` adds no item to W0–W13, and nothing in it may
+start while research and plan mode govern.
+
+### S-11 On the name
+
+"Xencode Agent Runtime" describes the right thing and cannot be used: the TUI already has
+an `AgentRun` type and an `arm_spawn` entry point (`app.rs:2905`), so "agent runtime" is
+occupied by xencode's *own* loop — which is the one distinction this feature must not
+blur. "XAR" additionally collides with a well-known archive format. Adopt instead:
+**worker** for an external agent process, **`xencode-agents-rs`** for `AR-*` (it knows one
+vendor and nothing about plans), and **`xencode-orchestrator-rs`** for `OR-*` (the plan,
+the graph, the broker). `/orchestrator` stays the user-facing word, which is the one the
+proposal already chose well.
 
 
 Anything marked UNVERIFIED was located through search snippets after the fetch
