@@ -193,7 +193,7 @@ impl VulnerabilityScanner {
     /// Check for path traversal vulnerabilities.
     fn check_path_traversal(line: &str, file_path: &str, lineno: u32) -> Option<SecurityFinding> {
         static PATH_TRAVERSAL_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?i)(open|read_text|read_to_string|Path::new)\s*\([^)]*user|input|param|filename"#).unwrap()
+            Regex::new(r#"(?i)(open|read_text|read_to_string|Path::new)\s*\([^)]*(?:user|input|param|filename)"#).unwrap()
         });
 
         if PATH_TRAVERSAL_RE.is_match(line) {
@@ -217,7 +217,7 @@ impl VulnerabilityScanner {
     /// Check for Server-Side Request Forgery (SSRF).
     fn check_ssrf(line: &str, file_path: &str, lineno: u32) -> Option<SecurityFinding> {
         static SSRF_RE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?i)(requests\.(get|post|put|delete)|reqwest::(get|post)|fetch)\s*\([^)]*input|url|user|param"#).unwrap()
+            Regex::new(r#"(?i)(requests\.(get|post|put|delete)|reqwest::(get|post)|fetch)\s*\([^)]*(?:input|url|user|param)"#).unwrap()
         });
 
         if SSRF_RE.is_match(line) {
@@ -243,4 +243,69 @@ impl VulnerabilityScanner {
 pub enum ScanError {
     #[error("Failed to read file {0}: {1}")]
     ReadError(String, String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn traversal(line: &str) -> Option<SecurityFinding> {
+        VulnerabilityScanner::check_path_traversal(line, "test.rs", 1)
+    }
+
+    fn ssrf(line: &str) -> Option<SecurityFinding> {
+        VulnerabilityScanner::check_ssrf(line, "test.rs", 1)
+    }
+
+    #[test]
+    fn path_traversal_needs_the_word_inside_a_call() {
+        // These all mention a suspect word, but never as an argument to a file
+        // operation, so reporting them would be noise.
+        for line in [
+            "fn parse_input(raw: &str) -> String {",
+            r#"let name = "input_handler_table";"#,
+            "fn load_config(path: &Path, params: &Options) -> Result<()> {",
+            "let filename_count = files.len();",
+            // The call is closed before the suspect word appears.
+            "let filename = open(path).is_ok();",
+        ] {
+            assert!(traversal(line).is_none(), "false positive on: {line}");
+        }
+    }
+
+    #[test]
+    fn path_traversal_still_fires_on_a_user_supplied_path() {
+        let hit = traversal("let handle = open(user_path)?;").expect("should flag open(user_path)");
+        assert_eq!(hit.finding_type, "path-traversal");
+        assert_eq!(hit.severity, Severity::High);
+        assert_eq!(hit.cwe_id.as_deref(), Some("CWE-22"));
+
+        assert!(traversal("let p = Path::new(&req.filename);").is_some());
+        assert!(traversal("read_to_string(filename)").is_some());
+    }
+
+    #[test]
+    fn ssrf_needs_the_word_inside_a_request_call() {
+        for line in [
+            "fn load(url: &str) {",
+            "let user_id = session.current();",
+            "let param_count = args.len();",
+            r#"const DEFAULT_URL: &str = "https://example.invalid";"#,
+        ] {
+            assert!(ssrf(line).is_none(), "false positive on: {line}");
+        }
+    }
+
+    #[test]
+    fn ssrf_still_fires_on_a_user_supplied_url() {
+        for line in [
+            "let _ = fetch(url);",
+            "r = requests.get(user_url)",
+            "let resp = reqwest::post(input).send().await?;",
+        ] {
+            let hit = ssrf(line).unwrap_or_else(|| panic!("should flag: {line}"));
+            assert_eq!(hit.finding_type, "ssrf");
+            assert_eq!(hit.cwe_id.as_deref(), Some("CWE-918"));
+        }
+    }
 }

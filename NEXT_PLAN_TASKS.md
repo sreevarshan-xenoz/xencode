@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 831 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 835 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2819,7 +2819,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 831-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 835-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -3875,12 +3875,13 @@ here is inherited from the reviewer's assumptions.
    reverse dependencies — exact, offline, and free (`cargo tree -i tokio`
    measured at 0.34 s) — are the cheapest real capability the entire impact
    cluster is missing.
-10. **The static-analysis scanner's output is not currently trustworthy.**
-    `xencode-analysis-rs/src/security.rs:196` and `:220` group their alternation
-    wrong: `…\([^)]*user|input|param|filename` makes `input`, `param` and
+10. **The static-analysis scanner's output was not trustworthy.**
+    `xencode-analysis-rs/src/security.rs:196` and `:220` grouped their alternation
+    wrong: `…\([^)]*user|input|param|filename` made `input`, `param` and
     `filename` **top-level** alternatives, so any line containing the word
-    `input` is reported High / CWE-22. QO-2. Every health scorecard, dashboard,
-    attack-path and privacy item (22, 25, 51, 52) is trash-in until this lands.
+    `input` was reported High / CWE-22. QO-2 — **landed 2026-09-23**, both
+    patterns grouped and pinned by tests. Every health scorecard, dashboard,
+    attack-path and privacy item (22, 25, 51, 52) was trash-in until this landed.
 11. **The retrieval eval has a false negative baked into it.**
     `xencode-context-rs/src/eval/gold.json` expects
     `rust/crates/xencode-context-rs/src/cmd_output.rs`, which **does not exist
@@ -4108,7 +4109,7 @@ context.
 - **QO-2 — Fix the two broken regexes first.** `security.rs:196,:220` — group
   the alternation under `\([^)]*(?:…)`. *Effort: S.* Provable today: any
   `fn parse_input(` line fires High/CWE-22. Every health proposal in the list is
-  downstream of this.
+  downstream of this. *(Done 2026-09-23 — see W0 progress.)*
 - **QO-3 — Metrics schema extension** (`session_key`, `cost_usd`, `model` +
   an incremental file-tail reader). *Effort: M.* This is **CX-2**; named here
   only to record that with one line in the file, items 19/21/29/67/68 all have no
@@ -4704,11 +4705,23 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   being one file. Reopen the item to overrule that. Verified: the hook and a real
   panic are covered by test; `xencode tui` under a pty starts, renders and writes
   no crash file on a clean run, and its conversation memory landed `0600`.
-- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QO-2`, `QTR-2`, `AM-3`
+- [x] `QO-2` — 2026-09-23. Both scanner patterns grouped. The path-traversal
+  and SSRF regexes ended with a bare `|input|param|filename` / `|url|user|param`
+  alternation, which the regex engine read as a top-level choice: *any* line
+  containing one of those words matched, with no call in front of it. Measured on
+  five one-line samples before the change: `fn parse_input(raw: &str) -> String {`,
+  `fn load(url: &str) {` and `let name = "input_handler_table";` each reported a
+  finding, and `let handle = open(user_path)?;` reported two (the second being
+  SSRF, from the word `user` alone). After grouping the words under
+  `\([^)]*(?:…)` those three report nothing and the last one reports only the
+  path traversal it should. Two genuine hits kept: `let _ = fetch(url);` and
+  `read_to_string(filename)`. Four tests in `security.rs` now pin both directions,
+  and each was re-run against the old pattern to confirm it actually fails there.
+- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-1`, `QN-2`, `QTR-2`, `AM-3`
 
 #### W1 — Make the agent observable — 15 items
 
-Needs W0. A trace of a run whose config can leak, and whose scanner reports the word `input` as High severity, is not evidence.
+Needs W0. A trace of a run whose config could leak, and whose scanner reported the word `input` as High severity, was not evidence — both are fixed in W0; the remaining items there are what still gates this wave.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
