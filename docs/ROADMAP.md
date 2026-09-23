@@ -7,7 +7,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-23** — 15 crates, 768 tests. Every line
+> **Verified against the tree on 2026-09-23** — 15 crates, 815 tests. Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
 > [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.
@@ -77,7 +77,9 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ### Current Architecture
 ```
 xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / OpenRouter
-                                    ↘ retry + sequential fallback (agent_fallback_models)
+                                   ↘ retry + sequential fallback (agent_fallback_models)
+                                   ↘ remote:… → any OpenAI-compatible endpoint, incl. the
+                                     Colab VM reached through an SSH forward (colab-rs)
 ```
 
 ### Target Architecture
@@ -111,9 +113,9 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / 
    microphone capture, and plugin manifests now load
 
 ### 🚀 Next up
-No open milestone: Milestone J closed the last known gap between what the manuals
-promise and what the code does. The icebox above is where the next one comes
-from.
+No open milestone: **Milestone K** (remote providers + the Google Colab GPU
+bridge) closed on 2026-09-23, verified against a live free-tier T4 rather than a
+mock. The icebox above is where the next one comes from.
 
 ## 📊 Success Metrics & Current Status
 
@@ -125,9 +127,9 @@ from.
 - **Performance**: Sub-second response times for all operations
 
 ### 📈 Metrics as measured (2026-09-23)
-- **Rust Migration**: 14/14 crates — complete; the Python stack is deleted
-  (Milestone K adds a 15th crate, `xencode-colab-rs`)
-- **Test Suite**: 768 passing, 0 failing, 4 ignored (`cargo test --workspace`)
+- **Rust Migration**: 15/15 crates — complete; the Python stack is deleted, and
+  Milestone K added `xencode-colab-rs` as the 15th
+- **Test Suite**: 815 passing, 0 failing, 4 ignored (`cargo test --workspace`)
 - **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all --check` clean
 - **Code Quality**: per-language heuristics + pattern-based OWASP scanner
