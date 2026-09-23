@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 809 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 811 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1036,9 +1036,11 @@ OpenAI-compatible server.
       reconnect (`xencode colab up --reconnect`): fast path reuses a live
       endpoint with zero colab/ssh calls, otherwise re-creates a reaped
       session / re-runs the bootstrap / re-spawns the forward and re-probes.
-- [ ] **K-3 — survivability (health row).** A provider-health row for the
-      forward (`draw_provider_health` / `run_health_check` currently have no
-      Remote/Colab entry).
+- [x] **K-3 — survivability (health row).** A provider-health row for the
+      forward (`draw_provider_health` / `run_health_check` now have a Remote
+      entry: seeded like the keyed providers, probes `{remote_base_url}/models`,
+      Connection Details lists the Remote URI, detail line under the row shows
+      the forward URL).
 - [ ] **K-4 — tests + docs.** Config round-trip for the Colab block, wiremock
       fake OpenAI Colab endpoint (extend `remote_endpoint.rs`), masked-key
       rendering (baseline exists from K-1b; the fake `colab` CLI on `$PATH`

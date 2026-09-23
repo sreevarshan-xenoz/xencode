@@ -14,7 +14,7 @@
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 15 crates, 809 tests passing, 4 ignored, zero warnings — the Rust workspace is the only active codebase (Milestone K added `xencode-colab-rs`)
+- ✅ **Rust migration complete**: 15 crates, 811 tests passing, 4 ignored, zero warnings — the Rust workspace is the only active codebase (Milestone K added `xencode-colab-rs`)
 - ✅ **Milestone J complete** (2026-09-21): every panel tells the truth.
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
