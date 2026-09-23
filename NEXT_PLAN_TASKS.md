@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 837 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 842 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2821,7 +2821,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 837-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 842-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -2972,6 +2972,11 @@ All verified by reading the file at the line given, on 2026-09-23.
     `affected_dependents` (default 3 hops, `AFFECTED_MAX_HOPS` at `:28`) on top of exactly this graph** — so
     the shipped Milestone F advice inherits the hole, and `xencode impact` as the
     review scoped it is **CI-6** + **VF-5** over data that is not yet accurate.
+    **Fixed by `LSP-4` on 2026-09-23** (private `struct`s, `enum`/`trait`/`type`
+    extraction, `const`/`extern fn`, re-export names, `mod` and `impl Trait for`
+    edges); what the fix cannot do at this layer is tell a declaration from the
+    same text inside a string literal, and the tier is still Rust-only — both are
+    CI-2's problem. Numbers in the W0 progress list.
 
 ### P-2 — Multi-agent orchestration (proposal 1)
 
@@ -3440,7 +3445,13 @@ pass found something the whole plan has been quietly assuming.
   *Effort: S.* Not in **CI** at all, because CI-2 replaces this layer wholesale —
   so it is a stopgap, justified only by the size of the hole: the +8 symbol
   retrieval signal is currently near-dead weight, and "implements trait" edges
-  are structurally impossible.
+  are structurally impossible. *(Edges, export names, private `struct`s, enum/
+  trait/type and `const`/`extern fn` are Done 2026-09-23 — see W0 progress. The
+  no-op half needed no change: `init.rs` already reports "No Rust files —
+  symbols/deps skipped" instead of an empty success. `const`/`static` values are
+  deliberately still not inventoried, and code inside a string literal is still
+  indexed as a declaration, because this tier reads text and only CI-2's parser
+  reads syntax.)*
 - **LSP-5 — Declare the multi-language policy**: semantic tools Rust-only,
   tree-sitter/ast-grep fallback elsewhere, documented as such. *Effort: S.*
   *Trap:* the per-language registry is precisely the thing to refuse.
@@ -3507,7 +3518,8 @@ Recorded because the plan is the only place they will survive:
    `struct`, and that mis-name every re-export. That makes **LSP-4** — an hour of
    regex work — more valuable per token than any new index, because every
    downstream consumer (`retrieve.rs`'s +8, `advise.rs`'s dependents, CI-6's
-   impact) is currently scoring and reporting on it.
+   impact) is currently scoring and reporting on it. *(Closed 2026-09-23 by
+   `LSP-4`; the consumers still score on a tier that reads text, not syntax.)*
 
 ### P-12 — Interactions with L, M, N and O
 
@@ -3871,7 +3883,9 @@ here is inherited from the reviewer's assumptions.
    `mod`/`pub mod`** statements — so `build_graph` (`:359-386`) genuinely gives
    `lib.rs` no children. `advise.rs`'s `affected_dependents` is therefore
    cross-crate only. LSP-4/CI-2 fix this; until then a layer checker (4) or a
-   lineage view (24) runs on wrong edges.
+   lineage view (24) runs on wrong edges. *(Fixed 2026-09-23 by `LSP-4`: **82**
+   module declarations measured in the current tree, all of them edges now, plus
+   the `impl Trait for` edges, so `affected_dependents` walks the module tree.)*
 9. **Nothing in the workspace consumes `cargo metadata`.** Zero hits for
    `cargo_metadata|MetadataCommand` including all Cargo.tomls. Crate-level
    reverse dependencies — exact, offline, and free (`cargo tree -i tokio`
@@ -4696,7 +4710,7 @@ No dependencies. Everything downstream inherits its honesty: do not put a dashbo
 | **DB-1** | An atomic write helper | core | atomic write; file says "DB-1 and SE-1 are one change, not two" |
 | **DB-5** | Keep JSONL, add torn-line discard | core | torn-line discard, rides DB-1 |
 | **DB-7** | Panic hook plus terminal restore | core | panic hook + terminal restore (O fact 13) |
-| **LSP-4** | Fix the regex tier now (fact 16): enum/trait/impl/`mod` edges | core | regex-tier holes (79 missing mod edges) — CI-2 is the permanent fix |
+| **LSP-4** | Fix the regex tier now (fact 16): enum/trait/impl/`mod` edges | core | regex-tier holes (82 missing mod edges here, 79 at review time) — CI-2 is the permanent fix |
 | **MM-1** | image resize/recompress before send (fact 6): decode, cap ~1568 px | core | image resize/recompress before send (O fact 6) |
 | **PR-1** | Egress gate at the three routers (fact 12), ideally hoisted into one | core | egress gate at the three routers |
 | **PR-2** | Deny-by-default cloud with an explicit opt-in plus a status-bar | core | deny-by-default cloud + status-bar indicator |
@@ -4787,7 +4801,41 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   are guards, not decoration. *Not done from the item:* directory-granularity
   coalescing above N paths and a `settled`/`storming` state to expose; the
   flush bound is a constant, not a reported state.
-- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`
+- [x] `LSP-4` — 2026-09-23. The regex tier now sees what Rust actually declares,
+  and says the name it means. Measured on this workspace's own index, before →
+  after: **127 → 211** dependency edges, **3,029 → 3,540** indexed symbol names,
+  and an export inventory of **57 names that were all module directories**
+  (`advise`, `database`, `app`) replaced by **274 names that are the things the
+  crates actually re-export** (`Advice`, `Bm25`, `XENCODE_DIR`) — the old
+  pattern captured the *first* segment of every `pub use`, so the symbol layer
+  never contained one exported item. Concretely: `mod x;` declarations are
+  edges (**82** in this tree, every one of them resolving to a file; the plan
+  said 79, counted before the last three crates landed), `impl Trait for Type`
+  is an edge to the file declaring the trait (2 of this tree's 53 `impl … for`
+  statements: the other 50 name a trait no indexed file defines, and one
+  implements a trait in its own file), `enum`/`trait`/`type` are
+  extracted, `struct` no longer requires `pub`, and `const fn` / `extern "C" fn`
+  count as functions. Ambiguity is refused rather than guessed: a trait name two
+  files both define yields no edge. `self::` also resolves to the module's own
+  directory now (`src/wire.rs` + `use self::db::…` means `src/wire/db.rs`),
+  which changes nothing in this workspace — it has zero such imports — but the
+  old answer was a sibling file, which is not what Rust means.
+  **Retrieval did not improve, and the honest reading is mixed**: on the 18-probe
+  gold set the deterministic pass holds recall@1 0.278 and recall@5 0.500 while
+  **MRR falls 0.366 → 0.338** (three answers slip one rank down as newly visible
+  module edges pull other files into the top of the list), and the hybrid pass
+  **rises to recall@1 0.444 from 0.389 and MRR 0.472 from 0.444**, with recall@5
+  unchanged at 0.500 either way. The richer graph is better material for a
+  text-matching rerank and worse material for raw edge counts; neither is a
+  regression to hide. `xencode advise` on this workspace went from 18 orphans and
+  1 hub to 10 orphans and 2 hubs, which is the same fact seen from the other end:
+  files the module tree reaches are no longer reported as disconnected.
+  *Not done from the item:* `const`/`static` **values** stay out of the inventory
+  — they route no edge and answer no query, and a field nothing reads is the dead
+  weight fact 16 complains about; and the tier still reads text, so a code sample
+  inside a string literal is indexed as a declaration (this item's own test
+  fixtures are, in this file's index entry) — that is what CI-2's parser is for.
+- [ ] `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`
 
 #### W1 — Make the agent observable — 15 items
 

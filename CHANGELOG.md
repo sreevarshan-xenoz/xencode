@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the repository map now sees modules, traits and what a crate exports
+The structural layer underneath `/ctx`, `/advise` and `xencode advise` was a set
+of regular expressions over Rust text, and four of its holes were large enough to
+make the results wrong rather than merely coarse. A `mod x;` line — the only thing
+that connects `lib.rs` to the files of its crate — produced no dependency at all,
+so a module tree was invisible: this workspace's index goes from 127 recorded
+dependencies to 211, of which 82 are module declarations, every one of which
+resolves to a real file. `xencode advise` reported 18 files here as orphans; the
+eight it stops reporting are ordinary source files that a crate root declares with
+`mod` (`anthropic.rs`, `gemini.rs`, `qwen.rs`, `mcp.rs`, `panic.rs`, `voice.rs`,
+`collab_client.rs`, `widgets/spinner.rs`), and the ten it still reports are
+integration tests under `tests/`, which no module declares — the honest ones. An `impl MyTrait for MyType` block is a
+dependency on the file that declares the trait, and none of those edges existed
+because no `use` statement has to mention it — two appear in this workspace, and
+the rest of the `impl` blocks here implement traits from outside the indexed tree,
+which are skipped rather than guessed at. `enum`, `trait` and `type` declarations
+were not collected at all, a `struct` without `pub` was invisible, and `const fn`
+and `extern "C" fn` were not counted as functions: 3,029 indexed symbol names are
+now 3,540. Finally, the names a crate re-exported were recorded as the *module*
+the re-export came from, so `pub use database::Pool` was filed under `database`
+and the export inventory of this workspace held 57 directory names and not one
+thing anyone can import — it now holds the 274 names actually exported, aliases and
+brace groups included, and a glob (`pub use foo::*`) contributes none rather than
+one wrong name.
+
+What that buys is measurable and mixed, and both halves are reported. On the
+eighteen-question retrieval scorecard for a real index of this workspace, the
+hybrid pass improves — first-answer rate 0.39 → 0.44, mean reciprocal rank
+0.444 → 0.472 — while the plain structural pass loses a little ordering precision
+(mean reciprocal rank 0.366 → 0.338) without losing any reach: the rank-1 and
+top-five rates are unchanged at 0.28 and 0.50, because three answers moved one
+place down as the newly visible module edges pulled other files up beside them.
+More accurate structure is better material for a text-matching second pass than
+for a raw edge count. `self::` paths are also resolved relative to the module's
+own directory now, which is what Rust means; this workspace contains no such
+import, so nothing here moved.
+
 ### Fixed — the file watcher now reports what it could not do
 Two ways this feature could fail without saying anything. If the workspace could
 not be watched at all — on a repository this size, usually because the operating

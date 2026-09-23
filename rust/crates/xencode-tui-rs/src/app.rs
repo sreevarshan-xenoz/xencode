@@ -1289,6 +1289,9 @@ fn learning_lessons(root: &std::path::Path) -> Result<Vec<(String, Vec<String>)>
                 .iter()
                 .map(|name| format!("struct {name}"))
                 .collect();
+            declared.extend(syms.enums.iter().map(|name| format!("enum {name}")));
+            declared.extend(syms.traits.iter().map(|name| format!("trait {name}")));
+            declared.extend(syms.types.iter().map(|name| format!("type {name}")));
             declared.extend(syms.functions.iter().map(|name| format!("fn {name}")));
             (!declared.is_empty()).then(|| (path.clone(), declared))
         })
@@ -1297,7 +1300,7 @@ fn learning_lessons(root: &std::path::Path) -> Result<Vec<(String, Vec<String>)>
     lessons.truncate(LEARN_LESSON_CAP);
     if lessons.is_empty() {
         return Err(
-            "The index lists no file that declares a struct or function — nothing real to teach."
+            "The index lists no file that declares a type or function — nothing real to teach."
                 .to_string(),
         );
     }
