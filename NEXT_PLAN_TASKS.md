@@ -1857,3 +1857,909 @@ during the passes (quota), so any figure the appendix marks **UNVERIFIED** is
 snippet-level and must be re-read before it is relied on. Vendor rate limits
 (L-11, free-tier quotas) drift by design in particular.
 
+
+---
+
+## Milestone O — the ground L, M and N did not walk on (research appendix, drafted 2026-09-23)
+
+L, M and N covered remote compute, the extension surface, code intelligence,
+developer workflow, evaluation, security, multimodal and the tailnet. Eight
+further passes went into territory none of them touched: the model/inference
+layer, the agent's inability to look anything up, machine-checkable
+verification, git history as context, state durability, platform portability,
+ambient autonomy, cost accountability, and the human-facing ergonomics of a
+tool meant to be lived in for eight hours.
+
+Like N, this is **the option space, recorded in full and deliberately
+unranked**. Like N it is research, not a commitment: nothing here is built.
+
+### O-0 — Facts about the current tree that reframe the options
+
+All verified by reading the file at the line given, on 2026-09-23.
+
+1. **The structured-output plumbing points at a field llama.cpp's OpenAI
+   endpoint does not read.** `merge_llamacpp_options` writes top-level
+   `grammar` and `json_schema` into the payload
+   (`xencode-providers-rs/src/lib.rs:1327-1334`), but every llama.cpp request
+   goes to `/v1/chat/completions` (`:1088`, `:1168`, `:1265`), where the
+   server's documented field is `response_format:{"type":"json_schema",…}`;
+   top-level `json_schema` belongs to the `/completion` route. So even if the
+   TUI stopped passing `None` (`xencode-tui-rs/src/app.rs:1492`, `:2419`,
+   `:5330`), the server would ignore it. A defect-shaped finding, not a
+   feature request.
+2. **Ollama requests carry four fields and nothing else**
+   (`xencode-providers-rs/src/lib.rs:881-891`): `model`, `messages`, `stream`,
+   and `tools`. No `format`, no `think`, no `keep_alive`, no `options.num_ctx`.
+   Ollama's documented behaviour is to default the context by VRAM — under
+   24 GiB that is a 4k window — and xencode never queries `/api/show`
+   (0 hits for `api/show`, `num_ctx`, `keep_alive` in request-building code).
+   The context window comes only from user config
+   (`xencode-context-rs/src/context.rs:297`).
+3. **There is no tokenizer of any kind** (`tiktoken`, `tokenizers`,
+   `llama-tokenizer` → 0 hits); every token number in the product is an
+   estimate — `est_tokens` at 4 chars/token prose, 3 for code
+   (`xencode-context-rs/src/budget.rs:101-104`).
+4. **`capabilities.rs` resolves local context windows to `None` on purpose**
+   (`xencode-providers-rs/src/capabilities.rs:1-17`, tests at `:141-152`): "a
+   wrong number is worse than no number". Do not read that as an oversight to
+   fix by guessing; the fix is to ask the server.
+5. **The default model list is four years stale**: `qwen2.5:7b`,
+   `qwen2.5:3b`, `qwen3:4b`, `llama3.1:8b`, `llama3.2:3b`, `mistral:7b`,
+   `phi3:mini`, `gemma2:2b` (`xencode-models-rs/src/ollama.rs:266-275`). No
+   SHA256, revision-pin or etag logic anywhere in `xencode-models-rs`.
+6. **The agent cannot reach the network at all, and the one fetcher that
+   exists cannot read JSON.** `fetch_url`'s content-type gate accepts only
+   `text/html`, `text/plain`, `application/xhtml+xml`, plus an empty header
+   (`xencode-analysis-rs/src/web.rs:96-102`); it is reachable only from
+   `xencode-cli/src/main.rs:1856`. `ToolClass` has no network variant
+   (`xencode-tui-rs/src/agent_tools.rs:62-69`) and unknown tools fall through
+   to `Shell` (`:134`), so a naive `web_fetch` would be labelled "shell
+   command" (`:117`) and gated as a shell rather than as egress.
+7. **`fetch_url` has no SSRF hardening**: no post-redirect host re-validation
+   and no private/link-local range block, and `reqwest` follows redirects by
+   default (`web.rs:50-94`). Handing it to a model un-hardened would create an
+   internal-network probe with a nice UI.
+8. **There is no failure classifier.** `classify()` (`agent_tools.rs:209-248`)
+   is the *approval* policy — its own tests call it that
+   (`classify_asks_per_mode_and_grants_shortcut` `:1980`,
+   `classify_denies_out_of_workspace_paths_in_every_mode` `:2036`). The agent's
+   entire error handling is capped stdout/stderr plus the prompt line "if a
+   result begins with `error:`, do not retry" (`:27`, `:562`). **This makes
+   `README.md:108`'s "Error classification and targeted fix suggestions" a
+   fiction** — a manuals bug, in the same class as the ones the docs rule
+   exists to catch.
+9. **The file watcher's debounce never flushes under load.** `next_batch`
+   (`xencode-context-rs/src/watcher.rs:122-129`) loops until the channel goes
+   quiet with no max-wait and no batch ceiling, so a `git checkout` or build
+   storm starves it indefinitely. Its one consumer is the TUI task at
+   `xencode-tui-rs/src/app.rs:5696`, which turns events into "a file you have
+   open changed" notices and **swallows `spawn`'s error** — so exceeding the
+   kernel's inotify watch limit fails silently.
+10. **`metrics.jsonl` is write-only telemetry.** The schema
+    (`xencode-context-rs/src/metrics.rs:24-42`) has no cost, currency, energy,
+    model-name or session/task field. Consumers either render the last N rows
+    (`app.rs:1017`, the profiler, reading the whole file each time) or
+    `latest_per_profile` (`metrics.rs:103`, used at `app.rs:3512-3528`). No
+    sums, no p50/p95, no session rollup exists anywhere. The file is
+    append-only, never rotated or size-capped (`metrics.rs:120-130`).
+11. **The Colab dead-man's-switch slot is declared and unwired.**
+    `ColabState::keepalive_pid` (`xencode-colab-rs/src/state.rs:24`) is written
+    `None` on both lifecycle paths (`lifecycle.rs:139`, `:253`). Meanwhile the
+    data for a spend ledger already exists: `started_at` (`state.rs:34`) and
+    `VM_MAX_AGE_HOURS = 12.0` (`lifecycle.rs:62`), which `status` already
+    renders as "reaped (started Nh ago)" (`lifecycle.rs:359`).
+12. **Config state is neither crash-safe nor versioned nor XDG-respecting.**
+    `save` and `save_to` both `std::fs::write` directly
+    (`xencode-config-rs/src/config.rs:452`, `:463`); the same plain-write
+    pattern is in the cache (`xencode-cache-rs/src/lib.rs:260`) and the
+    transcript (`xencode-context-rs/src/conversation.rs:73`). Zero `fsync` /
+    `sync_all` in the workspace. There is no `config_version` or
+    `schema_version` field. All 31 fields of `XencodeConfig` carry an
+    individual `#[serde(default)]`, but the struct has **no container-level
+    `#[serde(default)]`** (`config.rs:67`), so the first field added without
+    remembering the attribute hard-breaks every existing config file with a raw
+    parse error. Paths resolve through `dirs::home_dir().join(".xencode")`
+    (`config.rs:417`, `cache-rs/src/lib.rs:105`, `main.rs:832`) with a
+    `XCODE_CONFIG_DIR` escape hatch (`config.rs:412`); `dirs::config_dir()`,
+    `state_dir()` and `cache_dir()` are never called.
+13. **A panic destroys the terminal.** `run_tui` restores raw mode and the
+    alternate screen only on the linear return path (`main.rs:2253-2278`);
+    there is no `std::panic::set_hook` anywhere and no `color_eyre`/`eyre`
+    dependency.
+14. **Platform gating is thin and inconsistent** — correcting an assumption
+    made earlier in this session: there *are* six `#[cfg(unix)]` /
+    `#[cfg(windows)]` gates (`main.rs:855`,
+    `xencode-core-rs/src/tasks_file.rs:229`, `:247`, `:249`, `:253`,
+    `xencode-plugin-rs/src/registry.rs:159`, `:161`), which is a handful rather
+    than nothing, and too few to matter. The real blockers: `sh -c` is the
+    execution primitive for background tasks (`tasks.rs:201`), `run_command`
+    (`agent_tools.rs:779`) and hooks (`:882`); `std::os::unix::fs::PermissionsExt`
+    is used **inside non-gated test modules** (`xencode-colab-rs/src/lib.rs:43`
+    with `from_mode(0o755)` at `:98`, `xencode-tui-rs/src/mcp.rs:332`/`:452`,
+    `xencode-mcp-rs/tests/stdio.rs:8`/`:65`), which means `cargo test` will not
+    compile off Unix; `/proc` powers the profiler and memory HUD
+    (`app.rs:967`, `:979`, `:988`) and task liveness (`tasks_file.rs:231`);
+    `which()` is hand-rolled and ignores `PATHEXT` (`colab/preflight.rs:52`,
+    `tui/voice.rs:100`) while `models-rs/llamacpp.rs:475-497` does the opposite
+    and tries `llama-server.exe`; the Colab SSH tunnel builds a POSIX-quoted
+    `-o ProxyCommand=` (`orchestrate.rs:88-97`) that Windows' OpenSSH hands to
+    `cmd`; voice capture is `arecord`/`pw-record` only (`voice.rs:115`, `:121`).
+    There is no `process_group`/`setsid` anywhere, so killing the SSH tunnel can
+    leak children.
+15. **The repo already advertises a Windows build that nothing tests.**
+    `install.ps1` and `scripts/build-release.ps1` exist at the paths named and
+    are referenced by **zero** workflows; CI is `ubuntu-latest` in all three
+    files (`ci.yml:12`, `ci-cd.yml:19`/`:61`/`:88`, `release.yml:10`), and
+    `release.yml:33-40` uploads a bare `xencode` with no target triple and no
+    checksum.
+16. **A cross-compilation blocker is upstream, not ours:** `Cargo.lock` pulls
+    `aws-lc-sys` (plus `ring`, `bzip2`, `lzma-rs2`, `signal-hook`, `socket2`),
+    via `reqwest` in four crates and `axum-server`'s `tls-rustls` feature
+    (`xencode-cli/Cargo.toml:33`). `aws-lc-sys` wants a `cc` + CMake +
+    pkg-config toolchain *for the target*.
+17. **Keybindings are not configurable at all.** `xencode-tui-rs/src/keymap.rs`
+    is 2,348 lines of hard-coded chord table plus per-focus `match key.code`
+    handlers entered from `app.rs:6133`; `XencodeConfig` has no keybindings
+    field. Themes are exactly eight, in a hard-coded `match`
+    (`theme.rs:7-16`, `:55`), and the semantic `success`/`warning`/`danger`
+    slots are literally green/yellow/red in every dark palette (`theme.rs:47-50`).
+18. **Accessibility is better than feared, except in two places.** Redundancy
+    is real: diffs keep `+/-` (`ui.rs:117-126`), the tree prints `[M]/[A]/[D]`
+    (`:543`), tasks show `✓/✗` (`:1491-1492`), roles are labelled
+    ("🧑 You / 🤖 Xencode", `:610-611`), health shows ✅ *and* the word
+    ("healthy", `:1781`). The gaps: focus is signalled **only** by border
+    colour and highlight background, and the redundancy leans on emoji inside
+    padded strings (e.g. `:540`) — a cell-alignment risk given ratatui's
+    unicode-width discussion #1438. `NO_COLOR`/`FORCE_COLOR`/`CLICOLOR`,
+    `COLORTERM`, `TERM_PROGRAM`, terminfo and OSC-52 all have 0 hits.
+19. **Help is good; onboarding is absent.** A `?`/F1 modal is driven by tables
+    in `help.rs` with an anti-drift test at `keymap.rs:1571`. First-run is one
+    static line, `"Welcome to Xencode! Press 'i' to start typing."`
+    (`ui.rs:598`) — no GPU probe, no model-install guidance. Sessions persist
+    under auto-generated IDs only (`xencode-memory-rs/src/lib.rs:52-129`), no
+    naming and no `--resume`.
+20. **Git history is cheap where it matters, expensive in two specific
+    places.** All git access shells out through one seam,
+    `git_stdout` (`xencode-context-rs/src/gitinfo.rs:74`); no `git2`/`gix`/
+    `libgit2` dependency exists. Measured on this repo (758 commits, `.git`
+    599 MiB, commit-graph + multi-pack-index already present, `git` 2.55.0):
+    `log --format='%h %s'` 60.8 KB / 13 ms, full-history `--name-only` 44 ms,
+    `--follow` one file 90 ms, `blame -L 1,120` 11.7 KB — but
+    **`--numstat` 15.2 s and `git log -S` 17.8 s**. Crucially, **git context
+    already lives below the KV marker**: tier 5 (`context.rs:192-203`, built by
+    `git_summary_text` `:559`) with `GIT_CAP_TOKENS = 300` (`:21`), and
+    retrieved files are tier 6 — neither is inside `stable_head`
+    (`:96-119`, closed by `STABLE_END_MARKER` `:30`). The KV-prefix tax recorded
+    as N-0 fact 1 applies to the system prompt, `AGENTS.md` and `anchor.md`
+    **only**; history and retrieval features do not pay it. That materially
+    cheapens everything in O-4.
+21. **The offline documentation surface on this machine is already large.**
+    `~/.cargo/registry/src` holds 1.4 GB / 1013 extracted crate sources
+    (source + README + CHANGELOG, all version-present), `rust-docs` is 908 MB,
+    `rustc --explain E0308` works, and `cargo build --message-format=json`
+    emits `code.explanation` (711 chars for E0308) *plus* machine-readable
+    suggestions. None of it is reachable by the agent today, because the
+    path-allow rule denies anything outside the workspace
+    (`agent_tools.rs:186-205`).
+22. **A cross-cutting security note that applies to O-2 and O-4 together:**
+    commit subjects and fetched pages are attacker-controlled text arriving in
+    a prompt — the same class as N-0 fact 3 and SE-2/SE-3. Independently, git
+    invocations at `gitinfo.rs:74` carry neither `-c core.fsmonitor=false` nor
+    `GIT_CONFIG_NOSYSTEM`, so the GitSpawn-class repo-config execution hazard
+    already applies today, before any history feature is added.
+23. **Machine envelope, because several options are CPU-bound:** 8 cores,
+    15 GiB RAM, rustc/LLVM stable-only (1.98.1 / 22.1.8), 55,555 LOC across 15
+    crates with 398 locked deps. `cargo-miri` is installed; `llvm-tools`,
+    `cargo-llvm-cov`, `cargo-mutants`, `nextest` and clang are not. Only four
+    `unsafe` blocks exist in the workspace (all `libc::kill` / `mem::zeroed`,
+    `xencode-colab-rs/src/orchestrate.rs:180`, `:190`, `:199`, `:375`) and four
+    modules carry `#![forbid(unsafe_code)]`.
+
+### O-1 — The model and inference layer
+
+The axis where a local-first tool can beat a cloud agent and currently does
+almost nothing. Note the pattern: **most of these are not builds, they are
+requests we already know how to make and don't.**
+
+- **MI-1 Fix the structured-output plumbing** (fact 1) — map
+  `LlamaCppOptions.json_schema` to `response_format` on the OAI route and keep
+  top-level `json_schema` for `/completion`, then actually set it for the
+  tool-call/edit-args protocol. Kills the single most common local-model
+  failure mode: malformed tool JSON. **S**. Trap: `$ref`/`$defs` schemas
+  overflow the grammar converter and silently fall back to unconstrained JSON
+  (llama.cpp #21228; #25923/#27279 open) — needs local schema flattening plus
+  client-side re-validation of the reply against the schema we asked for.
+- **MI-2 Ollama request parity** — add `format` (JSON schema → GBNF),
+  `think`, `keep_alive`, and `options.num_ctx` to the `/api/chat` payload
+  (fact 2), discovering capability via `/api/show`. **S**. Trap:
+  tools+`format` interop on sub-7B models is weak; `/api/show` becomes a new
+  probe surface that can fail.
+- **MI-3 Hardware-profile server presets** — emit `-fa`, `-ctk q8_0`,
+  `-ctv q8_0`, `-np`, `-b`, `--ctx-size` per LOW/BALANCED/HIGH for the
+  self-spawned server and verify the values came back through `/props` (which
+  the client already reads, `llamacpp.rs:377`). **S/M**. Today every such knob
+  is reachable only as an opaque user string, `config.llama_cpp_args`
+  (`main.rs:933`, `app.rs:5230`). Trap: KV quant trades accuracy for context,
+  and a bad preset reads as *our* bug.
+- **MI-4 Reasoning-budget control** — llama.cpp has `--reasoning-budget` /
+  `--reasoning-effort`, Ollama has named levels. **S**. Feeds straight into the
+  `cached_tokens` reuse already measured. Trap: truncating a thinking chain
+  degrades output differently per model.
+- **MI-5 Speculative decoding on the Colab bridge** — llama.cpp master ships
+  draft-model, EAGLE-3, MTP and n-gram self-speculative (`--spec-type`). **M**.
+  This is the option with the clearest felt win, because generation speed over
+  an SSH link is the known pain of K/L. Trap: gains collapse on verbose code,
+  and the draft model's KV eats VRAM that Colab does not have.
+- **MI-6 Model advisor + pinning** — replace the 2024 list (fact 5) with a
+  data file mapping VRAM → model/quant, and pin HF revisions with SHA256
+  verification on `/resolve/<rev>/` downloads. **M/L**. Trap: the table rots in
+  months; without a maintenance cadence it becomes fiction in the product.
+  Overlaps LF-7 (weight provenance) — same work, don't build twice.
+- **MI-7 Task-shaped model profiles** — a deterministic per-task
+  model+options mapping (small model to summarise/classify, big model to edit),
+  presented as profiles rather than a "router". **S**, mostly UI over the
+  existing model-profile plumbing (`app.rs:4582`). Trap: two resident models
+  exceed consumer VRAM, so routing means unload/reload unless `keep_alive`
+  (MI-2) is budgeted. This is the honest version of the "ensemble" wording the
+  README already disclaims.
+
+**Rejected here:** grammar-patched sampling (not in llama.cpp master — research
+forks); LoRA hot-swap (the endpoint exists, `/lora-adapters`, but good
+GGUF-aware coding adapters don't, and per-request switching is unstable
+payoff); XGrammar acceleration (not merged).
+
+### O-2 — Giving the agent the research tools we already have
+
+The agent edits code it cannot look up. The pieces exist and are disconnected
+(facts 6, 21).
+
+- **RS-1 `web_fetch` as an agent tool** — wire the existing `fetch_url` into
+  the tool registry behind a **new** `ToolClass::Network → Ask`, not grantable
+  as one blanket "always allow all hosts". **S**. Trap: must first fix the
+  JSON content-type gate (fact 6), add post-redirect host re-validation and an
+  RFC1918/link-local/metadata deny (fact 7), and cap the returned characters
+  the way `main.rs:1841` already caps at 30 000. **OPT-IN-NETWORK.**
+- **RS-2 A search provider abstraction with `provider = "none"` as the
+  default** — a trait plus impls for a self-hosted SearXNG URL, BYO-key
+  Brave/Tavily, and keyless Wikipedia/MDN. **M**. Trap, and it is the finding
+  that kills the obvious version: the "free keyless" option everyone assumes
+  is dead. This machine's UA got `HTTP 202` + a *"Unfortunately, bots use
+  DuckDuckGo too"* CAPTCHA with `cc=botnet` from `lite.duckduckgo.com`, and the
+  documented `duckduckgo.com/developer/search-api` returns **410 Gone**; public
+  SearXNG instances returned 403/HTML/429 for `format=json` across four
+  instances, matching SearXNG's own docs that public instances disable JSON.
+  A default public instance is a tool that breaks weekly. **OPT-IN-NETWORK.**
+- **RS-3 Widen the read-only roots to the local registry and toolchain docs**
+  (fact 21) so `search_files`/`read_file` can reach the *exact locked version's*
+  upstream source, `README.md` and `CHANGELOG.md`. **S**. Trap: this is a
+  deliberate carve-out in the path-deny rule (`agent_tools.rs:186-205`) and
+  must resolve ambiguity through `Cargo.lock`, not "whatever version is on
+  disk". **OFFLINE-OK.**
+- **RS-4 `read_docs(crate, version, path)`** — deterministic intake over RS-3,
+  falling back to `crates.io/api/v1/crates/<c>/<v>/readme` and
+  `docs.rs/crate/<c>/<v>/source/<file>` only on a local miss. **M**. This is
+  the one place where a network call is genuinely better than a search call,
+  because the answer is version-pinned and structured. **OFFLINE-OK, with an
+  OPT-IN-NETWORK fallback.**
+- **RS-5 `lookup_advisory`** — clone the RustSec advisory DB shallow (6.3 MB,
+  1246 crate advisories as of this check) plus OSV's `crates.io/all.zip`
+  (3.3 MB) and query locally; refresh is an explicit command. **M**. Trap: do
+  not shell out to `cargo audit` — its maintainer stepped down in 2025.
+  **OFFLINE-OK after one sync.**
+- **RS-6 Known-error channel from rustc's own JSON** — run
+  `cargo build --message-format=json` and keep `code.explanation` plus the
+  structured suggestions instead of dumping stderr at the model (fact 21).
+  **S**, zero network, zero corpus, zero model training. Trap: covers rustc
+  only — test-framework, prose and CI failures have no public machine-readable
+  knowledge base, however much it is wanted. **OFFLINE-OK.**
+- **RS-7 `llms.txt` probing as a branch inside RS-1** — **S**. Trap: checked
+  across the Rust ecosystem and it is absent everywhere (docs.rs, tokio.rs,
+  actix.rs, doc.rust-lang.org, the cargo book all 404); adoption is real only
+  for JS/vendor docs. Keep it as a cheap fallback, not a design centre.
+  **OPT-IN-NETWORK.**
+- **RS-8 A local documentation corpus** in the Dash/Zeal docset shape (HTML +
+  a SQLite index) over std/core/nomicon/the book, optionally with a full-text
+  index. **L**. Trap: no maintained Rust docsets exist, it is ≥1 GB, and it is a
+  second index to version. **OFFLINE-OK.** Defer.
+
+**Rejected here:** DuckDuckGo HTML/Lite scraping and any bundled public
+SearXNG instance list (RS-2's measurements); copying Claude Code's `WebSearch`
+— its backend is Anthropic-side and not configurable, so it is unavailable to
+Ollama/llama.cpp users by construction; Zed's `search_web`, same reason; a
+Cline-style headless browser (drags Chromium into a single-binary tool);
+embedding-RAG over the open web; and "the user pastes the URL, Aider-style" as
+the *ceiling* — it is the right **approval** default, not a reason to build
+nothing.
+
+### O-3 — Verification the machine can check
+
+Beyond "the test command exited 0" — and, per fact 8, beyond an error
+classifier that does not exist.
+
+- **VF-1 Diff coverage** — `cargo llvm-cov --lcov`, intersected with the added
+  line numbers from `git diff`. **S**. Answers the only question that matters
+  after a green run: *did this change's lines get exercised*. Trap: coverage
+  needs a second instrumented build in a separate `CARGO_LLVM_COV_TARGET_DIR`
+  — a measured real case cost 377 s, nearly all recompilation.
+- **VF-2 `--show-missing-lines` / `--json` as a read-only tool** — hand the
+  agent `file → [uncovered line numbers]`, not a percentage. **S**. Trap:
+  macro/derive/generated lines are misattributed; needs
+  `--ignore-filename-regex` and `cfg(coverage)` skims.
+- **VF-3 `cargo mutants --in-diff <git diff>`** — actively maintained (v27.1.0,
+  2026-06), emits `mutants.json`/`outcomes.json`, supports nextest and
+  sharding. **M**. Two traps, and the second is the one that matters: (a) it
+  runs the whole suite per viable mutant with no per-test selection, so on 8
+  cores this is minutes to hours; (b) **an agent kills mutants by weakening
+  assertions.** If built, gate it: the repair diff may only touch
+  `#[cfg(test)]` code, must not reduce the assertion count, must not edit the
+  file under mutation, and must be proved by re-running *the same mutant set*,
+  not `cargo test`.
+- **VF-4 `proptest` (1.11.0) with committed `proptest-regressions/`** — the
+  model authors the property; shrinking and the failing input are mechanical,
+  local and reproducible. **M**. Trap: LLMs generate *vacuous* properties
+  (round-tripping already-canonical data passes forever). UNVERIFIED how far
+  that generalises; it is an eval question, not a tooling one.
+- **VF-5 `cargo nextest` as the runner** — filtersets give real build-graph
+  selection (`rdeps(<crate>)`), `--stress-count` is flake detection,
+  `--flaky-result fail` and JUnit `<flakyFailure>` are the quarantine hook, and
+  `cargo miri nextest run` beats `cargo miri test` on throughput. **S/M**. Two
+  traps: retries default to flaky-**pass**-exit-0, which silently masks
+  breakage; and with `xencode-tui-rs` depending on nearly everything,
+  `rdeps(xencode-tui-rs)` collapses to "run all".
+- **VF-6 clippy `--message-format=json`** — the cheapest structured feedback
+  channel that exists. **Already claimed as CI-5** (`:1535`); recorded so nobody
+  double-counts it.
+- **VF-7 `cargo-semver-checks` / `cargo-public-api --baseline-rev`** — a local
+  git-rev baseline works without publishing anything. **S/M**. Trap: all 15
+  crates sit at 0.1.0 unpublished with no external consumer, so semver checking
+  is ceremony until "public surface = what MCP and plugin authors see" is
+  actually defined. That definition is arguably M-milestone work.
+
+**Rejected here:** ML/predictive test selection (Meta's version needs millions
+of historical CI runs; we have none — VF-5's `rdeps` is the honest
+substitute); mutation testing in the default loop (already rejected at
+`:1788`; `--in-diff` + approval only); **Miri on this workspace** (fact 23:
+four libc FFI calls, `forbid(unsafe_code)` elsewhere, and Miri needs a nightly
+this box doesn't have — near-zero signal); `cargo-fuzz`/AFL++/honggfuzz
+campaigns (the parse surfaces we own are `pdf-extract` and `zip` — i.e. we'd be
+fuzzing dependencies — model text has no binary grammar, and a fuzz campaign
+competes with the resident model for the same 8 cores; the honest ceiling is
+one hand-written target for a pure function we actually own); grcov (llvm-cov
+JSON supersedes it); coverage-percentage gates and badges (invites
+assert-free padding); and a full-tree mutation gate — cargo-mutants' own docs
+note a diff touching only test code runs **zero** mutants, so an incremental
+gate reads green on precisely the change that gutted the suite.
+
+### O-4 — Git history as context, and git as a worker
+
+The premise held up, and fact 20 is why: history is *already* outside the KV
+prefix, so these do not pay the tax that taxes N's context ideas.
+
+- **GH-1 A ~250-token history digest per edited file** (last-touch subject per
+  hunk + the five most recent subjects touching the path) — the "why does this
+  exist" signal at tier-5 scale. **S**. Trap: raw `blame`/`log` is 10–80× the
+  tier (fact 20); summarize, never paste `-p`. **Per-turn (tier 5/5.5).**
+- **GH-2 `/why <file>:<line>`** as an explicit, opt-in-cost query. **M**. Trap:
+  pickaxe `git log -S` measured 17.8 s here and scales badly; require path
+  scoping and a timeout, or drop pickaxe entirely. **Per-turn (chat only).**
+- **GH-3 Co-change and recency as scoring terms in `retrieve()`**
+  (`retrieve.rs:122`), fed by full-history `--name-only` at 44 ms (fact 20) —
+  files that historically change together get pulled together. **M**. Trap:
+  "quick fix" commit noise corrupts the signal (documented in the mining
+  literature); it churns the cache *tail*, which is fine.
+  **Per-turn (tier 6).**
+- **GH-4 `xencode hotspots --json`** — churn × size and bus-factor by author
+  email, cross-checked against `CODEOWNERS`, surfaced as `Advise` rows. **M**.
+  Trap: `--numstat` costs 15.2 s, so use name-only counts plus file size; and
+  every row must carry an action or the whole panel is decorative.
+  **Per-turn one-liner.**
+- **GH-5 `xencode commit`** — message from the staged diff, rejecting any
+  entity name that does not appear in the diff, plus `interpret-trailers` for
+  `Co-authored-by` / `Assisted-by` attribution. **S/M**. Trap: the evaluated
+  literature is consistent that generated messages are fluent and
+  confidently wrong about *why*; the "why" has to come from the human.
+- **GH-6 Conflict assistant** — `git merge-tree --write-tree --messages` to
+  predict conflicts without touching the index, diff3 presentation of both
+  sides, a validation pass that the resolution contains each side's added
+  lines unless explicitly dropped, and `rerere` so repeats are cheap. **M/L**.
+  Trap: the silent-drop failure — losing one side and reporting success. Gate
+  on a `run_command` build+test.
+- **GH-7 A bisect driver** over the existing worktree + background-task
+  machinery, with `skip` for non-buildable commits and k-repeat voting for
+  flaky ones. **M/L**. **This is what L's "the agent finishes its own work" is
+  missing for regressions.** Three traps: flakiness gives false positives;
+  k-repeat multiplies wall-clock; and there is an eval loophole — bisecting a
+  repo whose history already contains the fix lets the agent *read the answer*
+  rather than find it (the same class of flaw SWE-bench documents in
+  repo-state leakage).
+- **GH-8 Local-first PR linkage** — parse `(#123)`, `Closes:`, and
+  `%(trailers)` locally, and hit GitHub's `commits/{sha}/pulls` only behind an
+  explicit `--net`, labelling the provenance of whatever comes back. **S**.
+  Trap: silent degradation. Never persist remote text into `anchor.md` — that
+  would push attacker-controlled prose into the KV-critical head.
+- **GH-9 `xencode history setup`** — `commit-graph write --reachable` plus a
+  multi-pack-index, so all of the above stay fast. **S**. Trap:
+  `--filter=blob:none` partial clones make cheap queries cheaper and make
+  blame/pickaxe fetch a blob per lookup.
+
+**Rejected here:** history in the stable head or `anchor.md` (it is read at
+`context.rs:529`; drift voids every KV reuse); blanket `git log -p` dumps; a
+`git2`/`gix` dependency (every need here is a one-shot text query and
+`gitinfo.rs:74` is already the right seam — and gix has no merge, while
+libgit2's merge ignores attributes and `rerere`); rebase engines like
+`git-imerge`/jj that duplicate WF-10; porting commitlint (JS); and CODEOWNERS
+*enforcement* (analysis, yes; policy, no).
+
+**Cross-cutting:** commit subjects are attacker-controlled text from a cloned
+repo (fact 22). GH-1 and GH-2 must carry SE-2 untrusted marking and must never
+auto-run under `all-allow`.
+
+### O-5 — State durability, self-diagnosis, and not losing the user's work
+
+There is no server to fall back on. This is the trust layer.
+
+- **DB-1 An atomic write helper** — one `write_atomic(path, bytes)`: temp file
+  in the same directory, `sync_all`, rename, fsync the parent. Used by config,
+  cache, transcript and Colab state (fact 12). **S**. Trap: the temp file must
+  be *created* with the final mode (`O_CREAT` + `0600`), not chmod'd after the
+  rename, or it reopens the very window SE-1 closes; NFS/SMB rename atomicity
+  is weak; `tempfile` is already a dependency (`xencode-server-rs/Cargo.toml:24`)
+  and its `persist` handles the Windows rename semantics.
+- **DB-2 `config_version: u32` plus a migration ladder** — with
+  **reject-and-explain when the file is newer than the binary**, which is the
+  only defence against an older binary silently rewriting a newer config.
+  **M**, and it must start with the container-level `#[serde(default)]` the
+  struct lacks today (fact 12) — otherwise the first new field breaks everyone
+  before any migration can run. Trap: each v→v+1 step must be total and tested.
+- **DB-3 Honest secrets tiering** — 0600 file (SE-1) stays the documented
+  baseline; optionally read from `XENCODE_API_KEY` / `API_KEY_<PROVIDER>` env,
+  or a `command:` helper (`pass`, `op`, `pinentry`) where **only the reference
+  is stored, never the secret**. **S** for env+helper, **M** if `keyring` is
+  added. Trap and the thing to write in the manual: Linux `keyring` means D-Bus
+  Secret Service, which anything in the desktop session can read — it protects
+  against a backed-up or world-readable `~/.xencode`, *not* against malware
+  running as the user; and it is unavailable headless/over SSH. Encrypting the
+  whole config with `sops`/`age` breaks the TUI's own save path.
+- **DB-4 XDG-correct paths plus state hygiene** — config →
+  `dirs::config_dir()`, state → `state_dir()`, cache → `cache_dir()`, with a
+  read-fallback to legacy `~/.xencode` and `XCODE_CONFIG_DIR` keeping
+  precedence (fact 12); plus `xencode cache gc --max-mb` and a size-trim on
+  `metrics.jsonl` (fact 10). **M**. Trap: a hard move orphans existing users'
+  checkpoints — that is a migration, not a rename.
+- **DB-5 Keep JSONL, add torn-line discard** — append-only JSONL plus an atomic
+  snapshot is right for a single binary; the reader drops a partial trailing
+  line instead of failing. **S**. Rejected below the reasoning: redb is alive
+  but adds a storage engine for write volume this app does not have, sled has
+  had no release since 2023, and SQLite WAL drags a C dependency into the
+  binary. **L** only if real resume-after-crash grows past what JSONL gives.
+- **DB-6 `xencode doctor --json`** — reuse the `Check{ok, detail, fix}` shape
+  already in `xencode-colab-rs/src/preflight.rs:21-40` so every check is
+  evidence-producing rather than a vibe, and each carries a fix string. Scope:
+  config parses and version is supported, key file permissions, free disk on
+  the state dir, cache and metrics sizes, Ollama/llama.cpp reachability
+  (folding in the existing per-model `ModelAction::Health`, `main.rs:784-815`),
+  and the Colab bridge by delegation — because `ColabAction::Preflight`
+  (`preflight.rs:85-257`) checks **only** the bridge (the `colab` binary, its
+  version, auth, `ssh`/`ssh-keygen`, an ed25519 keypair) and says nothing about
+  config, disk or providers. **M**. Trap: `--json` is the bug-report surface;
+  design it before the human-readable one and the text version becomes a
+  rendering of it rather than a second truth.
+- **DB-7 Panic hook plus terminal restore** — ratatui's own recipe: in the
+  hook, disable raw mode and leave the alternate screen, then delegate to the
+  default hook; record the last panic somewhere `doctor` can surface; add
+  `color_eyre` at `main()` and honour `RUST_BACKTRACE`. **S**, and the
+  highest trust-per-line item in this milestone, because fact 13 means the
+  current failure mode is "your terminal is broken and there is no trace".
+- **DB-8 Upgrade safety** — one timestamped `config.json.bak` before each save
+  and a `--dry-run` on `config set` and `colab up`. **S**. Trap, and the real
+  fix underneath it: `xencode colab up` loads, mutates provider URLs and
+  **full-saves the user's config** (`main.rs:1152-1157`, and again in
+  `lifecycle.rs:147`, `:250`) — that rewrite should go to a session-scoped
+  overlay, not the user's file. A backup only bounds the symptom.
+
+### O-6 — What "works on your machine" is allowed to mean
+
+Facts 14, 15 and 16 bound this. The honest finding is that the tree is not
+close to Windows, and the shipped `install.ps1` implies a guarantee nobody
+tests.
+
+- **PL-1 A `sys.rs` seam in `xencode-core-rs`** — `spawn_shell(cmd)`,
+  `terminate(pid)`, `pid_alive`, `hide_console`, each behind
+  `cfg(any(unix, windows))`, replacing the `sh -c` call sites, the `kill(2)`
+  escalation and the hand-rolled `which()`. **S**. Trap: `sh -c` and
+  `cmd /S /C` quoting are not symmetric; either standardise on
+  `powershell -NoProfile -Command` or ship an explicit `shell` config key
+  rather than guessing per platform.
+- **PL-2 Gate the Unix-only test modules and drop the hand-rolled `which()`**
+  (fact 14) for the `which` crate. **S**. This is the precondition for any
+  non-Linux CI job: today `cargo test` does not *compile* off Unix, a job that
+  fails for a boring reason gets deleted rather than fixed, and the matrix
+  never happens. Trap in the other direction: gating the tests also gates away
+  the only place those paths were exercised.
+- **PL-3 A terminal capability probe in the TUI** — `NO_COLOR`,
+  `FORCE_COLOR`, `CLICOLOR`, `COLORTERM=truecolor`, `TERM_PROGRAM`, tmux
+  detection, with a documented 16-colour and plain fallback (fact 18). **M**.
+  Trap: active probing needs raw-mode round-trips that time out on slow
+  terminals — cache it and never block the first frame.
+- **PL-4 A two-job cross-compile matrix on Linux runners** —
+  `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl` via `cross`, and
+  `x86_64-pc-windows-gnu` via `cargo-xwin`, avoiding Windows runner minutes.
+  **M**. Trap: it is blocked on fact 16 — `aws-lc-sys` needs a CMake/pkg-config
+  toolchain for the target, so the first move is selecting a pure-Rust rustls
+  backend, which is a dependency change, not a CI change.
+- **PL-5 macOS `aarch64-apple-darwin` build *and test*** on GitHub's arm64
+  runners, with ad-hoc `codesign --force --sign -` at release and notarisation
+  only on tags. **M**. Trap: notarisation needs a paid Apple Developer ID and
+  `notarytool` secrets; and the `/proc` HUD plus `arecord`/`pw-record` voice
+  need real fallbacks first (fact 14).
+- **PL-6 Rewrite `scripts/smoke-test.sh` as a Rust integration test** run with
+  `cargo test --test smoke --release` on every OS, and have `release.yml` call
+  it. **S**. Trap: keep it to `--version`/`--help`-shaped assertions — the
+  current script's `config show` → `default_model` and `scan .` →
+  `file|dir|kind` checks couple to output format, which is exactly what makes a
+  smoke test lie.
+- **PL-7 Declare and publish a glibc floor** — build on the oldest distro
+  supported and assert `ldd --version` in CI, or go musl-static for Linux and
+  skip the question. **S**. Trap: a glibc-linked binary runs perfectly on an
+  Arch laptop and fails at launch on an old RHEL — the failure is at the dynamic
+  loader, so it produces no useful error from our code.
+
+### O-7 — Ergonomics, accessibility, discoverability
+
+Facts 17, 18, 19. The split that matters: **cheap fixes to real
+access problems** vs **expensive emulations of other editors**.
+
+- **UX-1 Rebindable keymap as a TOML overlay on compiled defaults**, with
+  collision checking at load and validation against the `help.rs` tables so the
+  help modal cannot drift from the bindings. **M**. Trap: the current state is
+  2,348 hard-coded lines (fact 17), so this is additive; do not allow rebinding
+  quit or Escape, and do not build a helix-grade keymap engine.
+- **UX-2 Keymap presets as data** ("xencode", "plain", "nano-style"). **M** —
+  and the same work as UX-1 once it exists. Trap: a vim preset means
+  undertaking to maintain a modal editor, which is a different product.
+- **UX-3 Leader-style "show the keys for this panel"** reusing the per-focus
+  tables that already exist. **S**. Trap: timeout-based which-key adds latency
+  to *every* keypress in crossterm; trigger on an explicit key and stay there.
+- **UX-4 `NO_COLOR`/`FORCE_COLOR`/`CLICOLOR` honoured, plus a monochrome and a
+  high-contrast theme**, with ASCII glyph redundancy replacing the emoji that
+  currently carries it (fact 18). **S**. Trap: focus is colour-only today, so
+  the fallback needs a border-style-plus-label scheme, and that is an audit of
+  all 24 focus areas.
+- **UX-5 A WCAG contrast test over `ThemeColors`** — pure math, ≥4.5:1
+  foreground/background, run in CI. **S**. It will fail immediately on the
+  existing solarized and nord palettes; that is the point. Trap: semantic slots
+  expressed as the ANSI names `Green`/`Red` cannot be ratio-checked, so this
+  forces `Rgb` in those slots.
+- **UX-6 A fuzzy command palette** over slash commands, panels and settings
+  with one-line descriptions, replacing Ctrl+F (fact 19) as the discoverable
+  entry point. **M**. Trap: the wall-of-shortcuts anti-pattern — the palette
+  becomes the way to find things and the cheatsheet stays secondary reference.
+- **UX-7 A first-run setup coach** — detect missing config, probe Ollama and
+  the GPU, recommend a hardware-appropriate model with resumable download
+  progress. **M/L**. This is the single largest determinant of whether a
+  local-first tool survives contact with a new user, and it pairs with MI-6.
+  Trap: never re-nag, and make it re-invocable as `/setup`.
+- **UX-8 `:help <topic>` prose plus a generated man page, both from the same
+  `help.rs` data** with a CI drift check. **S/M**. Trap: a second source of
+  truth about keybindings is worse than none.
+- **UX-9 Mouse ergonomics** — click-to-cursor in inputs, double-click word
+  select, drag-select (fact 19 says wheel-scroll and click-to-focus already
+  work). **M**. Trap: enabling mouse capture steals the terminal's own
+  shift-select copy path, so it needs a documented escape hatch or a
+  per-session toggle.
+- **UX-10 Named sessions, `--resume <name>`, and a "where you were" footer** —
+  last file, panel, turn (fact 19: IDs only today). **M**. Trap: the ID-keyed
+  store (`xencode-memory-rs/src/lib.rs:52-129`) needs a name index, which is a
+  migration — see DB-2. Pairs with WF-3, which planned the same thing.
+- **UX-11 Measure and wrap policy** — 80/100/120-column toggle, wrap-vs-truncate,
+  line numbers, and grapheme-width normalisation in tree rows. **S/M**. Trap:
+  `unicode-width` correctness is a moving target in ratatui (discussion #1438),
+  and padded emoji in columnar layouts is where it bites first.
+- **UX-12 A `--simple` screen-reader mode** — a plain appending transcript with
+  no alternate screen and no repaint. **M**. This is the highest-value
+  accessibility item on the list precisely *because* of how hostile a streaming
+  self-repainting TUI is to Orca's review mode: a screen reader reads a
+  screenful, not an event stream. Trap: it is a second rendering path, so it
+  must share the message model rather than the layout code.
+- **UX-13 i18n groundwork only** — a message-ID macro for *new* strings with an
+  English-only catalog. **S** if strictly forward-only. Trap: mass
+  stringification is churn with zero user value today, `rust-i18n` looks
+  maintained and `gettext-rs`/`fluent-rs` less so (UNVERIFIED maintenance
+  cadence), and in-terminal CJK/RTL is not a 2026 target at all.
+
+**Rejected here:** vim modal emulation; shipping translations; terminfo-based
+capability detection beyond the colour env vars (crossterm covers the rest);
+OSC-52 as an accessibility item (it is clipboard, already in MM-6);
+phone/tablet-specific design (touch emits the same SGR mouse events UX-9
+consumes anyway); and any timeout-based which-key.
+
+### O-8 — Ambient autonomy, and what a run actually costs
+
+Two halves of one question: what may xencode do without a human typing next,
+and what should it say about what that took. Note fact 8 — `background_*` runs
+*shells*, not model turns, so "ambient agent" is a build, not a config.
+
+**Ambient**
+- **AM-1 Watch-triggered *checks*, not writes** — a settled batch runs
+  `cargo check`/lint/tests on the touched subtree through the existing
+  `TaskManager`, landing as advisories in the `[WATCH]` channel. **S**, no model
+  involved. Trap: the never-flushing debounce (fact 9) — without a max-wait and
+  an "is typing" suppression this fires on every keystroke.
+- **AM-2 Idle-gated agent turn** — when AM-1's check fails *and* the machine is
+  idle (PSI `some/cpu` below a threshold, no input for N seconds, on AC power),
+  spend one turn on a diff-scoped fix *proposal* written to an inbox, never
+  applied. **M**. Trap: "idle" must include *no active foreground generation*,
+  or ambient work evicts the user's KV cache and VRAM mid-sentence.
+- **AM-3 Debounce hardening as a prerequisite to both** — cap the quiet window,
+  add a max-latency flush, coalesce to directory granularity above N paths, and
+  expose `settled` vs `storming`. **S**. Trap: the swallowed `spawn` error
+  (fact 9) means a monorepo already exceeds `max_user_watches` silently on this
+  machine's behalf — fix the observability first.
+- **AM-4 Scheduled self-work** — a cron-like local schedule for dependency
+  audit, flaky-test triage, TODO triage and doc-drift checks, each writing a
+  digest item. **M**. Trap: GitHub's own scheduled workflows have a 5-minute
+  floor and *skip under load*; the local equivalent must skip too, and needs
+  AM-6's budget or a laptop burns a night on it. Note the honest alternative:
+  systemd timers already exist, are observable and log-joined.
+- **AM-5 Inbound-trigger work** — a PR label or review comment spawns a draft
+  branch in a worktree, Devin/Codex-automation style. **M**, and it *is* the
+  LF-2 approval round-trip — reuse that path, do not build a second one. Trap:
+  prompt injection from repo content turns the automation into a remote shell;
+  never with write+push unlocked (fact 22, SE-2/SE-3).
+- **AM-6 Digest, not interrupt** — queue everything; one daily and one weekly
+  rollup of runs, findings, tokens, watt-hours, dollars and reaped VMs.
+  Interrupt only on: budget breached, rented GPU still up, dirty tree from an
+  aborted run. **S**. Trap: desktop notification is a no-op over SSH, so the
+  reliable surface is a persisted inbox the TUI shows on start, with tmux
+  `display-message` as the middle tier. There is no notification code in the
+  tree at all today.
+
+**Cost and performance**
+- **CX-1 An aggregator over `metrics.jsonl`** — totals and p50/p95 tok/s,
+  KV-reuse percentage, tokens by session, written to a sidecar rollup so the
+  O(all rows) read at `app.rs:1017` stops growing. **S**. Trap: fact 10 — no
+  session key in the schema and no compaction, so this needs CX-2 first.
+- **CX-2 Schema extension** — add `model`, `provider`, `session_id`,
+  `est_cost_micros`, `power_w`, `source: local|cloud`, append-only so old rows
+  still parse. **S**. Trap: the profiler's tests (`app.rs:8403+`) are coupled to
+  the current record shape.
+- **CX-3 Honest local cost as time plus watt-hours** — sample NVML/RAPL during
+  generation, integrate to Wh, multiply by a user-set `$/kWh`, and render
+  "≈ 3.2 Wh · ≈ $0.0014 · 41 s". **M**. Trap, and the reason to phrase it
+  carefully: RAPL is package-wide and unprefixed-per-process, and
+  `nvmlDeviceGetPowerUsage` is a poll, not an attribution — so label every
+  number an estimate. Zero-dollar local lines should read as *zero-dollar, not
+  free*.
+- **CX-4 Cloud price lookup, never a vendored table** — fetch provider or
+  OpenRouter pricing at runtime, cache with a TTL, allow a per-model override in
+  config. **M**. Trap: a scraped price list goes stale silently and its
+  redistribution terms are unclear. UNVERIFIED: whether OpenRouter's `pricing`
+  fields distinguish cache-read from cache-write rates.
+- **CX-5 A Colab spend ledger** — record elapsed VM-hours on up/down/status so
+  `status` can say "rented 7.4 h of 12 h". **S**, and a prerequisite for AM-6's
+  "GPU still up" alert; the data is already computed and discarded (fact 11).
+  Trap: `started_at` is local-time RFC3339 and hand-editable.
+- **CX-6 Dead-man's-switch teardown** — fill in the declared `keepalive_pid`
+  (fact 11) with a watchdog that drops the forward after N minutes without a
+  request, letting Colab's idle reap actually reclaim the GPU. **M**. Trap: a
+  timer-based watchdog will kill a legitimately long generation — the heartbeat
+  must be request-driven.
+- **CX-7 Budgets that act** — daily token/energy/dollar/wall-clock caps that
+  *downgrade* (smaller model, lower `HardwareProfile`) rather than hard-fail.
+  **M**. Trap, and it is the documented failure mode across agent frameworks:
+  a cap that fires *after* the mutating tool call has landed leaves a dirty
+  tree. Enforce only at turn boundaries between tool calls, never between
+  `apply_patch` and its verification, and roll back through the worktree
+  support in D3.
+- **CX-8 A GPU-free performance gate in CI** — startup time via `hyperfine` on
+  `--version`/`--help`, `cargo bloat` text size against a checked-in baseline,
+  RSS at TUI boot (already readable — `app.rs:979` uses `/proc/self/statm`),
+  and a tok/s sanity check behind `#[ignore]`. **M**. Trap: shared runners give
+  ~20 % noise, so thresholds must be relative and paired (`critcmp`-style), not
+  absolute. Today there is no `benches/` and CI is fmt+clippy+test only.
+
+**Rejected here:** autonomous commit/push/PR off a file-watch trigger
+(unsupervised *writes* are where ambient agents actually hurt people, and the
+`ask` mode exists precisely for this); a general-purpose cron daemon inside the
+binary (systemd timers are installed, observable and log-joined — reimplementing
+scheduling buys surface area, not capability); per-process GPU energy
+attribution (not physically available via NVML; pretending otherwise yields a
+confidently wrong number); a vendored price table; per-session cost living only
+in `metrics.jsonl` rows (the rollup is the deliverable, not more rows); and
+interrupt-style desktop notifications as the primary ambient surface.
+
+### Do-not-build register — additions from O
+
+| Rejected | Reason |
+| --- | --- |
+| Grammar-patched sampling, XGrammar | Not in llama.cpp master; research-fork territory |
+| LoRA hot-swap per task | Endpoint exists; good GGUF coding adapters don't; unstable payoff |
+| DuckDuckGo HTML/Lite scraping; bundled public SearXNG list | Live probes: 202 bot CAPTCHA, `410 Gone`, 403/429 on `format=json` |
+| Headless browser in the binary | Drags Chromium into a single-binary tool |
+| Miri on this workspace | 4 unsafe FFI calls, `forbid(unsafe_code)` elsewhere, needs nightly we lack |
+| `cargo-fuzz`/AFL++ campaigns | Own parse surfaces are dependencies (`pdf-extract`, `zip`); competes with the model for 8 cores |
+| ML predictive test selection | Needs millions of CI runs; `rdeps` is the honest substitute |
+| Coverage-% gates and badges | Invites assert-free padding |
+| `git2`/`gix` dependency | All needs are one-shot text queries; `gitinfo.rs:74` is the seam; gix has no merge |
+| Rebase engines (`git-imerge`, jj) | Duplicate WF-10 |
+| Native Windows as a *supported* target | `sh -c`, ProxyCommand quoting, POSIX permissions, `arecord`, no CI |
+| FreeBSD / riscv64 / i686 / armv7 | No dependency pressure; pure rot |
+| Notarised macOS as a launch blocker | CLI quarantine yields a warning, not a hard stop |
+| Vim modal emulation | Undertaking to maintain an editor |
+| Shipped translations; CJK/RTL in-terminal | Churn without a maintainer; not a 2026 target |
+| Terminfo probing beyond colour env | crossterm covers the rest; probe latency on the first frame |
+| Autonomous commit/push from a watch trigger | Unsupervised writes are the harm `ask` mode prevents |
+| A cron daemon in the binary | systemd timers exist, are observable, log-joined |
+| Per-process GPU energy attribution | Not physically available; produces a wrong number with confidence |
+| SQLite/redb for session state | JSONL suffices; sled is unmaintained; SQLite drags a C dep |
+| Whole-config `sops`/`age` encryption | Breaks the TUI's own save path |
+| `cargo audit` as a subprocess | Maintainer stepped down 2025; query the DB directly |
+
+### Interactions with L, M and N
+
+- **MI-1/MI-2 are the substrate under N's agent-quality items.** A tool-call
+  protocol that emits malformed JSON forges a `run_command` argument or fails
+  silently; structured output fixed is a precondition for trusting several
+  N-3 items on small local models.
+- **MI-5 and CX-6/CX-5 belong together.** Speculative decoding (MI-5) is the
+  speed answer for the Colab path; the spend ledger and dead-man's switch
+  (CX-5, CX-6) are the cost answer for the same path. Shipping the first
+  without the second is how a "faster remote model" becomes an abandoned VM.
+- **RS-1 needs SE-2 and an approval-gate change together.** A network tool
+  whose result is untrusted text, classed as `Shell` by fallthrough, is the
+  exact lethal-trifecta input SE-4 gates on. Do not land the tool before the
+  class and the marking.
+- **DB-1 and SE-1 are one change, not two.** Creating the temp file with
+  `O_CREAT|0600` is the only order that closes the permission window;
+  chmod-after-rename reopens it.
+- **DB-2 is on the critical path for UX-1, UX-10 and MI-3.** All three add
+  config fields (keymaps, session names, server presets). Without a version
+  field and the container-level `#[serde(default)]`, each one individually
+  risks every existing config file.
+- **GH-7 is the missing piece of L's "the agent finishes its own work."** L
+  gives the agent room to iterate; bisect is the specific loop it cannot run
+  today, and it composes with D3's worktrees and the existing background tasks.
+- **VF-5 nextest and WF-4 autodiscovery are the same seam.** Deciding what
+  "run the tests" means (WF-4, `:1567`) is the decision VF-1/VF-3/VF-5 all
+  depend on; none of them can run before it.
+- **UX-7 first-run and MI-6 model advisor are one feature,** seen from two
+  ends: the coach needs the VRAM→model table, and the table has no better
+  moment to be surfaced.
+- **AM-5 is LF-2.** An inbound trigger that needs a human decision must reuse
+  the planned ntfy+nonce approval round-trip rather than inventing a second
+  approval channel.
+- **Fact 8 is a manuals fix, not a feature.** `README.md:108`'s "Error
+  classification and targeted fix suggestions" describes code that does not
+  exist; either the claim goes or the classifier gets built (VF-2/RS-6 are the
+  cheapest real versions of it).
+
+### Triage status
+
+**Not yet ranked**, same as N. O adds 73 options (MI 7, RS 8, VF 7, GH 9, DB 8,
+PL 7, UX 13, AM 6, CX 8) to N's 55 (CI 7, WF 10, EV 11, SE 7, MM 11, LF 9) — a
+pool of 128 — and adds a category the earlier appendices did not have: **defect-shaped
+findings that are not features** — MI-1 (schema sent to a field the endpoint
+ignores), fact 6/7 (a fetcher that can't read JSON and has no SSRF guard), fact
+8 (a README claim with no implementation behind it), fact 9 (a debounce that
+starves and an error nobody sees), fact 11 (a dead-man's switch declared and
+unwired), fact 12/13 (non-atomic writes, no panic hook, terminal destroyed),
+and fact 15 (a shipped Windows installer no workflow tests). Those compete with
+L/M/N's three defect items (SE-1, MM-1, SE-3) for the same "fix first" slot.
+
+Inputs a ranking pass will have to weigh, now across all four: the
+defect-shaped list above versus capability-shaped items; **MI-1/MI-2/MI-3/MI-4
+as the cheapest cluster in the whole corpus** (four request-shape changes that
+touch the product's actual differentiator); RS-3/RS-6 as the only *offline*
+capability gains available (they strengthen the local-first claim instead of
+eroding it); GH-7 as the single item that most extends what the agent can do
+unattended; UX-4/UX-5/DB-7 as the small trust items; and LF-8 as the measurement
+that decides whether "no network at all" can ever be said out loud.
+
+Two facts recorded here deliberately *remove* previously-assumed costs: git
+history and retrieved files sit below the KV marker (fact 20), so O-4's ideas
+are cheaper than N-0 fact 1 suggested; and the local registry plus rustc's JSON
+output already provide an offline documentation surface (fact 21) that needs no
+new corpus, index, model or network.
+
+### Where to re-check this appendix (primary sources, consulted 2026-09-23)
+
+Every `file:line` above is verifiable in the tree. External claims came from the
+canonical project pages below. Two of the eight passes hit a WebFetch quota
+limit partway through and say so: their non-canonical links (arXiv IDs, blog
+posts, benchmark numbers, third-party "2026 state of X" articles) are
+**snippet-level, not page-read** — re-fetch before any of those carries a
+decision. Everything marked UNVERIFIED in the option text is unverified on
+purpose, not optimistically.
+
+- **Model layer** — [llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
+  (raw-fetched; `json_schema`, `response_format`, `parallel_tool_calls`, `-ctk/-ctv`, `-fa`,
+  `--reasoning-budget`, `/lora-adapters`, `--spec-type`) ·
+  [speculative decoding docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md) ·
+  [grammar-conversion bugs #21228](https://github.com/ggml-org/llama.cpp/issues/21228),
+  [#25923](https://github.com/ggml-org/llama.cpp/issues/25923),
+  [#27279](https://github.com/ggml-org/llama.cpp/issues/27279) ·
+  [Ollama context length](https://docs.ollama.com/context-length) ·
+  [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs) ·
+  [Ollama thinking](https://docs.ollama.com/capabilities/thinking) ·
+  [Ollama FAQ (`keep_alive`)](https://docs.ollama.com/faq)
+- **Research tools** — [SearXNG search API docs](https://docs.searxng.org/dev/search_api.html) ·
+  [llms.txt spec](https://llmstxt.org/) · [RustSec advisory DB](https://github.com/RustSec/advisory-db) ·
+  [OSV bulk data](https://raw.githubusercontent.com/google/osv.dev/master/docs/data.md) ·
+  ["Stepping back from maintaining cargo-audit"](https://shnatsel.medium.com/i-am-stepping-back-from-maintaining-cargo-audit-35bb5f832d43) ·
+  [Dash docset format](https://kapeli.com/docsets) ·
+  [Claude Code tools reference](https://code.claude.com/docs/en/tools-reference.md) ·
+  [Zed agent tools](https://zed.dev/docs/ai/tools.md) ·
+  [Aider: images and web pages](https://aider.chat/docs/usage/images-urls.html).
+  The DuckDuckGo 202/`cc=botnet` CAPTCHA, the 410 on its developer API, the
+  public-instance 403/429 results, and the crates.io / docs.rs / GitHub probes
+  were **live requests made from this machine**, not read from any article.
+- **Verification** — [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) ·
+  [llvm-cov command guide](https://llvm.org/docs/CommandGuide/llvm-cov.html) ·
+  [nextest](https://nexte.st/docs/features/retries/) with
+  [stress tests](https://nexte.st/docs/features/stress-tests/),
+  [filterset `rdeps`](https://nexte.st/docs/filtersets/reference/) and
+  [cargo-mutants](https://nexte.st/docs/integrations/cargo-mutants/) /
+  [Miri integrations](https://nexte.st/docs/integrations/miri/) ·
+  [cargo-mutants: in-diff](https://mutants.rs/in-diff.html),
+  [performance](https://mutants.rs/performance.html),
+  [limitations](https://mutants.rs/limitations.html) ·
+  [proptest](https://lib.rs/crates/proptest) ·
+  [cargo-semver-checks](https://github.com/obi1kenobi/cargo-semver-checks) ·
+  [cargo-public-api](https://github.com/foresterre/cargo-public-api) ·
+  [Rust Fuzz book](https://rust-fuzz.github.io/book/cargo-fuzz/setup.html) ·
+  [Meta on predictive test selection](https://engineering.fb.com/2018-11-21/developer-tools/predictive-test-selection/)
+- **Git** — [git-merge-tree](https://git-scm.com/docs/git-merge-tree) ·
+  [rerere](https://git-scm.com/book/be/v2/Git-Tools-Rerere) ·
+  [git-interpret-trailers](https://git-scm.com/docs/git-interpret-trailers) ·
+  [scalar](https://git-scm.com/docs/scalar) ·
+  [gitoxide](https://github.com/gitoxidelabs/gitoxide) and its
+  [path-traversal advisory](https://github.com/Byron/gitoxide/security/advisories/GHSA-7w47-3wg8-547c) ·
+  [cargo-bisect-rustc](https://rust-lang.github.io/cargo-bisect-rustc/usage.html) ·
+  [SWE-bench repo-state leakage #465](https://github.com/SWE-bench/SWE-bench/issues/465) ·
+  [Aider repo map](https://aider.chat/docs/repomap.html) and
+  [git integration](https://aider.chat/docs/git.html) ·
+  [GitSpawn (git-config hijack)](https://www.manifold.security/blog/ai-coding-agents-git-hijack) ·
+  [git-cliff](https://crates.io/crates/git-cliff) ·
+  [GitHub commits API](https://docs.github.com/en/rest/commits/commits).
+  All history *timings* were measured on this repo with `git` 2.55.0.
+- **Durability and state** — [rustup's versioned settings.toml](https://github.com/rust-lang/rustup) ·
+  [dirs crate](https://crates.io/crates/dirs) and
+  [XDG base-dir practice for Rust](https://zork.net/~st/jottings/Rust_and_the_XDG_Base_Directory_Specification.html) ·
+  [ratatui panic-hook recipe](https://ratatui.rs/recipes/apps/panic-hooks/) and
+  [color_eyre recipe](https://ratatui.rs/recipes/apps/color-eyre/) ·
+  [keyring vs Secret Service](https://users.rust-lang.org/t/keyring-secret-service-libraries/4567) ·
+  [LWN on libsecret's threat model](https://lwn.net/Articles/490518/) ·
+  [atomic rename as a crash-safety primitive](https://groundstatestorage.com/posts/atomic-rename-as-a-crash-safety-primitive)
+- **Portability** — [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) ·
+  [cross](https://github.com/cross-rs/cross) ·
+  [GitHub arm64 runners changelog](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) ·
+  [crossterm](https://docs.rs/crossterm/) and the
+  [ratatui backends/FAQ](https://ratatui.rs/concepts/backends/) ·
+  [Windows legacy console mode](https://learn.microsoft.com/en-us/windows/console/legacymode) ·
+  [Windows OpenSSH](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) ·
+  [Ollama on Windows](https://docs.ollama.com/windows) ·
+  [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) ·
+  [kitty OSC-52 clipboard](https://sw.kovidgoyal.net/kitty/clipboard/) ·
+  [a terminal escape-sequence survey](https://ppwwyyxx.com/blog/2023/Terminal-Escape-Sequences/)
+- **Ergonomics and a11y** — [no-color.org](https://no-color.org/) ·
+  [force-color.org](https://force-color.org/) ·
+  [bixense colour env-var convention](http://bixense.com/clicolors/) ·
+  [Orca and terminals](https://www.onorca.dev/docs/terminal) ·
+  [ratatui's unicode-width discussion](https://github.com/ratatui/ratatui/discussions/1438) ·
+  [unicode-width](https://docs.rs/unicode-width/) ·
+  [helix keymap model](https://docs.helix-editor.com/keymap.html) ·
+  [zellij keybindings](https://zellij.dev/documentation/keybindings.html) ·
+  [yazi keymap config](https://yazi-rs.github.io/docs/configuration/keymap/) ·
+  [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) ·
+  [delta](https://github.com/dandavison/delta) ·
+  [rust-i18n](https://crates.io/crates/rust-i18n) ·
+  [fluent-rs](https://github.com/projectfluent/fluent-rs)
+- **Ambient and cost** — [notify](https://github.com/notify-rs/notify) ·
+  [watchexec](https://watchexec.github.io/downloads/cargo-watch/4.0.0/index.html) ·
+  [Linux PSI](https://facebookmicrosites.github.io/psi/docs/overview) and the
+  [kernel doc](https://www.kernel.org/doc/html/v5.5/accounting/psi.html) ·
+  [systemd.resource-control](https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html) ·
+  [GitHub Actions scheduled-workflow semantics](https://github.com/orgs/community/discussions/156282) ·
+  [notify-rust](https://docs.rs/notify-rust/) ·
+  [Colab idle-reap discussion](https://github.com/googlecolab/colabtools/issues/3451) ·
+  [OpenAI pricing page](https://developers.openai.com/api/docs/pricing)
