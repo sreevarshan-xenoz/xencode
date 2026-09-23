@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — what the orchestrator proposal was still missing (Milestone S revision)
+The response to the recorded appendix added four items the original thirty-eight did not
+contain, and they are the parts the idea needed to be an architecture rather than a
+feature list. A common event protocol is now its own piece of work and the centre of the
+runtime: six vendors can only be coordinated by something they all normalise into, and the
+adapters are thin precisely because that target exists. A task contract fixes what "done"
+means before a worker is launched — allowed and forbidden files, expected output, the
+verification commands, the completion condition — because the everyday failure of this whole
+feature is an agent that reports itself finished when nobody ever stated the condition. A
+result envelope keeps a worker's claims in a separate field from its evidence, so a
+reviewing agent receives a machine-readable engineering record instead of its predecessor's
+prose. And a veto that the blocked party cannot lift, clearable only by a named reviewer, a
+human, or a policy that says what it clears: that is the one kind of authority no vendor has
+ever had over another, and therefore the honest answer to why anything belongs in the middle
+at all. Parallelism stopped being a configured maximum and became a computation over whether
+tasks are independent, whether their file sets collide, and what they cost.
+
+Two rules arrived with them. "Do not scrape terminal output" is now a fallback order rather
+than a preference: read a worker's structured stream, otherwise derive from repository state
+ourselves, never scrape a terminal for text. And the rule the feature will be judged on —
+live control over a worker's permissions is real for exactly one vendor today, while every
+other vendor only accepts policy fixed before it starts, so the interface must display which
+of the two it is looking at. Claiming the first when holding the second is how a safety
+feature becomes a false assurance, and it is the same standard every other panel in this
+project is already held to. What comes next is deliberately not a user interface: the
+measurement, then the protocol derived from it, then the state model, then the task graph.
+Plan items in the wave order: 284.
+
 ### Docs — the multi-agent orchestrator proposal, measured (Milestone S)
 A third external proposal list arrived: thirty-eight items describing an
 `/orchestrator` mode that would run Codex, Claude Code, Gemini CLI, OpenCode and Agy as

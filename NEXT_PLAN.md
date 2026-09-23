@@ -157,18 +157,25 @@
   and cloud workers do not have that problem — what replaces it is one machine verifying
   everyone's output, which is written down as the new ceiling instead of glossed over.
   13 of the 38 were already in the plan, 13 survive narrowed, 10 are new, 2 are rejected,
-  and **22 new IDs (AR-1…AR-8, OR-1…OR-14)** join the waves — starting with a measurement
-  (run each installed agent headless and write down what actually arrives) that gates
-  everything after it. Nothing in the appendix is built or scheduled to be built: it is
+  and **26 new IDs (AR-1…AR-9, OR-1…OR-17)** join the waves. The owner's reply to the
+  appendix supplied the four the original proposal was missing: a common event protocol to
+  normalise six vendors into, a task contract that fixes what "done" means before a worker
+  starts, a result envelope that keeps an agent's claims apart from its evidence, and a veto
+  the blocked worker cannot lift. It also fixed the rule this feature will be judged on —
+  the panel must show whether a worker's permissions are **live controlled** (true of one
+  vendor today) or only **configured at launch** (true of all the rest), because an interface
+  that conflates the two is a safety feature quietly turned into a false assurance. It starts
+  with a measurement (run each installed agent headless and write down what actually arrives)
+  that gates everything after it. Nothing in the appendix is built or scheduled to be built: it is
   recorded, placed in the wave order, and left gated on that first measurement.
   Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone S.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
   fifteen dependency waves at the time — **eighteen now, W0…W17**, after Milestone S
-  below — over **280 recorded plan items** (258 then, 22 added by S): the
+  below — over **284 recorded plan items** (258 then, 26 added by S): the
   208 research candidates, the 31 further Q IDs that fold into them, the 19
-  committed L/M tasks, and S's 22 — with every ID placed exactly once (verified by script) and
+  committed L/M tasks, and S's 26 — with every ID placed exactly once (verified by script) and
   **no renumbering**, so each item keeps the appendix that produced it as its
   provenance. The sequence: correctness → observability → model substrate → code
   intelligence → retrieval → verification → evidence → trust → outward research →

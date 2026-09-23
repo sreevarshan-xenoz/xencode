@@ -125,14 +125,14 @@ plus five research appendices — **N**, **O**, **P**,
 **Q** (an external hundred-proposal review, dispositioned item by item) and **S** (an
 external thirty-eight-proposal review of running other vendors' coding agents, checked
 against what those agents already do) —
-which between them record 208 candidate features from N–Q, 22 further tasks from S, a
+which between them record 208 candidate features from N–Q, 26 further tasks from S, a
 do-not-build register for each family, and the defects found while checking claims
 against the code. The
 appendices were deliberately never ranked by worth, and still are not. The
 **order** was settled afterwards as **Milestone R**: eighteen dependency waves
-over all 280 recorded plan items — the 208 research candidates, the 31 further Q
+over all 284 recorded plan items — the 208 research candidates, the 31 further Q
 IDs that turned out to be folds or refinements of candidates already counted, the
-19 committed tasks in L and M, and S's 22 — sequenced by what would otherwise inherit another
+19 committed tasks in L and M, and S's 26 — sequenced by what would otherwise inherit another
 item's broken measurement — correctness first, then observability, the model
 substrate, code intelligence, verification, trust, knowledge, autonomy, and the
 product surface last. What remains an owner decision is valuation within a wave
