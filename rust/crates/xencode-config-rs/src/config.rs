@@ -38,7 +38,9 @@ pub struct ColabConfig {
     /// Local port the SSH forward exposes the VM's OpenAI endpoint at.
     #[serde(default = "default_colab_local_port")]
     pub local_port: u16,
-    /// Port the inference server listens on inside the VM.
+    /// Port the inference server listens on inside the VM. `0` = the
+    /// runtime's native port (llama.cpp 8080, ollama 11434) — set only to
+    /// override where the VM-side server binds.
     #[serde(default = "default_colab_remote_port")]
     pub remote_port: u16,
     /// Inference runtime started on the VM: "llama.cpp" or "ollama".
@@ -313,7 +315,7 @@ fn default_colab_local_port() -> u16 {
 }
 
 fn default_colab_remote_port() -> u16 {
-    8000
+    0
 }
 
 fn default_colab_runtime() -> String {
@@ -512,7 +514,7 @@ mod tests {
         assert!(!config.colab.enabled);
         assert_eq!(config.colab.session, "");
         assert_eq!(config.colab.local_port, 18000);
-        assert_eq!(config.colab.remote_port, 8000);
+        assert_eq!(config.colab.remote_port, 0);
         assert_eq!(config.colab.runtime, "llama.cpp");
         assert_eq!(config.colab.weights_source, "hf");
         assert_eq!(config.colab.model, "");
