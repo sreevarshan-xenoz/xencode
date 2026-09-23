@@ -1908,6 +1908,26 @@ impl<'a> App<'a> {
             "llamacpp".to_string(),
             (HealthStatus::Unknown.to_string(), 0.0, None),
         );
+        // K-3: the remote/Colab forward gets the same row as the rest. When a
+        // remote URL is configured (Settings → Remote URL, or what
+        // `xencode colab up` points at the forward) the check probes it;
+        // otherwise the row states the fix instead of staying silent.
+        app.ollama_health_entries.insert(
+            "remote".to_string(),
+            (
+                if app.config.remote_base_url.is_empty() {
+                    HealthStatus::Error.to_string()
+                } else {
+                    HealthStatus::Unknown.to_string()
+                },
+                0.0,
+                if app.config.remote_base_url.is_empty() {
+                    Some("Remote URL not configured (Settings → Remote URL)".to_string())
+                } else {
+                    None
+                },
+            ),
+        );
 
         for msg in app.memory.get_context(10) {
             app.messages.push(UiMessage {
@@ -4921,6 +4941,7 @@ impl<'a> App<'a> {
 
         let ollama_url = self.config.ollama_url.clone();
         let llama_cpp_url = self.config.llama_cpp_url.clone();
+        let remote_base_url = self.config.remote_base_url.clone();
         let timeout = self.config.response_timeout;
         let openrouter_key = self.config.api_keys.openrouter_api_key.clone();
         let qwen_key = self.config.api_keys.qwen_api_key.clone();
@@ -5089,6 +5110,37 @@ impl<'a> App<'a> {
                 }
                 Err(e) => {
                     let _ = tx.send(format!("[HEALTH]llamacpp|unavailable|0|{}", e));
+                }
+            }
+
+            // Check the remote/Colab forward (if a remote URL is configured).
+            // Probe the OpenAI-compatible models list — the same endpoint
+            // `xencode colab status` waits on, so a healthy row means the
+            // forward actually answers chat requests.
+            if !remote_base_url.is_empty() {
+                let start_rm = std::time::Instant::now();
+                let remote_client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(timeout.min(5)))
+                    .build()
+                    .unwrap_or_default();
+                let models_url = format!("{}/models", remote_base_url.trim_end_matches('/'));
+                match remote_client.get(&models_url).send().await {
+                    Ok(resp) => {
+                        let latency = start_rm.elapsed().as_secs_f64() * 1000.0;
+                        if resp.status().is_success() {
+                            let _ = tx.send(format!("[HEALTH]remote|healthy|{}|", latency));
+                        } else {
+                            let _ = tx.send(format!(
+                                "[HEALTH]remote|error|{}|HTTP {}",
+                                latency,
+                                resp.status()
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        let latency = start_rm.elapsed().as_secs_f64() * 1000.0;
+                        let _ = tx.send(format!("[HEALTH]remote|error|{}|{}", latency, e));
+                    }
                 }
             }
 
@@ -6287,12 +6339,52 @@ mod tests {
         cap_at_line, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
         parse_porcelain_z, parse_term_suggestions, parse_voice_level, watch_warning_for, App,
-        FocusArea, LoopSink, SpawnRecord, CTX_SYSTEM,
+        ConversationMemory, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
     use xencode_context_rs::init_project;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
+
+    /// K-3: the provider-health panel seeds a Remote/Colab forward row the same
+    /// way it seeds the keyed providers — and an empty remote URL says how to
+    /// fix it instead of staying silent.
+    #[test]
+    fn health_seeds_a_remote_row_for_the_forward() {
+        // Empty remote URL: the row must name the fix, not vanish.
+        let app = App::for_tests();
+        let (status, latency, error) = app
+            .ollama_health_entries
+            .get("remote")
+            .expect("remote row seeded");
+        assert_eq!(status.as_str(), "error");
+        assert_eq!(*latency, 0.0);
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Remote URL not configured"),
+            "{error:?}"
+        );
+
+        // Configured (what `xencode colab up` points at the forward): the row
+        // waits Unknown until the first health check probes it.
+        let config = XencodeConfig {
+            remote_base_url: "http://127.0.0.1:18000/v1".to_string(),
+            ..XencodeConfig::default()
+        };
+        let app = App::with_config_and_memory(
+            config,
+            ConversationMemory::new(10),
+            std::path::PathBuf::new(),
+        );
+        let (status, _, error) = app
+            .ollama_health_entries
+            .get("remote")
+            .expect("remote row seeded");
+        assert_eq!(status.as_str(), "unknown");
+        assert!(error.is_none(), "{error:?}");
+    }
 
     /// I2-01: `/rewind` is the user's undo for what the agent wrote. The
     /// checkpoint is recorded by the real gated path, not seeded by hand.

@@ -1930,6 +1930,7 @@ fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
             "ollama" => format!("{} Ollama", "\u{1F916}"),
             "llamacpp" => format!("{} llama.cpp", "\u{1F999}"),
             "openrouter" => format!("{} OpenRouter", "\u{1F310}"),
+            "remote" => format!("{} Remote", "\u{1F30D}"),
             _ => provider.to_string(),
         }
     };
@@ -1994,6 +1995,12 @@ fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
                 )));
             }
         }
+        if provider == "remote" && !app.config.remote_base_url.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!("        \u{1F504} {}", app.config.remote_base_url),
+                Style::default().fg(app.theme.message_system),
+            )));
+        }
         if !error_str.is_empty() {
             lines.push(Line::from(Span::styled(
                 format!("        {}", error_str),
@@ -2017,6 +2024,14 @@ fn provider_health_lines(app: &App) -> Vec<Line<'static>> {
     lines.push(Line::from(format!(
         "   Llama.cpp URI: {}",
         app.config.llama_cpp_url
+    )));
+    lines.push(Line::from(format!(
+        "   Remote URI:    {}",
+        if app.config.remote_base_url.is_empty() {
+            "(not configured)".to_string()
+        } else {
+            app.config.remote_base_url.clone()
+        }
     )));
     lines.push(Line::from(format!(
         "   OpenRouter:   {}",
@@ -4296,6 +4311,40 @@ fn draw_multi_language(f: &mut Frame, app: &App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::{clamp_scroll, App};
+
+    /// K-3: the health popup renders the Remote/Colab forward row — status,
+    /// latency, the configured URI in Connection Details, and (when set) the
+    /// URL right under the row.
+    #[test]
+    fn provider_health_lists_the_remote_forward_row() {
+        use super::provider_health_lines;
+
+        let mut app = App::for_tests();
+        app.ollama_health_entries
+            .insert("remote".to_string(), ("healthy".to_string(), 42.5, None));
+        app.config.remote_base_url = "http://127.0.0.1:18000/v1".to_string();
+
+        let lines = provider_health_lines(&app);
+        let text: String = lines
+            .iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Remote"), "row rendered: {text}");
+        assert!(text.contains("healthy"), "status rendered: {text}");
+        assert!(text.contains("42 ms"), "latency rendered: {text}");
+        assert!(
+            text.contains("http://127.0.0.1:18000/v1"),
+            "forward URI rendered: {text}"
+        );
+        assert!(text.contains("Remote URI:"), "details row: {text}");
+    }
 
     #[test]
     fn clamp_scroll_bounds_to_scrollable_rows() {
