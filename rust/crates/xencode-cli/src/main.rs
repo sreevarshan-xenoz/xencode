@@ -139,6 +139,13 @@ enum Commands {
         action: WorktreeAction,
     },
 
+    /// Google Colab bridge: preflight, then up / status / down for a model
+    /// server running on a Colab VM
+    Colab {
+        #[command(subcommand)]
+        action: ColabAction,
+    },
+
     /// Repository insights from the .xencode snapshot: broken imports,
     /// import cycles, hub files and orphans
     Advise {
@@ -257,6 +264,16 @@ enum ConfigAction {
     },
     /// Reset configuration to defaults
     Reset,
+}
+
+#[derive(Subcommand)]
+enum ColabAction {
+    /// Verify the google-colab-cli bridge is usable before bringing a VM up
+    Preflight {
+        /// Generate the ed25519 key pair into the xencode config dir if absent
+        #[arg(long)]
+        generate_key: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -447,6 +464,7 @@ async fn main() {
         Commands::Review { base, format } => run_review(base, format),
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Llamacpp { action } => run_llamacpp(action).await,
+        Commands::Colab { action } => run_colab(action).await,
         Commands::Tui => run_tui().await,
     };
 
@@ -923,6 +941,37 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             println!("llama_cpp_model_path = {path}");
             Ok(())
         }
+    }
+}
+
+async fn run_colab(action: ColabAction) -> Result<(), String> {
+    match action {
+        ColabAction::Preflight { generate_key } => run_colab_preflight(generate_key).await,
+    }
+}
+
+async fn run_colab_preflight(generate_key: bool) -> Result<(), String> {
+    let report = xencode_colab_rs::preflight(generate_key)
+        .await
+        .map_err(|e| format!("colab preflight: {e}"))?;
+
+    println!("Colab preflight — google-colab-cli bridge");
+    for check in &report.checks {
+        let mark = if check.ok { "[ ok ]" } else { "[FAIL]" };
+        println!("  {mark} {:<18} {}", check.name, check.detail);
+        if let Some(fix) = &check.fix {
+            println!("         fix: {fix}");
+        }
+    }
+
+    if report.ready() {
+        println!("Ready — the Colab bridge can be brought up.");
+        Ok(())
+    } else {
+        Err(format!(
+            "colab preflight found {} failing check(s)",
+            report.failed()
+        ))
     }
 }
 

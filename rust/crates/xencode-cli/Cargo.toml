@@ -21,6 +21,7 @@ xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
+xencode-colab-rs = { path = "../xencode-colab-rs" }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full", "rt-multi-thread"] }
