@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — the multi-agent orchestrator proposal, measured (Milestone S)
+A third external proposal list arrived: thirty-eight items describing an
+`/orchestrator` mode that would run Codex, Claude Code, Gemini CLI, OpenCode and Agy as
+workers under one plan, one permission broker, one shared memory and one merge decision.
+Unlike the earlier lists, this one could be checked against reality rather than argued
+about, because all five of those programs are installed on the machine this project is
+developed on — so the appendix records a table of what each one's own help text actually
+advertises, read today. Three results reshaped the idea. The five have already converged
+on the same headless contract (single-prompt mode, a machine-readable event stream, the
+same three-rung approval ladder, resumable sessions), which makes the proposed adapter
+layer a normaliser over command-line flags rather than five separate protocols, and drops
+three of its twelve proposed methods because no vendor implements them. Roughly a third of
+what was proposed is already shipped by the vendors being orchestrated, including their
+own session daemons, subagent definitions, non-interactive review commands and health
+checks — and Claude Code can import another agent's configuration wholesale. And the
+permission broker, which the proposal treats as the centrepiece, has exactly one working
+seam today: one vendor will route its approval requests to a model-context-protocol tool,
+which is the same surface task M-5 already plans to expose, so that task moves earlier in
+the order and every other vendor gets policy granted before launch — which is not control
+and is now described as such. The proposal does reverse one standing rejection, on grounds
+the plan accepts: the agent task graph was parked because a single local model saturates
+this laptop, and workers calling a remote service do not. What replaces that ceiling is
+written down instead of glossed over: one machine verifying everyone's output, a small
+local model doing the planning, and real money spent per fan-out. Thirteen proposals were
+already in the plan under another name, thirteen survive in a narrowed form, ten are new,
+two are rejected, and twenty-two new task IDs join the wave order — the first of which is
+a measurement: run each installed agent headless on a tiny read-only task and record what
+its event stream actually carries. Nothing else in the appendix may be treated as a
+commitment until that matrix exists. Nothing here is built; the wave count in Milestone R
+grows from fifteen to eighteen accordingly.
+
 ### Docs — the plan finally has an order (Milestone R)
 Four research appendices had declined to rank their candidates, which was honest
 about value but left no way to start anything. The owner supplied an ordering
