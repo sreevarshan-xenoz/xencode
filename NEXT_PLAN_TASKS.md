@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 835 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 837 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2499,7 +2499,9 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   add a max-latency flush, coalesce to directory granularity above N paths, and
   expose `settled` vs `storming`. **S**. Trap: the swallowed `spawn` error
   (fact 9) means a monorepo already exceeds `max_user_watches` silently on this
-  machine's behalf — fix the observability first.
+  machine's behalf — fix the observability first. *(Quiet-window cap, max-latency
+  flush and the `spawn` error are Done 2026-09-23 — see W0 progress; directory
+  coalescing and the `settled`/`storming` state are not.)*
 - **AM-4 Scheduled self-work** — a cron-like local schedule for dependency
   audit, flaky-test triage, TODO triage and doc-drift checks, each writing a
   digest item. **M**. Trap: GitHub's own scheduled workflows have a 5-minute
@@ -2819,7 +2821,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 835-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 837-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -4337,9 +4339,25 @@ and PR-1: refuse at the source class, never grade with a classifier.
   test denies an undeclared `run_command` from a plugin's hook.
 - **QTR-2 — Locality filter on `fallback_chain`.** *Effort: S.*
   `retry.rs:126-139` interleaves local and cloud candidates by config order with
-  no route awareness, so a local-first user with a `groq`/`openrouter` fallback
-  silently leaks the conversation on a transient error. This is a privacy bug
-  today, and the honest 80% of items 94/95.
+  no route awareness, so a local-first user with a cloud fallback silently leaks
+  the conversation on a transient error. This is a privacy bug today, and the
+  honest 80% of items 94/95.
+  - **Verified 2026-09-23; fact Q-1.10's example is wrong.** Routing is an
+    if-chain of prefix tests. Cloud arms: `anthropic:`, `qwen:`,
+    `google_gemini:`, and any id containing `/` **only when an OpenRouter key is
+    configured**. Local arms: `llamacpp:` / `llama.cpp:` / `llama:`, `remote:`
+    (whose locality depends on the configured base URL), and the default
+    fallthrough to local Ollama. There is no `ollama:` handler, no `groq:`
+    handler, and no bare `gemini:` prefix, so the fact's
+    `gemini:gemini-2.0-flash` example matches no cloud arm and never leaves the
+    machine. The leak that does exist is a local primary with an `anthropic:`,
+    `qwen:` or `google_gemini:` fallback, or a slash-id fallback while the
+    OpenRouter key is set.
+  - **Not started.** The fix is designed — a locality judgement mirroring those
+    arms, a filter beside the fallback-chain builder, one call site in the TUI's
+    fallback loop — but the session that did this work could not write to the
+    crate that owns routing, and the decision was to respect that boundary rather
+    than relocate egress logic into a crate that happened to be writable.
 - **QTR-3 — `bwrap` wrapper for `run_command`, hooks and background.** *Effort:
   M,* inside SE-7. Read-only bind of the workspace + `~/.cargo`, tmpfs
   elsewhere, network namespace off by default, visible opt-out. `bwrap` is
@@ -4752,7 +4770,24 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   with that path named. Measured before/after on a real index of this workspace
   and recorded in fact Q-1.11, along with the finding that the hybrid rerank
   cannot change recall@5 at all.
-- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`, `AM-3`
+- [x] `AM-3` — 2026-09-23. Two silent failures made loud, and one of them made
+  bounded. `WorkspaceWatcher::spawn`'s error was swallowed by `let Ok(..) = ..
+  else { return }` at the `app.rs` watcher task, so a workspace that cannot be
+  watched (on this machine's scale, usually the inotify path limit) reported
+  exactly what a quiet workspace reports: nothing. It now sends a new
+  `[WATCHOFF]<reason>` token, rendered in chat as `⚠ file watching is off: …`
+  beside the provider-fallback notice. The debounce itself could starve:
+  `next_batch` returned only on a gap of `quiet_for`, so a `git checkout` or a
+  build touching files faster than the gap held the batch until activity
+  stopped. The gap a caller can ask for is now capped at `MAX_QUIET_WINDOW`
+  (1 s) and a batch older than `MAX_STORM_LATENCY` (2 s) is emitted mid-storm.
+  Both directions are tested, and both tests were re-run against the old
+  `next_batch` to confirm they fail there — 4.03 s waiting for a 200-event
+  stream to end, and 10.00 s for a caller's uncapped window — so the assertions
+  are guards, not decoration. *Not done from the item:* directory-granularity
+  coalescing above N paths and a `settled`/`storming` state to expose; the
+  flush bound is a constant, not a reported state.
+- [ ] `LSP-4`, `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`
 
 #### W1 — Make the agent observable — 15 items
 
