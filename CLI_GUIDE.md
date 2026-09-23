@@ -140,13 +140,45 @@ type a public-tunnel URL (paid tier) into Settings → Remote URL instead.
 ```bash
 xencode colab preflight                # is the bridge usable? (exit 0 when green)
 xencode colab preflight --generate-key # also create ~/.xencode/colab_ed25519 if missing
+xencode colab up                       # create the VM, install the runtime, hold the tunnel
+xencode colab status                   # is the forward/session/endpoint alive?
+xencode colab down                     # kill the forward, colab stop, clear state
 ```
 
 `preflight` checks in one pass: the `colab` CLI on PATH, version >= 0.7.0
 (0.6.0 shipped without the `ssh` subcommand), backend auth via
 `colab sessions`, ssh/ssh-keygen on PATH, and the ed25519 key pair. Every
-failing check prints a runnable fix line. The VM lifecycle commands
-(`up`/`status`/`down`) land in Milestone K.
+failing check prints a runnable fix line.
+
+`up` is the happy-path bring-up: `colab new --gpu <gpu> -s <name>` when the
+session is absent, pushes an ssh bootstrap that installs the runtime bound to
+`127.0.0.1` only *inside* the VM, holds an `ssh -N -L` forward, waits until
+`/v1/models` answers, and writes `~/.xencode/colab.json` — then points the
+provider URLs at the forward (`llama_cpp_url`/`ollama_url` for the runtime,
+`remote_base_url` for the OpenAI-compatible remote). Flags override config;
+`config colab_*` keys fill the rest:
+
+```bash
+xencode colab up                      # uses colab.session / colab.runtime / colab.model
+xencode colab up --runtime ollama     # tag flow into the model picker; respins the VM
+xencode colab up --gpu L4 --model Qwen/Qwen2.5-7B-Instruct-GGUF
+xencode colab up --local-port 18001   # laptop side of the forward
+xencode colab up --remote-port 8080   # VM-side port (0 = runtime-native)
+xencode colab up --weights hf         # llama.cpp weights from Hugging Face
+```
+
+`runtime` chooses what is installed on the VM: `llama.cpp` (pinned
+`llama-cpp-python[server]` + a GGUF pulled from Hugging Face, one-shot
+heavier install) or `ollama` (`ollama serve` + the pull — its tags then flow
+into the model picker for free via the existing provider list). `weights` is
+`hf` for llama.cpp; `drive`/`gcs` are refused with a fix message. Session
+names are validated before they touch a shell (`[A-Za-z0-9_-]`, 1–64 chars).
+
+`status` never fails hard — it reports three cells (forward pid alive,
+session listed by `colab sessions`, and a `/v1/models` probe on the forward)
+so it stays scriptable while fully degraded. `down` is idempotent: kills the
+recorded forward pid, runs `colab stop -s <name>`, and clears state; with no
+`colab.json` it reports `nothing to tear down`.
 
 ### `xencode config <action>`
 Configuration management. Config lives in `~/.xencode/config.json`;
