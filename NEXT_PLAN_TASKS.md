@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 768 tests passing, 4 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 805 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1015,7 +1015,7 @@ OpenAI-compatible server.
       `~/.xencode/` (generate it if asked), and what to run when a check fails.
       The `xencode-colab-rs` crate was born here so its preflight gate has a
       home (`173a36b`; CLI wiring `5739ebb`).
-- [ ] **K-2b — orchestration + state in `xencode-colab-rs` (crate exists from
+- [x] **K-2b — orchestration + state in `xencode-colab-rs` (crate exists from
       K-2a).** Wraps the optional `colab`/`ssh` tools (same "report itself
       unpowered" pattern as J-07's recorders; `which()`/`run()` and the preflight
       checks are already there). New `ColabConfig` in `xencode-config-rs`:
@@ -1023,7 +1023,7 @@ OpenAI-compatible server.
       model, weights_source ("hf"|"drive"|"gcs"), auto_connect` — all
       `#[serde(default)]`. State in `~/.xencode/colab.json`: session, ssh /
       forward / keep-alive pids, ports, runtime, model, started_at, url.
-- [ ] **K-2c — `xencode colab up|status|down`.** `up`: `colab new --gpu T4`,
+- [x] **K-2c — `xencode colab up|status|down`.** `up`: `colab new --gpu T4`,
       SSH bootstrap (pinned `llama-server` + GGUF on `127.0.0.1:8080`, **or**
       `ollama serve` on 11434 — the ollama choice makes tags flow into the
       model picker for free via the existing `refresh_models()`), hold `-N -L`,

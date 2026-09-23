@@ -19,6 +19,18 @@ caught in code: `google-colab-cli` 0.6.0 shipped without the `ssh`
 subcommand (upstream issue #102); preflight requires >= 0.7.0.
 
 ### Added
+- **Colab VM lifecycle** (K-2c). `xencode colab up` brings a Colab VM up
+  end-to-end: creates the session (`colab new --gpu <gpu> -s <name>`) when
+  absent, pushes an ssh bootstrap that installs and starts the chosen runtime
+  bound to `127.0.0.1` only (llama.cpp — pinned `llama-cpp-python[server]` +
+  HF GGUF on 8080 — or ollama — `ollama serve` on 11434, its tags flow into
+  the model picker), holds the `-N -L` forward, waits for `/v1/models`, writes
+  `~/.xencode/colab.json`, and points `llama_cpp_url`/`ollama_url`/
+  `remote_base_url` at the forward. `xencode colab status` reports forward
+  pid / `colab sessions` listing / endpoint probe and never fails hard;
+  `xencode colab down` is idempotent (kill forward, `colab stop`, clear
+  state). Flag > `config colab_*` fallbacks; session names validated before
+  any shell use.
 - **Colab preflight gate** (K-2a). `xencode colab preflight` verifies in one
   pass that the bridge is usable before any VM is brought up: the `colab` CLI
   on PATH, version >= 0.7.0 (version string *and* a functional `colab ssh
