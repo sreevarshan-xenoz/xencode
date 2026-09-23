@@ -38,9 +38,23 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(1200);
 /// `/v1/models` probes after the forward is up. The server may still be
 /// finishing a cold model load; keep trying briefly.
 const PROBE_ATTEMPTS: u32 = 40;
+/// Colab gives a runtime exactly one SSH bridge, and the slot of a bridge that
+/// just died takes a while to release (measured live on a free-tier T4:
+/// `HTTP 429 … Already-active SSH session` survived ~45 s). Both the bootstrap
+/// and the forward retry through that window instead of failing the bring-up.
+const BRIDGE_ATTEMPTS: u32 = 8;
+/// How long to wait between bridge attempts.
+const BRIDGE_RETRY_GAP: Duration = Duration::from_secs(20);
+/// How long the forward is given to prove it stayed up before it is trusted.
+const FORWARD_SETTLE: Duration = Duration::from_secs(5);
 /// Colab reaps idle free-tier VMs; a bridge this old is likely pointing at a
 /// dead VM even when a stale pid survives.
 const VM_MAX_AGE_HOURS: f64 = 12.0;
+
+/// GGUF quantization used when neither `--quant` nor `colab_quant` says:
+/// small enough to fit a free-tier T4's 15 GB with a 7-8B model, good enough
+/// to be worth talking to.
+pub const DEFAULT_QUANT: &str = "Q4_K_M";
 
 /// Everything `up` needs, resolved by the CLI from flags + config.
 #[derive(Debug, Clone)]
@@ -57,9 +71,12 @@ pub struct UpOptions {
     /// Weight source ("hf" — llama.cpp only; drive/gcs are refused by the
     /// bootstrap with a fix).
     pub weights_source: String,
+    /// GGUF quantization fragment to pick inside the model repo (llama.cpp
+    /// only; ollama tags carry their own). Empty = "Q4_K_M".
+    pub quant: String,
     /// Laptop-side port the forward exposes.
     pub local_port: u16,
-    /// VM-side port; `0` = runtime native (8080 llama.cpp / 11434 ollama).
+    /// VM-side port; `0` = runtime native (18080 llama.cpp / 11434 ollama).
     pub remote_port: u16,
 }
 
@@ -81,16 +98,22 @@ pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Resu
 
     ensure_session(bins, &opts.session, &opts.gpu).await?;
 
+    let quant = if opts.quant.is_empty() {
+        DEFAULT_QUANT
+    } else {
+        opts.quant.as_str()
+    };
     let script = bootstrap_script(
         &opts.runtime,
         &opts.model,
         &opts.weights_source,
+        quant,
         remote_port,
     )?;
     run_bootstrap(bins, key, &opts.session, &script).await?;
 
     let (url, child) =
-        spawn_forward(bins, &opts.session, key, opts.local_port, remote_port).await?;
+        spawn_forward_ready(bins, &opts.session, key, opts.local_port, remote_port).await?;
     let forward_pid = child.id().expect("a just-spawned forward always has a pid");
 
     probe_models(opts.local_port, PROBE_ATTEMPTS, None)
@@ -151,15 +174,21 @@ pub async fn run_colab_reconnect(
     // the VM was reaped. Recreate it like `up` would, then keep going.
     ensure_session(bins, &session, opts.gpu.as_str()).await?;
 
+    let quant = if opts.quant.is_empty() {
+        DEFAULT_QUANT
+    } else {
+        opts.quant.as_str()
+    };
     let script = bootstrap_script(
         &opts.runtime,
         &opts.model,
         &opts.weights_source,
+        quant,
         remote_port,
     )?;
     run_bootstrap(bins, key, &session, &script).await?;
 
-    let (url, child) = spawn_forward(bins, &session, key, local_port, remote_port).await?;
+    let (url, child) = spawn_forward_ready(bins, &session, key, local_port, remote_port).await?;
     let forward_pid = child.id().expect("a just-spawned forward always has a pid");
 
     probe_models(local_port, PROBE_ATTEMPTS, None)
@@ -377,9 +406,11 @@ async fn ensure_session(bins: &Binaries, session: &str, gpu: &str) -> Result<(),
     Ok(())
 }
 
-/// Feed the bootstrap script to `ssh ... colab-vm bash -s` over the bridge
-/// and wait for a `READY` marker on stdout. Streams a progress line so a long
-/// pip install is visibly working, not hung.
+/// Feed the bootstrap script to `ssh -l root ... colab-vm bash -s` over the
+/// bridge and wait for a `READY` marker on stdout, retrying while Colab's
+/// single SSH slot is still held by the bridge that just died. Output is
+/// captured, not streamed: a slow install is silent but bounded by
+/// [`BOOTSTRAP_TIMEOUT`].
 async fn run_bootstrap(
     bins: &Binaries,
     key: &Path,
@@ -387,6 +418,47 @@ async fn run_bootstrap(
     script: &str,
 ) -> Result<(), String> {
     let argv = exec_ssh_argv(bins, session, key, "bash -s");
+    let mut busy = String::new();
+    for attempt in 1..=BRIDGE_ATTEMPTS {
+        let result = bootstrap_once(bins, &argv, script).await;
+        let Err(err) = result else { return Ok(()) };
+        if !bridge_busy(&err) {
+            return Err(err);
+        }
+        // The previous bridge's slot is still held; wait it out and redo the
+        // whole push (the script is idempotent: installs skip, downloads resume).
+        busy = err;
+        if attempt < BRIDGE_ATTEMPTS {
+            tokio::time::sleep(BRIDGE_RETRY_GAP).await;
+        }
+    }
+    Err(format!(
+        "colab up: the runtime allows one SSH bridge and its slot never freed — {busy}"
+    ))
+}
+
+/// True when an error is Colab refusing a *second* concurrent bridge rather
+/// than anything the user did wrong.
+fn bridge_busy(text: &str) -> bool {
+    text.contains("Already-active SSH session") || text.contains("HTTP 429")
+}
+
+/// The tail of a subprocess' output — what actually went wrong is at the end;
+/// the first line is usually ssh's host-key warning.
+fn error_tail(s: &str) -> Option<String> {
+    let lines: Vec<&str> = s
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("Warning: Permanently added"))
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let skip = lines.len().saturating_sub(3);
+    Some(lines[skip..].join(" / ").chars().take(400).collect())
+}
+
+async fn bootstrap_once(bins: &Binaries, argv: &[String], script: &str) -> Result<(), String> {
     let mut child = tokio::process::Command::new(&bins.ssh)
         .args(&argv[1..])
         .stdin(Stdio::piped())
@@ -422,9 +494,9 @@ async fn run_bootstrap(
         return Err(format!(
             "colab up: VM bootstrap failed (exit {}){}",
             output.status.code().unwrap_or(-1),
-            first_line(&stderr)
-                .or_else(|| first_line(&stdout))
-                .map(|l| format!(" — {l}"))
+            error_tail(&stderr)
+                .or_else(|| error_tail(&stdout))
+                .map(|t| format!(" — {t}"))
                 .unwrap_or_default()
         ));
     }
@@ -432,6 +504,34 @@ async fn run_bootstrap(
         return Err("colab up: VM bootstrap did not report READY".to_string());
     }
     Ok(())
+}
+
+/// Spawn the forward, tolerating the one-bridge-per-runtime slot: `ssh` exits
+/// immediately when the bridge is refused, so a forward that is already dead
+/// after [`FORWARD_SETTLE`] is re-spawned until the slot frees.
+async fn spawn_forward_ready(
+    bins: &Binaries,
+    session: &str,
+    key: &Path,
+    local_port: u16,
+    remote_port: u16,
+) -> Result<(String, tokio::process::Child), String> {
+    let mut last = String::from("forward exited before it settled");
+    for attempt in 1..=BRIDGE_ATTEMPTS {
+        let (url, mut child) = spawn_forward(bins, session, key, local_port, remote_port).await?;
+        tokio::time::sleep(FORWARD_SETTLE).await;
+        match child.try_wait() {
+            Ok(None) => return Ok((url, child)),
+            Ok(Some(status)) => last = format!("forward exited ({status})"),
+            Err(e) => last = format!("forward could not be waited on: {e}"),
+        }
+        if attempt < BRIDGE_ATTEMPTS {
+            tokio::time::sleep(BRIDGE_RETRY_GAP).await;
+        }
+    }
+    Err(format!(
+        "colab up: the ssh forward never stayed up — {last} (a Colab runtime serves one SSH bridge; close any other `colab ssh` and retry)"
+    ))
 }
 
 /// `colab stop -s <session>` — best-effort: absence is fine, hard backend
@@ -617,6 +717,7 @@ esac
                 "Qwen/Qwen2.5-7B-Instruct-GGUF".to_string()
             },
             weights_source: "hf".to_string(),
+            quant: String::new(),
             local_port,
             remote_port: 0,
         }

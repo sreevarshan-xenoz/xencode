@@ -293,10 +293,14 @@ enum ColabAction {
         /// Weights source: hf (llama.cpp only; drive/gcs are refused with a fix)
         #[arg(long)]
         weights: Option<String>,
+        /// GGUF quantization fragment to serve (llama.cpp only, e.g. Q4_K_M;
+        /// defaults to config colab.quant)
+        #[arg(long)]
+        quant: Option<String>,
         /// Local port the SSH forward exposes (defaults to config / 18000)
         #[arg(long)]
         local_port: Option<u16>,
-        /// VM-side port the runtime binds (0 = runtime-native: llama.cpp 8080,
+        /// VM-side port the runtime binds (0 = runtime-native: llama.cpp 18080,
         /// ollama 11434; defaults to config)
         #[arg(long)]
         remote_port: Option<u16>,
@@ -725,6 +729,7 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.colab.weights_source = value.clone();
                 }
+                "colab_quant" => config.colab.quant = value.clone(),
                 "colab_auto_connect" => config.colab.auto_connect = parse_bool(&value)?,
                 _ => return Err(format!("unknown config key: {key}")),
             }
@@ -1035,6 +1040,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
             runtime,
             model,
             weights,
+            quant,
             local_port,
             remote_port,
             reconnect,
@@ -1045,6 +1051,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
                 runtime,
                 model,
                 weights,
+                quant,
                 local_port,
                 remote_port,
                 reconnect,
@@ -1063,6 +1070,7 @@ async fn run_colab_up_cli(
     runtime: Option<String>,
     model: Option<String>,
     weights: Option<String>,
+    quant: Option<String>,
     local_port: Option<u16>,
     remote_port: Option<u16>,
     reconnect: bool,
@@ -1091,6 +1099,7 @@ async fn run_colab_up_cli(
         })
         .unwrap_or("Qwen/Qwen2.5-7B-Instruct-GGUF".to_string());
     let weights_source = weights.unwrap_or(config.colab.weights_source.clone());
+    let quant = quant.unwrap_or(config.colab.quant.clone());
     let local_port = local_port.unwrap_or(config.colab.local_port);
     let remote_port = remote_port.unwrap_or(config.colab.remote_port);
 
@@ -1127,6 +1136,7 @@ async fn run_colab_up_cli(
         runtime: runtime.clone(),
         model: model.clone(),
         weights_source,
+        quant,
         local_port,
         remote_port,
     };
@@ -1173,7 +1183,10 @@ async fn run_colab_up_cli(
 
 async fn run_colab_status_cli() -> Result<(), String> {
     let bins = xencode_colab_rs::resolve_binaries()?;
-    let report = xencode_colab_rs::run_colab_status(&bins, "xencode-vm").await;
+    let config = XencodeConfig::load().map_err(|e| e.to_string())?;
+    // An empty `colab.session` is not a session name; `status` prefers the
+    // recorded colab.json and only falls back to what the caller asks for.
+    let report = xencode_colab_rs::run_colab_status(&bins, &config.colab.session).await;
     for line in &report.lines {
         println!("  {line}");
     }

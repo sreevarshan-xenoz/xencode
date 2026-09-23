@@ -5,17 +5,17 @@
 //! `ProxyCommand`:
 //!
 //! ```text
-//! ssh -N -L 127.0.0.1:18000:127.0.0.1:8080 -i <key> \
+//! ssh -N -l root -L 127.0.0.1:18000:127.0.0.1:18080 -i <key> \
 //!     -o ProxyCommand="colab ssh --proxy-mode -s <session> -i <key>" \
-//!     root@colab
+//!     colab-vm
 //! ```
 //!
 //! OpenSSH runs `ProxyCommand` through the user's shell, so every value we
 //! interpolate into it ([`shell_quote`]) is single-quoted — a session name is
 //! user-typed and must never be interpreted as shell syntax. The `-L` source
 //! port is the laptop's `local_port`; the destination is `127.0.0.1` inside
-//! the VM, where the runtime is pinned (llama.cpp 8080, ollama 11434) unless
-//! the config overrides it.
+//! the VM, where the runtime binds ([`effective_remote_port`]: llama.cpp
+//! 18080, ollama 11434) unless the config overrides it.
 //!
 //! Beyond the forward itself, the same ssh is used to *bootstrap* the VM
 //! (`-N` omitted, `bash -s` fed on stdin) — the bridge is ssh's transport, so
@@ -62,6 +62,12 @@ pub fn shell_quote(s: &str) -> String {
     out
 }
 
+/// The user Colab's sshd accepts. Verified live on a free-tier T4 runtime
+/// (2026-09-23): the bridge injects the pubkey for `root` only — logging in as
+/// the local username, `colab`, `sree` or `user` all end in
+/// `Permission denied (publickey)`.
+pub const SSH_USER: &str = "root";
+
 /// The argv of the `colab ssh --proxy-mode -s <session> -i <key>` bridge that
 /// OpenSSH runs as a `ProxyCommand`. Passed as a vector, never through a
 /// shell, so no quoting or injection applies on the colab side.
@@ -105,6 +111,8 @@ pub fn forward_argv(
         "-N".to_string(),
         "-L".to_string(),
         format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}"),
+        "-l".to_string(),
+        SSH_USER.to_string(),
         "-i".to_string(),
         key.display().to_string(),
         "-o".to_string(),
@@ -207,15 +215,20 @@ pub fn validate_session_name(name: &str) -> Result<(), String> {
 
 /// The port the inference server listens on *inside* the VM. `configured` is
 /// the config's `remote_port`; `0` means "use the runtime's native port"
-/// (llama.cpp pins 8080, ollama 11434) so a config written before the runtime
-/// was chosen still boots the right endpoint.
+/// (llama.cpp 18080, ollama 11434) so a config written before the runtime was
+/// chosen still boots the right endpoint.
+///
+/// llama.cpp's own default is 8080, but a Colab runtime cannot use it: the
+/// notebook container runs its own node proxy on `*:8080` (measured live on a
+/// free-tier T4, `ss -tlnp` pid 6). Binding there fails outright, so the
+/// bridge picks a port the VM has free.
 pub fn effective_remote_port(runtime: &str, configured: u16) -> u16 {
     if configured != 0 {
         return configured;
     }
     match runtime {
         "ollama" => 11434,
-        _ => 8080,
+        _ => 18080,
     }
 }
 
@@ -277,6 +290,8 @@ pub fn colab_stop_argv(colab: &Path, session: &str) -> Vec<String> {
 pub fn exec_ssh_argv(bins: &Binaries, session: &str, key: &Path, command: &str) -> Vec<String> {
     vec![
         bins.ssh.display().to_string(),
+        "-l".to_string(),
+        SSH_USER.to_string(),
         "-i".to_string(),
         key.display().to_string(),
         "-o".to_string(),
@@ -484,6 +499,10 @@ mod tests {
         assert!(argv.contains(&"-N".to_string()));
         assert!(argv.contains(&"127.0.0.1:18000:127.0.0.1:8000".to_string()));
         assert!(argv.contains(&"-o".to_string()));
+        // Colab's sshd only accepts the bridge-injected key for `root`; every
+        // other login ends in `Permission denied (publickey)`.
+        let l = argv.iter().position(|a| a == "-l").expect("-l root");
+        assert_eq!(argv[l + 1], "root");
         let opts: Vec<&String> = argv.iter().collect();
         assert!(opts.contains(&&"BatchMode=yes".to_string()));
         assert!(opts.contains(&&"ExitOnForwardFailure=yes".to_string()));
@@ -580,7 +599,7 @@ mod tests {
 
     #[test]
     fn effective_remote_port_uses_runtime_native_when_unconfigured() {
-        assert_eq!(effective_remote_port("llama.cpp", 0), 8080);
+        assert_eq!(effective_remote_port("llama.cpp", 0), 18080);
         assert_eq!(effective_remote_port("ollama", 0), 11434);
         assert_eq!(effective_remote_port("llama.cpp", 9000), 9000);
         assert_eq!(effective_remote_port("ollama", 7000), 7000);
