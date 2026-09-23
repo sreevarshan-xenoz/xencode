@@ -773,6 +773,26 @@ esac
     }
 
     #[tokio::test]
+    async fn reconnect_errors_without_colab_json() {
+        let session = "life6";
+        let bin_dir = temp_dir(&format!("rc-{session}"));
+        let xcode_dir = temp_dir(&format!("rc-cfg-{session}"));
+        let _g = with_env(&bin_dir, &xcode_dir);
+        let key = xcode_dir.join("colab_ed25519");
+        std::fs::write(&key, "key").expect("write key");
+
+        let opts = opts_for(session, "llama.cpp", 18030);
+        let err = run_colab_reconnect(&bins_in(&bin_dir), &key, &opts)
+            .await
+            .expect_err("reconnect without state must fail");
+        assert!(
+            err.contains("no colab.json"),
+            "error names the missing state: {err}"
+        );
+        assert!(err.contains("colab up"), "error suggests the fix: {err}");
+    }
+
+    #[tokio::test]
     async fn reconnect_noops_when_the_endpoint_is_already_serving() {
         let session = "life7";
         let bin_dir = temp_dir(&format!("rc-{session}"));
