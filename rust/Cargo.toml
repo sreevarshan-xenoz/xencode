@@ -14,6 +14,7 @@ members = [
     "crates/xencode-server-rs",
     "crates/xencode-collaboration-rs",
     "crates/xencode-plugin-rs",
+    "crates/xencode-colab-rs",
 ]
 resolver = "2"
 
