@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 14 crates, 751 tests passing, zero warnings
+- [x] Workspace gates green — 15 crates, 768 tests passing, 4 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -992,9 +992,17 @@ OpenAI-compatible server.
   discards the buffer). Endpoint rows refresh the picker, all provider rows
   re-run the health check on save. Persistence stays behind `App::save_config()`
   so `for_tests()` writes a temp dir, never the real config.
-- **Still missing:** a Colab *lifecycle* layer — provision, bootstrap the
-  inference server, hold the forward, survive reconnects, report health, tear
-  down — plus the Settings section that drives it and the model-picker surfacing.
+- **K-2a (landed, `5739ebb` + `173a36b`):** `xencode colab preflight` gates the
+  bridge in one pass: the `colab` CLI on PATH, version >= 0.7.0 (the 0.6.0
+  version trap is caught twice — by the version string and by a functional
+  `colab ssh --help` probe), backend auth (`colab sessions`), ssh/ssh-keygen on
+  PATH, and an ed25519 key pair under the config dir (`--generate-key`). The
+  report prints a fix line per failing check and exits non-zero. Lives in the
+  new `xencode-colab-rs` crate (8 hermetic tests with fake colab CLIs).
+- **Still missing:** the rest of the Colab *lifecycle* — provision, bootstrap
+  the inference server, hold the forward, survive reconnects, report health,
+  tear down — plus the Settings section that drives it and the model-picker
+  surfacing.
 
 ### Tasks
 
@@ -1002,12 +1010,15 @@ OpenAI-compatible server.
 - [x] **K-1b — Settings can edit providers, masked keys included**
       (`68f2a4a`). The three kinds are now editable in one panel: Local
       (Ollama / llama.cpp), Cloud (Gemini / Qwen / OpenRouter), Remote / Colab.
-- [ ] **K-2a — `xencode colab preflight`.** Report, in one pass: CLI present and
+- [x] **K-2a — `xencode colab preflight`.** Report, in one pass: CLI present and
       >= 0.7.0, auth works (`colab sessions`), an ed25519 key exists under
       `~/.xencode/` (generate it if asked), and what to run when a check fails.
-- [ ] **K-2b — new crate `xencode-colab-rs` (orchestration + state).** Wraps the
-      optional `colab`/`ssh` tools (same "report itself unpowered" pattern as
-      J-07's recorders). New `ColabConfig` in `xencode-config-rs`:
+      The `xencode-colab-rs` crate was born here so its preflight gate has a
+      home (`173a36b`; CLI wiring `5739ebb`).
+- [ ] **K-2b — orchestration + state in `xencode-colab-rs` (crate exists from
+      K-2a).** Wraps the optional `colab`/`ssh` tools (same "report itself
+      unpowered" pattern as J-07's recorders; `which()`/`run()` and the preflight
+      checks are already there). New `ColabConfig` in `xencode-config-rs`:
       `enabled, session, local_port, remote_port, runtime ("llama.cpp"|"ollama"),
       model, weights_source ("hf"|"drive"|"gcs"), auto_connect` — all
       `#[serde(default)]`. State in `~/.xencode/colab.json`: session, ssh /
@@ -1024,9 +1035,9 @@ OpenAI-compatible server.
       (`draw_provider_health` / `run_health_check` currently have no Remote/Colab
       entry), dead-VM / 12-hour-reap detection, one-key reconnect.
 - [ ] **K-4 — tests + docs.** Config round-trip for the Colab block, wiremock
-      fake OpenAI Colab endpoint (extend `remote_endpoint.rs`), a fake `colab`
-      binary on `$PATH` for the parser, masked-key rendering (baseline exists
-      from K-1b); then README / QUICK_START / CLI_GUIDE / USER_MANUAL /
+      fake OpenAI Colab endpoint (extend `remote_endpoint.rs`), masked-key
+      rendering (baseline exists from K-1b; the fake `colab` CLI on `$PATH`
+      landed with K-2a); then README / QUICK_START / CLI_GUIDE / USER_MANUAL /
       CHANGELOG and the `.xencode.example.json` in the same pass.
 
 ### Standing constraints for this milestone

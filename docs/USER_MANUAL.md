@@ -19,7 +19,7 @@ and security analysis, repository insights, a collaboration server and a
 plugin system, with a focus on privacy and offline operation.
 
 ### Architecture
-Xencode is a **Rust-only** workspace (`rust/crates/*`, 14 crates):
+Xencode is a **Rust-only** workspace (`rust/crates/*`, 15 crates):
 - **Rust core** — Primary CLI/TUI, server, code analysis, security scanning, plugin system, multi-provider routing (Ollama, llama.cpp, Gemini, Qwen, OpenRouter) with retry middleware, and collaboration sync
 
 The Rust binary (`xencode`) is the entry point.
