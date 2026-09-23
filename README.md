@@ -537,7 +537,7 @@ Nothing is currently *committed* to build next. What exists instead is planning:
 two planned tracks (**L** — remote backends and a self-finishing agent; **M** —
 ecosystem compatibility) and five research option spaces (**N**, **O**, **P**,
 **Q**, **S**) recorded in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md), 208 candidates
-from the first four and 22 tasks from the fifth. The candidates were never ranked by
+from the first four and 26 tasks from the fifth. The candidates were never ranked by
 worth, and still are not; what
 was added afterwards is an **order** — eighteen dependency waves (**Milestone R**),
 starting with the defects that make today's output untrustworthy and ending with
