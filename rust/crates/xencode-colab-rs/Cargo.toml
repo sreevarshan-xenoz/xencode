@@ -1,0 +1,9 @@
+[package]
+name = "xencode-colab-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xencode-config-rs = { path = "../xencode-config-rs" }
+tokio = { version = "1", features = ["process", "time", "macros", "rt"] }
