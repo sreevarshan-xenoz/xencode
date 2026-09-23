@@ -16,7 +16,7 @@ Xencode is an AI-powered development assistant that talks to local language
 models through Ollama and llama.cpp (and, on opt-in, to cloud providers). It
 provides an approval-gated agent loop over your workspace, pattern-based code
 and security analysis, repository insights, a collaboration server and a
-plugin system, with a focus on privacy and offline operation.
+plugin system, with a focus on privacy and local-first operation.
 
 ### Architecture
 Xencode is a **Rust-only** workspace (`rust/crates/*`, 15 crates):

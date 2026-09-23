@@ -6,7 +6,7 @@
 
 # Xencode
 
-**The offline-first AI development assistant.**
+**The local-first AI coding agent. Bring your own model.**
 
 A Rust terminal-native AI coding assistant that routes requests across local
 and cloud models with a sequential provider fallback chain, runs an
@@ -18,7 +18,7 @@ approval-gated agentic tool loop, and has deep terminal ergonomics.
 [![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 
-**Offline by default. Online when you choose.** Your code never has to leave your machine.
+**Local-first: your machine, your model.** Online only when you point it somewhere. Your code never has to leave your machine.
 
 </div>
 
@@ -40,7 +40,7 @@ and fix your code — driven entirely from your terminal.
 
 ## ✨ Highlights
 
-- **🧠 Offline-first AI** — local Ollama models by default; cloud providers only when you opt in.
+- **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Colab GPU you rent, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
@@ -57,7 +57,7 @@ and fix your code — driven entirely from your terminal.
 
 | Problem | Xencode |
 | --- | --- |
-| **Privacy** | Fully offline by default. Code, context, and models stay local. |
+| **Privacy** | Local by default: code, context and models stay on your machine. A remote backend is a choice you make, never a dependency you inherit. |
 | **Lock-in** | Bring your own models — Ollama and llama.cpp locally; Gemini, Qwen, and OpenRouter (any OpenAI-compatible model id, including `vendor/model` Claude ids) in the cloud. |
 | **Provider outages** | A sequential fallback chain re-runs the turn on your alternate models when a provider fails before its first token. |
 | **Context loss** | Persistent conversation memory, memory+disk cache, and a lexical (BM25) workspace context index. |

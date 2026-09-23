@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — the product description catches up with the product
+Milestone K made the model endpoint something you point at, so "offline-first"
+in the tagline, the highlights list and the privacy row no longer described the
+build. Replaced with "local-first, bring your own model" in `README.md` and
+`docs/USER_MANUAL.md`, and the GitHub repo description with it. The absolute
+"works with no network" claim is deliberately not made — that needs the offline
+conformance test (plan item LF-8) before it can be asserted.
+
 ### Milestone K — remote providers + Google Colab — complete ✅
 A GPU you do not own as an inference backend: `remote:` routes any
 OpenAI-compatible endpoint (dedicated to the Colab SSH-forward case in the
