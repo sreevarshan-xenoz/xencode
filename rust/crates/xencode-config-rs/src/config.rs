@@ -39,15 +39,15 @@ pub struct ColabConfig {
     #[serde(default = "default_colab_local_port")]
     pub local_port: u16,
     /// Port the inference server listens on inside the VM. `0` = the
-    /// runtime's native port (llama.cpp 8080, ollama 11434) — set only to
-    /// override where the VM-side server binds.
+    /// runtime's native port (llama.cpp 18080 — Colab's own proxy holds 8080
+    /// — ollama 11434); set only to override where the VM-side server binds.
     #[serde(default = "default_colab_remote_port")]
     pub remote_port: u16,
     /// Inference runtime started on the VM: "llama.cpp" or "ollama".
     #[serde(default = "default_colab_runtime")]
     pub runtime: String,
-    /// Model id served on the VM (GGUF basename for llama.cpp, a tag for
-    /// ollama). Empty = the process defaults still apply.
+    /// Model the bridge installs on the VM: a Hugging Face GGUF repo id for
+    /// llama.cpp, a tag for ollama. Empty = the process defaults still apply.
     #[serde(default)]
     pub model: String,
     /// Where the runtime fetches weights: "hf", "drive" or "gcs".
@@ -57,7 +57,8 @@ pub struct ColabConfig {
     /// "Q4_K_M". Empty = the bridge default. ollama tags carry their own.
     #[serde(default)]
     pub quant: String,
-    /// Re-establish the forward automatically when xencode starts a session.
+    /// Intended as "re-establish the forward when xencode starts"; recorded
+    /// and round-tripped, but no code acts on it yet — bring-up stays explicit.
     #[serde(default)]
     pub auto_connect: bool,
 }
@@ -556,6 +557,25 @@ mod tests {
         assert_eq!(again.colab.quant, "Q6_K");
         assert!(again.colab.auto_connect);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The shipped example config is user-facing documentation, so it must
+    /// load through the real loader and carry the same Colab defaults the
+    /// bridge uses — an example that drifts teaches the wrong keys.
+    #[test]
+    fn shipped_example_loads_and_matches_colab_defaults() {
+        let example = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.xencode.example.json");
+        let config = XencodeConfig::load_from(&example)
+            .unwrap_or_else(|e| panic!("{} does not load: {e}", example.display()));
+        assert_eq!(config.colab, ColabConfig::default());
+        assert_eq!(config.colab.local_port, 18000);
+        assert_eq!(config.colab.remote_port, 0);
+        assert!(!config.colab.enabled, "the bridge is opt-in");
+        assert!(
+            config.remote_base_url.is_empty(),
+            "the example must not point at an invented endpoint"
+        );
     }
 
     /// A `remote:` endpoint is opt-in, so an absent URL must stay absent rather

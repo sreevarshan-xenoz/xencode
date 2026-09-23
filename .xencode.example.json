@@ -1,12 +1,13 @@
 {
-  "_comment": "Example of ~/.xencode/config.json (or $XCODE_CONFIG_DIR/config.json). Copy it there, or set individual keys with `xencode config set <KEY> <VALUE>`. Only the keys below exist — unknown keys are ignored by the loader. Cloud providers are selected by model prefix: `qwen:...`, `google_gemini:...`, or an OpenRouter-style `vendor/model` id; the local model is `default_model`. `agent_fallback_models` is tried in order by the agent, only while nothing has streamed yet; a `vendor/model` entry needs `openrouter_api_key`.",
+  "_comment": "Example of ~/.xencode/config.json (or $XCODE_CONFIG_DIR/config.json). Copy it there, or set individual keys with `xencode config set <KEY> <VALUE>`. Only the keys below exist — unknown keys are ignored by the loader. Cloud providers are selected by model prefix: `qwen:...`, `google_gemini:...`, or an OpenRouter-style `vendor/model` id; the local model is `default_model`. A `remote:` prefix (any OpenAI-compatible server, including one the Colab bridge tunnels to your laptop) uses `remote_base_url` + `api_keys.remote_api_key`. The `colab` block configures `xencode colab up`; a successful bring-up rewrites `llama_cpp_url` (or `ollama_url`) and `remote_base_url` to point at the local forward. `agent_fallback_models` is tried in order by the agent, only while nothing has streamed yet; a `vendor/model` entry needs `openrouter_api_key`.",
   "default_model": "qwen2.5:7b",
   "api_keys": {
     "openai_api_key": null,
     "openrouter_api_key": null,
     "google_gemini_api_key": null,
     "qwen_client_id": null,
-    "qwen_api_key": null
+    "qwen_api_key": null,
+    "remote_api_key": null
   },
   "agent_approval": "ask",
   "agent_max_rounds": 16,
@@ -42,6 +43,7 @@
   "show_line_numbers": true,
   "ollama_url": "http://localhost:11434",
   "llama_cpp_url": "http://localhost:8080",
+  "remote_base_url": "",
   "llama_cpp_model_path": "",
   "llama_cpp_executable": "",
   "llama_cpp_args": [],
@@ -49,5 +51,16 @@
   "max_cache_size": 100,
   "memory_enabled": true,
   "max_memory_items": 50,
-  "response_timeout": 30
+  "response_timeout": 30,
+  "colab": {
+    "enabled": false,
+    "session": "",
+    "local_port": 18000,
+    "remote_port": 0,
+    "runtime": "llama.cpp",
+    "model": "",
+    "weights_source": "hf",
+    "quant": "",
+    "auto_connect": false
+  }
 }
