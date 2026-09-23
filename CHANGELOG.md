@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the security scan no longer flags ordinary code for using common words
+`xencode analyze` reported High-severity path traversal (CWE-22) on lines that
+merely contained the word `input`, and Medium-severity SSRF (CWE-918) on any line
+containing `url` or `user`. A function declaration like `fn parse_input(raw:
+&str) -> String {` was enough to produce a finding, so the scan's output could not
+be believed. In both patterns the words were listed outside the group they belong
+to, so the pattern language read them as separate, independent searches rather
+than as arguments that must appear *inside* a file or request call. Both are
+grouped correctly now. On a sample of five single-line files, six findings came back
+before the change and two after — and the two that remain are the real ones, an
+`open(user_path)` and a `fetch(url)`. Four tests pin both directions, each
+re-checked against the old pattern to confirm it would have caught this.
+
 ### Fixed — a crash in the interface gives your terminal back and leaves a trace
 When the TUI hit a bug it panicked with raw mode and the alternate screen still
 switched on, so its own error message went onto a screen you could no longer
