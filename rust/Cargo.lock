@@ -3568,6 +3568,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xencode-colab-rs"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "xencode-config-rs",
+]
+
+[[package]]
 name = "xencode-collaboration-rs"
 version = "0.1.0"
 dependencies = [
