@@ -81,11 +81,7 @@ impl FileTaskRegistry {
             .map_err(|e| TaskError::Spawn(std::io::Error::other(e)))?;
         // Atomic replace: other processes read this file at any moment and
         // must never see a half-written JSON document.
-        let tmp = self
-            .root
-            .join(format!("tasks.json.{}.tmp", std::process::id()));
-        fs::write(&tmp, json).map_err(TaskError::Spawn)?;
-        fs::rename(&tmp, self.tasks_file()).map_err(TaskError::Spawn)
+        crate::atomic::write_atomic(&self.tasks_file(), json.as_bytes()).map_err(TaskError::Spawn)
     }
 
     /// Spawn `command` detached from this process and record it.
