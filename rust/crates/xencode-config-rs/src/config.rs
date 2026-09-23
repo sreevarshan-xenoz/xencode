@@ -22,6 +22,40 @@ pub struct ApiKeys {
     pub remote_api_key: Option<String>,
 }
 
+/// Google Colab bridge settings (Milestone K). Everything is opt-in by
+/// default: `enabled` is false, `session` empty (the CLI picks a name when the
+/// VM is created), local/remote ports default to the bridge plumbing, and the
+/// runtime is llama.cpp. `model` is what `xencode colab up` installs on the
+/// VM; `weights_source` chooses where it pulls the weights from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ColabConfig {
+    /// Master switch: the Colab provider is only reachable when true.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Colab session name. Empty = let `xencode colab up` create a session.
+    #[serde(default)]
+    pub session: String,
+    /// Local port the SSH forward exposes the VM's OpenAI endpoint at.
+    #[serde(default = "default_colab_local_port")]
+    pub local_port: u16,
+    /// Port the inference server listens on inside the VM.
+    #[serde(default = "default_colab_remote_port")]
+    pub remote_port: u16,
+    /// Inference runtime started on the VM: "llama.cpp" or "ollama".
+    #[serde(default = "default_colab_runtime")]
+    pub runtime: String,
+    /// Model id served on the VM (GGUF basename for llama.cpp, a tag for
+    /// ollama). Empty = the process defaults still apply.
+    #[serde(default)]
+    pub model: String,
+    /// Where the runtime fetches weights: "hf", "drive" or "gcs".
+    #[serde(default = "default_colab_weights")]
+    pub weights_source: String,
+    /// Re-establish the forward automatically when xencode starts a session.
+    #[serde(default)]
+    pub auto_connect: bool,
+}
+
 /// Top-level Xencode configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct XencodeConfig {
@@ -165,6 +199,11 @@ pub struct XencodeConfig {
     /// panel has nothing to show rather than something invented.
     #[serde(default)]
     pub model_profiles: Vec<ModelProfile>,
+
+    /// Google Colab bridge settings. Opt-in: every field has a safe default,
+    /// so a config that predates the block still loads with the bridge off.
+    #[serde(default)]
+    pub colab: ColabConfig,
 }
 
 /// One saved profile: a model id plus the sampling settings that reach a
@@ -269,6 +308,22 @@ fn default_mcp_timeout() -> u64 {
     30
 }
 
+fn default_colab_local_port() -> u16 {
+    18000
+}
+
+fn default_colab_remote_port() -> u16 {
+    8000
+}
+
+fn default_colab_runtime() -> String {
+    "llama.cpp".to_string()
+}
+
+fn default_colab_weights() -> String {
+    "hf".to_string()
+}
+
 impl Default for XencodeConfig {
     fn default() -> Self {
         Self {
@@ -302,6 +357,22 @@ impl Default for XencodeConfig {
             mcp_timeout: default_mcp_timeout(),
             agent_hooks: AgentHooks::default(),
             model_profiles: Vec::new(),
+            colab: ColabConfig::default(),
+        }
+    }
+}
+
+impl Default for ColabConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            session: String::new(),
+            local_port: default_colab_local_port(),
+            remote_port: default_colab_remote_port(),
+            runtime: default_colab_runtime(),
+            model: String::new(),
+            weights_source: default_colab_weights(),
+            auto_connect: false,
         }
     }
 }
@@ -438,6 +509,43 @@ mod tests {
         assert_eq!(config.max_memory_items, 50);
         assert!(config.mcp_servers.is_empty());
         assert_eq!(config.mcp_timeout, 30);
+        assert!(!config.colab.enabled);
+        assert_eq!(config.colab.session, "");
+        assert_eq!(config.colab.local_port, 18000);
+        assert_eq!(config.colab.remote_port, 8000);
+        assert_eq!(config.colab.runtime, "llama.cpp");
+        assert_eq!(config.colab.weights_source, "hf");
+        assert_eq!(config.colab.model, "");
+        assert!(!config.colab.auto_connect);
+    }
+
+    /// The Colab block is opt-in: a config written before it existed must load
+    /// with the bridge off, and a non-empty block must survive a round-trip.
+    #[test]
+    fn colab_block_defaults_off_and_round_trips() {
+        let dir = temp_dir();
+        let path = dir.join("colab.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(!loaded.colab.enabled);
+
+        loaded.colab.enabled = true;
+        loaded.colab.session = "xencode-t4a".to_string();
+        loaded.colab.local_port = 19000;
+        loaded.colab.remote_port = 8001;
+        loaded.colab.runtime = "ollama".to_string();
+        loaded.colab.model = "qwen3:8b".to_string();
+        loaded.colab.weights_source = "gcs".to_string();
+        loaded.colab.auto_connect = true;
+        loaded.save_to(&path).unwrap();
+
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(again.colab, loaded.colab);
+        assert_eq!(again.colab.session, "xencode-t4a");
+        assert_eq!(again.colab.runtime, "ollama");
+        assert!(again.colab.auto_connect);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A `remote:` endpoint is opt-in, so an absent URL must stay absent rather

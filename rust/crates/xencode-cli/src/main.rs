@@ -528,6 +528,26 @@ fn parse_comma_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Parse a `config set` boolean (`1`/`true` also accepted for shell ergonomics).
+fn parse_bool(value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(format!("invalid boolean: {value}")),
+    }
+}
+
+/// Parse a `config set` port (1..=65535).
+fn parse_u16(value: &str, key: &str) -> Result<u16, String> {
+    let port: u16 = value
+        .parse()
+        .map_err(|_| format!("invalid port for {key}: {value}"))?;
+    if port == 0 {
+        return Err(format!("{key} must be 1..=65535"));
+    }
+    Ok(port)
+}
+
 fn run_config(action: ConfigAction) -> Result<(), String> {
     match action {
         ConfigAction::Show => {
@@ -644,6 +664,32 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     }
                     config.mcp_timeout = seconds;
                 }
+                // Colab bridge (Milestone K). `colab_enabled` gates the whole
+                // feature; the rest tune the forward/session that `up` builds.
+                "colab_enabled" => config.colab.enabled = parse_bool(&value)?,
+                "colab_session" => config.colab.session = value.clone(),
+                "colab_local_port" => {
+                    config.colab.local_port = parse_u16(&value, "colab_local_port")?
+                }
+                "colab_remote_port" => {
+                    config.colab.remote_port = parse_u16(&value, "colab_remote_port")?
+                }
+                "colab_runtime" => {
+                    if !matches!(value.as_str(), "llama.cpp" | "ollama") {
+                        return Err("colab_runtime must be \"llama.cpp\" or \"ollama\"".to_string());
+                    }
+                    config.colab.runtime = value.clone();
+                }
+                "colab_model" => config.colab.model = value.clone(),
+                "colab_weights_source" => {
+                    if !matches!(value.as_str(), "hf" | "drive" | "gcs") {
+                        return Err(
+                            "colab_weights_source must be \"hf\", \"drive\" or \"gcs\"".to_string()
+                        );
+                    }
+                    config.colab.weights_source = value.clone();
+                }
+                "colab_auto_connect" => config.colab.auto_connect = parse_bool(&value)?,
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;

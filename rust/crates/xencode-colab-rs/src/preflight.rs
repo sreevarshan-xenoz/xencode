@@ -1,5 +1,6 @@
 //! The `xencode colab preflight` gate: verify the google-colab-cli bridge is
 //! actually usable before anything tries to bring a VM up.
+#![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -340,63 +341,8 @@ fn first_line(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::{Mutex, MutexGuard};
-
-    /// Tests that touch `$PATH` / `$XCODE_CONFIG_DIR` must not run
-    /// concurrently inside this test binary.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    struct EnvGuard {
-        _lock: MutexGuard<'static, ()>,
-        old_path: Option<OsString>,
-        old_xcode: Option<OsString>,
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.old_path {
-                Some(p) => std::env::set_var("PATH", p),
-                None => std::env::remove_var("PATH"),
-            }
-            match &self.old_xcode {
-                Some(x) => std::env::set_var("XCODE_CONFIG_DIR", x),
-                None => std::env::remove_var("XCODE_CONFIG_DIR"),
-            }
-        }
-    }
-
-    /// Lock + swap `$PATH` and `$XCODE_CONFIG_DIR` to a hermetic fake world
-    /// (PATH becomes *only* `bin_dir`, so real-host binaries cannot leak into
-    /// "missing tool" scenarios). Restored on drop.
-    fn with_env(bin_dir: &Path, xcode_dir: &Path) -> EnvGuard {
-        let lock = ENV_LOCK.lock().unwrap();
-        let old_path = std::env::var_os("PATH");
-        let old_xcode = std::env::var_os("XCODE_CONFIG_DIR");
-        std::env::set_var("PATH", bin_dir);
-        std::env::set_var("XCODE_CONFIG_DIR", xcode_dir);
-        EnvGuard {
-            _lock: lock,
-            old_path,
-            old_xcode,
-        }
-    }
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("xencode-colab-test-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("create temp dir");
-        dir
-    }
-
-    fn write_script(dir: &Path, name: &str, body: &str) {
-        let path = dir.join(name);
-        fs::write(&path, body).expect("write fake bin");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod fake bin");
-    }
+    use crate::testutil::{temp_dir, with_env, write_script};
+    use std::path::Path;
 
     /// Fake google-colab-cli: a modern 0.7.2 that accepts `ssh`.
     fn fake_colab_modern(dir: &Path) {
@@ -482,19 +428,13 @@ exit 0
     fn which_finds_a_binary_on_path() {
         let dir = temp_dir("which");
         write_script(&dir, "colab", "#!/bin/sh\nexit 0\n");
-        let _lock = ENV_LOCK.lock().unwrap();
-        let prior = std::env::var_os("PATH");
-        std::env::set_var("PATH", &dir);
+        let _lock = with_env(&dir, &dir);
         assert_eq!(
             which("colab"),
             Some(dir.join("colab")),
             "fake colab must be found on PATH"
         );
         assert_eq!(which("definitely-not-a-real-bin-xyz"), None);
-        match prior {
-            Some(p) => std::env::set_var("PATH", p),
-            None => std::env::remove_var("PATH"),
-        }
     }
 
     #[tokio::test]
