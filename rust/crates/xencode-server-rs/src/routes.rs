@@ -330,10 +330,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_models_count() {
+        let _iso = crate::testenv::isolated_config("list-models-count");
         let models = list_models().await;
         let model_list = models.0["models"].as_array().unwrap();
-        // Both remote providers are always appended, so at least 4 entries.
-        assert!(model_list.len() >= 4);
+        // What the local servers report depends on the machine, so the
+        // invariant is the two always-appended remote providers.
+        assert!(model_list.len() >= 2, "remotes always listed");
         // Every entry must carry a name + provider + type.
         for m in model_list {
             assert!(m["name"].is_string());
