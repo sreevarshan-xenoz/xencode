@@ -3555,6 +3555,7 @@ dependencies = [
  "walkdir",
  "xencode-analysis-rs",
  "xencode-cache-rs",
+ "xencode-colab-rs",
  "xencode-collaboration-rs",
  "xencode-config-rs",
  "xencode-context-rs",
