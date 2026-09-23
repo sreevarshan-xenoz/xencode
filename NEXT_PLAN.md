@@ -76,6 +76,23 @@
   `config.json` with plaintext keys is written world-readable, and attached
   images go to a provider undecoded and unresized. Appendix:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone N.
+- 🗺️ **Milestone O recorded** (2026-09-23): the second option-space appendix —
+  eight more passes over ground N never touched: the model/inference layer, the
+  agent's total inability to look anything up, machine-checkable verification,
+  git history as context, state durability and self-diagnosis, platform
+  portability, ambient autonomy, cost accountability, and terminal ergonomics
+  and accessibility. 73 further candidates, also **unranked**, with a
+  consolidated additions-only do-not-build register and the interactions each
+  item has with L, M and N. Its 23 verified facts reframe two earlier
+  conclusions: git history and retrieved files sit *below* the byte-stable KV
+  prefix, so the "context injection is expensive" tax does not apply to them;
+  and the local Cargo registry plus rustc's own JSON output already provide an
+  offline documentation surface needing no new corpus or model. Seven of those
+  facts read as defects rather than missing features (listed together in the
+  appendix's triage block) — most concretely, structured
+  output is sent to a field llama.cpp's chat endpoint does not read, and
+  `README.md` advertises error classification that does not exist. Appendix:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone O.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).
