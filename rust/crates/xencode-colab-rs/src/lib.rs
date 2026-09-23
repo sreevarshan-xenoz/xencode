@@ -26,7 +26,8 @@ pub mod state;
 
 pub use bootstrap::bootstrap_script;
 pub use lifecycle::{
-    point_config_at_forward, run_colab_down, run_colab_status, run_colab_up, UpOptions,
+    point_config_at_forward, run_colab_down, run_colab_reconnect, run_colab_status, run_colab_up,
+    UpOptions,
 };
 pub use orchestrate::{
     forward_argv, forward_url, pid_alive, proxy_argv, resolve_binaries, shell_quote, spawn_forward,
