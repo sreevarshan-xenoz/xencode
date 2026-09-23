@@ -16,6 +16,10 @@ pub struct ApiKeys {
     pub qwen_client_id: Option<String>,
     #[serde(default)]
     pub qwen_api_key: Option<String>,
+    /// Bearer token for the custom OpenAI-compatible endpoint (`remote:` models).
+    /// Optional: a local `llama-server`, LM Studio or vLLM usually has none.
+    #[serde(default)]
+    pub remote_api_key: Option<String>,
 }
 
 /// Top-level Xencode configuration.
@@ -76,6 +80,14 @@ pub struct XencodeConfig {
     /// llama.cpp server URL.
     #[serde(default = "default_llama_cpp_url")]
     pub llama_cpp_url: String,
+
+    /// API root of a custom OpenAI-compatible server, addressed as
+    /// `remote:<model>` — `/chat/completions` is appended to it. Empty means
+    /// nothing is configured, and a `remote:` request says so rather than
+    /// guessing a host. This is also how a Google Colab (or any SSH-forwarded)
+    /// `llama-server` reaches the laptop as `http://127.0.0.1:<port>/v1`.
+    #[serde(default)]
+    pub remote_base_url: String,
 
     /// Path to a GGUF model used when auto-starting / loading llama-server.
     #[serde(default = "default_llama_cpp_model_path")]
@@ -272,6 +284,7 @@ impl Default for XencodeConfig {
             agent_fallback_models: Vec::new(),
             ollama_url: default_ollama_url(),
             llama_cpp_url: default_llama_cpp_url(),
+            remote_base_url: String::new(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
             llama_cpp_executable: String::new(),
             llama_cpp_args: Vec::new(),
@@ -425,6 +438,35 @@ mod tests {
         assert_eq!(config.max_memory_items, 50);
         assert!(config.mcp_servers.is_empty());
         assert_eq!(config.mcp_timeout, 30);
+    }
+
+    /// A `remote:` endpoint is opt-in, so an absent URL must stay absent rather
+    /// than point somewhere invented — and a config written before the fields
+    /// existed must still load.
+    #[test]
+    fn remote_endpoint_defaults_empty_and_round_trips() {
+        let config = XencodeConfig::default();
+        assert!(config.remote_base_url.is_empty());
+        assert!(config.api_keys.remote_api_key.is_none());
+
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("remote.json");
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(loaded.remote_base_url.is_empty());
+
+        loaded.remote_base_url = "http://127.0.0.1:18080/v1".to_string();
+        loaded.api_keys.remote_api_key = Some("runtime-proxy-token".to_string());
+        loaded.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(again, loaded);
+        assert_eq!(again.remote_base_url, "http://127.0.0.1:18080/v1");
+        assert_eq!(
+            again.api_keys.remote_api_key.as_deref(),
+            Some("runtime-proxy-token")
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// MCP servers are declared as a map in config.json, and a server with no

@@ -520,10 +520,32 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
         }
         ConfigAction::Set { key, value } => {
             let mut config = XencodeConfig::load().map_err(|e| e.to_string())?;
+            let mut secret = false;
             match key.as_str() {
                 "default_model" => config.default_model = value.clone(),
                 "ollama_url" => config.ollama_url = value.clone(),
                 "llama_cpp_url" => config.llama_cpp_url = value.clone(),
+                "remote_url" => {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty()
+                        && !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+                    {
+                        return Err(
+                            "remote_url must be an http:// or https:// URL, or empty to unset"
+                                .to_string(),
+                        );
+                    }
+                    config.remote_base_url = trimmed.to_string();
+                }
+                // The value is a token: report that it was stored, never echo it back.
+                "remote_key" => {
+                    config.api_keys.remote_api_key = if value.trim().is_empty() {
+                        None
+                    } else {
+                        Some(value.clone())
+                    };
+                    secret = true;
+                }
                 "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
                 "llama_cpp_executable" => config.llama_cpp_executable = value.clone(),
                 "llama_cpp_args" => {
@@ -607,7 +629,11 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 _ => return Err(format!("unknown config key: {key}")),
             }
             config.save().map_err(|e| e.to_string())?;
-            println!("set {key} = {value}");
+            if secret {
+                println!("set {key} = (stored, not shown)");
+            } else {
+                println!("set {key} = {value}");
+            }
             Ok(())
         }
         ConfigAction::Reset => {
@@ -1092,6 +1118,10 @@ async fn run_query(
         None,
     )
     .with_llama_cpp(llama_client)
+    .with_remote(
+        &config.remote_base_url,
+        config.api_keys.remote_api_key.clone(),
+    )
     .with_request_timeout(config.response_timeout);
 
     let mut response_content = String::new();

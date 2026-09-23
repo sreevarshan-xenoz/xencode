@@ -102,6 +102,54 @@ impl OpenAICompatibleProvider {
         .await?
         .step)
     }
+    /// One non-streaming completion: `stream: false`, and the first choice's
+    /// message content. A reply carrying only tool calls has no content, which
+    /// is an empty string here rather than an error.
+    pub async fn generate(
+        &self,
+        model: &str,
+        rendered_messages: &serde_json::Value,
+        label: &str,
+    ) -> Result<String, ProviderError> {
+        let payload = serde_json::json!({
+            "model": model,
+            "messages": rendered_messages,
+            "stream": false,
+        });
+        let mut request = self.client.post(self.completions_url()).json(&payload);
+        if let Some(ref key) = self.api_key {
+            request = request.header("Authorization", format!("Bearer {key}"));
+        }
+        for (name, value) in &self.extra_headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ProviderError::Network(format!("{label} request failed: {e}")))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::api(label, status, body));
+        }
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| ProviderError::Parse(format!("{label} response: {e}")))?;
+        Ok(first_choice_text(&value))
+    }
+}
+
+/// `choices[0].message.content` as a string, or empty when absent or null.
+fn first_choice_text(value: &serde_json::Value) -> String {
+    value["choices"]
+        .get(0)
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Shared HTTP+SSE core for every OpenAI-compatible backend: POST the
@@ -211,5 +259,20 @@ mod tests {
         let payload = p.build_payload("m", &serde_json::json!([]), &sample_tools());
         assert_eq!(payload["tools"][0]["function"]["name"], "read_file");
         assert_eq!(payload["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn first_choice_text_reads_content_and_tolerates_a_tool_only_reply() {
+        assert_eq!(
+            first_choice_text(&serde_json::json!({"choices":[{"message":{"content":"hi"}}]})),
+            "hi"
+        );
+        // A reply that only asked for a tool call has no content to show.
+        assert_eq!(
+            first_choice_text(&serde_json::json!({"choices":[{"message":{"content":null}}]})),
+            ""
+        );
+        assert_eq!(first_choice_text(&serde_json::json!({"choices": []})), "");
+        assert_eq!(first_choice_text(&serde_json::json!({})), "");
     }
 }
