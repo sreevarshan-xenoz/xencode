@@ -4605,13 +4605,13 @@ one live conflict (§R-3). The one exception is the re-arguing Milestone S force
 cloud workers are not bound by the hardware that made multi-agent pipelines the honest
 answer, so two parked graph items are scoped back in (§R-2 item 8).
 
-**Inventory.** The universe is **280 IDs**: N 55 + O 73 + P 48 + Q 63 + S 22 +
+**Inventory.** The universe is **280 IDs**: N 55 + O 73 + P 48 + Q 63 + S 26 +
 L-1…L-12 + M-1…M-7. It is 280 rather than the headline **208** because that number counts Q at
 its **32 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
 counted and 2 are deterministic bug fixes — leaves out the 19 L/M items, which
-were committed tasks before any appendix existed, and predates Milestone S's 22.
+were committed tasks before any appendix existed, and predates Milestone S's 26.
 Every ID is placed **exactly once**
-below, checked by script against the file rather than by eye: **272 scheduled** into W0…W17, **8 not scheduled** (7 register rejections
+below, checked by script against the file rather than by eye: **276 scheduled** into W0…W17, **8 not scheduled** (7 register rejections
 carried forward, plus MI-5, which is contested), and QN-5 sitting inside W10 as
 conditional.
 
@@ -4633,14 +4633,14 @@ conditional.
 | W13 | Agent pipelines, not graphs | 3 |
 | W14 | Product surface and ecosystem | 57 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
-| W16 | One worker at a time, then brokered (new, from S) | 9 |
-| W17 | Many workers at once (new, from S) | 11 |
+| W16 | One worker at a time, then brokered (new, from S) | 12 |
+| W17 | Many workers at once (new, from S) | 12 |
 | — | declined / contested | 8 |
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 72 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 139 | makes the agent better at the work; nearly all of it waits on the substrate |
+| core substrate | 75 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 140 | makes the agent better at the work; nearly all of it waits on the substrate |
 | ecology | 60 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
 | park | 9 | declined, conditional, or contested (§R-3) |
 
@@ -5018,7 +5018,7 @@ prove nothing about a remote connection).
 | **AR-2** | Discover installed agents, versions, and how each was installed | core | PATH + `mise` reality; never installs, never upgrades |
 | **AR-3** | Contract probe: the flags each agent actually advertises | core | replaces "capability detection by name"; feeds `OR-6`'s routing |
 
-#### W16 — One worker at a time, then brokered — 9 items
+#### W16 — One worker at a time, then brokered — 12 items
 
 From Milestone S. Needs W1 (`WF-1` events, `EVd-1` ledger, `CX-2` schema), W5 (a verdict
 worth collecting) and W7 (`CAP-1`'s vocabulary, `SE-4`'s trifecta gate). `M-5` moved here
@@ -5033,12 +5033,15 @@ approval request instead of pre-granting one.
 | **AR-6** | The process ceiling: start, interrupt, wall-clock, hard kill | core | rides the existing background-task manager; no orphans |
 | **AR-7** | The handoff package, built only from observed facts | core | no self-reported progress; `EVd-3`'s rule |
 | **AR-8** | Worker health, reported read-only | core | shows an expired login, never fixes one |
+| **AR-9** | The common event protocol every adapter normalises into | core | **derived from `AR-1`'s matrix**, not from the proposal's draft; file changes derived from our own diff (§S-12) |
 | **OR-1** | Task decomposition, measured before it is trusted | core | gated on `EV-1` — the local planner is the weakest link (§S-4.2) |
-| **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count |
+| **OR-2** | The task graph and scheduler | core | capacity is `min(workers, verification throughput)`, not worker count, and parallelism is computed from independence + lease collision + cost (§S-12), not a fixed constant |
 | **OR-3** | The permission broker | core | real brokering for one vendor, pre-grant for the rest; never widens a mode itself |
+| **OR-15** | The task contract: done means what xencode said it means | core | `QI-3`'s machine-checkable slots in a real launch path; enforced by the lease and `SE-4`, not by asking |
+| **OR-16** | The result envelope, claims separated from evidence | core | `EVd-3`'s verdict extended, not a second ledger; the only thing a reviewer agent reads |
 | **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
 
-#### W17 — Many workers at once — 11 items
+#### W17 — Many workers at once — 12 items
 
 From Milestone S. Needs W6 (evidence), W11 (`CX-7`'s budgets that act, `CX-4`'s price
 lookup) and W12 (`LF-2`'s approval round-trip), and it is where `MA-4`/`MA-5` come back in
@@ -5056,6 +5059,7 @@ processes at once.
 | **OR-9** | Team recipes as TOML data | capability | recipes, not a team engine |
 | **OR-10** | Plan, simulate, and dry-run first by default | capability | folds item 33's separate mode into the default render |
 | **OR-11** | Explain every routing choice | capability | and label an estimate as an estimate |
+| **OR-17** | The veto, liftable only by reviewer, human or stated policy | capability | the authority claim that makes the middle position real rather than cosmetic |
 | **OR-13** | The Local-Only profile | capability | refuses external workers by name; rides `LF-8`'s no-network measurement in W14 |
 | **OR-12** | The worker panel | ecology | every number traces to a row; unobservable renders as unknown, never as idle |
 | **OR-14** | `/orchestrator` as a mode, plus its command surface | ecology | turning it off leaves plain xencode untouched |
@@ -5204,7 +5208,7 @@ parent's commit message, or it will look unstarted forever. Three further pairs 
 integrity layer, EVd-7 reuses EV-11's hash-chain primitive, and QM-6 works only under
 EV-7's human gate.
 
-Milestone S's twenty-two IDs add no folds of their own: where a proposal was already
+Milestone S's twenty-six IDs add no folds of their own: where a proposal was already
 covered, it was dispositioned to the existing ID and given no new number (§S-6), so an
 `AR-`/`OR-` commit always names work that is genuinely new. One traceability rule is
 specific to the new waves, though. **W15 is measurement, so a W15 commit's artifact is a
@@ -5408,7 +5412,7 @@ option not otherwise in the tree; **narrowed** = survives only in a reduced form
 | 38 | The final architecture and the name "Xencode Agent Runtime (XAR)" | narrowed | `S-11`. The component list maps onto `AR-*`/`OR-*` almost one-to-one; the name does not survive contact with the tree (§S-11) |
 
 Totals: **38 proposals → 13 planned, 13 narrowed, 10 new, 2 rejected**, and **22 new
-IDs** (`AR-1…AR-8`, `OR-1…OR-14`). Thirteen of the 38 were already in the tree under an
+IDs** (`AR-1…AR-8`, `OR-1…OR-14`) — before §S-12's revision, which adds four more. Thirteen of the 38 were already in the tree under an
 existing ID, which is a higher collision rate than Q's (25/100) on a list one-third the
 size — and the honest explanation is that S is the first proposal written *with* the
 roadmap in front of it rather than around it, so it names the overlaps itself instead of
@@ -5462,13 +5466,18 @@ must not enter a wave as commitments.
 The prefixes follow the appendix convention: `AR-` for the runtime that talks to one
 worker, `OR-` for the thing that decides what workers to talk to.
 
-- [ ] **AR-1 — the interop probe** (S-7). Run each installed CLI headless on a read-only
-      task and write down what its stream really contains.
-      **Done-when:** a matrix in this file, one row per installed agent, saying per row
-      which of {tool names, file paths, approval requests, token usage, session id,
-      denial behaviour} was *observed* rather than advertised — plus one measured cost
-      figure for a five-worker fan-out. No `OR-` item may be scheduled before this row
-      exists, and no row may be filled in from documentation.
+- [ ] **AR-1 — the interop probe, and the one question it answers.** Not "how do we
+      build the orchestrator" but the narrower one that decides its shape: **what is the
+      minimum common event protocol these six CLIs can actually be normalised into?**
+      Run each installed CLI headless on a read-only task and capture, per agent: launch
+      command, session creation, stdout, stderr, JSON events, tool events, file changes,
+      permission events, completion event, error event, session identifier, resume
+      mechanism, exit behaviour.
+      **Done-when:** the matrix in §S-12 is filled with **observed** cells and every
+      cell that came from a help screen is marked as such; one measured cost figure for a
+      five-worker fan-out; and `AR-9`'s protocol is derived from that matrix rather than
+      from the proposal's wish list. No `OR-` item may be scheduled before this exists,
+      and nothing may be inferred from documentation.
 - [ ] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
       record how each was installed (`mise`, `~/.local/bin`, other) without installing,
       upgrading or touching any of them.
@@ -5504,6 +5513,19 @@ worker, `OR-` for the thing that decides what workers to talk to.
       rate-limited per agent, read-only, and never silently fix anything.
       **Done-when:** an expired auth is *shown* as an expired auth, and the only offered
       next step is a command the human runs in their own terminal.
+- [ ] **AR-9 — the common event protocol (`AgentEvent`).** One event model every
+      adapter normalises into — the draft is `SessionStarted`, `Message`,
+      `ToolRequested`, `ToolStarted`, `ToolOutput`, `FileChanged`,
+      `PermissionRequested`, `Error`, `Completed`, `SessionEnded` — with two rules the
+      draft itself cannot settle. A file change is **derived from xencode's own diff of
+      the lease**; what a worker's stream claims about it is evidence to record, not truth
+      to act on. And `PermissionRequested` is expected from exactly one vendor (§S-3), so
+      the protocol has to be complete without it rather than degrade into a mystery when
+      it never arrives.
+      **Done-when:** it exists only after `AR-1`'s matrix says what is observable; every
+      variant is populated by at least one real observed stream; any field xencode
+      synthesised is marked as synthesised; and a run whose worker emitted nothing but
+      text still terminates correctly through the same state machine.
 - [ ] **OR-1 — task decomposition, measured.** Split one real task into a dependency
       tree, and score the split with `EV-1` before any router consumes it.
       **Done-when:** the decomposition's quality number is recorded with the baseline it
@@ -5571,14 +5593,37 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** turning it off leaves plain xencode exactly as it was found, and
       "attach" only ever means handing the real terminal to a process that has one
       (`S-6 #29`).
+- [ ] **OR-15 — the task contract.** Before a worker is launched it is told what "done"
+      means, by xencode: the lease and its workspace, the allowed file set, the forbidden
+      paths, the expected deliverables, the verification commands, and the completion
+      condition. The worker does not get to redefine any of them.
+      **Done-when:** this is `QI-3`'s machine-checkable-slot idea living in a real launch
+      path — a worker that finishes outside its lease fails the contract instead of
+      earning a merge, and the forbidden list is enforced by the worktree and `SE-4`'s
+      gate rather than by asking politely.
+- [ ] **OR-16 — the result envelope.** Every finished task produces one machine-readable
+      record: status, agent, task, changed files taken from the diff, the commands that
+      ran with their exit codes, claims held apart from evidence, and a handoff state.
+      **Done-when:** claims and evidence sit in different fields and only the evidence
+      half can be quoted to a human; a reviewing agent is handed this record rather than
+      the implementing agent's prose; and it is `EVd-3`'s checks-ran verdict extended, not
+      a second ledger competing with the first.
+- [ ] **OR-17 — the veto.** A review or verification outcome can block a merge, and the
+      block cannot be lifted by the worker that caused it. Only a named reviewer, the
+      human, or a policy that says out loud what it clears.
+      **Done-when:** a vetoed run reads as blocked, with the reason and who may clear it;
+      nothing a worker emits can change its own veto; and clearing one is an audited event
+      on `EV-11`'s log rather than a keypress.
 
 ### S-10 Where this sits in the wave order
 
-Recorded in §R: `AR-1…AR-3` are **measurement, not construction**, so they sit in a wave
+Recorded in §R (and re-checked after §S-12 added `AR-9`, `OR-15`, `OR-16`, `OR-17`):
+`AR-1…AR-3` are **measurement, not construction**, so they sit in a wave
 of their own (W15) ahead of everything else in this appendix; `AR-4…AR-8`, `OR-1…OR-3`
 depend on W1 (events, ledger), W5 (verification) and W7 (`CAP-1`, `SE-4`, `SE-7`) and sit
 in a new W16; `OR-4…OR-14` need W6, W11 and W12 and sit in W17, with `OR-13` riding
-`LF-8`'s no-network measurement from W14. Two existing items change status because of S:
+`LF-8`'s no-network measurement from W14; the four later additions land in W16
+(`AR-9`, `OR-15`, `OR-16`) and W17 (`OR-17`). Two existing items change status because of S:
 **`M-5` (`xencode mcp serve`) moves out of W14 into W16**, in front of `OR-3`, because it
 is the broker's only seam (S-3), and **`MA-4`/`MA-5` get a scoped un-rejection** for
 external workers only (§R-2 item 8). `S` adds no item to W0–W13, and nothing in it may
@@ -5593,7 +5638,62 @@ blur. "XAR" additionally collides with a well-known archive format. Adopt instea
 **worker** for an external agent process, **`xencode-agents-rs`** for `AR-*` (it knows one
 vendor and nothing about plans), and **`xencode-orchestrator-rs`** for `OR-*` (the plan,
 the graph, the broker). `/orchestrator` stays the user-facing word, which is the one the
-proposal already chose well.
+proposal already chose well. The owner reached for "Unified Agent Runtime" again in the
+revision below; that does not reopen this, for the same reason.
+
+### S-12 The same-day revision: four things the 38 did not contain
+
+Recorded after the disposition above, from the owner's response to it. These are not part
+of the 38 and are not re-dispositioned — they are additions, and the framing sentence that
+goes with them is the one to keep: **"make six independent agents behave like one
+engineering system."**
+
+| addition | what it changes |
+|---|---|
+| **The event protocol is the heart, not the adapters** | `AR-9`. The adapter is thin (detect / launch / send / stream / resume / terminate) precisely because the normalisation target exists; and "do not scrape terminal output" becomes a fallback order rather than a preference — **structured stream first, then derivation from xencode's own diff and git state, never ANSI scraping**. A worker that gives us nothing but prose still has to terminate correctly. |
+| **Vendor-local versus xencode-level intelligence** | turns §S-2's finding into a boundary line: sessions, subagents, model fallback, sandboxing and health stay the vendors' business; the cross-agent task graph, neutral project state, cross-agent context, permissions, verification, conflict and merge decisions, and accountability are ours. Anything that fits the left column is not a xencode feature, however good it looks in a mock. |
+| **Task contracts before launch** | `OR-15` — allowed and forbidden files, expected output, verification commands, completion condition, none of it redefinable by the worker. The failure this prevents is the ordinary one: an agent that reports itself done because "done" was never stated. |
+| **A result envelope instead of agent prose** | `OR-16` — a reviewer reading a implementer's *"yeah, authentication is done"* is the whole trust problem of this feature in one sentence. Machine-readable engineering artifact, claims separated from evidence. |
+| **A veto that the blocked party cannot lift** | `OR-17`. The one thing structurally unavailable between vendors, since none of them can block another. It is also the answer to "why is xencode in the middle" — not routing, **authority**. |
+| **Adaptive parallelism, not a fixed `max_parallel_agents`** | amends `OR-2`: capacity comes from whether the tasks are independent, whether their leases collide, and what they cost — so two cheap independent research tasks fan out and five tasks touching one file serialise. A constant is a guess; this is a computation over data xencode already has after `OR-4`. |
+| **The UI must name its own kind of control** | §S-13, below. |
+
+The order the owner set for what comes after `AR-1` is a research sequence with no user
+interface in it, and it is the right one: **matrix → adapter contract (`AR-9`) →
+orchestration state model → task graph model (`OR-2`)**. `OR-12`'s panel is last because a
+dashboard drawn before the state model is a drawing of a guess, which is how this file got
+a `gold.json` defect in the first place.
+
+### S-13 The rule that protects the rest of the feature
+
+**Say which kind of control this is.** Two sentences in the revision are worth more than
+any of its features, because they are the difference between an honest tool and a
+confident lie:
+
+> Don't show "Xencode controls Claude permissions" when it actually means "Xencode
+> configured Claude's startup permission policy." That would eventually become a nasty
+> trust bug.
+
+Measured, there are exactly two modes and they are not interchangeable:
+
+| mode | what it is | who has it here |
+|---|---|---|
+| **live control** | a request arrives from the worker mid-run and xencode answers it, so a refusal really happens | Claude Code alone, via `--permission-prompt-tool` over `M-5` — and unconfirmed until `AR-1` runs it |
+| **launch-time policy** | xencode chose the flags before the process started and cannot revisit them | every other vendor, and every vendor's sandbox flag |
+
+So the control mode is a **field on each agent row, rendered, not inferred** — the panel
+shows *live* or *configured at launch* beside each worker, and the launch line that proves
+which one it was is one keystroke away. The word "controls" does not appear next to a
+pre-granted vendor. This is the standing rule of Milestone J ("every panel tells the
+truth") applied to a feature whose entire pitch is authority over other people's processes:
+a permission UI that overstates itself is worse than no permission UI, because it is the
+one thing that makes running five autonomous programs in a repository feel safe.
+
+The same rule extends past permissions. A cost figure that was estimated rather than
+looked up says estimated (`CX-4`). A file change derived from a diff rather than reported
+by the worker says derived (`AR-9`). A `Completed` event that arrived because the process
+exited zero, with nothing behind it, is the envelope's most suspicious row and must read
+that way until `OR-16`'s evidence half disagrees.
 
 
 Anything marked UNVERIFIED was located through search snippets after the fetch
