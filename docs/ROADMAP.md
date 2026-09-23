@@ -113,9 +113,20 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / 
    microphone capture, and plugin manifests now load
 
 ### 🚀 Next up
-No open milestone: **Milestone K** (remote providers + the Google Colab GPU
+No *committed* milestone. **Milestone K** (remote providers + the Google Colab GPU
 bridge) closed on 2026-09-23, verified against a live free-tier T4 rather than a
-mock. The icebox above is where the next one comes from.
+mock; nothing has been green-lit since.
+
+What exists is planning, tracked in
+[`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md): two planned tracks — **L** (any
+machine you can SSH into, and an agent that finishes its own work) and **M**
+(ecosystem compatibility: hooks, skills, agents-as-markdown, MCP server, ACP) —
+plus three deliberately **unranked** research appendices, **N**, **O** and **P**,
+which between them record 176 candidate features, a do-not-build register for
+each family, and the defects found while checking claims against the code. The
+next milestone is a cut through that pool, and the cut needs an axis — effort,
+defect closure, or how much of the local-first story each item protects — which
+is an owner decision, not a default. The icebox above still feeds it.
 
 ## 📊 Success Metrics & Current Status
 
