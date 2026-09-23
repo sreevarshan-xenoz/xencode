@@ -121,13 +121,20 @@ What exists is planning, tracked in
 [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md): two planned tracks — **L** (any
 machine you can SSH into, and an agent that finishes its own work) and **M**
 (ecosystem compatibility: hooks, skills, agents-as-markdown, MCP server, ACP) —
-plus four deliberately **unranked** research appendices — **N**, **O**, **P**
+plus four research appendices — **N**, **O**, **P**
 and **Q** (an external hundred-proposal review, dispositioned item by item) —
 which between them record 208 candidate features, a do-not-build register for
 each family, and the defects found while checking claims against the code. The
-next milestone is a cut through that pool, and the cut needs an axis — effort,
-defect closure, or how much of the local-first story each item protects — which
-is an owner decision, not a default. The icebox above still feeds it.
+appendices were deliberately never ranked by worth, and still are not. The
+**order** was settled afterwards as **Milestone R**: fifteen dependency waves
+over all 258 recorded plan items — the 208 research candidates, the 31 further Q
+IDs that turned out to be folds or refinements of candidates already counted, and
+the 19 committed tasks in L and M — sequenced by what would otherwise inherit another
+item's broken measurement — correctness first, then observability, the model
+substrate, code intelligence, verification, trust, knowledge, autonomy, and the
+product surface last. What remains an owner decision is valuation within a wave
+(effort, defect closure, daily-driver value, how much of the local-first story
+each item protects), not sequence. The icebox above still feeds it.
 
 ## 📊 Success Metrics & Current Status
 

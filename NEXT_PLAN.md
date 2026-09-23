@@ -139,6 +139,26 @@
   group their alternation wrong, so a line containing the bare word `input` — or
   `url` — reports High severity path-traversal/SSRF. Appendix:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone Q.
+- 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
+  and Q each refused to rank their candidates, and that refusal was correct about
+  *value* but left no way to start. The owner supplied an **ordering** instead:
+  fifteen dependency waves, **W0…W14**, over all **258 recorded plan items** — the
+  208 research candidates, the 31 further Q IDs that fold into them, and the 19
+  committed L/M tasks — with every ID placed exactly once (verified by script) and
+  **no renumbering**, so each item keeps the appendix that produced it as its
+  provenance. The sequence: correctness → observability → model substrate → code
+  intelligence → retrieval → verification → evidence → trust → outward research →
+  project DNA → durable knowledge → operations → long-running autonomy → agent
+  pipelines → product surface. W0 is fifteen defects on purpose: three of them
+  (`gold.json`'s unreachable entry, the two mis-grouped scanner regexes, the empty
+  pseudo-documents) are what would otherwise let every later "it got better" claim
+  pass unnoticed while being false. Seven placements moved against the proposal as
+  received — `state.md`'s writer is gated behind QK-3 and so cannot be a Day-1 item;
+  EV-8 has to precede the replay built on it; Wave 0's first three entries were one
+  change described three times. One item is genuinely **contested and parked**:
+  MI-5 speculative decoding, which L declined for consumer hardware and O later
+  re-proposed for the Colab bridge — that needs an explicit yes or no, not a wave.
+  Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone R.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).

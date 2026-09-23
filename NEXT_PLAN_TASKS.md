@@ -1793,13 +1793,18 @@ SLSA-for-weights, still an IETF draft-00 with nothing to verify against (N-6).
 
 ### Triage status
 
-**Not yet ranked.** The ranking pass is deliberately a separate, later decision —
-this appendix records the option space so the cut is visible and revisitable
-rather than implicit. Inputs it will have to weigh: the three defect-shaped items
-(SE-1, MM-1, and the `AGENTS.md` trust position SE-3) versus capability-shaped
-items; EV-1 as the measurement that makes L-7's claim checkable; and the
-KV-prefix constraint in N-0 as a tax on several otherwise cheap features.
-Milestones L and M already carry a ranking; this appendix does not.
+**Ranked by dependency, not by value — see §Milestone R.** This appendix recorded
+the option space so the cut would be visible and revisitable rather than implicit;
+the ordering question was answered on 2026-09-23 as fifteen dependency waves, which
+place all 55 N items by what depends on what: CI into W3, SE into W0/W7, EV into
+W1/W10, WF into W1/W5/W14, LF into W2/W12/W14, MM into W0/W8/W14. What R
+deliberately does **not** settle is the question this section used to pose — which
+of them is *worth* doing first. The inputs a value ranking would still weigh: the
+three defect-shaped items (SE-1, MM-1, and the `AGENTS.md` trust position SE-3)
+versus capability-shaped items; EV-1 as the measurement that makes L-7's claim
+checkable; the KV-prefix constraint in N-0 as a tax on several otherwise cheap
+features. Milestones L and M already carried a ranking before this appendix
+existed; the appendix still does not supply one.
 
 ### Where to re-check this appendix (primary sources, consulted 2026-09-23)
 
@@ -2635,7 +2640,8 @@ interrupt-style desktop notifications as the primary ambient surface.
 
 ### Triage status
 
-**Not yet ranked**, same as N. O adds 73 options (MI 7, RS 8, VF 7, GH 9, DB 8,
+**Ranked by dependency, not by value — see §Milestone R** (N's status note carries
+the caveat; the same applies here). O adds 73 options (MI 7, RS 8, VF 7, GH 9, DB 8,
 PL 7, UX 13, AM 6, CX 8) to N's 55 (CI 7, WF 10, EV 11, SE 7, MM 11, LF 9) — a
 pool of 128 — and adds a category the earlier appendices did not have: **defect-shaped
 findings that are not features** — MI-1 (schema sent to a field the endpoint
@@ -2644,9 +2650,12 @@ ignores), fact 6/7 (a fetcher that can't read JSON and has no SSRF guard), fact
 starves and an error nobody sees), fact 11 (a dead-man's switch declared and
 unwired), fact 12/13 (non-atomic writes, no panic hook, terminal destroyed),
 and fact 15 (a shipped Windows installer no workflow tests). Those compete with
-L/M/N's three defect items (SE-1, MM-1, SE-3) for the same "fix first" slot.
+L/M/N's three defect items (SE-1, MM-1, SE-3) for the same "fix first" slot —
+R resolved that contention by putting SE-1 and MM-1 in W0 and SE-3 in W7, behind
+the untrusted-content marking it depends on.
 
-Inputs a ranking pass will have to weigh, now across all four: the
+Inputs a *value* ranking would still weigh (the dependency axis does not score
+these): the
 defect-shaped list above versus capability-shaped items; **MI-1/MI-2/MI-3/MI-4
 as the cheapest cluster in the whole corpus** (four request-shape changes that
 touch the product's actual differentiator); RS-3/RS-6 as the only *offline*
@@ -3557,7 +3566,7 @@ review did not know they existed.
 
 ### P-14 — Triage status
 
-**Not yet ranked.** This pass adds **48 options** — MA 5, MEM 5, EVd 7, AC 6,
+**Ranked by dependency — see §Milestone R.** This pass adds **48 options** — MA 5, MEM 5, EVd 7, AC 6,
 MD 4, CAP 3, PR 4, CU 2, GL 7, LSP 5 — on top of N's 55 and O's 73, for a pool of
 **176** across four unranked appendices. Seven of the 48 are written as
 REJECT-or-park (MA-4, MA-5, MEM-4, MEM-5, MD-3, MD-4, CAP-3) and the do-not-build
@@ -3567,12 +3576,17 @@ its job rather than a ranking.
 *(Superseded on one number: Milestone Q's pass — §Q-15 — adds a further 63
 options, of which 32 are net-new candidates, taking the pool from 176 to 208.)*
 
-What the pool now needs before any of it becomes a queue is one thing it does not
+What the pool needed before any of it became a queue was one thing it did not
 have: an **axis**. N, O and P each record an option space; none of them can be
 ranked against the others without deciding whether the currency is effort,
 defect-closure, daily-driver value, or how much of the local-model story each
 one protects. That decision is the owner's, and the P0–P3 table above is one
 candidate input for it, not this plan's answer.
+
+*Answered, partially, on 2026-09-23 (§Milestone R): the chosen currency is
+**dependency** — which item would otherwise inherit another's lie. That is an
+ordering, not a valuation; the four currencies above are still unpriced and the
+P0–P3 table is still unadopted.*
 
 ### P-15 — Primary sources
 
@@ -4509,10 +4523,11 @@ file — **to two of these ten research passes' own reports.**
   feature**, and it is a two-line change with a test. DB-3's keyring tier is
   buildable here (fact Q-1.3) contrary to the assumption in N.
 - **MD-1/MD-2 are where items 31 and 97 actually land**, not a new mode axis.
-- **The pool's axis problem is unchanged.** 10 of the hundred dispositioned as a
-  genuinely `new` option and 32 of the 63 Q- options are net-new candidates
-  against the existing pool (see §Q-15 for why those are different numbers); the
-  ordering question is still an owner decision.
+- **The pool's axis problem was open at the time of this pass.** 10 of the hundred
+  dispositioned as a genuinely `new` option and 32 of the 63 Q- options are net-new
+  candidates against the existing pool (see §Q-15 for why those are different
+  numbers). The ordering question was answered two days later, by the owner, as
+  §Milestone R.
 
 ### Q-15 Triage status
 
@@ -4537,10 +4552,14 @@ file — **to two of these ten research passes' own reports.**
   it". Trust and Experimentation are both "nothing is pinned, nothing is
   recorded, and there is no headless way to record it". Those are CI-2/LSP-4,
   GH-1/GH-8 and QA-1/QA-2 — three known items — not two missing product areas.
-- **Still an owner decision:** the ranking. Two external priority tables have now
-  been received and neither adopted. Cutting 208 candidates needs an axis, and
-  the axis is a question about what xencode is *for*, which this file is not
-  allowed to answer.
+- **Still an owner decision, in part:** the *valuation*. Two external priority
+  tables were received during this pass and neither was adopted; cutting 208
+  candidates by worth needs an axis about what xencode is *for*, which this file
+  is not allowed to answer. On 2026-09-23 the owner answered the narrower question
+  instead — the **ordering** — as fifteen dependency waves (§Milestone R), which is
+  a topological answer and deliberately not a valuation. So: the sequence is
+  decided, W0–W14 are each still a *set* rather than a queue, and the two external
+  tables remain unadopted.
 
 ### Q-16 Primary sources
 
@@ -4560,6 +4579,544 @@ must not be quoted.
 - **Trust, supply chain, sandbox:** [Codex CLI sandbox issue #1039](https://github.com/openai/codex/issues/1039) · [CVE-2025-59532](https://www.miggo.io/vulnerability-database/cve/CVE-2025-59532) · [malicious VS Code extension campaigns](https://www.reversinglabs.com/blog/a-new-playground-malicious-campaigns-proliferate-from-vscode-to-npm) · [MCP servers abused in supply-chain attacks](https://securelist.com/model-context-protocol-for-ai-integration-abused-in-supply-chain-attacks/117473/) · [MCP hosting path traversal](https://blog.gitguardian.com/breaking-mcp-server-hosting/) · [agent skill marketplaces as a supply-chain frontier](https://safeguard.sh/resources/blog/agent-skill-marketplaces-as-the-next-frontier-for-supply-chain-attacks) · [`Co-authored-by` trailers considered the wrong primitive](https://fabiorehm.com/blog/2026-03-02/our-coding-agent-commits-deserve-better-than-co-authored-by/) · [RustSec advisory-db](https://github.com/rustsec/advisory-db)
 - **Multi-repo and interop:** [Sourcegraph batch changes](https://sourcegraph.com/blog/change-a-single-character-in-hundreds-of-GitHub-repos-while-staying-in-control) · [Aider #339](https://github.com/Aider-AI/aider/issues/339) · [Backstage descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/) · [pgroll](https://pgroll.com/) · [ACP on JetBrains](https://www.jetbrains.com/acp/) · [A2A at the Linux Foundation](https://www.linuxfoundation.org/press/a2a-protocol-surpasses-150-organizations-lands-in-major-cloud-platforms-and-sees-enterprise-production-use-in-first-year) · [CRIU TCP restore issue #2456](https://github.com/checkpoint-restore/criu/issues/2456) · [Fleet's cancellation post](https://blog.jetbrains.com/fleet/2025/12/the-future-of-fleet/)
 - **Instructions ecosystems (for QB-3):** [GitHub repo custom instructions](https://docs.github.com/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot) · [AGENTS.md support changelog](https://github.blog/changelog/2025-08-28-copilot-coding-agent-now-supports-agents-md-custom-instructions/) · [nested AGENTS.md, open request](https://github.com/github/copilot-cli/issues/1655) · [Cursor rules guidance](https://www.morphllm.com/cursor-rules-best-practices) · [CLAUDE.md practice](https://www.alexdunlop.com/writing/claude-md-best-practices)
+
+---
+
+## Milestone R — the axis: fifteen dependency waves over the recorded options (drafted 2026-09-23)
+
+### R-0 What changed, and what did not
+
+Every appendix from N onward ended on the same sentence: **not yet ranked — the pool
+needs an axis**. The axis arrived on 2026-09-23 as a fifteen-wave dependency sequence
+over the pool, and it is recorded here as the execution layer. It is not a new
+backlog and nothing is renumbered: an item keeps the prefix of the appendix that
+produced it, so **provenance (L/M/N/O/P/Q) survives ordering (W0…W14)**.
+
+The claim in one line: **correctness → observability → model substrate → code
+intelligence → verification → trust → knowledge → autonomy → multi-agent**. The
+argument is not that W0 is easy but that several things a capable agent leans on are
+today structurally weak, unobservable, unverified or untrusted — so the order is
+decided by what a later item would otherwise inherit as a lie. Building the agent
+graph first is a jet engine on a shopping cart.
+
+This is a placement, not a re-litigation. Nothing here re-argues an option already
+dispositioned in N, O, P or Q, and the do-not-build register is unchanged apart from
+one live conflict (§R-3).
+
+**Inventory.** The universe is **258 IDs**: N 55 + O 73 + P 48 + Q 63 + L-1…L-12 +
+M-1…M-7. It is 258 rather than the headline **208** because that number counts Q at
+its **32 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
+counted and 2 are deterministic bug fixes — and leaves out the 19 L/M items, which
+were committed tasks before any appendix existed. Every ID is placed **exactly once**
+below, checked by script against the file rather than by eye: **250 scheduled** into W0…W14, **8 not scheduled** (7 register rejections
+carried forward, plus MI-5, which is contested), and QN-5 sitting inside W10 as
+conditional.
+
+| wave | what it is | items |
+|---|---|---|
+| W0 | Fix what makes current output untrustworthy | 15 |
+| W1 | Make the agent observable | 15 |
+| W2 | The model/inference substrate | 15 |
+| W3 | Code intelligence: replace the regex tier | 13 |
+| W4 | Retrieval on top of a real structure | 12 |
+| W5 | The verification engine | 12 |
+| W6 | Evidence and task state | 9 |
+| W7 | Trust architecture | 18 |
+| W8 | Outward research capability | 6 |
+| W9 | Project DNA and architecture intelligence | 21 |
+| W10 | Durable project knowledge | 21 |
+| W11 | Self-diagnosis, cost and operations | 17 |
+| W12 | Long-running autonomy | 15 |
+| W13 | Agent pipelines, not graphs | 3 |
+| W14 | Product surface and ecosystem | 58 |
+| — | declined / contested | 8 |
+
+| bucket | count | what it means |
+|---|---|---|
+| core substrate | 61 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 130 | makes the agent better at the work; nearly all of it waits on the substrate |
+| ecology | 58 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
+| park | 9 | declined, conditional, or contested (§R-3) |
+
+### R-1 The waves
+
+Within a wave, items are **unordered** unless a dependency note says otherwise.
+Wave order is the decision; item order inside a wave is still an owner call, and
+effort/impact ranking across the pool has deliberately not been computed.
+
+#### W0 — Fix what makes current output untrustworthy — 15 items
+
+No dependencies. Everything downstream inherits its honesty: do not put a dashboard, a score or a manual claim on top of W0’s measurements.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AM-3** | Debounce hardening as a prerequisite to both | core | debounce + un-swallow the watcher spawn error (owner, W0 item 8) |
+| **DB-1** | An atomic write helper | core | atomic write; file says "DB-1 and SE-1 are one change, not two" |
+| **DB-5** | Keep JSONL, add torn-line discard | core | torn-line discard, rides DB-1 |
+| **DB-7** | Panic hook plus terminal restore | core | panic hook + terminal restore (O fact 13) |
+| **LSP-4** | Fix the regex tier now (fact 16): enum/trait/impl/`mod` edges | core | regex-tier holes (79 missing mod edges) — CI-2 is the permanent fix |
+| **MM-1** | image resize/recompress before send (fact 6): decode, cap ~1568 px | core | image resize/recompress before send (O fact 6) |
+| **PR-1** | Egress gate at the three routers (fact 12), ideally hoisted into one | core | egress gate at the three routers |
+| **PR-2** | Deny-by-default cloud with an explicit opt-in plus a status-bar | core | deny-by-default cloud + status-bar indicator |
+| **QN-1** | Fix `gold.json` and widen the corpus | core | gold.json stale entry; blocks any retrieval/health claim |
+| **QN-2** | Put real text in the pseudo-documents and flip hybrid into the live | core | empty pseudo-documents: hybrid scoring is currently fiction |
+| **QO-2** | Fix the two broken regexes first | core | security.rs:196/:220 alternation grouping — the owner’s "scanner regex fixes" |
+| **QTR-2** | Locality filter on `fallback_chain` | core | locality filter on fallback_chain — the owner’s "provider local-only fallback bug" |
+| **QTR-6** | SE-1, immediately | core | fold into SE-1 (it is literally "SE-1, immediately") |
+| **QX-4** | Config hygiene as QX-3's prerequisite (same change as QTR-6) | core | fold into SE-1 (stated "same change as QTR-6") |
+| **SE-1** | `chmod 0600` on config save (fact 4) | core | chmod 0600 on save; QTR-6 and QX-4 are the same change, do not schedule three times |
+
+#### W1 — Make the agent observable — 15 items
+
+Needs W0. A trace of a run whose config can leak, and whose scanner reports the word `input` as High severity, is not evidence.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CX-1** | An aggregator over `metrics.jsonl` | core | aggregator over metrics.jsonl (absorbs L-9, "cost metering over metrics that exist") |
+| **CX-2** | Schema extension — add `model`, `provider`, `session_id` | core | schema extension: model, provider, session_id (absorbs QO-3) |
+| **EV-1** | local task-eval harness | core | local task-eval harness — the only thing that can score later work |
+| **EV-2** | turn trace + TUI inspector | core | turn trace + TUI inspector |
+| **EV-3** | prompt registry with versioning | core | prompt registry with versioning |
+| **EV-8** | playback regression below the HTTP boundary | core | cassette replay below the HTTP boundary — QA-1 depends on it, so it moves up out of W6 |
+| **EV-10** | judge-assisted eval reports, LLM ranking only near-miss outcomes | core | judge-assisted eval reports over EV-1 |
+| **EV-11** | tamper-evident audit log | core | tamper-evident audit log; EVd-7 reuses its primitive |
+| **L-9** | cost metering over the metrics that already exist | core | fold into CX-1 |
+| **QA-1** | EV-8 cassette replay + `xencode replay <run-id>` | core | replay <run-id> over EV-8 |
+| **QA-2** | Pin the parameters before claiming determinism | core | pin parameters before claiming determinism |
+| **QA-3** | EV-2's turn trace with decision markers is the flight recorder | core | decision markers on EV-2's trace |
+| **QA-5** | EV-1's fixture generator, schema-driven, no LLM in the loop | core | EV-1 fixture generator, schema-driven |
+| **QO-3** | Metrics schema extension | core | fold into CX-2 |
+| **WF-1** | NDJSON event stream mode (`query --stream --format ndjson`): token | core | NDJSON event stream |
+
+#### W2 — The model/inference substrate — 15 items
+
+Independent of W1. MI-1 gates every later tool-call; the O appendix calls MI-1…MI-4 the cheapest cluster in the whole corpus, and this pass agrees.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AC-1** | Read the window the server actually has: `n_ctx` from the `/props` | core | read n_ctx from /props (= MI-2/MI-3 relabel per P row 14) |
+| **AC-2** | Replace the hardcoded `Balanced` with real selection: total-RAM | core | replace the hardcoded Balanced |
+| **AC-3** | Rule-based task-shape router | capability | rule-based task-shape router; the honest half of MI-7 |
+| **AC-4** | Scale `top_k` and content caps from measured free space: real ctx | core | caps from measured free space |
+| **AC-5** | Tokenizer truth: `llama-server`'s `/tokenize` endpoint * | core | tokenizer truth via /tokenize (UNVERIFIED endpoint — probe before planning on it) |
+| **L-5** | `xencode hw probe`: local hardware → launch flags | core | hw probe revision: this box has a GPU (fact Q-1.1), so L-6's premise changes |
+| **L-6** | budget preflight and OOM recovery | core | budget preflight + OOM recovery |
+| **L-10** | resumable, disk-aware GGUF download | capability | resumable, disk-aware GGUF download |
+| **LF-7** | weight provenance — SHA256 + HF revision pin, verify-on-load | core | weight provenance; MI-6 is the same work — build once |
+| **MI-1** | Fix the structured-output plumbing (fact 1) | core | structured-output plumbing — a tool call that emits malformed JSON forges an argument |
+| **MI-2** | Ollama request parity | core | Ollama request parity |
+| **MI-3** | Hardware-profile server presets | core | hardware-profile server presets |
+| **MI-4** | Reasoning-budget control | core | reasoning-budget control |
+| **MI-6** | Model advisor + pinning | core | fold into LF-7 |
+| **MI-7** | Task-shaped model profiles | core | task-shaped model profiles (profiles, not a router) |
+
+#### W3 — Code intelligence: replace the regex tier — 13 items
+
+LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstream of every “understands my project” feature.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CI-1** | `ast_edit` agent tool via ast-grep as a subprocess | capability | ast_edit over ast-grep |
+| **CI-2** | tree-sitter symbol extraction replacing the `symbols.rs` regexes | core | tree-sitter symbol extraction replacing symbols.rs |
+| **CI-3** | `edit_symbol(path, symbol, new_body)` | core | safe symbol-level editing |
+| **CI-4** | codemod mode — the agent emits one ast-grep YAML rule, xencode applies | capability | codemod mode |
+| **CI-5** | Rust toolchain kit as gated tools | capability | Rust toolchain kit as gated tools (the thing listed as Wave 5’s "CI-5 structured clippy" is VF-6) |
+| **CI-6** | `what_breaks` impact analysis | core | what_breaks reverse-dependency — QD-1's substrate |
+| **CI-7** | DAP debug loop through lldb-dap over MCP, not a custom client | capability | DAP loop through lldb-dap over MCP |
+| **L-12** | LSP diagnostics loop | capability | LSP diagnostics loop after edits |
+| **LSP-1** | An `find_refs`/`callers` agent tool pair over references and call | capability | find_refs/callers tool pair |
+| **LSP-2** | `rust-analyzer scip` at `/init` and on refresh, answering impact | capability | rust-analyzer scip at init for impact |
+| **LSP-3** | Semantic Rust rename through the `ssr` CLI behind CI-4's | capability | semantic rename via ssr (QI-2 is the same tool) |
+| **LSP-5** | Declare the multi-language policy: semantic tools Rust-only | capability | declare the multi-language policy (Rust-only semantics) |
+| **QI-2** | `/rename <symbol> <new>` as an explicit agent tool over ast-grep + | capability | fold into LSP-3 |
+
+#### W4 — Retrieval on top of a real structure — 12 items
+
+CI-2/CI-6 (W3) supply the structural terms. The git-history terms (GH-1, GH-3, GH-9) need no new substrate and can start alongside.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AC-6** | Symbol-only repo-map tier for LOW/4k budgets, ranked by existing | capability | symbol-only repo-map tier for LOW/4k budgets |
+| **GH-1** | A ~250-token history digest per edited file | capability | history digest per edited file |
+| **GH-3** | Co-change and recency as scoring terms in `retrieve()` | capability | co-change + recency as retrieval terms |
+| **GH-9** | `xencode history setup` | capability | commit-graph + history setup |
+| **QM-3** | buy ordering before top_k | capability | buy ordering before top_k |
+| **QN-3** | RRF (k=60) instead of the `score + 8×bm25` linear blend | capability | RRF instead of the linear blend |
+| **QN-4** | Teach the verify pattern instead of building semantic search | capability | teach the verify pattern, not semantic search |
+| **RS-3** | Widen the read-only roots to the local registry and toolchain docs | capability | local registry + toolchain docs roots — one of the two offline gains |
+| **RS-4** | `read_docs(crate, version, path)` | capability | version-pinned docs intake over RS-3 |
+| **RS-5** | `lookup_advisory` — clone the RustSec advisory DB shallow | capability | RustSec advisory DB, shallow clone (also feeds SE-6/QO-1) |
+| **RS-6** | Known-error channel from rustc's own JSON | capability | rustc JSON known-error channel — the other offline gain |
+| **RS-8** | A local documentation corpus in the Dash/Zeal docset shape | capability | local Dash/Zeal docset corpus |
+
+#### W5 — The verification engine — 12 items
+
+WF-4 first, always — deciding what “run the tests” means is the decision VF-1/VF-3/VF-5 all depend on. No mutation testing before autodiscovery.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CU-1** | A verifier seam: evidence-shaped pass/fail plus an artifact, feeding | capability | verifier seam feeding EVd-3 |
+| **L-7** | test/lint auto-repair loop with an exit-code "done" gate | capability | test/lint auto-repair loop with the exit-code done gate |
+| **L-8** | `edit_file` failure fallback | capability | edit_file failure fallback |
+| **QA-6** | Fault seams + kill tests | capability | fault seams + kill tests |
+| **VF-1** | Diff coverage — `cargo llvm-cov --lcov`, intersected with the added | capability | diff coverage |
+| **VF-2** | `--show-missing-lines` / `--json` as a read-only tool | capability | uncovered-line reporting |
+| **VF-3** | `cargo mutants --in-diff <git diff>` | capability | in-diff mutation testing — after WF-4, never before |
+| **VF-4** | `proptest` (1.11.0) with committed `proptest-regressions/` | capability | property testing |
+| **VF-5** | `cargo nextest` as the runner | core | nextest as the runner (same seam as WF-4) |
+| **VF-6** | clippy `--message-format=json` | capability | clippy --message-format=json (the owner’s Wave 5 "CI-5 structured clippy" — this is VF-6) |
+| **VF-7** | `cargo-semver-checks` / `cargo-public-api --baseline-rev` | capability | semver/public-api checking |
+| **WF-4** | build/test autodiscovery | core | build/test autodiscovery — decides what "run the tests" means |
+
+#### W6 — Evidence and task state — 9 items
+
+EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); EVd-3 needs W5 to have actually run something.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **EVd-1** | Session run-ledger | core | session run-ledger — as the owner put it, "EVd-1 + EVd-2 first" |
+| **EVd-2** | A session key on `RequestMetrics` (`metrics.rs:22-42` has none) | core | session key on RequestMetrics |
+| **EVd-3** | A checks-ran verdict: `{ran, skipped, failed, evidence-ref}` | capability | checks-ran verdict with evidence-ref |
+| **EVd-4** | `.xencode/artifacts/<session>/` | capability | per-session artifact dirs |
+| **EVd-5** | Ledger-fed compaction | capability | ledger-fed compaction (folds into EV-6/SE-2) |
+| **EVd-6** | False-verified calibration | capability | false-verified calibration |
+| **EVd-7** | Hash-chain the ledger, reusing EV-11's prev-hash+seq primitive | capability | hash-chained ledger on EV-11's primitive |
+| **QA-4** | Sequential A/B/C variants recorded on EVd-1's ledger | capability | sequential A/B/C variants on EVd-1 |
+| **QI-3** | Machine-checkable slots only | capability | machine-checkable slots only |
+
+#### W7 — Trust architecture — 18 items
+
+Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). This is the gate in front of all of W8.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CAP-1** | Capabilities as the *vocabulary* of the gate: `filesystem.read` | core | capability vocabulary for the gate |
+| **CAP-2** | Make `permissions` real for plugins (fact 9): refuse to load | core | fold into QTR-1 |
+| **M-1** | give hooks their payload | capability | hook payload (before hooks can run anything: SE-4/QTR-3) |
+| **M-2** | enforce what a manifest declares | core | fold into QTR-1 |
+| **MD-1** | `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants, enforced | capability | PLAN/AUTONOMOUS as real ApprovalMode variants |
+| **MD-2** | Tool-stripping in PLAN: offer only `ReadOnly` tools when the mode | capability | tool-stripping in PLAN |
+| **PR-3** | Deterministic redaction of the *dynamic* tiers only | capability | deterministic redaction of the dynamic tiers |
+| **PR-4** | Per-request "show exactly what leaves the machine" preview + | capability | per-request "what leaves the machine" preview |
+| **QTR-1** | Make `manifest.permissions` real | core | manifest.permissions made real (M-2/CAP-2 are the same enforcement) |
+| **QTR-3** | `bwrap` wrapper for `run_command`, hooks and background | capability | fold into SE-7 |
+| **QTR-4** | Git-backed checkpoints | capability | git-backed checkpoints (the honest half of undo) |
+| **QTR-5** | Accountability as trailers + a run ledger | capability | accountability trailers + run ledger (rides GH-5's format) |
+| **SE-2** | untrusted-content marking | core | untrusted-content marking |
+| **SE-3** | the `AGENTS.md` trust split (fact 3) | core | AGENTS.md trust split |
+| **SE-4** | lethal-trifecta gate in `classify` | core | lethal-trifecta gate in classify |
+| **SE-5** | secret *content* scanning | capability | secret content scanning |
+| **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5) |
+| **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
+
+#### W8 — Outward research capability — 6 items
+
+Entirely gated on W7: RS-1 must not land before SE-2 and the approval-gate change, or network-returned content enters the exact path SE-4 is supposed to control.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CU-2** | Browser verification as a Playwright-MCP recipe (MM-11) | capability | browser verification as a Playwright-MCP recipe (= MM-11) |
+| **L-11** | free hosted inference routes (`groq:…`, `nvidia:…`) | capability | free hosted inference routes, behind the PR-2 opt-in |
+| **MM-11** | browser verification as a documented Playwright-MCP recipe | capability | fold into CU-2 |
+| **RS-1** | `web_fetch` as an agent tool | capability | web_fetch — MUST follow SE-2 + the approval-gate change, per the file's own note |
+| **RS-2** | A search provider abstraction with `provider = "none"` | capability | search provider abstraction, provider="none" as default — no keyless engine, tested and false |
+| **RS-7** | `llms.txt` probing as a branch inside RS-1 | capability | llms.txt probing inside RS-1 |
+
+#### W9 — Project DNA and architecture intelligence — 21 items
+
+Needs CI-6 (W3) for impact, VF-3 (W5) for QD-3, and a structurally honest graph before any of it is worth rendering.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **GH-2** | `/why <file>:<line>` as an explicit, opt-in-cost query | capability | why <file>:<line> |
+| **GH-4** | `xencode hotspots --json` | capability | hotspots: churn x size, bus factor |
+| **GH-8** | Local-first PR linkage | capability | PR linkage parsing |
+| **QB-1** | Declared-layer conformance check | capability | declared-layer conformance |
+| **QB-2** | Structural near-duplicate detector | capability | structural near-duplicate detector |
+| **QB-4** | Scorecard with zero LLM calls (fold into DB-6, no new ID) | capability | scorecard with zero LLM calls (fold into DB-6) |
+| **QB-5** | `xencode explain`, HIGH-only, citation-gated | capability | xencode explain, HIGH-only, citation-gated |
+| **QB-6** | `xencode onboard` — an ordered read-out of AC-6's map + QB-4's rows | capability | xencode onboard |
+| **QD-1** | `xencode impact <file>` | capability | xencode impact <file> |
+| **QD-2** | Blast-radius render | capability | blast-radius render in the TUI |
+| **QD-3** | Mutation score as the only defensible "semantic coverage" | capability | mutation score as the only defensible semantic coverage |
+| **QD-4** | Attack paths as a Semgrep rule-pack + a hand-written sink list | capability | attack paths as a Semgrep rule-pack |
+| **QD-5** | Counterfactual/removal analysis = the same graph with one node | capability | counterfactual/removal analysis |
+| **QI-1** | A/B the intent-expansion claim instead of building an engine | capability | A/B the intent-expansion claim instead of building an engine |
+| **QN-6** | Traceability as a trailer convention + a lint | capability | traceability trailer convention + lint |
+| **QT-1** | refine GH-2, do not re-propose | capability | /why from blame + message (refines GH-2) |
+| **QT-2** | Timeline view | capability | timeline view |
+| **QT-3** | `xencode archaeology` | capability | xencode archaeology |
+| **QT-4** | Debt ledger as SATD records with a blame-computed `introduced-in` | capability | debt ledger as SATD with blame-computed introduced-in |
+| **QT-5** | Documentation drift as a deterministic check | capability | documentation drift as a deterministic check |
+| **QT-6** | Regression memory = EV-7 + EVd evidence + MEM storage, one existing | capability | regression memory (EV-7 + EVd + MEM) |
+
+#### W10 — Durable project knowledge — 21 items
+
+Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberately after verification and trust, not beside them.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **EV-4** | cross-session memory with relevance retrieval | capability | cross-session memory with relevance retrieval — deliberately after W7 |
+| **EV-5** | sub-directory instruction files | capability | sub-directory instruction files (QB-3 is the same thing) |
+| **EV-6** | notes-to-self scratchpad | capability | notes-to-self scratchpad |
+| **EV-7** | failure reflection → human-promoted lesson | capability | failure reflection -> human-promoted lesson |
+| **MEM-1** | A candidate-facts file the human promotes | capability | candidate-facts file the human promotes |
+| **MEM-2** | `state.md` as the durable tier with provenance | capability | state.md as the durable tier with provenance |
+| **MEM-3** | Verify-on-read for code-shaped facts | capability | verify-on-read for code-shaped facts |
+| **QB-3** | Constitution = EV-5 scoped instruction files, human-only | capability | fold into EV-5 |
+| **QK-1** | run fingerprint + evidence-backed `verified_by`, with n and a Wilson interval | capability | source/confidence vocabulary (its behavioural-profile half stays declined) |
+| **QK-2** | budgeted, human-authored preference block inside AC-4’s ceiling | capability | budgeted AGENTS.md block, human-authored |
+| **QK-3** | one `SourceClass` enum in front of SE-2 (also PR-4’s pre-split) | capability | source classes — the hard gate in front of QM-1 |
+| **QK-4** | staleness as a `doctor`/`memory audit` check + a declarative project seed | capability | knowledge lifecycle rows |
+| **QK-5** | knowledge value/cost proxy from `retrieved_files` + token counts | capability | expiry/staleness |
+| **QK-6** | invalidate-don’t-delete GC with a 12-month tombstone queue | capability | collision handling |
+| **QK-7** | versioned checkpoints as `anchor.md`-style co-commits | capability | knowledge promotion |
+| **QM-1** | give `state.md` a writer before giving it features | capability | state.md writer — GATED ON QK-3, see the correction |
+| **QM-2** | source-diff invalidation for facts, reusing the shipped tracker | capability | source-diff invalidation reusing the shipped tracker |
+| **QM-4** | report disagreement, never resolve | capability | report disagreement, never resolve it |
+| **QM-5** | per-model aggregates with `n` printed | capability | per-model aggregates with n printed |
+| **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
+| **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
+
+#### W11 — Self-diagnosis, cost and operations — 17 items
+
+Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CX-3** | Honest local cost as time plus watt-hours | capability | local cost as time + watt-hours |
+| **CX-4** | Cloud price lookup, never a vendored table | capability | cloud price lookup, never a vendored table |
+| **CX-5** | A Colab spend ledger | capability | Colab spend ledger |
+| **CX-6** | Dead-man's-switch teardown | capability | dead-man's-switch teardown (belongs with MI-5 if MI-5 ever ships) |
+| **CX-7** | Budgets that act — daily token/energy/dollar/wall-clock caps | capability | budgets that act |
+| **CX-8** | A GPU-free performance gate in CI | capability | GPU-free performance gate in CI |
+| **DB-2** | `config_version: u32` plus a migration ladder | capability | config_version + migration ladder (on the critical path for UX-1, UX-10, MI-3) |
+| **DB-3** | Honest secrets tiering | capability | secrets tiering — Secret Service now that SE-1 is done |
+| **DB-4** | XDG-correct paths plus state hygiene | capability | XDG paths + state hygiene |
+| **DB-6** | `xencode doctor --json` | capability | xencode doctor --json |
+| **DB-8** | Upgrade safety — one timestamped `config.json.bak` before each save | capability | config.json.bak before each save (pairs with DB-2, not W0) |
+| **EV-9** | API prompt-cache accounting | capability | API prompt-cache accounting — blocked while AnthropicProvider stays parked |
+| **QO-1** | `xencode doctor --deps` | capability | xencode doctor --deps |
+| **QO-4** | Minimal regression harness | capability | minimal criterion regression harness |
+| **QO-5** | `xencode doctor --env` | capability | doctor --env probe and display |
+| **QO-6** | Release notes as a draft generator | capability | release-notes draft generator |
+| **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice |
+
+#### W12 — Long-running autonomy — 15 items
+
+Needs W5 (a verdict), W6 (a ledger) and W7 (an approval round-trip). Internal order is settled in the plan: LF-4 → LF-2 → GL-3/GL-5.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AM-5** | Inbound-trigger work | core | fold into LF-2 |
+| **GH-7** | A bisect driver over the existing worktree + background-task | capability | bisect driver over worktrees + background tasks |
+| **GL-1** | A goal record as one JSONL file | capability | goal record as JSONL |
+| **GL-2** | Lift L-7's acceptance anchor out of the turn | capability | L-7's acceptance anchor lifted out of the turn |
+| **GL-3** | Resume by re-verifying, never by replaying | capability | resume by re-verifying, never replaying |
+| **GL-4** | `xencode goal` as a row type on LF-4's detached queue | capability | xencode goal as a row type on LF-4 |
+| **GL-5** | A machine-turn gate: idle (PSI + no foreground generation) | capability | machine-turn gate (PSI + no foreground generation) |
+| **GL-6** | Findings land in AM-6's persisted inbox, never an interrupt | capability | findings into AM-6's inbox |
+| **GL-7** | A systemd `.path`/user timer as the wake trigger only | capability | systemd .path/timer as wake trigger |
+| **L-1** | extract a `Backend` trait from `xencode-colab-rs` | core | Backend trait out of xencode-colab-rs |
+| **L-2** | `xencode remote add\|list\|use\|up\|status\|down`, the BYO-SSH backend | capability | xencode remote add\|list\|use\|up\|status\|down |
+| **L-3** | remote capability probe | capability | remote capability probe on the box |
+| **L-4** | SSH hardening: TOFU pinning + connection reuse | capability | SSH TOFU pinning + reuse |
+| **LF-2** | approval round-trip to a phone | core | approval round-trip to a phone (the file says "AM-5 is LF-2") |
+| **LF-4** | `xencode run --detach` | core | detached queue with resume-after-crash — the gate under goals |
+
+#### W13 — Agent pipelines, not graphs — 3 items
+
+Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores / 15 GiB is what keeps this a pipeline rather than a graph.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **MA-1** | Clean-context reviewer as a consumer of existing `/spawn` | capability | clean-context reviewer over existing /spawn |
+| **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
+| **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
+
+#### W14 — Product surface and ecosystem — 58 items
+
+No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **AM-1** | Watch-triggered *checks*, not writes | ecology | watch-triggered checks (needs AM-3 from W0) |
+| **AM-2** | Idle-gated agent turn | ecology | idle-gated agent turn |
+| **AM-4** | Scheduled self-work — a cron-like local schedule for dependency | ecology | scheduled self-work |
+| **AM-6** | Digest, not interrupt | ecology | digest, not interrupt |
+| **GH-5** | `xencode commit` — message from the staged diff, rejecting | ecology | xencode commit — message from the staged diff |
+| **GH-6** | Conflict assistant — `git merge-tree --write-tree --messages` | ecology | conflict assistant over git merge-tree |
+| **LF-1** | `xencode tail serve up\|status\|down` | ecology | tail serve |
+| **LF-3** | outbound-only controller window over the tailnet | ecology | phone as window over the tailnet |
+| **LF-5** | `sql` tool + DB panel with read-only enforced in the driver | ecology | sql tool + DB panel |
+| **LF-6** | session bundle on git as the multi-machine bus | ecology | session bundle on git (QX-3 is the same, refined) |
+| **LF-8** | offline conformance suite | ecology | offline conformance suite — the measurement that licenses the no-network sentence |
+| **LF-9** | Google Workspace MCP as opt-in, read-only | ecology | Workspace MCP, opt-in read-only |
+| **M-3** | skills: a `SKILL.md` loader | ecology | SKILL.md loader |
+| **M-4** | `xencode plugin install <git-url>` | ecology | xencode plugin install <git-url> |
+| **M-5** | `xencode mcp serve`: xencode as an MCP server | ecology | xencode mcp serve |
+| **M-6** | finish the MCP client: resources, prompts, and HTTP with headers | ecology | finish the MCP client |
+| **M-7** | `xencode acp`: run the agent inside an editor | ecology | xencode acp (the sole interop investment, QX-5 agrees) |
+| **MM-2** | screenshot→attach hotkey via `grim`/`spectacle` into the existing | ecology | screenshot->attach hotkey |
+| **MM-3** | local VLM vision over the existing bridge | ecology | local VLM vision over the bridge |
+| **MM-4** | inline image preview via `ratatui-image` | ecology | inline image preview |
+| **MM-5** | Wayland image paste (`wl-paste -t image/png`) with text keeping | ecology | Wayland image paste |
+| **MM-6** | clipboard copy of code blocks/diffs | ecology | clipboard copy |
+| **MM-7** | syntax highlighting in the markdown renderer | ecology | syntax highlighting |
+| **MM-8** | `xencode report` — one self-contained HTML file | ecology | HTML report |
+| **MM-9** | Mermaid diagram generation | ecology | Mermaid |
+| **MM-10** | OCR for scanned PDFs | ecology | OCR for scanned PDFs |
+| **PL-1** | A `sys.rs` seam in `xencode-core-rs` | ecology | sys.rs spawn seam |
+| **PL-2** | Gate the Unix-only test modules and drop the hand-rolled | ecology | gate Unix-only test modules |
+| **PL-3** | A terminal capability probe in the TUI | ecology | terminal capability probe |
+| **PL-4** | A two-job cross-compile matrix on Linux runners | ecology | two-job cross-compile matrix |
+| **PL-5** | macOS `aarch64-apple-darwin` build *and test* on GitHub's arm64 | ecology | macOS arm64 build and test |
+| **PL-6** | Rewrite `scripts/smoke-test.sh` as a Rust integration test run | ecology | smoke-test.sh as a Rust integration test |
+| **PL-7** | Declare and publish a glibc floor | ecology | glibc floor declaration |
+| **QX-1** | Cross-repo *read* context | ecology | cross-repo read context |
+| **QX-2** | Migration lint as a tool, not a migration brain | ecology | migration lint as a tool |
+| **QX-3** | LF-6's session bundle, refined | ecology | fold into LF-6 |
+| **QX-5** | ACP adoption tracking only | ecology | ACP adoption tracking only (M-7 is the interop bet) |
+| **UX-1** | Rebindable keymap as a TOML overlay on compiled defaults | ecology | rebindable keymap |
+| **UX-2** | Keymap presets as data ("xencode", "plain", "nano-style") | ecology | keymap presets |
+| **UX-3** | Leader-style "show the keys for this panel" reusing the per-focus | ecology | leader-style key hints |
+| **UX-4** | `NO_COLOR`/`FORCE_COLOR`/`CLICOLOR` honoured, plus a monochrome | ecology | NO_COLOR / contrast honouring (PL-3 is the same probe) |
+| **UX-5** | A WCAG contrast test over `ThemeColors` | ecology | WCAG contrast test |
+| **UX-6** | A fuzzy command palette over slash commands, panels and settings | ecology | command palette |
+| **UX-7** | A first-run setup coach | ecology | first-run coach (pairs with MI-6/LF-7) |
+| **UX-8** | `:help <topic>` prose plus a generated man page, both | ecology | fold into WF-6 |
+| **UX-9** | Mouse ergonomics — click-to-cursor in inputs, double-click word | ecology | mouse ergonomics |
+| **UX-10** | Named sessions, `--resume <name>`, and a "where you were" footer | ecology | fold with WF-3 |
+| **UX-11** | Measure and wrap policy | ecology | measure and wrap policy |
+| **UX-12** | A `--simple` screen-reader mode | ecology | --simple screen-reader mode |
+| **UX-13** | i18n groundwork only | ecology | i18n groundwork |
+| **WF-2** | GitHub PR surface over REST | ecology | GitHub PR surface over REST |
+| **WF-3** | session resume/naming + redacted transcript export | ecology | session resume/naming + redacted export (UX-10 is the TUI half) |
+| **WF-5** | `cargo-dist` release pipeline + binstall + AUR | ecology | cargo-dist release pipeline |
+| **WF-6** | shell completions + man page generated from clap | ecology | completions + man page (UX-8 is the same generator) |
+| **WF-7** | CI watchdog | ecology | CI watchdog over Actions REST |
+| **WF-8** | `xencode-action` — the review command as a GitHub Action commenting | ecology | xencode-action |
+| **WF-9** | signed-commit passthrough | ecology | signed-commit passthrough |
+| **WF-10** | stacked-diff assist over worktrees | ecology | stacked-diff assist over worktrees |
+
+#### Not scheduled — 8 items
+
+Declined once already, or genuinely contested. Recorded here so nobody re-proposes one of these inside a wave.
+
+| ID | item | bucket | placement note |
+|---|---|---|---|
+| **CAP-3** | Multi-role `[agent.reviewer]` TOML | park | REJECT-tier: multi-role reviewer TOML spawns without a verifier |
+| **MA-4** | Raise `--parallel` for real concurrency | park | REJECT-or-park: raising --parallel pays in wall-clock on 8c/15GiB |
+| **MA-5** | The general `AgentGraph`/`AgentEdge` with per-node model/tools | park | rejected: general user-authored AgentGraph/AgentEdge |
+| **MD-3** | Per-mode system prompts | park | rejected: per-mode system prompts void KV reuse on every switch |
+| **MD-4** | Six modes with per-mode model and verification | park | rejected: six modes with per-mode model + verification |
+| **MEM-4** | Unrestricted write on "exit code 0 = verified" | park | REJECT-tier: unrestricted write on "exit code 0 = verified" |
+| **MEM-5** | SQLite/vector-indexed memory | park | rejected: SQLite/vector-indexed memory, unjustified at this corpus size |
+| **MI-5** | Speculative decoding on the Colab bridge | park | SPECULATIVE-DECODING CONFLICT: declined in the register at :1769 ("~25-30% tok/s for a fragile launch surface on hardware that is already the bottleneck"). MI-5's Colab-bridge form assumes rented VRAM. Needs the owner’s call before it can sit in any wave |
+
+### R-2 Corrections to the order as proposed
+
+The wave structure is adopted as written. Seven placements contradicted a dependency
+this file had already fixed in ink, so they moved; one is genuinely contested and is
+left unscheduled rather than quietly resolved. Nothing here is a disagreement about
+the shape of the program.
+
+1. **`state.md`’s writer is not a W0 item.** The owner’s Day-1 list put it first;
+   §Q-8 says **QM-1 must not ship before QK-3’s `SourceClass` exists** — "a writer
+   turns a 15-entry ring buffer into durable truth for every future conversation, and
+   a poisoned compaction summary is worse than no summary". QM-1 sits in W10, where
+   the owner’s own Wave 10 already had it. The Day-1 entry is dropped, not deferred.
+2. **MI-5 (speculative decoding) is a live conflict with our own register**, not a
+   placement. `NEXT_PLAN_TASKS.md:1769` declines it with L’s reason at `:1155` — "~25-30%
+   tok/s win for a large, fragile launch surface on hardware that is already the
+   bottleneck". MI-5 was written later, for the *Colab* bridge, where the VRAM premise
+   is different but its own trap note concedes "the draft model’s KV eats VRAM that
+   Colab does not have". It is parked in §R-3 pending an explicit yes or no; W2 is
+   complete without it.
+3. **EV-8 had to move up, not down.** The owner listed it in Wave 6 ("regression
+   playback") while also listing QA-1 replay in Wave 1 — and QA-1 *is* "EV-8 cassette
+   replay + `xencode replay <run-id>`". EV-8 now sits in W1 with QA-1.
+4. **Wave 0 listed one change three times.** SE-1, QTR-6 (whose own title is "SE-1,
+   immediately") and QX-4 ("same change as QTR-6") are the same item, so two of those
+   rows are folds of the first. DB-1 stays its own row but is recorded in the plan as
+   "DB-1 and SE-1 are one change, not two", which the commit rule permits merging.
+   W0 is therefore 15 IDs over 12 real changes: the group of four is one, the other
+   eleven IDs stand alone.
+5. **Four items the owner described rather than numbered were identified, and they
+   sit where the owner's own wave list puts them** — the naming, not the placement,
+   was the gap: the "provider local-only fallback bug" is QTR-2 (locality filter on
+   `fallback_chain`, the live hole in P fact 10) with PR-1/PR-2 around it; "panic hook
+   / terminal restoration" is DB-7; "watcher startup error visibility" is AM-3, which
+   the plan already says must be fixed before any ambient feature runs on it; the
+   "config correctness groundwork" is DB-2 with DB-8, both of which the owner
+   themselves listed in W11 and are left there.
+6. **RS-4/RS-5 were listed twice** (Wave 4 and Wave 8). They are offline work — local
+   version-pinned docs and a shallow RustSec clone — so both belong to W4, which is
+   what the plan calls "the only *offline* capability gains available". Only RS-1,
+   RS-2 and RS-7 need the W7 trust layer and stay in W8.
+7. **MD-1/MD-2 moved from the multi-agent wave to W7** (execution modes are an
+   `ApprovalMode` gate enforced in `classify()`, i.e. a control, not an agent
+   topology), and **AM-5 folds into LF-2** — the plan states "AM-5 is LF-2" — so the
+   inbound-trigger work is W12 with the approval round-trip while AM-1/2/4/6 stay in
+   W14.
+
+### R-3 Contested and declined
+
+| item | status | the question |
+|---|---|---|
+| **MI-5** | parked, needs an owner decision | Does L’s rejection of speculative decoding cover the rented-VRAM case, or was it about consumer hardware being the bottleneck? If the latter, MI-5 belongs in W2 beside CX-5/CX-6, which the plan already says must ship with it or not at all. |
+| **QN-5** | conditional, inside W10 | A dense retrieval arm only if QN-4’s verify-pattern work proves the gap. The register declines embeddings/vector indexes until then. |
+| **MA-4, MA-5, MD-3, MD-4, MEM-4, MEM-5, CAP-3** | not scheduled | Already dispositioned as REJECT-or-park in P; the wave order does not reopen them. |
+
+### R-4 The first sprint
+
+The owner’s opening four days, restated against the corrections above. It is a
+sequence of commits, not a schedule — see §R-6 for the rule:
+
+```text
+Day 1  W0 defects      SE-1(+DB-1)  DB-5  DB-7  QO-2  QN-1  QN-2  LSP-4
+Day 2  W0 egress       PR-1  PR-2  QTR-2  MM-1  AM-3        <- closes W0
+Day 3  W1 spine        CX-2  EV-2  EV-3  WF-1  EV-11
+Day 4  W1 eval+replay   EV-8  QA-1  QA-2  QA-3  QA-5  EV-1  EV-10  CX-1   <- closes W1
+Day 5+ W2 substrate    MI-1  MI-2  MI-3  MI-4  AC-1  AC-2  LF-7(=MI-6)  MI-7  AC-3
+                      then AC-4  AC-5  L-5  L-6  L-10      <- closes W2
+```
+
+Day 1 is deliberately all measurement-validity: `gold.json`, the two regexes and the
+empty pseudo-documents are the three things that would otherwise let every later "it
+got better" claim pass unnoticed while being false.
+
+### R-5 What this axis still does not decide
+
+- **Ordering inside a wave.** Except where a dependency is named, a wave is a set.
+- **Effort, impact, or value.** This is a topological order, not a priority order.
+  Nothing has been scored, and the two external priority tables stay transcribed-as-
+  input (P-13, Q-15) rather than adopted.
+- **Whether any of it is being built.** The waves make the sequence explicit; they do
+  not authorise the first commit. Research and plan mode still govern.
+
+### R-6 The commit rule this ordering implies
+
+A wave is not a unit of work — **an item is**. One ID = one change = one commit, made
+when that item's own done-when is met, before the next ID starts.
+
+- If two IDs are genuinely one change (SE-1's `chmod` with DB-1's atomic write,
+  MI-1 with the request-shape it travels in), **do them together and name both IDs in
+  that commit's message.**
+- A wave is complete only when **every non-parked ID in it can be traced to a commit
+  that names it.** Check against §R-1's tables, not by eye.
+- The manuals ride with the item, in the same pass — never "at the end of the wave".
+  AGENTS.md states this as a standing rule; §R-1 is what it applies to.
+
+The folds recorded above are the traceability hazard to watch for: QTR-6 and QX-4 ride
+SE-1, MI-6 rides LF-7, CAP-2 and M-2 ride QTR-1, QI-2 rides LSP-3, QO-3 rides CX-2,
+L-9 rides CX-1, AM-5 rides LF-2, MM-11 rides CU-2, UX-8 rides WF-6, UX-10 rides WF-3,
+QB-3 rides EV-5, EVd-5 folds into EV-6/SE-2. Each of those child IDs must appear in its
+parent's commit message, or it will look unstarted forever. Three further pairs are
+*dependencies* rather than folds and must not be merged out of sight: EV-3 is QM-1's
+integrity layer, EVd-7 reuses EV-11's hash-chain primitive, and QM-6 works only under
+EV-7's human gate.
+
 
 Anything marked UNVERIFIED was located through search snippets after the fetch
 quota ran out and has not been read end to end; treat its details as leads, not

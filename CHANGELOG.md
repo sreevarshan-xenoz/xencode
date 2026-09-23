@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — the plan finally has an order (Milestone R)
+Four research appendices had declined to rank their candidates, which was honest
+about value but left no way to start anything. The owner supplied an ordering
+instead of a ranking: fifteen dependency waves over all 258 recorded plan items,
+from "fix what makes today's output untrustworthy" through observability, the
+model layer, code intelligence, verification, trust and durable knowledge out to
+the product surface. Each item is placed exactly once and keeps the identifier the
+appendix that produced it gave it, so provenance survives ordering; the placement
+was checked by script rather than by eye. Seven of the proposed placements moved,
+because the plan already fixes some dependencies in ink — most importantly, the
+project-notes writer cannot be a first-day item, since it must not exist before
+the knowledge source-class model that stops it turning a bad summary into durable
+truth. One item is parked as genuinely contested rather than resolved: speculative
+decoding, which an earlier milestone declined for this laptop's hardware and a
+later one re-proposed for a rented GPU. What the waves deliberately do not decide
+is which item in a wave is worth doing first.
+
+### Docs — the commit rule now names what a commit completes
+The standing rule said "commit each change before the next". With an ordered plan
+that was too loose to audit, so `AGENTS.md` now defines the unit as a single plan
+item rather than a wave, requires every commit message to name the item or items it
+completes, requires both identifiers when two items turn out to be one change, and
+makes wave completion traceable — a wave is done only when each non-deferred item
+in it can be matched to a commit naming it. It also states plainly that commit
+messages are user-facing product history and must be written in plain, fully named
+English, with a list of the internal shorthand that is not acceptable in them.
+Nothing about the code changed.
+
 ### Docs — Milestone Q: the second hundred, dispositioned
 A second external proposal list (100 items around project DNA, time, system,
 trust and experimentation) was checked item by item against the Rust tree rather
