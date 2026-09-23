@@ -32,7 +32,7 @@ pub use orchestrate::{
     forward_argv, forward_url, pid_alive, proxy_argv, resolve_binaries, shell_quote, spawn_forward,
     terminate, Binaries,
 };
-pub use preflight::{preflight, which, Check, PreflightReport};
+pub use preflight::{preflight, which, Check, PreflightReport, KEY_FILENAME};
 pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};
 
 #[cfg(test)]
