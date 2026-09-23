@@ -19,6 +19,16 @@ caught in code: `google-colab-cli` 0.6.0 shipped without the `ssh`
 subcommand (upstream issue #102); preflight requires >= 0.7.0.
 
 ### Added
+- **Colab survivability: 12-hour-reap detection + one-key reconnect** (K-3).
+  `xencode colab status` now compares the recorded `started_at` age against
+  the endpoint: older than 12 hours (Colab's per-VM runtime limit) with a
+  dead forward is reported as a reaped VM, with the exact recovery command.
+  `xencode colab up --reconnect` rebuilds the bridge from `colab.json`
+  alone: a live endpoint short-circuits to its URL (zero `colab`/`ssh`
+  calls); otherwise the session is re-created if Colab reaped it, the
+  bootstrap re-runs, and the forward re-spawns until `/v1/models` answers —
+  no re-typing of the original flags. Missing `colab.json` fails fast with
+  a fix suggestion.
 - **Colab VM lifecycle** (K-2c). `xencode colab up` brings a Colab VM up
   end-to-end: creates the session (`colab new --gpu <gpu> -s <name>`) when
   absent, pushes an ssh bootstrap that installs and starts the chosen runtime

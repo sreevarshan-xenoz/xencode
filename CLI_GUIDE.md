@@ -141,6 +141,7 @@ type a public-tunnel URL (paid tier) into Settings → Remote URL instead.
 xencode colab preflight                # is the bridge usable? (exit 0 when green)
 xencode colab preflight --generate-key # also create ~/.xencode/colab_ed25519 if missing
 xencode colab up                       # create the VM, install the runtime, hold the tunnel
+xencode colab up --reconnect           # rebuild a broken bridge from colab.json (one key)
 xencode colab status                   # is the forward/session/endpoint alive?
 xencode colab down                     # kill the forward, colab stop, clear state
 ```
@@ -160,12 +161,20 @@ provider URLs at the forward (`llama_cpp_url`/`ollama_url` for the runtime,
 
 ```bash
 xencode colab up                      # uses colab.session / colab.runtime / colab.model
+xencode colab up --reconnect          # rebuild a broken bridge from colab.json (one key)
 xencode colab up --runtime ollama     # tag flow into the model picker; respins the VM
 xencode colab up --gpu L4 --model Qwen/Qwen2.5-7B-Instruct-GGUF
 xencode colab up --local-port 18001   # laptop side of the forward
 xencode colab up --remote-port 8080   # VM-side port (0 = runtime-native)
 xencode colab up --weights hf         # llama.cpp weights from Hugging Face
 ```
+
+`up --reconnect` is the one-key repair path driven by `colab.json`: if the
+forward's endpoint already answers `/v1/models` it returns immediately (no
+colab or ssh calls at all); otherwise it re-creates the session if the VM was
+reaped server-side (never when the session still exists), re-runs the
+bootstrap, and re-spawns the forward, then re-probes and rewrites state.
+Without a `colab.json` it errors with a pointer to a full `xencode colab up`.
 
 `runtime` chooses what is installed on the VM: `llama.cpp` (pinned
 `llama-cpp-python[server]` + a GGUF pulled from Hugging Face, one-shot
@@ -176,7 +185,9 @@ names are validated before they touch a shell (`[A-Za-z0-9_-]`, 1–64 chars).
 
 `status` never fails hard — it reports three cells (forward pid alive,
 session listed by `colab sessions`, and a `/v1/models` probe on the forward)
-so it stays scriptable while fully degraded. `down` is idempotent: kills the
+so it stays scriptable while fully degraded. When the VM is older than 12
+hours and the endpoint is down it flags a likely Colab reaper and prints the
+one-key fix (`xencode colab up --reconnect`). `down` is idempotent: kills the
 recorded forward pid, runs `colab stop -s <name>`, and clears state; with no
 `colab.json` it reports `nothing to tear down`.
 
