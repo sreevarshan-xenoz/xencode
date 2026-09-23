@@ -146,6 +146,10 @@ pub enum SettingKind {
     Stepped { step: u64, min: u64, max: u64 },
     /// Enter opens a text editor; commit stores the string as typed.
     Text,
+    /// Enter opens a text editor like `Text`, but the value is an API key:
+    /// it is echoed as bullets and stored as `Option<String>` (an empty
+    /// commit clears it).
+    Secret,
     /// Enter opens a text editor; commit parses the number.
     Number,
     /// Enter triggers it (Factory Reset).
@@ -276,6 +280,31 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Number,
     },
     SettingRow {
+        label: "Remote URL",
+        section: "Providers",
+        kind: SettingKind::Text,
+    },
+    SettingRow {
+        label: "Remote Key",
+        section: "Providers",
+        kind: SettingKind::Secret,
+    },
+    SettingRow {
+        label: "Gemini Key",
+        section: "Providers",
+        kind: SettingKind::Secret,
+    },
+    SettingRow {
+        label: "Qwen Key",
+        section: "Providers",
+        kind: SettingKind::Secret,
+    },
+    SettingRow {
+        label: "OpenRouter Key",
+        section: "Providers",
+        kind: SettingKind::Secret,
+    },
+    SettingRow {
         label: "Factory Reset",
         section: "Actions",
         kind: SettingKind::Action,
@@ -293,6 +322,18 @@ pub fn settings_row_index(label: &str) -> usize {
 
 /// Column width the Settings panel pads its labels to.
 pub const SETTINGS_LABEL_WIDTH: usize = 17;
+
+/// Render a secret for the screen: bullets, with the last four characters
+/// kept so two keys can be told apart. A value short enough to be fully
+/// revealed by that tail is hidden entirely.
+pub fn mask_secret(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 8 {
+        return "••••".to_string();
+    }
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{}{tail}", "•".repeat((chars.len() - 4).min(12)))
+}
 
 pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("📊 Performance Dashboard", "Session stats & metrics"),

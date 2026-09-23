@@ -13,7 +13,8 @@ use xencode_models_rs::current_timestamp;
 
 use crate::app::App;
 use crate::focus::{
-    FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS, SETTINGS_LABEL_WIDTH,
+    mask_secret, FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS,
+    SETTINGS_LABEL_WIDTH,
 };
 use crate::layout::compute_layout;
 use crate::widgets::{gauge, panel_border_set, spinner};
@@ -990,6 +991,7 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Ollama URL" => &app.config.ollama_url,
                 "Llama.cpp URL" => &app.config.llama_cpp_url,
                 "Llama.cpp Model" => &app.config.llama_cpp_model_path,
+                "Remote URL" => &app.config.remote_base_url,
                 _ => &app.config.ollama_url,
             };
             if editing_here {
@@ -997,10 +999,24 @@ fn setting_display(app: &App, idx: usize) -> String {
                     "{}| (type to edit, Enter to confirm)",
                     &app.settings_url_buffer[..app.settings_url_cursor]
                 )
-            } else if row.label == "Llama.cpp Model" && value.is_empty() {
+            } else if value.is_empty() {
                 "⚠️  Not set (Enter to edit)".to_string()
             } else {
                 format!("{}  (Enter to edit)", value)
+            }
+        }
+        SettingKind::Secret => {
+            if editing_here {
+                // Bullets, not characters: the key must never reach the screen.
+                format!(
+                    "{}| (Enter to save, Esc to cancel)",
+                    "•".repeat(app.settings_url_buffer.chars().count())
+                )
+            } else {
+                match crate::app::secret_value(&app.config, row.label) {
+                    Some(key) => format!("{}  (Enter to edit)", mask_secret(key)),
+                    None => "⚠️  Not set (Enter to edit)".to_string(),
+                }
             }
         }
         SettingKind::Number => {

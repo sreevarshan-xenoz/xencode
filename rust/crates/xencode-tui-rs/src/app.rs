@@ -6252,6 +6252,35 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 }
 
+/// The API key a Settings `Secret` row edits. Labels are the single source
+/// of truth shared by the renderer and the key handler, so a row that is
+/// missing here simply has no stored value rather than a wrong one.
+pub fn secret_value<'a>(config: &'a XencodeConfig, label: &str) -> Option<&'a str> {
+    let key = match label {
+        "Remote Key" => &config.api_keys.remote_api_key,
+        "Gemini Key" => &config.api_keys.google_gemini_api_key,
+        "Qwen Key" => &config.api_keys.qwen_api_key,
+        "OpenRouter Key" => &config.api_keys.openrouter_api_key,
+        _ => return None,
+    };
+    key.as_deref().filter(|value| !value.is_empty())
+}
+
+/// Store (or, for `None`, clear) the API key a `Secret` row edits. Returns
+/// false for an unknown label so the caller can ignore rows that were never
+/// meant to be secret.
+pub fn set_secret_value(config: &mut XencodeConfig, label: &str, value: Option<String>) -> bool {
+    let slot = match label {
+        "Remote Key" => &mut config.api_keys.remote_api_key,
+        "Gemini Key" => &mut config.api_keys.google_gemini_api_key,
+        "Qwen Key" => &mut config.api_keys.qwen_api_key,
+        "OpenRouter Key" => &mut config.api_keys.openrouter_api_key,
+        _ => return false,
+    };
+    *slot = value;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
