@@ -9,7 +9,11 @@
 //! - per-query hit rank, for eyeballing systematic misses
 //!
 //! Gold sets: `.xencode/eval/gold.json` (overrides the built-in sample, which
-//! is aimed at the Xencode repo itself).
+//! is aimed at the Xencode repo itself). The built-in sample mixes probes whose
+//! answer is in the file name with probes that need the vocabulary a file
+//! declares, so a change that only sharpens filename matching cannot pass it
+//! unchanged. `cargo test -p xencode-context-rs --test gold_baseline --
+//! --ignored --nocapture` prints what the current retriever scores on it.
 
 use crate::retrieve::{retrieve, RetrievalIndex, RetrieveOptions, RetrievedFile};
 use serde::{Deserialize, Serialize};
@@ -277,24 +281,74 @@ mod tests {
     }
 
     #[test]
-    fn default_gold_is_reachable_by_deterministic_signals() {
-        // The built-in gold must never silently rot: every expected file has to
-        // surface on filename + path signals alone (no symbols), or `/ctx eval`
-        // would report ~0 and blame the wrong layer.
+    fn every_gold_answer_is_reachable_from_its_own_file() {
+        // The corpus must not rot in either direction: each expected path has to
+        // be a real file in this workspace (`cmd_output.rs` was not, and a gold
+        // entry naming a file that does not exist can never be hit, so it drags
+        // every score down while looking like a retrieval failure), and its
+        // query has to describe that file well enough for the deterministic
+        // signals — its own name plus the symbols it declares — to put it first.
+        //
+        // The haystack is the answer plus three unrelated files. Being first
+        // here says the pairing is sound; it deliberately says nothing about
+        // whether the answer survives a whole repo, which is the part the
+        // measurement in `tests/gold_baseline.rs` reports.
+        let root = workspace_root();
         let gold = default_gold();
-        assert!(gold.len() >= 8);
-        let idx = RetrievalIndex {
-            files: gold
-                .iter()
-                .flat_map(|g| g.expected.iter().map(|p| file(p)))
-                .collect(),
-            ..Default::default()
-        };
-        let rep = evaluate(&idx, &gold, 5, &HashSet::new(), false);
-        assert_eq!(
-            rep.recall_at[0], 1.0,
-            "every gold expected file must be reachable by filename alone"
+        assert!(
+            gold.len() >= 16,
+            "the built-in corpus widened once; it must not shrink back"
         );
-        assert!(rep.mrr > 0.95);
+
+        for item in &gold {
+            assert_eq!(
+                item.expected.len(),
+                1,
+                "one answer per probe: {}",
+                item.query
+            );
+            let path = &item.expected[0];
+            let on_disk = root.join(path);
+            assert!(
+                on_disk.is_file(),
+                "gold entry points at a missing file: {path}"
+            );
+
+            let symbols = crate::extract_rust_symbols(
+                &std::fs::read_to_string(&on_disk)
+                    .unwrap_or_else(|e| panic!("unreadable gold answer {path}: {e}")),
+            );
+
+            let mut idx = RetrievalIndex {
+                files: [
+                    "rust/crates/xencode-core-rs/src/tasks.rs",
+                    "rust/crates/xencode-tui-rs/src/focus.rs",
+                    "rust/crates/xencode-analysis-rs/src/web.rs",
+                ]
+                .into_iter()
+                .map(file)
+                .chain(std::iter::once(file(path)))
+                .collect(),
+                ..Default::default()
+            };
+            idx.symbols.insert(path.clone(), symbols);
+
+            let rep = evaluate(&idx, std::slice::from_ref(item), 5, &HashSet::new(), false);
+            assert_eq!(
+                rep.hits[0].2, 1,
+                "query {:?} does not describe {}; ranked {:?}",
+                item.query, path, rep.hits[0].3
+            );
+        }
+    }
+
+    /// This workspace's root, three levels up from the crate directory.
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .expect("crate sits at <root>/rust/crates/<name>")
+            .to_path_buf()
     }
 }

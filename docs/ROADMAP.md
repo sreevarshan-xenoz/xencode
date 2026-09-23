@@ -151,7 +151,7 @@ each item protects), not sequence. The icebox above still feeds it.
 ### 📈 Metrics as measured (2026-09-23)
 - **Rust Migration**: 15/15 crates — complete; the Python stack is deleted, and
   Milestone K added `xencode-colab-rs` as the 15th
-- **Test Suite**: 835 passing, 0 failing, 4 ignored (`cargo test --workspace`)
+- **Test Suite**: 835 passing, 0 failing, 5 ignored (`cargo test --workspace`)
 - **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all --check` clean
 - **Code Quality**: per-language heuristics + pattern-based OWASP scanner

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the retrieval scorecard measures something harder
+`/ctx eval` grades the file finder against a set of questions whose answers are
+known-good files in this repository. One of those questions pointed at
+`cmd_output.rs`, a file that has never existed, so it could never be answered and
+quietly pulled every score down; and all ten questions were answerable from a file
+name alone, which is not a question worth asking a finder. The corpus is now
+eighteen questions. The unreachable one was retargeted to the file that really
+does trim command output, and the additions are phrased the way people actually
+type — including negations and conditions: "secret files are flagged without their
+contents being read", "refreshing a path that is not rust does nothing". Expect
+lower numbers, and read them as the honest size of the gap: on a real index of
+this workspace the deterministic pass scores 0.28 at rank 1 and 0.50 within the
+top five, the hybrid pass 0.39 and 0.50. Every one of the eighteen answers still
+comes first when it is put against three unrelated files, so the misses are about
+telling files apart across a whole repository rather than about the questions
+being wrong. A test now opens each gold answer on disk, so a question pointing at
+a missing file fails the suite by name.
+
 ### Fixed — the security scan no longer flags ordinary code for using common words
 `xencode analyze` reported High-severity path traversal (CWE-22) on lines that
 merely contained the word `input`, and Medium-severity SSRF (CWE-918) on any line
