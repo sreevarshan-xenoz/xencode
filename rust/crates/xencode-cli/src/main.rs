@@ -300,6 +300,10 @@ enum ColabAction {
         /// ollama 11434; defaults to config)
         #[arg(long)]
         remote_port: Option<u16>,
+        /// Rebuild a broken bridge from the recorded colab.json (re-spawn the
+        /// forward, or re-create the VM if it was reaped) instead of a full up
+        #[arg(long)]
+        reconnect: bool,
     },
     /// Report the Colab bridge state: forward pid, `colab sessions`, and a
     /// /v1/models probe on the forward
@@ -1033,6 +1037,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
             weights,
             local_port,
             remote_port,
+            reconnect,
         } => {
             run_colab_up_cli(
                 session,
@@ -1042,6 +1047,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
                 weights,
                 local_port,
                 remote_port,
+                reconnect,
             )
             .await
         }
@@ -1050,6 +1056,7 @@ async fn run_colab(action: ColabAction) -> Result<(), String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to colab up flags; a struct would just rename them
 async fn run_colab_up_cli(
     session: Option<String>,
     gpu: Option<String>,
@@ -1058,6 +1065,7 @@ async fn run_colab_up_cli(
     weights: Option<String>,
     local_port: Option<u16>,
     remote_port: Option<u16>,
+    reconnect: bool,
 ) -> Result<(), String> {
     let config = XencodeConfig::load().map_err(|e| e.to_string())?;
     if !config.colab.enabled {
@@ -1123,7 +1131,11 @@ async fn run_colab_up_cli(
         remote_port,
     };
 
-    let url = xencode_colab_rs::run_colab_up(&bins, &key, &opts).await?;
+    let url = if reconnect {
+        xencode_colab_rs::run_colab_reconnect(&bins, &key, &opts).await?
+    } else {
+        xencode_colab_rs::run_colab_up(&bins, &key, &opts).await?
+    };
 
     // Point the provider URLs at the forward so the picker and the
     // remote:/llama/ollama routes see the VM, then persist the change.
@@ -1134,7 +1146,11 @@ async fn run_colab_up_cli(
         .save()
         .map_err(|e| format!("colab up: could not save config: {e}"))?;
 
-    println!("Colab up — {url}");
+    if reconnect {
+        println!("Colab reconnected — {url}");
+    } else {
+        println!("Colab up — {url}");
+    }
     println!("  session:   {session}");
     println!("  runtime:   {runtime}");
     println!("  model:     {model}");
