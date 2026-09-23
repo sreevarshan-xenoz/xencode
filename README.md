@@ -105,7 +105,11 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **Sequential provider fallback** across those models (`agent_fallback_models`) when a provider fails before streaming.
 - **Agentic orchestrator** for multi-step coding tasks with bounded retries.
 - **Zero-duplicate-token** streaming retry middleware with token-delivery tracking.
-- Error classification and targeted fix suggestions.
+- Tool and shell failures reach the model as `error:`-prefixed or `exit <code>`
+  results, and the agent's instructions make it name the failure and change
+  approach instead of retrying it unchanged. There is **no automatic error
+  classifier** — nothing parses a compiler or test message into a category and a
+  suggested fix; that is a planned item, not current behavior.
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
@@ -523,11 +527,20 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 ## 🗺️ Roadmap
 
-The Rust migration (all 8 phases, 14 crates) is **complete**, and so is
+The Rust migration (all 8 phases, 15 crates) is **complete**, and so is
 **Milestone J** (2026-09-21) — the pass that made every TUI panel tell the truth
-and gave the plugin surface a runtime. There is no open milestone: the last known
-gap between what these manuals promise and what this code does is closed, and
-what is left is choices, not bugs.
+and gave the plugin surface a runtime — followed by **Milestone K** (2026-09-23),
+the remote-provider and Colab GPU-bridge pass, verified against a live free-tier
+T4 rather than a mock.
+
+Nothing is currently *committed* to build next. What exists instead is planning:
+two planned tracks (**L** — remote backends and a self-finishing agent; **M** —
+ecosystem compatibility) and three research option spaces (**N**, **O**, **P**)
+recorded deliberately unranked in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md), 176
+candidates between them. Cutting that pool into the next milestone is an open
+decision — and those passes turned up live gaps between promise and code, which
+they list as defects rather than features, including this manual's own habit of
+overstating the security scanner and error handling.
 
 Under consideration, in [`docs/ROADMAP.md`](docs/ROADMAP.md):
 

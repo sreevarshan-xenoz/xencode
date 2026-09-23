@@ -93,6 +93,33 @@
   output is sent to a field llama.cpp's chat endpoint does not read, and
   `README.md` advertises error classification that does not exist. Appendix:
   [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone O.
+- 🗺️ **Milestone P recorded** (2026-09-23): the third option-space appendix, and
+  the only one driven by someone else's architecture — an external review of
+  xencode arrived as eighteen proposals (multi-agent orchestration, repository
+  memory, semantic code intelligence, a verification engine, evidence-based
+  state, long-running goals, an autonomous background agent, skills, a capability
+  system, browser and computer use, artifacts, an eval harness, adaptive context,
+  task-aware retrieval, execution modes, model specialization, a hybrid privacy
+  router) plus a diagram and its own P0–P3 ranking. Every item was tested against
+  the tree: **eight** are already planned under existing IDs, **five** survive
+  only in a weakened form — a multi-agent graph becomes a serial pipeline, an LLM
+  task classifier becomes a rule-based router, six execution modes become one,
+  desktop computer use becomes browser-only, and "adaptive context" turns out to
+  be mostly relabeling of work O already committed — **three** are genuinely new
+  (a session evidence ledger, a privacy router, artifacts as evidence), and the
+  remaining two are already partly in the tree. The reviewer's ranking turns out
+  close to inverted: its P0 slate is the work blocked on a substrate nothing
+  exists for, while several of its P3 items are small, honest fixes. Three defects
+  the review could not have known about surfaced in the checking: `state.md` has a
+  reader and **no writer at all**, the provider fallback chain already sends a
+  local-only prompt to a cloud provider on the first error, and two of the security
+  scanner's regexes fire on the literal word `input`. 48 further options,
+  **unranked** like N's and O's — the review's own priority table is transcribed as
+  input, not adopted — plus 27 additions to the do-not-build register and the
+  constraint that decides most of the ranking: `--parallel 1` on 8 cores and
+  15 GiB, which is why an agent graph degenerates into a pipeline here rather than
+  running concurrently. Appendix:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone P.
 - ⏸️ **Deliberately parked, not gaps to "fix"**: `AnthropicProvider` stays
   unreachable until an `anthropic_api_key` is a decision someone makes, and
   `crdt.rs` stays unwired (settled Milestone G deferral).

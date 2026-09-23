@@ -2763,3 +2763,906 @@ purpose, not optimistically.
   [notify-rust](https://docs.rs/notify-rust/) ·
   [Colab idle-reap discussion](https://github.com/googlecolab/colabtools/issues/3451) ·
   [OpenAI pricing page](https://developers.openai.com/api/docs/pricing)
+
+---
+
+## Milestone P — the "Xencode 2.0" review, checked item by item (research appendix, drafted 2026-09-23)
+
+An external architectural review of xencode came in as eighteen proposals, a
+would-not-build list, a target-architecture diagram and a P0–P3 priority table.
+This milestone is the research pass over those eighteen: each one tested against
+the tree, each one traced to whatever L/M/N/O already committed, and each one
+reduced to the options that survive on this hardware.
+
+Three ground rules for reading it:
+
+- **Unranked, like N and O.** The review's P0–P3 table is recorded below as *its*
+  author's input (§P-13), not adopted as this plan's ranking. Ranking is still a
+  separate pass the owner has not asked for.
+- **Nothing here is built.** This is an appendix, not a queue.
+- **Several of the eighteen are already shipped or already planned.** The
+  interesting output of this pass is less "what to add" than "which of these
+  already exist, which are a rename of something in N/O, and which claims about
+  the tree turned out to be false."
+
+### P-0 — Disposition of the eighteen
+
+| # | Proposal | Disposition | Where it actually lives |
+|---|---|---|---|
+| 1 | `AgentGraph` multi-agent orchestration | plumbing ships, graph rejected | `/spawn` worktree subagents + per-spawn checkpoints exist (`app.rs:2866-2950`); the survivable shape is **MA-2** (serial pipeline) + **MA-1** (clean-context reviewer), not a user-authored DAG |
+| 2 | Repository memory / project knowledge graph | rename of planned work + an empty slot it never noticed | **EV-4** (expiry/review) + **EV-7** (promotion gate) already are this feature; its intended home `state.md` turns out to have **no writer at all** (§P-1 fact 6) → **MEM-1…MEM-3** |
+| 3 | Semantic code intelligence (AST) | already planned | **CI-1…CI-7** (Milestone N) |
+| 4 | LSP integration | planned above the current tier, and unbuildable as casually as it reads | **CI-2/CI-3** already own it; the new findings are that the layer under it is four regexes (fact 16) and that **no maintained Rust LSP client exists** → **LSP-1…LSP-5** |
+| 5 | `VerificationEngine` | already planned, and blocked | **VF-\*** (O) + **EV-1**; honest blocker: nothing verifies anything today (facts 7 and 11) — a `VerificationEngine` crate before the ledger is ceremony |
+| 6 | Evidence-based state ("never say done without evidence") | **genuinely new substrate** | **EVd-1…EVd-7**; this is the review's best idea and the tree's biggest hole |
+| 7 | Long-running autonomous goals | already planned, wrapped | **L-7** (exit-code gate) + **LF-4** (detached queue); **GL-1…GL-3** add the record, the anchor and resume-by-re-verify |
+| 8 | Background/ambient agent | already planned, and already rejected as a daemon | **AM-1…AM-6**; O-8 rejects an in-binary cron daemon and autonomous commit/push from triggers |
+| 9 | Skills | already planned | Milestone **M** (SKILL.md compat) |
+| 10 | Capability/permission system | partly new, partly fiction | the manifest field `permissions` exists and is **read nowhere** (`manifest.rs:47`) → **CAP-2**; capabilities as gate vocabulary = **CAP-1**, prerequisite to **SE-4**/**RS-1** |
+| 11 | Browser / computer use | browser yes, desktop no | browser = **MM-11** + **CU-2** (a Playwright-MCP recipe, zero product code); Wayland desktop control is a **REJECT** on platform grounds (O-6) |
+| 12 | Artifact-based verification | **new and cheap** | **EVd-4** (`.xencode/artifacts/`, last N + all failures) |
+| 13 | Eval harness | already planned, and already half-present | **EV-1**; `eval.rs:7,85-155` computes recall@k / precision@k / MRR today for retrieval — the measurement spine exists, only its consumer doesn't |
+| 14 | Adaptive context engine | ~70% relabel | "know the model + window" = **MI-2/MI-3** (= **AC-1**), "window per run" = **MI-7** + **AC-2**, "history importance" = **EV-4**; genuinely beyond the plan: **AC-4** (caps driven by measured free space) and **AC-5** (tokenizer truth) |
+| 15 | Task-type-aware retrieval | new in its weak form only | **AC-3**, a deterministic rule-based router; the LLM-classifier form has no published support for code agents and the review's "dramatically smarter" claim outruns the literature |
+| 16 | Execution modes (PLAN/REVIEW/DEBUG/…) | one real mode, four labels | **MD-1** (PLAN as a gate in `classify()`) + **MD-2** (tool-stripping); the rest are prompt/model differences that belong to **MI-7**, and per-mode *system prompts* would void KV reuse on every switch (**MD-3**, reject) |
+| 17 | Model specialization by task | already planned | **MI-7** (per-role profiles) |
+| 18 | Hybrid local/remote privacy router | **new, and there is a live hole today** | **PR-1…PR-4**; today `agent_step_with_fallback` already sends a local-only prompt to a cloud provider on failure (fact 10) — any egress policy that doesn't filter the fallback chain is decorative |
+
+**The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
+`xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
+a *direction*, not a task. It is a rewrite of a working 15-crate, 815-test tree
+into a different crate boundary, and the owner's stated preference is optional
+modes over rewrites. Every primitive in the diagram can be added to the existing
+crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
+profiles to `models-rs` — which is how the options below are scoped.
+
+### P-1 — Facts the review did not have
+
+All verified by reading the file at the line given, on 2026-09-23.
+
+1. **Concurrency is not available, by design.** `budget.rs:76-96` launches
+   `llama-server --parallel 1` with the comment that it "keeps the KV slot count
+   to one so cache reuse is predictable". Each slot carries its own KV, and
+   Ollama documents `OLLAMA_NUM_PARALLEL` defaulting to 1 with RAM scaling by
+   `num_parallel × context length`. On 8 cores / 15 GiB with no GPU, two
+   concurrent agents add no throughput — they split prefill and evict each
+   other's cache. This is the constraint that turns proposal 1 from a graph into
+   a pipeline.
+2. **`/spawn` subagents already share the parent's byte-identical stable head** —
+   same `agent_system_prompt()`, same worktree `AGENTS.md`/anchor
+   (`app.rs:2866-2899`) — and each spawn already gets its own `CheckpointStore`
+   (`:2946-2950`). The per-agent workspace/checkpoint isolation the proposal
+   asks for exists; the serial schedule is what makes the shared prefix pay.
+3. **The hardware profile is a compile-time constant, not a detection.**
+   `const CTX_PROFILE: HardwareProfile = HardwareProfile::Balanced`
+   (`app.rs:34`), used at every live call site (`:2238, :2267, :2321, :2872,
+   :2877`, `xencode-cli/src/main.rs:1367, :1373`); `Low`/`High` appear only in
+   `context.rs` tests. Nothing probes RAM or VRAM, and `llama_cpp_args()` is
+   never emitted to a server — the profile-stepped `top_k`, content caps and
+   compaction thresholds are all pinned to the `Balanced` column.
+4. **The server is asked for its config and the answer is discarded.** `/props`
+   is polled three times (`xencode-models-rs/src/llamacpp.rs:197, :248, :377`)
+   but `LlamaCppProps` (`:64-71`) deserializes only
+   `default_generation_settings` and `total_slots`, and the only field read out
+   of the former is `n_predict` (`:394-399`). `n_ctx` sits in that same JSON and
+   is never read. There is no `/api/show` call for Ollama at all. So
+   `ModelCapabilities.context_window` resolving local windows to `None`
+   (`capabilities.rs:57-81`) is correct given the data, and **AC-1** is the
+   cheapest fix in this milestone.
+5. **Correction to Milestone O's account of retrieval.** `embed.rs` does
+   implement BM25 over path+symbol pseudo-documents (`:92, :143`) plus
+   `hybrid_rerank` (`:165-189`). What O recorded as "a fixed weight table, not
+   BM25" was half-right: the structural weight table in `retrieve.rs:7-15` is
+   the *shipped* scorer, and the BM25 layer is real but **called only from the
+   eval harness** (`eval.rs:106`) — the live retrieval path never uses it. That
+   is a wiring gap, not a missing feature, and it changes what "prove lexical
+   loses before embedding" means: the hybrid is already coded and already
+   measurable.
+6. **`state.md` has a reader and no writer.** It is read as tier 4
+   (`context.rs:530`), rendered in `/ctx` (`app.rs:3462, :3555, :3997`), and
+   capped at 800 tokens. `ContextState::write()` (`state.rs:82-86`) has exactly
+   one caller in the workspace — the test at `state.rs:198`. `compact.rs:129`
+   parses a hard-compaction reply into a `ContextState` that is then dropped,
+   and `/ctx compact` tells the user *"state.md only changes when the model
+   flags it"* (`app.rs:3377`) — but there is no tool that flags it (0 hits for
+   any state-writing tool in `agent_tools.rs`). So the durable-facts slot the
+   repository-memory proposal wants to invent is already provisioned, already
+   below the KV marker, already empty, and already has a UI message describing a
+   mechanism that does not exist. **Defect-shaped finding, and it is the second
+   such UI fiction after `README.md:108`.**
+7. **There is no failure classifier and no verdict vocabulary.** Plan status is
+   exactly `Pending | InProgress | Done` (`agent_tools.rs:1485-1489`), with
+   `parse_status` (`:1522-1531`) folding every other spelling into `Pending` —
+   no `Blocked`, no `Failed`. "Verified" today means `run_command` returned a
+   string beginning `exit <code>` (`:775-833`). `README.md:108` still advertises
+   "Error classification and targeted fix suggestions".
+8. **`update_plan` is `ToolClass::ReadOnly`** (`:132`) and writes into a
+   `PlanHandle` (`:993-1001`); `/plan` toggles a strip in the TUI
+   (`app.rs:3692-3736`). "Plan mode" as the review imagines it — the agent
+   researching without touching anything — has **no enforcement today**: a model
+   can post a plan and immediately edit files in the same turn.
+9. **`PluginManifest.permissions` is parsed and read nowhere**
+   (`manifest.rs:47`; the only other occurrences are `Default` and test
+   fixtures at `:113`, `registry.rs:145`). Plugins today can contribute exactly
+   two things: `prompt_prefix` (which lands in the stable head,
+   `app.rs:2382-2388`) and hooks.
+10. **A local-only prompt already leaves the machine.** `fallback_chain`
+    (`xencode-providers-rs/src/retry.rs:126-139`) concatenates the primary model
+    with the configured list without looking at the routing prefix, and its own
+    test mixes `llama3.2` with `gemini:gemini-2.0-flash` (`:446-456`).
+    `agent_step_with_fallback` (`app.rs:5400`) walks that chain whenever a
+    provider errors. Any privacy router (proposal 18) that gates the router but
+    not the fallback chain is decorative. **This reads as a defect today**, in
+    the same family as fact 6.
+11. **The security scanner's two taint-shaped rules cannot be read as verdicts.**
+    `check_path_traversal` compiles
+    `(?i)(open|read_text|read_to_string|Path::new)\s*\([^)]*user|input|param|filename`
+    (`xencode-analysis-rs/src/security.rs:196`). Because alternation binds
+    loosest, the pattern is `(open(…)user) | input | param | filename`, so *any
+    line containing the word "input" is reported as High-severity path
+    traversal*; `check_ssrf` (`:220`) has the identical shape with `url`/`user`.
+    Reproduced by evaluating the same pattern under PCRE against
+    `let input_buffer = 3;` (match) and a clean line (no match). The
+    scanner is user-facing: `xencode-cli/src/main.rs:2055-2058` prints
+    `Security: {n} issues in {file}` per file, and the TUI's Security auditor
+    panel runs the same rules per file. Findings also echo the matched line, so a
+    report can carry a secret it just detected. Note what does *not* exist:
+    `analyze --format json` emits only `{issues, images, skipped}` — there is no
+    `security` key and no pass/fail verdict anywhere, which makes the review's
+    `VerificationEngine` inherit a scanner that cannot be silently wrong about a
+    verdict but *can* be loudly wrong about every line containing `input`.
+12. **Prompts have three egress routers, not one chokepoint:**
+    `generate_inner` (`providers-rs/src/lib.rs:430`),
+    `generate_stream_with_tools` (`:616`), `generate_stream_inner` (`:710`), fed
+    by `app.rs:1513`, `app.rs:5419` and `main.rs:1412`. Everything else that
+    touches reqwest directly (`app.rs:5022-5140`, `xencode-server-rs`) is health
+    and model listing — no prompt content. A per-request egress hook is
+    therefore feasible, and the right shape is one `dispatch` in front of all
+    three.
+13. **The response cache keys on the wrong thing.** `cache_key =
+    sha256(prompt | model)` (`xencode-cache-rs/src/lib.rs:216-222`), looked up
+    on the **raw prompt before context assembly** (`main.rs:1341`, assembled at
+    `:1372`) and modelled as "CLI-only" in O-5 fact 20. Redaction can't collide
+    with non-redaction, so the privacy worry is unfounded — but the stored answer
+    is keyed on something other than what was sent, so any retrieved-file or
+    history difference silently reuses the wrong answer, and **any egress class
+    (PR-*) must key on the same decision the cache does** or the cache becomes an
+    egress log with a nicer name.
+14. **Nothing durable records a model turn.** `FileTask` is
+    `{id, name, command, pid, started_at, killed}` (`core-rs/src/tasks_file.rs:24-33`)
+    with status derived from an exit file plus `/proc` (`:154-161, :228-244`):
+    it records a shell, not a turn. `xencode query` is a single-shot Ollama call
+    (`main.rs:1272-1286`); the tool loop, gate and checkpoints exist only inside
+    the TUI. Checkpoints are in-memory, per-turn, ≤4 MiB, and lost on quit
+    (`agent_tools.rs:1282-1310`) — so `/rewind` cannot tell a model edit from an
+    interleaved human one.
+15. **And the gate has no responder outside a terminal.** Approvals are an
+    `mpsc` of `(ApprovalRequest, oneshot::Sender<…>)` (`agent_tools.rs:1107-1125`);
+    with no reader, a mutating call cannot be answered. Proposal 7 and proposal
+    8's autonomous agent therefore deny every write the moment nobody is
+    watching — which is the correct default, and the reason **LF-2** (approval
+    round-trip from a phone) is the real blocker behind long-running autonomy,
+    ahead of the queue itself.
+16. **The "semantic" layer is four regexes over Rust text, and the hole is wider
+    than the label suggests.** `symbols.rs:58-68` holds structs / functions /
+    imports / exports. Structs match only `pub struct` — private structs are
+    invisible — and there is **no enum, trait, impl, type or const extraction at
+    all**, so "implements trait" edges are structurally impossible and the graph
+    carries zero trait information. The `fn` pattern misses `const fn` and
+    `extern fn` and everything macro-generated. `exports` captures the *first*
+    path segment, so `pub use database::Pool` exports `"database"` rather than
+    `Pool` (pinned by the test at `:490`). Edges come only from `use` statements
+    (`build_graph`, `:359-386`) — a `mod x;` declaration is not an edge, so
+    `lib.rs` has no children and whole-crate parent→child reachability is
+    missing. Extraction is Rust-only (`extract_rust_symbols`, called from
+    `init.rs:357` and `refresh.rs:68`), which means the +8 symbol signal in the
+    retrieval table (`retrieve.rs:12`) is dead weight on any non-Rust repo.
+    **`advise.rs` already computes cycles / hubs / orphans / broken-imports and
+    `affected_dependents` (default 3 hops, `AFFECTED_MAX_HOPS` at `:28`) on top of exactly this graph** — so
+    the shipped Milestone F advice inherits the hole, and `xencode impact` as the
+    review scoped it is **CI-6** + **VF-5** over data that is not yet accurate.
+
+### P-2 — Multi-agent orchestration (proposal 1)
+
+The evidence is unusually one-sided, and it agrees with the hardware.
+
+- Anthropic's multi-agent research system measured Opus-lead + Sonnet-subagents
+  beating single Opus by **90.2%** on breadth-first *research* evals, while
+  stating that token usage explains 80% of the variance, multi-agent burns
+  ~15× chat tokens, and coding is explicitly out of scope: "most coding tasks
+  involve fewer truly parallelizable tasks than research, and LLM agents are not
+  yet great at coordinating and delegating".
+- MAST (1,600+ traces, 7 frameworks): multi-agent gains on benchmarks are
+  "often minimal"; the 14 failure modes cluster into system design,
+  inter-agent misalignment and task verification.
+- Cognition, in the follow-up to "Don't Build Multi-Agents", endorses exactly one
+  class: **single writer, other agents contribute intelligence**. The
+  clean-context review loop (Devin Review) is measured at ~2 bugs/PR, ~58%
+  severe; parallel-writer swarms see "no meaningful adoption"; and their own
+  swarm demos "share a simple, verifiable success criterion" that real software
+  work lacks.
+- Aider's architect→editor — a *two-stage sequential chain over two models* —
+  moved the polyglot SOTA from 79.7% to 85%. That is the whole case for a
+  pipeline, and none of it for a graph.
+- No shipped system's "multi-agent" is a user-authored DAG: Claude Code
+  subagents are an orchestrator-worker loop (one delegation at a time), and
+  Cursor/Codex "parallel agents" are N independent full sessions on N cloud
+  machines — parallelism bought with compute this box does not have.
+
+**Options**
+
+- **MA-1 — Clean-context reviewer as a consumer of existing `/spawn`.** Spawn the
+  worktree subagent with read-only tools against the diff, post findings to chat.
+  *Effort: S.* The only directly measured multi-agent win for code, and it needs
+  no new machinery. *Trap:* no iteration cap and it reviews forever.
+  *Done when:* a seeded bug in a scratch branch is caught by the reviewer and
+  the loop terminates under a cap.
+- **MA-2 — `xencode workflow` as a fixed serial pipeline** (research → plan →
+  implement → test → review): a Rust `Stage` enum, one slot, per-stage model and
+  budget from **MI-7** profiles, `AgentRun` reused, handoff struct = plan text +
+  diff + compressed trace. *Effort: M.* Captures architect/editor value plus the
+  **L-7** gate plus MA-1 while preserving byte-stable KV inside each stage.
+  *Trap:* wall-clock — N serial CPU generations; and rigidity on two-line tasks,
+  so it must be opt-in per invocation.
+- **MA-3 — Read-only explorer as a tool call** (recon → distilled summary, main
+  agent stays sole writer). *Effort: M.* *Trap:* lossy summaries omit exactly the
+  line the coder needed; mitigate by returning `file:line` citations, which is
+  what **CI-3**'s symbol index makes cheap.
+- **MA-4 — Raise `--parallel` for real concurrency.** *Effort: L.* *Trap:* pays
+  RAM for a speedup 8 cores cannot deliver and breaks the documented
+  `--parallel 1` KV invariant. Park.
+- **MA-5 — The general `AgentGraph`/`AgentEdge` with per-node model/tools/
+  workspace.** *Effort: L.* *Trap:* user-authored edges are an untestable config
+  surface, and MAST's taxonomy is a list of ways they fail. See REJECT.
+
+### P-3 — Repository memory (proposals 2, 6)
+
+Start from what exists: `xencode-memory-rs` is conversational only — a 50-message
+sliding window per session, persisted to `~/.xencode/conversation_memory.json`
+(`src/lib.rs:9, :83-99`). There is no project-fact store anywhere in the tree,
+which is why the review's "understands the entire repository and maintains
+durable project memory" reads as a gap. It is a gap with one empty room already
+built: `state.md` (fact 6).
+
+The literature here is a warning, not a feature list.
+
+- **AgentPoison** (NeurIPS 2024): poisoning **<0.1%** of an agent's long-term
+  memory gives >80% attack success, and the triggers are *retrieval-targeted* —
+  the planted fact surfaces precisely when it is relevant. A memory the model
+  writes and the model reads back is the attack surface, not the feature.
+- AGENTS.md injection is already exploited in the wild (Backslash on silent
+  credential exfiltration through a malicious repo `AGENTS.md`; NVIDIA guidance
+  for indirect injection; a Copilot agent leaking private repos). xencode puts
+  repo-controlled `AGENTS.md` text in the obey-exactly position
+  (`context.rs:33-35`) — N flagged this as a defect; self-writing memory there
+  would make it worse, not better.
+- The prior-art spectrum is a straight line from "agent edits its own memory" to
+  "human writes the file": MemGPT/Letta self-edits and accumulates drift; mem0
+  lets an LLM decide ADD/UPDATE/DELETE with no human gate and had its SOTA
+  claims publicly rebutted by Zep (the LoCoMo 84%→58% dispute) — treat every
+  vendor number in this space as soft; Zep/Graphiti's `valid_at`/`invalid_at`
+  *invalidate-don't-delete* model is the honest design; Claude Code's automatic
+  memory and Cursor's memories are both complained about as stale and ignored;
+  Aider's conventions are human config, never self-written; Reflexion works
+  because it is episodic and session-scoped.
+- Standing caution on self-generated lessons: "LLMs Cannot Self-Correct Reasoning
+  Yet" (Huang et al., ICLR 2024).
+
+**Options**
+
+- **MEM-1 — A candidate-facts file the human promotes.** `.xencode/memory/
+  learned.candidate.md`, agent-drafted, promoted into `state.md` behind
+  **EV-7**'s gate. *Effort: S.* This is the feature, minus the poisoning hole.
+  *Trap:* promotion fatigue — nobody reviews an unbounded queue; cap it and
+  invalidate on diff.
+- **MEM-2 — `state.md` as the durable tier with provenance.** One line per fact
+  with `[src: commit|session|date]`; facts naming a path go stale when that path
+  appears in the next git-dirty scan. *Effort: M.* Depends on there being a
+  writer at all (fact 6). *Trap:* 800 tokens is ~15 facts, and inclusion is not
+  correctness.
+- **MEM-3 — Verify-on-read for code-shaped facts.** "X calls Y" re-checked
+  through `xencode-analysis-rs`/grep at inject time, dropped on falsity.
+  *Effort: M.* *Trap:* only symbolic facts are mechanically checkable; "why"
+  decisions are not, and pretending otherwise is how a stale memory survives.
+- **MEM-4 — Unrestricted write on "exit code 0 = verified".** **REJECT-tier**:
+  exit 0 is not verification, no verifier exists (fact 7), and this is exactly
+  the self-poisoning path AgentPoison measures.
+- **MEM-5 — SQLite/vector-indexed memory.** *Effort: L.* *Trap:* unjustified at
+  a few hundred facts by the project's own evaluate-before-you-embed bar, and
+  markdown is diffable, git-trackable and greppable by the human.
+
+### P-4 — Evidence, verification and artifacts (proposals 5, 6, 11, 12)
+
+The review's strongest contribution. Its three items — a verdict the model
+cannot talk its way into, evidence-linked state, and artifact-based verification
+— are **one substrate with three projections**, and the ordering is separable
+even though the design is not.
+
+- in-toto's shape is the useful part: a statement = subjects (digests) +
+  predicate + builder, where a *run* materializes subject digests. Signing and
+  DSSE envelopes buy third-party trust, and at one local user with no trust
+  boundary there is no third party to convince. SWE-bench is the discipline
+  lesson: a submission is a diff plus a raw log, and **the harness decides, not
+  the model**.
+- OTel's GenAI conventions already define `invoke_agent`/`execute_tool` spans
+  with trace-id correlation — the right skeleton for a ledger, for free, with no
+  collector. *(Page reads below are snippet-level; the fetch quota was exhausted
+  this session.)*
+- "Context rot" (Chroma, 2025) supports the review's evidence-based-state
+  intuition — long contexts degrade non-uniformly — but only if compaction
+  *re-injects* from the ledger, which `compact.rs` already half-does through
+  `state.md`. As stated by the reviewer it is partly hand-wavy.
+- Machine-checkable verification itself is still **VF-1**'s problem (O measured a
+  377 s instrumented coverage build on this box), and a ledger must not claim a
+  verdict `VF-1` cannot support.
+
+**Options**
+
+- **EVd-1 — Session run-ledger.** Append-only JSONL of
+  `(session, run-class, exit code, subject digests, log ref)`, OTel-shaped,
+  in-toto-predicate-flavoured, no signatures. *Effort: M.* This is the shared
+  primitive of proposals 5+6+11. *Trap:* ledgers are secret-full — a raw
+  `test.log` tail can carry a config value; **EV-2**'s redaction rule applies at
+  write time, not read time.
+- **EVd-2 — A session key** on `RequestMetrics` (`metrics.rs:22-42` has none) and
+  on ledger rows. *Effort: S.* Also unblocks **CX-1**, which O lists as needing
+  precisely this. *Trap:* drifting into **L-9**'s cost work — a key is not a
+  bill.
+- **EVd-3 — A checks-ran verdict**: `{ran, skipped, failed, evidence-ref}`,
+  never the word "verified" while `VF-1` is unbuilt, and the scanner's output
+  labelled `pattern-scan` wherever it is surfaced (fact 11) rather than
+  "security". *Effort: S.* JUnit's `skipped ≠ passed` semantics are the model.
+  *Trap:* every consumer will want to upgrade the word.
+- **EVd-4 — `.xencode/artifacts/<session>/`.** Per-session dirs, log tails
+  reusing `agent_tools.rs:778-830`'s caps, keep last N plus every failing
+  session, git-ignored by default. *Effort: S.* *Trap:* a `cargo test` loop
+  fills a disk.
+- **EVd-5 — Ledger-fed compaction.** Merge into **EV-6**/**SE-2** rather than
+  forking a third memory of what happened.
+- **EVd-6 — False-verified calibration.** Seed broken changes, then measure how
+  often the agent's verdict claimed success. *Effort: M.* This is the one thing
+  **EV-1** cannot measure, because EV-1 grades task success and not report
+  over-claiming — which is the review's actual worry.
+- **EVd-7 — Hash-chain the ledger**, reusing **EV-11**'s prev-hash+seq primitive
+  verbatim. *Effort: S.* *Trap:* do not add signing. For a local user a chain
+  proves only self-consistency, which is still worth having for rewind
+  forensics.
+
+Build **EVd-1 + EVd-2** first: they are the substrate, cheap, and unblock CX-1.
+Defer the verdict (EVd-3) until **L-7** exists, because an exit code is the only
+honest signal today. Defer artifacts until **EV-2** lands, since EV-2 is ~70% of
+the ledger already.
+
+### P-5 — Adaptive context and task-aware retrieval (proposals 13, 14, 17)
+
+- **Agentless** (arXiv 2407.01489, FSE 2025): a fixed three-stage pipeline with
+  *no* autonomous retrieval beat agentic baselines on SWE-bench, and
+  localization quality drives resolve rate — evidence for a deterministic router
+  over an LLM classifier, and for better static retrieval over cleverness.
+- **Lost in the Middle** (Liu et al., TACL 2024) and **Context Rot** (Chroma
+  2025): position and length both matter, non-uniformly. Ordering is a first-class
+  lever, not a tie-break — which is worth more here than a bigger index, given
+  the 4k-class windows O-1 measured.
+- **Generative Agents** (arXiv 2304.03442): recency + importance + relevance,
+  with ablations — the canonical support for **EV-4**'s drop-order, i.e. the
+  review's "importance-weighted history" is already planned.
+- **Aider's repo map**: a symbol map from the dependency graph, ranked by
+  PageRank from the current files, inside an auto-adjusting ~1k-token budget.
+  Cheap, no embeddings, and the canonical answer for small windows — and
+  `retrieve.rs` already stores `DepEdge`s, so the in-degree version is nearly
+  free.
+- Against proposal 15: **no published measurement** was found that a 4-class
+  task-shape retrieval configuration improves outcomes for code agents, let
+  alone makes a 4B model dramatically smarter. A 4B classifier misroutes on
+  ambiguous phrasing, and its call costs a full prefill on a CPU box.
+- Prompt compression (LLMLingua-2, claimed 1.5–6×) has an empirical study
+  finding it *hurts* reasoning-shaped tasks, and it is Python — dead on the
+  Rust-only rule.
+
+**Options**
+
+- **AC-1 — Read the window the server actually has**: `n_ctx` from the `/props`
+  response already fetched (fact 4), plus Ollama `/api/show`. Feed it into
+  `ModelCapabilities.context_window` as server-verified `Some`. *Effort: S.*
+  This **is MI-2/MI-3** — relabel, don't re-plan. *Trap:* `/api/show` reports
+  the Modelfile value, not a request-level `num_ctx` override; track what was
+  sent.
+- **AC-2 — Replace the hardcoded `Balanced`** with real selection: total-RAM
+  probe, user override in config. *Effort: S.* *Trap:* without a GPU, RAM
+  probing is guessing — keep it overridable or ship nothing.
+- **AC-3 — Rule-based task-shape router.** Derive the shape from signals already
+  in the tree: prompt verbs (fix/rename/add/refactor/secure), whether touched
+  files contain `#[test]`, the last `run_command` exit status, the git-changed
+  set; then bias the existing weight table (BUGFIX → test-file dep-hops, REFACTOR
+  → symbol references, FEATURE → AGENTS/architecture). *Effort: S–M.* The one
+  genuinely new idea in proposals 14/15, at zero classifier calls. *Trap:* a
+  weight table per shape is fiction unless **EV-1**'s gold sets are partitioned
+  by shape — measure per partition before merging.
+- **AC-4 — Scale `top_k` and content caps from measured free space**: real ctx
+  (AC-1) minus a prompt-overhead EMA from the `usage` already recorded per
+  request, instead of profile-stepped constants. *Effort: M.* This is the part of
+  "adaptive context engine" that isn't already planned. *Trap:* oscillation
+  without hysteresis, and the chars/3–4 estimator is often ±20–30% on code — so
+  this is adapting on noise until **AC-5** exists.
+- **AC-5 — Tokenizer truth**: `llama-server`'s `/tokenize` endpoint *(UNVERIFIED
+  that pinned build b11120 exposes it — check `--help` before planning work)*, or
+  a pure-Rust GGUF vocab read (`llama-gguf`, `shimmytok`) offline; count the
+  assembled prompt once per turn. *Effort: M.* Prerequisite for AC-4 being
+  honest. *Trap:* Ollama has no count endpoint, so this diverges the local
+  routes again; do not add HF `tokenizers` — wrong vocab for GGUF.
+- **AC-6 — Symbol-only repo-map tier** for LOW/4k budgets, ranked by existing
+  `DepEdge` in-degree from seed files (PageRank-lite). *Effort: M.* *Trap:* a map
+  only helps if the model then asks for the right file, and a 4B may just spend
+  tokens on it — prove with the harness.
+
+### P-6 — Execution modes and capabilities (proposals 9, 10, 16)
+
+- Every vendor that ships "modes" ships two orthogonal knobs — Codex separates a
+  **sandbox** (read-only / workspace-write + network-off / full-access,
+  kernel-enforced via Seatbelt or Landlock/seccomp) from an **approval policy**,
+  and its issue #3684 is a catalogue of what happens when they are conflated.
+  Claude Code's four permission modes are mostly prompt + gate, and the community
+  finding that "Plan Mode Isn't Read-Only" (allow-rules and Bash still write) is
+  the exact failure MD-1 has to not reproduce.
+- Gemini CLI's plan mode is read-only tool restriction plus framing; Cursor,
+  Aider and Zed change prompt/tools, not the OS sandbox; Zed's per-tool
+  allow/ask/deny is the capability grammar at one layer less than the review's
+  proposal.
+- The tree's own position: modes that change the **tool list** are free
+  (`app.rs:5491-5507` already withdraws tools on the final round, and the list is
+  sent as the provider `tools` field — never part of the stable head), while
+  modes that change the **system prompt** sit in the head and void KV reuse on
+  every switch.
+
+**Options**
+
+- **MD-1 — `PLAN` and `AUTONOMOUS` as real `ApprovalMode` variants**, enforced by
+  `classify()` denying `Edit`/`Shell` in PLAN. *Effort: S.* One honest line of
+  enforcement, and it makes fact 8's display-only plan into a gate. *Trap:*
+  `grants` are keyed by `ToolClass` and shared across the session
+  (`app.rs:307`, `agent_tools.rs:1107-1141`) — "allow Edit for this session"
+  granted in IMPLEMENT would leak into PLAN unless grants become per-mode.
+- **MD-2 — Tool-stripping in PLAN**: offer only `ReadOnly` tools when the mode is
+  PLAN, using the mechanism at `app.rs:5506`. *Effort: M.* Belt to MD-1's
+  braces. *Trap:* changing the tool list mid-turn costs a KV miss on
+  tool-calling templates — batch it at turn boundaries.
+- **MD-3 — Per-mode system prompts.** *Effort: L.* **REJECT**: voids the stable
+  head on every switch and shows up as a kv-reuse-ratio collapse. Mode state
+  belongs in the per-turn region.
+- **MD-4 — Six modes with per-mode model and verification.** Collides with
+  **MI-7**; DEBUG/REVIEW are labels until profiles exist. Park.
+- **CAP-1 — Capabilities as the *vocabulary* of the gate**: `filesystem.read`,
+  `filesystem.write`, `shell.execute`, `network.request`, `external.mcp` as
+  per-mode booleans inside `classify()`. *Effort: M.* This is the honest half of
+  proposal 10, and it is prerequisite to **SE-4** and **RS-1** landing
+  coherently — `RS-1`'s proposed `ToolClass::Network` becomes
+  `network.request` for free. *Trap:* `secrets.read` and `git.push` would be
+  *invented capabilities over `sh -c` strings*; prefix matching is
+  trivia-level bypassable, which is **SE-7**'s kernel-enforcement job, not the
+  gate's.
+- **CAP-2 — Make `permissions` real for plugins** (fact 9): refuse to load a
+  plugin that registers hooks unless its declared permissions are a subset of
+  what hooks can actually do. *Effort: S.* Kills a field that is currently
+  theatre.
+- **CAP-3 — Multi-role `[agent.reviewer]` TOML.** **REJECT** today: spawns
+  inherit `ApprovalCtx`, so no second role exists that acts with independent
+  authority, and a policy language nobody writes correctly is a liability.
+
+### P-7 — Privacy routing and computer use (proposals 11, 18)
+
+- Prior art is **file-level and all-or-nothing**, not snippet-level: Copilot
+  content exclusion is path/pattern blocking with documented gaps for selected
+  and pasted context; Cursor's privacy mode is an account-level toggle plus
+  `.cursorignore`. Proxy redaction (LiteLLM, Kong's `ai-privacy-deploy`, Presidio
+  replace/restore round-trips) exists in Python land; no mature Rust equivalent
+  surfaced. Redaction inside code files also degrades what the model can reason
+  about — broken snippet semantics — and no vendor claims to have resolved that
+  tension.
+- Browser automation is settled: Playwright MCP, ~23 tools, accessibility-snapshot
+  driven, auth via a persistent profile/`storageState`. Desktop control is not:
+  Linux Wayland a11y adoption is poor and `ydotool`/`wtype` are uinput hacks,
+  OSWorld-class agents remain weak on long-horizon tasks, and O-6 already
+  recorded that this box has no AT-SPI foundation.
+
+**Options**
+
+- **PR-1 — Egress gate at the three routers** (fact 12), ideally hoisted into one
+  `dispatch`: classify the request `local`/`remote` by prefix and apply a policy
+  tier per provider. *Effort: M.* **Must filter `fallback_chain`** (fact 10) or
+  the feature is decorative — that is the single most important line in this
+  milestone's do-work-so-that-it-is-honest list.
+- **PR-2 — Deny-by-default cloud with an explicit opt-in plus a status-bar
+  egress indicator.** *Effort: S.* Reuses the fact that cloud prefixes need an
+  `api_keys` entry to exist at all. *Trap:* keys-for-transport and
+  keys-for-consent are different things; keep them distinct in config, or the
+  indicator lies.
+- **PR-3 — Deterministic redaction of the *dynamic* tiers only** (name-based
+  secret-file deny at `scanner.rs:48-63` + content scan, with a
+  placeholder/restore map); the stable head is never redacted, since dynamic
+  redaction there breaks KV reuse and trips `/ctx`'s drift check (`app.rs:3504`).
+  *Effort: M.* *Trap:* redaction recall is low; false reassurance is worse than
+  an honest "task description only" mode.
+- **PR-4 — Per-request "show exactly what leaves the machine" preview +
+  confirm.** *Effort: M.* *Trap:* approval fatigue — no vendor ships it for a
+  reason — but it is the only option that makes the policy *checkable*, and it is
+  cheap as a `/egress` debug command rather than a per-turn gate.
+- **CU-1 — A verifier seam**: evidence-shaped pass/fail plus an artifact, feeding
+  **MM-3**'s VLM check. *Effort: S–M.* Cheap now; the trap is generalizing it
+  into an "external executor" framework.
+- **CU-2 — Browser verification as a Playwright-MCP recipe (**MM-11**)**, with
+  zero product code. *Effort: S.* *Trap:* MCP tools are `ToolClass::External` —
+  no preview, no undo — and screenshots burn a local model's context.
+
+**REJECT**: per-snippet egress allowlisting sold as a guarantee (regex detection
+cannot prove absence — build the PR-2/PR-3 *classes* and describe them
+honestly); desktop/GUI-app computer use on Wayland.
+
+### P-8 — Long-running work (proposals 7, 8)
+
+- Codex cloud tasks run per-task in remote containers with unreliable
+  environment reuse; Claude Code's `--resume`/`--continue` replays
+  **conversation state, not the filesystem**; Copilot's unit is an async PR with
+  no durable goal at all; LangGraph checkpointers persist channel values,
+  explicitly not the environment; Temporal gets durability from recorded history
+  plus *deterministic replay* — a constraint no LLM-agent product actually
+  adopts. Anthropic's long-running-agent harness is the low-tech combination: a
+  progress file, git, and a fresh-context worker that **re-verifies the tree**.
+  *(Several of those pages were snippet-level only.)*
+- Locally, a background turn either halves foreground throughput or evicts the
+  user's model: slot KV scales with `slots × n_ctx` and reuse is per-slot, so a
+  second conversation forces full re-prefill. On 8 cores that is not a
+  scheduling nuisance, it is the whole budget. Background autonomy is usable
+  here only idle-gated (PSI, **AM-2**) or routed to the Colab path.
+- systemd offers the trigger, not the queue: `.path` units are real inotify
+  activation, and timers with `Persistent=true` catch up after suspend — an
+  overnight timer on a suspended laptop simply does not run. A goal queue ≠ a
+  cron daemon; O-8 already rejected the daemon.
+
+**Options**
+
+- **GL-1 — A goal record as one JSONL file** (`goals/<id>.jsonl`: objective,
+  acceptance command + exit-code gate, status, step log, budget, worktree ref,
+  base commit, last evidence) — matches the derived-status idiom the tree already
+  uses for tasks. *Effort: S.* *Trap:* schema creep into a workflow engine.
+- **GL-2 — Lift L-7's acceptance anchor out of the turn** so the definition of
+  "done" survives restarts and model changes. *Effort: S.* *Trap:* anchoring to a
+  test that passes vacuously.
+- **GL-3 — Resume by re-verifying, never by replaying.** On wake: re-run the
+  acceptance command against the current tree, record base commit + `git status`
+  to detect interleaved human edits, and invalidate all retrieved context.
+  *Effort: M.* *Trap:* `git status` misses *committed* human changes on the
+  branch — compare the HEAD sha too.
+- **GL-4 — `xencode goal` as a row type on LF-4's detached queue.** *Effort: M.*
+  *Trap:* goal UX before LF-4 exists is an in-TUI toy that dies with the
+  terminal. Do not build a second queue.
+- **GL-5 — A machine-turn gate**: idle (PSI + no foreground generation) ∧
+  **CX-7** budget ∧ **LF-2** approval channel, running in a **D3**-style worktree
+  with rollback. *Effort: M.* *Trap:* CX-7's cap fires *after* the mutating call
+  unless it is checked before each round.
+- **GL-6 — Findings land in AM-6's persisted inbox/digest**, never as an
+  interrupt. *Effort: S.*
+- **GL-7 — A systemd `.path`/user timer as the wake trigger only.** *Effort: S.*
+  *Trap:* wake storms need **AM-3**'s debounce first — and O-9 recorded that the
+  current watcher never flushes under a storm.
+
+The ordering this pass settles is not a feature order, it is a dependency order:
+**LF-4** (detached model turns) → **LF-2** (approval round-trip; the real
+blocker, since no responder means auto-deny — fact 15) → **GL-3/GL-5** → goals
+and watch triggers on top.
+
+### P-9 — Semantic code intelligence and LSP (proposals 3, 4)
+
+The review asked for "AST + LSP" as one item. The tree's answer is split: the
+AST-shaped half is Milestone N's **CI-1…CI-7**, and the LSP half is where this
+pass found something the whole plan has been quietly assuming.
+
+- **What the current symbol layer actually is** (§P-1 fact 16, below): four
+  regexes over Rust text. It cannot answer any of the five questions an LSP
+  exists for — references, call hierarchy, type definition, implementation,
+  rename — because those need cross-crate name resolution, trait selection and
+  macro expansion. So "semantic code intelligence" is not one missing feature,
+  it is a tier boundary, and xencode sits under it.
+- **rust-analyzer has a batch CLI that makes the boundary cheap-ish**: verified
+  against `crates/rust-analyzer/src/cli/flags.rs` on master, the subcommands
+  include `scip` (whole-workspace symbol index, definitions *and* references, no
+  LSP client required) and `ssr` (semantic structural replace — `$a.foo($b) =>
+  bar($a,$b)` with real resolution). `scip` is the cheapest route to graph data
+  the plan currently gets from regexes; `ssr` subsumes **CI-4**'s codemod for
+  Rust.
+- **A resident rust-analyzer is the single biggest process on this machine.**
+  Reported numbers: 14.7 GB on a "fairly large" project (rust-analyzer #19552),
+  17 GB and climbing on the dioxus workspace with a maintainer advising disabled
+  cache priming — i.e. growth deferred, not fixed — and a 2024 write-up finding
+  ~1.8 GB enough to threaten an 8 GB box. xencode's own tree is 398 locked deps
+  plus a sysroot. **15 GiB total.** No local measurement was possible: the
+  installed `rust-analyzer` on this box is a broken rustup shim. The new
+  alternative (Rust Glancer, Aug 2026) claims ~100× less RAM via on-disk indexes
+  and is immature.
+- **There is no maintained Rust LSP client.** `tower-lsp` last shipped 2023-08
+  and is server-side; `lsp-types` last shipped 2024-06 from a repo with no push
+  since; `lsp-server` is current only because rust-analyzer maintains it;
+  `lsp-client` is v0.1.0 with ~2k downloads. Zed, helix and neovim all hand-roll.
+  Shipped agents: Codex CLI has none (open issue #8745), OpenCode ships a
+  built-in registry, Claude Code users reach LSP through the community
+  `mcp-language-server` bridge (1.6k★). Building a client means owning a crash
+  and restart state machine nobody else in this ecosystem will supply.
+- **Does semantic beat grep? Mixed, small-n, and it cuts against the review.**
+  The AgentConnect pilot (Aug 2026) found agents *chose* LSP tools 0–6% of the
+  time for localization and that forcing semantic-first **cut** success from 100
+  to 89%; on reference completeness precision reached 1.00 vs 0.76 but **recall
+  stayed ~0.66 in both arms** — the agent, not the tool, was the bottleneck.
+  F1 gains appeared only on noisy identifier reuse (+0.246, −12% tokens) and were
+  absent on clean code (+16% tokens for nothing). Counter-evidence on the
+  narrower claim: RepoNavigator gets SOTA localization from a *single*
+  jump-to-definition tool plus RL, and CodeRanker (ASE'26) shows a structural
+  graph as a side channel buys −26% input tokens at maintained accuracy.
+- **A persisted graph is not free either**: Codebase-Memory (arXiv 2603.27277)
+  measures a persisted tree-sitter knowledge graph at 83% answer quality vs 92%
+  for a file-explorer agent, at 10× fewer tokens, and names staleness/
+  invalidation as its weak point — which is exactly the wrong weak point given
+  `watcher.rs:122-129` never flushes under a steady edit stream, i.e. while an
+  agent is writing files.
+- **Affected-test mapping has a hard ceiling**: nextest's `rdeps()` filtersets
+  are crate/package granularity and nothing in cargo maps file→test. Co-located
+  `#[test]` modules map trivially; beyond that, package granularity is the
+  honest answer, which is what **VF-5** already says.
+
+**Options**
+
+- **LSP-1 — An `find_refs`/`callers` agent tool pair** over references and call
+  hierarchy via a subprocess rust-analyzer client. *Effort: L.* The only
+  genuinely un-collectable signal in the whole retrieval story. *Trap:* resident
+  RA's memory on 15 GiB, plus owning a server lifecycle state machine, plus it is
+  a new subsystem the Rust ecosystem does not provide. Not **CI-1…CI-7**.
+- **LSP-2 — `rust-analyzer scip` at `/init` and on refresh**, answering impact
+  and reference questions from the emitted index. *Effort: M.* Client-free
+  semantic graph, and it makes **CI-6** symbol-accurate instead of
+  regex-accurate. *Trap:* minutes of reindex latency and the same staleness
+  problem — do this *before* attempting LSP-1, since it is the same data without
+  the resident process.
+- **LSP-3 — Semantic Rust rename through the `ssr` CLI** behind **CI-4**'s
+  preview diff. *Effort: S–M.* CI-4 covers syntax-level codemod; this adds
+  resolution, aliases and re-exports — i.e. the part where a codemod silently
+  breaks a build.
+- **LSP-4 — Fix the regex tier now** (fact 16): enum/trait/impl/`mod` edges, the
+  export-name bug, private structs, and honest no-op behaviour on non-Rust repos.
+  *Effort: S.* Not in **CI** at all, because CI-2 replaces this layer wholesale —
+  so it is a stopgap, justified only by the size of the hole: the +8 symbol
+  retrieval signal is currently near-dead weight, and "implements trait" edges
+  are structurally impossible.
+- **LSP-5 — Declare the multi-language policy**: semantic tools Rust-only,
+  tree-sitter/ast-grep fallback elsewhere, documented as such. *Effort: S.*
+  *Trap:* the per-language registry is precisely the thing to refuse.
+
+### P-10 — Do-not-build register (additions only; the N and O registers still stand)
+
+| Rejected | Because |
+|---|---|
+| A general `AgentGraph` + scheduler | No shipped system demonstrates graph edges beating an LLM-led loop or a hardcoded chain; at 15 GiB / 8 cores / one KV slot it degenerates to a pipeline anyway |
+| Six named agent roles, each with own context/tools/model/worktree | The review's framing, not a measured need; MA-2's 3–4 stages cover the explorer/reviewer value |
+| Parallel writer agents on one repo | Conflicts, duplicated retrieval, per-agent `all-allow` before **SE-4** is the lethal trifecta with extra steps |
+| `VerificationEngine` as a separate crate before the ledger | Ceremony over a substrate that doesn't exist yet |
+| DSSE / Sigstore / any signing on evidence | One local user, no trust boundary, no third party to convince |
+| The word "verified" in any verdict | No verifier exists (fact 7); use `{ran, skipped, failed, evidence-ref}` |
+| SPDX / CycloneDX | Wrong problem — xencode distributes nothing |
+| `benchmark.json` performance tracking | No profiling baseline exists yet |
+| Self-writing memory into `AGENTS.md` or the stable head | Voids KV reuse per edit and hands the model the pen on its own system prompt (AgentPoison + live AGENTS.md exploits) |
+| Auto-write memory on "exit code 0" | Exit 0 is not verification; MEM-4 |
+| Six category files as six new tiers | Six caps and six staleness classes for content `state.md`'s four sections already model |
+| A vector/SQLite memory index now | MEM-5; a few hundred facts, and markdown is diffable |
+| An LLM-based task-shape classifier call | AC-3's rules do the job; no measurement supports the classifier for code agents |
+| VRAM / KV-cache telemetry loops | `--parallel 1`, no GPU, and O's N-0 already pins the KV contract |
+| LLMLingua-style generic prompt compression | Python, and mixed evidence specifically on reasoning-shaped tasks |
+| Mid-function context truncation refinements | Line-boundary cuts are fine; no evidence finer handling matters |
+| Per-mode system prompts in the head | MD-3: a KV-reuse collapse per mode switch |
+| A per-command-prefix / per-glob capability grammar | Prefix matching over `sh -c` strings is trivia-level bypassable; that is **SE-7**'s job |
+| `[agent.role]` policy tables | CAP-3: no role exists today that can act without the human |
+| Desktop/GUI computer use on this platform | O-6: no AT-SPI foundation on Wayland; OSWorld-class long-horizon failure |
+| "Secrets are guaranteed blocked from egress" as a promise | Regex detection can't prove absence (and fact 11's regexes are worse than useless) |
+| Temporal-style deterministic replay for goals | No LLM-agent product has adopted it; re-verification (GL-3) is the cheaper honest equivalent |
+| An always-on daemon, autonomous commit/push, or a second scheduler/approval channel | Already rejected in O-8; GL inherits those rejections |
+| The "Xencode 2.0" crate restructure as written | A rewrite of a working tree to satisfy a diagram; every primitive in it fits the existing crates |
+| A standalone persisted "code knowledge graph" product layer | **CI-2** + **LSP-2** produce the same edges on demand; 83-vs-92% answer quality plus an invalidation pipeline aimed at a watcher that can starve |
+| A per-language LSP registry | **LSP-5**: say Rust-only and mean it, instead of accruing one adapter per language |
+| LSP as a retrieval-ranking signal | The pilot evidence is that agents don't pick it and precision ≠ recall |
+| "Milestone L: Xencode Autonomous Engineering" as a re-brand | L exists already and means something else; naming collision would make the plan unreadable |
+
+### P-11 — Corrections to the review
+
+Recorded because the plan is the only place they will survive:
+
+1. **Retrieval is not a plain keyword table.** It is a structural weight table
+   *plus* a BM25 hybrid that exists in `embed.rs` and is wired only into the eval
+   harness (`eval.rs:106`). The fix is a call site, not a subsystem.
+2. **The context engine is not "mostly static"; it is compile-time fixed.**
+   `HardwareProfile::Balanced` is a `const` on every live path (fact 3), which
+   makes **AC-2** a one-line-per-call-site change rather than an architecture.
+3. **There is no state to be "evidence-based" about yet.** `state.md` has no
+   writer (fact 6), so the review's evidence-linked memory is downstream of
+   *claiming the slot*, not of building a store.
+4. **Nothing about the current tree "supports multiple models running in
+   parallel".** It is the opposite: `--parallel 1` is a documented invariant
+   (fact 1), and it is what makes the byte-stable prefix pay for `/spawn`.
+5. **The privacy router is not a greenfield feature.** A policy that doesn't
+   filter `fallback_chain` (fact 10) leaks on the first provider error, so PR-1
+   has a bug to fix before it has a feature to add.
+6. **The verification story is worse than "no VerificationEngine".** Two of the
+   scanner's rules fire on the literal word `input` (fact 11), and the manuals
+   already advertise classification that does not exist. Any evidence layer built
+   on top inherits those claims unless EVd-3 names them honestly first.
+7. **The symbol index is not a symbol index.** The review could only assume the
+   "code intelligence" box in its diagram was AST-shaped; it is four regexes
+   (fact 16) that cannot see a `trait`, an `impl`, an `enum` or a private
+   `struct`, and that mis-name every re-export. That makes **LSP-4** — an hour of
+   regex work — more valuable per token than any new index, because every
+   downstream consumer (`retrieve.rs`'s +8, `advise.rs`'s dependents, CI-6's
+   impact) is currently scoring and reporting on it.
+
+### P-12 — Interactions with L, M, N and O
+
+- **MA-1/MA-2** should be specced as **EV-1** tasks, not as new eval
+  infrastructure, and their per-stage models come from **MI-7**. **L-7** is
+  MA-2's test stage.
+- **MEM-1/MEM-2** *are* **EV-4** + **EV-7**; the only new work is the writer for
+  `state.md`, which is a defect fix, and the promotion gate, which EV-7 already
+  specifies.
+- **EVd-1/2** are the substrate **EV-2** (redacted traces), **EV-6**
+  (compaction-exempt scratchpad), **EV-11** (hash chain), **CX-1** (per-session
+  cost) and **VF-1** (machine-checkable proof) all assumed would exist. Land the
+  ledger first and fold those five into it rather than shipping five
+  half-memories.
+- **AC-1/AC-2** are **MI-2/MI-3**'s implementation; **AC-5/AC-6** are new and are
+  prerequisites for **MI-4**'s context-fill warnings being accurate.
+  **AC-6** overlaps **CI-1…CI-7**'s symbol index — build it on that index, not
+  beside it.
+- **CAP-1** is the vocabulary **SE-4** and **RS-1** need to agree with each
+  other; **SE-7** remains the only honest answer for anything command-shaped.
+- **PR-1** touches the same three routers as **MI-1**'s structured-output fix and
+  the same fallback chain as **L-4**'s retry work — one `dispatch` refactor
+  serves all three.
+- **GL-\*** adds nothing to **LF-4**/**AM-1…AM-6** except a record type and an
+  acceptance anchor; the queue, the guard and the inbox are already planned.
+- **LSP-2**/**LSP-4** feed **CI-6** (impact) and **VF-5** (affected tests) the
+  accurate edges they both assume today; **LSP-1** is the only item here that is
+  not a **CI-\*** refinement, and it should not start until **LSP-2** has shown
+  what the same data costs without a resident server.
+- Collisions to avoid: `EVd-4` artifacts vs **EV-2** traces (same bytes, one
+  writer); `MD-1` PLAN vs **M-2**-style prompt shaping (gate ≠ prompt);
+  `AC-3`'s BUGFIX shape vs **L-7**'s repair loop (the loop *is* the shape);
+  `CU-2`'s browser verification vs **MM-11** (identical recipe; CU-2 is just the
+  verifier seam around it).
+
+### P-13 — The review's priority table, recorded as input
+
+The reviewer's own ranking, kept here verbatim in substance so the eventual
+triage pass can accept or reject each row knowingly rather than inheriting it:
+
+- **P0**: AgentGraph, repository memory, semantic code intelligence,
+  VerificationEngine.
+- **P1**: evidence-based state, long-running goals, autonomous background agent,
+  skills.
+- **P2**: capability/permission system, browser/computer use, artifact
+  verification, eval harness.
+- **P3**: adaptive context, task-aware retrieval, execution modes, model
+  specialization, hybrid privacy router.
+
+Read against §P-0, that ordering is close to inverted in one place: every P0 item
+is either already planned (CI-\*, VF-\*), already shipped in part (spawn
+plumbing), or blocked on a substrate nothing exists for — while several P3 items
+(**AC-1**, `n_ctx` in a JSON the code already fetches; **EVd-2**'s session key;
+**CAP-2**'s plugin-permission check; **PR-2**'s cloud opt-in) are genuinely small
+and genuinely honest fixes. It is also the case that this milestone's
+defect-shaped findings — facts 6, 10 and 11 — sit in no tier at all, because the
+review did not know they existed.
+
+### P-14 — Triage status
+
+**Not yet ranked.** This pass adds **48 options** — MA 5, MEM 5, EVd 7, AC 6,
+MD 4, CAP 3, PR 4, CU 2, GL 7, LSP 5 — on top of N's 55 and O's 73, for a pool of
+**176** across four unranked appendices. Seven of the 48 are written as
+REJECT-or-park (MA-4, MA-5, MEM-4, MEM-5, MD-3, MD-4, CAP-3) and the do-not-build
+register declines 27 further shapes the review proposed, which is the pass doing
+its job rather than a ranking.
+
+What the pool now needs before any of it becomes a queue is one thing it does not
+have: an **axis**. N, O and P each record an option space; none of them can be
+ranked against the others without deciding whether the currency is effort,
+defect-closure, daily-driver value, or how much of the local-model story each
+one protects. That decision is the owner's, and the P0–P3 table above is one
+candidate input for it, not this plan's answer.
+
+### P-15 — Primary sources
+
+Local, verified in-tree on 2026-09-23: `xencode-context-rs/src/`
+`budget.rs`, `context.rs`, `state.rs`, `compact.rs`, `retrieve.rs`, `embed.rs`,
+`eval.rs`, `metrics.rs`, `scanner.rs`, `watcher.rs`, `symbols.rs`,
+`advise.rs`, `init.rs`, `refresh.rs` ·
+`xencode-tui-rs/src/` `app.rs`, `agent_tools.rs`, `capabilities.rs` ·
+`xencode-providers-rs/src/` `lib.rs`, `retry.rs` ·
+`xencode-models-rs/src/llamacpp.rs` · `xencode-analysis-rs/src/security.rs` ·
+`xencode-plugin-rs/src/` `manifest.rs`, `registry.rs`, `runtime.rs` ·
+`xencode-core-rs/src/` `tasks.rs`, `tasks_file.rs` · `xencode-cache-rs/src/lib.rs` ·
+`xencode-memory-rs/src/lib.rs` · `xencode-config-rs/src/config.rs` ·
+`xencode-cli/src/main.rs`.
+
+External:
+
+- **Multi-agent** — [Anthropic: how we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) ·
+  [Cognition: Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) ·
+  [Cognition: Multi-Agents — What's Actually Working](https://cognition.com/blog/multi-agents-working) ·
+  [Why Do Multi-Agent LLM Systems Fail? (MAST)](https://arxiv.org/abs/2503.13657) ·
+  [Aider: separating code reasoning and editing](https://aider.chat/2024-09-26/architect.html) ·
+  [Ollama FAQ](https://docs.ollama.com/faq) ·
+  [llama.cpp KV-cache reuse discussion #13606](https://github.com/ggml-org/llama.cpp/discussions/13606) ·
+  [Claude Code subagents](https://code.claude.com/docs/en/sub-agents)
+- **Memory and injection** — [AgentPoison](https://arxiv.org/abs/2407.12784) ·
+  [memory-injection survey](https://arxiv.org/html/2601.05504v2) (UNVERIFIED
+  body) · [Backslash on AGENTS.md exfiltration](https://www.backslash.ai) ·
+  [NVIDIA on indirect AGENTS.md injection](https://developer.nvidia.com) ·
+  [MemGPT/Letta](https://docs.letta.com) · [mem0](https://github.com/mem0ai/mem0) ·
+  [Zep/Graphiti temporal knowledge graph](https://github.com/getzep/graphiti) ·
+  [Claude Code auto-memory #48783](https://github.com/anthropics/claude-code/issues/48783) ·
+  [Reflexion](https://arxiv.org/abs/2303.11366) ·
+  [LLMs Cannot Self-Correct Reasoning Yet](https://arxiv.org/abs/2310.01798)
+- **Evidence** — [in-toto attestation](https://github.com/in-toto/attestation) ·
+  [in-toto/SLSA](https://slsa.dev/blog/2023/05/in-toto-and-slsa) ·
+  [OTel GenAI agent spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-agent-spans.md) (snippet-level) ·
+  [SWE-bench](https://github.com/SWE-bench/SWE-bench) ·
+  [nextest machine-readable output](https://nexte.st/docs/machine-readable/libtest-json/) ·
+  [libtest JSON stabilization thread](https://internals.rust-lang.org/t/path-for-stabilizing-libtests-json-output/20163) ·
+  [quick-junit](https://crates.io/crates/quick-junit) ·
+  [Context Rot (Chroma)](https://www.trychroma.com/research/context-rot) ·
+  [Anthropic: effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- **Retrieval and context** — [Agentless](https://arxiv.org/html/2407.01489v2) ·
+  [Lost in the Middle](https://arxiv.org/abs/2307.03172) (UNVERIFIED) ·
+  [Generative Agents](https://arxiv.org/pdf/2304.03442) ·
+  [Aider repo map](https://aider.chat/docs/repomap.html) (UNVERIFIED content) ·
+  [LLMLingua-2](https://llmlingua.com/llmlingua2.html) ·
+  [empirical study on prompt compression](https://openreview.net/pdf?id=lbFVTPv4s6) ·
+  [llama-gguf](https://docs.rs/llama-gguf) · [shimmytok](https://github.com/Michael-A-Kuykendall/shimmytok)
+- **Modes and capabilities** — [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes) ·
+  [Plan mode isn't read-only](https://blog.sondera.ai/p/claude-codes-plan-mode-isnt-read) (UNVERIFIED) ·
+  [Claude Code #57439](https://github.com/anthropics/claude-code/issues/57439) ·
+  [Codex approval/sandbox](https://vladimirsiedykh.com/blog/codex-cli-approval-modes-2025) ·
+  [Codex #3684](https://github.com/openai/codex/issues/3684) ·
+  [Gemini CLI plan mode](https://geminicli.com/docs/cli/plan-mode/) ·
+  [Zed tool permissions](https://zed.dev/docs/ai/tool-permissions) ·
+  [agent sandbox deep dive](https://pierce.dev/notes/a-deep-dive-on-agent-sandboxes) ·
+  [Linux sandboxing](https://yeet.cx/topical-takes/sandbox-ai-coding-agent-linux)
+- **Privacy and computer use** — [Copilot content exclusion](https://docs.github.com/en/copilot/concepts/context/content-exclusion) ·
+  [Presidio](https://microsoft.github.io/presidio/) ·
+  [Playwright MCP](https://playwright.dev/mcp/introduction) ·
+  [playwright-mcp](https://github.com/microsoft/playwright-mcp) ·
+  [OSWorld 2.0](https://arxiv.org/abs/2606.29537) ·
+  [cua.ai on Linux computer use](https://cua.ai/blog/inside-linux-computer-use) ·
+  [Wayland fragmentation](https://www.semicomplete.com/blog/xdotool-and-exploring-wayland-fragmentation/)
+- **Code intelligence** — [rust-analyzer CLI flags](https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/cli/flags.rs) ·
+  [rust-analyzer #19552 (14.7 GB)](https://github.com/rust-lang/rust-analyzer/issues/19552) ·
+  [RA at 13 GiB](https://users.rust-lang.org/t/rust-analyzer-using-13-gib/133914) (UNVERIFIED body) ·
+  [rust-analyzer memory on a low-end machine](https://www.dgendill.com/posts/programming/2024-01-06-reducing-rust-analyzer-memory-usage.html) ·
+  [Grep beats LSP? (AgentConnect pilot, small-n)](https://agentconnect.md/blog/grep-beat-lsp-harness/) ·
+  [RepoNavigator](https://arxiv.org/abs/2512.20957) ·
+  [CodeRanker](https://arxiv.org/html/2606.14061v3) ·
+  [Codebase-Memory](https://arxiv.org/abs/2603.27277) ·
+  [aider + ctags](https://aider.chat/docs/ctags.html) ·
+  [aider tree-sitter repo map](https://aider.chat/2023-10-22/repomap.html) ·
+  [tower-lsp](https://crates.io/crates/tower-lsp) ·
+  [lsp-types](https://crates.io/crates/lsp-types) ·
+  [lsp-server](https://crates.io/crates/lsp-server) ·
+  [Codex LSP request #8745](https://github.com/openai/codex/issues/8745) ·
+  [OpenCode LSP](https://opencode.ai/docs/lsp/) ·
+  [mcp-language-server](https://github.com/isaacphi/mcp-language-server) ·
+  [nextest filtersets](https://nexte.st/docs/filtersets/reference/)
+- **Long-running work** — [Anthropic: effective harnesses](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) (UNVERIFIED) ·
+  [Claude Code sessions](https://code.claude.com/docs/en/sessions) ·
+  [Claude Code headless](https://code.claude.com/docs/en/headless) ·
+  [Codex environment-reuse issue](https://github.com/openai/codex/issues/25086) ·
+  [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence) ·
+  [llama.cpp per-slot context](https://github.com/lemonade-sdk/lemonade/issues/3276) ·
+  [llama.cpp KV persistence #8860](https://github.com/ggml-org/llama.cpp/discussions/8860) ·
+  [systemd.timer `Persistent=`](https://unix.stackexchange.com/questions/747513/systemd-timer-to-catch-up-on-missed-runs-of-the-services) ·
+  [Temporal durable execution](https://learn.temporal.io/tutorials/go/background-check/durable-execution/)
+
+Anything marked UNVERIFIED was located through search snippets after the fetch
+quota ran out and has not been read end to end; treat its details as leads, not
+citations.

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs — two promises the code never made
+The research passes behind Milestones N–P checked manual claims against the
+implementation, and two did not hold. `README.md` advertised "error
+classification and targeted fix suggestions": there is no classifier — tool and
+shell failures reach the model as `error:`/`exit <code>` results and the agent's
+instructions tell it to name the failure — so the bullet now says that, and says
+the classifier is planned rather than present. The Roadmap section claimed there
+was "no open milestone" and "no known gap between promise and code"; five
+planning tracks (L, M, N, O, P) are recorded, and the same passes listed live
+gaps as defects. The stale crate count (14 → 15) is corrected with it.
+
 ### Docs — the product description catches up with the product
 Milestone K made the model endpoint something you point at, so "offline-first"
 in the tagline, the highlights list and the privacy row no longer described the
