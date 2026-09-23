@@ -5423,7 +5423,8 @@ leaving them to be found.
 Everything above is architecture. One measurement decides whether it is any of those
 things, and it is the cheapest real-connection check in this file:
 
-> **`AR-1` — the interop probe.** Launch each installed vendor CLI headless on a tiny
+> **`AR-1` — the interop probe, opencode first.** Launch the installed vendor CLIs
+> headless on a tiny
 > **read-only** prompt ("plan a rename of `X` across these two files; change nothing"),
 > with its own sandbox at `read-only`/`plan`, and record what actually arrives: does the
 > event stream carry tool names, file paths, approval requests and token usage? Can
@@ -5478,6 +5479,19 @@ worker, `OR-` for the thing that decides what workers to talk to.
       five-worker fan-out; and `AR-9`'s protocol is derived from that matrix rather than
       from the proposal's wish list. No `OR-` item may be scheduled before this exists,
       and nothing may be inferred from documentation.
+
+      **Run order (owner, 2026-09-23): opencode first, by itself; the other five later.**
+      One adapter fully understood beats six half-probed, and opencode is the cheapest
+      place to learn what a probe costs in attention and money — it is the only candidate
+      that ships a server mode (`opencode serve`, `opencode attach <url>`) *and* an ACP
+      server (`opencode acp`), so the same evening answers `M-7`'s "is ACP real in
+      practice" question, and it can be pointed at a local provider through `-m
+      provider/model`, so the first run need not spend cloud money at all (confirm which
+      provider it lands on before launching, and record it). Its `--format json` event
+      stream becomes the reference the other five are diffed against.
+      **The gate is unchanged by this order:** `AR-9`'s protocol may not be treated as
+      settled on one vendor's stream — a common denominator needs at least two
+      observations before it stops being an opinion about opencode.
 - [ ] **AR-2 — discovery.** Find candidate agents on `PATH`, read their versions, and
       record how each was installed (`mise`, `~/.local/bin`, other) without installing,
       upgrading or touching any of them.
