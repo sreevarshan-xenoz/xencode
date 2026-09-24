@@ -31,3 +31,6 @@ walkdir = "2"
 dirs = "7"
 axum = "0.8"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
+
+[dev-dependencies]
+tempfile = "3"

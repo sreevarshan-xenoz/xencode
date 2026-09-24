@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 923 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 936 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1637,6 +1637,8 @@ never is.
 - **EV-11 tamper-evident audit log** — hash-chain `audit.jsonl` (prev-hash + seq;
   the `seq` exists, the chain does not). S. Trap: do not build a Merkle tree.
   Done-when: a verify command detects a mid-file edit.
+  *(Done 2026-09-24 — see W1 progress. `xencode audit verify` walks the chain and
+  exits non-zero; no tree, just `prev` plus a self-digest per line.)*
 
 ### N-4 — Security and the agent's own trust model
 
@@ -2836,7 +2838,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 923-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 903-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -5107,7 +5109,7 @@ done-when is met, and the commit that does it names the IDs.
   `agent_rounds` only, so the `xencode query` single-shot path still writes
   nothing, and the file is never trimmed — reading takes the last N rows, so
   growth is unbounded until something rotates it.
-- Verified by 923 tests. The writer is proven by a test that runs the real agent
+- Verified by 903 tests. The writer is proven by a test that runs the real agent
   loop end to end — real HTTP over a real listening socket, real tool execution
   against a file on disk whose content contained `OPENAI_API_KEY=sk-…` — and then
   reads back the one row that was written and asserts the key is absent from it.
@@ -5174,6 +5176,51 @@ done-when is met, and the commit that does it names the IDs.
   the same GGUF asked to answer in katakana printed `サーバは準備完了です。` in
   2.854 s, and the server was stopped afterwards (`/health` refusing connections)
   with `~/.xencode/config.json` unchanged, verified by checksum.
+- [x] `EV-11` — 2026-09-24. Every record the session server appends to
+  `audit.jsonl` now carries `prev` (the digest of the record before it) and
+  `digest` (a hash over its own fields including `prev`), and
+  `xencode audit verify [PATH]` walks a log and says which line does not add up,
+  exiting non-zero when one does not. Four kinds of problem are distinguished:
+  the contents no longer match the digest on their own line; the line names a
+  predecessor that is not the line before it (moved, or a neighbour edited, or
+  one removed); a line with no chain fields at all appearing after lines that
+  have them (an appended forgery); and a line that is not a JSON object. No tree,
+  no segments, no second file — the trap here was building more than a link.
+- Three decisions worth keeping. `serde_json` writes an object's keys in sorted
+  order, so re-serialising a parsed record gives back the bytes that were hashed;
+  the digest is taken over the record with its own `digest` field removed, which
+  is what lets a checker recompute it without knowing the writer's buffer state.
+  A record written before chaining existed has no digest to hand on, so it links
+  by the hash of its own text as written — the only way an existing log continues
+  instead of being truncated or orphaned, and deleting such a line still breaks
+  the next link, which is tested. And a file ending mid-line is reported as an
+  interrupted write rather than as tampering, because a crash or a full disk
+  produces exactly that shape and only at the end (the sink holds its lock across
+  a whole line) — the same distinction `read_jsonl_tolerant` in
+  `xencode-core-rs/src/jsonl.rs` already draws for `metrics.jsonl`.
+- What it cannot do, stated rather than implied: whoever can rewrite the file
+  can recompute the chain as they rewrite it; cutting the tail off leaves a
+  shorter chain that verifies cleanly, since nothing outside the file records how
+  long it should be; and a server that never wrote an event it decided to skip
+  leaves no gap to find. Closing the second of those needs an anchor kept
+  somewhere else — a checkpoint in another file, or a signature with a key not on
+  this machine — which is outside this item and is not claimed by it. One test
+  asserts the truncation gap on purpose, so it cannot be reported as covered
+  later by accident.
+- Only `audit.jsonl` is chained. `metrics.jsonl` and EV-2's `turns.jsonl` are not,
+  which is deliberate: they are performance data, and hashing them would cost a
+  write on every turn to protect numbers nobody audits. The chain primitive lives
+  in `xencode-server-rs/src/audit.rs` (`chained_line`, `verify_chain`, `link_of`)
+  for `EVd-7` to reuse if the evidence ledger wants it.
+- Verified by 936 tests, 0 failures, 5 ignored, gates clean. Nine of those are
+  unit tests over the writer and the checker, and four run the real
+  `xencode audit verify` binary against a log the real sink wrote, then edit that
+  file with a string replacement and check the command's output and exit status —
+  writer and command are separate processes there, which is the only part of this
+  that could otherwise have agreed with itself by construction. On this machine
+  `~/.xencode/audit.jsonl` does not exist yet (the server has not been run with a
+  session), so the real-path run confirmed the missing-file message and exit
+  status 0; the tampering cases are covered in the two layers above.
 
 #### W2 — The model/inference substrate — 15 items
 

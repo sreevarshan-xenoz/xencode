@@ -470,7 +470,9 @@ xencode server --host 0.0.0.0 --cert fullchain.pem --key privkey.pem   # https +
   joiners are Editor, and only Editor-or-above may relay activity on the
   WebSocket (Viewers receive). All mutating HTTP endpoints require the
   bearer token. Every action appends one JSONL line to
-  `~/.xencode/audit.jsonl` (`--audit-path` to move, `none` to disable).
+  `~/.xencode/audit.jsonl` (`--audit-path` to move, `none` to disable). Each
+  line is linked to the one before it, so `xencode audit verify` can say
+  whether the file was edited afterwards.
 - Sessions live in memory only: after a server restart the peers are
   gone — only the audit log survives.
 
@@ -565,6 +567,24 @@ xencode cache stats
 # Clear all cached responses
 xencode cache clear
 ```
+
+### Audit Log Integrity
+
+```bash
+# Check the session server's audit log for records changed after writing
+xencode audit verify
+
+# Check a log somewhere else
+xencode audit verify /path/to/audit.jsonl
+```
+
+Every record the server appends carries a digest of its own contents and the
+digest of the record before it, so editing, deleting or moving a line is
+reported on a specific line and the command exits non-zero. A record written
+before this was in place is counted and named as unprovable rather than
+silently passed over. Truncating the end of the log is not something the file
+can detect on its own, and neither is a full rewrite that recomputes every
+digest.
 
 ### Background Tasks
 

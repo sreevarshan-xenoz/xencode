@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the audit log can be checked for edits made afterwards
+The session server's `audit.jsonl` recorded who did what, and nothing could say
+whether the file still held what had been written to it. Each record now carries
+a digest of its own contents and the digest of the record before it, so
+`xencode audit verify` reports an edited, deleted, moved or appended record on a
+specific line and exits non-zero:
+
+```
+line 2: the contents do not match the digest recorded on this line
+/home/sree/.xencode/audit.jsonl: 2 records, chain broken — …
+```
+
+A log written before this change is carried along rather than discarded: its
+older records are counted and named as proving nothing about themselves, and the
+first new record links to them, so deleting one of the old lines still breaks
+the chain. A file that stops half-way through a record — what a crash or a full
+disk leaves behind — is reported as an interrupted write rather than as
+tampering.
+
+The limits are the limits a hash chain without a key has. Whoever can rewrite
+the whole file can recompute every digest, and cutting the end off a log leaves a
+shorter chain that verifies cleanly, because nothing outside the file says how
+long it should be. This detects an edit; it does not prove the log is complete.
+
 ### Fixed — a streamed answer is no longer shortened by where the network cut it
 A model's answer arrives as a series of small reads, and the boundaries between
 them are chosen by the network stack rather than by the protocol. Every one of

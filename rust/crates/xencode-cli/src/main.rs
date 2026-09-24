@@ -75,6 +75,12 @@ enum Commands {
         action: CacheAction,
     },
 
+    /// The session server's audit log
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
+
     /// Send a query to a model
     Query {
         /// The prompt to send
@@ -372,6 +378,15 @@ enum CacheAction {
 }
 
 #[derive(Subcommand)]
+enum AuditAction {
+    /// Check an audit log for records that were changed after they were written
+    Verify {
+        /// Log to check (default: ~/.xencode/audit.jsonl)
+        path: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum MemoryAction {
     /// List all conversation sessions
     List,
@@ -455,6 +470,7 @@ async fn main() {
         Commands::Config { action } => run_config(action),
         Commands::Models { action } => run_models(action).await,
         Commands::Cache { action } => run_cache(action),
+        Commands::Audit { action } => run_audit(action),
         Commands::Query {
             prompt,
             model,
@@ -1257,6 +1273,45 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
                 }
             }
             Ok(())
+        }
+    }
+}
+
+/// Check the session server's audit log for records that were edited after
+/// the fact. Exits non-zero when something does not add up.
+fn run_audit(action: AuditAction) -> Result<(), String> {
+    use xencode_server_rs::audit::{describe, verdict, verify_chain};
+
+    match action {
+        AuditAction::Verify { path } => {
+            let path = match path {
+                Some(path) => path,
+                None => resolve_audit_path(None)?.ok_or_else(|| {
+                    "the audit log is turned off, so nothing was recorded".to_string()
+                })?,
+            };
+            if !path.exists() {
+                println!(
+                    "{}: no audit log has been written here, so there is nothing to check",
+                    path.display()
+                );
+                return Ok(());
+            }
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("{} could not be read: {e}", path.display()))?;
+            let report = verify_chain(&text);
+            for problem in &report.problems {
+                println!("{}", describe(problem));
+            }
+            println!("{}", verdict(&path, &report));
+            if report.intact() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{} was changed after it was written",
+                    path.display()
+                ))
+            }
         }
     }
 }
