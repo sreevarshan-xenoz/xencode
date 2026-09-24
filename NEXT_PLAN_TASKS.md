@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1096 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1099 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2150,6 +2150,12 @@ requests we already know how to make and don't.**
   `--reasoning-effort`, Ollama has named levels. **S**. Feeds straight into the
   `cached_tokens` reuse already measured. Trap: truncating a thinking chain
   degrades output differently per model.
+  *(Done 2026-09-24 for llama.cpp — see W2 progress. The control is a launch
+  setting, because the per-request reasoning fields were measured as accepted and
+  ignored. It offers `auto`, `off` and a token budget; it does not offer
+  `--reasoning-effort`, which was never measured on this build, and it has no
+  Ollama half, because there is no `ollama` on this machine to measure against.
+  The trap is recorded with numbers rather than as a warning.)*
 - **MI-5 Speculative decoding on the Colab bridge** — llama.cpp master ships
   draft-model, EAGLE-3, MTP and n-gram self-speculative (`--spec-type`). **M**.
   This is the option with the clearest felt win, because generation speed over
@@ -6192,6 +6198,67 @@ done-when is met, and the commit that does it names the IDs.
   before the preset, and removing the zero-slot filter — and watching each fail. One
   more test, ignored by default, re-runs the read-back against a real server when
   `XENCODE_TEST_LLAMA_URL` points at one.
+
+- [x] `MI-4` — 2026-09-24, the sixth item of W2. How much a local model may think
+  before it answers is now a setting, and it is a launch setting.
+  **Why a launch flag rather than a request field.** Decided by measuring the other
+  possibility first. `llama-server` b10809 answers `200` to a request carrying
+  `reasoning_budget`, `reasoning_effort` or a `chat_template_kwargs` object turning
+  thinking off, and then ignores every one of them: three requests with different
+  per-request values produced the same 681 completion tokens, 1981 characters of
+  thinking and 314 characters of answer. An unrecognised key is likewise accepted
+  with no log line, so being accepted is not being read. A control built on those
+  fields would have looked implemented while doing nothing, so
+  `config.llama_cpp_reasoning` turns into `--reasoning off` or
+  `--reasoning-budget <n>` on the command line the server starts with, `auto` and an
+  empty value add no flag at all, and the request path was left untouched.
+  **What is refused, and where it stops.** The interpretation lives in one place,
+  `reasoning_launch_args()`, next to the other launch-argument code, so both callers
+  read it the same way. `xencode config set` and `xencode llamacpp start` treat a
+  value that names nothing — a word other than `off`/`auto`, a negative or fractional
+  number — as an error and the command stops, because there the server was asked for
+  by name; the TUI's auto-start says the same words in the chat and boots without the
+  flag, because a launch nobody is watching should not be blocked by a typo in a file
+  it did not write. Ordering follows the previous item: the thinking flag travels with
+  the profile's preset and `llama_cpp_args` stays last, so a repeated flag is still
+  decided by the user's own copy.
+  **The trap this item names, with numbers.** Truncating a chain of thought produces
+  no error — it produces an answer from a half-finished plan, and how badly differs by
+  model. Measured on one model rather than described:
+  `unsloth/Qwen3-0.6B-GGUF` at `Q4_K_M` (sha256 beginning `ac2d9771`, 396,705,472
+  bytes, downloaded for this and left in `~/.cache/llama.cpp/`), temperature 0, the
+  sheep question. Thinking left alone: 1352 characters of thinking before a
+  354-character answer. Budget 32: 98 before 871. Budget 0: none before 2577.
+  `--reasoning off`: none before 358. Correctness moved against the setting rather
+  than with it — the unrestricted and budget-32 runs both answered 8, `off` answered 9
+  in 32 tokens — and the budget-32 answer additionally had its thinking block cut off
+  mid-structure, leaving the block's own closing tag inside the answer text. One
+  question on one small model, recorded as what was seen, and the reason the manuals
+  call a budget a control over length and delay rather than over quality.
+  **Live through the product, both settings.** `xencode config set
+  llama_cpp_reasoning off` then `xencode llamacpp start --model … --port 8080`
+  printed `… --parallel 1 --reasoning off`, and the server that answered on 8080
+  returned no thinking field at all with a 32-token answer; `ps` on the live process
+  showed the same flag in its command line. The same pair with the value `32` printed
+  `--reasoning-budget 32` and returned 98 characters of thinking and a 248-token
+  answer. A bad value was refused on the command line with
+  `error: llama_cpp_reasoning must be "auto", "off" or a token budget like "256", not
+  "lots"` and exit status 1, and `auto` was stored as no key at all.
+  **Not done, on purpose.** No Ollama half: this item names its named levels, and
+  there is no `ollama` binary on this machine to check what any of them do. No
+  `--reasoning-effort`: the values it takes were never measured here, so offering it
+  would be guessing. Nothing reads the setting back, because `/props` does not
+  report it. And no Settings-panel row — the config key, the CLI and the two launch
+  paths are the whole feature for now.
+  Verified by 1099 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Three tests are new: the setting turning into the flag that
+  means it, across case and surrounding spaces, with `auto` and empty naming nothing;
+  a value that names nothing being refused with the words and the bad value in the
+  message; and the launch command carrying `--reasoning off` ahead of the config's own
+  flags, while an unparseable value yields the report and no flag. Two were confirmed
+  by breaking what they guard — letting a negative budget through, and dropping the
+  reasoning flags out of the launch command — and watching each fail.
 
 #### W2 — The model/inference substrate — 15 items
 

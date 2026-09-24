@@ -699,6 +699,70 @@ pub fn server_launch_args(
     args
 }
 
+/// The launch flags for the reasoning setting, or the one sentence explaining
+/// why the setting says nothing usable.
+///
+/// `None`, a blank string and `auto` all say nothing: the model's own chat
+/// template decides whether it thinks, which is what every build did before this
+/// setting existed. `off` becomes `--reasoning off`; a whole number becomes
+/// `--reasoning-budget <n>`.
+///
+/// **Why this is a launch flag and not a request field.** Measured on
+/// `llama-server` b10809 with Qwen3-0.6B-Q4_K_M, asking one question at
+/// temperature 0: the same request sent plain, sent with `reasoning_budget: 16`,
+/// sent with `reasoning_effort: "minimal"`, and sent with
+/// `chat_template_kwargs: {"thinking": false}`. The three that carried a field
+/// came back identical to each other — 681 completion tokens, 1981 characters of
+/// thinking — so a 16-token budget and an instruction not to think both did
+/// nothing. Separately, a request carrying a key that exists nowhere in
+/// llama.cpp was answered with HTTP 200 and no log line, which is the general
+/// problem: a server accepting a field is not evidence that it read the field.
+/// What does bite is the command line, measured the same way on the same model
+/// and question:
+///
+/// | launched with | thinking characters | answer characters |
+/// |---|---|---|
+/// | (nothing) | 1352 | 354 |
+/// | `--reasoning-budget 32` | 98 | 871 |
+/// | `--reasoning-budget 0` | 0 | 2577 |
+/// | `--reasoning off` | 0 | 358 |
+///
+/// Read the last two rows together, because they are the trap in this setting:
+/// a budget of `0` is not the same as turning thinking off. It enters the
+/// thinking block, ends it immediately, and the model goes on to write its
+/// reasoning into the answer instead — 2577 characters of it for a one-number
+/// question, against 358 from `--reasoning off`. A budget too small to finish a
+/// chain does not fail and does not warn; the answer simply comes from a
+/// half-finished plan. On this one question the unrestricted run and the
+/// `--reasoning-budget 32` run both reached for the wrong number while `off` got
+/// it right, which is a single sample on a 0.6B model and is recorded as that,
+/// not as a rule about budgets.
+///
+/// The `/props` endpoint does not echo either flag, so unlike the context window
+/// and the slot count there is no read-back: what was asked is visible in the
+/// command line the program prints, and the effect is only visible in what comes
+/// back.
+pub fn reasoning_launch_args(setting: Option<&str>) -> Result<Vec<String>, String> {
+    let Some(raw) = setting.map(str::trim) else {
+        return Ok(Vec::new());
+    };
+    if raw.is_empty() || raw.eq_ignore_ascii_case("auto") {
+        return Ok(Vec::new());
+    }
+    if raw.eq_ignore_ascii_case("off") {
+        return Ok(vec!["--reasoning".to_string(), "off".to_string()]);
+    }
+    match raw.parse::<i64>() {
+        Ok(budget) if budget >= 0 => Ok(vec![
+            "--reasoning-budget".to_string(),
+            budget.to_string(),
+        ]),
+        _ => Err(format!(
+            "llama_cpp_reasoning must be \"auto\", \"off\" or a token budget like \"256\", not {raw:?}"
+        )),
+    }
+}
+
 /// Resolve the `llama-server` binary; tries the explicit path supplied by the
 /// user, then common names on `PATH`.
 pub fn find_llama_server(executable: Option<&str>) -> Option<String> {
@@ -1207,6 +1271,49 @@ mod tests {
 
         let blank = server_launch_args(&[], Some("   "), &[]);
         assert!(blank.is_empty(), "{blank:?} carries a blank alias");
+    }
+
+    /// The three things the reasoning setting can mean, said as flags. `off` and
+    /// a budget are different sentences — `--reasoning off` tells the template
+    /// not to think at all, `--reasoning-budget N` lets it think for N tokens —
+    /// so they cannot be folded into one "thinking: yes/no" switch.
+    #[test]
+    fn the_reasoning_setting_becomes_the_flag_that_means_it() {
+        let cases: &[(&str, &[&str])] = &[
+            ("off", &["--reasoning", "off"]),
+            ("OFF", &["--reasoning", "off"]),
+            ("256", &["--reasoning-budget", "256"]),
+            ("0", &["--reasoning-budget", "0"]),
+            ("  1024  ", &["--reasoning-budget", "1024"]),
+            ("auto", &[]),
+            ("", &[]),
+        ];
+        for (setting, want) in cases {
+            let got = reasoning_launch_args(Some(setting)).expect("{setting} is a reasoning mode");
+            assert_eq!(
+                got.iter().map(String::as_str).collect::<Vec<_>>(),
+                want.to_vec(),
+                "for {setting:?}"
+            );
+        }
+        assert!(reasoning_launch_args(None).unwrap().is_empty());
+    }
+
+    /// A value that names no mode is refused in the sentence a user can act on,
+    /// rather than passed to `llama-server` — which accepts a flag it cannot
+    /// parse by refusing to start at all, or (for a budget) by never hearing
+    /// about it.
+    #[test]
+    fn a_reasoning_setting_that_names_nothing_is_refused_with_the_words() {
+        for bad in ["-1", "lots", "256.5", "on", "1e3"] {
+            let err = reasoning_launch_args(Some(bad))
+                .err()
+                .unwrap_or_else(|| panic!("{bad:?} was accepted as a reasoning setting"));
+            assert!(
+                err.contains("\"auto\", \"off\" or a token budget") && err.contains(bad),
+                "refusal for {bad:?} does not say what is allowed: {err}"
+            );
+        }
     }
 
     /// The three answers a start-up check can give, in the words the user sees.

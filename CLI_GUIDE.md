@@ -484,6 +484,35 @@ context in 1 slot(s) asked for — later flags win, so check llama_cpp_args`.
 The same check is available in the TUI: it is the status line under the model
 list (`m`).
 
+**How much the model may think** is a launch setting too. `llama_cpp_reasoning`
+takes `auto` (leave it to the model), `off`, or a token budget as a plain number:
+
+```bash
+xencode config set llama_cpp_reasoning off    # --reasoning off
+xencode config set llama_cpp_reasoning 256    # --reasoning-budget 256
+xencode config set llama_cpp_reasoning auto   # no flag at all
+```
+
+Anything else — a word that is not `off`/`auto`, a negative or fractional
+number — is refused by `config set`, and a value typed into the JSON file by
+hand is refused the same way by `llamacpp start` (the command stops rather than
+starting a server that thinks). The TUI's auto-start reports such a value and
+boots without the flag, because a start nobody is watching should not stall.
+
+Two limits worth knowing, both measured against `llama-server` b10809 with
+`unsloth/Qwen3-0.6B-GGUF` at `Q4_K_M`:
+
+- These are launch flags only. Sending `reasoning_budget`, `reasoning_effort` or
+  `chat_template_kwargs` per request is accepted with HTTP 200 and then ignored
+  — three replies with different per-request values were byte-for-byte the same
+  amount of thinking, so this product does not pretend to control them there.
+- `/props` does not report the setting, so the `as asked` line above cannot
+  confirm it. A too-small budget also does not fail loudly: it answers from a
+  half-finished plan. With a budget of 32 the model ran out of thinking halfway
+  through the sheep question and answered 8; left unrestricted it answered 8 as
+  well; with `off` it answered 9 in 32 tokens. One question, one small model —
+  a reason to treat a budget as a speed and length control, not a quality one.
+
 ### `xencode colab <action>`
 Google Colab bridge: run the inference server on a Colab VM (T4 GPU etc.)
 and reach it from this machine. The only supported transport is the official
@@ -629,6 +658,7 @@ xencode config reset
 | `colab_auto_connect` | bool | Persisted but not acted on yet — nothing reconnects without an explicit `xencode colab up` |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_args` | string | split on whitespace; passed to a self-started `llama-server` after the hardware profile's own flags, so a repeated flag is decided here |
+| `llama_cpp_reasoning` | string | how much a local model may think before answering: `auto` or empty for no flag, `off` for `--reasoning off`, or a token budget as a number for `--reasoning-budget`. A launch setting — see [How much the model may think](#how-much-the-model-may-think) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
 | `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |

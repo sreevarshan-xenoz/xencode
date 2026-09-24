@@ -5763,16 +5763,38 @@ impl<'a> App<'a> {
         });
     }
 
-    /// The flags a self-spawned `llama-server` starts with: this session's
-    /// profile preset, the model alias, then the config's own `llama_cpp_args`.
-    /// That order is the whole design — `llama-server` runs with the last value
-    /// given for a flag, so a window written in the config beats the preset
-    /// rather than being silently overruled by it.
-    fn llama_launch_args(&self, alias: Option<&str>) -> Vec<String> {
-        xencode_models_rs::llamacpp::server_launch_args(
-            &self.hardware.profile.llama_cpp_args(),
-            alias,
-            &self.config.llama_cpp_args,
+    /// The flags a self-spawned `llama-server` starts with, and the one thing
+    /// worth telling the user about them.
+    ///
+    /// Order is the design: the profile's preset, then what `llama_cpp_reasoning`
+    /// asks for, then the model alias, then the config's own `llama_cpp_args` —
+    /// last, because `llama-server` runs with the last value given for a flag, so
+    /// a window written in the config beats the preset rather than being silently
+    /// overruled by it.
+    ///
+    /// The second half of the answer is a reasoning setting that names nothing:
+    /// a value put into the file by hand is reported and then left alone, which
+    /// puts thinking back where it was before the setting existed — the model's
+    /// own template.
+    fn llama_launch_plan(&self, alias: Option<&str>) -> (Vec<String>, Option<String>) {
+        let (reasoning, warning) = match xencode_models_rs::llamacpp::reasoning_launch_args(
+            self.config.llama_cpp_reasoning.as_deref(),
+        ) {
+            Ok(args) => (args, None),
+            Err(problem) => (
+                Vec::new(),
+                Some(format!("{problem} — thinking is left to the model")),
+            ),
+        };
+        let mut preset = self.hardware.profile.llama_cpp_args();
+        preset.extend_from_slice(&reasoning);
+        (
+            xencode_models_rs::llamacpp::server_launch_args(
+                &preset,
+                alias,
+                &self.config.llama_cpp_args,
+            ),
+            warning,
         )
     }
 
@@ -5783,6 +5805,12 @@ impl<'a> App<'a> {
     /// own flags after it, then asked what it is actually running as — see
     /// [`xencode_models_rs::llamacpp::settings_check_line`] for what that check
     /// can and cannot see.
+    ///
+    /// `llama_cpp_reasoning` contributes the thinking flags through
+    /// [`Self::llama_launch_plan`]. A value that names nothing is reported in
+    /// the chat and then left out of the command: a boot nobody is watching
+    /// should not be stopped by a word in a file, and a server started without
+    /// those flags thinks the way its own template says.
     ///
     /// Skips if the server is already answering on `llama_cpp_url`. If no model
     /// path is configured, falls back to discovering a GGUF on disk (see
@@ -5814,7 +5842,10 @@ impl<'a> App<'a> {
             // between slots, and the budget fills the whole one.
             slots: Some(1),
         };
-        let args = self.llama_launch_args(alias.as_deref());
+        let (args, reasoning_warning) = self.llama_launch_plan(alias.as_deref());
+        if let Some(problem) = reasoning_warning {
+            let _ = tx.send(format!("[LLAMACPP_MSG]⚠️ {problem}"));
+        }
 
         let shared = Arc::new(std::sync::Mutex::new(None));
         self.llama_process = Some(shared.clone());
@@ -9023,7 +9054,8 @@ mod tests {
 
         let mut app = App::for_tests();
         app.hardware = xencode_context_rs::ProfileDecision::resolve("low");
-        let args = app.llama_launch_args(Some("tiny"));
+        let (args, warning) = app.llama_launch_plan(Some("tiny"));
+        assert!(warning.is_none(), "{warning:?}");
         assert_eq!(
             value_of(&args, "--ctx-size").as_deref(),
             Some("4096"),
@@ -9035,7 +9067,7 @@ mod tests {
         );
 
         app.hardware = xencode_context_rs::ProfileDecision::resolve("high");
-        let args = app.llama_launch_args(None);
+        let (args, _) = app.llama_launch_plan(None);
         assert_eq!(value_of(&args, "--ctx-size").as_deref(), Some("16384"));
         assert_eq!(
             value_of(&args, "--parallel").as_deref(),
@@ -9044,12 +9076,67 @@ mod tests {
         );
 
         app.config.llama_cpp_args = vec!["--ctx-size".to_string(), "32768".to_string()];
-        let args = app.llama_launch_args(None);
+        let (args, _) = app.llama_launch_plan(None);
         assert_eq!(
             args.last().map(String::as_str),
             Some("32768"),
             "the config's flag has to be the later one: {args:?}"
         );
+    }
+
+    /// A reasoning setting is a launch flag, so it has to land in the same
+    /// command line — before the config's own flags, which still win.
+    ///
+    /// A value that names nothing is the interesting half: an unattended boot
+    /// must not be stopped by a typo in a file, so the setting is dropped, the
+    /// server starts with thinking left to the model, and the user is told.
+    #[test]
+    fn a_reasoning_setting_is_a_launch_flag_and_a_bad_one_is_said_not_fatal() {
+        let flag_index =
+            |args: &[String], flag: &str| -> Option<usize> { args.iter().position(|a| a == flag) };
+        let last_flag_index =
+            |args: &[String], flag: &str| -> Option<usize> { args.iter().rposition(|a| a == flag) };
+
+        let mut app = App::for_tests();
+        app.config.llama_cpp_args = vec!["--ctx-size".to_string(), "8192".to_string()];
+
+        app.config.llama_cpp_reasoning = Some("off".to_string());
+        let (args, warning) = app.llama_launch_plan(None);
+        assert!(warning.is_none(), "{warning:?}");
+        let off = flag_index(&args, "--reasoning").expect("the flag is missing");
+        assert_eq!(args[off + 1], "off", "{args:?}");
+        assert!(
+            off < last_flag_index(&args, "--ctx-size").expect("the config flag is missing"),
+            "the config's flags come last so they win: {args:?}"
+        );
+
+        app.config.llama_cpp_reasoning = Some("256".to_string());
+        let (args, warning) = app.llama_launch_plan(None);
+        assert!(warning.is_none(), "{warning:?}");
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--reasoning-budget", "256"]),
+            "{args:?} lost the budget"
+        );
+
+        // Nothing asked for: the command is exactly what it was before the
+        // setting existed, so an ordinary session gains no reasoning flags.
+        app.config.llama_cpp_reasoning = None;
+        let (args, warning) = app.llama_launch_plan(None);
+        assert!(warning.is_none(), "{warning:?}");
+        assert!(
+            !args.iter().any(|a| a.starts_with("--reasoning")),
+            "{args:?} sets reasoning nobody asked for"
+        );
+
+        app.config.llama_cpp_reasoning = Some("lots".to_string());
+        let (args, warning) = app.llama_launch_plan(None);
+        assert!(
+            !args.iter().any(|a| a.starts_with("--reasoning")),
+            "{args:?} still carries a flag the setting refused to name"
+        );
+        let problem = warning.expect("a bad setting has to be reported");
+        assert!(problem.contains("\"lots\""), "{problem}");
     }
 
     /// AC-5: a real count is reported beside the number it replaces when a human

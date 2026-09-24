@@ -858,6 +858,21 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     config.llama_cpp_args =
                         value.split_whitespace().map(|s| s.to_string()).collect();
                 }
+                // How much a local model may think before answering. Checked
+                // with the same code that turns the word into a launch flag, so
+                // a value accepted here is one that will actually take effect
+                // later. "auto" and blank both mean "leave it to the model", and
+                // are stored as nothing rather than as a word.
+                "llama_cpp_reasoning" => {
+                    let trimmed = value.trim();
+                    xencode_models_rs::llamacpp::reasoning_launch_args(Some(trimmed))?;
+                    config.llama_cpp_reasoning =
+                        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        };
+                }
                 "max_cache_size" => {
                     config.max_cache_size = value
                         .parse()
@@ -1181,14 +1196,23 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             println!("  port:  {port}");
 
             // Same preset the TUI's auto-start uses: the profile's flags first,
-            // the config's own `llama_cpp_args` last so they have the final say.
+            // then what the reasoning setting asks for, then the config's own
+            // `llama_cpp_args` so they have the final say. Here a reasoning
+            // setting that names nothing stops the command instead of being
+            // shrugged off — this server was asked for by name, so saying "off"
+            // and starting a server that thinks is the one thing not to do.
             let profile = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
             let asked = xencode_models_rs::llamacpp::ServerReport {
                 context_tokens: Some(profile.profile.ctx_tokens() as u32),
                 slots: Some(1),
             };
+            let reasoning = xencode_models_rs::llamacpp::reasoning_launch_args(
+                config.llama_cpp_reasoning.as_deref(),
+            )?;
+            let mut preset = profile.profile.llama_cpp_args();
+            preset.extend_from_slice(&reasoning);
             let args = xencode_models_rs::llamacpp::server_launch_args(
-                &profile.profile.llama_cpp_args(),
+                &preset,
                 None,
                 &config.llama_cpp_args,
             );

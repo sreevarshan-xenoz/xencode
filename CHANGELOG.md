@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a local model's thinking can be capped or switched off
+A reasoning model spends most of its answer on a chain of thought nobody asked
+for, and xencode had no say in the matter: the launch carried no thinking flags,
+and the fields that look like they should (`reasoning_effort`,
+`reasoning_budget`) are per-request keys a local `llama-server` accepts with
+HTTP 200 and then ignores — three requests sent with different per-request
+values produced exactly the same amount of thinking.
+
+`llama_cpp_reasoning` is now a launch setting, so it is said once and takes
+effect: `off` becomes `--reasoning off`, a plain number becomes
+`--reasoning-budget <n>`, and `auto` or an empty value adds nothing and leaves
+thinking to the model's own template. `xencode config set` refuses a value that
+names none of those — a word that is not `off`/`auto`, a negative or fractional
+number — and a value edited into the JSON by hand is refused the same way by
+`xencode llamacpp start`, which stops rather than starting a server that thinks.
+The TUI's auto-start reports it and boots without the flag instead, because a
+start nobody is watching should not stall on a typo in a file.
+
+What a budget really buys is measured on `llama-server` b10809 with
+`unsloth/Qwen3-0.6B-GGUF` at `Q4_K_M`, temperature 0. Left alone the model
+filled 1352 characters of thinking before a 354-character answer; `off` produced
+a 358-character answer with no thinking at all; a budget of 32 cut thinking to
+98 characters and the answer grew to 871. The trap is the last one: a truncated
+chain of thought does not fail, it just answers from a half-finished plan. On
+the sheep question ("all but 9 die") the restricted and unrestricted runs both
+answered 8, while `off` answered 9 in 32 tokens — one question on one small
+model, so a budget is a control over length and delay, not over quality. The
+server also reports nothing about which of these it is running as, so the flags
+line is the only record of the setting.
+
 ### Added — the server xencode starts is launched from the profile and checked afterwards
 A `llama-server` that xencode spawns for itself came up with whatever defaults
 that binary has, plus one opaque string (`llama_cpp_args`) that the program
