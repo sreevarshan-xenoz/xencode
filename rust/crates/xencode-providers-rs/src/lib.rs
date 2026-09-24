@@ -22,7 +22,7 @@ pub mod traffic;
 
 use retry::RetryConfig;
 
-pub use capabilities::{capabilities_for, ModelCapabilities};
+pub use capabilities::{capabilities_for, effective_context_window, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
 pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
 pub use tools::{
@@ -325,6 +325,13 @@ fn llamacpp_target(model: &str) -> Option<&str> {
 /// OpenAI-compatible endpoint (`remote:<model>`).
 fn remote_target(model: &str) -> Option<&str> {
     model.strip_prefix("remote:")
+}
+
+/// True when `model` is served by a llama.cpp server, so a caller can decide
+/// whether asking that server anything (its window, its tokenizer) is worth
+/// a request at all. Same rule the provider uses to route, not a copy of it.
+pub fn routes_to_llamacpp(model: &str) -> bool {
+    matches!(llamacpp_target(model), Some(target) if !target.is_empty())
 }
 
 /// ProviderManager abstracts over local and cloud models.
@@ -1605,6 +1612,17 @@ mod tests {
         assert_eq!(llamacpp_target("llama:runner"), Some("runner"));
         assert_eq!(llamacpp_target("qwen2.5:7b"), None);
         assert_eq!(llamacpp_target("llama3.1:8b"), None);
+    }
+
+    #[test]
+    fn routing_to_llama_cpp_is_what_the_server_probe_asks() {
+        assert!(routes_to_llamacpp("llamacpp:model.gguf"));
+        assert!(routes_to_llamacpp("llama:dolphin"));
+        // An Ollama tag that only looks local, and a bare prefix with no model
+        // behind it, must not send anyone to the llama.cpp server.
+        assert!(!routes_to_llamacpp("llama3.1:8b"));
+        assert!(!routes_to_llamacpp("llama:"));
+        assert!(!routes_to_llamacpp("qwen2.5:7b"));
     }
 
     #[test]

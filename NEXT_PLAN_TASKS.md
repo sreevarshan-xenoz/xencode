@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1066 tests passing, 8 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1075 tests passing, 9 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3262,6 +3262,12 @@ the ledger already.
   This **is MI-2/MI-3** — relabel, don't re-plan. *Trap:* `/api/show` reports
   the Modelfile value, not a request-level `num_ctx` override; track what was
   sent.
+  *(Done 2026-09-24, the llama.cpp half — see W2 progress. The window is read
+  from `default_generation_settings.n_ctx` and governs the budget, and on b10809
+  that is where it is: there is no top-level `n_ctx` in that response. The
+  Ollama half was **not** done — `/api/show` is unverified on this machine
+  because Ollama is not installed, so the trap above is left unfixed rather than
+  fixed against a guess.)*
 - **AC-2 — Replace the hardcoded `Balanced`** with real selection: total-RAM
   probe, user override in config. *Effort: S.* *Trap:* without a GPU, RAM
   probing is guessing — keep it overridable or ship nothing.
@@ -5915,6 +5921,67 @@ done-when is met, and the commit that does it names the IDs.
   so the refusal reaching the model's transcript is what is asserted and not just
   the absence of a file, which the old reader already got right half the time; and
   one for the command line's own decision about what counts as an answer.
+
+- [x] `AC-1` — 2026-09-24, second item of W2 (and, as this item says of itself,
+  the same work as MI-2/MI-3's window half — done here rather than re-planned
+  there). The context budget had been doing arithmetic on a window nobody looked
+  up: `assemble_chat` multiplies the model's window by a fill fraction to decide
+  how much project context survives, and for a local model that window came from
+  the hardware profile, because `ModelCapabilities.context_window` deliberately
+  resolves local routes to `None` — a wrong number is worse than no number, and
+  the family table cannot know `-c`. The running server does know. It is now
+  asked.
+  **What was measured first**, on `llama-server` b10809 with the 1.5B model
+  already on this box: `/props` answers with `total_slots`, `build_info`,
+  `model_path`, `chat_template`, the two token strings, and
+  `default_generation_settings`, which holds `n_ctx` beside `params`. **There is
+  no top-level `n_ctx`** on this build — the key fact 4 recorded as "sits in that
+  same JSON" is one level down from where it used to be, and a reader that asked
+  for `props["n_ctx"]` would have found nothing and said so quietly. A server
+  started `-c 8192` reports 8192; the same server restarted `-c 4096` with no
+  config change reports 4096, which is the end-to-end proof (CLI, real request,
+  real process) that the number is live rather than remembered.
+  **What reads it**: `LlamaCppClient::context_window()` for the request, and a
+  separate pure function for the parsing, so the shape of the answer is tested
+  against the payload captured above rather than against a mock server. It is
+  read as "positive and fits a u32" or not at all, and a server that answers
+  without the field is `None` — which means "keep the old behaviour", not "the
+  window is zero". `effective_context_window(model, reported)` then decides
+  precedence in one place: the report governs **only** a model that routes to a
+  llama.cpp server, and on that route it beats the family table, which is the
+  case that actually bites — `llama:llama-3.1-8b` is a 128k family on a server
+  that may hold 4096, and budgeting for the family is how context past the
+  server's limit gets trimmed with nothing said.
+  **Where it is used**: the command line asks once per run, before assembling,
+  and writes what it learned to stderr (`context: 8192-token window reported by
+  the server at http://localhost:8080`) so the number a run was budgeted for is
+  visible rather than inferred. The TUI cannot ask inline — its context is built
+  in a synchronous handler — so the value lives in one session field, refreshed
+  when the app starts, again after a llama.cpp model is loaded or swapped, and
+  again while each turn is in flight. That last one is a known and stated limit:
+  a server restarted outside xencode takes effect from the next turn, not the one
+  already being assembled.
+  **Not done, on purpose**: the item's Ollama half. `/api/show` was never called
+  here because Ollama is not installed on this machine, and writing a reader for
+  a response this pass has not seen — plus the trap the item names, that the
+  endpoint reports the Modelfile value rather than a request-level `num_ctx`
+  override — would be planning on an unverified endpoint, which is what the W2
+  entry for AC-5 warns about. A `qwen2.5:7b` run therefore budgets exactly as it
+  did before this item, and the Ollama window stays unread.
+  Verified by 1075 tests, 0 failures, 9 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Nine tests are new: four for the shape of that `/props`
+  answer (the captured payload, a build that reports the window at the top level,
+  a report that is absent, zero, quoted or too large, and a usable nested value
+  preferred over an unusable top-level one), one that the route decision the probe
+  makes is the provider's own routing rule and not a copy of it, three for
+  precedence (the three local prefixes, a report beating the 128k family guess, and
+  a report from a llama.cpp server refusing to govern an Anthropic, an OpenRouter
+  or an Ollama run), and one in the TUI that a reported 2048 shrinks a delegated
+  run's budget from the profile's 6144 tokens to 1536 — checked by removing the
+  plumbing, which is what makes that last one fail. A tenth test is a real request
+  to a real server and is skipped unless one is running:
+  `XENCODE_TEST_LLAMA_URL=http://127.0.0.1:8080 cargo test -p xencode-models-rs -- --ignored`.
 
 #### W2 — The model/inference substrate — 15 items
 

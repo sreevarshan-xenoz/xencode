@@ -76,6 +76,40 @@ struct LlamaCppLoadResponse {
     error: Option<String>,
 }
 
+/// Pick the context window out of a `/props` response.
+///
+/// Measured on `llama-server` b10809: the running window is
+/// `default_generation_settings.n_ctx`, and `/props` has **no** top-level
+/// `n_ctx` — a build that starts the server with `-c 8192` reports 8192 there
+/// and nothing elsewhere. The top-level key is read as a second candidate
+/// because releases before that one carried it there; that shape is unverified
+/// on this machine, so the nested key stays first and the whole response is
+/// checked before either is believed.
+///
+/// Returns `None` when no candidate is a positive number that fits a `u32`.
+pub fn context_window_from_props(props: &serde_json::Value) -> Option<u32> {
+    if let Some(nested) = props
+        .get("default_generation_settings")
+        .and_then(|dgs| dgs.get("n_ctx"))
+        .and_then(|v| v.as_u64())
+    {
+        if let Some(window) = as_window(nested) {
+            return Some(window);
+        }
+    }
+    props
+        .get("n_ctx")
+        .and_then(|v| v.as_u64())
+        .and_then(as_window)
+}
+
+fn as_window(tokens: u64) -> Option<u32> {
+    if tokens == 0 {
+        return None;
+    }
+    u32::try_from(tokens).ok()
+}
+
 /// A running `llama-server` process that xencode spawned (auto-start support).
 #[derive(Debug)]
 pub struct LlamaServerProcess {
@@ -376,6 +410,30 @@ impl LlamaCppClient {
     /// [`Self::load_model`].
     pub async fn switch_model(&self, path: &str) -> Result<(), LlamaCppError> {
         self.load_model(path).await
+    }
+
+    /// The context window the server is actually running with.
+    ///
+    /// Reads `/props`; see [`context_window_from_props`] for which keys are
+    /// consulted. `Ok(None)` means the server answered without saying — an old
+    /// build, or one started with `--props` disabled — which is a different
+    /// answer from "no server", and the caller treats it as "keep guessing".
+    pub async fn context_window(&self) -> Result<Option<u32>, LlamaCppError> {
+        let url = format!("{}/props", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| LlamaCppError::Api(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let props = resp
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| LlamaCppError::Parse(e.to_string()))?;
+        Ok(context_window_from_props(&props))
     }
 
     /// Query token-generation timing and usage for a model from the native
@@ -763,5 +821,77 @@ mod tests {
         assert_eq!(t.tokens_generated, 0);
         assert_eq!(t.predicted_per_second, 0.0);
         assert_eq!(t.total_seconds, 0.0);
+    }
+
+    /// `/props` as answered by `llama-server` b10809 started with `-c 8192`,
+    /// captured from the running server on this machine and trimmed to the keys
+    /// that matter here. Note what is absent: there is no top-level `n_ctx`.
+    fn props_b10809() -> serde_json::Value {
+        serde_json::json!({
+            "bos_token": "<|endoftext|>",
+            "build_info": "b10809-5266f24da7",
+            "chat_template": "{%- if tools %}",
+            "default_generation_settings": {
+                "n_ctx": 8192,
+                "params": { "n_predict": -1, "temperature": 0.8, "top_k": 40 }
+            },
+            "endpoint_props": false,
+            "eos_token": "<|im_end|>",
+            "model_alias": "dolphin",
+            "model_ftype": "Q4_K - Medium",
+            "model_path": "/models/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf",
+            "total_slots": 4
+        })
+    }
+
+    #[test]
+    fn context_window_is_read_from_the_generation_settings() {
+        assert_eq!(context_window_from_props(&props_b10809()), Some(8192));
+    }
+
+    #[test]
+    fn context_window_falls_back_to_a_top_level_report() {
+        let props = serde_json::json!({ "n_ctx": 4096, "total_slots": 1 });
+        assert_eq!(context_window_from_props(&props), Some(4096));
+    }
+
+    #[test]
+    fn context_window_is_absent_when_the_server_does_not_report_one() {
+        let empty = serde_json::json!({ "build_info": "b10809", "total_slots": 4 });
+        assert_eq!(context_window_from_props(&empty), None);
+        let zero = serde_json::json!({ "default_generation_settings": { "n_ctx": 0 } });
+        assert_eq!(context_window_from_props(&zero), None);
+        let text = serde_json::json!({ "default_generation_settings": { "n_ctx": "8192" } });
+        assert_eq!(context_window_from_props(&text), None);
+        let huge = serde_json::json!({ "n_ctx": 5_000_000_000_u64 });
+        assert_eq!(context_window_from_props(&huge), None);
+    }
+
+    #[test]
+    fn a_usable_nested_window_beats_an_unusable_top_level_one() {
+        let props = serde_json::json!({
+            "n_ctx": 0,
+            "default_generation_settings": { "n_ctx": 2048 }
+        });
+        assert_eq!(context_window_from_props(&props), Some(2048));
+    }
+
+    /// Live check against a running `llama-server` — needs a real server, so it
+    /// is skipped by default. Point it at one with
+    /// `XENCODE_TEST_LLAMA_URL=http://127.0.0.1:8099 cargo test -p
+    /// xencode-models-rs -- --ignored`, and start that server with a window you
+    /// know, since the assertion is only "it reported one".
+    #[tokio::test]
+    #[ignore]
+    async fn a_running_server_reports_its_own_window() {
+        let url = std::env::var("XENCODE_TEST_LLAMA_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let reported = LlamaCppClient::new(&url, 5)
+            .context_window()
+            .await
+            .expect("server did not answer /props");
+        let tokens = reported.expect("server reported no window");
+        assert!(tokens > 0, "reported window {tokens} is not usable");
+        println!("{url} is running a {tokens}-token window");
     }
 }

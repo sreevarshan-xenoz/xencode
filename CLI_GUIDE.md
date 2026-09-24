@@ -163,6 +163,43 @@ nothing at all. `update_plan` is the one exception, deliberately: its reader has
 always accepted bare strings and invented key names because that is what small
 models write, and its worst outcome is a list the next call corrects.
 
+#### Which context window a run budgets for
+
+Before a run assembles its context, it asks how large the model's window is,
+because that decides how much gets included and how much gets trimmed. For a
+model served by llama.cpp the answer comes from the server rather than from a
+guess: `xencode query` reads `/props` and takes
+`default_generation_settings.n_ctx`, and says what it learned on stderr.
+
+```console
+$ xencode query --model llama:dolphin "Name one primary colour in one word."
+context: 8192-token window reported by the server at http://localhost:8080
+Red
+```
+
+That line is the server's number, not a constant. The server above was started
+with `-c 8192`; restarting the same model with `-c 4096` and changing nothing in
+`~/.xencode/config.json` made the same command print
+`context: 4096-token window reported by the server…`. (Measured on
+`llama-server` build 10809. Note for anyone parsing `/props` themselves: that
+build reports no top-level `n_ctx` — the value lives in
+`default_generation_settings`.)
+
+What the server says wins over the model family's usual window, on purpose.
+`llama:llama-3.1-8b` is a family documented at 128k, and a server started with
+`-c 4096` has 4096 and no more; budgeting for the family would fill context the
+model never sees. A number learned from a llama.cpp server is never applied to
+another route — a `qwen2.5:7b` or `anthropic:…` run keeps its own answer, since
+the reported window describes a process that run is not talking to.
+
+Two routes are still unmeasured on this machine and stay as they were: Ollama's
+effective `num_ctx` is not read (`/api/show` was not verified — no Ollama
+installed here), and when a server does not answer, or answers without the
+field, the hardware profile's default governs as before. In the TUI the same
+number is refreshed at startup, after a llama.cpp model load or swap, and at the
+start of each turn — so a server restarted outside xencode takes effect from the
+next turn rather than the one already in flight.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without
