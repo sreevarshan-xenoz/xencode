@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — answers that can be produced again
+A llama.cpp request carried a temperature but no seed, so the server drew a fresh
+one every time and nothing about a turn's output could be repeated. Two settings
+now exist for that: `llama_cpp_seed` in `config.json` (also a "Llama Seed" row in
+the TUI's Settings panel) and `xencode query --seed` for a single run, either
+alongside the existing `--temperature`. A negative seed means "keep choosing", the
+same as `-1` on llama.cpp's own command line, and is sent as such.
+
+What a turn was *asked* to use is recorded with it. Each turn's line in
+`.xencode/cache/metrics.jsonl` now carries `temperature` and `seed`, and
+`.xencode/cache/metrics-rollup.json` keeps a count of how many generated turns were
+pinned and what the newest one used. Only turns that actually produced tokens are
+counted — the log is mostly context-assembly lines that never asked a model
+anything, and calling them "not repeatable" would have been wrong. The rollup's
+version went from 1 to 2, and an old sidecar is rebuilt rather than read: its new
+fields would have come back as zeros and looked like a measurement of nothing.
+
+`/cost` closes the loop by saying what the recorded turns can be reproduced from:
+which share ran repeatably, what the newest of them used, and — where nothing was
+pinned — that `llama_cpp_seed` is what to set. A project with no generated turns
+says nothing about repeatability at all.
+
+The seed was checked by running it, against a `llama-server 0.4.0-dev` started
+locally from a `Dolphin3.0-Qwen2.5-1.5B` GGUF: at `temperature 1.5` the same prompt
+with one seed gave the same answer every time and no seed gave different answers,
+and through the binary `xencode query --temperature 1.5 --seed 42` printed the same
+line on three runs. Two things break that even when the seed is pinned, and both
+are written into the guide where the flag is documented: `xencode query` answers a
+different question on each run because it pulls recent turns from shared
+conversation memory (run it with `memory_enabled: false`, or a fresh config
+directory), and llama.cpp's prefix cache can flip a sampled token between a cold
+and a warm request. Note also that this recording covers TUI turns — `xencode query`
+still writes no metrics line, and on a GPU, floating-point ordering means a pinned
+seed does not make output reproducible on its own. 8 tests added (972 → 980).
+
 ### Added — `/cost` says what this project's turns add up to
 The TUI has been writing one line to `.xencode/cache/metrics.jsonl` for every
 turn that assembles a context, and a performance panel that re-read that whole

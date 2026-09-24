@@ -90,6 +90,16 @@ pub struct RequestMetrics {
     /// until the hardware sampling exists.
     #[serde(default)]
     pub power_w: Option<f32>,
+    /// The temperature this turn was asked to sample at, as it was sent. `None`
+    /// means nothing went over the wire, which is different from `0.0` — the
+    /// server picked its own, so the answer cannot be repeated.
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    /// The seed the sampler was told to use. See `temperature`: absent means the
+    /// server chose one per request and the run is not reproducible. A negative
+    /// seed asks the server to keep choosing, so it means the same as absent.
+    #[serde(default)]
+    pub seed: Option<i64>,
 }
 
 impl RequestMetrics {
@@ -113,7 +123,23 @@ impl RequestMetrics {
             source: None,
             est_cost_micros: None,
             power_w: None,
+            temperature: None,
+            seed: None,
         }
+    }
+
+    /// Whether the turn this row describes could be run again for the same
+    /// answer: a seed names the sampler's draws, and a temperature of zero takes
+    /// the best token every time, which makes the seed irrelevant. Anything else
+    /// — including a row written before either field existed — ran on sampling
+    /// the server picked for itself.
+    ///
+    /// A negative seed is not a pin: llama.cpp documents `-1` as "use a random
+    /// seed", so a row that says it was sent `-1` asked for a fresh draw as
+    /// surely as one that sent nothing.
+    pub fn repeatable(&self) -> bool {
+        matches!(self.seed, Some(seed) if seed >= 0)
+            || matches!(self.temperature, Some(temp) if temp == 0.0)
     }
 
     /// Fill in the llama.cpp-driven counters in one call (§13). `cached_tokens`
@@ -488,7 +514,52 @@ mod tests {
         assert_eq!(rows[0].source, None);
         assert_eq!(rows[0].est_cost_micros, None);
         assert_eq!(rows[0].power_w, None);
+        assert_eq!(rows[0].temperature, None);
+        assert_eq!(rows[0].seed, None);
+        // Reading an old row is not the same as claiming it repeats: with no
+        // sampling recorded, the only honest answer is that the server chose.
+        assert!(!rows[0].repeatable());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// What makes a run repeatable is what went over the wire, so the row holds
+    /// the settings rather than a verdict — a seed of `0` and a temperature of
+    /// `0.0` are both real values, and both have to survive the round trip as
+    /// themselves instead of collapsing into "not set".
+    #[test]
+    fn a_row_records_the_sampling_it_was_asked_for_and_says_whether_it_repeats() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut free = RequestMetrics::from_timings("LOW", 4096, 100, 100, 10, 11.0, 300.0, 1);
+        free.temperature = Some(0.7);
+        append_metrics(&xencode, &free).unwrap();
+
+        let mut pinned = RequestMetrics::from_timings("LOW", 4096, 100, 100, 10, 11.0, 300.0, 1);
+        pinned.temperature = Some(0.0);
+        pinned.seed = Some(0);
+        append_metrics(&xencode, &pinned).unwrap();
+
+        let rows = read_metrics(&xencode);
+        assert_eq!(rows.len(), 2);
+        assert!(!rows[0].repeatable(), "0.7 with no seed is still a draw");
+        assert!(rows[1].repeatable());
+        assert_eq!(rows[1].temperature, Some(0.0));
+        assert_eq!(rows[1].seed, Some(0));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_negative_seed_asks_for_a_fresh_draw_so_it_repeats_nothing() {
+        let mut row = RequestMetrics::new("LOW", 4096);
+        row.seed = Some(-1);
+        assert!(!row.repeatable());
+        // Greedy decoding repeats whatever the seed says, and a seed of its own
+        // repeats whatever the temperature says.
+        row.temperature = Some(0.0);
+        assert!(row.repeatable());
+        row.temperature = Some(0.001);
+        row.seed = Some(1);
+        assert!(row.repeatable());
     }
 
     #[test]

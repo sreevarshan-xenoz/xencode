@@ -1448,6 +1448,9 @@ fn merge_llamacpp_options(payload: &mut serde_json::Value, opts: &LlamaCppOption
     if let Some(temp) = opts.temperature {
         payload["temperature"] = serde_json::json!(temp);
     }
+    if let Some(seed) = opts.seed {
+        payload["seed"] = serde_json::json!(seed);
+    }
     if let Some(max_tokens) = opts.max_tokens {
         payload["max_tokens"] = serde_json::json!(max_tokens);
     }
@@ -1547,6 +1550,7 @@ mod tests {
             min_p: Some(0.05),
             mirostat: Some(2),
             max_tokens: Some(256),
+            seed: Some(42),
             grammar: None,
             json_schema: None,
         };
@@ -1557,7 +1561,39 @@ mod tests {
         assert_eq!(payload["min_p"], 0.05);
         assert_eq!(payload["mirostat"], 2);
         assert_eq!(payload["max_tokens"], 256);
+        assert_eq!(payload["seed"], 42);
         assert!(payload.get("grammar").is_none());
+    }
+
+    /// The status quo the seed work replaces: with no seed asked for, nothing
+    /// goes over the wire, and llama.cpp draws one per request (`--seed` defaults
+    /// to -1 = random). A test that only checked the happy path would let a
+    /// stray `"seed": null` through, which the server reads as "random" while
+    /// the code looks like it pinned something.
+    #[test]
+    fn merge_options_omits_seed_and_temperature_entirely_when_unset() {
+        let opts = LlamaCppOptions {
+            max_tokens: Some(64),
+            ..Default::default()
+        };
+        let mut payload = serde_json::json!({ "model": "m", "stream": true });
+        merge_llamacpp_options(&mut payload, &opts);
+        assert_eq!(payload["max_tokens"], 64);
+        assert!(payload.get("seed").is_none());
+        assert!(payload.get("temperature").is_none());
+    }
+
+    /// Zero is a value, not an absence: a seed of 0 must still be sent, or the
+    /// one run someone pinned to that seed would sample freely.
+    #[test]
+    fn merge_options_sends_seed_zero() {
+        let opts = LlamaCppOptions {
+            seed: Some(0),
+            ..Default::default()
+        };
+        let mut payload = serde_json::json!({});
+        merge_llamacpp_options(&mut payload, &opts);
+        assert_eq!(payload["seed"], 0);
     }
 
     #[test]

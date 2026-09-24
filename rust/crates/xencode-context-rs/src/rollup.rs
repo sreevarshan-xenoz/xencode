@@ -19,8 +19,9 @@ use std::path::{Path, PathBuf};
 
 /// Bumped when the sidecar holds something the previous shape did not. A
 /// rollup written by another version is rebuilt from the records rather than
-/// trusted.
-pub const ROLLUP_VERSION: u8 = 1;
+/// trusted. Version 2 added the repeatability counts, which a version 1 file
+/// would read back as zeros — a wrong answer rather than a missing one.
+pub const ROLLUP_VERSION: u8 = 2;
 
 /// How many of the most recent rate samples are kept for the percentiles. The
 /// window is the whole of what a percentile here can claim to cover.
@@ -103,6 +104,19 @@ pub struct MetricsRollup {
     /// by a server that stayed silent would drag the percentile down.
     pub generation_tok_s: Vec<f32>,
     pub prompt_tok_s: Vec<f32>,
+    /// Of everything folded, how many records were asked for an answer that could
+    /// be produced again — see [`RequestMetrics::repeatable`]. This is kept
+    /// because a figure over runs that cannot be repeated describes one afternoon
+    /// rather than a result, and the reader deserves to know which it is.
+    /// Counted over [`Self::rows_generated`] only: a record that generated no
+    /// tokens sampled nothing, so it can neither be repeatable nor not.
+    pub rows_repeatable: u64,
+    /// Records that describe a generation, i.e. the denominator for
+    /// [`Self::rows_repeatable`]. Context-assembly records write no completion
+    /// tokens and are excluded; they say how big a prompt was, not what came back.
+    pub rows_generated: u64,
+    /// The sampling of the newest repeatable record, worded for a report.
+    pub last_sampling: Option<String>,
 }
 
 impl Default for MetricsRollup {
@@ -125,6 +139,9 @@ impl MetricsRollup {
             last_by_profile: BTreeMap::new(),
             generation_tok_s: Vec::new(),
             prompt_tok_s: Vec::new(),
+            rows_repeatable: 0,
+            rows_generated: 0,
+            last_sampling: None,
         }
     }
 
@@ -162,6 +179,15 @@ impl MetricsRollup {
         );
         push_sample(&mut self.generation_tok_s, row.generation_tok_s);
         push_sample(&mut self.prompt_tok_s, row.prompt_tok_s);
+        // The subset holds by construction: only a record that produced tokens
+        // can have produced them repeatably.
+        if row.completion_tokens > 0 {
+            self.rows_generated += 1;
+            if row.repeatable() {
+                self.rows_repeatable += 1;
+                self.last_sampling = Some(sampling_words(row));
+            }
+        }
         self.rows += 1;
     }
 
@@ -185,6 +211,17 @@ impl MetricsRollup {
     pub fn session_count(&self) -> usize {
         self.by_session.keys().filter(|key| !key.is_empty()).count()
     }
+}
+
+fn sampling_words(row: &RequestMetrics) -> String {
+    let mut parts = Vec::new();
+    if let Some(temp) = row.temperature {
+        parts.push(format!("temperature {temp}"));
+    }
+    if let Some(seed) = row.seed {
+        parts.push(format!("seed {seed}"));
+    }
+    parts.join(" · ")
 }
 
 fn push_sample(window: &mut Vec<f32>, value: f32) {
@@ -244,7 +281,8 @@ pub fn read_rollup(xencode_dir: &Path) -> Option<MetricsRollup> {
 /// A metrics file that was replaced rather than appended to restarts the
 /// rollup from nothing, because the records it holds now are not the ones the
 /// totals were built from. A file that has gone missing leaves the last rollup
-/// untouched and unreadable-by-nothing: nothing was observed to change.
+/// as it was: nothing was seen to change, and the totals still describe the
+/// records that were there.
 pub fn refresh_rollup(xencode_dir: &Path) -> std::io::Result<MetricsRollup> {
     let mut rollup = read_rollup(xencode_dir).unwrap_or_default();
     let (rows, offset) = read_metrics_since(xencode_dir, rollup.byte_offset);
@@ -577,6 +615,109 @@ mod tests {
         // Both sessions together, priced through the same table.
         let all = cost_of(&rollup.by_model, &table);
         assert_eq!(all.known_micros, 576);
+        fs_reset(&dir);
+    }
+
+    /// The counts say how much of the record can be produced again, and only the
+    /// rows that asked for it contribute. A row written with no seed and no
+    /// temperature of zero ran on sampling the server chose, which is the same
+    /// answer a row from before these fields existed has to give — an assumed
+    /// "repeatable" there would overstate what the run can prove.
+    #[test]
+    fn repeatability_counts_only_the_records_that_asked_for_it() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut rows = Vec::new();
+        // Nothing sent at all: the server drew its own seed.
+        rows.push({
+            let mut m = record("LOW", 100, 100, 10);
+            m.ts_unix_ms = 1;
+            m
+        });
+        // A temperature on its own still leaves the draws to chance.
+        rows.push({
+            let mut m = record("LOW", 200, 200, 20);
+            m.ts_unix_ms = 2;
+            m.temperature = Some(0.7);
+            m
+        });
+        // A seed pins the sampler whatever the temperature is.
+        rows.push({
+            let mut m = record("LOW", 300, 300, 30);
+            m.ts_unix_ms = 3;
+            m.temperature = Some(1.0);
+            m.seed = Some(5);
+            m
+        });
+        // Greedy decoding needs no seed to give the same answer twice.
+        rows.push({
+            let mut m = record("LOW", 400, 400, 40);
+            m.ts_unix_ms = 4;
+            m.temperature = Some(0.0);
+            m
+        });
+        // And a later unrepeatably-sampled turn must not overwrite the wording
+        // for the last one that was pinned.
+        rows.push({
+            let mut m = record("LOW", 500, 500, 50);
+            m.ts_unix_ms = 5;
+            m
+        });
+        // A context-assembly record: no tokens came back, so there was no
+        // sampling to judge and it belongs in neither side of the count.
+        rows.push({
+            let mut m = record("LOW", 600, 600, 0);
+            m.ts_unix_ms = 6;
+            m
+        });
+        append(&xencode, &rows);
+
+        let rollup = refresh_rollup(&xencode).unwrap();
+        assert_eq!(rollup.rows, 6);
+        assert_eq!(rollup.rows_generated, 5);
+        assert_eq!(rollup.rows_repeatable, 2);
+        assert_eq!(rollup.last_sampling.as_deref(), Some("temperature 0"));
+        fs_reset(&dir);
+    }
+
+    /// A version 1 sidecar is a real file from before the repeatability counts
+    /// existed: the same shape, minus those two fields. Because every field has
+    /// a default, it would read back happily and report that nothing was ever
+    /// repeatable — a wrong answer presented as a measurement. The version check
+    /// is what turns that file into a rebuild.
+    #[test]
+    fn a_version_1_sidecar_is_rebuilt_because_it_never_answered_the_question() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        append(
+            &xencode,
+            &[{
+                let mut m = record("LOW", 1000, 400, 50);
+                m.temperature = Some(0.2);
+                m.seed = Some(7);
+                m
+            }],
+        );
+        let current = refresh_rollup(&xencode).unwrap();
+        assert_eq!(current.rows_repeatable, 1);
+        std::fs::write(
+            rollup_path(&xencode),
+            format!(
+                r#"{{"v":1,"byte_offset":{},"rows":{}}}"#,
+                current.byte_offset, current.rows
+            ),
+        )
+        .unwrap();
+
+        assert!(read_rollup(&xencode).is_none());
+        let rollup = refresh_rollup(&xencode).unwrap();
+        assert_eq!(rollup.rows, 1);
+        assert_eq!(rollup.rows_generated, 1);
+        assert_eq!(rollup.rows_repeatable, 1);
+        assert_eq!(
+            rollup.last_sampling.as_deref(),
+            Some("temperature 0.2 · seed 7")
+        );
         fs_reset(&dir);
     }
 

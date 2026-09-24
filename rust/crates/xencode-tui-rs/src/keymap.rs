@@ -698,6 +698,9 @@ fn settings_enter(app: &mut App, tx: &Tx) {
                     app.config.llama_cpp_min_p =
                         buf.trim().parse::<f64>().ok().filter(|x| x.is_finite());
                 }
+                "Llama Seed" => {
+                    app.config.llama_cpp_seed = buf.trim().parse().ok();
+                }
                 "Llama Max Tokens" => {
                     app.config.llama_cpp_max_tokens = buf.trim().parse().ok();
                 }
@@ -781,6 +784,11 @@ fn settings_edit_seed(app: &App, label: &str) -> String {
         "Llama Min-P" => app
             .config
             .llama_cpp_min_p
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
+        "Llama Seed" => app
+            .config
+            .llama_cpp_seed
             .map(|v| v.to_string())
             .unwrap_or_default(),
         "Llama Max Tokens" => app
@@ -1939,6 +1947,40 @@ mod tests {
             app.settings_cursor,
             crate::focus::settings_row_index("Llama.cpp URL")
         );
+    }
+
+    /// The seed row behaves like the other typed number rows: blank means
+    /// nothing is sent, what is stored comes back when the row is reopened, and
+    /// text that is not a number unsets it rather than committing a zero the
+    /// server would honour as a real seed.
+    #[test]
+    fn the_seed_row_edits_and_commits_like_the_other_number_rows() {
+        let mut app = app_with(FocusArea::Settings);
+        app.config.llama_cpp_seed = None;
+        app.settings_cursor = crate::focus::settings_row_index("Llama Seed");
+        press(&mut app, KeyCode::Enter);
+        assert!(app.settings_url_editing);
+        assert_eq!(
+            app.settings_url_buffer, "",
+            "an unset seed must not show an invented value"
+        );
+        for ch in "1234".chars() {
+            press(&mut app, KeyCode::Char(ch));
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.llama_cpp_seed, Some(1234));
+
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.settings_url_buffer, "1234");
+        app.settings_url_buffer.clear();
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.llama_cpp_seed, None);
+
+        app.config.llama_cpp_seed = Some(9);
+        press(&mut app, KeyCode::Enter);
+        app.settings_url_buffer = "twelve".to_string();
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.config.llama_cpp_seed, None);
     }
 
     #[test]

@@ -154,6 +154,16 @@ pub struct XencodeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llama_cpp_min_p: Option<f64>,
 
+    /// llama.cpp sampling default: the seed the sampler draws from. Unset means
+    /// nothing is sent and the server chooses one per request, so a run cannot be
+    /// repeated. Set it — and `llama_cpp_temperature: 0.0` — when a result has to
+    /// be reproducible; a negative value asks the server to keep choosing, the
+    /// way `-1` does on its own command line. What a turn was asked to use is
+    /// written to the project's `metrics.jsonl` by the TUI, so a claim of
+    /// repeatability can be checked against the row rather than against memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_seed: Option<i64>,
+
     /// llama.cpp sampling default: max generated tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llama_cpp_max_tokens: Option<u32>,
@@ -371,6 +381,7 @@ impl Default for XencodeConfig {
             llama_cpp_temperature: None,
             llama_cpp_top_k: None,
             llama_cpp_min_p: None,
+            llama_cpp_seed: None,
             llama_cpp_max_tokens: None,
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),
@@ -524,6 +535,7 @@ mod tests {
         assert!(config.llama_cpp_temperature.is_none());
         assert!(config.llama_cpp_top_k.is_none());
         assert!(config.llama_cpp_min_p.is_none());
+        assert!(config.llama_cpp_seed.is_none());
         assert!(config.llama_cpp_max_tokens.is_none());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);

@@ -1559,6 +1559,7 @@ impl SingleShot {
                 temperature: config.llama_cpp_temperature,
                 top_k: config.llama_cpp_top_k,
                 min_p: config.llama_cpp_min_p,
+                seed: config.llama_cpp_seed,
                 max_tokens: config.llama_cpp_max_tokens,
                 grammar: None,
                 json_schema: None,
@@ -2568,6 +2569,7 @@ impl<'a> App<'a> {
                 temperature: self.config.llama_cpp_temperature,
                 top_k: self.config.llama_cpp_top_k,
                 min_p: self.config.llama_cpp_min_p,
+                seed: self.config.llama_cpp_seed,
                 max_tokens: self.config.llama_cpp_max_tokens,
                 grammar: None,
                 json_schema: None,
@@ -5658,6 +5660,7 @@ impl<'a> App<'a> {
                     temperature: self.config.llama_cpp_temperature,
                     top_k: self.config.llama_cpp_top_k,
                     min_p: self.config.llama_cpp_min_p,
+                    seed: self.config.llama_cpp_seed,
                     max_tokens: self.config.llama_cpp_max_tokens,
                     grammar: None,
                     json_schema: None,
@@ -5910,6 +5913,25 @@ fn cost_report_lines(
     }
     if !rates_shown {
         out.push("No server reported a speed for these records.".to_string());
+    }
+    // Whether any of it could be produced again. A number over runs that cannot
+    // be repeated describes one afternoon, so the report says which it is. Only
+    // the turns that generated tokens are counted: a context-assembly record
+    // sampled nothing, so it has no opinion about repeatability either way.
+    if rollup.rows_generated > 0 {
+        let (pinned, total) = (rollup.rows_repeatable, rollup.rows_generated);
+        let count = count_words(total as usize, "turn");
+        let words = rollup
+            .last_sampling
+            .as_deref()
+            .unwrap_or("the sampling the records name");
+        out.push(if pinned == 0 {
+            format!("Nothing here can be produced again: no seed and no temperature of 0 went over the wire, so each of the {count} sampled as the server chose. Set llama_cpp_seed in config.json to pin it.")
+        } else if pinned == total {
+            format!("{count} ran repeatably, every time ({words}).")
+        } else {
+            format!("{pinned} of {count} ran repeatably, the newest at {words}; the rest sampled as the server chose.")
+        });
     }
 
     // This conversation first, then the rest by name.
@@ -6846,6 +6868,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     // same thing unless the server was changed underneath.
                     app.metrics_identity(&app.config.default_model.clone())
                         .apply(&mut m);
+                    // What this turn was told to sample at. The timings arrive
+                    // for a generation the TUI sent with exactly these values, so
+                    // the row describes the request that produced them rather
+                    // than a guess about it — and a row with neither field says
+                    // plainly that nothing was pinned.
+                    m.temperature = app.config.llama_cpp_temperature;
+                    m.seed = app.config.llama_cpp_seed;
                     let _ = xencode_context_rs::append_metrics(&xencode, &m);
                 }
             } else if token == "[HEALTH_DONE]" {
@@ -9706,6 +9735,17 @@ mod tests {
         }
     }
 
+    /// The `/cost` report for a scratch project as the command prints it, with
+    /// the directory cleaned up afterwards.
+    fn cost_report_at(project: &std::path::Path) -> String {
+        let mut app = App::for_tests();
+        app.memory.start_session(Some("session_a".to_string()));
+        app.report_cost_at(&project.join(".xencode"));
+        let lines = system_lines(&app).join("\n");
+        let _ = std::fs::remove_dir_all(project);
+        lines
+    }
+
     fn system_lines(app: &App) -> Vec<String> {
         app.messages
             .iter()
@@ -9790,6 +9830,55 @@ mod tests {
         assert_eq!(spend.micros, None);
         assert_eq!(spend.line, "💸 1200 tok");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The report is a claim about runs that already happened, so it has to say
+    /// whether they can be produced again. A record that generated no tokens is
+    /// left out of the count rather than being counted as unrepeatably sampled.
+    #[test]
+    fn the_cost_report_says_which_turns_could_be_produced_again() {
+        let dir = cost_project("partly-pinned");
+        let mut pinned = cost_turn("session_a", 1000, 400, 200);
+        pinned.temperature = Some(0.0);
+        pinned.seed = Some(1234);
+        let mut free = cost_turn("session_a", 500, 500, 100);
+        free.temperature = Some(0.8);
+        record_turns(
+            &dir.join(".xencode"),
+            &[
+                pinned,
+                free,
+                // Assembled a context, generated nothing: no sampling to judge.
+                cost_turn("session_a", 300, 300, 0),
+            ],
+        );
+        let report = cost_report_at(&dir);
+        assert!(
+            report.contains("1 of 2 turns ran repeatably, the newest at temperature 0 · seed 1234"),
+            "{report}"
+        );
+
+        let dir = cost_project("all-pinned");
+        let mut one = cost_turn("session_a", 100, 100, 10);
+        one.seed = Some(7);
+        record_turns(&dir.join(".xencode"), &[one]);
+        let report = cost_report_at(&dir);
+        assert!(
+            report.contains("1 turn ran repeatably, every time (seed 7)."),
+            "{report}"
+        );
+
+        let dir = cost_project("none-pinned");
+        record_turns(
+            &dir.join(".xencode"),
+            &[cost_turn("session_a", 100, 100, 10)],
+        );
+        let report = cost_report_at(&dir);
+        assert!(
+            report.contains("Nothing here can be produced again: no seed and no temperature of 0"),
+            "{report}"
+        );
+        assert!(report.contains("llama_cpp_seed"), "{report}");
     }
 
     #[test]

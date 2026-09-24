@@ -275,6 +275,11 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Number,
     },
     SettingRow {
+        label: "Llama Seed",
+        section: "llama.cpp",
+        kind: SettingKind::Number,
+    },
+    SettingRow {
         label: "Llama Max Tokens",
         section: "llama.cpp",
         kind: SettingKind::Number,
