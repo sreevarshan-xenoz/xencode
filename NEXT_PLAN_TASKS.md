@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 945 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 972 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1257,7 +1257,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** an ambiguous edit on a real duplicated line converges in
       one retry, and the existing exact-match contract stays exact — no silent
       fuzzy write.
-- [ ] **L-9 — cost metering over the metrics that already exist.** Aggregate
+- [x] **L-9 — cost metering over the metrics that already exist.** Aggregate
       `RequestMetrics` (prompt/cached/completion tokens, tok/s, context usage,
       compaction) into per-model and per-session spend with a configurable
       budget: a `/cost` command, a TUI status row, and a warning as the budget is
@@ -1265,6 +1265,11 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** numbers come from written `metrics.jsonl` records and match
       a hand-summed session, an unknown price is shown as unknown rather than
       invented, and a price table update is data, not code.
+      *(Done 2026-09-24 together with `CX-1` — see W1 progress. Spend is derived
+      from the rollup through `.xencode/pricing.json` rather than written into the
+      log, so `est_cost_micros` stays empty on purpose; the hand-sum match was
+      checked against a real 164-row log, and the unknown-price branches are the
+      ones a project without a price table actually sees.)*
 
 #### Track E — extend both (after either track lands)
 
@@ -2548,6 +2553,10 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
   O(all rows) read at `app.rs:1017` stops growing. **S**. Trap: fact 10 — no
   session key in the schema and no compaction, so this needs CX-2 first — which
   landed, so the key is there to group by.
+  *(Done 2026-09-24 with `L-9` on top of it — see W1 progress. The line reference
+  had drifted: the whole-file reads were the performance panel's and `/ctx kv`'s,
+  and both now go through `.xencode/cache/metrics-rollup.json`, with the panel's
+  recent-turn rows coming from a bounded 256 KiB read of the end of the log.)*
 - **CX-2 Schema extension** — add `model`, `provider`, `session_id`,
   `est_cost_micros`, `power_w`, `source: local|cloud`, append-only so old rows
   still parse. **S**. Trap: the profiler's tests (`app.rs:8403+`) are coupled to
@@ -5285,6 +5294,63 @@ done-when is met, and the commit that does it names the IDs.
   directory and the model URL at a port that was bound and released — so the failure
   is a loopback refusal, instant and offline, and no test can reach a vendor service
   or depend on someone having a model loaded.
+- [x] `CX-1` + `L-9` — 2026-09-24, one change, because `L-9`'s spend is `CX-1`'s
+  rollup read through a price table and neither is useful alone.
+- What the rollup is: `.xencode/cache/metrics-rollup.json`, written by
+  `refresh_rollup`, which reads only the bytes appended since the last fold and
+  adds them to what is already there. It carries row count, the token totals, the
+  totals per session and per model inside that session, the newest row each
+  hardware profile produced, and p50/p95 generation and prompt-evaluation speed
+  over the newest 512 turns that reported a rate. Percentiles are exact ranks over
+  the samples kept (`index = round(fraction × (n−1))`, no interpolation), and each
+  figure says how many samples it covers. A turn whose server reported no rate is
+  left out of the window rather than counted as zero.
+- What `L-9` did *not* do: fill in `est_cost_micros`. `CX-2` added that column and
+  nothing writes it, and it stays unwritten on purpose — prices are data in
+  `.xencode/pricing.json`, so a cost frozen into the log at generation time would
+  outlive the price it was computed from. Cost is derived on read, which is what
+  makes "a price table update is data, not code" true rather than a slogan.
+- Measured against the 164 rows a real TUI session had already left in
+  `rust/crates/xencode-tui-rs/.xencode/cache/metrics.jsonl` (42,199 bytes, 21 named
+  sessions): the rollup's totals equalled an independent hand sum of the raw JSON —
+  18,395 tokens prompted, 0 cached, 0 completion, 21 sessions — and its byte offset
+  equalled the file size. Optimized build, this laptop: full read 135 µs, sidecar
+  read 46 µs, a fold of the whole file 332 µs. The same rows repeated to 16,400
+  (4.1 MiB) cost 12.3 ms to read whole, while the sidecar stayed 8 KiB and 36 µs —
+  so the growth `CX-1` was written to stop is measured, at the size where it
+  matters, and the small-file difference is not worth claiming.
+- What that real file cannot prove: none of its rows carry a server rate (they are
+  context-assembly rows, written before llama.cpp was asked anything), so the
+  percentile windows were empty on real data and the report's
+  "No server reported a speed for these records." line is the branch that a live
+  project actually shows. The speed figures themselves are proven only over rows
+  written by `append_metrics` in tests. Same for cost: no `pricing.json` exists in
+  this repository, so every measured run above was unpriced, and the money wording
+  is covered by tests that write a price table to a scratch directory.
+- Two facts worth carrying forward: the log is still appended and never trimmed, so
+  the rollup bounds the *read* and not the file (rotation is not in this item), and
+  `xencode query` still writes no rows — `/cost` describes agent turns and context
+  assembly, and a project that only ever used `xencode query` correctly reports
+  nothing recorded and writes no sidecar.
+- A test-hygiene finding, not caused here and not fixed: one existing `xencode-tui-rs`
+  library test records a context row into whatever directory the test runner is
+  standing in, which during `cargo test` is the crate itself. It appended three rows
+  to that real 164-row file while this item was being checked; the file was restored
+  afterwards. `rust/crates/xencode-tui-rs/.xencode/` is gitignored, so nothing in the
+  repository is affected, but a test that writes into the working tree is a trap for
+  whoever next measures against that file.
+- Verified by 972 tests, 0 failures, 5 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Twenty-seven tests
+  are new: twelve over the fold (sums from rows on disk, incremental add, a refresh
+  with nothing new leaving the sidecar byte alone, session and model grouping, a
+  replaced log rebuilding rather than double-counting, a missing log keeping the last
+  rollup, percentile coverage, the bounded window, the newest-per-profile row, a
+  sidecar from another version, a half-written sidecar, and a hand-summed session
+  priced to the micro-dollar), seven over the price rules (missing file, unparseable
+  file, negative price, unknown model, cache billed at the input price, partial
+  totals, and the dollar formatting), two over the bounded tail read, and six in the
+  TUI over the report wording, the budget line, the status row, the once-only warning
+  and `/cost` writing nothing where nothing is recorded.
 
 #### W2 — The model/inference substrate — 15 items
 

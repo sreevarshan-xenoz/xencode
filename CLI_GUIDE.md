@@ -52,7 +52,11 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `/plugin reload` re-scans the plugin directory), `/trace [turns]` (what the
 recent agent turns did — rounds, tool calls with their outcome, and any token
 count a server reported — read from `.xencode/cache/turns.jsonl` in the project,
-so it answers with every model server down), and
+so it answers with every model server down), `/cost` (tokens, KV-cache reuse,
+p50/p95 speed and spend for the turns recorded in this project, read from
+`.xencode/cache/metrics.jsonl` through its rollup sidecar and priced by
+`.xencode/pricing.json`; a model with no price there is shown as unpriced, never
+as free, and it too answers with every model server down), and
 `/spawn <task> [#branch]` (run a subagent in a fresh
 git worktree next to the project, e.g. `proj-spawn-1` on branch
 `xencode/spawn-1`; a `#branch` suffix names the branch). The spawned
@@ -344,6 +348,7 @@ xencode config reset
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_args` | string | split on whitespace |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
+| `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
 | `layout` | string | TUI body preset: `classic`, `chat-first`, `zen` (unknown → classic at render) |
 | `rounded_borders` | bool | rounded panel corners |

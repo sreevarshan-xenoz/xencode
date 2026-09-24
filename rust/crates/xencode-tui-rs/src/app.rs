@@ -96,7 +96,7 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
     "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp", "/plugin",
-    "/trace",
+    "/trace", "/cost",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -583,6 +583,28 @@ pub struct App<'a> {
     pub last_ctx_total_tokens: u64,
     /// Retrieved files in the last assembly (recorded into metrics row).
     pub last_ctx_retrieved_files: u8,
+
+    /// What this session has spent, from the records on disk: the status-row
+    /// text, and the cost it was derived from. Refreshed when a turn finishes,
+    /// never on a redraw (CX-1/L-9).
+    pub spend: Option<SpendSnapshot>,
+    /// Whether the budget warning has already been shown this session, so a
+    /// crossed budget warns once rather than on every turn after.
+    budget_warned: bool,
+}
+
+/// The spend line the status bar shows, kept as text plus the figure it came
+/// from, so the budget check and the bar can never disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpendSnapshot {
+    pub line: String,
+    /// Micro-dollars for this session, `None` while no price is known.
+    pub micros: Option<u64>,
+    /// Prompt + completion tokens this session has on record.
+    pub tokens: u64,
+    /// Whether anything is priced at all, which decides whether `micros` being
+    /// `None` means "free" or "unknown".
+    pub priced: bool,
 }
 
 /// First non-empty line of a process output, for one-line chat reporting.
@@ -1042,12 +1064,15 @@ async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<Str
             _ => None,
         };
         let (rss, total) = process_memory_mb();
-        let rows = xencode_context_rs::read_metrics(&xencode);
-        (cpu, rss, total, rows)
+        // The rollup sidecar carries the totals; only the handful of lines the
+        // panel prints are read from the file itself.
+        let rollup = xencode_context_rs::refresh_rollup(&xencode).ok();
+        let tail = xencode_context_rs::read_metrics_tail(&xencode, PROFILER_METRIC_ROWS);
+        (cpu, rss, total, rollup, tail)
     })
     .await;
 
-    let (cpu, rss, total, rows) = match sampled {
+    let (cpu, rss, total, rollup, tail) = match sampled {
         Ok(v) => v,
         Err(e) => {
             let _ = tx.send(format!("[PROFILER]failed:sample thread died: {}", e));
@@ -1092,15 +1117,26 @@ async fn run_profiler(xencode: std::path::PathBuf, tx: mpsc::UnboundedSender<Str
         }
     }
 
-    if rows.is_empty() {
+    let recorded = rollup.as_ref().map(|r| r.rows).unwrap_or(tail.len() as u64);
+    if recorded == 0 {
         let _ = tx
             .send("[PROFILER]note:no metrics.jsonl yet — a llama.cpp turn records one".to_string());
     } else {
-        let _ = tx.send(format!(
-            "[PROFILER]row:metrics|recorded turns|{}",
-            rows.len()
-        ));
-        for r in rows.iter().rev().take(PROFILER_METRIC_ROWS) {
+        let _ = tx.send(format!("[PROFILER]row:metrics|recorded turns|{}", recorded));
+        if let Some(kv) = rollup.as_ref().and_then(|r| r.kv_reuse_ratio()) {
+            let _ = tx.send(format!(
+                "[PROFILER]row:metrics|KV cache reuse|{}% of {} prompt tokens",
+                (kv * 100.0) as u64,
+                rollup.as_ref().map(|r| r.totals.prompt_tokens).unwrap_or(0)
+            ));
+        }
+        if let Some(speed) = rollup.as_ref().and_then(|r| r.generation_percentiles()) {
+            let _ = tx.send(format!(
+                "[PROFILER]row:metrics|generation speed|p50 {:.1} · p95 {:.1} tok/s over {} turns",
+                speed.p50, speed.p95, speed.samples
+            ));
+        }
+        for r in tail.iter().rev() {
             let _ = tx.send(format!(
                 "[PROFILER]row:{}|turn {}|{}% kv · {} prompt · {:.0} tok/s · {} files",
                 r.profile,
@@ -1885,6 +1921,8 @@ impl<'a> App<'a> {
             task_runtime: crate::agent_tools::new_task_runtime(),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
+            spend: None,
+            budget_warned: false,
         };
         app.style_chat_input();
 
@@ -2256,6 +2294,13 @@ impl<'a> App<'a> {
             return;
         }
 
+        // What the recorded turns add up to (L-9): totals, speed, spend. No
+        // model asked, so it answers with every server down.
+        if prompt == "/cost" || prompt.starts_with("/cost ") {
+            self.handle_cost_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
 
         // Normal LLM generation — project context is injected on every turn:
@@ -2592,6 +2637,9 @@ impl<'a> App<'a> {
         if text == "[DONE]" {
             self.is_generating = false;
             self.total_llm_calls += 1;
+            // The turn is over and its record is on disk: this is the moment the
+            // session's spend and the budget warning can be right (L-9).
+            self.refresh_spend();
             if let Some(last) = self.messages.last() {
                 if last.role == "assistant" {
                     self.memory.add_message(
@@ -3655,32 +3703,47 @@ impl<'a> App<'a> {
                     }
                 ));
 
-                let rows = xencode_context_rs::read_metrics(&xencode);
-                if rows.is_empty() {
-                    let _ = tx.send("[CTX]📈 No metrics yet — run /ctx <query> then a llama.cpp generation to see KV reuse.".to_string());
-                } else {
-                    let _ = tx.send("[CTX]📈 Latest KV-cache rows per profile:".to_string());
-                    for r in xencode_context_rs::RequestMetrics::latest_per_profile(&rows) {
-                        let _ = tx.send(format!(
-                            "[CTX]   {} — prompt {} · cached {} · reuse {}% · {} tok/s",
-                            r.profile,
-                            r.prompt_tokens,
-                            r.cached_tokens,
-                            (r.kv_reuse_ratio() * 100.0) as u64,
-                            r.generation_tok_s
-                        ));
+                // The newest record per profile, from the rollup rather than by
+                // re-reading every record ever written.
+                match xencode_context_rs::refresh_rollup(&xencode) {
+                    Ok(rollup) if rollup.rows == 0 => {
+                        let _ = tx.send("[CTX]📈 No metrics yet — run /ctx <query> then a llama.cpp generation to see KV reuse.".to_string());
                     }
-                    // Interpret §13: large stable prefix + ~0 cached = prefix drift bug.
-                    let latest = xencode_context_rs::RequestMetrics::latest_per_profile(&rows)
-                        .first()
-                        .cloned();
-                    if let Some(r) = latest {
-                        if r.prompt_tokens > 2000 && r.kv_reuse_ratio() < 0.05 {
-                            let _ = tx.send(
-                                "[CTX]🚨 Large prompt but ~0 cached tokens — something breaks prefix stability; check for dynamic tiers above the stable head."
-                                    .to_string(),
-                            );
+                    Ok(rollup) => {
+                        let _ = tx.send("[CTX]📈 Latest KV-cache row per profile:".to_string());
+                        for (profile, s) in &rollup.last_by_profile {
+                            let reuse = if s.prompt_tokens > 0 {
+                                (s.cached_tokens.min(s.prompt_tokens) as f64
+                                    / s.prompt_tokens as f64)
+                                    * 100.0
+                            } else {
+                                0.0
+                            };
+                            let _ = tx.send(format!(
+                                "[CTX]   {} — prompt {} · cached {} · reuse {}% · {} tok/s",
+                                profile,
+                                s.prompt_tokens,
+                                s.cached_tokens,
+                                reuse as u64,
+                                s.generation_tok_s
+                            ));
                         }
+                        // Interpret §13: large stable prefix + ~0 cached = prefix drift bug.
+                        if let Some(s) =
+                            rollup.last_by_profile.values().max_by_key(|v| v.ts_unix_ms)
+                        {
+                            if s.prompt_tokens > 2000 && s.cached_tokens * 20 < s.prompt_tokens {
+                                let _ = tx.send(
+                                    "[CTX]🚨 Large prompt but ~0 cached tokens — something breaks prefix stability; check for dynamic tiers above the stable head."
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(format!(
+                            "[CTX]📈 The metrics rollup could not be written: {e}"
+                        ));
                     }
                 }
                 if let Some(ts) = &self.last_llamacpp_timings {
@@ -3910,6 +3973,96 @@ impl<'a> App<'a> {
         }
         for line in trace_report(&rows, current_timestamp()) {
             self.system_line(&line);
+        }
+    }
+
+    /// Fold a project's records into the rollup and read its price table —
+    /// everything a cost figure is built from. A project with no
+    /// `metrics.jsonl` costs nothing to ask about: the fold finds no records and
+    /// writes no sidecar.
+    fn spend_inputs(
+        &self,
+        xencode: &std::path::Path,
+    ) -> Result<
+        (
+            xencode_context_rs::MetricsRollup,
+            xencode_context_rs::PriceTable,
+            Option<String>,
+        ),
+        String,
+    > {
+        let rollup = xencode_context_rs::refresh_rollup(xencode)
+            .map_err(|e| format!("the metrics rollup could not be written: {e}"))?;
+        let table = xencode_context_rs::PriceTable::load(xencode);
+        Ok((rollup, table, self.memory.current_session().cloned()))
+    }
+
+    /// `/cost`: what the recorded turns add up to, and what is not known about
+    /// them. Nothing is asked of a model, so it works with every server down.
+    fn handle_cost_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/cost").unwrap_or("").trim();
+        if !arg.is_empty() {
+            self.system_line("usage: /cost  (totals, speed and spend from the records on disk)");
+            return;
+        }
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        self.report_cost_at(&xencode);
+    }
+
+    /// The `/cost` body, with the project named so a test can point it at a
+    /// scratch directory rather than whatever the test runner is standing in.
+    fn report_cost_at(&mut self, xencode: &std::path::Path) {
+        match self.spend_inputs(xencode) {
+            Ok((rollup, table, session)) => {
+                let budget = self.config.cost_budget_usd_micros;
+                for line in cost_report_lines(&rollup, &table, session.as_deref(), budget) {
+                    self.system_line(&line);
+                }
+                self.settle_spend(&rollup, &table, session.as_deref(), budget);
+            }
+            Err(message) => self.system_line(&message),
+        }
+    }
+
+    /// Re-read what this session has spent after a turn. The status row shows it
+    /// and the budget warning fires once when it is crossed. A project with no
+    /// records to fold reads a couple of bytes and writes nothing, so this costs
+    /// nothing until there is something to report.
+    fn refresh_spend(&mut self) {
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let budget = self.config.cost_budget_usd_micros;
+        let (rollup, table, session) = match self.spend_inputs(&xencode) {
+            Ok(inputs) => inputs,
+            Err(_) => return,
+        };
+        self.settle_spend(&rollup, &table, session.as_deref(), budget);
+    }
+
+    /// Put the session's spend on the status row and warn once if it has crossed
+    /// the budget. Split from the file reading so both halves can be tested
+    /// against records in a scratch directory.
+    fn settle_spend(
+        &mut self,
+        rollup: &xencode_context_rs::MetricsRollup,
+        table: &xencode_context_rs::PriceTable,
+        session: Option<&str>,
+        budget: Option<u64>,
+    ) {
+        self.spend = spend_snapshot(rollup, table, session, budget);
+        let crossed = match (&self.spend, budget) {
+            (Some(snapshot), Some(limit)) => snapshot.micros.is_some_and(|m| m >= limit),
+            _ => false,
+        };
+        if crossed && !self.budget_warned {
+            self.budget_warned = true;
+            let snapshot = self.spend.as_ref().expect("checked above");
+            self.system_line(&format!(
+                "⚠️ Budget crossed: {} of the {} set for this session. /cost breaks it down, and nothing here stops a request — the budget warns.",
+                xencode_context_rs::format_usd(snapshot.micros.unwrap_or(0)),
+                xencode_context_rs::format_usd(budget.unwrap_or(0))
+            ));
         }
     }
 
@@ -5661,6 +5814,254 @@ fn should_advance_fallback(err: &xencode_providers_rs::ProviderError, emitted_an
 /// How many turns `/trace` shows. The trace file keeps everything; this is the
 /// window the inspector browses.
 const TRACE_TURNS: usize = 50;
+
+/// How many model groups and session groups `/cost` lists before saying how many
+/// it left out.
+const COST_MODEL_ROWS: usize = 8;
+const COST_SESSION_ROWS: usize = 6;
+
+/// Money as the report prints it: a priced figure, or the words that say it is
+/// not one. A total over partly priced models is a floor, not an invoice, and
+/// is worded as one.
+fn cost_words(report: &xencode_context_rs::CostReport) -> String {
+    if report.complete() {
+        return xencode_context_rs::format_usd(report.known_micros);
+    }
+    if report.known_micros == 0 {
+        return format!(
+            "price unknown for {}",
+            count_words(report.unpriced.len(), "model")
+        );
+    }
+    format!(
+        "at least {} (no price for {})",
+        xencode_context_rs::format_usd(report.known_micros),
+        count_words(report.unpriced.len(), "model")
+    )
+}
+
+/// What the recorded turns add up to, as lines for the chat pane (L-9, over
+/// CX-1's rollup). Pure: the rollup and the table come off disk, the arithmetic
+/// here does not, so the wording and the numbers can be checked together without
+/// a filesystem.
+fn cost_report_lines(
+    rollup: &xencode_context_rs::MetricsRollup,
+    table: &xencode_context_rs::PriceTable,
+    session: Option<&str>,
+    budget_micros: Option<u64>,
+) -> Vec<String> {
+    use xencode_context_rs as ctx;
+    let mut out = Vec::new();
+    if rollup.rows == 0 {
+        out.push(
+            "Nothing recorded in this project yet — a turn that assembles context writes one record."
+                .to_string(),
+        );
+        return out;
+    }
+
+    let sessions = if rollup.session_count() > 0 {
+        format!("in {} session(s)", rollup.session_count())
+    } else {
+        "no session named on any record".to_string()
+    };
+    let span = if rollup.first_ts_unix_ms > 0 && rollup.last_ts_unix_ms > rollup.first_ts_unix_ms {
+        format!(
+            " · {} → {}",
+            format_row_time(rollup.first_ts_unix_ms),
+            format_row_time(rollup.last_ts_unix_ms)
+        )
+    } else {
+        String::new()
+    };
+    out.push(format!(
+        "{} {sessions}{}",
+        count_words(rollup.rows as usize, "record"),
+        span
+    ));
+
+    let totals = &rollup.totals;
+    let reuse = match totals.kv_reuse_ratio() {
+        Some(ratio) => format!(
+            " · {}% of the prompt served from the KV cache",
+            (ratio * 100.0) as u64
+        ),
+        None => " · no prompt tokens reported".to_string(),
+    };
+    out.push(format!(
+        "{} prompted · {} generated{reuse}",
+        totals.prompt_tokens, totals.completion_tokens
+    ));
+
+    let mut rates_shown = false;
+    if let Some(speed) = rollup.generation_percentiles() {
+        out.push(format!(
+            "generation p50 {:.1} tok/s · p95 {:.1} tok/s (the newest {} records that reported one)",
+            speed.p50, speed.p95, speed.samples
+        ));
+        rates_shown = true;
+    }
+    if let Some(speed) = rollup.prompt_percentiles() {
+        out.push(format!(
+            "prompt evaluation p50 {:.1} tok/s · p95 {:.1} tok/s (the newest {} records that reported one)",
+            speed.p50, speed.p95, speed.samples
+        ));
+        rates_shown = true;
+    }
+    if !rates_shown {
+        out.push("No server reported a speed for these records.".to_string());
+    }
+
+    // This conversation first, then the rest by name.
+    let mut order: Vec<&String> = rollup
+        .by_session
+        .keys()
+        .filter(|key| !key.is_empty())
+        .collect();
+    if let Some(current) = session {
+        if let Some(at) = order.iter().position(|key| key.as_str() == current) {
+            order.swap(0, at);
+        }
+    }
+    if !order.is_empty() {
+        out.push("Per session:".to_string());
+        for key in order.iter().take(COST_SESSION_ROWS) {
+            let group = &rollup.by_session[*key];
+            let report = ctx::cost_of(&group.by_model, table);
+            out.push(format!(
+                "  {}{} {} prompted · {} generated · {}",
+                if Some(key.as_str()) == session {
+                    "→ "
+                } else {
+                    "  "
+                },
+                key,
+                group.tokens.prompt_tokens,
+                group.tokens.completion_tokens,
+                cost_words(&report)
+            ));
+        }
+        if order.len() > COST_SESSION_ROWS {
+            out.push(format!("  … and {} more", order.len() - COST_SESSION_ROWS));
+        }
+    }
+    if rollup.by_session.contains_key("") {
+        let group = &rollup.by_session[""];
+        out.push(format!(
+            "  (records written before sessions were tracked: {} prompted)",
+            group.tokens.prompt_tokens
+        ));
+    }
+
+    out.push("Per model:".to_string());
+    let models: Vec<&String> = rollup.by_model.keys().collect();
+    let report = ctx::cost_of(&rollup.by_model, table);
+    for cost in report.per_model.iter().take(COST_MODEL_ROWS) {
+        let label = if cost.model.is_empty() {
+            "no model named".to_string()
+        } else {
+            cost.model.clone()
+        };
+        let detail = match (&cost.micros, &cost.rates) {
+            (Some(micros), Some(price)) => format!(
+                "{} · in ${}/M · out ${}/M{}",
+                ctx::format_usd(*micros),
+                price.input_usd_per_mtok,
+                price.output_usd_per_mtok,
+                if cost.cache_billed_at_input_price {
+                    " · cache reads at the input price"
+                } else {
+                    ""
+                }
+            ),
+            _ => cost.unknown_because.clone().unwrap_or_default(),
+        };
+        out.push(format!(
+            "  {label} — {} prompted · {} generated · {detail}",
+            cost.tokens.prompt_tokens, cost.tokens.completion_tokens
+        ));
+    }
+    if models.len() > COST_MODEL_ROWS {
+        out.push(format!("  … and {} more", models.len() - COST_MODEL_ROWS));
+    }
+    out.push(format!("Everything recorded: {}", cost_words(&report)));
+
+    match budget_micros {
+        Some(limit) => {
+            let spent = session
+                .and_then(|key| rollup.by_session.get(key))
+                .map(|group| ctx::cost_of(&group.by_model, table));
+            match spent {
+                None => out.push(format!(
+                    "Budget {} for this session — it has written no records yet.",
+                    ctx::format_usd(limit)
+                )),
+                Some(report) => {
+                    let words = cost_words(&report);
+                    let suffix = match (report.complete(), report.known_micros >= limit) {
+                        (true, true) => " — over.".to_string(),
+                        (true, false) => String::new(),
+                        (false, _) => " — a floor while a price is unknown.".to_string(),
+                    };
+                    out.push(format!(
+                        "Budget {} for this session: spent {words}{suffix}",
+                        ctx::format_usd(limit)
+                    ));
+                }
+            }
+        }
+        None => out.push(
+            "No budget set — cost_budget_usd_micros in config.json takes micro-dollars."
+                .to_string(),
+        ),
+    }
+
+    if !table.file_present {
+        out.push(format!(
+            "Prices come from {} — it is not there, so nothing is priced and no figure is invented.",
+            table.path.display()
+        ));
+    }
+    for rejected in &table.rejected {
+        out.push(format!("pricing.json: {rejected}"));
+    }
+    out
+}
+
+/// The status-row text and the figure behind it, for one session. `None` when
+/// that session has written nothing, which is what keeps the bar empty on the
+/// first turn rather than showing a made-up zero.
+fn spend_snapshot(
+    rollup: &xencode_context_rs::MetricsRollup,
+    table: &xencode_context_rs::PriceTable,
+    session: Option<&str>,
+    budget_micros: Option<u64>,
+) -> Option<SpendSnapshot> {
+    let key = session?;
+    let group = rollup.by_session.get(key)?;
+    let tokens = group.tokens.prompt_tokens + group.tokens.completion_tokens;
+    let report = xencode_context_rs::cost_of(&group.by_model, table);
+    // Money only when every model in the session has a price; otherwise the bar
+    // counts tokens, which is what is actually known.
+    let line = if report.complete() {
+        match budget_micros {
+            Some(limit) => format!(
+                "💸 {}/{}",
+                xencode_context_rs::format_usd(report.known_micros),
+                xencode_context_rs::format_usd(limit)
+            ),
+            None => format!("💸 {}", xencode_context_rs::format_usd(report.known_micros)),
+        }
+    } else {
+        format!("💸 {} tok", tokens)
+    };
+    Some(SpendSnapshot {
+        line,
+        micros: report.complete().then_some(report.known_micros),
+        tokens,
+        priced: report.complete(),
+    })
+}
 
 /// "42s ago", "7m ago", "3h ago", "2d ago" — the age of a recorded turn.
 /// Elapsed time rather than a clock reading, because the app has no timezone
@@ -8407,7 +8808,10 @@ mod tests {
     fn slash_completion_extends_unique_prefixes_only() {
         use super::complete_slash_token;
         assert_eq!(complete_slash_token("/ini").as_deref(), Some("/init"));
-        assert_eq!(complete_slash_token("/c").as_deref(), Some("/ctx"));
+        // "/c" is ambiguous now that /cost exists; either branch still completes.
+        assert_eq!(complete_slash_token("/c").as_deref(), None);
+        assert_eq!(complete_slash_token("/ct").as_deref(), Some("/ctx"));
+        assert_eq!(complete_slash_token("/co").as_deref(), Some("/cost"));
         assert_eq!(complete_slash_token("/b").as_deref(), Some("/bytebot"));
         assert_eq!(complete_slash_token("/init").as_deref(), None); // complete
         assert_eq!(complete_slash_token("/x").as_deref(), None); // no match
@@ -9246,12 +9650,208 @@ mod tests {
             "no metrics row in {messages:?}"
         );
         assert!(messages.iter().any(|m| m == "[PROFILER]done"));
+        // The two figures the rollup contributes: reuse over every record, and a
+        // speed over the window. 3600 of 4000 prompt tokens were cached.
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("KV cache reuse|90% of 4000 prompt tokens")),
+            "no reuse line in {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("generation speed|p50 31.5 · p95 31.5 tok/s over 1 turns")),
+            "no speed line in {messages:?}"
+        );
         for scripted in ["process_data", "render_template", "generate_report"] {
             assert!(
                 !messages.iter().any(|m| m.contains(scripted)),
                 "profiler still lists {scripted}"
             );
         }
+    }
+
+    /// A scratch project for the cost work: a real `.xencode` directory, real
+    /// records appended to `metrics.jsonl`, and optionally a real price table
+    /// beside it. Named uniquely so two tests never share one.
+    fn cost_project(tag: &str) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("xcode-cost-{tag}-{unique}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".xencode")).unwrap();
+        dir
+    }
+
+    /// One turn as the context assembly records it: prompt tokens in, of which
+    /// `evaluated` actually had to be thought about, completion tokens out.
+    fn cost_turn(
+        session: &str,
+        prompt: u32,
+        evaluated: u32,
+        completion: u32,
+    ) -> xencode_context_rs::RequestMetrics {
+        let mut row = xencode_context_rs::RequestMetrics::from_timings(
+            "BALANCED", 8192, prompt, evaluated, completion, 12.5, 300.0, 4,
+        );
+        row.session_id = Some(session.to_string());
+        row.model = Some("qwen2.5:7b".to_string());
+        row
+    }
+
+    fn record_turns(xencode: &std::path::Path, rows: &[xencode_context_rs::RequestMetrics]) {
+        for row in rows {
+            xencode_context_rs::append_metrics(xencode, row).unwrap();
+        }
+    }
+
+    fn system_lines(app: &App) -> Vec<String> {
+        app.messages
+            .iter()
+            .filter(|message| message.role == "system")
+            .map(|message| message.content.clone())
+            .collect()
+    }
+
+    /// The done-when for the cost work, checked end to end: records written to
+    /// the file, priced against a table on disk, printed by the command — and the
+    /// figure matches what the same records add up to by hand.
+    #[test]
+    fn cost_numbers_come_from_the_records_and_match_a_hand_sum() {
+        let dir = cost_project("priced");
+        let xencode = dir.join(".xencode");
+        std::fs::write(
+            xencode.join("pricing.json"),
+            r#"{"models":{"qwen2.5:7b":{"input_usd_per_mtok":0.3,"output_usd_per_mtok":0.6,"cached_input_usd_per_mtok":0.06}}}"#,
+        )
+        .unwrap();
+        record_turns(
+            &xencode,
+            &[
+                cost_turn("session_a", 1000, 400, 200),
+                cost_turn("session_a", 500, 500, 100),
+                cost_turn("session_b", 200, 200, 50),
+            ],
+        );
+
+        let mut app = App::for_tests();
+        app.memory.start_session(Some("session_a".to_string()));
+        app.report_cost_at(&xencode);
+        let lines = system_lines(&app);
+        let report = lines.join("\n");
+
+        // Hand sum for session_a: 900 fresh input × $0.30 + 600 cached × $0.06 +
+        // 300 generated × $0.60, all per million tokens — 270 + 36 + 180.
+        assert!(report.contains("→ session_a"), "{lines:#?}");
+        assert!(report.contains("$0.000486"), "{lines:#?}");
+        assert!(
+            report.contains("Everything recorded: $0.000576"),
+            "{lines:#?}"
+        );
+        assert!(
+            report.contains("1700 prompted · 350 generated"),
+            "{lines:#?}"
+        );
+        assert!(
+            report.contains("35% of the prompt served from the KV cache"),
+            "{lines:#?}"
+        );
+        assert!(
+            xencode.join("cache/metrics-rollup.json").is_file(),
+            "the rollup sidecar was never written"
+        );
+        assert_eq!(app.spend.as_ref().map(|s| s.micros), Some(Some(486)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_model_with_no_price_is_reported_as_unknown_and_never_as_free() {
+        let dir = cost_project("unpriced");
+        let xencode = dir.join(".xencode");
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.memory.start_session(Some("session_a".to_string()));
+        app.report_cost_at(&xencode);
+        let report = system_lines(&app).join("\n");
+        assert!(
+            report.contains("Everything recorded: price unknown for 1 model"),
+            "{report}"
+        );
+        assert!(
+            report.contains("no price for qwen2.5:7b in pricing.json"),
+            "{report}"
+        );
+        assert!(report.contains("Prices come from"), "{report}");
+        assert!(!report.contains("$0\n"), "a zero was printed as a price");
+        // The bar counts tokens, because that is all that is known.
+        let spend = app.spend.clone().expect("the session has records");
+        assert_eq!(spend.micros, None);
+        assert_eq!(spend.line, "💸 1200 tok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn crossing_the_budget_warns_once_and_says_what_it_was_set_to() {
+        let dir = cost_project("budget");
+        let xencode = dir.join(".xencode");
+        std::fs::write(
+            xencode.join("pricing.json"),
+            r#"{"models":{"qwen2.5:7b":{"input_usd_per_mtok":0.3,"output_usd_per_mtok":0.6}}}"#,
+        )
+        .unwrap();
+        record_turns(&xencode, &[cost_turn("session_a", 1000, 400, 200)]);
+
+        let mut app = App::for_tests();
+        app.memory.start_session(Some("session_a".to_string()));
+        // One turn of 1000 prompt tokens, 600 of them from the cache, and no
+        // cache rate in the table: 400 × $0.3 + 600 × $0.3 + 200 × $0.6 per
+        // million = 420 micro-dollars, which a $0.0004 budget has crossed.
+        app.config.cost_budget_usd_micros = Some(400);
+        app.report_cost_at(&xencode);
+        app.report_cost_at(&xencode);
+        let lines = system_lines(&app);
+        let warnings: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.starts_with("⚠️ Budget crossed"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "the budget warned {warnings:?}");
+        assert!(warnings[0].contains("$0.00042 of the $0.0004"));
+        let spend = app.spend.clone().expect("spend is known");
+        assert_eq!(spend.micros, Some(420));
+        assert_eq!(spend.line, "💸 $0.00042/$0.0004");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_cost_command_is_named_and_completes_like_the_other_ones() {
+        assert!(super::SLASH_COMMANDS.contains(&"/cost"));
+        assert_eq!(
+            super::complete_slash_token("/cos").as_deref(),
+            Some("/cost")
+        );
+    }
+
+    #[test]
+    fn asking_about_cost_where_nothing_is_recorded_leaves_no_files_behind() {
+        let dir = cost_project("usage");
+        let mut app = App::for_tests();
+        app.report_cost_at(&dir.join(".xencode"));
+        let report = system_lines(&app).join("\n");
+        assert!(
+            report.contains("Nothing recorded in this project yet"),
+            "{report}"
+        );
+        // Nothing to fold means nothing written: a question about cost must not
+        // leave files behind in a project that has none.
+        assert!(!xencode_context_rs::rollup_path(&dir.join(".xencode")).exists());
+        // An argument is answered in words rather than sent off to a model.
+        app.handle_cost_command("/cost everything");
+        assert!(system_lines(&app)
+            .last()
+            .is_some_and(|line| line.starts_with("usage: /cost")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

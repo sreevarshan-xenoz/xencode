@@ -92,6 +92,10 @@ const COMMANDS: &[Binding] = &[
         "/trace [turns]",
         "what the recent agent turns did: rounds, tools, tokens (local, asks no model)",
     ),
+    (
+        "/cost",
+        "spend, tokens and speed from the records on disk (local, asks no model)",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

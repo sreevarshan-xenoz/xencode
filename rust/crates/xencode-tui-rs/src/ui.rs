@@ -350,7 +350,15 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let status_text = format!("{}{}", left_parts, hints);
+    // What this session has spent so far, from the records on disk (L-9). Empty
+    // until a turn has been recorded, so the bar does not show a made-up zero.
+    let spend_str = app
+        .spend
+        .as_ref()
+        .map(|snapshot| format!("{}  ", snapshot.line))
+        .unwrap_or_default();
+
+    let status_text = format!("{}{}{}", left_parts, spend_str, hints);
 
     let bar = Paragraph::new(status_text).style(
         Style::default()

@@ -47,7 +47,8 @@ images ride as message parts the model actually sees, shrunk first to a
 1568-pixel long edge and recompressed to JPEG when they have no transparency,
 PDFs/DOCXs parse to
 text), `/ctx` retrieval,
-`/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, model picker, and more.
+`/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
+turns add up to in tokens and money, model picker, and more.
 
 ### One-shot query
 ```bash
@@ -117,6 +118,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
 /plugin [reload]      - Show which plugins took effect, or re-scan the plugin dir
 /trace [turns]        - Replay what the last agent turns did, from the local turn log
+/cost                 - Tokens, KV-cache reuse, speed and spend for this project
 ```
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full

@@ -188,6 +188,69 @@ pub fn append_metrics(xencode_dir: &Path, m: &RequestMetrics) -> std::io::Result
     writeln!(file, "{line}")
 }
 
+/// How many bytes from the end of `metrics.jsonl` a tail read looks at. One
+/// record is a couple of hundred bytes, so this window holds a thousand or more.
+const TAIL_READ_BYTES: u64 = 256 * 1024;
+
+/// The last `limit` records, oldest first like [`read_metrics`], without reading
+/// the whole file. Callers that show "the recent turns" used to parse everything
+/// to pick out a handful of lines from the end.
+///
+/// Falls back to reading the file when the window did not hold `limit` records,
+/// so asking for more than fits is answered rather than quietly truncated.
+pub fn read_metrics_tail(xencode_dir: &Path, limit: usize) -> Vec<RequestMetrics> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    if limit == 0 {
+        return Vec::new();
+    }
+    let path = metrics_path(xencode_dir);
+    let len = match fs::metadata(&path) {
+        Ok(meta) => meta.len(),
+        Err(_) => return Vec::new(),
+    };
+    let start = len.saturating_sub(TAIL_READ_BYTES);
+    let mut bytes = Vec::new();
+    if let Ok(mut file) = fs::File::open(&path) {
+        if file.seek(SeekFrom::Start(start)).is_ok() {
+            let _ = file.read_to_end(&mut bytes);
+        }
+    }
+    // The window most likely starts inside a record: that fragment is dropped,
+    // unless the read started at the top of the file.
+    let body = if start == 0 {
+        &bytes[..]
+    } else {
+        match bytes.iter().position(|byte| *byte == b'\n') {
+            Some(newline) => &bytes[newline + 1..],
+            // Not even one whole record in the window.
+            None => return last_rows(&read_metrics(xencode_dir), limit),
+        }
+    };
+    let mut rows = Vec::new();
+    for line in body.split(|byte| *byte == b'\n').rev() {
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(row) = serde_json::from_slice::<RequestMetrics>(line) {
+            rows.push(row);
+            if rows.len() == limit {
+                break;
+            }
+        }
+    }
+    if rows.len() < limit && start > 0 {
+        return last_rows(&read_metrics(xencode_dir), limit);
+    }
+    rows.reverse();
+    rows
+}
+
+fn last_rows(rows: &[RequestMetrics], limit: usize) -> Vec<RequestMetrics> {
+    let skip = rows.len().saturating_sub(limit);
+    rows.iter().skip(skip).cloned().collect()
+}
+
 /// Read every row recorded so far. A run that was killed while appending
 /// leaves a partial last line, and `metrics.jsonl` is still readable
 /// otherwise, so that line is dropped rather than failing the read.
@@ -345,6 +408,61 @@ mod tests {
         assert_eq!(latest.len(), 2);
         let bal = latest.iter().find(|r| r.profile == "BALANCED").unwrap();
         assert_eq!(bal.cached_tokens, 300);
+    }
+
+    #[test]
+    fn a_tail_read_gives_the_newest_rows_in_the_same_order_as_a_full_read() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        for i in 0..25u8 {
+            let mut m = RequestMetrics::new("LOW", 4096);
+            m.retrieved_files = i;
+            append_metrics(&xencode, &m).unwrap();
+        }
+
+        let tail = read_metrics_tail(&xencode, 5);
+        let all = read_metrics(&xencode);
+        let ids = |rows: &[RequestMetrics]| -> Vec<u8> {
+            rows.iter().map(|r| r.retrieved_files).collect()
+        };
+        assert_eq!(tail.len(), 5);
+        assert_eq!(
+            ids(&tail),
+            vec![20, 21, 22, 23, 24],
+            "the tail must be oldest-first, like a full read"
+        );
+        assert_eq!(ids(&tail), ids(&all[all.len() - 5..]));
+
+        // Asking for more than exist is not an error and is not padded.
+        assert_eq!(read_metrics_tail(&xencode, 500).len(), 25);
+        assert!(read_metrics_tail(&xencode, 0).is_empty());
+        assert!(read_metrics_tail(&dir.join("nowhere"), 5).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_tail_read_of_a_half_written_last_line_returns_the_whole_rows() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut m = RequestMetrics::new("LOW", 4096);
+        m.retrieved_files = 1;
+        append_metrics(&xencode, &m).unwrap();
+        m.retrieved_files = 2;
+        append_metrics(&xencode, &m).unwrap();
+        use std::io::Write;
+        fs::OpenOptions::new()
+            .append(true)
+            .open(metrics_path(&xencode))
+            .unwrap()
+            .write_all(b"{\"profile\":\"LOW\",\"context")
+            .unwrap();
+
+        let tail = read_metrics_tail(&xencode, 10);
+        assert_eq!(
+            tail.iter().map(|r| r.retrieved_files).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

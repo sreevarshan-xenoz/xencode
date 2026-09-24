@@ -178,6 +178,13 @@ pub struct XencodeConfig {
     #[serde(default = "default_memory_items")]
     pub max_memory_items: usize,
 
+    /// What one conversation session may spend before the TUI warns, in
+    /// micro-dollars ($1.00 = 1_000_000). Unset by default, because a price is
+    /// only known if `pricing.json` says so — see `/cost`. This is a warning
+    /// threshold, not a stop: nothing refuses a request over it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_budget_usd_micros: Option<u64>,
+
     /// Whether a prompt may be sent to an internet service at all.
     ///
     /// This is consent, not credentials: `api_keys` says who you are to a cloud
@@ -370,6 +377,7 @@ impl Default for XencodeConfig {
             cache_enabled: true,
             memory_enabled: true,
             max_memory_items: default_memory_items(),
+            cost_budget_usd_micros: None,
             allow_cloud_models: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),

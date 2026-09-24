@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 945 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 972 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -133,6 +133,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Two-tier cache (memory + disk) with LRU eviction.
 - Structured provider transport with status-code-driven retries, retry budgets, timeouts, and a provider-health panel.
 - Per-request context metrics appended to `.xencode/cache/metrics.jsonl`, each row naming the conversation, the model id, the server that served it and whether the prompt left this machine.
+- Those rows are folded once into `.xencode/cache/metrics-rollup.json` — totals, per-session and per-model tokens, KV-reuse share, and p50/p95 speeds over the newest 512 samples — so the panels that report them read a small sidecar instead of the whole log. `/cost` turns the rollup into spend using `.xencode/pricing.json`; a model with no price in that file is reported as unpriced rather than as free.
 - Per-turn trace appended to `.xencode/cache/turns.jsonl` and read back by `/trace`: how long the turn took, how many rounds it ran, which tools it called and how each ended, and the token count when a server reported one. It stores no prompt text and no tool arguments — just a digest of the prompt and a short redacted tail of each tool's output.
 - Collaboration server exposing sessions, a WebSocket relay, auth, model/provider status, and llama.cpp load/unload routes — bearer-token gated except the public ones.
 
@@ -250,6 +251,7 @@ These nine are the only strings the chat input intercepts (`SLASH_COMMANDS` in
 /mcp [status|stop]          Start the configured MCP servers / report / withdraw them
 /plugin [reload]            Show which plugins took effect / re-scan the plugin dir
 /trace [turns]              What the recent agent turns did: rounds, tools, tokens
+/cost                       Tokens, speed and spend from the records on disk
 ```
 
 Press `?` in the TUI for the live keybinding and command overlay.
@@ -445,7 +447,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (945 passing, 5 ignored)
+cargo test                          # Full workspace suite (972 passing, 5 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
