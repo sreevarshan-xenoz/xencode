@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1017 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1021 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -134,7 +134,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Structured provider transport with status-code-driven retries, retry budgets, timeouts, and a provider-health panel.
 - Per-request context metrics appended to `.xencode/cache/metrics.jsonl`, each row naming the conversation, the model id, the server that served it, whether the prompt left this machine, and the version of the instructions the turn was asked to obey.
 - Those rows are folded once into `.xencode/cache/metrics-rollup.json` — totals, per-session and per-model tokens, KV-reuse share, and p50/p95 speeds over the newest 512 samples — so the panels that report them read a small sidecar instead of the whole log. `/cost` turns the rollup into spend using `.xencode/pricing.json`; a model with no price in that file is reported as unpriced rather than as free.
-- Per-turn trace appended to `.xencode/cache/turns.jsonl` and read back by `/trace`: how long the turn took, how many rounds it ran, which tools it called and how each ended, and the token count when a server reported one. It stores no prompt text and no tool arguments — just a digest of the prompt, the version of the instruction set it ran under, and a short redacted tail of each tool's output.
+- Per-turn trace appended to `.xencode/cache/turns.jsonl` and read back by `/trace`: how long the turn took, how many rounds it ran, which tools it called and with what arguments, how each one ended, which workspace files the context put in front of the model, whether the turn carried the `[d]` decision marker, and the token count when a server reported one. It stores no prompt text and no tool output beyond a short redacted tail of each. Arguments are kept only as far as they explain the call — a path, a pattern or a command line survives, while the body of a file being written, the text an edit replaces and a plan's steps are recorded as their size — and credentials are stripped from both arguments and output before anything is written.
 - **A run can be written down and lived through again.** With `session_recording` on, every model call of an agent turn appends to `.xencode/cache/sessions/<run-id>.jsonl`: the request, the response bytes as they arrived on the socket, and what each tool actually returned. `xencode replay <run-id>` serves those bytes again on a loopback port while the real agent loop, the real stream reader, the real permission gate and the real tools run against them — so a tool call that came in fifteen fragments is reassembled by the same code that reads a live server, and nothing answers from a model. Two replays of one recording write the same `tool_calls.jsonl` down to the byte, because every time in it comes from the recording rather than the clock. Tools stay gated: without `--run-tools` a call that needed approval comes back `denied` and the report says where it stopped matching.
 - **The instructions a model is given are files, not strings buried in code.** The agent system prompt, the tool vocabulary, the transcript-folding prompt and the two subagent briefs live in `rust/crates/xencode-context-rs/prompts/*.md` and are compiled in, each carrying a version that is a hash of its own text. `/ctx prompts` lists them; `/ctx eval` records retrieval scores against that set, so a score is only ever compared with a run measured under the same instructions.
 - Collaboration server exposing sessions, a WebSocket relay, auth, model/provider status, and llama.cpp load/unload routes — bearer-token gated except the public ones.
@@ -451,7 +451,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1017 passing, 6 ignored)
+cargo test                          # Full workspace suite (1021 passing, 6 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

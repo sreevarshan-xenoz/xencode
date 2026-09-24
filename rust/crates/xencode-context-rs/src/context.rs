@@ -321,6 +321,11 @@ pub struct ChatAssembly {
     pub soft_compaction_needed: bool,
     pub retrieved_included: usize,
     pub retrieved_total: usize,
+    /// Which files those [`retrieved_included`] bodies came from, best-match
+    /// first — the ones the budget kept, not the candidates it trimmed. The
+    /// turn trace records this list so a turn can be asked what it was looking
+    /// at; the bodies themselves are not kept anywhere.
+    pub retrieved_files: Vec<String>,
     pub history_kept: usize,
     pub history_total: usize,
 }
@@ -493,6 +498,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         soft_compaction_needed,
         retrieved_included,
         retrieved_total,
+        retrieved_files: retrieved_head.iter().map(|b| b.path.clone()).collect(),
         history_kept,
         history_total,
     }
@@ -881,10 +887,52 @@ mod tests {
         assert_eq!(chat.turns[1].role, "user");
         assert_eq!(chat.turns[2].role, "assistant");
         assert_eq!(chat.retrieved_included, 2);
+        // The trace asks which files those were, not just how many.
+        assert_eq!(
+            chat.retrieved_files,
+            vec!["src/auth.rs".to_string(), "src/database.rs".to_string()]
+        );
         assert_eq!(chat.history_kept, 2);
         assert_eq!(chat.history_total, 2);
         assert!(chat.total_tokens <= chat.target_tokens);
         assert!(!chat.truncated);
+    }
+
+    /// The trace names the files a turn was shown, and only the ones the budget
+    /// actually kept.
+    #[test]
+    fn chat_lists_the_retrieved_files_it_kept_and_not_the_ones_it_trimmed() {
+        let long_retrieved: Vec<RetrievedBlock> = (0..20)
+            .map(|i| RetrievedBlock {
+                path: format!("src/f{i}.rs"),
+                score: 10 + i as u64,
+                body: format!(
+                    "File: src/f{i}.rs\n```rust\n{}\n```",
+                    "pub fn x(i: u64) -> u64 { i * 2 }\n".repeat(40)
+                ),
+            })
+            .collect();
+        let input = ChatInput {
+            profile: HardwareProfile::Low,
+            ..sample_chat_input(long_retrieved, &[])
+        };
+        let chat = assemble_chat(input);
+        assert!(chat.retrieved_included > 0);
+        assert!(chat.retrieved_included < chat.retrieved_total);
+        assert_eq!(chat.retrieved_files.len(), chat.retrieved_included);
+        // In the order they were offered, which is the order the bodies went in.
+        assert_eq!(chat.retrieved_files[0], "src/f0.rs");
+        for (index, path) in chat.retrieved_files.iter().enumerate() {
+            assert_eq!(*path, format!("src/f{index}.rs"));
+            assert!(chat.turns.last().unwrap().content.contains(path));
+        }
+        let trimmed = format!("src/f{}.rs", chat.retrieved_total - 1);
+        assert!(!chat
+            .turns
+            .last()
+            .unwrap()
+            .content
+            .contains(&format!("File: {trimmed}")));
     }
 
     #[test]
