@@ -1,0 +1,27 @@
+{
+  "format": "xencode-cassette/1",
+  "captured": {
+    "at_unix_ms": 1790225921000,
+    "server": "llama-server 0.4.0-dev (build 10809, commit 5266f24da7), built with GNU 16.2.1 for Linux x86_64, CPU-only, started with -m <model> -c 4096 -t 8 --port 8080 --no-webui and answering on 127.0.0.1:8080",
+    "model": "/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf (Dolphin 3.0 fine-tune of Qwen2.5-1.5B, GGUF quantisation Q4_K_M, 986051648 bytes, general.architecture qwen2)",
+    "tool": "curl -N with the request body sent from a file, against the server above on the same machine; the request body is reproduced in interactions[].request.body and the streamed answer in interactions[].response.body",
+    "note": "Asked to answer in Japanese. The content deltas carry multi-byte characters: the first frame holds サーバ and the next holds は, so an ordinary sentence arrives as a sequence of three-byte pieces. Assembled, the answer is exactly サーバは準備が整いました。 This is the recording that shows why a reader has to work on bytes rather than on whatever one network read happened to hand it."
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "body_contains": [
+          "Reply in Japanese"
+        ],
+        "body": "{\n  \"model\": \"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\n  \"stream\": true,\n  \"max_tokens\": 80,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Reply in Japanese: the server is ready. Use katakana.\"\n    }\n  ]\n}\n"
+      },
+      "response": {
+        "status": 200,
+        "content_type": "text/event-stream",
+        "body": "data: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"サーバ\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"は\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"準備\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"が\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"整\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"いました\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":null,\"index\":0,\"delta\":{\"content\":\"。\"}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\"}\n\ndata: {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"delta\":{}}],\"created\":1790225921,\"id\":\"chatcmpl-Iov1XGqb2hgaO3258UGfT9Z7oXuzXuN0\",\"model\":\"/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf\",\"system_fingerprint\":\"b10809-5266f24da7\",\"object\":\"chat.completion.chunk\",\"timings\":{\"cache_n\":0,\"prompt_n\":33,\"prompt_ms\":2019.219,\"prompt_per_token_ms\":61.18845454545455,\"prompt_per_second\":16.342952398922556,\"predicted_n\":9,\"predicted_ms\":332.884,\"predicted_per_token_ms\":41.6105,\"predicted_per_second\":24.032395669362298}}\n\ndata: [DONE]\n\n"
+      }
+    }
+  ]
+}

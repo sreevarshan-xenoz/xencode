@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a streamed answer is no longer shortened by where the network cut it
+A model's answer arrives as a series of small reads, and the boundaries between
+them are chosen by the network stack rather than by the protocol. Every one of
+the eight streaming readers here used to decode a single read on its own and
+split it on newlines. That loses text in two ways at once: a data line that
+straddles two reads fails to parse as JSON in both halves, so the answer comes
+back with a piece missing from the middle; and a read that ends inside a
+multi-byte character — any Japanese, Cyrillic or accented text — fails to decode
+as UTF-8, so the whole read is thrown away and the answer can come back empty.
+Neither was reported. Nothing said "the server wrote more than this".
+
+Reads now pass through one buffer that keeps whatever is not yet a complete line
+and hands it to the next read, and a line that is genuinely invalid UTF-8 is
+passed through with replacement characters instead of discarded. Applies to
+Ollama, llama.cpp, OpenRouter, the OpenAI-compatible path, Anthropic, Gemini and
+Qwen.
+
+What makes this trustworthy rather than plausible: the streams it is checked
+against were recorded from a real server, not written by hand. Four recordings
+of `llama-server` output are committed under
+`rust/crates/xencode-providers-rs/tests/fixtures/cassettes/` with the machine,
+build, model and command that produced them, and a local server replays them on
+a real port, deliberately cutting each line in two mid-character. The Japanese
+recording is 2,967 bytes, and all 2,968 ways of cutting it into two pieces are
+tried: the answer reassembles whole at every one of them. The previous behaviour
+is kept in the test and compared against the same stream at its 2,966 interior
+cut points; it lost text at 2,949 of them, every single one except the 17 that
+happened to land exactly on a line break. One recording covers a two-turn agent
+run whose tool call arrives in twelve pieces — the test executes the real command
+and checks that the result the model then saw was the one the shell produced.
+
+That last recording also shows a gap rather than fixing one: a thinking model can
+spend its whole answer on reasoning that this product does not read, and finish
+on the token limit without producing a visible character. Replayed, it answers
+blank. The test asserts the blank, so the change that fills it — surfacing
+reasoning output — has to be a deliberate one.
+
 ### Added — every agent turn leaves a record, and `/trace` reads it back
 Until now a finished turn left nothing behind you could look at. Each one now
 appends a line to `.xencode/cache/turns.jsonl` in the project — how long it ran,

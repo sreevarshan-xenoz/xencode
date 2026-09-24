@@ -190,30 +190,31 @@ where
     let mut text = String::new();
     let mut completion_tokens: u64 = 0;
     let mut acc = ToolCallAccumulator::default();
+    let mut lines = crate::frames::FrameLines::default();
 
+    // The stream is read as bytes, not as lines: a `data:` line can be spread
+    // over two reads, and one read can hold several. See `frames`.
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-        if let Ok(raw) = std::str::from_utf8(&chunk) {
-            for line in raw.lines() {
-                let line = line.trim();
-                if line.is_empty() || line == "data: [DONE]" {
-                    continue;
-                }
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                        // The final chunk carries usage (with an empty choices array).
-                        if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-                            if let Some(t) = usage.get("completion_tokens").and_then(|v| v.as_u64())
-                            {
-                                completion_tokens = t;
-                            }
-                        }
-                        tools::ingest_oai_chunk(&json, &mut text, &mut acc, &mut callback);
-                    }
-                }
-            }
-        }
+        lines.feed(&chunk, &mut |line| {
+            ingest_line(
+                line,
+                &mut text,
+                &mut completion_tokens,
+                &mut acc,
+                &mut callback,
+            )
+        });
     }
+    lines.finish(&mut |line| {
+        ingest_line(
+            line,
+            &mut text,
+            &mut completion_tokens,
+            &mut acc,
+            &mut callback,
+        )
+    });
 
     Ok(StreamOutcome {
         step: AgentStep {
@@ -222,6 +223,33 @@ where
         },
         completion_tokens,
     })
+}
+
+/// One complete line of an OpenAI-style SSE body.
+pub(crate) fn ingest_line<F: FnMut(&str)>(
+    line: &str,
+    text: &mut String,
+    completion_tokens: &mut u64,
+    acc: &mut ToolCallAccumulator,
+    callback: &mut F,
+) {
+    let line = line.trim();
+    if line.is_empty() || line == "data: [DONE]" {
+        return;
+    }
+    let Some(data) = line.strip_prefix("data: ") else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+        return;
+    };
+    // The final chunk carries usage (with an empty choices array).
+    if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
+        if let Some(tokens) = usage.get("completion_tokens").and_then(|v| v.as_u64()) {
+            *completion_tokens = tokens;
+        }
+    }
+    tools::ingest_oai_chunk(&json, text, acc, callback);
 }
 
 #[cfg(test)]

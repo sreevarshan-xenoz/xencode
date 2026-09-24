@@ -267,36 +267,46 @@ impl GeminiProvider {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
 
+        let mut lines = crate::frames::FrameLines::default();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        // Gemini sends `data: {"candidates": [...]}`
-                        if let Ok(parsed) = serde_json::from_str::<GeminiStreamChunk>(data) {
-                            if let Some(candidates) = parsed.candidates {
-                                for candidate in &candidates {
-                                    if let Some(ref content) = candidate.content {
-                                        for part in &content.parts {
-                                            if !part.text.is_empty() {
-                                                callback(&part.text);
-                                                full_response.push_str(&part.text);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            lines.feed(&chunk, &mut |line| {
+                ingest_line(line, &mut full_response, &mut callback)
+            });
         }
+        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback));
 
         Ok(full_response)
+    }
+}
+
+/// One Gemini SSE frame: `data: {"candidates": [...]}`, whose text lives in
+/// every part of every candidate's content.
+fn ingest_line<F: FnMut(&str)>(line: &str, full_response: &mut String, callback: &mut F) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Some(data) = line.strip_prefix("data: ") else {
+        return;
+    };
+    // Gemini sends `data: {"candidates": [...]}`
+    let Ok(parsed) = serde_json::from_str::<GeminiStreamChunk>(data) else {
+        return;
+    };
+    let Some(candidates) = parsed.candidates else {
+        return;
+    };
+    for candidate in &candidates {
+        let Some(content) = &candidate.content else {
+            continue;
+        };
+        for part in &content.parts {
+            if !part.text.is_empty() {
+                callback(&part.text);
+                full_response.push_str(&part.text);
+            }
+        }
     }
 }
 
