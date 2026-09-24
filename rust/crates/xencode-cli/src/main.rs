@@ -428,6 +428,17 @@ enum EvalAction {
         /// to the server.
         #[arg(long, default_value_t = 1024)]
         max_tokens: u32,
+
+        /// After every verdict is in, ask a model to rank the attempts that came
+        /// close. Two more requests per run, and no verdict changes.
+        #[arg(long)]
+        judge: bool,
+
+        /// Rank with a different model than the one under test, which is the only
+        /// thing here that does anything about a judge favouring its own style.
+        /// Defaults to the model being scored, and says so in the report.
+        #[arg(long)]
+        judge_model: Option<String>,
     },
 }
 
@@ -1508,8 +1519,15 @@ async fn run_eval(action: EvalAction) -> Result<(), String> {
             println!("\nrecorded runs, oldest first:");
             for run in runs {
                 let age_minutes = now.saturating_sub(run.ts_unix_ms) / 60_000;
+                // A ranking is not a verdict, so it is said after the numbers
+                // rather than mixed into them.
+                let ranked = if run.judge_ranking.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · closest to a fix: {}", run.judge_ranking.join(", "))
+                };
                 println!(
-                    "  {:>6}  {:<26} {:>3}/{:<3} graded passed  {} · prompts {} · {}",
+                    "  {:>6}  {:<26} {:>3}/{:<3} graded passed  {} · prompts {} · {}{ranked}",
                     format_age_minutes(age_minutes),
                     run.model,
                     run.passed,
@@ -1532,6 +1550,8 @@ async fn run_eval(action: EvalAction) -> Result<(), String> {
             llamacpp_url,
             timeout,
             max_tokens,
+            judge,
+            judge_model,
         } => {
             let config = XencodeConfig::load().unwrap_or_default();
             let shapes = if cases.is_empty() {
@@ -1572,6 +1592,8 @@ async fn run_eval(action: EvalAction) -> Result<(), String> {
                 timeout_secs: timeout,
                 max_tokens: (max_tokens > 0).then_some(max_tokens),
                 history_dir: Some(project_xencode_dir()),
+                judge,
+                judge_model,
             };
             let report = run_task_eval(&options).await?;
             for line in report.lines() {

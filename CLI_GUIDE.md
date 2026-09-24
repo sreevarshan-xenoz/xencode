@@ -541,6 +541,8 @@ xencode eval list
 xencode eval run -m llamacpp:dolphin --llamacpp-url http://127.0.0.1:8099
 xencode eval run -c off-by-one -c stale-cache --repeats 3 --out /tmp/eval
 xencode eval run --allow-shell            # the shell class is otherwise refused
+xencode eval run --judge                  # rank the near misses after the grading
+xencode eval run --judge --judge-model llamacpp:bigger  # rank with another model
 ```
 
 What counts as a pass is deliberately narrow: the case's own `cargo test --offline`
@@ -555,10 +557,36 @@ evidence about a model.
 
 Flags worth knowing: `-c/--case` (repeatable, `off-by-one` and `Off_By_One` both
 work), `-m/--model`, `--repeats`, `--max-rounds`, `--allow-shell`, `--out`,
-`--ollama-url`, `--llamacpp-url`, `--timeout` (default 120 s per request) and
-`--max-tokens` (default 1024; `0` leaves the limit to the server). The answer
-length is capped because a small model that has started repeating itself will
-otherwise hold one case for minutes.
+`--ollama-url`, `--llamacpp-url`, `--timeout` (default 120 s per request),
+`--max-tokens` (default 1024; `0` leaves the limit to the server), `--judge` and
+`--judge-model`. The answer length is capped because a small model that has
+started repeating itself will otherwise hold one case for minutes.
+
+`--judge` asks a model, afterwards, which of the attempts that *failed* came
+closest to a correct fix. It is a ranking and nothing else: the judge is shown
+only the near misses — a case that never ran, one that passed, one that changed
+no files, and one that edited its own grader are all left out — and the request
+has no field in which to call anything a pass, so `pass rate` is computed the
+same whether or not a judge was asked. Three bias controls are in code rather
+than in the wording: the attempts are listed in an order derived from their
+identities and then the same question is asked again with the list reversed, and
+if the two answers differ the ranking is discarded and the report says so; a
+candidate is shown as its change and the grader's last lines, never as the agent's
+prose, with the change capped at 4,000 characters, so a wall of edits cannot
+outshout a small one; and nothing in the request names a model, with
+`--judge-model` letting a different one do the reading. What is *not* solved is a
+judge recognising its own style when it is the same model that wrote the attempts
+— relabelling hides the name, not the handwriting. A run holding more than 26
+near misses shows the first 26 and says how many were left out.
+
+What it has been asked of, so far, is a 1.5B model on a local `llama-server`, and
+twice the answer was that there was nothing to rank: judged over a whole run it
+reported `no case was a near miss`, because that model leaves every file untouched,
+and put the two questions to it directly over a real socket it replied `unsure` and
+named nothing. The plumbing is proven; no ordering this tool has printed yet came
+from a model big enough to compare two diffs. A judged run prints the version of the
+ranking instruction it used, and adding it moved the digest `xencode eval list`
+shows for every run, so a score from before it is not offered as a comparison.
 
 What this number is *not*: it is one model, one set of instructions and eight
 shapes of defect. Eight cases is below the ten-to-thirty the plan asked for, and

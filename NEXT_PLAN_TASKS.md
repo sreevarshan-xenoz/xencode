@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1038 tests passing, 7 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1046 tests passing, 8 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1657,6 +1657,9 @@ never is.
 - **EV-10 judge-assisted eval reports**, LLM ranking only near-miss outcomes that
   an exit code already graded. S (3 d). Trap: position/verbosity/self-preference
   bias are documented; the judge may never flip an exit-code failure.
+  *(Done 2026-09-24 — see W1 progress. The ranking is a separate line in the
+  report with no field that can change a verdict, the attempts are shown twice in
+  opposite orders, and what a judge sees is the diff and the grader's tail only.)*
 - **EV-11 tamper-evident audit log** — hash-chain `audit.jsonl` (prev-hash + seq;
   the `seq` exists, the chain does not). S. Trap: do not build a Merkle tree.
   Done-when: a verify command detects a mid-file edit.
@@ -5758,6 +5761,69 @@ done-when is met, and the commit that does it names the IDs.
   the model id dials; a run that changed the right file being graded from the
   file; the same again with the grader tampered with; and an unreachable model not
   being counted as a failed fix.
+
+- [x] `EV-10` — 2026-09-24. A run can now be asked which of its failures came
+  closest, without anyone being allowed to change which of them failed. The judge
+  lives in `rust/crates/xencode-tui-rs/src/eval_judge.rs` behind
+  `xencode eval run --judge`, off by default because it costs two more model
+  requests and decides nothing: the report's pass rate is computed from the
+  graders and the diffs exactly as it was before, and the ranking sits on lines of
+  its own underneath it. `JudgeRun` has no field that could say "this one was
+  actually fine", and a test says so by building a report whose single failing case
+  the judge has ranked first and asserting the rate is still `0/1`.
+  The judge is only ever shown near misses, which is the part of the item the rest
+  is in service of: a case that never ran has nothing to read, a case that passed
+  needs no opinion, and a case that rewrote its own grader is explained by that
+  fact alone. What remains is an attempt somebody wrote that an exit code rejected.
+  Reaching it needed the diff to exist at all — a case now carries the change it
+  left (`CaseResult::diff`, from `git diff` against the seeded commit plus a
+  `+++ new file:` line for each file the run created, cut at 4,000 characters with
+  the cut said in the text), which also means the `out` directory of a run holds
+  what each attempt did and not just what it touched.
+  The three ways a ranking can be nonsense are handled in code rather than by a
+  warning in the prompt. **Position**: the attempts are listed in an order derived
+  from a hash of their own identities, salted by the version of the ranking
+  instruction so editing the instruction reshuffles the listing, and then the same
+  question is asked a second time with the list in the opposite order and every
+  letter kept with the attempt it was given. Both answers must name every attempt
+  shown, in the same order, or the ranking is dropped and the report prints that it
+  moved — a measurement of the bias, not a correction of it. **Verbosity**: a
+  candidate is its diff and one line of what the tests said, never a sentence the
+  agent wrote, never its round count, token count or elapsed time, and a test
+  asserts those are absent from the request. **Self-preference**: nothing in the
+  request names a model, and `--judge-model` points the judge at a different one —
+  but a judge that reads prose written by its own kind may still recognise its own
+  habits, and that is reported as an open limit rather than argued away. One
+  ranking holds 26 attempts; past that the report says how many were left out
+  instead of quietly comparing a subset.
+  `--judge` changes what is asked afterwards, not what the agent was told, and yet
+  it still moves the digest of the instruction set the eval records — the ranking
+  prompt is a registered prompt (`prompts/eval-judge.md`, sixth in the set) because
+  an unregistered one has no version, and the version is what makes two runs
+  comparable. Runs taken before this are therefore not offered as a comparison.
+  Recorded as it went, on this machine, against the same local `llama-server` and
+  the same 1.5B model as `EV-1`: eight cases at temperature 0, seed 42, answers
+  capped at 512 tokens, prompts `f6062cc81640`, **0/8**, and
+  `judge: no case was a near miss, so nothing was ranked` — because every case left
+  its file untouched, which is the same finding `EV-1` recorded and not a new one.
+  So the ranking path was asked of a real model directly, in an ignored test
+  (`XENCODE_JUDGE_LIVE_URL` names the server): two questions, the second backwards,
+  answered in 21.2 seconds, and the model replied `unsure` over and over. Nothing
+  was ranked and the report said so, which is the honest outcome of a small model
+  being asked to compare two plausible changes. Whether a stronger model produces a
+  stable ordering is not measured here.
+  Verified by 1046 tests, 0 failures, 8 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Nine tests are new, eight of them in the routine suite: what
+  counts as a near miss and what does not; a ranking naming only what was shown, in
+  the order said, with made-up letters, prose and repeats dropped; an ordering that
+  moves when the list is reversed not being reported; a candidate shown as its
+  change and nothing else; the listing not being the running order, and being stable
+  until the instruction changes; a ranking that cannot change what the exit code
+  graded; a run with nothing to rank asking no question at all; and one whole run
+  through a judged eval, over a scripted server on a real socket. The ninth is the
+  live ranking path above, kept out of the routine suite because it needs a model
+  that is really running.
 
 #### W2 — The model/inference substrate — 15 items
 

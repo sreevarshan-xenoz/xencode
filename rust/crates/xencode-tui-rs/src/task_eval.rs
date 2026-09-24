@@ -86,6 +86,14 @@ pub struct TaskEvalOptions {
     /// The project's `.xencode` directory, where the run is appended to
     /// `cache/task_eval.jsonl`. `None` keeps it inside `out_dir` only.
     pub history_dir: Option<PathBuf>,
+    /// Ask a model to rank the attempts that came close, after every one of them
+    /// has already been graded by its grader. Off by default: it costs two more
+    /// requests per run and changes no verdict. See [`crate::eval_judge`].
+    pub judge: bool,
+    /// Rank with a different model than the one that wrote the attempts, which is
+    /// the only thing here that does anything about a judge preferring its own
+    /// style. `None` uses the model under test and says so in the report.
+    pub judge_model: Option<String>,
 }
 
 impl Default for TaskEvalOptions {
@@ -105,6 +113,8 @@ impl Default for TaskEvalOptions {
             timeout_secs: 120,
             max_tokens: Some(1024),
             history_dir: None,
+            judge: false,
+            judge_model: None,
         }
     }
 }
@@ -146,6 +156,11 @@ pub struct CaseResult {
     /// Set when the case could not be run or could not be graded at all, which is
     /// not the same thing as a failed attempt and is never counted as one.
     pub error: Option<String>,
+    /// What the run changed, as text: the tracked diff against the commit the case
+    /// was seeded at, plus any file it added. Kept so a failure can be read
+    /// without opening the case directory, and because it is the only thing the
+    /// ranking judge is allowed to look at (EV-10). Capped, and says so.
+    pub diff: String,
 }
 
 impl CaseResult {
@@ -171,6 +186,7 @@ impl CaseResult {
             elapsed_ms: 0,
             passed: false,
             error: Some(error),
+            diff: String::new(),
         }
     }
 
@@ -242,6 +258,10 @@ pub struct TaskEvalReport {
     pub out_dir: PathBuf,
     pub results: PathBuf,
     pub cases: Vec<CaseResult>,
+    /// The ranking of the near misses, when one was asked for (`--judge`). It
+    /// carries no verdict: every case above was graded by its grader and its diff,
+    /// and a pass rate never reads this field.
+    pub judge: Option<crate::eval_judge::JudgeRun>,
 }
 
 impl TaskEvalReport {
@@ -324,6 +344,9 @@ impl TaskEvalReport {
                 self.ungraded()
             ),
         });
+        if let Some(judge) = &self.judge {
+            out.extend(judge.lines());
+        }
         out.push(format!(
             "graders, diffs and turn traces kept in {}",
             self.out_dir.display()
@@ -356,6 +379,17 @@ pub struct TaskEvalRecord {
     /// `shape:pass` / `shape:fail` per case, in the order they ran.
     pub verdicts: Vec<String>,
     pub out_dir: String,
+    /// The ranking of the near misses, when one was asked for: which model was
+    /// asked, and the order it settled on. Empty when no ranking survived being
+    /// asked twice.
+    ///
+    /// Neither field is part of what makes two runs comparable, because the judge
+    /// reads a run after it was graded and cannot have influenced what the agent
+    /// was asked to do.
+    #[serde(default)]
+    pub judge_model: Option<String>,
+    #[serde(default)]
+    pub judge_ranking: Vec<String>,
 }
 
 impl TaskEvalRecord {
@@ -388,6 +422,12 @@ impl TaskEvalRecord {
                 })
                 .collect(),
             out_dir: report.out_dir.to_string_lossy().into_owned(),
+            judge_model: report.judge.as_ref().map(|judge| judge.model.clone()),
+            judge_ranking: report
+                .judge
+                .as_ref()
+                .and_then(|judge| judge.order.clone())
+                .unwrap_or_default(),
         }
     }
 }
@@ -477,7 +517,7 @@ pub async fn run_task_eval(options: &TaskEvalOptions) -> Result<TaskEvalReport, 
         }
     }
 
-    let report = TaskEvalReport {
+    let mut report = TaskEvalReport {
         model: options.model.clone(),
         server: server_of(options),
         prompt_version: xencode_context_rs::prompts::set_version().to_string(),
@@ -492,7 +532,17 @@ pub async fn run_task_eval(options: &TaskEvalOptions) -> Result<TaskEvalReport, 
         out_dir: options.out_dir.clone(),
         results: options.out_dir.join("results.jsonl"),
         cases,
+        judge: None,
     };
+    if options.judge {
+        // Asked after every verdict is in, and given no way to change one: the
+        // ranking is of attempts the grader already rejected.
+        let judged = crate::eval_judge::judge(options, &report).await;
+        for line in judged.lines() {
+            eprintln!("{line}");
+        }
+        report.judge = Some(judged);
+    }
     write_results(&report)?;
     if let Some(dir) = &options.history_dir {
         let previous = comparable_previous_run(&read_task_eval_runs(dir), &report);
@@ -603,12 +653,14 @@ async fn run_case(options: &TaskEvalOptions, shape: BugShape, attempt: usize) ->
 
     let row = read_recent_traces(&trace_dir, 1).pop();
     let changed = changed_against(&task.path, seed_head.as_deref());
+    let diff = work_diff(&task.path, seed_head.as_deref());
     grade(
         task,
         attempt,
         row.as_ref(),
         changed,
         started.elapsed().as_millis() as u64,
+        diff,
     )
 }
 
@@ -619,6 +671,7 @@ fn grade(
     row: Option<&TurnTrace>,
     changed: Vec<String>,
     elapsed_ms: u64,
+    diff: String,
 ) -> CaseResult {
     let expected = &task.case.expected_files;
     let missing: Vec<String> = expected
@@ -695,6 +748,7 @@ fn grade(
         elapsed_ms,
         passed,
         error,
+        diff,
     }
 }
 
@@ -735,6 +789,49 @@ fn changed_against(repo: &Path, since: Option<&str>) -> Vec<String> {
     paths
 }
 
+/// How much of a run's change is kept. A diff long enough to need this is itself
+/// worth reading about, and the ranking judge is told where the text stopped.
+pub const DIFF_CAP: usize = 4_000;
+
+/// What the run changed, as text: the tracked diff against the commit the case was
+/// seeded at, then the contents of any file it added, since a new file appears in
+/// no diff. Capped rather than complete — the point is a readable thing, and a
+/// run that wrote thousands of lines has already been counted by its grader.
+fn work_diff(repo: &Path, since: Option<&str>) -> String {
+    let mut out = match since {
+        Some(commit) => {
+            git(repo, &["--no-pager", "diff", "--no-color", commit]).unwrap_or_default()
+        }
+        None => String::new(),
+    };
+    if let Some(untracked) = git(repo, &["ls-files", "--others", "--exclude-standard"]) {
+        for path in untracked.lines() {
+            if out.len() >= DIFF_CAP {
+                break;
+            }
+            let body = match std::fs::read_to_string(repo.join(path)) {
+                Ok(body) => body,
+                // A file that does not read as text was written by something other
+                // than an edit, and there is no honest way to show it here.
+                Err(_) => continue,
+            };
+            out.push_str(&format!("+++ new file: {path}\n{body}\n"));
+        }
+    }
+    if out.trim().is_empty() {
+        return String::new();
+    }
+    if out.len() > DIFF_CAP {
+        let mut cut = DIFF_CAP;
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.truncate(cut);
+        out.push_str("\n…the change was longer than this and was cut off here");
+    }
+    out
+}
+
 fn git(repo: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .arg("--no-optional-locks")
@@ -748,10 +845,39 @@ fn git(repo: &Path, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// A finished case with only what a test cares about set, so the interesting
+/// fields stand out instead of drowning in fifteen lines of defaults. Shared with
+/// [`crate::eval_judge`], whose tests are about which cases a judge may look at.
+#[cfg(test)]
+pub(crate) fn test_case(shape: &str, attempt: usize, changed: &[&str], diff: &str) -> CaseResult {
+    CaseResult {
+        shape: shape.to_string(),
+        title: format!("{shape}, described"),
+        attempt,
+        path: String::new(),
+        rounds: 2,
+        tool_calls: 1,
+        calls_refused: 0,
+        calls_failed: 0,
+        changed: changed.iter().map(|path| path.to_string()).collect(),
+        missing: Vec::new(),
+        unexpected: Vec::new(),
+        edited_grader: false,
+        grader_passed: false,
+        grader_exit: Some(101),
+        grader_command: "cargo test --offline".to_string(),
+        grader_tail: String::new(),
+        completion_tokens: None,
+        elapsed_ms: 1_000,
+        passed: false,
+        error: None,
+        diff: diff.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
     /// A scratch directory that cannot collide with another test process.
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -834,6 +960,7 @@ mod tests {
                     elapsed_ms: 4_000,
                     passed: true,
                     error: None,
+                    diff: "-for i in 0..n-1\n+for i in 0..n".to_string(),
                 },
                 CaseResult {
                     shape: "swallowed-error".to_string(),
@@ -856,8 +983,10 @@ mod tests {
                     elapsed_ms: 0,
                     passed: false,
                     error: Some("the model answered nothing".to_string()),
+                    diff: String::new(),
                 },
             ],
+            judge: None,
         };
         assert_eq!(report.graded(), 1);
         assert_eq!(report.passed(), 1);
@@ -910,6 +1039,7 @@ mod tests {
             elapsed_ms: 1_000,
             passed: false,
             error: None,
+            diff: "+#[test] fn always_passes() {}".to_string(),
         };
         let line = case.line();
         assert!(line.contains("fail"), "{line}");
@@ -934,6 +1064,7 @@ mod tests {
             out_dir: PathBuf::new(),
             results: PathBuf::new(),
             cases: Vec::new(),
+            judge: None,
         };
         let older = TaskEvalRecord {
             ts_unix_ms: 1,
@@ -949,8 +1080,21 @@ mod tests {
             passed: 3,
             verdicts: Vec::new(),
             out_dir: String::new(),
+            judge_model: None,
+            judge_ranking: Vec::new(),
         };
         assert!(comparable_previous_run(std::slice::from_ref(&older), &report).is_some());
+        // A run that was ranked afterwards measured the same thing about the
+        // agent: the judge read the verdicts, it did not make them.
+        assert!(comparable_previous_run(
+            &[TaskEvalRecord {
+                judge_model: Some("dolphin".to_string()),
+                judge_ranking: vec!["r1/off-by-one".to_string()],
+                ..older.clone()
+            }],
+            &report
+        )
+        .is_some());
         // The prompts changed, so the two numbers do not describe the same build.
         assert!(comparable_previous_run(
             &[TaskEvalRecord {
@@ -1015,7 +1159,9 @@ mod tests {
                 elapsed_ms: 2_000,
                 passed: true,
                 error: None,
+                diff: "-n - 1\n+n".to_string(),
             }],
+            judge: None,
         };
         append_history(&xencode, &report).unwrap();
         let runs = read_task_eval_runs(&xencode);
@@ -1279,6 +1425,63 @@ mod tests {
             lines.contains("not run: the model request failed"),
             "the report names the case that produced no verdict:\n{lines}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The ranking asked over a real socket, twice, after the verdicts were in —
+    /// and the verdicts are still what the grader said. The attempt here writes a
+    /// file the defect has nothing to do with, so it is a near miss: not a fix,
+    /// but work worth reading.
+    #[tokio::test]
+    async fn an_attempt_that_failed_is_ranked_without_being_regraded() {
+        let dir = scratch("eval-judged");
+        let (url, server) = scripted(vec![
+            call(
+                "write_file",
+                serde_json::json!({"path": "notes.md", "content": "the sum is fine actually\n"}),
+            ),
+            said("thought about it and left it"),
+            said("A"),
+            said("A"),
+        ])
+        .await;
+        let report = run_task_eval(&TaskEvalOptions {
+            out_dir: dir.clone(),
+            model: "scripted-agent".to_string(),
+            shapes: vec![BugShape::OffByOne],
+            ollama_url: Some(url),
+            judge: true,
+            ..Default::default()
+        })
+        .await
+        .expect("the eval ran");
+        let _ = server.await;
+
+        let outcome = &report.cases[0];
+        assert_eq!(outcome.error, None);
+        assert!(!outcome.passed, "the defect is still in the file");
+        assert!(
+            outcome.diff.contains("+++ new file: notes.md"),
+            "a file the run added appears in no diff, so it has to be shown whole:\n{}",
+            outcome.diff
+        );
+        let judge = report.judge.as_ref().expect("a ranking was asked for");
+        assert_eq!(judge.near_misses, 1);
+        assert_eq!(judge.shown, vec!["r1/off-by-one".to_string()]);
+        assert_eq!(
+            judge.order.as_deref(),
+            Some(&["r1/off-by-one".to_string()][..])
+        );
+        assert!(judge.stable, "both arrangements said the same thing");
+        assert!(judge.error.is_none(), "{:?}", judge.error);
+
+        // What the judge thought changes nothing about what was measured.
+        assert_eq!(report.graded(), 1);
+        assert_eq!(report.passed(), 0);
+        assert_eq!(report.pass_rate(), Some(0.0));
+        let lines = report.lines().join("\n");
+        assert!(lines.contains("pass rate: 0/1"), "{lines}");
+        assert!(lines.contains("closest to a fix"), "{lines}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
