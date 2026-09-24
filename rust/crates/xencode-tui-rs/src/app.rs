@@ -5763,8 +5763,26 @@ impl<'a> App<'a> {
         });
     }
 
+    /// The flags a self-spawned `llama-server` starts with: this session's
+    /// profile preset, the model alias, then the config's own `llama_cpp_args`.
+    /// That order is the whole design — `llama-server` runs with the last value
+    /// given for a flag, so a window written in the config beats the preset
+    /// rather than being silently overruled by it.
+    fn llama_launch_args(&self, alias: Option<&str>) -> Vec<String> {
+        xencode_models_rs::llamacpp::server_launch_args(
+            &self.hardware.profile.llama_cpp_args(),
+            alias,
+            &self.config.llama_cpp_args,
+        )
+    }
+
     /// Auto-start `llama-server` when xencode boots, per config docs
     /// (`llama_cpp_model_path` / `llama_cpp_executable` / `llama_cpp_args`).
+    ///
+    /// The server is started with the hardware profile's preset and the config's
+    /// own flags after it, then asked what it is actually running as — see
+    /// [`xencode_models_rs::llamacpp::settings_check_line`] for what that check
+    /// can and cannot see.
     ///
     /// Skips if the server is already answering on `llama_cpp_url`. If no model
     /// path is configured, falls back to discovering a GGUF on disk (see
@@ -5786,13 +5804,17 @@ impl<'a> App<'a> {
         let model_path = self.config.llama_cpp_model_path.clone();
         let exec = self.config.llama_cpp_executable.clone();
         let url = self.config.llama_cpp_url.clone();
-        let mut args = self.config.llama_cpp_args.clone();
-        if let Some(alias) = &alias {
-            if !args.iter().any(|a| a == "--alias") {
-                args.push("--alias".to_string());
-                args.push(alias.clone());
-            }
-        }
+        // The profile's preset first, the user's own flags last: a flag written
+        // twice is decided by the later one, so the config keeps the final say.
+        let profile = self.hardware.profile;
+        let label = format!("{} preset", profile.name());
+        let asked = xencode_models_rs::llamacpp::ServerReport {
+            context_tokens: Some(profile.ctx_tokens() as u32),
+            // Every profile asks for one slot; `llama-server` divides the window
+            // between slots, and the budget fills the whole one.
+            slots: Some(1),
+        };
+        let args = self.llama_launch_args(alias.as_deref());
 
         let shared = Arc::new(std::sync::Mutex::new(None));
         self.llama_process = Some(shared.clone());
@@ -5885,13 +5907,26 @@ impl<'a> App<'a> {
             let pid = server.pid();
             *shared.lock().unwrap() = Some(server);
             // This process is the authority on its own window, and it is only
-            // reachable now that it has finished loading the model.
-            if let Ok(Some(tokens)) = client.context_window().await {
+            // worth asking once the model is in: a server answers `/props` with
+            // 503 while it loads. What it reports is also the only proof that the
+            // profile's preset took effect at all.
+            let report = client
+                .report_when_ready(120, std::time::Duration::from_millis(500))
+                .await;
+            if let Some(tokens) = report.context_tokens {
                 let _ = ok_tx.send(format!("[CTXWINDOW]{tokens}"));
             }
+            // The status line under the model list holds one message at a time, so
+            // whatever is written last is what the user ends up seeing. The "it
+            // started" line is worth a second; what the server is actually running
+            // is worth staying.
             let _ = ok_tx.send(format!(
                 "[LLAMACPP_MSG]✅ auto-started llama-server on {} (PID {pid}, model {})",
                 url, model_path
+            ));
+            let _ = ok_tx.send(format!(
+                "[LLAMACPP_MSG]ℹ️ {}",
+                xencode_models_rs::llamacpp::settings_check_line(&label, asked, report)
             ));
             let _ = ok_tx.send("[HEALTH]llamacpp|healthy|0|auto-started".to_string());
             // A new model just came online — refresh the picker so
@@ -8972,6 +9007,49 @@ mod tests {
             xencode_context_rs::ProfileDecision::resolve("auto").profile
         );
         assert!(typo.reason.contains("\"banlanced\""), "{:?}", typo.reason);
+    }
+
+    /// The decided profile has to reach the command line a server is started
+    /// with, not just the line `/ctx` prints: LOW starts at 4096 and HIGH at
+    /// 16384, and whatever the config says comes last so it wins the argument.
+    #[test]
+    fn the_launch_command_carries_the_profile_and_ends_with_the_config() {
+        let value_of = |args: &[String], flag: &str| -> Option<String> {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+
+        let mut app = App::for_tests();
+        app.hardware = xencode_context_rs::ProfileDecision::resolve("low");
+        let args = app.llama_launch_args(Some("tiny"));
+        assert_eq!(
+            value_of(&args, "--ctx-size").as_deref(),
+            Some("4096"),
+            "a LOW session starts a LOW server: {args:?}"
+        );
+        assert!(
+            args.windows(2).any(|pair| pair == ["--alias", "tiny"]),
+            "{args:?} lost the model alias"
+        );
+
+        app.hardware = xencode_context_rs::ProfileDecision::resolve("high");
+        let args = app.llama_launch_args(None);
+        assert_eq!(value_of(&args, "--ctx-size").as_deref(), Some("16384"));
+        assert_eq!(
+            value_of(&args, "--parallel").as_deref(),
+            Some("1"),
+            "two slots would split the window the budget is filling"
+        );
+
+        app.config.llama_cpp_args = vec!["--ctx-size".to_string(), "32768".to_string()];
+        let args = app.llama_launch_args(None);
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("32768"),
+            "the config's flag has to be the later one: {args:?}"
+        );
     }
 
     /// AC-5: a real count is reported beside the number it replaces when a human

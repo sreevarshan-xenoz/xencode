@@ -110,6 +110,38 @@ fn as_window(tokens: u64) -> Option<u32> {
     u32::try_from(tokens).ok()
 }
 
+/// What a running server says about itself, read out of one `/props` response.
+///
+/// A field is `None` when the server answered without reporting it, which is a
+/// different answer from `Some` and stays that way in the caller's wording.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerReport {
+    /// Tokens of context per slot — see [`context_window_from_props`].
+    ///
+    /// Per slot, not total: measured on b10809, a server started with
+    /// `--ctx-size 2048 --parallel 2` reported 1024 here.
+    pub context_tokens: Option<u32>,
+    /// How many conversations the server serves at once (`total_slots`).
+    pub slots: Option<u32>,
+}
+
+/// Pick both reported values out of a `/props` response.
+///
+/// Measured on b10809: `default_generation_settings.n_ctx` and a top-level
+/// `total_slots` are both present; the launch's `--cache-type-k`,
+/// `--cache-type-v` and `--batch-size` appear nowhere in the response, so a
+/// preset that includes them cannot be checked this way.
+pub fn report_from_props(props: &serde_json::Value) -> ServerReport {
+    ServerReport {
+        context_tokens: context_window_from_props(props),
+        slots: props
+            .get("total_slots")
+            .and_then(|v| v.as_u64())
+            .and_then(|s| u32::try_from(s).ok())
+            .filter(|s| *s > 0),
+    }
+}
+
 /// Pick the token count out of a `/tokenize` response, for the `text` that was
 /// sent to get it.
 ///
@@ -126,6 +158,48 @@ pub fn counted_tokens_from_response(body: &serde_json::Value, text: &str) -> Opt
         return None;
     }
     Some(tokens.len() as u64)
+}
+
+/// Say what a server xencode started reports about itself, next to what it was
+/// started with.
+///
+/// `/props` is the only witness, and it carries two of the preset's values —
+/// the window and the slot count. The cache quantization and batch size appear
+/// nowhere in the response, so this says nothing about them either way.
+pub fn settings_check_line(label: &str, asked: ServerReport, got: ServerReport) -> String {
+    if got.context_tokens.is_none() && got.slots.is_none() {
+        return format!("{label}: the server reported no settings, so nothing is verified");
+    }
+    let summary = |report: ServerReport| match (report.context_tokens, report.slots) {
+        (Some(ctx), Some(slots)) => format!("{ctx} tokens of context in {slots} slot(s)"),
+        (Some(ctx), None) => format!("{ctx} tokens of context"),
+        (None, Some(slots)) => format!("{slots} slot(s)"),
+        (None, None) => String::new(),
+    };
+    let got_summary = summary(got);
+    let asked_summary = summary(asked);
+    if asked_summary.is_empty() {
+        return format!("{label}: {got_summary}");
+    }
+    // Only a value both sides have can disagree; a server that reports half of
+    // what was asked has not contradicted the other half.
+    let contradicted = asked
+        .context_tokens
+        .zip(got.context_tokens)
+        .is_some_and(|(want, reported)| want != reported)
+        || asked
+            .slots
+            .zip(got.slots)
+            .is_some_and(|(want, reported)| want != reported);
+    if !contradicted {
+        return format!("{label}: {got_summary}, as asked");
+    }
+    // A flag written twice is decided by the last value, so a difference usually
+    // means `llama_cpp_args` had the last word rather than a preset failing to
+    // apply.
+    format!(
+        "{label}: {got_summary}, not the {asked_summary} asked for — later flags win, so check llama_cpp_args"
+    )
 }
 
 /// A running `llama-server` process that xencode spawned (auto-start support).
@@ -437,6 +511,12 @@ impl LlamaCppClient {
     /// build, or one started with `--props` disabled — which is a different
     /// answer from "no server", and the caller treats it as "keep guessing".
     pub async fn context_window(&self) -> Result<Option<u32>, LlamaCppError> {
+        Ok(self.report().await?.context_tokens)
+    }
+
+    /// Everything this client knows how to check about a running server, from
+    /// one `/props` request.
+    pub async fn report(&self) -> Result<ServerReport, LlamaCppError> {
         let url = format!("{}/props", self.base_url);
         let resp = self
             .client
@@ -445,13 +525,37 @@ impl LlamaCppClient {
             .await
             .map_err(|e| LlamaCppError::Api(e.to_string()))?;
         if !resp.status().is_success() {
-            return Ok(None);
+            return Ok(ServerReport::default());
         }
         let props = resp
             .json::<serde_json::Value>()
             .await
             .map_err(|e| LlamaCppError::Parse(e.to_string()))?;
-        Ok(context_window_from_props(&props))
+        Ok(report_from_props(&props))
+    }
+
+    /// Ask until the server says something about itself, giving up after `tries`
+    /// attempts `gap` apart and returning whatever it said by then.
+    ///
+    /// This exists because a server that has accepted a connection is not yet a
+    /// server that has loaded a model: `llama-server` answers `/health` with 503
+    /// while the weights come in, and `/props` with it — measured starting a
+    /// 1.5B GGUF, where the settings were unreadable for the first seconds and
+    /// reported `4096 tokens in 1 slot` afterwards. A check taken at that moment
+    /// has nothing to say, and a client that reports "unverified" for a server
+    /// that is merely still loading teaches the user to ignore it.
+    pub async fn report_when_ready(&self, tries: u32, gap: std::time::Duration) -> ServerReport {
+        for attempt in 0..tries {
+            if let Ok(report) = self.report().await {
+                if report.context_tokens.is_some() || report.slots.is_some() {
+                    return report;
+                }
+            }
+            if attempt + 1 < tries {
+                tokio::time::sleep(gap).await;
+            }
+        }
+        ServerReport::default()
     }
 
     /// How many tokens the server's own vocabulary says `text` is, asked of its
@@ -570,6 +674,29 @@ pub fn start_llama_server(
         child,
         base_url: format!("http://127.0.0.1:{}", port),
     })
+}
+
+/// Assemble the command line for a server xencode starts itself.
+///
+/// Order is the whole point: the profile's preset first, then the model alias,
+/// then whatever the user put in `llama_cpp_args` — last. `llama-server` runs
+/// with the final value given for a flag, measured on b10809 by starting one
+/// with `--ctx-size 8192 --ctx-size 2048`: `/props` reported 2048. Anything
+/// earlier would let a preset quietly win an argument the user wrote down.
+pub fn server_launch_args(
+    profile_args: &[String],
+    alias: Option<&str>,
+    user_args: &[String],
+) -> Vec<String> {
+    let mut args = profile_args.to_vec();
+    if let Some(alias) = alias {
+        if !alias.trim().is_empty() && !args.iter().any(|a| a == "--alias") {
+            args.push("--alias".to_string());
+            args.push(alias.trim().to_string());
+        }
+    }
+    args.extend(user_args.iter().cloned());
+    args
 }
 
 /// Resolve the `llama-server` binary; tries the explicit path supplied by the
@@ -996,5 +1123,169 @@ mod tests {
         let estimated = chars.div_ceil(4) as u64;
         assert!(tokens > 0, "counted {tokens} tokens for {chars} characters");
         println!("{url}: {chars} characters = {tokens} tokens counted, {estimated} estimated");
+    }
+
+    /// Waiting costs the wait and nothing else: a server that never answers
+    /// leaves the report empty rather than hanging, so the caller can still say
+    /// "unverified" and move on. Nothing listens on port 9 here, so the requests
+    /// are refused on the loopback interface.
+    #[tokio::test]
+    async fn waiting_for_a_server_that_never_answers_gives_up_empty() {
+        let client = LlamaCppClient::new("http://127.0.0.1:9", 1);
+        let report = client
+            .report_when_ready(2, std::time::Duration::from_millis(10))
+            .await;
+        assert_eq!(report, ServerReport::default());
+    }
+
+    /// The slot count beside the window, from the same `/props` request. Needs a
+    /// real server; see [`a_running_server_reports_its_own_window`] for the URL
+    /// variable.
+    #[tokio::test]
+    #[ignore]
+    async fn a_running_server_reports_its_slot_count() {
+        let url = std::env::var("XENCODE_TEST_LLAMA_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let report = LlamaCppClient::new(&url, 5)
+            .report()
+            .await
+            .expect("server did not answer /props");
+        let slots = report.slots.expect("server reported no slot count");
+        assert!(slots > 0, "reported {slots} slots");
+        println!(
+            "{url}: {slots} slot(s), {} tokens of context each",
+            report.context_tokens.unwrap_or(0)
+        );
+    }
+
+    /// A flag written twice is not a conflict — `llama-server` runs with the last
+    /// value, measured on b10809 by starting one with `--ctx-size 8192
+    /// --ctx-size 2048` and reading 2048 back from `/props`. That is what makes
+    /// the ordering here load-bearing: the user's own arguments have to be the
+    /// later ones or the preset would overrule the person who wrote them.
+    #[test]
+    fn what_the_user_configured_is_the_last_word() {
+        let args = server_launch_args(
+            &["--ctx-size".to_string(), "8192".to_string()],
+            Some("tiny"),
+            &["--ctx-size".to_string(), "32768".to_string()],
+        );
+        assert_eq!(
+            args,
+            [
+                "--ctx-size",
+                "8192",
+                "--alias",
+                "tiny",
+                "--ctx-size",
+                "32768",
+            ]
+        );
+    }
+
+    /// An alias already in the preset is not said a second time, and a blank one
+    /// is not said at all — `llama-server` takes `--alias` to mean "the next
+    /// argument is the name", so a bare one would swallow the flag after it.
+    #[test]
+    fn an_alias_is_said_once_and_never_blank() {
+        let args = server_launch_args(
+            &["--alias".to_string(), "preset".to_string()],
+            Some("tiny"),
+            &[],
+        );
+        assert_eq!(args, ["--alias", "preset"]);
+
+        let added = server_launch_args(
+            &["--ctx-size".to_string(), "4096".to_string()],
+            Some("tiny"),
+            &[],
+        );
+        assert_eq!(added, ["--ctx-size", "4096", "--alias", "tiny"]);
+
+        let none = server_launch_args(&["--ctx-size".to_string(), "4096".to_string()], None, &[]);
+        assert_eq!(none, ["--ctx-size", "4096"]);
+
+        let blank = server_launch_args(&[], Some("   "), &[]);
+        assert!(blank.is_empty(), "{blank:?} carries a blank alias");
+    }
+
+    /// The three answers a start-up check can give, in the words the user sees.
+    #[test]
+    fn a_server_either_agrees_disagrees_or_says_nothing() {
+        let asked = ServerReport {
+            context_tokens: Some(8192),
+            slots: Some(1),
+        };
+        assert_eq!(
+            settings_check_line(
+                "BALANCED preset",
+                asked,
+                ServerReport {
+                    context_tokens: Some(8192),
+                    slots: Some(1)
+                }
+            ),
+            "BALANCED preset: 8192 tokens of context in 1 slot(s), as asked"
+        );
+        assert_eq!(
+            settings_check_line(
+                "BALANCED preset",
+                asked,
+                ServerReport {
+                    context_tokens: Some(2048),
+                    slots: Some(1)
+                }
+            ),
+            "BALANCED preset: 2048 tokens of context in 1 slot(s), not the 8192 tokens of context in 1 slot(s) asked for — later flags win, so check llama_cpp_args"
+        );
+        assert_eq!(
+            settings_check_line("BALANCED preset", asked, ServerReport::default()),
+            "BALANCED preset: the server reported no settings, so nothing is verified"
+        );
+        // A server that answers half of it has not contradicted the other half.
+        assert_eq!(
+            settings_check_line(
+                "BALANCED preset",
+                asked,
+                ServerReport {
+                    context_tokens: Some(8192),
+                    slots: None
+                }
+            ),
+            "BALANCED preset: 8192 tokens of context, as asked"
+        );
+    }
+
+    /// Shape read straight off a b10809 `/props` response for a server started
+    /// with `--ctx-size 4096 --parallel 1`.
+    #[test]
+    fn a_server_says_its_window_and_its_slots() {
+        let props = serde_json::json!({
+            "default_generation_settings": { "n_ctx": 4096, "params": { "seed": 4294967295u64 } },
+            "total_slots": 1,
+            "build_info": "b10809-5266f24da7",
+        });
+        assert_eq!(
+            report_from_props(&props),
+            ServerReport {
+                context_tokens: Some(4096),
+                slots: Some(1),
+            }
+        );
+    }
+
+    /// A slot count that is absent, zero, or not a number says nothing. `0` is
+    /// not "no parallelism" — it is a server that has not told us, and the caller
+    /// has to be able to tell that apart from a real answer.
+    #[test]
+    fn a_server_that_does_not_report_its_slots_says_so_by_not_reporting_them() {
+        for props in [
+            serde_json::json!({ "default_generation_settings": { "n_ctx": 8192 } }),
+            serde_json::json!({ "total_slots": 0 }),
+            serde_json::json!({ "total_slots": "one" }),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(report_from_props(&props).slots, None, "{props}");
+        }
     }
 }

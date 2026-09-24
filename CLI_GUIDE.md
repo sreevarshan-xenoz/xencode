@@ -254,6 +254,13 @@ same decision appears in `/ctx kv`, where the profile line carries its reason �
 which becomes `🗂 Profile LOW (set in config) — ctx 4096 · utilization 60% · top-k 3`
 when `hardware_profile` says `low`.
 
+The same profile now also decides how a server this program starts is launched:
+`xencode llamacpp start` and the TUI's auto-start pass a preset that matches the
+profile — `--ctx-size` at the window above, plus flash attention, KV-cache
+quantization and batch size — and then ask the running server what it came up
+with, so a flag that never took effect is reported instead of assumed. See
+[`xencode llamacpp <action>`](#xencode-llamacpp-action).
+
 #### What a prompt actually costs, counted by the model
 
 Knowing the window is one thing; knowing what the prompt is worth inside it is
@@ -456,6 +463,27 @@ xencode llamacpp list                             # models on a running server
 xencode llamacpp stop
 ```
 
+`start` launches `llama-server` with a set of flags chosen for this machine's
+memory profile (`auto`, `low`, `balanced` or `high` — see `hardware_profile`
+below), and then asks the running server what it is actually serving, printing
+both lines:
+
+```
+  flags: --flash-attn on --cache-type-k q8_0 --cache-type-v q4_0 --ctx-size 4096 --batch-size 512 --parallel 1
+LOW preset: 4096 tokens of context in 1 slot(s), as asked
+```
+
+The check can only see what `/props` reports, which is the context window and
+the slot count; the cache quantization and batch size are passed but not
+reported back, so they are not claimed. Flags in `llama_cpp_args` are appended
+after the profile's own, and `llama-server` takes the later of a repeated flag,
+so overriding one is supported and shows up as a disagreement: setting
+`llama_cpp_args` to `--ctx-size 2048` with the `low` profile printed
+`LOW preset: 2048 tokens of context in 1 slot(s), not the 4096 tokens of
+context in 1 slot(s) asked for — later flags win, so check llama_cpp_args`.
+The same check is available in the TUI: it is the status line under the model
+list (`m`).
+
 ### `xencode colab <action>`
 Google Colab bridge: run the inference server on a Colab VM (T4 GPU etc.)
 and reach it from this machine. The only supported transport is the official
@@ -600,7 +628,7 @@ xencode config reset
 | `colab_local_port`, `colab_remote_port` | number | Laptop side of the forward / VM-side port (`0` = runtime-native: llama.cpp `18080`, ollama `11434`) |
 | `colab_auto_connect` | bool | Persisted but not acted on yet — nothing reconnects without an explicit `xencode colab up` |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
-| `llama_cpp_args` | string | split on whitespace |
+| `llama_cpp_args` | string | split on whitespace; passed to a self-started `llama-server` after the hardware profile's own flags, so a repeated flag is decided here |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
 | `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |

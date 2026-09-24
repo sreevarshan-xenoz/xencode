@@ -1180,7 +1180,20 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             println!("  model: {model_path}");
             println!("  port:  {port}");
 
-            let extra: Vec<&str> = config.llama_cpp_args.iter().map(|s| s.as_str()).collect();
+            // Same preset the TUI's auto-start uses: the profile's flags first,
+            // the config's own `llama_cpp_args` last so they have the final say.
+            let profile = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
+            let asked = xencode_models_rs::llamacpp::ServerReport {
+                context_tokens: Some(profile.profile.ctx_tokens() as u32),
+                slots: Some(1),
+            };
+            let args = xencode_models_rs::llamacpp::server_launch_args(
+                &profile.profile.llama_cpp_args(),
+                None,
+                &config.llama_cpp_args,
+            );
+            let extra: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            println!("  flags: {}", extra.join(" "));
             let mut server =
                 start_llama_server(&exe, &model_path, port, &extra).map_err(|e| e.to_string())?;
 
@@ -1209,6 +1222,19 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
 
             println!("llama-server ready at {}", server.base_url);
             println!("Model loaded: {}", model_path);
+            // A server that answers is not yet a server that has loaded its
+            // model, so ask until it says what it is running as.
+            let report = client
+                .report_when_ready(120, std::time::Duration::from_millis(500))
+                .await;
+            println!(
+                "{}",
+                xencode_models_rs::llamacpp::settings_check_line(
+                    &format!("{} preset", profile.profile.name()),
+                    asked,
+                    report
+                )
+            );
             println!("Server will keep running; use `xencode llamacpp stop` to terminate.");
             // Keep the process alive under this CLI invocation.
             tokio::spawn(async move {

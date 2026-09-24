@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the server xencode starts is launched from the profile and checked afterwards
+A `llama-server` that xencode spawns for itself came up with whatever defaults
+that binary has, plus one opaque string (`llama_cpp_args`) that the program
+never interprets. Nothing about the memory profile decided anything about the
+server, and nothing said whether the flags that were passed had taken effect.
+
+Now each profile carries a preset, and the server is launched from it: flash
+attention, a quantized key/value cache (a smaller one for the value cache on the
+`low` profile), a context window equal to the one that profile budgets against,
+a batch size, and one generation slot. `xencode llamacpp start` prints the flags
+it passed, and the program then asks the running server what it is actually
+serving and prints the comparison —
+`LOW preset: 4096 tokens of context in 1 slot(s), as asked`. In the TUI the same
+line is the status under the model list.
+
+That comparison reaches two numbers, because the server reports two: the context
+window and the slot count. The cache quantization and the batch size appear
+nowhere in what the server will say about itself, so they are passed and not
+claimed. A server that disagrees is named instead of soothed: setting
+`llama_cpp_args` to `--ctx-size 2048` under the `low` profile produced
+`LOW preset: 2048 tokens of context in 1 slot(s), not the 4096 tokens of context
+in 1 slot(s) asked for — later flags win, so check llama_cpp_args`. That
+placement is deliberate — your own flags are passed last, and a flag written
+twice is decided by the later one, which is also what the read-back catches.
+
+Three things about the server were measured on `llama-server` b10809 rather than
+assumed, and each changed the preset. A bare `--flash-attn` no longer parses:
+that build wants `on`, `off` or `auto`, and it aborts the launch otherwise, which
+is the difference between a server coming up and one that does not. The context
+window is divided between slots, so a preset that wants a window asks for one
+slot; and `--n-predict` is not emitted at all, because a small value there cut a
+test answer short at eight tokens — capping output length belongs to the request,
+not to the server's launch.
+
+Getting the answer printed took two corrections. A server reports
+`model is loading` for as long as the model is loading, and the health check
+counts that as reachable, so the first attempt read the settings before they
+existed and reported that nothing was verified; the read now waits for the server
+to actually answer. And the status line holds one message, so the
+"auto-started" notice was erasing the result of the check a moment after it
+appeared — the check is written last now, since "it started" is worth one second
+and "here is what it is running" is the part worth keeping.
+
+The Ollama side is untouched: no `ollama` binary is installed here, so nothing
+about its server options was measured, and this item does not pretend otherwise.
+
 ### Added — the machine decides how much context it can afford
 Every budget figure — how many tokens of project context a run may spend, how
 full it is allowed to get, how many file chunks survive — comes from one hardware
