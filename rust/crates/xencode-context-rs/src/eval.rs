@@ -85,18 +85,23 @@ pub fn gold_from_disk(xencode_dir: &std::path::Path) -> Vec<EvalItem> {
     default_gold()
 }
 
-/// Run the gold set through retrieval, optionally through the BM25 rerank
-/// stage, and measure recall@k / precision@k / MRR.
-pub fn evaluate(
+/// Run the gold set through retrieval and measure recall@k / precision@k / MRR.
+///
+/// `rerank` selects the arm: `false` is the deterministic structural pipeline,
+/// `true` runs the same pipeline with the lexical arm added at the candidate
+/// stage (`RetrieveOptions::lexical`), which is what would ship. The A/B is
+/// deliberately option-driven rather than global so both arms can be measured
+/// in one process, with and without documentation text.
+pub fn evaluate_with(
     index: &RetrievalIndex,
     gold: &[EvalItem],
     top_k: usize,
     dirty: &HashSet<String>,
-    rerank: bool,
+    options: &RetrieveOptions,
 ) -> EvalReport {
     let opts = RetrieveOptions {
         top_k,
-        ..Default::default()
+        ..options.clone()
     };
     let mut recall = vec![0.0; top_k];
     let mut precision = vec![0.0; top_k];
@@ -105,12 +110,7 @@ pub fn evaluate(
     let mut hits: Vec<(String, Vec<String>, usize, Vec<String>)> = Vec::new();
 
     for item in gold {
-        let results = retrieve(&item.query, index, dirty, &opts);
-        let ranked = if rerank {
-            crate::embed::hybrid_rerank(index, &results, &item.query)
-        } else {
-            results
-        };
+        let ranked = retrieve(&item.query, index, dirty, &opts);
         let ranked_paths: Vec<String> = ranked.iter().map(|r| r.path.clone()).collect();
         if item.expected.is_empty() {
             hits.push((
@@ -155,7 +155,7 @@ pub fn evaluate(
     EvalReport {
         queries: gold.len(),
         top_k,
-        reranked: rerank,
+        reranked: opts.lexical,
         recall_at: recall.iter().map(|v| v / n).collect(),
         precision_at: precision.iter().map(|v| v / with_expected).collect(),
         mrr: if mrr_queries > 0 {
@@ -165,6 +165,28 @@ pub fn evaluate(
         },
         hits,
     }
+}
+
+/// Run the gold set through either the deterministic pipeline or, with
+/// `rerank`, the hybrid one that scores candidates with BM25 — including each
+/// file's documentation prose — before the top-K is cut.
+pub fn evaluate(
+    index: &RetrievalIndex,
+    gold: &[EvalItem],
+    top_k: usize,
+    dirty: &HashSet<String>,
+    rerank: bool,
+) -> EvalReport {
+    evaluate_with(
+        index,
+        gold,
+        top_k,
+        dirty,
+        &RetrieveOptions {
+            lexical: rerank,
+            ..Default::default()
+        },
+    )
 }
 
 #[cfg(test)]

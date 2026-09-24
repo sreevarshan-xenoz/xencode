@@ -3393,45 +3393,82 @@ impl<'a> App<'a> {
                 let dirty: HashSet<String> =
                     xencode_context_rs::dirty_paths(&root).into_iter().collect();
                 let k = 5;
-                let base = xencode_context_rs::evaluate(&index, &gold, k, &dirty, false);
-                let reranked = xencode_context_rs::evaluate(&index, &gold, k, &dirty, true);
+                // Three arms, so the run says what each addition is worth: the
+                // structural pipeline on its own, that pipeline with the
+                // lexical arm over path + symbols, and the same with each
+                // file's documentation prose added to what it indexes.
+                let arms: [(&str, xencode_context_rs::RetrieveOptions); 3] = [
+                    ("deterministic       ", Default::default()),
+                    (
+                        "+ text (path+symbol)",
+                        xencode_context_rs::RetrieveOptions {
+                            lexical: true,
+                            lexical_docs: false,
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "+ text + doc prose  ",
+                        xencode_context_rs::RetrieveOptions {
+                            lexical: true,
+                            lexical_docs: true,
+                            ..Default::default()
+                        },
+                    ),
+                ];
+                let reports: Vec<xencode_context_rs::EvalReport> = arms
+                    .iter()
+                    .map(|(_, opts)| {
+                        xencode_context_rs::evaluate_with(&index, &gold, k, &dirty, opts)
+                    })
+                    .collect();
                 let _ = tx.send("[CTX_START]".to_string());
                 let _ = tx.send(format!(
                     "[CTX]🧪 Retrieval eval — {} gold queries, top-{} ({} gold file{})",
-                    base.queries,
+                    reports[0].queries,
                     k,
                     if gold.iter().all(|g| g.expected.is_empty()) {
                         0
                     } else {
-                        base.queries
+                        reports[0].queries
                     },
-                    if base.queries == 1 { "" } else { "s" }
+                    if reports[0].queries == 1 { "" } else { "s" }
                 ));
-                let _ = tx.send(format!(
-                    "[CTX]   deterministic : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
-                    base.mrr,
-                    base.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
-                    base.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
-                    base.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
-                ));
-                let _ = tx.send(format!(
-                    "[CTX]   + BM25 rerank : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
-                    reranked.mrr,
-                    reranked.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
-                    reranked.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
-                    reranked.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
-                ));
-                let delta = reranked.mrr - base.mrr;
-                let verdict = if (delta - base.mrr).abs() < f64::EPSILON && delta.abs() < 1e-6 {
-                    "no change"
-                } else if delta > 1e-6 {
-                    "rerank wins — enable by default"
+                let base_mrr = reports[0].mrr;
+                for ((label, _), rep) in arms.iter().zip(&reports) {
+                    let _ = tx.send(format!(
+                        "[CTX]   {label} : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
+                        rep.mrr,
+                        rep.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                        rep.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
+                        rep.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                    ));
+                }
+                let best = reports
+                    .iter()
+                    .enumerate()
+                    // `max_by` returns the *last* equally-maximum element, which
+                    // would credit the last arm with a tie it didn't win.
+                    .fold(0usize, |acc, (i, rep)| {
+                        if rep.mrr > reports[acc].mrr + 1e-9 {
+                            i
+                        } else {
+                            acc
+                        }
+                    });
+                let delta = reports[best].mrr - base_mrr;
+                let verdict = if delta <= 1e-6 {
+                    "no arm beats the deterministic baseline — the hybrid costs time it does not buy"
                 } else {
-                    "rerank ties or hurts — keep deterministic baseline"
+                    "the hybrid arm wins — it is on by default, XCODE_HYBRID=0 to compare"
                 };
-                let _ = tx.send(format!("[CTX]   ΔMRR {delta:+.3} → {verdict}",));
-                let _ = tx.send("[CTX]   Per query:".to_string());
-                for (query, expected, rank, ranked) in &base.hits {
+                let _ = tx.send(format!(
+                    "[CTX]   best: {} · ΔMRR {:+.3} vs deterministic → {verdict}",
+                    arms[best].0.trim(),
+                    delta
+                ));
+                let _ = tx.send("[CTX]   Per query (deterministic arm):".to_string());
+                for (query, expected, rank, ranked) in &reports[0].hits {
                     let rank_str = if *rank == usize::MAX {
                         "miss".to_string()
                     } else {
@@ -3961,10 +3998,7 @@ impl<'a> App<'a> {
                 return;
             };
             let profile = xencode_context_rs::HardwareProfile::Balanced;
-            let opts = xencode_context_rs::RetrieveOptions {
-                top_k: profile.top_k(),
-                ..Default::default()
-            };
+            let opts = xencode_context_rs::RetrieveOptions::for_live_chat(profile.top_k());
             let changed: HashSet<String> =
                 xencode_context_rs::dirty_paths(&root).into_iter().collect();
             let results = xencode_context_rs::retrieve(&query, &index, &changed, &opts);

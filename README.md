@@ -32,7 +32,7 @@ turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
 provider is down.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 842 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 847 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -361,6 +361,9 @@ flowchart TD
 - One JSON file: `~/.xencode/config.json`. Point Xencode elsewhere with
   `XCODE_CONFIG_DIR` — the conversation memory and the server's audit log
   resolve to the same directory.
+- `XCODE_HYBRID=0` ranks the workspace files for a turn by name, symbol and
+  dependency distance alone, skipping the BM25 pass over each file's
+  documentation. On by default; the `/ctx eval` command prints both numbers.
 - Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
   TUI Settings panel. Only the keys in the struct are read; unknown keys are
   ignored.
@@ -417,7 +420,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (842 passing, 5 ignored)
+cargo test                          # Full workspace suite (847 passing, 5 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

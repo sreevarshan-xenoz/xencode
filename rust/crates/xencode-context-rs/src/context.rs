@@ -535,10 +535,7 @@ pub fn collect_live_context(root: &Path, query: &str, profile: HardwareProfile) 
     if let Some(index) = RetrievalIndex::load(&xencode) {
         index_present = true;
         let changed: HashSet<String> = dirty_paths(root).into_iter().collect();
-        let opts = RetrieveOptions {
-            top_k: profile.top_k(),
-            ..Default::default()
-        };
+        let opts = RetrieveOptions::for_live_chat(profile.top_k());
         let results = retrieve(query, &index, &changed, &opts);
         retrieved_total = results.len();
         blocks = read_retrieved_bodies(root, &index.files, &results, profile.content_cap_chars());
