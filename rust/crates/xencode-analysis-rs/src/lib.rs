@@ -6,8 +6,9 @@ pub mod web;
 
 pub use analyzer::CodeAnalyzer;
 pub use images::{
-    analyze_image, detect_format, dimensions, inspect_bytes, is_image_path, to_data_url,
-    ImageError, ImageFormat, ImageMeta, MAX_IMAGE_BYTES,
+    analyze_image, detect_format, dimensions, inspect_bytes, is_image_path, prepare_for_send,
+    to_data_url, ImageError, ImageFormat, ImageMeta, PreparedImage, JPEG_QUALITY, MAX_IMAGE_BYTES,
+    MAX_IMAGE_EDGE,
 };
 pub use issues::{
     AnalysisReport, AnalysisSummary, CodeIssue, IssueType, SecurityFinding, Severity,

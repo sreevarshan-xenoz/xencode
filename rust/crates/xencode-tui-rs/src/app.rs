@@ -713,24 +713,38 @@ fn append_text_attachment(block: &mut String, path: &str) {
     }
 }
 
-/// Read an attached image off disk and encode it as a data URL for message
-/// parts. Pure over the file — unit-tested. The `Err` reason is a short
-/// human phrase for the `(image not sent: …)` note in the attached block,
-/// so a skipped image is always visible, never silent.
-fn encode_attached_image(path: &str) -> Result<String, String> {
-    use xencode_analysis_rs::{inspect_bytes, to_data_url, ImageError};
+/// Read an attached image off disk, shrink it to what a vision request can use
+/// (see `xencode_analysis_rs::prepare_for_send`), and encode it as a data URL
+/// for message parts. Pure over the file — unit-tested.
+///
+/// The `Err` reason is a short human phrase for the `(image not sent: …)` note
+/// in the attached block, so a skipped image is always visible, never silent.
+/// The `Option<String>` on the success side says what was changed about the
+/// image, and is `None` when it goes out exactly as it came in.
+fn encode_attached_image(path: &str) -> Result<(String, Option<String>), String> {
+    use xencode_analysis_rs::{
+        inspect_bytes, prepare_for_send, to_data_url, ImageError, MAX_IMAGE_BYTES,
+    };
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read file: {e}"))?;
-    let meta = inspect_bytes(path, &bytes).map_err(|e| match e {
-        ImageError::TooLarge(_, cap) => {
-            format!("exceeds the {} MiB image cap", cap / 1024 / 1024)
-        }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "exceeds the {} MiB image cap",
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
+    }
+    inspect_bytes(path, &bytes).map_err(|e| match e {
         ImageError::UnknownFormat(_) => "not a recognized image".to_string(),
-        ImageError::ReadError(_, detail) => format!("cannot read file: {detail}"),
+        other => other.to_string(),
     })?;
-    Ok(to_data_url(meta.format, &bytes))
+    let prepared = prepare_for_send(&bytes);
+    Ok((
+        to_data_url(prepared.format, &prepared.bytes),
+        prepared.summary(),
+    ))
 }
 
-/// Merge image data URLs into the final user turn as content parts,/// preserving the assembled text ahead of them. Pure — unit-tested.
+/// Merge image data URLs into the final user turn as content parts,
+/// preserving the assembled text ahead of them. Pure — unit-tested.
 /// Returns false (leaving `messages` untouched) when there is nothing to
 /// attach to: empty message list or a non-user tail.
 fn attach_images_to_last_message(messages: &mut [ChatMessage], urls: Vec<String>) -> bool {
@@ -2249,7 +2263,14 @@ impl<'a> App<'a> {
         for path in attached_paths {
             if xencode_analysis_rs::is_image_path(std::path::Path::new(path)) {
                 match encode_attached_image(path) {
-                    Ok(url) => attached_image_urls.push(url),
+                    Ok((url, note)) => {
+                        attached_image_urls.push(url);
+                        if let Some(note) = note {
+                            attached_block.push_str(&format!(
+                                "<file path=\"{path}\">\n(image changed before sending: {note})\n</file>\n\n"
+                            ));
+                        }
+                    }
                     Err(reason) => attached_block.push_str(&format!(
                         "<file path=\"{path}\">\n(image not sent: {reason})\n</file>\n\n"
                     )),
@@ -7369,8 +7390,15 @@ mod tests {
         let path = dir.join("shot.png");
         let bytes = tiny_png();
         std::fs::write(&path, &bytes).unwrap();
-        let url = super::encode_attached_image(path.to_str().unwrap()).unwrap();
+        let (url, note) = super::encode_attached_image(path.to_str().unwrap()).unwrap();
         assert!(url.starts_with("data:image/png;base64,"), "{url}");
+        // A header that parses but holds no decodable pixels goes out as it
+        // came in, with nothing to report.
+        assert_eq!(note, None);
+        assert_eq!(
+            url,
+            xencode_analysis_rs::to_data_url(xencode_analysis_rs::ImageFormat::Png, &bytes)
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

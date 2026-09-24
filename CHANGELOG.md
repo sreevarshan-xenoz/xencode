@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an attached screenshot no longer goes out at full size
+Attaching an image sent the file's bytes exactly as they sat on disk. A
+1901 × 1061 screenshot left this workspace as 2.3 million base64 characters in
+the request, and a 2880-pixel wallpaper preview as 1.16 million, on every turn
+that kept the message in history — while vision models resample to roughly a
+1568-pixel long edge anyway, so the extra detail never reached the model. The
+20 MiB image ceiling that the inventory command enforces was also never applied
+to the attach path at all.
+
+Attached PNG and JPEG images are now decoded, capped at 1568 px on the longest
+edge, and recompressed as JPEG at quality 80 — measured on real files from this
+machine: the screenshot above went to 258 KiB (353 339 characters), the wallpaper
+to 276 KiB (378 163), a 2560 × 1700 photograph to 679 KiB (927 295). Counted at
+the same four-characters-per-token the context budgeter uses, that first
+screenshot is worth about 88 000 tokens of request where it used to cost about
+577 000. Every one of those payloads now fits under 1 MiB, and the file a real
+user would notice — an image with transparency — keeps its alpha channel and
+stays PNG, since flattening it would throw away information the model may need.
+GIF, WebP, BMP, ICO and SVG go out untouched, because only the PNG and JPEG
+codecs are linked; anything that fails to decode, or that would come out bigger
+than it went in, is sent as it arrived rather than refused. When an image is
+changed on the way out, the prompt says so:
+`(image changed before sending: sent as image/jpeg …)`.
+
 ### Changed — the file finder reads what files say about themselves
 The lexical scoring pass used to run *after* the candidate list had been cut to
 its top few, so it could only reshuffle files the filename-and-symbol pass had
