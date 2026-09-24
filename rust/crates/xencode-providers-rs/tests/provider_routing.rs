@@ -225,7 +225,14 @@ async fn openrouter_prefix_routes() {
 
 #[tokio::test]
 async fn llamacpp_prefix_routes_to_llamacpp() {
-    let manager = make_manager(None, None, None);
+    use xencode_models_rs::LlamaCppClient;
+
+    // A client with no server behind it: without this the manager builds the
+    // default one, which points at localhost:8080 — so on a machine where
+    // somebody is actually running llama-server the request succeeds and this
+    // test of *routing* starts depending on the neighbours.
+    let manager = make_manager(None, None, None)
+        .with_llama_cpp(LlamaCppClient::new("http://127.0.0.1:9999", 2));
 
     let result = manager
         .generate("llamacpp:mistral-7b-instruct.Q4_K_M.gguf", &test_messages())
