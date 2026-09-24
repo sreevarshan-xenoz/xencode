@@ -96,6 +96,7 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
     "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp", "/plugin",
+    "/trace",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -241,6 +242,14 @@ struct AgentRun {
     /// instead of re-read from config per request, so the status bar and the
     /// router cannot disagree about which rule is in force.
     egress: EgressPolicy,
+    /// `.xencode/` for the project this turn runs in, where the turn trace is
+    /// appended when the loop finishes (EV-2).
+    trace_dir: std::path::PathBuf,
+    /// Session, model, provider and route to write on that row.
+    trace_identity: xencode_context_rs::MetricsIdentity,
+    /// Digest of the text that started the turn. The prompt itself is never
+    /// recorded, only this, so a trace cannot become a copy of the conversation.
+    prompt_digest: Option<String>,
 }
 
 pub struct App<'a> {
@@ -2241,6 +2250,12 @@ impl<'a> App<'a> {
             return;
         }
 
+        // What the last turns did (EV-2): read the turn trace, no model asked.
+        if prompt == "/trace" || prompt.starts_with("/trace ") {
+            self.handle_trace_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
 
         // Normal LLM generation — project context is injected on every turn:
@@ -2367,7 +2382,7 @@ impl<'a> App<'a> {
             assembly.retrieved_included.min(u8::MAX as usize)
         ));
 
-        let run = self.agent_run(LoopSink::Chat, context_messages);
+        let run = self.agent_run(LoopSink::Chat, context_messages, &prompt);
 
         tokio::spawn(agent_rounds(run, tx));
     }
@@ -2472,18 +2487,30 @@ impl<'a> App<'a> {
     /// checkpoint group and budgets. Read at the moment a turn starts, so a
     /// settings change lands on the next turn; chat and ByteBot build the same
     /// run and differ only in `sink` (I2-04).
-    fn agent_run(&self, sink: LoopSink, context_messages: Vec<ChatMessage>) -> AgentRun {
+    ///
+    /// `prompt` is what the user typed (or the task a delegated run was given).
+    /// Only its digest is kept, for the turn trace.
+    fn agent_run(
+        &self,
+        sink: LoopSink,
+        context_messages: Vec<ChatMessage>,
+        prompt: &str,
+    ) -> AgentRun {
+        let root = xencode_context_rs::default_root();
         AgentRun {
             sink,
             model: self.config.default_model.clone(),
             context_messages,
             approval: self.approval_ctx(),
             task_runtime: self.task_runtime.clone(),
-            tool_root: xencode_context_rs::default_root(),
+            tool_root: root.clone(),
             // Keep at least one tool round; 0 would offer tools on no turn.
             max_rounds: self.config.agent_max_rounds.clamp(1, 64),
             fallback_models: self.config.agent_fallback_models.clone(),
             egress: self.egress_policy(),
+            trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
+            trace_identity: self.metrics_identity(&self.config.default_model),
+            prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
@@ -2931,7 +2958,7 @@ impl<'a> App<'a> {
         self.focus = FocusArea::ByteBotPanel;
 
         let context_messages = self.bytebot_context(&task);
-        Some(self.agent_run(LoopSink::ByteBot, context_messages))
+        Some(self.agent_run(LoopSink::ByteBot, context_messages, &task))
     }
 
     /// ByteBot's conversation: the task framed as an autonomous brief, on the
@@ -3027,7 +3054,7 @@ impl<'a> App<'a> {
         // A per-spawn checkpoint store: `/rewind` in the main chat reaches the
         // main checkout's turns, never a spawned worktree's edits.
         let context_messages = self.delegated_context(&worktree_path, task, SPAWN_BRIEF);
-        let mut run = self.agent_run(LoopSink::Spawn(id), context_messages);
+        let mut run = self.agent_run(LoopSink::Spawn(id), context_messages, task);
         run.tool_root = worktree_path;
         run.approval.checkpoints = std::sync::Arc::new(crate::agent_tools::CheckpointStore::new());
         Some((id, branch_name, run))
@@ -3851,6 +3878,38 @@ impl<'a> App<'a> {
                 ));
             }
             _ => self.system_line("usage: /plan (toggle the full list)  |  /plan clear"),
+        }
+    }
+
+    /// Show what the recent turns did (EV-2). Reads `.xencode/cache/turns.jsonl`
+    /// and prints it newest first; it never asks a model anything, so it works
+    /// with every server down.
+    fn handle_trace_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/trace").unwrap_or("").trim();
+        let limit = if arg.is_empty() {
+            TRACE_TURNS
+        } else {
+            match arg.parse::<usize>() {
+                Ok(0) | Err(_) => {
+                    self.system_line(&format!(
+                        "usage: /trace [turns]  (shows the {TRACE_TURNS} most recent)"
+                    ));
+                    return;
+                }
+                Ok(turns) => turns.min(TRACE_TURNS),
+            }
+        };
+        let root = xencode_context_rs::default_root();
+        let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let rows = xencode_context_rs::read_recent_traces(&xencode, limit);
+        if rows.is_empty() {
+            self.system_line(
+                "No turns traced yet here. A row is written each time an agent turn finishes.",
+            );
+            return;
+        }
+        for line in trace_report(&rows, current_timestamp()) {
+            self.system_line(&line);
         }
     }
 
@@ -5599,6 +5658,127 @@ fn should_advance_fallback(err: &xencode_providers_rs::ProviderError, emitted_an
     !emitted_any && xencode_providers_rs::retry::is_fallback_eligible(err)
 }
 
+/// How many turns `/trace` shows. The trace file keeps everything; this is the
+/// window the inspector browses.
+const TRACE_TURNS: usize = 50;
+
+/// "42s ago", "7m ago", "3h ago", "2d ago" — the age of a recorded turn.
+/// Elapsed time rather than a clock reading, because the app has no timezone
+/// data and "when did this go wrong" is the question the pane answers.
+fn trace_age(now_ms: u64, then_ms: u64) -> String {
+    let secs = now_ms.saturating_sub(then_ms) / 1000;
+    match secs {
+        0..=59 => format!("{secs}s ago"),
+        60..=3_599 => format!("{}m ago", secs / 60),
+        3_600..=86_399 => format!("{}h ago", secs / 3_600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+/// "1 turn", "3 turns", "0 tool calls" — the report reads badly with one plural.
+fn count_words(count: usize, word: &str) -> String {
+    if count == 1 {
+        format!("1 {word}")
+    } else {
+        format!("{count} {word}s")
+    }
+}
+
+/// Render recorded turns for `/trace`: a header of totals, then one line per
+/// turn newest first, then a line of output for each tool that did not finish.
+/// Pure — the rows come from the file, so the layout is unit-testable.
+fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<String> {
+    let now_ms = (now_secs.max(0.0) * 1_000.0) as u64;
+    let calls: usize = rows.iter().map(|row| row.tools.len()).sum();
+    let reported: Vec<u64> = rows
+        .iter()
+        .filter_map(|row| row.completion_tokens)
+        .collect();
+    let tokens: u64 = reported.iter().sum();
+    let mut out = vec![format!(
+        "{} · {} · {} reported on {} of {} turns",
+        count_words(rows.len(), "turn"),
+        count_words(calls, "tool call"),
+        count_words(tokens as usize, "token"),
+        reported.len(),
+        rows.len()
+    )];
+    if reported.is_empty() {
+        out.push(
+            "No server reported a token count for these turns, and cost is never estimated here."
+                .to_string(),
+        );
+    }
+    // Newest first, numbered from the newest turn shown.
+    for (index, row) in rows.iter().rev().enumerate() {
+        let route = match row.source {
+            Some(xencode_context_rs::MetricSource::Local) => "local",
+            Some(xencode_context_rs::MetricSource::Cloud) => "off-machine",
+            None => "route unknown",
+        };
+        let server = row.provider.as_deref().unwrap_or("unknown");
+        let model = row.model.as_deref().unwrap_or("unknown model");
+        let tool_names: Vec<String> = row
+            .tools
+            .iter()
+            .take(4)
+            .map(|tool| {
+                if tool.outcome == "done" {
+                    tool.name.clone()
+                } else {
+                    format!("{}·{}", tool.name, tool.outcome)
+                }
+            })
+            .collect();
+        let extra = row.tools.len().saturating_sub(tool_names.len());
+        let tools = if row.tools.is_empty() {
+            "no tools".to_string()
+        } else {
+            format!(
+                "{}: {}{}",
+                count_words(row.tools.len(), "tool"),
+                tool_names.join(", "),
+                if extra > 0 {
+                    format!(" +{extra} more")
+                } else {
+                    String::new()
+                }
+            )
+        };
+        out.push(format!(
+            "#{} {} · {model} via {server} ({route}) · {} · {tools} · {}",
+            index + 1,
+            trace_age(now_ms, row.ts_unix_ms),
+            count_words(row.rounds as usize, "round"),
+            match row.completion_tokens {
+                Some(tokens) => count_words(tokens as usize, "token"),
+                None => "no token count".to_string(),
+            }
+        ));
+        if row.failed {
+            out.push("   stopped on a provider error before answering".to_string());
+        }
+        for tool in row.tools.iter().filter(|tool| tool.outcome != "done") {
+            if let Some(tail) = &tool.tail {
+                let tail = if tail.len() > 160 {
+                    let mut end = 160;
+                    while !tail.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &tail[..end])
+                } else {
+                    tail.clone()
+                };
+                out.push(format!(
+                    "   {} ({}) output: {tail}",
+                    tool.name, tool.outcome
+                ));
+            }
+        }
+    }
+    out
+}
+
 async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -5619,7 +5799,20 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         remote_api_key,
         llama_opts,
         egress,
+        trace_dir,
+        trace_identity,
+        prompt_digest,
     } = run;
+    let turn_started = std::time::Instant::now();
+    // What this turn actually did, written to `.xencode/cache/turns.jsonl` when
+    // the loop ends (EV-2). `rounds` counts trips through the loop, including a
+    // last one that failed; the token total adds up only what a server
+    // reported, so a run against Ollama, which reports none, has no total.
+    let mut turn_tools: Vec<xencode_context_rs::ToolTrace> = Vec::new();
+    let mut rounds: u32 = 0;
+    let mut reported_tokens: Option<u64> = None;
+    let mut last_timings = None;
+    let mut stopped_on_error = false;
 
     let client = OllamaClient::new(&ollama_url, timeout);
     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
@@ -5643,6 +5836,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         _ => None,
     };
     for round in 0..=max_rounds {
+        rounds += 1;
         let offer: &[xencode_providers_rs::ToolDefinition] =
             if round == max_rounds { &[] } else { &tools };
         // Chat streams deltas straight to the transcript; ByteBot wants one
@@ -5667,6 +5861,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
             // on [DONE] like before; ByteBot has no transcript to bury it in,
             // so the panel says what failed.
             Err(e) => {
+                stopped_on_error = true;
                 if let Some(id) = spawn_id {
                     let _ = tx.send(format!("{SPAWN_PREFIX}{id}:err:{e}"));
                 } else if sink == LoopSink::ByteBot {
@@ -5675,6 +5870,13 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
                 break;
             }
         };
+        // Take, don't peek: a turn can make several llama.cpp requests and each
+        // must add its tokens once. The last one taken is also what the
+        // `[TIMINGS]` line at the end of the run reports, as before.
+        if let Some(ts) = manager.take_llamacpp_timings() {
+            reported_tokens = Some(reported_tokens.unwrap_or(0) + ts.tokens_generated);
+            last_timings = Some(ts);
+        }
         if sink == LoopSink::ByteBot || spawn_id.is_some() {
             let text = if step.text.is_empty() {
                 std::mem::take(&mut spoken)
@@ -5750,6 +5952,17 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
                     let _ = tx.send(format!("{SPAWN_PREFIX}{id}:done:{}", outcome.label()));
                 }
             }
+            // Keep a redacted, short end of the output before `result` is
+            // handed to the model: it is the only part of a tool's output this
+            // program retains, and only because a failed command is unreadable
+            // without it.
+            let tail =
+                xencode_context_rs::tail_preview(&result, xencode_context_rs::TRACE_TAIL_CAP);
+            turn_tools.push(xencode_context_rs::ToolTrace {
+                name: call.name.clone(),
+                outcome: outcome.label().to_string(),
+                tail: (!tail.is_empty()).then_some(tail),
+            });
             history.push(xencode_providers_rs::AgentTurn::ToolResult {
                 id: call.id.clone(),
                 content: result,
@@ -5757,11 +5970,21 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         }
     }
     // Report llama.cpp tok/s stats if this was a llama.cpp request
-    if let Some(ts) = manager.last_llamacpp_timings() {
+    if let Some(ts) = last_timings {
         if let Ok(json) = serde_json::to_string(&ts) {
             let _ = tx.send(format!("[TIMINGS]{}", json));
         }
     }
+    // One row per turn in `.xencode/cache/turns.jsonl`, written before the turn
+    // is announced as finished so `/trace` run immediately after can see it.
+    let mut trace =
+        xencode_context_rs::TurnTrace::new(turn_started.elapsed().as_millis() as u64, rounds)
+            .with_identity(trace_identity);
+    trace.failed = stopped_on_error;
+    trace.prompt_sha256 = prompt_digest;
+    trace.tools = turn_tools;
+    trace.completion_tokens = reported_tokens;
+    let _ = xencode_context_rs::append_trace(&trace_dir, &trace);
     let _ = tx.send(match sink {
         LoopSink::Chat => "[DONE]".to_string(),
         LoopSink::ByteBot => "[BYTEBOT_DONE]".to_string(),
@@ -6498,8 +6721,9 @@ mod tests {
     use super::{
         cap_at_line, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
-        parse_porcelain_z, parse_term_suggestions, parse_voice_level, watch_warning_for, App,
-        ConversationMemory, Egress, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        parse_porcelain_z, parse_term_suggestions, parse_voice_level, trace_age, trace_report,
+        watch_warning_for, App, ConversationMemory, Egress, FocusArea, LoopSink, SpawnRecord,
+        XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -7864,11 +8088,250 @@ mod tests {
             !app.egress_policy().allow_cloud,
             "cloud is off until the config asks for it"
         );
-        assert!(!app.agent_run(LoopSink::Chat, Vec::new()).egress.allow_cloud);
+        assert!(
+            !app.agent_run(LoopSink::Chat, Vec::new(), "which rule applies")
+                .egress
+                .allow_cloud
+        );
 
         app.config.allow_cloud_models = true;
         assert!(app.egress_policy().allow_cloud);
-        assert!(app.agent_run(LoopSink::Chat, Vec::new()).egress.allow_cloud);
+        assert!(
+            app.agent_run(LoopSink::Chat, Vec::new(), "which rule applies")
+                .egress
+                .allow_cloud
+        );
+    }
+
+    /// A turn run carries what its trace row needs — and the prompt only as a
+    /// digest, so the trace file cannot become a copy of the conversation.
+    #[test]
+    fn a_turn_run_carries_its_trace_identity_without_the_prompt_text() {
+        let app = App::for_tests();
+        let secret_prompt = "log in as admin with password=hunter2hunter2";
+        let run = app.agent_run(LoopSink::Chat, Vec::new(), secret_prompt);
+        assert_eq!(
+            run.prompt_digest.as_deref(),
+            Some(xencode_context_rs::prompt_digest(secret_prompt).as_str())
+        );
+        assert!(
+            !run.prompt_digest.unwrap().contains("hunter2"),
+            "the digest must not carry the prompt"
+        );
+        assert_eq!(
+            run.trace_identity.model.as_deref(),
+            Some(app.config.default_model.as_str())
+        );
+        assert!(run.trace_dir.ends_with(xencode_context_rs::XENCODE_DIR));
+        // The route written on the row is the route this session would use.
+        assert_eq!(
+            run.trace_identity.source,
+            Some(xencode_context_rs::MetricSource::Local),
+            "the default model is a local one"
+        );
+    }
+
+    #[test]
+    fn a_turn_ages_as_elapsed_time_not_a_clock_reading() {
+        assert_eq!(trace_age(1_000, 1_000), "0s ago");
+        assert_eq!(trace_age(45_000, 1_000), "44s ago");
+        assert_eq!(trace_age(180_000, 1_000), "2m ago");
+        assert_eq!(trace_age(7_260_000, 1_000), "2h ago");
+        assert_eq!(trace_age(180_000_000, 1_000), "2d ago");
+        // A row from the future (a clock jump) reads as just now, not a panic.
+        assert_eq!(trace_age(1_000, 9_000), "0s ago");
+    }
+
+    /// What `/trace` prints: totals first, the newest turn first, and the
+    /// reason a turn went wrong visible without opening the file.
+    #[test]
+    fn the_trace_report_lists_turns_newest_first_with_their_totals() {
+        let older = xencode_context_rs::TurnTrace {
+            ts_unix_ms: 1_000,
+            duration_ms: 900,
+            rounds: 1,
+            prompt_sha256: Some("0123456789abcdef".to_string()),
+            model: Some("qwen2.5:7b".to_string()),
+            provider: Some("ollama".to_string()),
+            source: Some(xencode_context_rs::MetricSource::Local),
+            completion_tokens: Some(120),
+            ..Default::default()
+        };
+        let mut newer = older.clone();
+        newer.ts_unix_ms = 61_000;
+        newer.rounds = 3;
+        newer.failed = true;
+        newer.completion_tokens = None;
+        newer.source = Some(xencode_context_rs::MetricSource::Cloud);
+        newer.provider = Some("anthropic".to_string());
+        newer.model = Some("anthropic:claude-3-5-sonnet".to_string());
+        newer.tools = vec![
+            xencode_context_rs::ToolTrace {
+                name: "read_file".to_string(),
+                outcome: "done".to_string(),
+                tail: None,
+            },
+            xencode_context_rs::ToolTrace {
+                name: "run_command".to_string(),
+                outcome: "failed".to_string(),
+                tail: Some("permission denied".to_string()),
+            },
+        ];
+        let lines = trace_report(&[older, newer], 65.0);
+        assert_eq!(
+            lines[0],
+            "2 turns · 2 tool calls · 120 tokens reported on 1 of 2 turns"
+        );
+        assert_eq!(
+            lines[1],
+            "#1 4s ago · anthropic:claude-3-5-sonnet via anthropic (off-machine) · 3 rounds · 2 tools: read_file, run_command·failed · no token count",
+            "{}",
+            lines[1]
+        );
+        assert_eq!(lines[2], "   stopped on a provider error before answering");
+        assert_eq!(
+            lines[3],
+            "   run_command (failed) output: permission denied"
+        );
+        assert_eq!(
+            lines[4], "#2 1m ago · qwen2.5:7b via ollama (local) · 1 round · no tools · 120 tokens",
+            "{}",
+            lines[4]
+        );
+    }
+
+    /// When no server reported usage the report says so, rather than showing a
+    /// total of zero that would read as "cost nothing".
+    #[test]
+    fn a_trace_of_turns_nobody_measured_says_so() {
+        let row = xencode_context_rs::TurnTrace {
+            ts_unix_ms: 1_000,
+            rounds: 1,
+            ..Default::default()
+        };
+        let lines = trace_report(&[row], 2_000.0);
+        assert_eq!(
+            lines[0],
+            "1 turn · 0 tool calls · 0 tokens reported on 0 of 1 turns"
+        );
+        assert_eq!(
+            lines[1],
+            "No server reported a token count for these turns, and cost is never estimated here."
+        );
+    }
+
+    /// A count that cannot be shown is answered with usage, before the project's
+    /// trace file is opened at all.
+    #[tokio::test]
+    async fn trace_command_answers_a_count_it_cannot_show_with_usage() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        app.set_chat_text("/trace 0");
+        app.submit_message(tx.clone());
+        let last = app.messages.last().expect("a reply");
+        assert_eq!(last.role, "system");
+        assert!(
+            last.content.starts_with("usage: /trace"),
+            "{}",
+            last.content
+        );
+        assert!(
+            !app.is_generating,
+            "reading a trace asks nothing of a model"
+        );
+    }
+
+    /// The writer end to end: the real agent loop over a real socket, a real
+    /// tool call, and a key in the file the tool read. One turn must produce
+    /// one row, and that row must not carry the key.
+    #[tokio::test]
+    async fn one_turn_of_the_real_loop_writes_one_redacted_trace_row() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-trace-turn-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("notes.txt"),
+            "first line\nOPENAI_API_KEY=sk-abcdefghijklmnop\nthird line\n",
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let answers = vec![
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": {"path": "notes.txt"}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "read it"}, "done": true}),
+            ];
+            for answer in answers {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let read = sock.read(&mut buf).await.unwrap_or(0);
+                    if read == 0 || buf[..read].windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let body = format!("{answer}\n");
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(reply.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+
+        let app = App::for_tests();
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "read the note".into(),
+            }],
+            "read the note",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        run.trace_dir = dir.join(xencode_context_rs::XENCODE_DIR);
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        while rx.try_recv().is_ok() {}
+        let _ = server.await;
+
+        let xencode = dir.join(xencode_context_rs::XENCODE_DIR);
+        let rows = xencode_context_rs::read_recent_traces(&xencode, 50);
+        assert_eq!(rows.len(), 1, "one turn, one row");
+        let row = &rows[0];
+        assert_eq!(row.rounds, 2, "the tool round and the answer");
+        assert!(!row.failed);
+        assert_eq!(row.tools.len(), 1);
+        assert_eq!(row.tools[0].name, "read_file");
+        assert_eq!(row.tools[0].outcome, "done");
+        let tail = row.tools[0].tail.clone().expect("output was kept");
+        assert!(!tail.contains("sk-abcdefghijklmnop"), "{tail}");
+        assert!(tail.contains("[redacted]"), "{tail}");
+        assert_eq!(
+            row.prompt_sha256.as_deref(),
+            Some(xencode_context_rs::prompt_digest("read the note").as_str())
+        );
+        assert_eq!(row.provider.as_deref(), Some("ollama"));
+        assert_eq!(
+            row.model.as_deref(),
+            Some(app.config.default_model.as_str())
+        );
+        assert_eq!(row.source, Some(xencode_context_rs::MetricSource::Local));
+        // Ollama reports no usage, so the row says nothing rather than guessing.
+        assert_eq!(row.completion_tokens, None);
+        assert_eq!(row.est_cost_micros, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// `/bytebot <task>` from the chat is the same run, and an argument-less

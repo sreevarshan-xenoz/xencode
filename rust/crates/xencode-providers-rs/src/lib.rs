@@ -421,6 +421,12 @@ impl ProviderManager {
         self.llamacpp_timings.lock().unwrap().clone()
     }
 
+    /// Read the llama.cpp timings and empty the slot, so a caller that adds up
+    /// several requests in one turn counts each generation exactly once.
+    pub fn take_llamacpp_timings(&self) -> Option<LlamaCppTimings> {
+        self.llamacpp_timings.lock().unwrap().take()
+    }
+
     /// Replace the egress policy. The default allows every route, so a caller
     /// that has not opted in sees exactly the behaviour this gate replaced.
     pub fn with_egress_policy(mut self, policy: EgressPolicy) -> Self {

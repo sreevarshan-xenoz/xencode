@@ -49,7 +49,10 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
 `/mcp stop`), `/plugin` (report which plugins loaded and what they changed;
-`/plugin reload` re-scans the plugin directory), and
+`/plugin reload` re-scans the plugin directory), `/trace [turns]` (what the
+recent agent turns did — rounds, tool calls with their outcome, and any token
+count a server reported — read from `.xencode/cache/turns.jsonl` in the project,
+so it answers with every model server down), and
 `/spawn <task> [#branch]` (run a subagent in a fresh
 git worktree next to the project, e.g. `proj-spawn-1` on branch
 `xencode/spawn-1`; a `#branch` suffix names the branch). The spawned
