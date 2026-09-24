@@ -179,6 +179,20 @@ pub struct XencodeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llama_cpp_max_tokens: Option<u32>,
 
+    /// How much a self-started `llama-server` is allowed to think before it
+    /// answers: `off` to tell a thinking model not to, or a token budget as text
+    /// (`"256"`) to cut thinking short. Anything else — including `auto` and
+    /// leaving this out — says nothing at launch and the model's own template
+    /// decides, which is what every build did before this existed.
+    ///
+    /// This is a launch setting, not a request setting: a running server ignores
+    /// the same fields in a request body. `reasoning_launch_args` in
+    /// `xencode-models-rs` records what was measured, including the fact that a
+    /// budget too small to finish a chain does not fail — it just answers from a
+    /// half-finished plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llama_cpp_reasoning: Option<String>,
+
     /// Maximum cache size (number of entries).
     #[serde(default = "default_cache_size")]
     pub max_cache_size: usize,
@@ -409,6 +423,7 @@ impl Default for XencodeConfig {
             llama_cpp_min_p: None,
             llama_cpp_seed: None,
             llama_cpp_max_tokens: None,
+            llama_cpp_reasoning: None,
             max_cache_size: default_cache_size(),
             response_timeout: default_timeout(),
             cache_enabled: true,
@@ -566,6 +581,8 @@ mod tests {
         assert!(config.llama_cpp_min_p.is_none());
         assert!(config.llama_cpp_seed.is_none());
         assert!(config.llama_cpp_max_tokens.is_none());
+        // A model that thinks is left alone until the user says otherwise.
+        assert!(config.llama_cpp_reasoning.is_none());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
