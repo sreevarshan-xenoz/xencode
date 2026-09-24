@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 880 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 888 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -132,7 +132,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
 - Structured provider transport with status-code-driven retries, retry budgets, timeouts, and a provider-health panel.
-- Per-request context metrics appended to `.xencode/cache/metrics.jsonl`.
+- Per-request context metrics appended to `.xencode/cache/metrics.jsonl`, each row naming the conversation, the model id, the server that served it and whether the prompt left this machine.
 - Collaboration server exposing sessions, a WebSocket relay, auth, model/provider status, and llama.cpp load/unload routes — bearer-token gated except the public ones.
 
 ---
@@ -441,7 +441,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (880 passing, 5 ignored)
+cargo test                          # Full workspace suite (888 passing, 5 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

@@ -20,7 +20,7 @@ use retry::RetryConfig;
 
 pub use capabilities::{capabilities_for, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
-pub use egress::{chain_for, classify, url_host, Egress, EgressPolicy, RoutingFacts};
+pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
 pub use tools::{
     advise_tools, background_tools, command_tools, file_tools, plan_tools, AgentStep, AgentTurn,
     ToolCall, ToolDefinition,
