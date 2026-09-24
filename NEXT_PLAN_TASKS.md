@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1021 tests passing, 6 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1028 tests passing, 7 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -4318,6 +4318,13 @@ context.
   broken cache invalidation. *Hard rule:* a fresh `git init` per fixture —
   `retrieve.rs:16` seeds from git-changed files, so a leftover dirty tree
   silently changes both retrieval and the outcome.
+  *(Done 2026-09-24 — see W1 progress. All eight exist as declared cases in
+  `xencode-context-rs/src/seeds.rs`, each written into its own repository with one
+  commit and a clean tree, and all eight were run both ways on this machine: fail as
+  seeded, pass with the reference change. "null-deref" and "race" are the two shapes
+  that had to be restated for a language that has neither — a lookup that stops the
+  program instead of falling back, and a lost update with the interleaving timed
+  rather than left to chance.)*
 - **QA-6 — Fault seams + kill tests.** `fail`-crate failpoints at the
   provider/MCP/filesystem/registry seams (none of `fail`/proptest/quickcheck is
   in `Cargo.lock` today) plus six real kills: SIGKILL llama.cpp mid-turn, `rm
@@ -5628,6 +5635,54 @@ done-when is met, and the commit that does it names the IDs.
   `/trace 1` printed `#1 [d] 4s ago`. The `read for context:` line is the one part
   covered only by the test with the exact expected text, because a scratch project
   with no index retrieves nothing.
+- [x] `QA-5` — 2026-09-24. Eight small programs whose defect is put there on
+  purpose, generated from a written description of it rather than from a model's
+  mood: `xencode-context-rs/src/seeds.rs`. A case is declared as data — the shape,
+  the files, the words the task states, the behaviour the grader checks, and the
+  smallest change that makes it pass — and `write_seed` lays it out as its own
+  repository: `git init`, everything committed, one commit deep, nothing pending.
+  That last part is the item's hard rule and it is checked, not assumed:
+  `retrieve.rs` seeds part of its ranking from the files git reports as changed, so
+  a case unpacked into somebody else's tree would be indexed differently for a
+  reason no report mentions. Two cases side by side have different history and
+  neither has work in flight.
+  The eight, in the names the plan used and the names a language without null or
+  data-race-as-such allows: a loop one short; a lookup that stops the program
+  rather than falling back (what "null-deref" is in Rust); an answer returned before
+  the better rule is read; a malformed line dropped in silence; a comparison the
+  wrong way round; a result that says whether it worked and is thrown away (the
+  "unused-must-use" shape, seeded as an `#[must_use]` call whose outcome is
+  ignored); a lost update between two workers; and a cached value that outlives
+  what it came from. The race is the one shape that could have been made flaky, and
+  it is not: the two workers' read and write are separated by timed sleeps, so the
+  update is lost on every run and the fixed version, which holds the lock across
+  both halves, passes on every run.
+  The reference change is held by the harness and written nowhere inside the tree —
+  asserted for all eight, in every file an agent is handed including its own
+  `task.md`. What this cannot do is hide the grader: the expected values sit in
+  `tests/behaviour.rs` in the repository the agent works in, and an agent that reads
+  them and hard-codes the answer is stopped by nothing here. That limit is stated in
+  the module and in the changelog rather than left to be discovered.
+  Generation asks nothing of a model and reaches nothing over the network: the
+  cases use only the standard library, and their generated `Cargo.toml` declares
+  itself a workspace root so a suite unpacked inside this repository is still built
+  on its own.
+  Measured, not asserted: all eight were graded twice on this machine — every one
+  exits 101 as seeded and 0 with the reference change applied, sixteen grader runs
+  in 16.7 seconds. That walk is kept runnable rather than in the routine suite,
+  because it compiles sixteen crates: `cargo test -p xencode-context-rs --lib
+  seeds:: -- --ignored`. Two of the eight are graded in the routine suite as well,
+  so the wiring cannot rot silently between walks.
+  Verified by 1028 tests, 0 failures, 7 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Eight tests are
+  new, all in the generator, seven of them in the routine suite: that every shape
+  declares a case with files, a grader and a change that applies exactly once to the
+  file the case says it touches; that the change text is nowhere in the tree; that
+  each case is its own clean repository with its own history; that a directory
+  already holding something is refused rather than overwritten; that one shape always
+  writes the same bytes; and the graded pass over two of the shapes described above.
+  The eighth is the walk over all eight, kept out of the routine suite because it
+  compiles sixteen crates.
 
 #### W2 — The model/inference substrate — 15 items
 
