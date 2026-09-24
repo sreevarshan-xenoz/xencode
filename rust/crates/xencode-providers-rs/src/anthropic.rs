@@ -274,57 +274,61 @@ impl AnthropicProvider {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut event_type = String::new();
+        let mut lines = crate::frames::FrameLines::default();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
+            lines.feed(&chunk, &mut |line| {
+                ingest_line(line, &mut event_type, &mut full_response, &mut callback)
+            });
+        }
+        lines.finish(&mut |line| {
+            ingest_line(line, &mut event_type, &mut full_response, &mut callback)
+        });
 
-                    // Parse SSE event type lines: `event: content_block_delta`
-                    if let Some(event_name) = trimmed.strip_prefix("event: ") {
-                        event_type = event_name.to_string();
-                        continue;
-                    }
+        Ok(full_response)
+    }
+}
 
-                    // Parse SSE data lines: `data: {...}`
-                    if let Some(data) = trimmed.strip_prefix("data: ") {
-                        // Reset event_type after using it to prevent stale carry-over
-                        let current_event = std::mem::take(&mut event_type);
+/// One complete line of Anthropic's SSE body. An `event:` line names the
+/// `data:` line that follows it, so the name has to survive between lines.
+fn ingest_line<F: FnMut(&str)>(
+    line: &str,
+    event_type: &mut String,
+    full_response: &mut String,
+    callback: &mut F,
+) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
 
-                        // Handle the streaming events
-                        if current_event == "content_block_delta" {
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
-                                if let Some(delta) = parsed.get("delta") {
-                                    if delta.get("type").and_then(|t| t.as_str())
-                                        == Some("text_delta")
-                                    {
-                                        if let Some(text_chunk) =
-                                            delta.get("text").and_then(|t| t.as_str())
-                                        {
-                                            if !text_chunk.is_empty() {
-                                                callback(text_chunk);
-                                                full_response.push_str(text_chunk);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else if current_event == "message_start" {
-                            // Optionally capture message_id from the initial event
-                            // (no text content in message_start)
+    // Parse SSE event type lines: `event: content_block_delta`
+    if let Some(event_name) = trimmed.strip_prefix("event: ") {
+        *event_type = event_name.to_string();
+        return;
+    }
+
+    // Parse SSE data lines: `data: {...}`
+    let Some(data) = trimmed.strip_prefix("data: ") else {
+        return;
+    };
+    // Reset the event name after using it to prevent stale carry-over.
+    let current_event = std::mem::take(event_type);
+
+    if current_event == "content_block_delta" {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(delta) = parsed.get("delta") {
+                if delta.get("type").and_then(|t| t.as_str()) == Some("text_delta") {
+                    if let Some(text_chunk) = delta.get("text").and_then(|t| t.as_str()) {
+                        if !text_chunk.is_empty() {
+                            callback(text_chunk);
+                            full_response.push_str(text_chunk);
                         }
-
-                        // event_type was cleared by std::mem::take above
                     }
                 }
             }
         }
-
-        Ok(full_response)
     }
 }
 

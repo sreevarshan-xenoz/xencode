@@ -11,7 +11,9 @@ pub mod anthropic;
 pub mod capabilities;
 pub mod compatible;
 pub mod egress;
+mod frames;
 pub mod gemini;
+pub mod playback;
 pub mod qwen;
 pub mod retry;
 pub mod tools;
@@ -234,7 +236,70 @@ pub(crate) fn to_ollama_value(msg: &ChatMessage) -> serde_json::Value {
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
     message: ChatMessage,
-    done: bool,
+}
+
+/// One complete NDJSON line from Ollama's `/api/chat`: forwards the text it
+/// carries, replaces `calls` when it carries tool calls, and reports whether
+/// the server said it was done. `calls` is `None` on the plain chat path, which
+/// has no tools to expect.
+fn ingest_ollama_line<F: FnMut(&str)>(
+    line: &str,
+    text: &mut String,
+    calls: Option<&mut Vec<ToolCall>>,
+    callback: &mut F,
+) -> bool {
+    if line.trim().is_empty() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    if let Some(message) = value.get("message") {
+        if let Ok(message) = serde_json::from_value::<ChatMessage>(message.clone()) {
+            let content = message.text_content();
+            if !content.is_empty() {
+                callback(&content);
+                text.push_str(&content);
+            }
+        }
+        if let Some(offered) = message.get("tool_calls") {
+            let parsed = tools::parse_ollama_calls(offered, "call_");
+            if !parsed.is_empty() {
+                if let Some(calls) = calls {
+                    *calls = parsed;
+                }
+            }
+        }
+    }
+    value.get("done").and_then(|d| d.as_bool()).unwrap_or(false)
+}
+
+/// OpenRouter's SSE framing: `data: {json}` lines whose first choice carries
+/// the text delta, terminated by a `data: [DONE]` marker.
+fn ingest_openrouter_line<F: FnMut(&str)>(line: &str, text: &mut String, callback: &mut F) {
+    let line = line.trim();
+    if line.is_empty() || line == "data: [DONE]" {
+        return;
+    }
+    let Some(data) = line.strip_prefix("data: ") else {
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+        return;
+    };
+    let Some(content) = json
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|choice| choice.get("delta"))
+        .and_then(|delta| delta.get("content"))
+        .and_then(|content| content.as_str())
+    else {
+        return;
+    };
+    if !content.is_empty() {
+        callback(content);
+        text.push_str(content);
+    }
 }
 
 /// Extract the inner model identifier if `model` routes to the llama.cpp
@@ -923,24 +988,25 @@ impl ProviderManager {
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
+        let mut lines = frames::FrameLines::default();
+        let mut done = false;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    if let Ok(parsed) = serde_json::from_str::<OllamaResponse>(line) {
-                        let text = parsed.message.text_content();
-                        callback(&text);
-                        full_response.push_str(&text);
-                        if parsed.done {
-                            return Ok(full_response);
-                        }
-                    }
+            lines.feed(&chunk, &mut |line| {
+                if done {
+                    return;
                 }
-            }
+                done = ingest_ollama_line(line, &mut full_response, None, &mut callback);
+            });
+        }
+        if !done {
+            lines.finish(&mut |line| {
+                if done {
+                    return;
+                }
+                done = ingest_ollama_line(line, &mut full_response, None, &mut callback);
+            });
         }
 
         Ok(full_response)
@@ -989,38 +1055,25 @@ impl ProviderManager {
         let mut stream = response.bytes_stream();
         let mut text = String::new();
         let mut calls: Vec<ToolCall> = Vec::new();
+        let mut lines = frames::FrameLines::default();
+        let mut done = false;
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(raw) = std::str::from_utf8(&chunk) {
-                for line in raw.lines() {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                        if let Some(message) = json.get("message") {
-                            if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-                                if !content.is_empty() {
-                                    callback(content);
-                                    text.push_str(content);
-                                }
-                            }
-                            if let Some(tc) = message.get("tool_calls") {
-                                let parsed = tools::parse_ollama_calls(tc, "call_");
-                                if !parsed.is_empty() {
-                                    calls = parsed;
-                                }
-                            }
-                        }
-                        if json.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
-                            return Ok(AgentStep {
-                                text,
-                                tool_calls: calls,
-                            });
-                        }
-                    }
+            lines.feed(&chunk, &mut |line| {
+                if done {
+                    return;
                 }
-            }
+                done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
+            });
+        }
+        if !done {
+            lines.finish(&mut |line| {
+                if done {
+                    return;
+                }
+                done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
+            });
         }
 
         Ok(AgentStep {
@@ -1123,33 +1176,14 @@ impl ProviderManager {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
 
+        let mut lines = crate::frames::FrameLines::default();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
-                                if let Some(first) = choices.first() {
-                                    if let Some(delta) = first.get("delta") {
-                                        if let Some(content) =
-                                            delta.get("content").and_then(|c| c.as_str())
-                                        {
-                                            callback(content);
-                                            full_response.push_str(content);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            lines.feed(&chunk, &mut |line| {
+                ingest_openrouter_line(line, &mut full_response, &mut callback)
+            });
         }
+        lines.finish(&mut |line| ingest_openrouter_line(line, &mut full_response, &mut callback));
 
         Ok(full_response)
     }
@@ -1277,43 +1311,31 @@ impl ProviderManager {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
         let mut completion_tokens: u64 = 0;
+        let mut acc = tools::ToolCallAccumulator::default();
+        let mut lines = frames::FrameLines::default();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result
                 .map_err(|e| ProviderError::Network(format!("llama.cpp stream error: {e}")))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            // The final chunk carries usage (with an empty choices array).
-                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-                                if let Some(t) =
-                                    usage.get("completion_tokens").and_then(|v| v.as_u64())
-                                {
-                                    completion_tokens = t;
-                                }
-                            }
-                            if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
-                                if let Some(first) = choices.first() {
-                                    if let Some(delta) = first.get("delta") {
-                                        if let Some(content) =
-                                            delta.get("content").and_then(|c| c.as_str())
-                                        {
-                                            callback(content);
-                                            full_response.push_str(content);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            lines.feed(&chunk, &mut |line| {
+                compatible::ingest_line(
+                    line,
+                    &mut full_response,
+                    &mut completion_tokens,
+                    &mut acc,
+                    &mut callback,
+                )
+            });
         }
+        lines.finish(&mut |line| {
+            compatible::ingest_line(
+                line,
+                &mut full_response,
+                &mut completion_tokens,
+                &mut acc,
+                &mut callback,
+            )
+        });
 
         if completion_tokens > 0 {
             self.record_llamacpp_timings(completion_tokens, start.elapsed().as_secs_f64());

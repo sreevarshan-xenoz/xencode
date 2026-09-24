@@ -48,6 +48,27 @@ struct QwenStreamChoice {
     delta: DeltaContent,
 }
 
+/// One Qwen SSE frame: `data: {"choices": [...]}` with the new text in
+/// `delta.content`, terminated by a bare `data: [DONE]`.
+fn ingest_line<F: FnMut(&str)>(line: &str, full_response: &mut String, callback: &mut F) {
+    let line = line.trim();
+    if line.is_empty() || line == "data: [DONE]" {
+        return;
+    }
+    let Some(data) = line.strip_prefix("data: ") else {
+        return;
+    };
+    let Ok(parsed) = serde_json::from_str::<QwenStreamChunk>(data) else {
+        return;
+    };
+    for choice in &parsed.choices {
+        if !choice.delta.content.is_empty() {
+            callback(&choice.delta.content);
+            full_response.push_str(&choice.delta.content);
+        }
+    }
+}
+
 impl QwenProvider {
     /// Create a new Qwen provider.
     pub fn new(api_key: String, base_url: Option<String>) -> Self {
@@ -137,27 +158,14 @@ impl QwenProvider {
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
 
+        let mut lines = crate::frames::FrameLines::default();
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                for line in text.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line == "data: [DONE]" {
-                        continue;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(parsed) = serde_json::from_str::<QwenStreamChunk>(data) {
-                            for choice in &parsed.choices {
-                                if !choice.delta.content.is_empty() {
-                                    callback(&choice.delta.content);
-                                    full_response.push_str(&choice.delta.content);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            lines.feed(&chunk, &mut |line| {
+                ingest_line(line, &mut full_response, &mut callback)
+            });
         }
+        lines.finish(&mut |line| ingest_line(line, &mut full_response, &mut callback));
 
         Ok(full_response)
     }

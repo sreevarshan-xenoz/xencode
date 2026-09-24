@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 903 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 923 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1622,6 +1622,11 @@ never is.
   Trap: house-rule optics — the fixtures must be documented as captures of real
   traffic (the `compact.rs` transcript snapshots are already such a corpus), not
   as mocks. Done-when: a previously-flaky bug is pinned by a committed fixture.
+  *(Done 2026-09-24 — see W1 progress. Four recordings of real `llama-server`
+  output are committed as cassettes with their capture provenance, replayed over
+  a real loopback port through the production reader; the bug they pin is streamed
+  text being lost at chunk boundaries. Replay one level higher — the whole agent
+  loop driven from a recording — is QA-1, not this.)*
 - **EV-9 API prompt-cache accounting** — `cache_control` breakpoints at the stable
   prefix; `cached_tokens` is already metered. S-M (3-5 d). Trap: markers in the
   wrong place void reuse — measure with the existing kv-reuse ratio.
@@ -2831,7 +2836,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 903-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 923-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -5102,7 +5107,7 @@ done-when is met, and the commit that does it names the IDs.
   `agent_rounds` only, so the `xencode query` single-shot path still writes
   nothing, and the file is never trimmed — reading takes the last N rows, so
   growth is unbounded until something rotates it.
-- Verified by 903 tests. The writer is proven by a test that runs the real agent
+- Verified by 923 tests. The writer is proven by a test that runs the real agent
   loop end to end — real HTTP over a real listening socket, real tool execution
   against a file on disk whose content contained `OPENAI_API_KEY=sk-…` — and then
   reads back the one row that was written and asserts the key is absent from it.
@@ -5115,6 +5120,60 @@ done-when is met, and the commit that does it names the IDs.
   (Ollama or llama.cpp) is up on this machine, so that run exercised a failed
   turn; the successful multi-round, multi-tool shape is exercised only by the
   stub-socket test.
+- [x] `EV-8` — 2026-09-24. The bug this pins is below the HTTP boundary, where an
+  in-process fake cannot reach it: all eight streaming readers decoded one network
+  read at a time and split it on newlines, so a data line straddling two reads
+  failed to parse in both halves, and a read ending inside a multi-byte character
+  failed to decode and was thrown away whole. Nothing reported either — the answer
+  simply came back shorter than the model wrote it, or empty. Every reader now
+  feeds bytes through `frames::FrameLines`, which keeps the incomplete tail for
+  the next read and decodes a genuinely invalid line lossily instead of dropping
+  it: Ollama, llama.cpp, OpenRouter, the OpenAI-compatible path, Anthropic, Gemini
+  and Qwen.
+- The recordings are captures, not expectations. Four of them are committed under
+  `rust/crates/xencode-providers-rs/tests/fixtures/cassettes/` — a plain answer,
+  an answer in katakana, a two-turn calculator run, and a thinking model that
+  never emitted a visible character — each with the server build (`llama-server
+  0.4.0-dev`, build 10809, commit 5266f24da7, CPU-only), the GGUF file it ran, the
+  `curl` command that took the bytes and the date. They were recorded against a
+  `llama-server` started on this machine from a local model file, so no network
+  and no vendor account was involved. A test asserts that provenance is present in
+  every cassette rather than living in the commit message.
+- Frame boundaries are the player's business, not the format's: `curl` reassembles
+  a body before you see it, so no recording can hold the original split points.
+  `playback` therefore serves each recorded line either whole or cut near its
+  middle, preferring an offset that lands on a UTF-8 continuation byte so the
+  character really is split, over a real loopback socket with `Transfer-Encoding:
+  chunked` and one write per piece. The cassette format is refused outright if it
+  comes from another version, records nothing, holds a successful response with an
+  empty body, or asks for a request body its own recording would not satisfy.
+- Numbers, measured against the pre-fix behaviour kept in the test file. The
+  katakana recording is 2,967 bytes; all 2,968 two-way cuts of it now reassemble
+  to exactly the lines the server sent, while the old per-read decode lost text at
+  2,949 of its 2,966 interior cut points — safe only at the 17 that land on a line
+  break. The calculator recording's tool call arrives in 12 argument fragments,
+  reassembles to `{"expr": "27 * 43"}` regardless of cut points, and the test runs
+  that expression in a real `sh -c`, then checks that the request the model was
+  sent on turn two contains `1161` — the number the shell actually printed.
+- What this item does **not** close. The plan asked for replay "through real tool
+  execution in seeded temp repos", and what it proves is one level below that: a
+  real socket, the production reader, a real shell computing a real tool result.
+  Replaying a recording through the whole `agent_rounds` loop is not there, because
+  that loop builds its own payloads with the system prompt and the retrieval block
+  in front of the history, so no tight cassette matcher can be written for it
+  without first recording at that level — which is exactly `QA-1`'s job with
+  `xencode replay <run-id>`. Say so in `QA-1` rather than counting it twice here.
+- Pinned but deliberately unfixed: the reasoning-only recording holds 67
+  `reasoning_content` frames, no `content` frames at all, and stops on
+  `finish_reason: "length"`. This product never parses `reasoning_content`, so
+  replayed it answers with an empty string, and a test asserts that emptiness. It
+  is the MI-4 gap written down as a recording rather than as a claim.
+- Verified by 923 tests, 0 failures, 5 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Beyond the tests,
+  the path was checked against a live server on this machine: `xencode query` with
+  the same GGUF asked to answer in katakana printed `サーバは準備完了です。` in
+  2.854 s, and the server was stopped afterwards (`/health` refusing connections)
+  with `~/.xencode/config.json` unchanged, verified by checksum.
 
 #### W2 — The model/inference substrate — 15 items
 
