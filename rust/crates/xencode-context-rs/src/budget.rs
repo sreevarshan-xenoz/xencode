@@ -72,29 +72,67 @@ impl HardwareProfile {
         }
     }
 
-    /// Default llama.cpp server args per profile (§13). KV quantization is a
-    /// profile setting, not a universal flag; LOW trades the value cache to
-    /// `q4_0` to fit small VRAM with the key cache, BALANCED/HIGH run both at
-    /// `q8_0`. `--parallel 1` keeps the KV slot count to one so cache reuse is
-    /// predictable.
+    /// Prompt batch size — how many tokens the server evaluates per step while
+    /// reading a prompt in. A bigger batch costs memory and buys speed, so it
+    /// follows the same band as the rest. These three values are reasoned from
+    /// the memory bands, not measured against a model; `llama_cpp_args` in the
+    /// config can overrule them, since `llama-server` runs with the last value
+    /// given for a flag.
+    pub fn batch_size(self) -> u32 {
+        match self {
+            HardwareProfile::Low => 512,
+            HardwareProfile::Balanced => 2048,
+            HardwareProfile::High => 4096,
+        }
+    }
+
+    /// The flags this profile wants a self-spawned `llama-server` to start with.
+    ///
+    /// Measured on `llama-server` b10809 hosting a 1.5B Q4_K_M GGUF. Two things
+    /// about that measurement matter here:
+    ///
+    /// - `--flash-attn` now takes a value (`on|off|auto`) and rejects itself
+    ///   written bare: `--flash-attn --cache-type-k …` aborts the launch with
+    ///   `unknown value for --flash-attn: '--cache-type-k'`. The preset used to
+    ///   emit exactly that, so a server started from it would never have come up.
+    /// - Of these flags, only `--ctx-size` and `--parallel` come back through
+    ///   `/props` (as `default_generation_settings.n_ctx` and `total_slots`), so
+    ///   only those two can be checked after the fact. `--cache-type-k`,
+    ///   `--cache-type-v` and `--batch-size` are reported nowhere, and no claim
+    ///   is made about them.
+    ///
+    /// KV quantization is a profile setting rather than a universal flag: LOW
+    /// trades the value cache to `q4_0` to fit small memory alongside the key
+    /// cache, BALANCED/HIGH run both at `q8_0`. `--parallel 1` is every
+    /// profile's answer: `llama-server` splits `--ctx-size` across slots — a
+    /// server on the BALANCED profile with two slots gives each conversation
+    /// 4096 tokens while the budget is still filling for 8192 — and one slot is
+    /// the only count the context builder's arithmetic survives.
+    ///
+    /// There is deliberately no `--n-predict`. Measured with `--n-predict 8`, a
+    /// reply that asked for no limit of its own stopped after eight tokens with
+    /// `finish_reason: "length"` — a generation cap is a property of the request,
+    /// not of the machine's memory, and putting one here would quietly truncate
+    /// every long answer.
     pub fn llama_cpp_args(self) -> Vec<String> {
-        let mut args = vec![
+        let cache_type_v = match self {
+            HardwareProfile::Low => "q4_0",
+            HardwareProfile::Balanced | HardwareProfile::High => "q8_0",
+        };
+        vec![
             "--flash-attn".to_string(),
+            "on".to_string(),
             "--cache-type-k".to_string(),
             "q8_0".to_string(),
             "--cache-type-v".to_string(),
-        ];
-        match self {
-            HardwareProfile::Low => args.push("q4_0".to_string()),
-            HardwareProfile::Balanced | HardwareProfile::High => args.push("q8_0".to_string()),
-        }
-        args.push("--ctx-size".to_string());
-        args.push(self.ctx_tokens().to_string());
-        args.push("--n-predict".to_string());
-        args.push("1024".to_string());
-        args.push("--parallel".to_string());
-        args.push("1".to_string());
-        args
+            cache_type_v.to_string(),
+            "--ctx-size".to_string(),
+            self.ctx_tokens().to_string(),
+            "--batch-size".to_string(),
+            self.batch_size().to_string(),
+            "--parallel".to_string(),
+            "1".to_string(),
+        ]
     }
 
     /// The word this profile goes by in the config file's `hardware_profile`.
@@ -342,32 +380,131 @@ mod tests {
             HardwareProfile::Balanced.top_k(),
             HardwareProfile::High.top_k()
         );
+        assert!(HardwareProfile::Low.batch_size() < HardwareProfile::Balanced.batch_size());
+        assert!(HardwareProfile::Balanced.batch_size() < HardwareProfile::High.batch_size());
     }
 
+    /// The preset a self-spawned server starts from, written out in full for all
+    /// three profiles. `llama-server` refuses to start at all on a flag it cannot
+    /// parse — `--flash-attn` used to take no value and now takes `on|off|auto` —
+    /// so this list is the difference between a server coming up and a TUI that
+    /// says nothing happened.
     #[test]
-    fn llama_cpp_args_match_profile_spec() {
+    fn each_profile_starts_the_server_with_its_own_preset() {
+        assert_eq!(
+            HardwareProfile::Low.llama_cpp_args(),
+            [
+                "--flash-attn",
+                "on",
+                "--cache-type-k",
+                "q8_0",
+                "--cache-type-v",
+                "q4_0",
+                "--ctx-size",
+                "4096",
+                "--batch-size",
+                "512",
+                "--parallel",
+                "1",
+            ]
+        );
         assert_eq!(
             HardwareProfile::Balanced.llama_cpp_args(),
-            vec![
+            [
                 "--flash-attn",
+                "on",
                 "--cache-type-k",
                 "q8_0",
                 "--cache-type-v",
                 "q8_0",
                 "--ctx-size",
                 "8192",
-                "--n-predict",
-                "1024",
+                "--batch-size",
+                "2048",
                 "--parallel",
                 "1",
             ]
         );
-        let low = HardwareProfile::Low.llama_cpp_args();
-        assert!(low.contains(&"q4_0".to_string()));
-        assert!(low.contains(&"4096".to_string()));
-        let high = HardwareProfile::High.llama_cpp_args();
-        assert!(high.contains(&"16384".to_string()));
-        assert!(high.contains(&"q8_0".to_string()));
+        assert_eq!(
+            HardwareProfile::High.llama_cpp_args(),
+            [
+                "--flash-attn",
+                "on",
+                "--cache-type-k",
+                "q8_0",
+                "--cache-type-v",
+                "q8_0",
+                "--ctx-size",
+                "16384",
+                "--batch-size",
+                "4096",
+                "--parallel",
+                "1",
+            ]
+        );
+    }
+
+    /// A flag with nothing after it is a flag that reads the *next* flag as its
+    /// value, which is how `--flash-attn --cache-type-k …` aborts a launch on
+    /// b10809 with `unknown value for --flash-attn`.
+    #[test]
+    fn every_flag_is_followed_by_the_value_it_takes() {
+        for profile in [
+            HardwareProfile::Low,
+            HardwareProfile::Balanced,
+            HardwareProfile::High,
+        ] {
+            let args = profile.llama_cpp_args();
+            assert!(args.len() % 2 == 0, "{args:?} does not pair up");
+            for pair in args.chunks(2) {
+                assert!(pair[0].starts_with("--"), "{} has no value", pair[0]);
+                assert!(
+                    !pair[1].starts_with("--"),
+                    "{} is missing its value",
+                    pair[0]
+                );
+            }
+        }
+    }
+
+    /// Measured with `--n-predict 8`: a reply that asked for no limit of its own
+    /// stopped after eight tokens with `finish_reason: "length"`. How long an
+    /// answer may run is not a property of the machine's memory, so no profile
+    /// gets to decide it at launch.
+    #[test]
+    fn no_profile_caps_generation_length_at_launch() {
+        for profile in [
+            HardwareProfile::Low,
+            HardwareProfile::Balanced,
+            HardwareProfile::High,
+        ] {
+            assert!(
+                !profile
+                    .llama_cpp_args()
+                    .iter()
+                    .any(|arg| arg.starts_with("--n-predict")),
+                "{} caps generation at launch",
+                profile.name()
+            );
+        }
+    }
+
+    /// One slot on every profile, because that is what keeps the window the
+    /// budget is filling: `llama-server` divides `--ctx-size` by the slot count.
+    #[test]
+    fn every_profile_runs_a_single_slot() {
+        for profile in [
+            HardwareProfile::Low,
+            HardwareProfile::Balanced,
+            HardwareProfile::High,
+        ] {
+            let args = profile.llama_cpp_args();
+            let slot = args
+                .iter()
+                .position(|a| a == "--parallel")
+                .and_then(|i| args.get(i + 1));
+            assert_eq!(slot, Some(&"1".to_string()), "{}", profile.name());
+        }
     }
 
     /// The bands are stated in whole GiB, so the boundary is where a machine

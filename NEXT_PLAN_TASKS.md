@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1086 tests passing, 10 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1096 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2140,6 +2140,12 @@ requests we already know how to make and don't.**
   is reachable only as an opaque user string, `config.llama_cpp_args`
   (`main.rs:933`, `app.rs:5230`). Trap: KV quant trades accuracy for context,
   and a bad preset reads as *our* bug.
+  *(Done 2026-09-24 — see W2 progress. The preset is per profile and the values
+  that can be read back are read back. Three of this item's flags are short forms
+  that the code does not use, and its `-np` was measured capping a test answer at
+  eight tokens, so it is not emitted at all; of the six knobs it names, only the
+  window and the slot count appear anywhere in `/props`, which is why the check
+  claims two and not six.)*
 - **MI-4 Reasoning-budget control** — llama.cpp has `--reasoning-budget` /
   `--reasoning-effort`, Ollama has named levels. **S**. Feeds straight into the
   `cached_tokens` reuse already measured. Trap: truncating a thinking chain
@@ -6112,6 +6118,80 @@ done-when is met, and the commit that does it names the IDs.
   that the turn's budget actually moves with the resolved profile. The last of those
   was checked by putting the constant back at the assembly call site and watching
   it fail with `a narrower profile has to spend less: 6144 against 6144`.
+
+- [x] `MI-3` — 2026-09-24, the fifth item of W2. A server this program starts for
+  itself is now launched from the hardware profile, and is asked afterwards what it
+  came up with.
+  **What the profile says.** `HardwareProfile::llama_cpp_args()` writes the launch
+  preset out in full: flash attention on, the key cache at `q8_0`, the value cache
+  at `q4_0` on LOW and `q8_0` above it, `--ctx-size` at the same window the budget
+  spends against (4096/8192/16384), a batch size that grows with the profile
+  (512/2048/4096, a new `batch_size()` so the number is stated once), and one
+  generation slot. Both callers — `xencode llamacpp start` and the TUI's
+  auto-start — go through `server_launch_args`, which puts the preset first, names
+  the model alias once, and leaves `config.llama_cpp_args` last.
+  **Measured before writing**, on `llama-server` b10809 with the 1.5B Dolphin
+  model. A bare `--flash-attn` aborts the launch (`unknown value for
+  --flash-attn: '--cache-type-k'`) — that flag takes `on|off|auto` now, which is
+  why the preset spells the value out and why the shape of the list is tested: a
+  flag that cannot be parsed does not fail quietly, it means no server. Repeated
+  flags go to the later one (`--ctx-size 8192 --ctx-size 2048` serves 2048), which
+  is what makes "config last" a real override rather than decoration. The window is
+  divided across slots (`--ctx-size 2048 --parallel 2` gives `n_ctx_slot` 1024), so
+  a preset that asks for a window asks for one slot. `--n-predict`, which this item
+  names, is not emitted: `--n-predict 8` ended a test answer at eight tokens with
+  `finish: length`, and a launch-time cap on output length is not something the
+  budget layer wants to own — the request already carries that.
+  **What is checked, and what cannot be.** `/props` reports two of the six values
+  this preset sets: `default_generation_settings.n_ctx` and `total_slots`.
+  `LlamaCppClient::report()` reads both into a `ServerReport`, and
+  `settings_check_line()` compares them with what was asked and answers one of
+  three ways — agreement (`LOW preset: 4096 tokens of context in 1 slot(s), as
+  asked`), disagreement (`LOW preset: 2048 tokens of context in 1 slot(s), not the
+  4096 tokens of context in 1 slot(s) asked for — later flags win, so check
+  llama_cpp_args`), or no answer (`the server reported no settings, so nothing is
+  verified`). The cache types and the batch size appear nowhere in `/props`, so
+  nothing claims they took effect. A half-answer is treated as an answer: an
+  older server that reports the window but not the slots is not called out for the
+  slots it never mentioned.
+  **Live, on this machine, both branches.** `xencode llamacpp start --model …
+  --port 8131` under `hardware_profile low` printed
+  `flags: --flash-attn on --cache-type-k q8_0 --cache-type-v q4_0 --ctx-size 4096 --batch-size 512 --parallel 1`
+  and then `LOW preset: 4096 tokens of context in 1 slot(s), as asked`; the same
+  command with `llama_cpp_args` set to `--ctx-size 2048` printed the disagreement
+  line above. In the TUI, an auto-started server under the profile the machine
+  picked for itself showed, in the status line under the model list,
+  `ℹ️ BALANCED preset: 8192 tokens of context in 1 slot(s), as asked` — read off a
+  server the TUI had just launched, in a terminal driven headless, and captured
+  from the rendered frame.
+  **Two things that were wrong before this was true.** The first live run printed
+  `the server reported no settings, so nothing is verified` while `curl` on the
+  same port was returning `n_ctx: 4096`: `ping()` treats HTTP 503 — which is what
+  `llama-server` says while the model is loading — as healthy, so the read happened
+  before the settings existed. `report_when_ready()` now retries until the server
+  actually reports, and both callers use it. The second is visible in the code
+  rather than the transcript: the status line holds one message, so the
+  `✅ auto-started llama-server on …` notice was overwriting the check a moment
+  after it arrived, and the first three headless captures found no trace of it. The
+  check is sent last now, because "it started" is worth a second and what the server
+  is running is the part worth reading.
+  **Not done, on purpose**: nothing for Ollama. This item is about the server xencode
+  launches itself, and no `ollama` binary is installed here to measure against.
+  Verified by 1096 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Eleven tests are new and one is gone, replaced: the old
+  `llama_cpp_args_match_profile_spec` asserted the short-flag list this item
+  outgrew. What is new — the exact preset each profile emits; that every flag is
+  followed by the value it takes; that no profile caps generation length at launch;
+  that every profile runs one slot; that the user's own flags end up last; that an
+  alias is said once and never blank; the three answers a check can give, including
+  the half-answer; reading the window and the slots out of a `/props` shape; and
+  that a server which never answers is eventually given up on rather than waited on
+  forever. Four of them were confirmed by breaking the code they guard — dropping
+  the value from `--flash-attn`, adding `--n-predict` back, putting the config flags
+  before the preset, and removing the zero-slot filter — and watching each fail. One
+  more test, ignored by default, re-runs the read-back against a real server when
+  `XENCODE_TEST_LLAMA_URL` points at one.
 
 #### W2 — The model/inference substrate — 15 items
 
