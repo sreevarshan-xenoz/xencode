@@ -5447,7 +5447,10 @@ pub fn spawn_worktree(
 }
 
 /// One assistant step through the provider: the primary model first, then each
-/// configured fallback in order (I4-01). A candidate is abandoned only when it
+/// configured fallback in order (I4-01) — but only the fallbacks that leave the
+/// conversation in the same place the primary would (PR-1 / QTR-2: a local model
+/// that happens to be down must not move the whole exchange to a cloud
+/// provider). A candidate is abandoned only when it
 /// fails **before emitting any token** *and* the error is fallback-eligible
 /// ([`xencode_providers_rs::retry::is_fallback_eligible`]) — once a token has
 /// streamed (or a tool step returned), switching models would duplicate output
@@ -5467,7 +5470,17 @@ async fn agent_step_with_fallback(
     tx: &mpsc::UnboundedSender<String>,
     spoken: &mut String,
 ) -> Result<xencode_providers_rs::AgentStep, xencode_providers_rs::ProviderError> {
-    let chain = xencode_providers_rs::retry::fallback_chain(model, fallback_models);
+    let (chain, skipped) = manager.fallback_chain(model, fallback_models);
+    // A candidate that would move the conversation somewhere else is not tried,
+    // and not silently: "no fallback ran" has to look different from "a
+    // fallback was configured and refused".
+    if !skipped.is_empty() && sink == LoopSink::Chat {
+        let _ = tx.send(format!(
+            "[FALLBACK]not tried: {} — this turn is a {} turn and a fallback may not change that",
+            skipped.join(", "),
+            manager.egress_of(model).label()
+        ));
+    }
     for (index, candidate) in chain.iter().enumerate() {
         // Fresh per candidate: only a failure with a clean slate is allowed to
         // move on. A token delivered here, even on a failing attempt, fixes the
@@ -5512,9 +5525,12 @@ async fn agent_step_with_fallback(
 ///
 /// Two things fix a model in place: output the user has already seen (a
 /// switch would duplicate it) and tool work already done (a switch would
-/// double-execute it). A [`xencode_providers_rs::ProviderError::Parse`] fixes it
-/// too — that is our own decoder failing on bytes we received, so every
-/// candidate reproduces it and walking the chain only burns them.
+/// double-execute it). Two errors fix it on their own: a
+/// [`xencode_providers_rs::ProviderError::Parse`] is our own decoder failing on
+/// bytes we received, so every candidate reproduces it; an
+/// [`xencode_providers_rs::ProviderError::Egress`] is this program refusing to
+/// send the prompt somewhere, and handing the conversation to the next provider
+/// would be the very thing the refusal prevents.
 fn should_advance_fallback(err: &xencode_providers_rs::ProviderError, emitted_any: bool) -> bool {
     !emitted_any && xencode_providers_rs::retry::is_fallback_eligible(err)
 }
@@ -7608,6 +7624,65 @@ mod tests {
         assert!(
             !super::should_advance_fallback(&bad_decode, false),
             "our own parse failure is not the provider's fault; the chain stops"
+        );
+        let refused = ProviderError::Egress("cloud models are not allowed".to_string());
+        assert!(
+            !super::should_advance_fallback(&refused, false),
+            "a refusal must end the turn, not hand the conversation to the next provider"
+        );
+    }
+
+    /// PR-1 / QTR-2 from the user's side: a local model that is configured with
+    /// a cloud alternate must not run that alternate, and must say so — an
+    /// invisible skip is indistinguishable from "no fallback was configured".
+    /// The local route here points at a closed port, so the turn fails; what is
+    /// under test is everything the loop said on the way to failing.
+    #[tokio::test]
+    async fn a_fallback_that_would_leave_the_machine_is_named_not_run() {
+        use xencode_models_rs::{LlamaCppOptions, OllamaClient};
+        use xencode_providers_rs::ProviderManager;
+
+        let manager = ProviderManager::new(
+            OllamaClient::new("http://127.0.0.1:1", 1),
+            None,
+            None,
+            None,
+            None,
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut spoken = String::new();
+        let fallbacks = vec!["anthropic:claude-3-5-sonnet".to_string()];
+
+        let result = super::agent_step_with_fallback(
+            &manager,
+            "qwen2.5:7b",
+            &fallbacks,
+            &[],
+            &[],
+            &[],
+            &LlamaCppOptions::default(),
+            LoopSink::Chat,
+            &tx,
+            &mut spoken,
+        )
+        .await;
+        assert!(result.is_err(), "the local route is a closed port");
+        drop(tx);
+
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        assert!(
+            lines.iter().any(|line| {
+                line.starts_with("[FALLBACK]not tried")
+                    && line.contains("anthropic:claude-3-5-sonnet")
+            }),
+            "the skipped cloud candidate should be named, got {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("trying anthropic")),
+            "a skipped candidate must never be attempted, got {lines:?}"
         );
     }
 
