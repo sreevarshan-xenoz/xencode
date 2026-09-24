@@ -136,6 +136,7 @@ async fn get_config() -> Json<serde_json::Value> {
                 "temperature": cfg.llama_cpp_temperature,
                 "top_k": cfg.llama_cpp_top_k,
                 "min_p": cfg.llama_cpp_min_p,
+                "seed": cfg.llama_cpp_seed,
                 "max_tokens": cfg.llama_cpp_max_tokens,
             }
         }

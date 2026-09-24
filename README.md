@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 972 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 980 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -265,7 +265,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **General** | `xencode` | Launch Rust TUI (default experience) |
 | **General** | `xencode --version` | Show installed version |
 | **Query** | `xencode query "…"` | Run a one-shot query |
-| **Query** | `xencode query "…" --temperature 0.2 --max-tokens 512` | llama.cpp sampling per call: also `--top-k`, `--min-p`, `--mirostat`, `--grammar`, `--json-schema`, `--no-cache`, `--session`, `--model` |
+| **Query** | `xencode query "…" --temperature 0.2 --max-tokens 512` | llama.cpp sampling per call: also `--top-k`, `--min-p`, `--mirostat`, `--seed`, `--grammar`, `--json-schema`, `--no-cache`, `--session`, `--model` |
 | **Query** | `xencode query "…" --format ndjson \| jq -r .type` | One JSON event per line for scripts: `start`, `token`, then `done` or `error` — every field in the CLI guide |
 | **Scan** | `xencode scan . --max-depth 2` | Scan workspace |
 | **Config** | `xencode config show` | Show runtime config |
@@ -447,7 +447,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (972 passing, 5 ignored)
+cargo test                          # Full workspace suite (980 passing, 5 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

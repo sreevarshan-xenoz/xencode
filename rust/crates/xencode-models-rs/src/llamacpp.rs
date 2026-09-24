@@ -147,6 +147,11 @@ pub struct LlamaCppOptions {
     /// Temperature for sampling.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
+    /// Sampler seed. llama.cpp draws tokens from this, so a run is only
+    /// repeatable if the seed goes over the wire with the temperature — leave it
+    /// out and the server picks one per request, which is what it does today.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
     /// Max tokens to predict.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,

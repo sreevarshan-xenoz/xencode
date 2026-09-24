@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 972 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 980 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3823,7 +3823,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 28 | Self-Debugging Environment | planned | DB-6 `xencode doctor --json` (+QO-7's probe list) |
 | 29 | Self-Benchmarking | narrowed | QO-4, gated on CX-8. "Agent success %" needs an eval corpus that does not exist yet |
 | 30 | Reproducible Agent Runs | planned | EV-8 (HTTP-boundary playback); QA-1 adds `xencode replay <run-id>` on top of it |
-| 31 | Deterministic Agent Mode | narrowed | QA-2 first: **nothing is pinned today** — no `seed` anywhere in the workspace, `llama_cpp_temperature: None`. MD-1 is the mode axis |
+| 31 | Deterministic Agent Mode | narrowed | QA-2 is done: `llama_cpp_seed` is sent and recorded, and a turn says whether it was pinned. Still only honest on CPU with fixed threads — MD-1 is the mode axis |
 | 32 | Agent Flight Recorder | planned | EV-2 turn trace + `is_decision` markers; QA-3 |
 | 33 | Agent Debugger | narrowed | A viewer over EV-2's trace. CI-7 (DAP over MCP) is the actual debugger |
 | 34 | Agent Sandbox Profiles | planned | SE-7; QTR-3 is the `bwrap` slice of it — two profiles, not a zoo |
@@ -4277,6 +4277,12 @@ context.
   QA-1/EVd-2. Status quo: nothing is sent at all (fact Q-1.13). Even pinned, GPU
   floating-point ordering and cross-restart KV state keep replay honest only on
   CPU with fixed threads for short horizons.
+  *(Done 2026-09-24 — see W1 progress. `seed` is sent and both settings are
+  recorded, but in `metrics.jsonl`: there is no per-run `model.json` in this
+  codebase. The seed was proven to reach the sampler by running it against a
+  local server, and the two things that break a pinned seed anyway — this
+  product's own conversation memory, and llama.cpp's prefix cache — are written
+  down where the flag is documented.)*
 - **QA-3 — EV-2's turn trace with decision markers** is the flight recorder and
   the debugger's substrate. Chosen tool + args, `retrieved_files`, `is_decision`,
   optionally llama.cpp logprobs. *Trap:* promised causality. Model-written
@@ -5351,6 +5357,74 @@ done-when is met, and the commit that does it names the IDs.
   totals, and the dollar formatting), two over the bounded tail read, and six in the
   TUI over the report wording, the budget line, the status row, the once-only warning
   and `/cost` writing nothing where nothing is recorded.
+- [x] `QA-2` — 2026-09-24. A `seed` now travels with a llama.cpp request, and the
+  sampling a turn was asked to use is written into that turn's metrics row, so
+  "this answer can be produced again" is checked against a file instead of against
+  memory. `llama_cpp_seed` is a config key and a Settings row ("Llama Seed");
+  `xencode query --seed` and `--temperature` override it for one run.
+  `temperature: 0` was already sent but never recorded, so it is recorded now.
+- The done-when was met by running it, not by asserting it. Against a
+  `llama-server 0.4.0-dev` (build 10809, commit 5266f24da7) started on this machine
+  from a local `Dolphin3.0-Qwen2.5-1.5B-Q4_K_M` GGUF — no network, no vendor
+  account — at `temperature 1.5`, chosen because it is past the sane range and so
+  makes a difference loud: `seed 42` gave the same answer three times, `seed 7`
+  gave a different answer twice, and no seed gave three different answers. Through
+  the real binary, `xencode query --temperature 1.5 --seed 42` printed "836,
+  pineapple" on all three runs where the same command without `--seed` printed
+  three different answers. The server was stopped afterwards and port 8123
+  confirmed to have no listener; every run used a throwaway `XCODE_CONFIG_DIR` and
+  `~/.xencode/config.json` was left alone.
+- Two things defeat a pinned seed, and both were reached by getting a negative
+  result first. The first belongs to this product: `xencode query` pulls recent
+  turns out of the shared `conversation_memory.json`, so consecutive runs are
+  answering different questions and no seed can repeat them — the first batch
+  differed for this reason even at `temperature 0`. With a fresh memory file per
+  run, or `memory_enabled: false`, it repeats. The second belongs to llama.cpp: its
+  prefix cache evaluated 45 prompt tokens on the first request and reported
+  `prompt_n: 1` with `cached_tokens: 44` on those after it, and that cold/warm
+  difference flipped the sampled token at `temperature 1.5` with the seed
+  unchanged. Both are written into `CLI_GUIDE.md` beside the flag, because the next
+  person to measure will hit them the same way.
+- One narrowing, because the plan asked for something that does not exist: there is
+  no per-run `model.json` to record into. The settings go to `metrics.jsonl` as
+  `temperature` and `seed` — settings, not a verdict — and
+  `RequestMetrics::repeatable()` derives the verdict on read from them: a seed of
+  zero or more, or a temperature of exactly zero. A negative seed is llama.cpp's
+  way of asking for a fresh draw (`-s, --seed SEED  RNG seed (default: -1)`), so it
+  counts as unpinned.
+- The rollup gained `rows_generated`, `rows_repeatable` and `last_sampling`, and its
+  version went 1 → 2. `rows_generated` exists because most of the log is
+  context-assembly rows that never asked a model anything: counting those as "not
+  repeatable" would have understated the pinning in the direction that flatters the
+  claim, so only a turn whose server reported completion tokens is in the
+  denominator, and both counters are incremented inside that one branch so the
+  subset relation holds by construction. The version bump is not ceremony and is
+  tested: every field has a serde default, so a version 1 sidecar would read back
+  as three zeros and present as a measurement of zero rather than as the absence of
+  one. A sidecar from another version is rebuilt.
+- `/cost` says the result in the three shapes it can take: none pinned ("Nothing
+  here can be produced again: … Set llama_cpp_seed in config.json to pin it."), all
+  pinned ("1 turn ran repeatably, every time (seed 7)."), or some ("1 of 2 turns ran
+  repeatably, the newest at temperature 0 · seed 1234; the rest sampled as the
+  server chose."). When no turn in the range generated tokens the block is skipped,
+  so a project that only assembled context is not told anything about repeatability.
+- What this does not close. `xencode query` writes no metrics row, so the recording
+  covers TUI turns — specifically the `[TIMINGS]` line, which the llama.cpp path is
+  the only emitter of, which is why filling in the two fields there is honest rather
+  than a guess. The plan's own remaining caveat is untouched by any of this: on a
+  GPU, float ordering and KV state across a restart keep replay honest only on CPU
+  with fixed threads over a short horizon, and pinning parameters does not change
+  that. `--seed` on `xencode query` deliberately has no config fallback, matching the
+  other sampling flags — it is for one run.
+- Verified by 980 tests, 0 failures, 5 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Eight tests are
+  new: two that the merge step sends a seed and omits both keys when neither is set
+  (including `seed: 0`, which must not be dropped as if it were absent), two over
+  the row's round-trip and the negative-seed case, two over the rollup counts and
+  the rebuilt version 1 sidecar, one that the Settings row behaves like the other
+  number rows — clearing it gives unset, and `twelve` typed over a value gives
+  unset rather than zero — and one over the three report wordings from rows read
+  back off disk.
 
 #### W2 — The model/inference substrate — 15 items
 

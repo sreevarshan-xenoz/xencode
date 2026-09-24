@@ -1054,6 +1054,7 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Llama Temp" => app.config.llama_cpp_temperature.map(|v| v.to_string()),
                 "Llama Top-K" => app.config.llama_cpp_top_k.map(|v| v.to_string()),
                 "Llama Min-P" => app.config.llama_cpp_min_p.map(|v| v.to_string()),
+                "Llama Seed" => app.config.llama_cpp_seed.map(|v| v.to_string()),
                 "Llama Max Tokens" => app.config.llama_cpp_max_tokens.map(|v| v.to_string()),
                 _ => None,
             };

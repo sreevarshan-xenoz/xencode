@@ -209,6 +209,10 @@ enum Commands {
         #[arg(long)]
         mirostat: Option<i32>,
 
+        /// llama.cpp sampling: seed, for output that can be produced again
+        #[arg(long)]
+        seed: Option<i64>,
+
         /// llama.cpp sampling: max generated tokens
         #[arg(long = "max-tokens")]
         max_tokens: Option<u32>,
@@ -579,6 +583,7 @@ async fn main() {
             top_k,
             min_p,
             mirostat,
+            seed,
             max_tokens,
             grammar,
             json_schema,
@@ -593,6 +598,7 @@ async fn main() {
                 top_k,
                 min_p,
                 mirostat,
+                seed,
                 max_tokens,
                 grammar,
                 json_schema,
@@ -1438,6 +1444,7 @@ async fn run_query(
     top_k: Option<i32>,
     min_p: Option<f64>,
     mirostat: Option<i32>,
+    seed: Option<i64>,
     max_tokens: Option<u32>,
     grammar: Option<String>,
     json_schema: Option<String>,
@@ -1452,6 +1459,7 @@ async fn run_query(
         top_k,
         min_p,
         mirostat,
+        seed,
         max_tokens,
         grammar,
         json_schema,
@@ -1477,6 +1485,7 @@ async fn run_query_once(
     top_k: Option<i32>,
     min_p: Option<f64>,
     mirostat: Option<i32>,
+    seed: Option<i64>,
     max_tokens: Option<u32>,
     grammar: Option<String>,
     json_schema: Option<String>,
@@ -1641,6 +1650,7 @@ async fn run_query_once(
         min_p,
         mirostat,
         max_tokens,
+        seed,
         grammar,
         json_schema: parse_json_schema(json_schema)?,
     };

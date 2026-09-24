@@ -92,6 +92,36 @@ xencode query "List three file formats" --json-schema '{"type":"object"}'
 Sampling flags apply when the resolved model is served by llama.cpp; the
 prompt alone (no flags) goes to the configured default model.
 
+#### Repeatable answers: `--seed`, and what it does not cover
+
+`--seed <n>` sends the sampler seed to llama.cpp. Without it — and without
+`--temperature 0` — the server draws a fresh seed for every request, so the same
+prompt answers differently. Measured on this machine against `llama-server`
+0.4.0-dev (build 10809) with a 1.5B model at `--temperature 1.5`: three runs with
+`--seed 42` gave the same answer three times, and three runs with no seed gave
+three different answers.
+
+A seed pins the draws, not the whole run. Two things outside it can still change
+the answer, and both bit during the measurement above:
+
+- **The prompt has to be the same.** `xencode query` carries recent turns out of
+  the shared conversation memory (`conversation_memory.json` under the config
+  directory) into every request, so consecutive runs are not asking the same
+  question. Set `memory_enabled: false`, or point `XCODE_CONFIG_DIR` at a fresh
+  directory, when a run has to be reproducible.
+- **So does the server's cache state.** llama.cpp keeps the prompt prefix it has
+  already evaluated; the first request after the model loads re-runs the whole
+  prompt and later ones continue from the cached part. That changes the arithmetic
+  slightly, and at a high temperature a slightly different logit can flip the
+  sampled token. Reproduce from the same state — or restart the server — before
+  calling a difference a regression.
+
+The same settings exist as config defaults (`llama_cpp_seed`,
+`llama_cpp_temperature`), and the Settings panel has a **Llama Seed** row. The TUI
+writes what each llama.cpp turn was asked to sample at into
+`cache/metrics.jsonl`, so `/cost` can say how much of the recorded history could
+actually be produced again rather than asserting it.
+
 #### `xencode query --format ndjson` — the answer as events a script can read
 
 The default format prints the model's words as they arrive, which is what
@@ -348,7 +378,8 @@ xencode config reset
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_args` | string | split on whitespace |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
-| `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. |
+| `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
+| `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
 | `layout` | string | TUI body preset: `classic`, `chat-first`, `zen` (unknown → classic at render) |
 | `rounded_borders` | bool | rounded panel corners |
