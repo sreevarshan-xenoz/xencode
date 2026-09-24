@@ -14,6 +14,12 @@
 //! | dependency hop from seed| +3/hop (≤3 hops)       |
 //!
 //! Empty/absent queries seed from git-changed + most recently touched files.
+//!
+//! With `RetrieveOptions::lexical` the same candidates are additionally scored
+//! by BM25 over their pseudo-documents — path, declared symbols and the file's
+//! documentation prose — before the top-K is cut, so the text of a file can
+//! carry it into the injection set instead of only reordering files that
+//! already made it. That hybrid stage is off by default; `/ctx eval` runs both.
 
 use crate::index::{FileEntry, FilesIndex, Manifest};
 use crate::symbols::{DepEdge, PerFileSymbols};
@@ -45,6 +51,12 @@ pub struct RetrieveOptions {
     pub expand_hops: usize,
     /// Files used as forced seeds when the query is empty (changed + recent).
     pub empty_query_seeds: usize,
+    /// Score the candidate set with BM25 and rank by structural + lexical score
+    /// before cutting to `top_k`, instead of cutting on structure alone.
+    pub lexical: bool,
+    /// What the lexical arm may do to a candidate list, and the knob the eval
+    /// turns to price the documentation prose.
+    pub lexical_docs: bool,
 }
 
 impl Default for RetrieveOptions {
@@ -54,6 +66,32 @@ impl Default for RetrieveOptions {
             min_score: MIN_SCORE,
             expand_hops: DEFAULT_EXPAND_HOPS,
             empty_query_seeds: 6,
+            lexical: false,
+            lexical_docs: true,
+        }
+    }
+}
+
+impl RetrieveOptions {
+    /// What the product does with a query: the lexical arm is on by default,
+    /// because it measured better on this repository's gold set (mean
+    /// reciprocal rank 0.796 against 0.338), and `XCODE_HYBRID=0` switches it
+    /// back off.
+    ///
+    /// Deliberately *not* the `Default`, which stays the structural baseline so
+    /// the eval can run both arms in one process. Every live caller goes through
+    /// here, so the `/ctx find` preview cannot disagree with what a turn
+    /// actually sends.
+    pub fn for_live_chat(top_k: usize) -> Self {
+        let lexical = match std::env::var("XCODE_HYBRID") {
+            // Anything that is not an explicit "no" keeps the arm on.
+            Ok(v) => !matches!(v.trim(), "0" | "false" | "no" | "off"),
+            Err(_) => true,
+        };
+        Self {
+            top_k,
+            lexical,
+            ..Default::default()
         }
     }
 }
@@ -198,13 +236,30 @@ pub fn retrieve(
         frontier = next;
     }
 
-    let mut results: Vec<RetrievedFile> = scores
+    let candidates: Vec<(String, u64, Vec<String>)> = scores
         .into_iter()
-        .filter(|(_, s)| s.total >= options.min_score)
-        .map(|(path, s)| RetrievedFile {
+        .map(|(path, s)| (path, s.total, s.reasons))
+        .collect();
+    if options.lexical && !query_words.is_empty() {
+        // The lexical arm ranks the whole index, so a file only its text
+        // describes can enter the candidates rather than only reorder those
+        // that structural scoring already surfaced.
+        return crate::embed::hybrid_select(
+            index,
+            &candidates,
+            query,
+            options.top_k,
+            options.lexical_docs,
+            options.min_score,
+        );
+    }
+    let mut results: Vec<RetrievedFile> = candidates
+        .into_iter()
+        .filter(|(_, total, _)| *total >= options.min_score)
+        .map(|(path, score, reasons)| RetrievedFile {
             path,
-            score: s.total,
-            reasons: s.reasons,
+            score,
+            reasons,
         })
         .collect();
     results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
@@ -459,6 +514,53 @@ mod tests {
         assert_eq!(results[0].path, "web/static/style.css");
         // filename exact (+10) + path segment contain "style" (+5).
         assert_eq!(results[0].score, 15);
+    }
+
+    #[test]
+    fn lexical_mode_reaches_a_file_the_structural_pass_missed() {
+        // `session_store` shares no word with the query, declares no matching
+        // symbol and is not near any seed, so the structural pipeline cannot
+        // surface it at all. Only its documentation can.
+        let idx = RetrievalIndex {
+            files: vec![
+                file("src/auth.rs", 100),
+                file("src/session_store.rs", 60),
+                file("src/jwt.rs", 40),
+            ],
+            symbols: BTreeMap::from([(
+                "src/session_store.rs".to_string(),
+                PerFileSymbols {
+                    docs: "Holds the signed cookie across a restart.".to_string(),
+                    ..Default::default()
+                },
+            )]),
+            deps: vec![],
+            mtimes: BTreeMap::new(),
+        };
+        let changed = HashSet::new();
+        let query = "signed cookie restart";
+
+        let structural = retrieve(query, &idx, &changed, &RetrieveOptions::default());
+        let paths: Vec<&str> = structural.iter().map(|r| r.path.as_str()).collect();
+        assert!(
+            !paths.contains(&"src/session_store.rs"),
+            "the structural arm should not find it: {paths:?}"
+        );
+
+        let hybrid = retrieve(
+            query,
+            &idx,
+            &changed,
+            &RetrieveOptions {
+                lexical: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            hybrid.first().map(|r| r.path.as_str()),
+            Some("src/session_store.rs")
+        );
+        assert!(hybrid[0].reasons.iter().any(|r| r.starts_with("text")));
     }
 
     #[test]

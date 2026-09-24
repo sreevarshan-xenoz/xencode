@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the file finder reads what files say about themselves
+The lexical scoring pass used to run *after* the candidate list had been cut to
+its top few, so it could only reshuffle files the filename-and-symbol pass had
+already surfaced — and the documents it scored were built entirely from
+identifiers, never a sentence. A question phrased in ordinary words could
+therefore only be answered by a file whose name happens to contain one of them.
+Every indexed file now also stores its documentation prose (capped at 1.2 KB
+per file, with code samples inside those comments left out), and the lexical
+pass runs over the whole index *before* the cut, so a file with no matching name
+and no matching symbol can still reach the prompt on the strength of what its
+own docs say.
+
+Measured against this workspace's 18-question gold set over an index of 155
+files: filename, symbol and dependency ranking alone gets the right file first
+28% of the time and into the top five 50% of the time, a mean reciprocal rank of
+0.338. Adding the lexical pass over names and symbols lifts those to 67% / 94% /
+0.782. Adding the documentation prose on top leaves the first two where they are
+and lifts the rank to 0.796 — one question that landed fourth now lands second.
+Cost per query in a release build: 1.1 ms without the lexical pass, 12.5 ms over
+names and symbols, 16.5 ms including prose, against a generation that takes
+seconds. One question — "refreshing a path that is not rust does nothing" — is
+still missed by every pass.
+
+The hybrid pass is on in chat by default; `XCODE_HYBRID=0` puts a turn back on
+filename-and-symbol ranking, and `/ctx eval` prints all three numbers side by
+side so the switch can be tested rather than trusted. The eval scores the
+without-prose run on purpose, because most of the gain came from moving the pass
+earlier, not from the prose.
+
 ### Fixed — the repository map now sees modules, traits and what a crate exports
 The structural layer underneath `/ctx`, `/advise` and `xencode advise` was a set
 of regular expressions over Rust text, and four of its holes were large enough to

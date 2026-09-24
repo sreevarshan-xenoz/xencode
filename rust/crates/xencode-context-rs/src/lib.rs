@@ -52,8 +52,10 @@ pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
     MAX_DOC_BYTES, MAX_DOC_CHARS,
 };
-pub use embed::{hybrid_rerank, pseudo_document, tokenize, Bm25};
-pub use eval::{default_gold, evaluate, gold_from_disk, EvalItem, EvalReport, EvalRun};
+pub use embed::{hybrid_select, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT};
+pub use eval::{
+    default_gold, evaluate, evaluate_with, gold_from_disk, EvalItem, EvalReport, EvalRun,
+};
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
     git_file_set, is_git_repo, parse_numstat, DiffFile, GitInfo, MAX_DIFF_CHARS,

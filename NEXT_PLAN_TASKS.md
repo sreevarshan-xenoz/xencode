@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 842 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 847 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2821,7 +2821,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 842-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 847-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -2868,7 +2868,9 @@ All verified by reading the file at the line given, on 2026-09-23.
    eval harness** (`eval.rs:106`) — the live retrieval path never uses it. That
    is a wiring gap, not a missing feature, and it changes what "prove lexical
    loses before embedding" means: the hybrid is already coded and already
-   measurable.
+   measurable. *(Fixed by QN-2 on 2026-09-23: the live path runs the lexical
+   pass, and `hybrid_rerank` no longer exists — it became `hybrid_select`, which
+   runs before the top-K cut.)*
 6. **`state.md` has a reader and no writer.** It is read as tier 4
    (`context.rs:530`), rendered in `/ctx` (`app.rs:3462, :3555, :3997`), and
    capped at 800 tokens. `ContextState::write()` (`state.rs:82-86`) has exactly
@@ -3926,7 +3928,10 @@ here is inherited from the reviewer's assumptions.
     `embed.rs:165-168` says out loud that it only reorders within it. Adding
     text to the pseudo-document changes nothing for a file the structural pass
     never surfaced — QN-2's fix has to reach the candidate stage, not just the
-    ranking one.
+    ranking one. *(QN-2 did exactly that on 2026-09-23: doc prose now enters the
+    pseudo-document, and the lexical pass scores the whole candidate set before
+    the cut, which is where recall@5 moved 0.500 → 0.944. The stop-word list
+    still treats `without`/`not`/`never` as content terms — that is QN-4's.)*
 13. **No generation on this box is pinned, and the UI implies otherwise.**
     Grep across all crates: `seed` appears in **no request payload anywhere**.
     `llama_cpp_temperature`/`top_k` default to `None`
@@ -4174,10 +4179,12 @@ context.
   must be a path that exists. *(Done 2026-09-23 — see W0 progress.)*
 - **QN-2 — Put real text in the pseudo-documents and flip hybrid into the live
   path.** *Effort: S–M.* Doc-comment/head-of-file tokens into `embed.rs`'s
-  pseudo-document (fact Q-1.12), then move `hybrid_rerank` from eval-only into
+  pseudo-document (fact Q-1.12), then move the lexical pass from eval-only into
   `retrieve()` behind the existing A/B flag. **Highest expected value in the
   whole hundred.** *Done-when:* recall@5/MRR improve on real gold in the `/ctx`
-  A/B.
+  A/B. *(Done 2026-09-23 — see W0 progress. The rerank stage was replaced by a
+  candidate stage rather than moved, because moving it as written could not
+  change recall at all.)*
 - **QN-3 — RRF (k=60) instead of the `score + 8×bm25` linear blend.** *Effort:
   S.* Rank fusion beats tuned linear blends untuned, which matters when nobody is
   tuning.
@@ -4835,7 +4842,34 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   weight fact 16 complains about; and the tier still reads text, so a code sample
   inside a string literal is indexed as a declaration (this item's own test
   fixtures are, in this file's index entry) — that is what CI-2's parser is for.
-- [ ] `MM-1`, `PR-1`, `PR-2`, `QN-2`, `QTR-2`
+- [x] `QN-2` — 2026-09-23. The lexical pass moved from a rerank stage into
+  candidate selection, and the documents it scores now contain prose. Fact
+  Q-1.12 was right that this was fiction: `evaluate` truncated to top-K before
+  handing the list to the reranker, so recall@5 could not move, and the
+  "documents" were paths plus identifiers. `PerFileSymbols.docs` now carries
+  each file's `//!`/`///` text — fenced code samples inside those comments left
+  out — capped at `DOC_TEXT_CAP` (1,200 bytes); `hybrid_select` scores the whole
+  index with BM25 and cuts the top-K from structural + 4×lexical, so a file with
+  no name, symbol or dependency-hoop signal can enter on its text alone. The old
+  `hybrid_rerank` is gone rather than kept as a second stage.
+  Measured on this workspace, 155 files, 18 probes, release build, recall@1 /
+  recall@5 / MRR / ms per query:
+  deterministic **0.278 / 0.500 / 0.338 / 1.1**; lexical over path+symbols
+  **0.667 / 0.944 / 0.782 / 12.5**; adding doc prose **0.667 / 0.944 / 0.796 /
+  16.5**. For reference the pre-QN-2 rerank-only hybrid arm scored 0.444 / 0.500
+  / 0.472. **The prose is not where the win is**: it moves one probe (secret
+  files, rank 4 → 2) and 0.014 MRR, and costs 4 ms. Almost all of it comes from
+  running the arm before the cut. `/ctx eval` prints all three lines so that
+  stays visible rather than being folded into one number, and
+  `XCODE_HYBRID=0` is the switch back; the hybrid is the live default now, via
+  `RetrieveOptions::for_live_chat`, which both the chat path and the `/ctx find`
+  preview use so the diagnostic cannot disagree with what a turn sends. One
+  probe ("refreshing a path that is not rust does nothing") is missed by every
+  arm: `refresh.rs` shares no vocabulary with that question. *Not done from the
+  item:* only Rust doc comments are indexed — a Markdown or TOML file still
+  contributes no prose — and negation words (`without`, `not`, `never`) remain
+  content terms the corpus cannot match, which is QN-4's shape to handle.
+- [ ] `MM-1`, `PR-1`, `PR-2`, `QTR-2`
 
 #### W1 — Make the agent observable — 15 items
 
