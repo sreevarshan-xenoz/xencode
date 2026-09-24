@@ -10,6 +10,7 @@ use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, Ollama
 pub mod anthropic;
 pub mod capabilities;
 pub mod compatible;
+pub mod egress;
 pub mod gemini;
 pub mod qwen;
 pub mod retry;
@@ -19,6 +20,7 @@ use retry::RetryConfig;
 
 pub use capabilities::{capabilities_for, ModelCapabilities};
 pub use compatible::OpenAICompatibleProvider;
+pub use egress::{chain_for, classify, url_host, Egress, EgressPolicy, RoutingFacts};
 pub use tools::{
     advise_tools, background_tools, command_tools, file_tools, plan_tools, AgentStep, AgentTurn,
     ToolCall, ToolDefinition,
@@ -38,6 +40,11 @@ pub enum ProviderError {
         message: String,
     },
     Parse(String),
+    /// The prompt was refused before it left this machine, because the route
+    /// the model name resolves to needs a permission the configuration has not
+    /// given it. Not a network condition: no retry and no fallback candidate
+    /// can make an unpermitted route permitted.
+    Egress(String),
 }
 
 impl ProviderError {
@@ -77,6 +84,7 @@ impl fmt::Display for ProviderError {
             ProviderError::Network(msg) => write!(f, "network error: {msg}"),
             ProviderError::Api { message, .. } => write!(f, "API error: {message}"),
             ProviderError::Parse(msg) => write!(f, "parse error: {msg}"),
+            ProviderError::Egress(msg) => write!(f, "egress denied: {msg}"),
         }
     }
 }
@@ -274,6 +282,9 @@ pub struct ProviderManager {
     remote_base_url: Option<String>,
     remote_api_key: Option<String>,
     retry_config: RetryConfig,
+    /// Whether a request may leave this machine. Checked before every route in
+    /// front of the network, and again when the agent's fallback chain is built.
+    egress: EgressPolicy,
     client: reqwest::Client,
     /// Per-request silence bound (seconds). Streaming responses get a
     /// time-to-first-token cap, then run unbounded once tokens flow;
@@ -302,6 +313,7 @@ impl ProviderManager {
             remote_base_url: None,
             remote_api_key: None,
             retry_config: RetryConfig::default(),
+            egress: EgressPolicy::default(),
             client,
             request_timeout_secs: 0,
             llamacpp_timings: Mutex::new(None),
@@ -409,6 +421,53 @@ impl ProviderManager {
         self.llamacpp_timings.lock().unwrap().clone()
     }
 
+    /// Replace the egress policy. The default allows every route, so a caller
+    /// that has not opted in sees exactly the behaviour this gate replaced.
+    pub fn with_egress_policy(mut self, policy: EgressPolicy) -> Self {
+        self.egress = policy;
+        self
+    }
+
+    pub fn egress_policy(&self) -> EgressPolicy {
+        self.egress
+    }
+
+    /// Where this model id would send the prompt, given the current
+    /// configuration — the same prefix rules the routers below use.
+    pub fn egress_of(&self, model: &str) -> Egress {
+        classify(model, self.routing_facts())
+    }
+
+    /// The fallback order a turn may walk, and the candidates it skipped.
+    ///
+    /// A skipped candidate is not an error to swallow: the caller shows it, so
+    /// "no fallback ran" is distinguishable from "no fallback was configured".
+    pub fn fallback_chain(
+        &self,
+        primary: &str,
+        configured: &[String],
+    ) -> (Vec<String>, Vec<String>) {
+        chain_for(primary, configured, self.egress, self.routing_facts())
+    }
+
+    /// The configuration that decides where a model id resolves to.
+    fn routing_facts(&self) -> RoutingFacts<'_> {
+        RoutingFacts {
+            openrouter_key: self.openrouter_api_key.is_some(),
+            remote_host: self.remote_host(),
+        }
+    }
+
+    /// Host of the configured `remote:` endpoint, if any.
+    fn remote_host(&self) -> Option<&str> {
+        self.remote_base_url.as_deref().and_then(url_host)
+    }
+
+    /// Refuse a route the policy does not permit, before the prompt is built.
+    fn check_egress(&self, model: &str) -> Result<(), ProviderError> {
+        self.egress.check(self.egress_of(model))
+    }
+
     /// The configured OpenAI-compatible endpoint, or a message saying how to
     /// configure one. Never falls back to a default host: a mistyped or absent
     /// URL must fail loudly rather than POST the prompt somewhere else.
@@ -433,6 +492,8 @@ impl ProviderManager {
         messages: &[ChatMessage],
         options: Option<&LlamaCppOptions>,
     ) -> Result<String, ProviderError> {
+        self.check_egress(model)?;
+
         // Route based on model prefix
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
             if let Some(ref key) = self.anthropic_api_key {
@@ -625,6 +686,8 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
+        self.check_egress(model)?;
+
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
             if let Some(ref key) = self.anthropic_api_key {
                 let provider = anthropic::AnthropicProvider::new(key.clone(), None, None);
@@ -717,6 +780,8 @@ impl ProviderManager {
     where
         F: FnMut(&str),
     {
+        self.check_egress(model)?;
+
         // Route based on model prefix
         if let Some(inner_model) = model.strip_prefix("anthropic:") {
             if let Some(ref key) = self.anthropic_api_key {

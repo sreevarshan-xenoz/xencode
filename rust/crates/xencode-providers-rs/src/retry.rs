@@ -85,6 +85,9 @@ pub fn is_retriable(err: &ProviderError) -> bool {
         },
         // Parse errors are not retriable — the response came back but couldn't be parsed
         ProviderError::Parse(_) => false,
+        // A refusal to send anything is not a failed send: retrying asks the
+        // same policy the same question.
+        ProviderError::Egress(_) => false,
     }
 }
 
@@ -110,12 +113,16 @@ fn is_name_resolution_failure(msg: &str) -> bool {
 /// same 4xx status is pointless; escaping to provider B is often the point —
 /// a 404 `model not found`, a wrong key, a provider outage, a quota ceiling.
 ///
-/// The only error that gets one chance is [`ProviderError::Parse`]: it is our
-/// own decoder failing on data we already received, so another provider/model
-/// reproduces it equally. Everything else is provider-specific enough that a
-/// fallback candidate can plausibly succeed. (I4-01)
+/// The two errors that get no second chance are [`ProviderError::Parse`] and
+/// [`ProviderError::Egress`]. A parse failure is our own decoder failing on
+/// data we already received, so another provider/model reproduces it equally.
+/// An egress refusal is not a network condition at all: it is this program
+/// declining to send the prompt somewhere, and no other candidate makes an
+/// unpermitted route permitted — advancing the chain would be the exact leak
+/// the refusal exists to prevent. Everything else is provider-specific enough
+/// that a fallback candidate can plausibly succeed. (I4-01, PR-1)
 pub fn is_fallback_eligible(err: &ProviderError) -> bool {
-    !matches!(err, ProviderError::Parse(_))
+    !matches!(err, ProviderError::Parse(_) | ProviderError::Egress(_))
 }
 
 /// When a provider/model fails without emitting anything, follow a fallback
@@ -123,6 +130,11 @@ pub fn is_fallback_eligible(err: &ProviderError) -> bool {
 ///
 /// Empty ids and a primary repeated in the list are dropped, so the chain is
 /// exactly "[primary, fallback₁, …]" with no duplicate tries.
+///
+/// This is the *textual* order only — it looks at no route, so a local primary
+/// happily gains a cloud alternate. The chain a turn may actually walk is
+/// [`crate::egress::chain_for`], which filters this by where each candidate
+/// sends the conversation. (PR-1, QTR-2)
 pub fn fallback_chain(primary: &str, configured: &[String]) -> Vec<String> {
     let mut chain: Vec<String> = Vec::with_capacity(configured.len() + 1);
     let primary = primary.trim();
@@ -424,6 +436,15 @@ mod tests {
     fn parse_failures_are_not_fallback_eligible() {
         let err = ProviderError::Parse("unexpected end of JSON".to_string());
         assert!(!is_fallback_eligible(&err));
+    }
+
+    /// An egress refusal is a decision, not a failure: falling through to the
+    /// next candidate would be the leak the refusal exists to prevent.
+    #[test]
+    fn egress_refusals_are_not_fallback_eligible() {
+        let err = ProviderError::Egress("cloud models are not allowed".to_string());
+        assert!(!is_fallback_eligible(&err));
+        assert!(!is_retriable(&err), "a refusal is not a failed send");
     }
 
     /// The critic: a 404/401 is *not* retriable against the same provider

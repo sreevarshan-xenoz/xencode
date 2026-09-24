@@ -30,9 +30,10 @@ and llama.cpp out of the box, talks to cloud providers (Gemini, Qwen, and any
 OpenAI-compatible model through OpenRouter) when you opt in, and keeps a chat
 turn alive by walking a **sequential provider
 fallback chain** — primary model first, then the configured alternates — when a
-provider is down.
+provider is down, without ever using that recovery to move a conversation
+somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 852 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 872 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -42,7 +43,7 @@ and fix your code — driven entirely from your terminal.
 
 - **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Colab GPU you rent, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`.
-- **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists.
+- **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
@@ -102,7 +103,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 
 ### AI + Agentic
 - Local-first model routing through Ollama and llama.cpp, with cloud providers (Gemini, Qwen, OpenRouter / any OpenAI-compatible model) on opt-in.
-- **Sequential provider fallback** across those models (`agent_fallback_models`) when a provider fails before streaming.
+- **Sequential provider fallback** across those models (`agent_fallback_models`) when a provider fails before streaming. Only candidates that keep the conversation on the same kind of provider as the model you picked are tried.
 - **Agentic orchestrator** for multi-step coding tasks with bounded retries.
 - **Zero-duplicate-token** streaming retry middleware with token-delivery tracking.
 - Tool and shell failures reach the model as `error:`-prefixed or `exit <code>`
@@ -386,7 +387,9 @@ flowchart TD
   so an `anthropic:…` model always fails with *"Anthropic API key not
   configured"*. Reach Claude models through OpenRouter (`anthropic/…`) instead.
 - A failing provider walks `agent_fallback_models` in order — one attempt each,
-  only while nothing has streamed yet.
+  only while nothing has streamed yet, and only to a provider that sends the
+  conversation where the primary would have. A local model that is down does
+  not hand your code to a cloud API.
 - API keys are stored as plain strings in that JSON file. There is **no
   encrypted vault** in the Rust implementation. Xencode writes the file
   owner-only (`0600`) and atomically, so a crash mid-save cannot leave a torn
@@ -420,7 +423,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (852 passing, 5 ignored)
+cargo test                          # Full workspace suite (872 passing, 5 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

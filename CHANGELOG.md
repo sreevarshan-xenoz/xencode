@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a provider going down no longer moves your conversation elsewhere
+A local model that failed — Ollama restarting, a rate limit, a bad key — handed
+the whole exchange to the next entry in `agent_fallback_models`, whatever that
+entry was. The chain was built from strings, with no idea which entries leave
+the machine, and every error except our own response-decode failure advanced it.
+So the README's "your code never leaves your machine" posture lasted only until
+the first transient failure, at which point a conversation held with
+`qwen2.5:7b` could be continued by an internet API. The same shape waited in
+reverse for a cloud primary with a local alternate.
+
+Where a prompt is going is now decided in one place,
+`xencode-providers-rs/src/egress.rs`, by reading the same prefix rules the three
+request routers already used: `anthropic:`, `qwen:` and `google_gemini:` are
+off-machine; `llamacpp:` / `llama:` and a bare Ollama name are local; a model
+containing `/` is off-machine only when an OpenRouter key is configured, because
+without one it falls through to Ollama; and `remote:` is judged by the host its
+configured URL actually names, not by its prefix. A fallback candidate is now
+tried only if it sends the conversation where the primary would have sent it,
+and a candidate that was skipped for that reason is named in the transcript as
+`[FALLBACK]not tried: …` rather than vanishing silently — "no fallback ran" and
+"the only fallback you configured would have leaked" are different situations
+and now look different. A request refused by policy ends the turn: no retry, and
+no next candidate, because a refusal is a decision rather than a failure.
+
+Nothing is refused by default yet. The policy that decides whether an
+internet-connected route may be used at all ships allowing every route, which is
+today's behaviour, and the classifier and the fallback rule are what this change
+delivers; making the local-first posture the default is the next step.
+
 ### Fixed — an attached screenshot no longer goes out at full size
 Attaching an image sent the file's bytes exactly as they sat on disk. A
 1901 × 1061 screenshot left this workspace as 2.3 million base64 characters in

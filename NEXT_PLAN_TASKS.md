@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 852 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 872 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2821,11 +2821,11 @@ Three ground rules for reading it:
 | 15 | Task-type-aware retrieval | new in its weak form only | **AC-3**, a deterministic rule-based router; the LLM-classifier form has no published support for code agents and the review's "dramatically smarter" claim outruns the literature |
 | 16 | Execution modes (PLAN/REVIEW/DEBUG/…) | one real mode, four labels | **MD-1** (PLAN as a gate in `classify()`) + **MD-2** (tool-stripping); the rest are prompt/model differences that belong to **MI-7**, and per-mode *system prompts* would void KV reuse on every switch (**MD-3**, reject) |
 | 17 | Model specialization by task | already planned | **MI-7** (per-role profiles) |
-| 18 | Hybrid local/remote privacy router | **new, and there is a live hole today** | **PR-1…PR-4**; today `agent_step_with_fallback` already sends a local-only prompt to a cloud provider on failure (fact 10) — any egress policy that doesn't filter the fallback chain is decorative |
+| 18 | Hybrid local/remote privacy router | **was new, and the hole is now closed** | **PR-1…PR-4**; `agent_step_with_fallback` used to send a local-only prompt to a cloud provider on failure (fact 10) — **PR-1 + QTR-2 fixed that on 2026-09-24**, so a fallback may no longer change where the conversation goes. What is still missing is the refusal by default (PR-2) and the redaction/preview layers (PR-3, PR-4) |
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 852-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 872-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -2911,6 +2911,14 @@ All verified by reading the file at the line given, on 2026-09-23.
     provider errors. Any privacy router (proposal 18) that gates the router but
     not the fallback chain is decorative. **This reads as a defect today**, in
     the same family as fact 6.
+    **Closed 2026-09-24 by PR-1 / QTR-2.** The chain a turn may walk is now
+    filtered by where each candidate sends the conversation
+    (`egress.rs::chain_for`), with the classification read out of the routers'
+    own prefix order rather than beside it. The fact's illustration was wrong in
+    the way Q-9 records: `gemini:` matches no cloud arm, so the leak that did
+    exist was an `anthropic:` / `qwen:` / `google_gemini:` alternate — or a
+    slash-id while an OpenRouter key is configured — sitting behind a local
+    primary.
 11. **The security scanner's two taint-shaped rules cannot be read as verdicts.**
     `check_path_traversal` compiles
     `(?i)(open|read_text|read_to_string|Path::new)\s*\([^)]*user|input|param|filename`
@@ -2936,6 +2944,14 @@ All verified by reading the file at the line given, on 2026-09-23.
     and model listing — no prompt content. A per-request egress hook is
     therefore feasible, and the right shape is one `dispatch` in front of all
     three.
+    **Gate landed 2026-09-24 (PR-1)** as three `check_egress` calls at the head
+    of exactly these functions, not one `dispatch` — they differ in signature,
+    return type and retry behaviour, so hoisting them was a bigger refactor than
+    the gate needed. What the fact predicted is true and is how it works: the
+    classification is one function (`egress::classify`) that all three ask, and
+    its "no prompt content elsewhere" survey is why nothing after the routers
+    needed gating (`app.rs`'s direct reqwest use is health and model listing
+    only).
 13. **The response cache keys on the wrong thing.** `cache_key =
     sha256(prompt | model)` (`xencode-cache-rs/src/lib.rs:216-222`), looked up
     on the **raw prompt before context assembly** (`main.rs:1341`, assembled at
@@ -3293,6 +3309,12 @@ the ledger already.
   tier per provider. *Effort: M.* **Must filter `fallback_chain`** (fact 10) or
   the feature is decorative — that is the single most important line in this
   milestone's do-work-so-that-it-is-honest list.
+  *(Done 2026-09-24 — see W0 progress. Delivered as a `check_egress` call at the
+  head of each of the three routers rather than one hoisted `dispatch`: the
+  routers differ in signature, return type and retry behaviour, so a shared
+  dispatcher would have been a larger refactor than the gate needs. The
+  classification itself exists once, in `egress::classify`, and is what both the
+  gate and the chain filter use.)*
 - **PR-2 — Deny-by-default cloud with an explicit opt-in plus a status-bar
   egress indicator.** *Effort: S.* Reuses the fact that cloud prefixes need an
   `api_keys` entry to exist at all. *Trap:* keys-for-transport and
@@ -4365,8 +4387,8 @@ and PR-1: refuse at the source class, never grade with a classifier.
 - **QTR-2 — Locality filter on `fallback_chain`.** *Effort: S.*
   `retry.rs:126-139` interleaves local and cloud candidates by config order with
   no route awareness, so a local-first user with a cloud fallback silently leaks
-  the conversation on a transient error. This is a privacy bug today, and the
-  honest 80% of items 94/95.
+  the conversation on a transient error. This **was** a privacy bug in the tree,
+  and the honest 80% of items 94/95.
   - **Verified 2026-09-23; fact Q-1.10's example is wrong.** Routing is an
     if-chain of prefix tests. Cloud arms: `anthropic:`, `qwen:`,
     `google_gemini:`, and any id containing `/` **only when an OpenRouter key is
@@ -4378,11 +4400,19 @@ and PR-1: refuse at the source class, never grade with a classifier.
     machine. The leak that does exist is a local primary with an `anthropic:`,
     `qwen:` or `google_gemini:` fallback, or a slash-id fallback while the
     OpenRouter key is set.
-  - **Not started.** The fix is designed — a locality judgement mirroring those
-    arms, a filter beside the fallback-chain builder, one call site in the TUI's
-    fallback loop — but the session that did this work could not write to the
-    crate that owns routing, and the decision was to respect that boundary rather
-    than relocate egress logic into a crate that happened to be writable.
+  - **Done 2026-09-24 with PR-1 — see W0 progress.** The judgement is
+    `egress::classify`, which mirrors the arms above in their real order:
+    `remote:` is decided by the host its configured URL names, and a slash-id is
+    cloud only when an OpenRouter key exists. The filter sits beside the
+    chain builder (`egress::chain_for`, with `retry::fallback_chain` left as the
+    textual order it always was and now documented as such), and the one call
+    site is the TUI's fallback loop. It is not a second place that has to be
+    remembered: the gate at each router asks the same question of the same
+    model id. The earlier session's boundary holds and is respected — the logic
+    lives in `xencode-providers-rs`, the crate that owns routing.
+  - *Not done here:* refusing a cloud route **by default**. That is PR-2's
+    opt-in field and status-bar indicator; the policy object exists and defaults
+    to allowing everything, so no working configuration changed behaviour.
 - **QTR-3 — `bwrap` wrapper for `run_command`, hooks and background.** *Effort:
   M,* inside SE-7. Read-only bind of the workspace + `~/.cargo`, tmpfs
   elsewhere, network namespace off by default, visible opt-out. `bwrap` is
@@ -4894,7 +4924,48 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   image with transparency stays PNG because flattening it deletes information, a
   format whose codec is not linked (GIF, WebP, BMP, ICO, SVG) goes out as it
   arrived, and a re-encode that would come out bigger is discarded.
-- [ ] `PR-1`, `PR-2`, `QTR-2`
+ - [x] `PR-1` + `QTR-2` — 2026-09-24, one change: the plan's own requirement for
+   PR-1 was "must filter `fallback_chain` (fact 10) or the feature is
+   decorative", and that filter *is* QTR-2, so they cannot be separated.
+   `xencode-providers-rs/src/egress.rs` now holds the route table in one place —
+   `classify(model, RoutingFacts)` reads the prefixes in the order the three
+   routers read them, so the two cannot drift silently — and answers a question
+   the routers never asked: does this request leave the machine. `EgressPolicy`
+   rides on `ProviderManager`; `check_egress` runs as the first statement of
+   `generate_inner`, `generate_stream_with_tools` and `generate_stream_inner`,
+   ahead of any connection. A new `ProviderError::Egress` ends a turn: it is not
+   retriable and not fallback-eligible, because retrying asks a policy the same
+   question and the next provider is the leak.
+   **The defect fact 10 described is reproduced and closed by test**, side by
+   side in `tests/egress_policy.rs`: for a local primary with
+   `["anthropic:claude-3-5-sonnet", "llama3.2:3b"]` configured, the old textual
+   builder still yields all three ids — cloud second in line behind one
+   transient Ollama error — while `fallback_chain` on the same input returns the
+   two local ones and reports the cloud id as skipped. `retry.rs`'s own example
+   is now documented as the textual order it is, because that test's
+   `gemini:gemini-2.0-flash` was never a cloud route.
+   Three judgement calls worth stating: the primary is **never** dropped from the
+   chain (dropping it would run a different model than the user picked; the
+   router refuses the turn instead, and says which model), a `remote:` endpoint is
+   judged by the host its configured URL actually names rather than by its prefix
+   — so `http://127.0.0.1:8080/v1` is local and a tunnel host is not, and a name
+   that merely starts like a loopback address (`127.example.com`,
+   `localhost.evil.invalid`) is not — and a skipped candidate is named in the
+   transcript as `[FALLBACK]not tried: …`, because "no fallback ran" has to look
+   different from "your only fallback would have leaked". **Nothing is refused by
+   default**: `EgressPolicy::default()` allows every route, so the shipped
+   behaviour change is the fallback filter alone; the deny-by-default opt-in and
+   the status-bar indicator are PR-2's. The gate is three calls rather than the
+   hoisted `dispatch` the item suggested — the routers differ in signature,
+   return type and retry behaviour, and the dispatcher would have been a larger
+   refactor than the gate needs.
+   Workspace: **852 → 872 tests** (10 in `egress.rs`, 8 in
+   `tests/egress_policy.rs`, one in `retry.rs`, one in the TUI asserting the
+   skip is announced and that the skipped model is never attempted), zero
+   failures, `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
+   -- -D warnings` clean. `small_terminal_render` needed no change: nothing is
+   drawn differently yet.
+ - [ ] `PR-2`
 
 #### W1 — Make the agent observable — 15 items
 
