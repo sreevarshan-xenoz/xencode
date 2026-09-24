@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 847 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 852 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1470,6 +1470,9 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
    (`:91`), reads header dimensions (`:134`), caps at 20 MiB (`:23`) and encodes a
    data URL (`:302`) — no decode, no resize, no recompress. A 4K screenshot goes
    to the provider as-is. This is a token-budget defect, not a missing feature.
+   *(Fixed by MM-1 on 2026-09-24: `prepare_for_send` decodes, caps the long edge
+   at 1568 px and recompresses; the 20 MiB cap is now enforced on the attach path
+   as well, where `inspect_bytes` never applied it.)*
 7. **Scanned PDFs silently yield empty text**, and the code knows it:
    `documents.rs:16-18` lists OCR as a follow-up.
 8. **The TUI cannot show an image.** ratatui 0.29 + crossterm 0.28 only; no
@@ -1675,6 +1678,7 @@ That is why SE-2/SE-3/SE-4 are ranked above SE-7 despite being less glamorous.
 - **MM-1 image resize/recompress before send** (fact 6): decode, cap ~1568 px,
   JPEG q80. S-M. Done-when: attached bytes are under ~1 MiB and a token-count
   before/after is in the commit message. **A fix, not a feature.**
+  *(Done 2026-09-24 — see W0 progress.)*
 - **MM-2 screenshot→attach hotkey** via `grim`/`spectacle` into the existing
   attach path. M (~200 lines). Trap: Wayland-only tooling — degrade with a clear
   message the way `voice.rs` does. Done-when: one keypress lands a screenshot in
@@ -2821,7 +2825,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 847-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 852-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -4869,7 +4873,28 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
   item:* only Rust doc comments are indexed — a Markdown or TOML file still
   contributes no prose — and negation words (`without`, `not`, `never`) remain
   content terms the corpus cannot match, which is QN-4's shape to handle.
-- [ ] `MM-1`, `PR-1`, `PR-2`, `QTR-2`
+- [x] `MM-1` — 2026-09-24. `prepare_for_send` in `xencode-analysis-rs/src/images.rs`
+  decodes an attached PNG or JPEG, caps the longest edge at `MAX_IMAGE_EDGE`
+  (1568 px) and recompresses an opaque image as JPEG at `JPEG_QUALITY` 80;
+  `encode_attached_image` in the TUI now runs every attachment through it before
+  building the data URL, which is the single place images enter a request, so all
+  five provider shapes benefit without touching a payload builder. Fact 6 was
+  right that nothing bounded this: the attach path called `inspect_bytes`, which
+  does not enforce `MAX_IMAGE_BYTES`, so the 20 MiB ceiling existed in the
+  inventory command and nowhere a user could hit it — that check is now in the
+  attach path too, before decoding. Measured on real files from this machine
+  (bytes → bytes, base64 characters → characters): a 1901×1061 screenshot
+  1690 KiB → 258 KiB, 2 308 414 → 353 339 characters, about 577 000 → 88 000
+  tokens at the budgeter's four-chars-per-token rate; a 2880×1800 wallpaper
+  849 KiB → 276 KiB (1 159 322 → 378 163); a 2560×1700 photograph 1147 KiB →
+  679 KiB. Every payload lands under the ~1 MiB the item asked for.
+  *Not done from the item:* nothing — but three behaviours are chosen, not
+  accidental, and both `PreparedImage::passthrough` and the `(image changed
+  before sending: …)` note in the prompt exist so none of them is invisible: an
+  image with transparency stays PNG because flattening it deletes information, a
+  format whose codec is not linked (GIF, WebP, BMP, ICO, SVG) goes out as it
+  arrived, and a re-encode that would come out bigger is discarded.
+- [ ] `PR-1`, `PR-2`, `QTR-2`
 
 #### W1 — Make the agent observable — 15 items
 

@@ -43,7 +43,9 @@ yourself. See [CLI_GUIDE.md](CLI_GUIDE.md) for the accepted model prefixes.
 xencode
 ```
 Full-screen terminal UI: chat, file explorer (Space attaches files —
-images ride as message parts the model actually sees, PDFs/DOCXs parse to
+images ride as message parts the model actually sees, shrunk first to a
+1568-pixel long edge and recompressed to JPEG when they have no transparency,
+PDFs/DOCXs parse to
 text), `/ctx` retrieval,
 `/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/spawn` to run a subagent in its own git worktree, model picker, and more.
 
