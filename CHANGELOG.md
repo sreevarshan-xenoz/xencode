@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — which of the failures came closest
+`xencode eval run --judge` asks a model, after every case has been graded, to order
+the attempts that came close. It is off by default, costs two more requests, and
+changes no verdict: the pass rate in the report is computed from the graders and the
+diffs exactly as before, and the ranking is written on its own lines underneath. The
+answer has nowhere to say "this one was actually fine" — the only thing it can
+produce is an ordering, and a test holds the two apart by ranking a failing case
+first and checking that the run still reports `0/1`.
+
+Only attempts that left a rejected change behind are ever shown. A case that never
+ran, a case that passed, and a case that rewrote its own test are each explained by
+that fact alone. Getting there meant keeping the change itself for the first time: a
+case now carries its diff, cut at 4,000 characters with the cut said in the text, so
+the output directory of a run holds what each attempt did and not only which files
+it touched.
+
+What makes this more than an extra column of text is that three known ways for a
+ranking to be wrong are answered in code. The attempts are listed in an order
+derived from their own identities rather than the order they ran in, and the same
+question is asked a second time with the list backwards and every letter left with
+the attempt it was given; unless both answers name everything in the same order, the
+ranking is dropped and the report prints that it moved. A candidate is shown as its
+change plus one line of what the tests said — never a sentence the agent wrote,
+never its rounds, tokens or clock, since those are how a longer answer wins rather
+than a better one. Nothing in the request names a model, and `--judge-model` points
+the judge at a different one; a judge reading prose from its own kind may still
+prefer it, and that stays a limit rather than being argued away. One question holds
+26 attempts, and past that the report says how many were left out.
+
+Asked of a real server, on the eight seeded defects and the same 1.5B model as
+before: **0/8**, with `no case was a near miss` — every case left its file untouched,
+which is what the scoring pass said about this model a few hours earlier, not
+something new. The ordering path was therefore put to
+the model directly, twice, over a real socket: it answered in 21.2 seconds by saying
+`unsure` repeatedly, and nothing was ranked. That a stronger model would produce a
+stable ordering is not measured here. Adding the ranking instruction also moves the
+version the eval writes down, so scores from before it are not offered side by side
+with scores from after. 9 tests added (1038 → 1046 passing, 7 → 8 ignored).
+
 ### Added — the agent scored on defects seeded on purpose
 `xencode eval run` takes the agent through a small repository with one bug put in it
 — an off-by-one, a swapped comparison, a missing null check, and five more — and

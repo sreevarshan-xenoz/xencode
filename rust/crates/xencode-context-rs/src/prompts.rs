@@ -24,6 +24,7 @@ pub const TOOLS: &str = include_str!("../prompts/tools.md");
 pub const COMPACT_TRANSCRIPT: &str = include_str!("../prompts/compact-transcript.md");
 pub const SUBAGENT_BRIEF: &str = include_str!("../prompts/subagent-brief.md");
 pub const SUBAGENT_WORKTREE_BRIEF: &str = include_str!("../prompts/subagent-worktree-brief.md");
+pub const EVAL_JUDGE: &str = include_str!("../prompts/eval-judge.md");
 
 /// Drop a final newline if an editor added one. The files are written without
 /// one, so their last byte is prompt text; this keeps a stray newline from
@@ -91,6 +92,11 @@ pub fn registry() -> Vec<Prompt> {
             path: "prompts/subagent-worktree-brief.md",
             text: body(SUBAGENT_WORKTREE_BRIEF),
         },
+        Prompt {
+            name: "eval-judge",
+            path: "prompts/eval-judge.md",
+            text: body(EVAL_JUDGE),
+        },
     ]
 }
 
@@ -151,6 +157,14 @@ pub fn compaction_prompt(state: &str, transcript_tail: &str, recent: &str) -> St
         .replace("{recent}", recent)
 }
 
+/// The ranking instruction with the attempts it is asked about underneath it.
+/// The attempts are assembled by the eval harness, which is the only thing that
+/// has them; this file holds the part that never changes, so the version of the
+/// instruction travels with the instruction.
+pub fn eval_judge_prompt(attempts: &str) -> String {
+    format!("{}\n\n{}", body(EVAL_JUDGE), attempts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,7 +172,7 @@ mod tests {
     #[test]
     fn every_registered_prompt_is_named_non_empty_and_unique() {
         let prompts = registry();
-        assert_eq!(prompts.len(), 5, "the registry covers five prompts");
+        assert_eq!(prompts.len(), 6, "the registry covers six prompts");
         let mut names: Vec<&str> = prompts.iter().map(|p| p.name).collect();
         names.sort();
         names.dedup();
