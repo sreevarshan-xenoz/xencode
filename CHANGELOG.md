@@ -278,6 +278,32 @@ Token counts are reported only when a server actually reported one — llama.cpp
 does, Ollama does not — and cost is never estimated, so those fields are `null`
 and `/trace` says which is the case rather than printing a number it made up.
 
+### Added — eight defects that are put there on purpose
+Measuring whether the agent can fix something needs something to fix, and a bug
+found by chance proves nothing about either the agent or the measurement. Eight
+small programs are now generated from a written description of the defect they
+carry — off by one in a loop, a setting that stops the program when it should fall
+back, a price answered before the better rule is read, a bad line skipped in
+silence, a comparison pointing the wrong way, a result that says whether it worked
+and is dropped, two workers whose additions collide, and a remembered value that
+outlives what it came from. Each one arrives as its own repository with one commit
+and a clean tree, a `task.md` that states the symptom and not the change, a test
+that grades it by exit code, and — kept outside the repository, in the harness —
+the smallest change that makes it pass.
+
+Nothing is asked of a model here, which is the point: the same case written twice
+is the same bytes, so a pass rate taken today and a pass rate taken next month are
+about the same program. The cases use nothing outside the standard library, so a
+whole suite of them runs with no network. All eight were checked both ways on this
+machine: every one fails its grader as seeded and passes it with the reference
+change applied, sixteen runs of `cargo test` in 16.7 seconds.
+
+Two things this does not claim. A case still has its grader inside it, so an agent
+that reads the test and hard-codes the expected value is not stopped by the layout
+— that is a real limit, written down rather than papered over. And nothing in the
+interface calls the generator yet; the harness that runs an agent against these and
+reports a pass rate is the next item.
+
 ### Changed — the turn record says what each call was made with
 A `/trace` row could tell you that a turn called `read_file` and that the call
 failed, but not what it asked to read, which is the first thing you want to know

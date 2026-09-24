@@ -30,6 +30,7 @@ pub mod refresh;
 pub mod retrieve;
 pub mod rollup;
 pub mod scanner;
+pub mod seeds;
 pub mod session;
 pub mod stale;
 pub mod state;
@@ -86,6 +87,10 @@ pub use rollup::{
     ProfileSample, SessionTotals, TokenTotals, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
 };
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
+pub use seeds::{
+    all_seed_cases, seed_case, write_seed, BugShape, GraderRun, SeedCase, SeedEdit, SeedFile,
+    SeededTask,
+};
 pub use session::{
     list_session_ids, new_run_id, read_session, resolve_run_id, session_path, sessions_dir,
     RecordedCall, RecordedRun, RecordedToolCall, Session, SessionLine, SessionWriter,
