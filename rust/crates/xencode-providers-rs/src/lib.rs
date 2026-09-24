@@ -16,6 +16,7 @@ pub mod gemini;
 pub mod playback;
 pub mod qwen;
 pub mod retry;
+pub mod schema;
 pub mod tools;
 pub mod traffic;
 
@@ -1469,12 +1470,36 @@ impl ProviderManager {
 }
 
 /// Merge llama.cpp sampling options into an OpenAI-compatible chat payload.
+///
+/// A schema goes out as `response_format`, the shape the chat endpoint documents,
+/// rather than as a bare `json_schema` — which is the name the plain-text
+/// `/completion` endpoint uses, and the only shape a schema sent to a chat request
+/// should not take. What the local server was measured doing with an answer asked
+/// for this way is to follow it: `{"answer": "yes", "confidence": 1}` came back to
+/// a request whose text said, in as many words, to answer in a sentence and avoid
+/// braces.
+///
+/// One measured interaction is worth knowing before a caller reaches for this: a
+/// schema and a `tools` list in the same chat request do not combine. The server
+/// honours the schema and stops offering tool calls at all — on the local build
+/// here, five requests carrying both produced an answer shaped like the schema and
+/// no tool call whatsoever. Both are passed through exactly as asked, because
+/// choosing silently between them would be worse than the caller finding out.
 fn merge_llamacpp_options(payload: &mut serde_json::Value, opts: &LlamaCppOptions) {
     if let Some(ref grammar) = opts.grammar {
         payload["grammar"] = serde_json::Value::String(grammar.clone());
     }
     if let Some(ref schema) = opts.json_schema {
-        payload["json_schema"] = schema.clone();
+        let schema = schema::flatten(schema);
+        payload["response_format"] = serde_json::json!({
+            "type": "json_schema",
+            "json_schema": {
+                // The name is how the endpoint asks which of several schemas this
+                // is; one request, one shape, so one name.
+                "name": "answer",
+                "schema": schema,
+            }
+        });
     }
     if let Some(min_p) = opts.min_p {
         payload["min_p"] = serde_json::json!(min_p);

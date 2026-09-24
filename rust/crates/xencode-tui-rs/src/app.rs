@@ -2440,6 +2440,7 @@ impl<'a> App<'a> {
             plan: self.agent_plan.clone(),
             mcp: self.mcp.clone(),
             hooks: self.session_hooks(),
+            schemas: std::collections::HashMap::new(),
         }
     }
 
@@ -6424,7 +6425,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         sink,
         model,
         context_messages,
-        approval,
+        mut approval,
         task_runtime,
         tool_root,
         max_rounds,
@@ -6480,6 +6481,13 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     tools.extend(xencode_providers_rs::plan_tools());
     // Whatever `/mcp` started, read at the moment the turn begins.
     tools.extend(approval.mcp.definitions());
+    // The executor validates against the same descriptions the model was
+    // offered, so a call that does not fit them is answered rather than run
+    // with whatever the reader would have guessed (MI-1).
+    approval.schemas = tools
+        .iter()
+        .map(|def| (def.name.clone(), def.parameters.clone()))
+        .collect();
 
     let mut history: Vec<xencode_providers_rs::AgentTurn> = Vec::new();
     let mut final_text = String::new();
@@ -7518,6 +7526,7 @@ mod tests {
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
             hooks: app.config.agent_hooks.clone(),
+            schemas: std::collections::HashMap::new(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -7916,6 +7925,7 @@ mod tests {
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
             hooks: app.config.agent_hooks.clone(),
+            schemas: std::collections::HashMap::new(),
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),
@@ -9002,6 +9012,89 @@ mod tests {
             !app.is_generating,
             "reading a trace asks nothing of a model"
         );
+    }
+
+    /// The loop itself, not just the executor: a call whose arguments arrive cut
+    /// off, and a call that leaves out a field its description asked for, are
+    /// both answered to the model instead of run — even in the most permissive
+    /// approval mode. The second one only fails because the loop hands the
+    /// executor the same descriptions it handed the model.
+    #[tokio::test]
+    async fn the_loop_refuses_a_tool_call_whose_arguments_do_not_fit() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let dir = std::env::temp_dir().join(format!(
+            "xencode-args-loop-{}-{}",
+            std::process::id(),
+            std::time::UNIX_EPOCH.elapsed().unwrap().subsec_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let answers = vec![
+                serde_json::json!({"message": {"role": "assistant", "tool_calls": [
+                    {"function": {"name": "write_file", "arguments": "{\"path\": \"bad.txt\", \"co"}},
+                    {"function": {"name": "search_files", "arguments": {}}}
+                ]}, "done": true}),
+                serde_json::json!({"message": {"role": "assistant", "content": "retried"}, "done": true}),
+            ];
+            for answer in answers {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                loop {
+                    let read = sock.read(&mut buf).await.unwrap_or(0);
+                    if read == 0 || buf[..read].windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let body = format!("{answer}\n");
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(reply.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+
+        let mut app = App::for_tests();
+        app.config.agent_approval = "all-allow".to_string();
+        app.approval_rx = None;
+        let mut run = app.agent_run(
+            LoopSink::Chat,
+            vec![xencode_providers_rs::ChatMessage {
+                role: "user".to_string(),
+                content: "write the file".into(),
+            }],
+            "write the file",
+        );
+        run.ollama_url = format!("http://{addr}");
+        run.tool_root = dir.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        super::agent_rounds(run, tx).await;
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        let _ = server.await;
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("write_file was not carried out")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("search_files was not carried out")),
+            "{lines:?}"
+        );
+        assert!(!dir.join("bad.txt").exists(), "a cut-off call wrote");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The writer end to end: the real agent loop over a real socket, real tool

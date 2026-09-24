@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a model's request has to say what it means
+Before now, a tool call whose arguments could not be read was run as a call with
+no arguments at all: a response cut off halfway through the first field looked
+exactly like a request to do nothing, and the workspace found out the difference.
+Every call the agent loop makes is now read as the argument description that tool
+was offered with, and if it does not fit, the model is told how it does not fit —
+`write_file was not carried out: that is not what was asked for: content is
+missing, and it was asked for` — before any approval prompt is opened, so nobody
+is ever asked to yes a call that cannot run. `update_plan` is left out of the
+shape check on purpose: its reader has always accepted bare strings and invented
+key names, because that is what small models write, and a wrong plan is corrected
+by the next call rather than by a refusal.
+
+The same description is now kept for structured output. `xencode query
+--json-schema` sends the schema to a llama.cpp server in the field that server
+reads (`response_format` of type `json_schema`) with every `$ref` written out
+first, and whatever route the model answered from, the reply is checked against
+the schema here: an answer that does not fit ends the run with an error and exit 1
+instead of being printed, cached and remembered as if it had. Nothing is trimmed
+into fitting. Measured on `llama-server` build 10809 with a 1.5B model, a 60-token
+budget cut the reply inside a string and reported exactly that; a 200-token budget
+returned the object and exited 0.
+
 ### Added — which of the failures came closest
 `xencode eval run --judge` asks a model, after every case has been graded, to order
 the attempts that came close. It is off by default, costs two more requests, and

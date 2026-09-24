@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1046 tests passing, 8 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1066 tests passing, 8 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1932,6 +1932,14 @@ All verified by reading the file at the line given, on 2026-09-23.
    TUI stopped passing `None` (`xencode-tui-rs/src/app.rs:1492`, `:2419`,
    `:5330`), the server would ignore it. A defect-shaped finding, not a
    feature request.
+   *Measured 2026-09-24, correcting the last sentence*: on `llama-server`
+   b10809-5266f24da7 both spellings are read on `/v1/chat/completions` — a
+   request carrying top-level `json_schema` produced `{"answer":"yes",
+   "confidence":1}` from a 1.5B model against a prompt that asked for prose and
+   forbade braces, exactly as the `response_format` form did. The field name is
+   the smaller problem; what was unimplemented is the client-side check, and the
+   trap that turned out to bite is that a `response_format` schema and `tools` in
+   one request produced no tool call at all (5 of 5).
 2. **Ollama requests carry four fields and nothing else**
    (`xencode-providers-rs/src/lib.rs:881-891`): `model`, `messages`, `stream`,
    and `tools`. No `format`, no `think`, no `keep_alive`, no `options.num_ctx`.
@@ -2114,6 +2122,12 @@ requests we already know how to make and don't.**
   overflow the grammar converter and silently fall back to unconstrained JSON
   (llama.cpp #21228; #25923/#27279 open) — needs local schema flattening plus
   client-side re-validation of the reply against the schema we asked for.
+  *(Done 2026-09-24 — see W2 progress. Both halves are in: `schema.rs` flattens
+  `$ref` before the request goes out, and every reply and every tool call is
+  checked here rather than trusted there. Two of this item's premises did not
+  survive contact with b10809: top-level `json_schema` is read on the chat route
+  too, and `$ref` is resolved server-side — what is not any server's job is
+  noticing an answer that does not fit.)*
 - **MI-2 Ollama request parity** — add `format` (JSON schema → GBNF),
   `think`, `keep_alive`, and `options.num_ctx` to the `/api/chat` payload
   (fact 2), discovering capability via `/api/show`. **S**. Trap:
@@ -5824,6 +5838,83 @@ done-when is met, and the commit that does it names the IDs.
   through a judged eval, over a scripted server on a real socket. The ninth is the
   live ranking path above, kept out of the routine suite because it needs a model
   that is really running.
+
+- [x] `MI-1` — 2026-09-24, the first item of W2. What the agent does with a
+  model's answer is now decided twice: once where the request is built, and once
+  here, where the reply is read.
+  **The reading.** `xencode-providers-rs/src/schema.rs` is a new module: a
+  JSON-Schema subset that resolves local `$ref`s (`#`, `#/$defs/x`,
+  `#/definitions/x`) by writing them into the place that used to point at them,
+  and a checker for `type`, `enum`, `required`, `properties`,
+  `additionalProperties: false`, `items`, `minItems`, `maxItems` and `anyOf`.
+  Nothing was added to `Cargo.toml` to get this, because the workspace builds
+  offline against vendored crates and a schema dependency is a new supply chain
+  for six keywords. A reference that cannot be resolved is left in the document
+  as written — saying "this schema mentions a definition that is not there" is
+  the server's business and it says so loudly — and one that refers back through
+  itself is expanded to a fixed depth and then stops, which is what lets a
+  recursive schema be sent at all.
+  **Tool calls.** `ToolCall::arguments_object()` stays, and is now the documented
+  unsafe one: it answers a call whose arguments arrived as text that stops halfway
+  with an empty object, which is the same answer it gives a call that asked for
+  nothing, and the loop was running whichever it was. `arguments_checked()` tells
+  those two apart; `arguments_for()` also holds the call to the description the
+  tool was offered with. `execute_tool_call_approved` calls it before
+  `classify`, so a call that does not fit is answered to the model — `write_file
+  was not carried out: that is not what was asked for: content is missing, and it
+  was asked for` — without ever opening an approval prompt. The chat loop hands
+  that function the same `parameters` values it handed the server, so there is one
+  description per tool and not two that can drift.
+  **The one exception, recorded rather than quietly made:** `update_plan` is
+  exempt from the shape check and not from being readable. Its reader has always
+  taken bare strings, markdown checkbox lines and invented key names, because that
+  is what small models write, and enforcing the strict description on it would
+  break a list that worked the day before this existed. A test holds both halves:
+  a checkbox plan still updates, and a plan whose arguments cannot be parsed is
+  still an error rather than an empty list.
+  **The request.** `merge_llamacpp_options` now sends the schema as
+  `response_format: {"type": "json_schema", "json_schema": {name, schema}}` with
+  the schema flattened first, instead of top-level `json_schema`.
+  **Measured on this machine, on `llama-server` b10809-5266f24da7 with
+  Dolphin3.0-Qwen2.5-1.5B, and two of the item's premises did not survive it.**
+  A `response_format` json_schema *was* obeyed against a prompt demanding prose
+  and forbidding braces (`{"answer":"yes","confidence":1}`) — and so, identically,
+  was the old top-level `json_schema`, so the field name was not the bug this plan
+  said it was. `$ref`/`$defs` are resolved server-side on this build: a dangling
+  reference is a loud HTTP 400 (`Unable to generate parser for this template…
+  Error resolving ref #/$defs/missing`), not the silent unconstrained fallback the
+  trap describes, and a recursive `$defs` produced a working recursive grammar
+  (the model ran to the token cap with `finish: length` and did not crash). What
+  *was* found one floor higher: a request carrying both a `response_format` schema
+  and `tools` produced no tool call in 5 of 5 tries — it answered the schema
+  instead (`{"answer":"yes"}`, empty `tool_calls`), which is why the schema is sent
+  for single-shot structured output and the tools keep their own descriptions.
+  `{"type": "json_object"}` with no schema returned prose.
+  **End to end, through the real client and not a probe script:**
+  `xencode query --model llama:dolphin --json-schema '{answer enum, reason}'`
+  at `--max-tokens 60` cut the reply inside the `reason` string and the run ended
+  `error: the answer does not fit --json-schema: the answer was not JSON: EOF
+  while parsing a string at line 3 column 261` with exit 1; the same request at
+  200 tokens returned the object and exited 0. So the enforcement that was missing
+  is here, and it holds on every route: on Ollama, OpenRouter and the remote
+  bridge nothing constrains the answer upstream — MI-2 is the item that changes
+  that — but an answer that does not fit is now reported instead of being printed,
+  cached and remembered. A cached reply is reused only if it still fits the schema
+  being declared now.
+  Verified by 1066 tests, 0 failures, 8 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Twenty tests are new: eleven for the checker (each of the
+  keywords above, a reference written out, an unresolvable one left alone, a schema
+  that refers to itself, a quoted number accepted because the readers in this tree
+  accept it, and an answer read as the JSON it claims to be); two for the call
+  reader (text that parses, text that stops halfway, `null` that is honestly empty);
+  five for the executor's gate (a cut-off call refused with no prompt raised, a
+  call refused in the most permissive mode there is, a fitting call unaffected, an
+  extra field the schema says nothing about still accepted, and the `update_plan`
+  exemption in both directions); one that drives the whole loop over a real socket,
+  so the refusal reaching the model's transcript is what is asserted and not just
+  the absence of a file, which the old reader already got right half the time; and
+  one for the command line's own decision about what counts as an answer.
 
 #### W2 — The model/inference substrate — 15 items
 
