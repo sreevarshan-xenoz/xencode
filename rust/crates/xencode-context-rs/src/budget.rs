@@ -5,7 +5,9 @@
 //! token counts come from llama.cpp `usage` and are what the metrics layer
 //! displays.
 
-/// VRAM-based inference profiles (§14 defaults).
+/// VRAM-based inference profiles (§14 defaults). Which one a given machine gets
+/// is `ProfileDecision::resolve` — by total RAM, since a model without a GPU to
+/// sit on lives in system memory, and the config may overrule it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardwareProfile {
     /// <4 GB — smallest context, aggressive compaction.
@@ -94,6 +96,136 @@ impl HardwareProfile {
         args.push("1".to_string());
         args
     }
+
+    /// The word this profile goes by in the config file's `hardware_profile`.
+    pub fn key(self) -> &'static str {
+        match self {
+            HardwareProfile::Low => "low",
+            HardwareProfile::Balanced => "balanced",
+            HardwareProfile::High => "high",
+        }
+    }
+
+    /// The profile a config word names, or `None` for anything else — including
+    /// `auto`, which is not a profile but a request to ask the machine.
+    pub fn from_key(value: &str) -> Option<HardwareProfile> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "low" => Some(HardwareProfile::Low),
+            "balanced" => Some(HardwareProfile::Balanced),
+            "high" => Some(HardwareProfile::High),
+            _ => None,
+        }
+    }
+
+    /// Choose a profile from total RAM in KiB, the unit `/proc/meminfo` reports.
+    ///
+    /// The sizes in this file's profile definitions are VRAM bands, and most
+    /// machines running xencode have no usable VRAM to measure — this box has a
+    /// 2 GB MX250 while the model it runs lives in system memory. So the choice
+    /// is made against RAM, where the limit that actually bites is the model's
+    /// own resident weight plus the context on top of it: under 8 GiB there is no
+    /// room for both and the narrow window is the honest one; 24 GiB and up can
+    /// hold a 16k window without the kernel evicting anything. These are reasoned
+    /// thresholds, not measured ones, which is exactly why `ProfileDecision`
+    /// reports which of them decided and why the config can overrule the probe.
+    pub fn select_from_total_ram_kib(kib: u64) -> HardwareProfile {
+        const GIB: u64 = 1024 * 1024;
+        if kib < 8 * GIB {
+            HardwareProfile::Low
+        } else if kib < 24 * GIB {
+            HardwareProfile::Balanced
+        } else {
+            HardwareProfile::High
+        }
+    }
+}
+
+/// Total RAM this machine reports, in KiB. `None` where the kernel's own file is
+/// absent or unreadable — a non-Linux host, or a container with a stripped
+/// `/proc` — which is the case the caller must handle rather than guess at.
+pub fn total_memory_kib() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    parse_meminfo_total_kib(&meminfo)
+}
+
+/// Read `MemTotal` out of `/proc/meminfo` text: `MemTotal:  16141080 kB` →
+/// `Some(16141080)`. Separate from the reader so the arithmetic can be tested
+/// without depending on the machine it runs on.
+pub fn parse_meminfo_total_kib(text: &str) -> Option<u64> {
+    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
+    let value = line.split_whitespace().nth(1)?;
+    value.parse().ok()
+}
+
+/// The profile chosen for this run, and the reason in words. The reason exists
+/// because a budget that arrives by probe is a claim a user can only check if it
+/// is printed: "BALANCED profile from 15.4 GiB of RAM" can be disagreed with,
+/// and `hardware_profile` in the config is how.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileDecision {
+    pub profile: HardwareProfile,
+    /// Completes the sentence `{PROFILE} profile {reason}`.
+    pub reason: String,
+}
+
+impl ProfileDecision {
+    /// Resolve the profile: the config word if it names one, then the machine's
+    /// reported memory, then `Balanced` — which is the profile every build of
+    /// xencode used before there was a probe, so a machine that cannot be read
+    /// behaves exactly as it did.
+    pub fn resolve(config_value: &str) -> ProfileDecision {
+        let value = config_value.trim();
+        if value.is_empty() || value.eq_ignore_ascii_case("auto") {
+            return from_machine();
+        }
+        if let Some(profile) = HardwareProfile::from_key(value) {
+            return ProfileDecision {
+                profile,
+                reason: "set in config".to_string(),
+            };
+        }
+        // A word that names no profile is a typo, and a typo must not quietly
+        // become someone's budget. The machine decides, and says what was refused.
+        let decided = from_machine();
+        ProfileDecision {
+            profile: decided.profile,
+            reason: format!(
+                "{}, though the config said \"{value}\", which is not a profile",
+                decided.reason
+            ),
+        }
+    }
+
+    /// One line, for the user who is about to have context trimmed by it.
+    pub fn describe(&self) -> String {
+        format!("{} profile {}", self.profile.name(), self.reason)
+    }
+}
+
+fn from_machine() -> ProfileDecision {
+    match total_memory_kib() {
+        Some(kib) => ProfileDecision {
+            profile: HardwareProfile::select_from_total_ram_kib(kib),
+            reason: format!(
+                "from {} of RAM",
+                format_memory_size(kib).unwrap_or_else(|| format!("{kib} KiB"))
+            ),
+        },
+        None => ProfileDecision {
+            profile: HardwareProfile::Balanced,
+            reason: "this machine reported no memory size, so the default applies".to_string(),
+        },
+    }
+}
+
+/// KiB as a human size: 16141080 KiB → "15.4 GiB". `None` for values that would
+/// print as zero or negative, which are not sizes worth claiming.
+pub fn format_memory_size(kib: u64) -> Option<String> {
+    let gib = kib as f64 / (1024.0 * 1024.0);
+    if gib < 0.05 {
+        return None;
+    }
+    Some(format!("{gib:.1} GiB"))
 }
 
 /// Deterministic token estimate: `ceil(chars / 4)` prose, `ceil(chars / 3)`
@@ -236,5 +368,106 @@ mod tests {
         let high = HardwareProfile::High.llama_cpp_args();
         assert!(high.contains(&"16384".to_string()));
         assert!(high.contains(&"q8_0".to_string()));
+    }
+
+    /// The bands are stated in whole GiB, so the boundary is where a machine
+    /// changes budget without changing anything else.
+    #[test]
+    fn profile_bands_follow_total_ram() {
+        let gib = 1024u64 * 1024;
+        assert_eq!(
+            HardwareProfile::select_from_total_ram_kib(4 * gib),
+            HardwareProfile::Low
+        );
+        assert_eq!(
+            HardwareProfile::select_from_total_ram_kib(8 * gib),
+            HardwareProfile::Balanced
+        );
+        assert_eq!(
+            HardwareProfile::select_from_total_ram_kib(24 * gib - 1),
+            HardwareProfile::Balanced
+        );
+        assert_eq!(
+            HardwareProfile::select_from_total_ram_kib(32 * gib),
+            HardwareProfile::High
+        );
+    }
+
+    /// A laptop's `MemTotal` — a real reading from the machine this was written
+    /// on — has to land on the profile that machine behaved as before the probe
+    /// existed. Anything else is a silent change of budget for everyone who
+    /// upgraded.
+    #[test]
+    fn a_measured_laptop_lands_on_the_profile_it_had() {
+        let meminfo = "MemTotal:       16141080 kB\nMemFree:         1234567 kB\n";
+        let kib = parse_meminfo_total_kib(meminfo).expect("MemTotal should parse");
+        assert_eq!(kib, 16_141_080);
+        assert_eq!(
+            HardwareProfile::select_from_total_ram_kib(kib),
+            HardwareProfile::Balanced
+        );
+        assert_eq!(format_memory_size(kib).as_deref(), Some("15.4 GiB"));
+    }
+
+    #[test]
+    fn meminfo_without_a_readable_total_is_not_an_answer() {
+        assert_eq!(parse_meminfo_total_kib(""), None);
+        assert_eq!(
+            parse_meminfo_total_kib("MemFree: 123 kB"),
+            None,
+            "a file with no MemTotal must not decide a budget"
+        );
+        assert_eq!(
+            parse_meminfo_total_kib("MemTotal: many kB"),
+            None,
+            "a value that is not a number is not a size"
+        );
+        assert_eq!(format_memory_size(0), None);
+    }
+
+    /// The config is the escape hatch, and it is also the thing that must be
+    /// believed when it is wrong: a machine with 8 GiB told to budget like a
+    /// 24 GiB one gets the wide window, because the user may know their model
+    /// better than the probe does.
+    #[test]
+    fn config_overrides_the_probe_and_a_typo_does_not_become_a_budget() {
+        for (value, expected) in [
+            ("low", HardwareProfile::Low),
+            ("BALANCED", HardwareProfile::Balanced),
+            ("  high  ", HardwareProfile::High),
+        ] {
+            let decision = ProfileDecision::resolve(value);
+            assert_eq!(decision.profile, expected, "{value} should be honoured");
+            assert_eq!(decision.reason, "set in config");
+            assert!(decision
+                .describe()
+                .starts_with(&format!("{} profile", expected.name())));
+        }
+        // "auto" and empty both mean: ask the machine, whatever it says.
+        let auto = ProfileDecision::resolve("auto");
+        let empty = ProfileDecision::resolve("");
+        assert_eq!(auto, empty);
+        // A word that is not a profile must not be read as one, and must say so.
+        let typo = ProfileDecision::resolve("ballanced");
+        assert_eq!(typo.profile, auto.profile);
+        assert!(
+            typo.reason.contains("\"ballanced\""),
+            "the refused value has to appear in the reason: {typo:?}",
+        );
+    }
+
+    /// Every profile survives a round trip through the config word for it, and
+    /// `auto` is not one of them — it is the absence of a choice.
+    #[test]
+    fn profile_config_words_round_trip() {
+        for profile in [
+            HardwareProfile::Low,
+            HardwareProfile::Balanced,
+            HardwareProfile::High,
+        ] {
+            assert_eq!(HardwareProfile::from_key(profile.key()), Some(profile));
+        }
+        assert_eq!(HardwareProfile::from_key("auto"), None);
+        assert_eq!(HardwareProfile::from_key("48gb"), None);
     }
 }

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the machine decides how much context it can afford
+Every budget figure — how many tokens of project context a run may spend, how
+full it is allowed to get, how many file chunks survive — comes from one hardware
+profile, and until now that profile was the same on every machine: the middle
+setting, chosen in code and never looked up. A 4 GiB netbook and a 64 GiB workstation
+were given the same allowance, and neither had any way to say otherwise.
+
+The profile is now decided. By default it is picked from the memory this machine
+reports: under 8 GiB is `low` (4096 tokens, 60% fill, top-3), 8–24 GiB is
+`balanced` (8192, 75%, top-5), above that is `high` (16384, 85%, top-8). This
+laptop, with 15.4 GiB, gets `balanced` — which is what it was getting before, but
+now because something measured it. The choice is reported rather than assumed
+(`hardware: BALANCED profile from 15.4 GiB of RAM`), and `hardware_profile` in the
+config overrules it: `xencode config set hardware_profile low` produces
+`hardware: LOW profile set in config`. A value that names no profile is refused at
+the moment it is typed in, with the valid words listed, and one already sitting in
+the config file is used no further — the run falls back to the memory probe and
+says so (`…, though the config said "banlanced", which is not a profile`).
+
+Two omissions are deliberate. The graphics card is not consulted: a profile is
+about how much text fits in a window, and the same reasoning that puts a model in
+system memory when there is no GPU for it puts the decision on RAM alone. And the
+thresholds are reasoned, not measured — no model was benchmarked at each band to
+find where it stops working — which is exactly why the config can overrule the
+probe, and why the reason is printed every run. A machine that reports no memory
+size at all keeps the previous default, and says that is what happened.
+
 ### Added — a prompt's cost, counted by the model that has to read it
 
 Everything that decides how much project context survives has been working from

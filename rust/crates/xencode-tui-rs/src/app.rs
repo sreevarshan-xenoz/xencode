@@ -30,10 +30,6 @@ use crate::ui;
 /// System block injected as tier 1 when previewing `/ctx` context assembly.
 const CTX_SYSTEM: &str = xencode_context_rs::prompts::AGENT_SYSTEM;
 
-/// Hardware profile the live chat path budgets against. Must stay in sync
-/// with the llama.cpp `--ctx-size` the auto-start uses for this profile.
-const CTX_PROFILE: HardwareProfile = HardwareProfile::Balanced;
-
 /// Represents a message in the UI chat list
 pub struct UiMessage {
     pub role: String,
@@ -591,6 +587,13 @@ pub struct App<'a> {
     /// in flight. `None` until it says — including when no llama.cpp server is
     /// what this session talks to.
     pub server_context_window: Option<u32>,
+
+    /// The hardware profile this session budgets project context against, and
+    /// the reason it was picked: `hardware_profile` in the config if it names
+    /// one, otherwise the memory this machine reports. Decided once, at startup,
+    /// and shown by `/ctx` — a session that changed profile mid-conversation
+    /// would change how much of its own history fits.
+    pub hardware: xencode_context_rs::ProfileDecision,
 
     /// What this session has spent, from the records on disk: the status-row
     /// text, and the cost it was derived from. Refreshed when a turn finishes,
@@ -1674,8 +1677,15 @@ impl<'a> App<'a> {
     /// history makes transcript assertions non-deterministic and the writes
     /// pollute the user's home — so no test may call it.
     pub fn for_tests() -> Self {
+        // Pin the context budget. Left on "auto" the profile would come from the
+        // memory of whatever machine runs the suite, and a test that asserts what
+        // a profile prints would pass here and fail on a bigger laptop.
+        let config = XencodeConfig {
+            hardware_profile: "balanced".to_string(),
+            ..Default::default()
+        };
         let mut app = Self::with_config_and_memory(
-            XencodeConfig::default(),
+            config,
             ConversationMemory::new(50),
             std::path::PathBuf::new(),
         );
@@ -1713,6 +1723,7 @@ impl<'a> App<'a> {
         let _client = OllamaClient::new(&config.ollama_url, config.response_timeout);
         // `config` moves into the struct below; the panel needs its own copy.
         let model_profiles = config.model_profiles.clone();
+        let hardware = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
 
         let scan_opts = ScanOptions {
             max_depth: Some(5),
@@ -1964,6 +1975,7 @@ impl<'a> App<'a> {
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
             server_context_window: None,
+            hardware,
             spend: None,
             budget_warned: false,
         };
@@ -2366,7 +2378,7 @@ impl<'a> App<'a> {
             history.pop();
         }
         let root = xencode_context_rs::default_root();
-        let live = xencode_context_rs::collect_live_context(&root, &prompt, CTX_PROFILE);
+        let live = xencode_context_rs::collect_live_context(&root, &prompt, self.hardware.profile);
         // Sorted for a deterministic prompt (and KV prefix) across turns.
         // Images ride as message parts, not inlined text: read_to_string
         // would silently drop them, and raw bytes would corrupt the prompt.
@@ -2407,7 +2419,7 @@ impl<'a> App<'a> {
             xencode_providers_rs::effective_context_window(&model, self.server_context_window);
         let system = self.agent_system_prompt();
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
-            profile: CTX_PROFILE,
+            profile: self.hardware.profile,
             context_window,
             system: &system,
             agents_md: live.agents_md.as_deref(),
@@ -2456,7 +2468,7 @@ impl<'a> App<'a> {
         let identity = self.metrics_identity(&self.config.default_model);
         Self::record_ctx_metrics(
             &xencode,
-            CTX_PROFILE,
+            self.hardware.profile,
             assembly.total_tokens,
             assembly.target_tokens,
             assembly.retrieved_included,
@@ -3135,14 +3147,14 @@ impl<'a> App<'a> {
         task: &str,
         brief: fn(&str) -> String,
     ) -> xencode_context_rs::ChatAssembly {
-        let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
+        let live = xencode_context_rs::collect_live_context(root, task, self.hardware.profile);
         let model = self.config.default_model.clone();
         let context_window =
             xencode_providers_rs::effective_context_window(&model, self.server_context_window);
         let system = self.agent_system_prompt();
         let prompt = brief(task);
         xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
-            profile: CTX_PROFILE,
+            profile: self.hardware.profile,
             context_window,
             system: &system,
             agents_md: live.agents_md.as_deref(),
@@ -3825,8 +3837,7 @@ impl<'a> App<'a> {
                 }
             }
             Some("kv") => {
-                const PROFILE: xencode_context_rs::HardwareProfile =
-                    xencode_context_rs::HardwareProfile::Balanced;
+                let profile = self.hardware.profile;
                 let root = xencode_context_rs::default_root();
                 let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                 let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
@@ -3839,7 +3850,7 @@ impl<'a> App<'a> {
                 // Different recent windows (and git text) must NOT disturb the
                 // byte-stable head — that's the KV-reuse contract (§13).
                 let doc_a = xencode_context_rs::assemble_prompt(
-                    PROFILE,
+                    profile,
                     CTX_SYSTEM,
                     agents.as_deref(),
                     anchor.as_deref(),
@@ -3849,7 +3860,7 @@ impl<'a> App<'a> {
                     recent_a,
                 );
                 let doc_b = xencode_context_rs::assemble_prompt(
-                    PROFILE,
+                    profile,
                     CTX_SYSTEM,
                     agents.as_deref(),
                     anchor.as_deref(),
@@ -3861,15 +3872,16 @@ impl<'a> App<'a> {
                 let stable_ok = doc_a.stable_prefix == doc_b.stable_prefix;
                 let _ = tx.send("[CTX_START]".to_string());
                 let _ = tx.send(format!(
-                    "[CTX]🗂 Profile {} — ctx {} · utilization {}% · top-k {}",
-                    PROFILE.name(),
-                    PROFILE.ctx_tokens(),
-                    (PROFILE.utilization() * 100.0) as u64,
-                    PROFILE.top_k(),
+                    "[CTX]🗂 Profile {} ({}) — ctx {} · utilization {}% · top-k {}",
+                    profile.name(),
+                    self.hardware.reason,
+                    profile.ctx_tokens(),
+                    (profile.utilization() * 100.0) as u64,
+                    profile.top_k(),
                 ));
                 let _ = tx.send(format!(
                     "[CTX]⚙️ llama.cpp args: {}",
-                    PROFILE.llama_cpp_args().join(" ")
+                    profile.llama_cpp_args().join(" ")
                 ));
                 let _ = tx.send(format!(
                     "[CTX]🧱 Stable prefix {} bytes — sha256 {} · cross-request identical: {}",
@@ -4497,6 +4509,7 @@ impl<'a> App<'a> {
         } else {
             None
         };
+        let profile = self.hardware.profile;
         tokio::spawn(async move {
             let _ = tx.send("[CTX_START]".to_string());
             let root = xencode_context_rs::default_root();
@@ -4505,7 +4518,6 @@ impl<'a> App<'a> {
                 let _ = tx.send("[CTX]❌ No project index — run /init first.".to_string());
                 return;
             };
-            let profile = xencode_context_rs::HardwareProfile::Balanced;
             let opts = xencode_context_rs::RetrieveOptions::for_live_chat(profile.top_k());
             let changed: HashSet<String> =
                 xencode_context_rs::dirty_paths(&root).into_iter().collect();
@@ -7268,7 +7280,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     // stable prefix means prefix stability broke somewhere.
                     let root = xencode_context_rs::default_root();
                     let xencode = root.join(xencode_context_rs::XENCODE_DIR);
-                    let profile = xencode_context_rs::HardwareProfile::Balanced;
+                    let profile = app.hardware.profile;
                     let mut m = xencode_context_rs::RequestMetrics::from_timings(
                         profile.name(),
                         profile.ctx_tokens() as u32,
@@ -8931,6 +8943,35 @@ mod tests {
             app.bytebot_context("fix the failing test").target_tokens,
             (200_000f64 * profile.utilization()).floor() as u64
         );
+    }
+
+    /// AC-2: the budget profile is decided for the session rather than fixed in
+    /// the code, so naming one in the config moves the turn's budget with it —
+    /// and a word that is not a profile name does not move anything.
+    #[test]
+    fn the_budget_profile_is_decided_rather_than_fixed() {
+        let mut app = App::for_tests();
+        let balanced = app.bytebot_context("fix the failing test").target_tokens;
+
+        app.hardware = xencode_context_rs::ProfileDecision::resolve("low");
+        assert_eq!(
+            app.hardware.profile,
+            xencode_context_rs::HardwareProfile::Low
+        );
+        let low = app.bytebot_context("fix the failing test").target_tokens;
+        assert!(
+            low < balanced,
+            "a narrower profile has to spend less: {low} against {balanced}"
+        );
+
+        // A misspelling is not a profile, and must not be read as one: the
+        // machine's answer stands, and the reason carries what was refused.
+        let typo = xencode_context_rs::ProfileDecision::resolve("banlanced");
+        assert_eq!(
+            typo.profile,
+            xencode_context_rs::ProfileDecision::resolve("auto").profile
+        );
+        assert!(typo.reason.contains("\"banlanced\""), "{:?}", typo.reason);
     }
 
     /// AC-5: a real count is reported beside the number it replaces when a human

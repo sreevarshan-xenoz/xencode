@@ -884,6 +884,20 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .map_err(|_| format!("invalid number: {value}"))?;
                 }
                 "layout" => config.layout = value.clone(),
+                // The context budget profile. "auto" hands the choice to the
+                // memory probe; a name pins it. Reject a word that is neither,
+                // rather than storing a value that silently means "auto".
+                "hardware_profile" => {
+                    let trimmed = value.trim().to_ascii_lowercase();
+                    if trimmed != "auto"
+                        && xencode_context_rs::HardwareProfile::from_key(&trimmed).is_none()
+                    {
+                        return Err(format!(
+                            "hardware_profile must be \"auto\", \"low\", \"balanced\" or \"high\", not \"{value}\""
+                        ));
+                    }
+                    config.hardware_profile = trimmed;
+                }
                 "rounded_borders" => {
                     config.rounded_borders = value
                         .parse()
@@ -1858,11 +1872,14 @@ async fn run_query_once(
         })
         .unwrap_or_default();
     let root = xencode_context_rs::default_root();
-    let live = xencode_context_rs::collect_live_context(
-        &root,
-        &prompt,
-        xencode_context_rs::HardwareProfile::Balanced,
-    );
+    // How much of this window project context may fill is a profile decision,
+    // and the profile is no longer a constant: the config can name one, and if
+    // it does not, the memory this machine reports chooses. What was chosen and
+    // why is printed, because a budget that trims someone's context silently is
+    // worse than a budget that says so.
+    let hardware = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
+    eprintln!("hardware: {}", hardware.describe());
+    let live = xencode_context_rs::collect_live_context(&root, &prompt, hardware.profile);
     // The window the server is actually running with, when the model is served
     // by a llama.cpp process that will say. A family table cannot know `-c`;
     // every other route keeps the table's answer.
@@ -1880,7 +1897,7 @@ async fn run_query_once(
     }
     let context_window = xencode_providers_rs::effective_context_window(&model, server_window);
     let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
-        profile: xencode_context_rs::HardwareProfile::Balanced,
+        profile: hardware.profile,
         context_window,
         system: xencode_context_rs::prompts::AGENT_SYSTEM,
         agents_md: live.agents_md.as_deref(),

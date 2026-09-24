@@ -79,6 +79,17 @@ pub struct XencodeConfig {
     #[serde(default = "default_layout")]
     pub layout: String,
 
+    /// How much project context a run is allowed to spend: "low", "balanced" or
+    /// "high". "auto" (the default) picks one from the memory this machine
+    /// reports, and says which it picked and why — on the command line, and in
+    /// the TUI's `/ctx`. The reason the setting exists at all is that the probe
+    /// reads system memory, not the GPU a machine may or may not have, so it can
+    /// be wrong about a box it has never seen; naming a profile here replaces the
+    /// guess instead of arguing with it. An unrecognised value is reported and
+    /// ignored rather than treated as a profile.
+    #[serde(default = "default_hardware_profile")]
+    pub hardware_profile: String,
+
     /// Draw panel borders with rounded corners.
     #[serde(default)]
     pub rounded_borders: bool,
@@ -309,6 +320,10 @@ fn default_layout() -> String {
     "classic".to_string()
 }
 
+fn default_hardware_profile() -> String {
+    "auto".to_string()
+}
+
 fn default_agent_approval() -> String {
     "ask".to_string()
 }
@@ -375,6 +390,7 @@ impl Default for XencodeConfig {
             default_model: default_model(),
             active_theme: default_theme(),
             layout: default_layout(),
+            hardware_profile: default_hardware_profile(),
             rounded_borders: false,
             show_scrollbars: true,
             show_line_numbers: true,
@@ -905,6 +921,9 @@ mod tests {
         assert_eq!(config.agent_max_rounds, 16);
         assert_eq!(config.agent_command_timeout, 30);
         assert_eq!(config.active_theme, "ocean");
+        // A config written before the profile was selectable says nothing about
+        // it, which means "let the machine decide" rather than "no profile".
+        assert_eq!(config.hardware_profile, "auto");
 
         fs::remove_dir_all(&dir).unwrap();
     }
