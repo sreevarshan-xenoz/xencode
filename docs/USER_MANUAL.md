@@ -387,11 +387,26 @@ Type `/` in the chat input and press `Tab` to list them:
 /mcp [status|stop]      Start the MCP servers declared in config, or query them
 /plugin [reload]        Report which plugins took effect / re-scan the dir
 /spawn <task> [#branch] Run a subagent in a fresh sibling git worktree
+/trace [turns]          What the recent agent turns did, from the local turn log
 ```
 
 There is no `/help`, `/clear`, `/exit` or `/models`: press `?` (or `F1`) for
 the keybinding overlay, `Ctrl+C` (or `q`) to quit, and `m` for the model
 selector.
+
+**`/trace [turns]` — looking back at what the agent actually did.** Each finished
+agent turn appends one line to `.xencode/cache/turns.jsonl` inside the project:
+how long it took, how many rounds the loop ran, the model and server that served
+it, which tools it called and how each one ended. `/trace` prints the newest 50
+of those lines (fewer with `/trace 5`), starting with a total. It reads a local
+file, so it answers even with every model server down.
+
+What it does not keep is deliberate: no prompt text (only a short digest of it),
+no tool arguments, and no full tool output — just a brief tail of each output,
+scrubbed of anything that looks like a key, token or password before it is
+stored. And because most local servers report no token usage at all, the token
+column stays empty unless one did, and cost is never estimated; `/trace` says
+which of those is the case rather than showing a number it invented.
 
 ### First Run
 

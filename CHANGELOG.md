@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — every agent turn leaves a record, and `/trace` reads it back
+Until now a finished turn left nothing behind you could look at. Each one now
+appends a line to `.xencode/cache/turns.jsonl` in the project — how long it ran,
+how many rounds the loop took, which model and server answered, whether it
+stopped on a provider error, and each tool call with how it ended — and the new
+`/trace [turns]` command prints the newest fifty of them in the TUI, with a
+per-task total on the first line. It reads a local file, so it works with every
+model server down.
+
+The omissions are the point as much as the contents. Tool output is where secrets
+turn up — a `read_file` of a `.env`, a `curl -v`, a failing test printing an
+environment — so a trace stores no prompt text (only a short digest of it), no
+tool arguments, and no complete output. Each output contributes a short tail that
+is scrubbed of anything shaped like a key, token, password or private key before
+it reaches the file. Scrubbing matches known shapes, so a secret in a form none
+of them covers would still be written; that is the honest limit of this.
+
+Token counts are reported only when a server actually reported one — llama.cpp
+does, Ollama does not — and cost is never estimated, so those fields are `null`
+and `/trace` says which is the case rather than printing a number it made up.
+
 ### Changed — a recorded request says which model it went to
 Each row in `.xencode/cache/metrics.jsonl` carried token counts and speeds and
 nothing about itself: no conversation, no model, no server. Anything read out of

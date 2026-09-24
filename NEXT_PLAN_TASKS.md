@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 888 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 903 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1596,7 +1596,10 @@ never is.
 - **EV-2 turn trace + TUI inspector** — per-turn JSONL beside `metrics.jsonl`
   (prompt hash, tools, rounds, tokens, cost) and a `/trace` pane. S (2-4 d).
   Trap: tool output contains secrets. Done-when: the last 50 turns are browsable
-  with per-task token totals.
+  with per-task token totals. *(Done 2026-09-24 — see W1 progress. The rows are
+  `.xencode/cache/turns.jsonl`, `/trace [turns]` renders the newest 50, and the
+  token column is only filled in when a server actually reported a count — which
+  today means llama.cpp, never Ollama.)*
 - **EV-3 prompt registry with versioning** — named prompt files, version hashed
   into metrics and eval rows. S (2-3 d). Trap: see the KV-prefix constraint in
   N-0. Done-when: `/ctx` shows the active version and eval output groups by it.
@@ -2828,7 +2831,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 888-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 903-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -5071,6 +5074,47 @@ done-when is met, and the commit that does it names the IDs.
   then `/ctx which file defines add`, wrote
   `"session_id":"session_1790221977","model":"qwen2.5:7b","provider":"ollama","source":"local"`
   into that project's `.xencode/cache/metrics.jsonl`.
+- [x] `EV-2` — 2026-09-24. Every finished agent turn now appends one row to
+  `.xencode/cache/turns.jsonl`, next to `metrics.jsonl`, and `/trace [turns]` in
+  the TUI prints the newest ones with a per-task total on the first line. A row
+  holds: when the turn finished and how long it took, how many rounds the loop
+  ran, the session/model/provider/source identity `CX-2` added, whether the turn
+  stopped on a provider error, a 16-character SHA-256 digest of the text that
+  started it, and one entry per tool call with its outcome.
+- What is deliberately *not* in a row, because the trap in this item is that tool
+  output carries secrets: no prompt text (only its digest), no tool arguments, no
+  full tool output. Each output contributes a whitespace-collapsed tail of at
+  most 300 characters, and it passes through `redact_secrets` before the cut —
+  which strips keyed values whose name looks secret-bearing (`password`,
+  `secret`, `api_key`, `authorization` and friends, in `=`/`:`/JSON shapes),
+  bearer and scheme-prefixed tokens, vendor key formats (`sk-`, `ghp_`, `xoxb-`,
+  `AIza`, `AKIA`, `ya29.`), and PEM private-key blocks. Redaction is pattern
+  based: a secret in a shape none of these patterns knows about still gets
+  written. The cut happens on a character boundary after redaction, so a preview
+  ends where the secret ended rather than mid-token.
+- `prompt_tokens` and `est_cost_micros` are `null` on every row and
+  `completion_tokens` is filled in only when a server actually reported a count
+  — llama.cpp does, Ollama does not. `/trace` then says so in words ("No server
+  reported a token count for these turns, and cost is never estimated here.")
+  instead of printing a made-up number, same rule as `CX-2`.
+- Two things worth knowing for `QA-3`, which wants decision markers on this
+  trace, and for `CX-1`, which wants a rollup: rows are appended by
+  `agent_rounds` only, so the `xencode query` single-shot path still writes
+  nothing, and the file is never trimmed — reading takes the last N rows, so
+  growth is unbounded until something rotates it.
+- Verified by 903 tests. The writer is proven by a test that runs the real agent
+  loop end to end — real HTTP over a real listening socket, real tool execution
+  against a file on disk whose content contained `OPENAI_API_KEY=sk-…` — and then
+  reads back the one row that was written and asserts the key is absent from it.
+  It is not a hand-built `TurnTrace` passed to the renderer. Beyond that, the
+  command was checked in the real TUI: `xencode tui` in a scratch project, one
+  prompt with no model server running, then `/trace`, which rendered
+  `1 turn · 0 tool calls · 0 tokens reported on 0 of 1 turns` and
+  `#1 34s ago · qwen2.5:7b via ollama (local) · 1 round · no tools · no token count`
+  followed by `stopped on a provider error before answering`. No model server
+  (Ollama or llama.cpp) is up on this machine, so that run exercised a failed
+  turn; the successful multi-round, multi-tool shape is exercised only by the
+  stub-socket test.
 
 #### W2 — The model/inference substrate — 15 items
 

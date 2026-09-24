@@ -88,6 +88,10 @@ const COMMANDS: &[Binding] = &[
         "/plugin [reload]",
         "show which plugins took effect; reload re-scans the plugin dir",
     ),
+    (
+        "/trace [turns]",
+        "what the recent agent turns did: rounds, tools, tokens (local, asks no model)",
+    ),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

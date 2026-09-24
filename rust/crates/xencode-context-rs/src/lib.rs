@@ -30,6 +30,7 @@ pub mod scanner;
 pub mod stale;
 pub mod state;
 pub mod symbols;
+pub mod trace;
 pub mod watcher;
 pub mod worktree;
 
@@ -77,6 +78,10 @@ pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
     build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
     DepEdge, PerFileSymbols,
+};
+pub use trace::{
+    append_trace, prompt_digest, read_recent_traces, redact_secrets, tail_preview, trace_path,
+    ToolTrace, TurnTrace, TRACE_TAIL_CAP,
 };
 pub use watcher::{
     map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,
