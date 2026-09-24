@@ -56,6 +56,24 @@ xencode query "what is recursion?"
 ```
 Get an instant answer without entering the TUI.
 
+### Replay a recorded run
+```bash
+xencode config set session_recording true   # then run an agent turn in the TUI
+xencode replay --list                       # what has been recorded, newest first
+xencode replay 1790240197                   # the shortest prefix that is unique
+```
+Turn on `session_recording` and every model call of an agent turn is written down
+as it happened — the request, the response bytes as they arrived, and what each
+tool returned. `xencode replay` serves those bytes again on a loopback port while
+the real agent loop, the real stream reader, the real permission gate and the real
+tools run against them, and writes `tool_calls.jsonl` saying which call came back
+the same and which did not. No model answers a replay, so it needs no server and
+no provider account. What is recorded is the TUI's agent turns: `xencode query`
+writes no recording. The tools stay gated: a call the recording says needed
+approval comes back `denied` unless you pass `--run-tools`. Ollama, llama.cpp, a
+`remote:` endpoint and OpenRouter can be recorded; models served by Anthropic,
+Gemini or Qwen cannot, and the command says so rather than writing a paraphrase.
+
 ### Analyze a path
 ```bash
 xencode analyze ./src

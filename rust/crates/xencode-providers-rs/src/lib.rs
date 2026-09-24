@@ -17,6 +17,7 @@ pub mod playback;
 pub mod qwen;
 pub mod retry;
 pub mod tools;
+pub mod traffic;
 
 use retry::RetryConfig;
 
@@ -357,6 +358,9 @@ pub struct ProviderManager {
     request_timeout_secs: u64,
     /// Most recent llama.cpp generation timing (tokens + tok/s), if any.
     llamacpp_timings: Mutex<Option<LlamaCppTimings>>,
+    /// Where to write down what a request asked and what came back, when the
+    /// caller asked for a recording (QA-1). `None` records nothing.
+    traffic: Option<traffic::TrafficRecorder>,
 }
 
 impl ProviderManager {
@@ -382,7 +386,17 @@ impl ProviderManager {
             client,
             request_timeout_secs: 0,
             llamacpp_timings: Mutex::new(None),
+            traffic: None,
         }
+    }
+
+    /// Keep the traffic of every OpenAI-compatible request this manager makes,
+    /// so the session it describes can be replayed later
+    /// ([`traffic::TrafficRecorder`], [`playback::Playback`]). `None` — which is
+    /// what every caller passes unless it is recording — captures nothing.
+    pub fn with_traffic(mut self, recorder: Option<traffic::TrafficRecorder>) -> Self {
+        self.traffic = recorder;
+        self
     }
 
     /// Point the `remote:` prefix at an OpenAI-compatible server. An empty or
@@ -559,7 +573,8 @@ impl ProviderManager {
             Some(base_url) => Ok(compatible::OpenAICompatibleProvider::new(
                 base_url,
                 self.remote_api_key.clone(),
-            )),
+            )
+            .with_recorder(self.traffic.clone())),
             None => Err(ProviderError::api_message(
                 "No remote endpoint configured — set Settings → Remote Endpoint \
                  URL, or run `xencode config set remote_url <url>`"
@@ -1052,14 +1067,21 @@ impl ProviderManager {
             return Err(ProviderError::api("Ollama", status, msg));
         }
 
+        let status = response.status().as_u16();
+        let started = Instant::now();
         let mut stream = response.bytes_stream();
         let mut text = String::new();
         let mut calls: Vec<ToolCall> = Vec::new();
         let mut lines = frames::FrameLines::default();
         let mut done = false;
+        // Only read into when a recording is being kept; see `traffic`.
+        let mut raw: Vec<u8> = Vec::new();
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+            if self.traffic.is_some() {
+                raw.extend_from_slice(&chunk);
+            }
             lines.feed(&chunk, &mut |line| {
                 if done {
                     return;
@@ -1074,6 +1096,21 @@ impl ProviderManager {
                 }
                 done = ingest_ollama_line(line, &mut text, Some(&mut calls), &mut callback);
             });
+        }
+
+        if let Some(recorder) = self.traffic.as_ref() {
+            if let Ok(response_body) = String::from_utf8(raw) {
+                recorder.record(traffic::TrafficPair {
+                    method: "POST".to_string(),
+                    path: traffic::url_path(&url),
+                    request_body: payload.to_string(),
+                    status,
+                    content_type: "application/x-ndjson".to_string(),
+                    response_body,
+                    ts_unix_ms: traffic::now_unix_ms(),
+                    duration_ms: started.elapsed().as_millis() as u64,
+                });
+            }
         }
 
         Ok(AgentStep {
@@ -1386,11 +1423,14 @@ impl ProviderManager {
 
         let outcome = compatible::post_sse_stream(
             &self.client,
-            &url,
-            None,
-            &[],
-            &payload,
-            "llama.cpp",
+            &compatible::SseRequest {
+                url: &url,
+                api_key: None,
+                extra_headers: &[],
+                payload: &payload,
+                label: "llama.cpp",
+                recorder: self.traffic.as_ref(),
+            },
             callback,
         )
         .await?;

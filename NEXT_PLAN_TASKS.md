@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 990 tests passing, 5 ignored, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, plugin, llamacpp, tui
+- [x] Workspace gates green — 15 crates, 1017 tests passing, 6 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -4277,6 +4277,15 @@ context.
   against cassettes over wiremock (already a dev-dep). *Done-when:* two replays
   of one recorded session produce byte-identical `tool_calls.jsonl`. *Trap:*
   without mocked clocks this never matches.
+  *(Done 2026-09-24 — see W1 progress. One file per run at
+  `.xencode/cache/sessions/<run-id>.jsonl`, kept only for the routes whose bytes
+  this program reads itself, and `xencode replay <run-id>` serves it again on a
+  loopback port through `EV-8`'s player while the real loop, the real stream
+  reader, the real permission gate and the real tool run against it. Not wiremock:
+  the player already speaks HTTP on a socket, which is what let a tool call
+  arriving in fifteen fragments be reassembled by the production reader rather than
+  by a stub. The clock trap was hit for real — the first two runs differed by one
+  timestamp — and every time in the ledger now comes out of the recording.)*
 - **QA-2 — Pin the parameters before claiming determinism.** *Effort: S.* Add
   `seed`/`temperature:0` to the llama.cpp call options and record them in the
   run's model.json — the honest version of item 31, and a prerequisite for
@@ -5498,6 +5507,66 @@ done-when is met, and the commit that does it names the IDs.
 - What this does not close: `xencode query` still writes no metrics row, so a CLI
   turn carries no digest either, and the plan's `N-0` KV-prefix work remains the
   place where the prefix itself is guarded.
+- [x] `QA-1` — 2026-09-24. An agent run can now be written down and lived through
+  again. With `xencode config set session_recording true` (off by default), each
+  model call of a turn appends one line to `.xencode/cache/sessions/<run-id>.jsonl`
+  holding the request body, the response bytes exactly as they arrived on the
+  socket, what each tool the model asked for actually returned, and the clock
+  reading at that moment. `xencode replay <run-id>` serves those bytes again on a
+  loopback port through the player `EV-8` built, and the real agent loop runs
+  against them — the HTTP client, the stream reader that has to reassemble a tool
+  call arriving in fifteen fragments, the permission gate, and the tool itself,
+  which executes for real. No model answers a replay: checked with the local
+  `llama-server` stopped and the port closed.
+- The done-when is byte identity, and it was met the hard way. The first two runs
+  of the same recording differed by one field — `recorded_ts_unix_ms` of the
+  second call, about a second apart, because the ledger had stamped when the
+  replay ran. Every time in the ledger now comes out of the recording, matched by
+  the call's number in the run, and the report says so on its own line:
+  `clock: every time in the ledger is the recorded one; nothing here reads the
+  clock, which is why two replays of one run can be compared at all`. Two replays
+  into two directories write the same bytes, and so does a third into a directory
+  an earlier replay already used.
+- What a replay is *not*: a licence to run things. Without `--run-tools` nobody is
+  there to answer the approval prompt, so the gated call comes back `denied`, the
+  second model call has no request the recording can answer, and the command says
+  `1 of 2 model calls answered` and exits non-zero. Observed, not just asserted.
+  `--run-tools` is the only thing that sets `all-allow`, and only because a caller
+  asked to run the recorded commands again.
+- The recording is honest about which runs it can cover. Only the routes whose
+  bytes this program reads itself are recordable — Ollama, llama.cpp, a `remote:`
+  endpoint, OpenRouter — and a model on Anthropic, Gemini or Qwen is refused with
+  the reason, because those have their own readers and a "recording" of them would
+  be a paraphrase. One test pins that list in both directions.
+- The trap the matcher closes: the request the second turn is matched on *is* the
+  tool's own output, so a replay whose command printed something different is
+  refused rather than answered with a recording for a different question. That
+  makes the fixture's rule real rather than tidy — the recorded command has to be
+  one that gives the same answer twice, which rules out `date` and `git log`.
+- The recording under `tests/fixtures/sessions/` came from a real run on this
+  machine — `llama-server` build 10809, Dolphin3.0-Qwen2.5-1.5B Q4_K_M — captured
+  by an ignored test that drives the production loop and prints the file, and its
+  README carries the server build, the model file, the command and the date. The
+  four provider recordings `EV-8` already had stay what they were.
+- One bug found by running the command rather than the tests: a second replay into
+  the default output directory appended its own recording under the same run id,
+  and the report then described a replay that answered nothing — `0 of 2 model
+  calls answered` for a run that had in fact completed both. `SessionWriter::begin`
+  now starts a run's file fresh instead of adding to whatever is there, which is
+  what "begin" always claimed to mean.
+- Verified by 1017 tests, 0 failures, 6 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Twenty-eight tests
+  are new: nine over the recording's round trip and what a file holding two runs
+  would have done, five over keeping the request and response bytes as they
+  arrived, nine in the replay itself (building a recording into a cassette,
+  pointing an Ollama or `remote:` recording at the player, the ledger's fields and
+  digests, the clock, the wording of the report, and the ignored test that
+  captures a recording from a live server), one in the TUI over which routes may be
+  recorded and that nothing is written while the setting is off, and four end to
+  end — two replays byte-identical, the tool really running and its real output
+  reaching the next recorded request, a replay without permission stopping where a
+  headless run would, and a replay that cannot be told to overwrite the recording
+  it is reading.
 
 #### W2 — The model/inference substrate — 15 items
 

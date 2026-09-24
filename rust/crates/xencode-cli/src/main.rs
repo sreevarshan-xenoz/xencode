@@ -329,6 +329,32 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Run a recorded session again from the bytes it was made of
+    Replay {
+        /// Which run: its full id, or enough of the start to be unique. Omit it
+        /// with --list to see what has been recorded.
+        run_id: Option<String>,
+
+        /// List recorded runs, newest first
+        #[arg(long)]
+        list: bool,
+
+        /// Let the replay's tool calls really run. Without this the permission
+        /// gate stays in charge, so a call it would have asked a person about
+        /// comes back denied.
+        #[arg(long)]
+        run_tools: bool,
+
+        /// The tree the replay's tool calls work against (default: this one)
+        #[arg(long)]
+        tool_root: Option<PathBuf>,
+
+        /// Where to write tool_calls.jsonl and the replay's own recording
+        /// (default: <project>/.xencode/cache/replays/<run id>)
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
     /// Manage plugins
     Plugin {
         #[command(subcommand)]
@@ -625,6 +651,13 @@ async fn main() {
         Commands::Analyze { path, format } => run_analyze(path, format),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
         Commands::Review { base, format } => run_review(base, format),
+        Commands::Replay {
+            run_id,
+            list,
+            run_tools,
+            tool_root,
+            out,
+        } => run_replay(run_id, list, run_tools, tool_root, out).await,
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Colab { action } => run_colab(action).await,
@@ -822,6 +855,10 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // separate from the `*_key` entries on purpose: a key proves who
                 // you are to a provider, it does not authorise the trip.
                 "allow_cloud_models" => config.allow_cloud_models = parse_bool(&value)?,
+                // Keep every model call of every run, in the clear, under
+                // `.xencode/cache/sessions`. Off by default because it is the
+                // most sensitive copy this program can make of a conversation.
+                "session_recording" => config.session_recording = parse_bool(&value)?,
                 "mcp_timeout" => {
                     let seconds: u64 = value
                         .parse()
@@ -2273,6 +2310,132 @@ fn run_review(base: String, format: OutputFormat) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `.xencode` for the tree being worked on, in the same place the TUI writes its
+/// recordings and its traces.
+fn project_xencode_dir() -> std::path::PathBuf {
+    xencode_context_rs::default_root().join(xencode_context_rs::XENCODE_DIR)
+}
+
+/// The first thing the person asked, for `--list`. A recording is named by a
+/// number nobody remembers, so the listing shows the prompt instead.
+fn recorded_prompt(session: &xencode_context_rs::Session) -> Option<String> {
+    let opening = session.opening_messages()?;
+    let last_user = opening
+        .iter()
+        .rev()
+        .find(|message| message.get("role").and_then(|r| r.as_str()) == Some("user"))?;
+    let text = match last_user.get("content")? {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    Some(if one_line.chars().count() > 72 {
+        format!("{}…", one_line.chars().take(72).collect::<String>())
+    } else {
+        one_line
+    })
+}
+
+/// The word for a count, so a listing says "1 recording" rather than
+/// "1 recording(s)".
+fn count_word(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 {
+        one
+    } else {
+        many
+    }
+}
+
+fn list_recordings(xencode_dir: &std::path::Path) -> Result<(), String> {
+    let dir = xencode_context_rs::sessions_dir(xencode_dir);
+    let ids = xencode_context_rs::list_session_ids(xencode_dir);
+    if ids.is_empty() {
+        println!("nothing recorded in {}", dir.display());
+        println!(
+            "a run is recorded only with session_recording on \
+             (`xencode config set session_recording true`), and only when the model is served by \
+             Ollama, llama.cpp, an OpenAI-compatible endpoint or OpenRouter."
+        );
+        return Ok(());
+    }
+    println!(
+        "{} {} in {}",
+        ids.len(),
+        count_word(ids.len(), "recording", "recordings"),
+        dir.display()
+    );
+    for id in ids {
+        let Ok(session) = xencode_context_rs::read_session(xencode_dir, &id) else {
+            // A half-written file is still a run that happened; say what is
+            // unreadable about it rather than leaving it out of the list.
+            println!("{id}  unreadable");
+            continue;
+        };
+        let tools: usize = session.calls.iter().map(|call| call.tools.len()).sum();
+        println!(
+            "{id}  {} model {}, {} tool {}, {}",
+            session.calls.len(),
+            count_word(session.calls.len(), "call", "calls"),
+            tools,
+            count_word(tools, "call", "calls"),
+            session.run.model
+        );
+        if let Some(prompt) = recorded_prompt(&session) {
+            println!("    \"{prompt}\"");
+        }
+    }
+    Ok(())
+}
+
+async fn run_replay(
+    run_id: Option<String>,
+    list: bool,
+    run_tools: bool,
+    tool_root: Option<PathBuf>,
+    out: Option<PathBuf>,
+) -> Result<(), String> {
+    let xencode_dir = project_xencode_dir();
+    if list {
+        return list_recordings(&xencode_dir);
+    }
+    let given = run_id.ok_or_else(|| {
+        "name the run to replay, or pass --list to see what has been recorded".to_string()
+    })?;
+    let resolved = xencode_context_rs::resolve_run_id(&xencode_dir, &given)?;
+    let options = xencode_tui_rs::replay::ReplayOptions {
+        run_id: resolved.clone(),
+        xencode_dir: xencode_dir.clone(),
+        tool_root: tool_root.unwrap_or_else(xencode_context_rs::default_root),
+        out_dir: out.unwrap_or_else(|| {
+            xencode_dir
+                .join("cache")
+                .join("replays")
+                .join(resolved.clone())
+        }),
+        run_tools,
+    };
+    let report = xencode_tui_rs::replay::replay(&options).await?;
+    for line in report.lines() {
+        println!("{line}");
+    }
+    if report.matches() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the replay of {} did not reproduce the recording",
+            report.run_id
+        ))
+    }
 }
 
 fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {

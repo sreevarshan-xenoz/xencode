@@ -228,6 +228,16 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub agent_hooks: AgentHooks,
 
+    /// Write down every model call an agent turn makes, so the turn can be run
+    /// again. Off by default, and it has to stay that way for a person who has
+    /// not asked for it: a recording holds the whole prompt and the full output
+    /// of every tool, which is the most sensitive copy of a session this program
+    /// can make. What is written goes to `.xencode/cache/sessions/` — the tree
+    /// already kept out of version control — and `xencode replay <run-id>` reads
+    /// it back.
+    #[serde(default)]
+    pub session_recording: bool,
+
     /// Named generation settings the TUI's Custom Models panel applies to the
     /// next turn. The panel edits these values and writes them back with
     /// [`XencodeConfig::save`]; nothing is seeded, so an empty list means the
@@ -394,6 +404,7 @@ impl Default for XencodeConfig {
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
             agent_hooks: AgentHooks::default(),
+            session_recording: false,
             model_profiles: Vec::new(),
             colab: ColabConfig::default(),
         }
@@ -525,6 +536,8 @@ mod tests {
         assert!(config.show_line_numbers);
         assert_eq!(config.agent_approval, "ask");
         assert_eq!(config.agent_max_rounds, 16);
+        // Nothing is written down about a session until the user asks.
+        assert!(!config.session_recording);
         assert_eq!(config.agent_command_timeout, 30);
         assert!(config.agent_fallback_models.is_empty());
         assert_eq!(config.ollama_url, "http://localhost:11434");

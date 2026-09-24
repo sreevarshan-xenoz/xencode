@@ -153,6 +153,9 @@ writes what each llama.cpp turn was asked to sample at into
 `cache/metrics.jsonl`, so `/cost` can say how much of the recorded history could
 actually be produced again rather than asserting it.
 
+A seed pins what the sampler draws, not what the run did. To have a whole turn
+come back the same, record it and replay it — see `xencode replay` below.
+
 #### `xencode query --format ndjson` — the answer as events a script can read
 
 The default format prints the model's words as they arrive, which is what
@@ -420,6 +423,7 @@ xencode config reset
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |
 | `agent_fallback_models` | list | comma-separated ordered alternates for the agent's turns (I4-01), e.g. `xencode config set agent_fallback_models "qwen2.5:14b,google_gemini:gemini-2.0-flash"`. The configured default model is always tried first, so this list holds only fallbacks (duplicates of it are dropped). A candidate is abandoned — and the chain moves on — only when it failed **before emitting any token** and the error is not our own response-decode failure; a token already on screen, or a `Parse` error, fixes the model in place. Each candidate gets one attempt per step and the transcript records a `[FALLBACK]` line when the chain moves. A candidate that would send the conversation somewhere the primary would not — a cloud API as the alternate for a local model, or the reverse — is never tried, and the transcript names it as skipped instead; a `remote:` endpoint counts as local only when its configured URL points at this machine (`localhost`, `127.x`, `::1`, `.local`). `xencode query` is single-shot and does not use this chain. An empty list (the default) disables fallback. |
+| `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048 }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
@@ -449,6 +453,63 @@ Response cache management: `stats`, `clear`.
 xencode cache stats
 xencode cache clear
 ```
+
+### `xencode replay <run-id> [--run-tools]`
+Run a recorded agent turn again from the bytes it was made of. Turn on
+`session_recording` (see the config table) and each model call of a turn is
+written to `.xencode/cache/sessions/<run-id>.jsonl`: the request, the response
+bytes as they arrived on the socket, what each tool returned, and the clock
+reading at the time. A replay serves those bytes again on a loopback port while
+the real agent loop runs against them — the HTTP client, the stream reader that
+has to reassemble a tool call arriving in fragments, the permission gate, and the
+tools themselves, which execute for real. No model answers a replay, so it needs
+neither a server nor a provider account.
+
+```bash
+xencode replay --list                  # what has been recorded, newest first
+xencode replay 1790240197              # the id, or enough of its start to be unique
+xencode replay 1790240197 --run-tools  # and let the recorded commands run again
+xencode replay 1790240197 --tool-root /tmp/scratch --out /tmp/check
+```
+
+```
+recording 1790240197-eee44c61: 2 model calls, 1 tool call
+replay: 2 of 2 model calls answered, 0 requests the recording could not answer
+tools: 1 of 1 recorded calls asked again (outcomes: done=1)
+answers: the same bytes the recording holds, reassembled from a socket
+clock: every time in the ledger is the recorded one; nothing here reads the clock, which is why two replays of one run can be compared at all
+ledger: <project>/.xencode/cache/replays/1790240197-eee44c61/tool_calls.jsonl
+```
+
+(Only the last line is shortened here — the command prints the ledger's full
+path.)
+
+`--list` names each recording, what it asked for, and how many calls and tools it
+holds. `--tool-root` is the tree the replay's tool calls work against (the current
+project by default); `--out` is where the ledger and the replay's own recording go
+(`<project>/.xencode/cache/replays/<run id>` by default), and it cannot be pointed
+at the directory holding the recording being replayed.
+
+**The gate stays in charge.** Without `--run-tools` nothing is approved silently:
+no one is there to answer the approval prompt, so a call the recording shows was
+gated comes back `denied`, the next model call has no request to be answered with,
+and the report says `1 of 2 model calls answered` and exits non-zero.
+`--run-tools` is the only thing that sets the loop to allow everything, and only
+because a caller asked to live through the recorded commands again.
+
+What the ledger holds is one line per recorded tool call: the tool's name and
+arguments, its outcome, how many characters the result was and a SHA-256 of it,
+which model call it came from, and the time fields taken from the recording
+(`recorded_ts_unix_ms`, `recorded_duration_ms`) rather than from the replay's own
+clock — which is what lets two replays be compared at all. Lines the replay never
+reached are written too, with `"replayed": false`.
+
+A recording is only as good as its being repeatable, so the second turn is matched
+on the tool's own output bytes: a replay whose command printed something different
+is refused rather than answered with a recording made for a different answer. A
+recorded command must therefore be one that gives the same output every time —
+`date`, `git log` and anything over the network make a recording that can only ever
+report the request it could not answer.
 
 ### `xencode audit verify [PATH]`
 Check the session server's audit log for records that were changed after they
