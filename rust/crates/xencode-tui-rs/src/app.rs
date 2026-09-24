@@ -131,7 +131,7 @@ pub fn complete_slash_token(token: &str) -> Option<String> {
 /// the same rounds through the same permission gate — only where the events
 /// go differs, so neither can drift from the other.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LoopSink {
+pub(crate) enum LoopSink {
     /// Stream deltas and `⚙` transcript lines, as the chat loop always has.
     Chat,
     /// Report to the ByteBot panel: calls become step rows, the model's text
@@ -203,40 +203,45 @@ fn bytebot_progress(steps: &[(String, String)]) -> f64 {
 
 /// Everything the shared tool loop needs beyond the conversation itself.
 /// Owned, because the loop runs on its own task.
-struct AgentRun {
-    sink: LoopSink,
-    model: String,
-    context_messages: Vec<ChatMessage>,
-    approval: crate::agent_tools::ApprovalCtx,
-    task_runtime: crate::agent_tools::TaskRuntime,
-    tool_root: std::path::PathBuf,
+pub(crate) struct AgentRun {
+    pub(crate) sink: LoopSink,
+    pub(crate) model: String,
+    pub(crate) context_messages: Vec<ChatMessage>,
+    pub(crate) approval: crate::agent_tools::ApprovalCtx,
+    pub(crate) task_runtime: crate::agent_tools::TaskRuntime,
+    pub(crate) tool_root: std::path::PathBuf,
     /// Offered until the final round, which is tool-less so a run always ends
     /// with a text answer.
-    max_rounds: usize,
+    pub(crate) max_rounds: usize,
     /// Alternate models tried in order when the primary fails before emitting
     /// any output (I4-01). Set from `agent_fallback_models` config.
-    fallback_models: Vec<String>,
-    ollama_url: String,
-    llama_cpp_url: String,
-    timeout: u64,
-    openrouter_key: Option<String>,
-    qwen_key: Option<String>,
-    gemini_key: Option<String>,
-    remote_base_url: String,
-    remote_api_key: Option<String>,
-    llama_opts: LlamaCppOptions,
+    pub(crate) fallback_models: Vec<String>,
+    pub(crate) ollama_url: String,
+    pub(crate) llama_cpp_url: String,
+    pub(crate) timeout: u64,
+    pub(crate) openrouter_key: Option<String>,
+    pub(crate) qwen_key: Option<String>,
+    pub(crate) gemini_key: Option<String>,
+    pub(crate) remote_base_url: String,
+    pub(crate) remote_api_key: Option<String>,
+    pub(crate) llama_opts: LlamaCppOptions,
     /// Where this session's prompts may go (PR-2). Carried as the policy itself
     /// instead of re-read from config per request, so the status bar and the
     /// router cannot disagree about which rule is in force.
-    egress: EgressPolicy,
+    pub(crate) egress: EgressPolicy,
     /// `.xencode/` for the project this turn runs in, where the turn trace is
     /// appended when the loop finishes (EV-2).
-    trace_dir: std::path::PathBuf,
+    pub(crate) trace_dir: std::path::PathBuf,
     /// Session, model, provider and route to write on that row.
-    trace_identity: xencode_context_rs::MetricsIdentity,
+    pub(crate) trace_identity: xencode_context_rs::MetricsIdentity,
     /// Digest of the text that started the turn. The prompt itself is never
     /// recorded, only this, so a trace cannot become a copy of the conversation.
-    prompt_digest: Option<String>,
+    pub(crate) prompt_digest: Option<String>,
+    /// Where this run's recording goes, when the user asked for one (QA-1).
+    /// Unlike the trace above, a recording keeps the prompts and the tool
+    /// output whole — that is what makes it replayable — so it only exists
+    /// while `session_recording` is on.
+    pub(crate) session: Option<xencode_context_rs::SessionWriter>,
 }
 
 pub struct App<'a> {
@@ -2523,7 +2528,7 @@ impl<'a> App<'a> {
     ///
     /// `prompt` is what the user typed (or the task a delegated run was given).
     /// Only its digest is kept, for the turn trace.
-    fn agent_run(
+    pub(crate) fn agent_run(
         &self,
         sink: LoopSink,
         context_messages: Vec<ChatMessage>,
@@ -2544,6 +2549,7 @@ impl<'a> App<'a> {
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
             trace_identity: self.metrics_identity(&self.config.default_model),
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
+            session: self.begin_recording(prompt),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
@@ -2562,6 +2568,55 @@ impl<'a> App<'a> {
                 json_schema: None,
                 mirostat: None,
             },
+        }
+    }
+
+    /// Start the recording of a run, when the user asked for one (QA-1).
+    ///
+    /// Off unless `session_recording` is on, and off for a route this program
+    /// cannot write down — see [`recording_route`]. A recording is the fullest
+    /// copy of a session this program can make: prompts, raw answers, full tool
+    /// output. It goes under the project's `.xencode/cache/`, which is kept out
+    /// of version control, and nowhere else.
+    fn begin_recording(&self, prompt: &str) -> Option<xencode_context_rs::SessionWriter> {
+        if !self.config.session_recording {
+            return None;
+        }
+        let model = self.config.default_model.clone();
+        let server = self.recording_route(&model)?;
+        let root = xencode_context_rs::default_root();
+        let run = xencode_context_rs::RecordedRun {
+            format: xencode_context_rs::SESSION_FORMAT.to_string(),
+            run_id: xencode_context_rs::new_run_id(prompt),
+            recorded_at_unix_ms: xencode_context_rs::conversation::now_millis(),
+            prompt_version: xencode_context_rs::prompts::set_version().to_string(),
+            model,
+            server,
+            tool_root: root.to_string_lossy().into_owned(),
+            prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
+        };
+        xencode_context_rs::SessionWriter::begin(&root.join(xencode_context_rs::XENCODE_DIR), &run)
+            .ok()
+    }
+
+    /// Where a model's traffic could be written down, or `None` for a route this
+    /// program reads with a decoder it does not capture. Answering "what were you
+    /// told" later depends on keeping the bytes as they arrived, so the routes
+    /// named here are the ones a recording can cover: Ollama, llama.cpp, a
+    /// `remote:` endpoint and OpenRouter, which is everything this project runs
+    /// a local model through. Anthropic, Gemini and Qwen keep their own readers,
+    /// and a recording of them would be a paraphrase, so there is none.
+    ///
+    /// The answer is also the server's address, which a recording states so that
+    /// a replay three months on can say where its bytes came from.
+    fn recording_route(&self, model: &str) -> Option<String> {
+        let provider = xencode_providers_rs::provider_for(model, self.routing_facts());
+        match provider {
+            "ollama" => Some(self.config.ollama_url.clone()),
+            "llamacpp" => Some(self.config.llama_cpp_url.clone()),
+            "remote" => Some(self.config.remote_base_url.clone()),
+            "openrouter" => Some("https://openrouter.ai/api/v1".to_string()),
+            _ => None,
         }
     }
 
@@ -6278,7 +6333,46 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
     out
 }
 
-async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
+/// Write down what a round asked a model and what the model's answer asked for.
+///
+/// One line per request, in the order they were made, with the tool results hung
+/// under the last of them — that is the answer which asked for them. A round that
+/// switched models through the fallback chain leaves a line for each attempt that
+/// came back, because each one was a real request the session paid for.
+fn record_round(
+    session: Option<&mut xencode_context_rs::SessionWriter>,
+    recorder: Option<&xencode_providers_rs::traffic::TrafficRecorder>,
+    tools: Vec<xencode_context_rs::RecordedToolCall>,
+) {
+    let (Some(writer), Some(recorder)) = (session, recorder) else {
+        return;
+    };
+    let pairs = recorder.take();
+    let last = pairs.len().saturating_sub(1);
+    for (index, pair) in pairs.into_iter().enumerate() {
+        let call = xencode_context_rs::RecordedCall {
+            // The writer numbers the run's calls; a round cannot know how many
+            // came before it.
+            seq: 0,
+            ts_unix_ms: pair.ts_unix_ms,
+            duration_ms: pair.duration_ms,
+            method: pair.method,
+            path: pair.path,
+            request_body: pair.request_body,
+            status: pair.status,
+            content_type: pair.content_type,
+            response_body: pair.response_body,
+            tools: if index == last {
+                tools.clone()
+            } else {
+                Vec::new()
+            },
+        };
+        let _ = writer.record(call);
+    }
+}
+
+pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
         model,
@@ -6301,6 +6395,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         trace_dir,
         trace_identity,
         prompt_digest,
+        mut session,
     } = run;
     let turn_started = std::time::Instant::now();
     // What this turn actually did, written to `.xencode/cache/turns.jsonl` when
@@ -6308,6 +6403,9 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     // last one that failed; the token total adds up only what a server
     // reported, so a run against Ollama, which reports none, has no total.
     let mut turn_tools: Vec<xencode_context_rs::ToolTrace> = Vec::new();
+    // What this round's tool calls returned, for the recording of the call
+    // that asked for them.
+    let mut recorded: Vec<xencode_context_rs::RecordedToolCall> = Vec::new();
     let mut rounds: u32 = 0;
     let mut reported_tokens: Option<u64> = None;
     let mut last_timings = None;
@@ -6315,11 +6413,17 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
 
     let client = OllamaClient::new(&ollama_url, timeout);
     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
+    // A recorder is only attached when a recording is being kept: capturing
+    // costs a copy of every response body, and nothing else reads it.
+    let recorder = session
+        .as_ref()
+        .map(|_| xencode_providers_rs::traffic::TrafficRecorder::new());
     let manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
         .with_llama_cpp(llama_client)
         .with_request_timeout(timeout)
         .with_remote(&remote_base_url, remote_api_key)
-        .with_egress_policy(egress);
+        .with_egress_policy(egress)
+        .with_traffic(recorder.clone());
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
@@ -6400,13 +6504,16 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
             }
         }
         if step.tool_calls.is_empty() {
+            // The answer that ended the run is still a model call worth
+            // keeping, with no tool results under it.
+            record_round(session.as_mut(), recorder.as_ref(), Vec::new());
             break;
         }
         history.push(xencode_providers_rs::AgentTurn::Assistant {
             text: step.text.clone(),
             calls: step.tool_calls.clone(),
         });
-        for call in &step.tool_calls {
+        for (index_of, call) in step.tool_calls.iter().enumerate() {
             let summary = crate::agent_tools::summarize_call(call);
             match sink {
                 LoopSink::Chat => {
@@ -6464,9 +6571,25 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
             });
             history.push(xencode_providers_rs::AgentTurn::ToolResult {
                 id: call.id.clone(),
-                content: result,
+                content: result.clone(),
+            });
+            recorded.push(xencode_context_rs::RecordedToolCall {
+                index: index_of,
+                id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                outcome: outcome.label().to_string(),
+                // Whole, not the redacted tail the trace keeps: a replay has to
+                // hand the model the bytes it was handed, and a recording that
+                // did not is not one.
+                result,
             });
         }
+        record_round(
+            session.as_mut(),
+            recorder.as_ref(),
+            std::mem::take(&mut recorded),
+        );
     }
     // Report llama.cpp tok/s stats if this was a llama.cpp request
     if let Some(ts) = last_timings {
@@ -7235,6 +7358,48 @@ mod tests {
     use tokio::sync::mpsc;
     use xencode_context_rs::init_project;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
+
+    /// QA-1: which runs can be written down, and which are left alone.
+    #[test]
+    fn only_the_routes_whose_bytes_this_program_keeps_can_be_recorded() {
+        let mut app = App::for_tests();
+        app.config.session_recording = true;
+        app.config.ollama_url = "http://127.0.0.1:11434".to_string();
+        app.config.llama_cpp_url = "http://127.0.0.1:8080".to_string();
+        app.config.remote_base_url = "http://127.0.0.1:8099/v1".to_string();
+        app.config.api_keys.openrouter_api_key = Some("not-a-real-key".to_string());
+        assert_eq!(
+            app.recording_route("ollama:qwen2.5:7b").as_deref(),
+            Some("http://127.0.0.1:11434")
+        );
+        assert_eq!(
+            app.recording_route("llamacpp:dolphin").as_deref(),
+            Some("http://127.0.0.1:8080")
+        );
+        assert_eq!(
+            app.recording_route("remote:dolphin").as_deref(),
+            Some("http://127.0.0.1:8099/v1")
+        );
+        assert_eq!(
+            app.recording_route("moonshotai/kimi-k2").as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        // Read with a decoder that does not keep the bytes as they arrived, so a
+        // recording of these would be a paraphrase and none is started.
+        assert_eq!(app.recording_route("anthropic:claude-sonnet-4-5"), None);
+        assert_eq!(app.recording_route("google_gemini:gemini-2.5-flash"), None);
+        assert_eq!(app.recording_route("qwen:qwen3-32b"), None);
+
+        // Off by default, and a route that could be recorded does not make the
+        // flag irrelevant: with it off, no file is opened at all.
+        app.config.session_recording = false;
+        assert_eq!(
+            app.recording_route("ollama:qwen2.5:7b").as_deref(),
+            Some("http://127.0.0.1:11434"),
+            "the route is still recordable; the user's choice is what stops it"
+        );
+        assert!(app.begin_recording("hello").is_none());
+    }
 
     /// K-3: the provider-health panel seeds a Remote/Colab forward row the same
     /// way it seeds the keyed providers — and an empty remote URL says how to

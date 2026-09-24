@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a run written down, and run again
+Turn on `session_recording` (`xencode config set session_recording true`, off by
+default) and every model call of an agent turn appends one line to
+`.xencode/cache/sessions/<run-id>.jsonl`: the request that went out, the response
+bytes exactly as they arrived on the socket, what each tool the model asked for
+actually returned, and the clock reading at that moment. The new
+`xencode replay <run-id>` serves those bytes again on a loopback port while the
+real agent loop runs against them — the HTTP client, the stream reader that has to
+reassemble a tool call whose arguments arrived as fifteen separate pieces, the
+permission gate, and the tools themselves, which execute for real. No model
+answers a replay, so it needs no server and no provider account; the recorded
+traffic under `rust/crates/xencode-tui-rs/tests/fixtures/sessions/` came from a run
+against a local `llama-server`, and every replay in the test suite passes with that
+server stopped and its port closed.
+
+Two replays of one recording now write the same `tool_calls.jsonl` down to the
+byte. That was not true the first two times it was tried: the ledger stamped when
+each replay ran, so two runs of the same recording differed by about a second in
+one timestamp field. Every time in the ledger now comes out of the recording,
+matched by the call's number in the run, and the report says so on a line of its
+own.
+
+The permission gate is not bypassed by any of this. Without `--run-tools` nobody is
+there to answer an approval prompt, so a gated call comes back `denied`, the next
+model call has nothing to be answered with, and the command reports
+`1 of 2 model calls answered` and exits non-zero. `--run-tools` is the only thing
+that lets a replay's tools run, and the recording is honest about what it can
+cover: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter are recordable
+because this program reads their bytes itself, and asking to record a model served
+by Anthropic, Gemini or Qwen is refused with the reason rather than writing a
+paraphrase. Because the next turn is matched on the tool's own output, a replay
+whose command printed something different is refused rather than answered with a
+recording made for a different question — which also means a command worth
+recording has to be one that gives the same output twice.
+
+One bug was found by using the command rather than the tests: a second replay into
+the default output directory appended its recording to the first replay's under the
+same run id, and the report then said nothing had been answered about a run that
+had in fact completed. Starting a run's recording now replaces any file under that
+id instead of adding to it. 28 tests added (990 → 1017 passing, 5 → 6 ignored —
+the extra ignored test is the one that captures a recording from a live local
+server).
+
 ### Added — the instructions a model is given, named and versioned
 Five prompts went over the wire from strings written in the middle of Rust code:
 the agent system prompt, the tool vocabulary that rides on the end of it, the

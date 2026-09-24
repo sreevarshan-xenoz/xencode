@@ -648,6 +648,32 @@ always add up to the answer the `done` line reports — including when the reply
 came from the response cache. `CLI_GUIDE.md` documents each field, the version
 rules, and the one shell trap that eats line breaks in a naive consumer.
 
+### Replaying a recorded run
+
+```bash
+xencode config set session_recording true    # then run an agent turn in the TUI
+xencode replay --list                        # what has been recorded, newest first
+xencode replay 1790240197                    # an id, or enough of it to be unique
+xencode replay 1790240197 --run-tools        # and let the recorded commands run again
+```
+
+With `session_recording` on, each model call of an agent turn is written to
+`.xencode/cache/sessions/<run-id>.jsonl` as it happens — the request, the response
+bytes exactly as they arrived, and what each tool returned. `xencode replay` serves
+those bytes again on a loopback port while the real agent loop, the real stream
+reader, the real permission gate and the real tools run against them, then writes
+`tool_calls.jsonl` naming each call, its arguments, its outcome and a digest of its
+result. No model answers a replay, so it needs neither a server nor a provider
+account, and two replays of one recording write the same file down to the byte,
+because every time in it comes from the recording rather than the clock.
+
+The gate is not bypassed: without `--run-tools` a call the recording shows needed
+approval comes back `denied`, and the report says which model call it stopped at
+and exits non-zero. Only the routes whose bytes this program reads itself are
+recordable — Ollama, llama.cpp, a `remote:` endpoint and OpenRouter — and asking
+for a recording of an Anthropic, Gemini or Qwen model is refused with the reason.
+`CLI_GUIDE.md` documents the flags and what the ledger holds.
+
 ### Background Tasks
 
 ```bash
@@ -678,6 +704,7 @@ Commands:
   config    Configuration management
   models    Local model management (Ollama & llama.cpp)
   cache     Response cache management
+  audit     The session server's audit log
   query     Send a query to a model
   memory    Manage conversation memory
   tasks     Manage background tasks (file-backed, survives this process)
@@ -688,6 +715,7 @@ Commands:
   analyze   Analyze code for issues and vulnerabilities
   fetch     Fetch a web page and extract research-ready text
   review    Review the diff between a base branch and HEAD, file by file
+  replay    Run a recorded session again from the bytes it was made of
   plugin    Manage plugins
   llamacpp  llama.cpp server management (status/start/stop/load/unload)
   tui       Launch the Terminal User Interface

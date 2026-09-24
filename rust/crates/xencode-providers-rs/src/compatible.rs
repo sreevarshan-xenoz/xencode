@@ -28,6 +28,9 @@ pub struct OpenAICompatibleProvider {
     api_key: Option<String>,
     extra_headers: Vec<(String, String)>,
     client: reqwest::Client,
+    /// Set when this endpoint's traffic is being captured; see
+    /// [`crate::traffic`].
+    recorder: Option<crate::traffic::TrafficRecorder>,
 }
 
 impl OpenAICompatibleProvider {
@@ -40,7 +43,15 @@ impl OpenAICompatibleProvider {
             api_key,
             extra_headers: Vec::new(),
             client: reqwest::Client::new(),
+            recorder: None,
         }
+    }
+
+    /// Capture every request this endpoint makes, so the session can be served
+    /// back later. See [`crate::traffic::TrafficRecorder`].
+    pub fn with_recorder(mut self, recorder: Option<crate::traffic::TrafficRecorder>) -> Self {
+        self.recorder = recorder;
+        self
     }
 
     /// Extra header sent on every request (e.g. OpenRouter's
@@ -92,11 +103,14 @@ impl OpenAICompatibleProvider {
         let payload = self.build_payload(model, rendered_messages, tools);
         Ok(post_sse_stream(
             &self.client,
-            &self.completions_url(),
-            self.api_key.as_deref(),
-            &self.extra_headers,
-            &payload,
-            label,
+            &SseRequest {
+                url: &self.completions_url(),
+                api_key: self.api_key.as_deref(),
+                extra_headers: &self.extra_headers,
+                payload: &payload,
+                label,
+                recorder: self.recorder.as_ref(),
+            },
             callback,
         )
         .await?
@@ -152,30 +166,51 @@ fn first_choice_text(value: &serde_json::Value) -> String {
         .to_string()
 }
 
+/// One streaming request: where it goes, how it authenticates, what it asks for
+/// and what to do with the bytes. Grouped because a call that streams needs all
+/// of it, and passing eight arguments in order is how a header ends up where the
+/// payload belongs.
+pub(crate) struct SseRequest<'a> {
+    pub url: &'a str,
+    pub api_key: Option<&'a str>,
+    pub extra_headers: &'a [(String, String)],
+    pub payload: &'a serde_json::Value,
+    pub label: &'a str,
+    /// Keep the bytes as they arrived for a recording of this run; `None` asks
+    /// for nothing to be kept.
+    pub recorder: Option<&'a crate::traffic::TrafficRecorder>,
+}
+
 /// Shared HTTP+SSE core for every OpenAI-compatible backend: POST the
 /// payload, forward text through the callback, accumulate `delta.tool_calls`,
 /// and harvest the terminal `usage` chunk when the server sends one.
 pub(crate) async fn post_sse_stream<F>(
     client: &reqwest::Client,
-    url: &str,
-    api_key: Option<&str>,
-    extra_headers: &[(String, String)],
-    payload: &serde_json::Value,
-    label: &str,
+    request: &SseRequest<'_>,
     mut callback: F,
 ) -> Result<StreamOutcome, ProviderError>
 where
     F: FnMut(&str),
 {
-    let mut request = client.post(url).json(payload);
+    let SseRequest {
+        url,
+        api_key,
+        extra_headers,
+        payload,
+        label,
+        recorder,
+    } = *request;
+    let mut http = client.post(url).json(payload);
     if let Some(key) = api_key {
-        request = request.header("Authorization", format!("Bearer {key}"));
+        http = http.header("Authorization", format!("Bearer {key}"));
     }
     for (name, value) in extra_headers {
-        request = request.header(name.as_str(), value.as_str());
+        http = http.header(name.as_str(), value.as_str());
     }
 
-    let response = request
+    let started = std::time::Instant::now();
+    let request_body = payload.to_string();
+    let response = http
         .send()
         .await
         .map_err(|e| ProviderError::Network(format!("{label} stream request failed: {e}")))?;
@@ -186,16 +221,29 @@ where
         return Err(ProviderError::api(label, status, body));
     }
 
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
     let mut stream = response.bytes_stream();
     let mut text = String::new();
     let mut completion_tokens: u64 = 0;
     let mut acc = ToolCallAccumulator::default();
     let mut lines = crate::frames::FrameLines::default();
+    // Kept only for a recording: the bytes as they arrived, before the frame
+    // reader had anything to say about where a line begins.
+    let mut raw: Vec<u8> = Vec::new();
 
     // The stream is read as bytes, not as lines: a `data:` line can be spread
     // over two reads, and one read can hold several. See `frames`.
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| ProviderError::Network(e.to_string()))?;
+        if recorder.is_some() {
+            raw.extend_from_slice(&chunk);
+        }
         lines.feed(&chunk, &mut |line| {
             ingest_line(
                 line,
@@ -215,6 +263,23 @@ where
             &mut callback,
         )
     });
+
+    // A body that is not text is not recorded at all: half of it written down
+    // would come back later as an answer the model never gave.
+    if let Some(recorder) = recorder {
+        if let Ok(response_body) = String::from_utf8(raw) {
+            recorder.record(crate::traffic::TrafficPair {
+                method: "POST".to_string(),
+                path: crate::traffic::url_path(url),
+                request_body,
+                status,
+                content_type,
+                response_body,
+                ts_unix_ms: crate::traffic::now_unix_ms(),
+                duration_ms: started.elapsed().as_millis() as u64,
+            });
+        }
+    }
 
     Ok(StreamOutcome {
         step: AgentStep {

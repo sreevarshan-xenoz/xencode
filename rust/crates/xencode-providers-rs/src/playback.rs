@@ -264,11 +264,15 @@ where
 {
     let outcome = crate::compatible::post_sse_stream(
         &reqwest::Client::new(),
-        &format!("{base_url}{path}"),
-        None,
-        &[],
-        request,
-        "cassette replay",
+        &crate::compatible::SseRequest {
+            url: &format!("{base_url}{path}"),
+            api_key: None,
+            extra_headers: &[],
+            payload: request,
+            label: "cassette replay",
+            // A replay is the far end of a recording, not the making of one.
+            recorder: None,
+        },
         callback,
     )
     .await?;

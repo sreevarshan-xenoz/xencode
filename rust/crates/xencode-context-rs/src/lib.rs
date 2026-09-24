@@ -30,6 +30,7 @@ pub mod refresh;
 pub mod retrieve;
 pub mod rollup;
 pub mod scanner;
+pub mod session;
 pub mod stale;
 pub mod state;
 pub mod symbols;
@@ -85,12 +86,18 @@ pub use rollup::{
     ProfileSample, SessionTotals, TokenTotals, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
 };
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
+pub use session::{
+    list_session_ids, new_run_id, read_session, resolve_run_id, session_path, sessions_dir,
+    RecordedCall, RecordedRun, RecordedToolCall, Session, SessionLine, SessionWriter,
+    SESSION_FORMAT,
+};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
     build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
     DepEdge, PerFileSymbols,
 };
+
 pub use trace::{
     append_trace, prompt_digest, read_recent_traces, redact_secrets, tail_preview, trace_path,
     ToolTrace, TurnTrace, TRACE_TAIL_CAP,
