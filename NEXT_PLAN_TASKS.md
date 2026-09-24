@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 880 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 888 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2529,11 +2529,14 @@ and what should it say about what that took. Note fact 8 — `background_*` runs
 - **CX-1 An aggregator over `metrics.jsonl`** — totals and p50/p95 tok/s,
   KV-reuse percentage, tokens by session, written to a sidecar rollup so the
   O(all rows) read at `app.rs:1017` stops growing. **S**. Trap: fact 10 — no
-  session key in the schema and no compaction, so this needs CX-2 first.
+  session key in the schema and no compaction, so this needs CX-2 first — which
+  landed, so the key is there to group by.
 - **CX-2 Schema extension** — add `model`, `provider`, `session_id`,
   `est_cost_micros`, `power_w`, `source: local|cloud`, append-only so old rows
   still parse. **S**. Trap: the profiler's tests (`app.rs:8403+`) are coupled to
-  the current record shape.
+  the current record shape. *(Done 2026-09-24 with `QO-3` — see W1 progress. The
+  profiler's tests survived: the record shape grew by fields that are absent on
+  old lines rather than changing the ones those tests read.)*
 - **CX-3 Honest local cost as time plus watt-hours** — sample NVML/RAPL during
   generation, integrate to Wh, multiply by a user-set `$/kWh`, and render
   "≈ 3.2 Wh · ≈ $0.0014 · 41 s". **M**. Trap, and the reason to phrase it
@@ -2825,7 +2828,7 @@ Three ground rules for reading it:
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 880-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 888-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -4179,7 +4182,9 @@ context.
 - **QO-3 — Metrics schema extension** (`session_key`, `cost_usd`, `model` +
   an incremental file-tail reader). *Effort: M.* This is **CX-2**; named here
   only to record that with one line in the file, items 19/21/29/67/68 all have no
-  history to reason about.
+  history to reason about. *(Done 2026-09-24 as `CX-2` — see W1 progress: the
+  key is `session_id`, the cost column is `est_cost_micros` and stays null until
+  something measures a price, and the tail reader is `read_metrics_since`.)*
 - **QO-4 — Minimal regression harness.** 3–5 criterion benches around real hot
   paths (index build, compaction, retrieval), 10 samples per bench, Mann-Whitney
   against stored baselines, reporting p-value + % delta, and **refusing a verdict
@@ -5010,7 +5015,7 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
 
 #### W1 — Make the agent observable — 15 items
 
-Needs W0. A trace of a run whose config could leak, and whose scanner reported the word `input` as High severity, was not evidence — both are fixed in W0; the remaining items there are what still gates this wave.
+Needs W0, which is complete. A trace of a run whose config could leak, and whose scanner reported the word `input` as High severity, was not evidence — both are fixed in W0.
 
 | ID | item | bucket | placement note |
 |---|---|---|---|
@@ -5029,6 +5034,43 @@ Needs W0. A trace of a run whose config could leak, and whose scanner reported t
 | **QA-5** | EV-1's fixture generator, schema-driven, no LLM in the loop | core | EV-1 fixture generator, schema-driven |
 | **QO-3** | Metrics schema extension | core | fold into CX-2 |
 | **WF-1** | NDJSON event stream mode (`query --stream --format ndjson`): token | core | NDJSON event stream |
+
+**Progress.** Same rule as W0: an item is recorded here only when its own
+done-when is met, and the commit that does it names the IDs.
+
+- [x] `CX-2` + `QO-3` — 2026-09-24, one change, because `QO-3` *is* `CX-2` under
+  its other name. A row in `metrics.jsonl` now says which conversation it came
+  from, which model id was asked for, which client served it (`ollama`,
+  `llamacpp`, `remote`, `openrouter`, `qwen`, `anthropic`, `google_gemini`) and
+  whether the prompt left this machine — so a total can be split by session and
+  by model instead of being one average over everything ever recorded.
+  `est_cost_micros` and `power_w` join the schema as `null` on every row:
+  nothing measures a price or a wattage yet, and the fields are here so the
+  cost work lands without changing the shape a second time. Rows written before
+  this still read, because the new fields are absent rather than wrong on those
+  lines, which is what the profiler panel and `latest_per_profile` keep using.
+- Two judgement calls worth keeping. The provider name is answered by the same
+  single reading of the model prefixes that answers "does this leave the
+  machine" (`route_of` in `xencode-providers-rs/src/egress.rs`), rather than by
+  looking at the name again in a second place — which is how the model list's
+  `[cloud]` badge ended up wrong about an Ollama model named `qwen-72b-chat`. And the identity is stamped from the
+  configuration in force when the row is written.
+- The incremental tail reader `QO-3` asked for is `read_metrics_since`: it
+  resumes at a byte position, advances only over lines that are complete (a
+  process killed mid-append must not leave a reader positioned so that every
+  later record fails to parse), and starts over when the file is replaced rather
+  than appended to. Nothing calls it in this change; `CX-1`'s rollup is the
+  consumer it was written for.
+- Not done here, and `CX-1` must not read more coverage into the file than it
+  has: rows are written by the two context-assembly sites and the llama.cpp
+  timings site. The `xencode query` command records nothing, so a cloud request
+  still has no row at all and any cloud-side figure in a later report has to
+  come from somewhere else.
+- Verified by 888 tests, and by a real run rather than only a unit test:
+  `xencode tui` in a scratch project with a throwaway config directory, `/init`
+  then `/ctx which file defines add`, wrote
+  `"session_id":"session_1790221977","model":"qwen2.5:7b","provider":"ollama","source":"local"`
+  into that project's `.xencode/cache/metrics.jsonl`.
 
 #### W2 — The model/inference substrate — 15 items
 

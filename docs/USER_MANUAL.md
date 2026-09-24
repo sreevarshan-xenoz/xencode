@@ -41,7 +41,7 @@ The Rust binary (`xencode`) is the entry point.
 > demo. The **Performance Profiler** — `Enter` samples this process's CPU and
 > resident memory from `/proc`, reads the turn latency, llama.cpp timings and
 > provider health the session already measured, and lists the last rows of
-> `.xencode/metrics.jsonl`; anything with no data behind it shows `n/a` instead
+> `.xencode/cache/metrics.jsonl`; anything with no data behind it shows `n/a` instead
 > of a number. The **Terminal Assistant** — you type what you want to do, it
 > makes one call to the configured model for candidate commands, and a command
 > you pick runs through the agent's approval gate exactly as the model's own

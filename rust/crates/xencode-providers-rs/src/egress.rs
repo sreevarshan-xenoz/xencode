@@ -89,25 +89,42 @@ pub struct RoutingFacts<'a> {
 /// Classify a model id by the same prefix rules the routers use, in the same
 /// order — a change to one must be a change to the other.
 pub fn classify(model: &str, facts: RoutingFacts<'_>) -> Egress {
-    if model.starts_with("anthropic:")
-        || model.starts_with("qwen:")
-        || model.starts_with("google_gemini:")
-    {
-        return Egress::Cloud;
+    route_of(model, facts).0
+}
+
+/// Which client a model id actually selects, in the same single pass
+/// [`classify`] uses. Recorded on metrics rows so a token count can be
+/// attributed to a server without re-reading the router's if-chain elsewhere.
+pub fn provider_for(model: &str, facts: RoutingFacts<'_>) -> &'static str {
+    route_of(model, facts).1
+}
+
+/// The prefix chain the routers walk, read once: where the prompt ends up and
+/// which client dials it. Keeping both answers in one function is what stops
+/// the reported provider and the reported destination disagreeing.
+fn route_of(model: &str, facts: RoutingFacts<'_>) -> (Egress, &'static str) {
+    if model.starts_with("anthropic:") {
+        return (Egress::Cloud, "anthropic");
+    }
+    if model.starts_with("qwen:") {
+        return (Egress::Cloud, "qwen");
+    }
+    if model.starts_with("google_gemini:") {
+        return (Egress::Cloud, "google_gemini");
     }
     if llamacpp_target(model).is_some() {
-        return Egress::Local;
+        return (Egress::Local, "llamacpp");
     }
     if remote_target(model).is_some() {
         return match facts.remote_host {
-            Some(host) if host_is_local(host) => Egress::Local,
-            _ => Egress::Cloud,
+            Some(host) if host_is_local(host) => (Egress::Local, "remote"),
+            _ => (Egress::Cloud, "remote"),
         };
     }
     if model.contains('/') && facts.openrouter_key {
-        return Egress::Cloud;
+        return (Egress::Cloud, "openrouter");
     }
-    Egress::Local
+    (Egress::Local, "ollama")
 }
 
 /// The host of an HTTP(S) URL, without scheme, port or path.
@@ -275,6 +292,31 @@ mod tests {
         assert!(deny.check(Egress::Cloud).is_err());
         assert!(deny.check(Egress::Local).is_ok());
         assert!(EgressPolicy::default().check(Egress::Cloud).is_ok());
+    }
+
+    #[test]
+    fn the_provider_is_named_by_the_same_prefix_reading_as_the_destination() {
+        let no_key = RoutingFacts::default();
+        for (model, expected) in [
+            ("qwen2.5:7b", "ollama"),
+            ("llama3.2:3b", "ollama"),
+            // A model whose name mentions a vendor but carries no prefix goes
+            // where its prefix says, which is nothing: local Ollama.
+            ("qwen-72b-chat", "ollama"),
+            ("llamacpp:coder.gguf", "llamacpp"),
+            ("llama:coder", "llamacpp"),
+            ("anthropic:claude-3-5-sonnet", "anthropic"),
+            ("qwen:qwen3-max", "qwen"),
+            ("google_gemini:gemini-2.0-flash", "google_gemini"),
+            ("remote:coder", "remote"),
+        ] {
+            assert_eq!(provider_for(model, no_key), expected, "{model}");
+        }
+        // A slashed id is OpenRouter only once a key makes that route exist;
+        // without one the routers hand it to local Ollama and the recorded
+        // provider follows the actual route.
+        assert_eq!(provider_for("openai/gpt-4o", no_key), "ollama");
+        assert_eq!(provider_for("openai/gpt-4o", cloud_key()), "openrouter");
     }
 
     #[test]

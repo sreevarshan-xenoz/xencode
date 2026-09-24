@@ -2351,6 +2351,7 @@ impl<'a> App<'a> {
         // Metrics for this real generation (reaches `/ctx kv` via [CTXSTATS]
         // in the drain loop, next to the llama.cpp [TIMINGS]).
         let xencode = root.join(xencode_context_rs::XENCODE_DIR);
+        let identity = self.metrics_identity(&self.config.default_model);
         Self::record_ctx_metrics(
             &xencode,
             CTX_PROFILE,
@@ -2358,6 +2359,7 @@ impl<'a> App<'a> {
             assembly.target_tokens,
             assembly.retrieved_included,
             assembly.soft_compaction_needed,
+            identity,
         );
         let _ = tx.send(format!(
             "[CTXSTATS]{}|{}",
@@ -2443,6 +2445,26 @@ impl<'a> App<'a> {
             remote_host: (!self.config.remote_base_url.is_empty())
                 .then(|| url_host(&self.config.remote_base_url))
                 .flatten(),
+        }
+    }
+
+    /// Which conversation, model and server a metrics row was written for.
+    ///
+    /// Derived from the same configuration the request routers read, so a row
+    /// cannot claim to be local while the turn that produced it was refused as
+    /// cloud (CX-2). The cost and power fields stay empty: nothing measures
+    /// them yet, and an estimate invented here would be indistinguishable from
+    /// a measurement later.
+    fn metrics_identity(&self, model: &str) -> xencode_context_rs::MetricsIdentity {
+        let facts = self.routing_facts();
+        xencode_context_rs::MetricsIdentity {
+            session_id: self.memory.current_session().cloned(),
+            model: Some(model.to_string()),
+            provider: Some(xencode_providers_rs::provider_for(model, facts).to_string()),
+            source: Some(match classify(model, facts) {
+                Egress::Local => xencode_context_rs::MetricSource::Local,
+                Egress::Cloud => xencode_context_rs::MetricSource::Cloud,
+            }),
         }
     }
 
@@ -4023,6 +4045,7 @@ impl<'a> App<'a> {
         target_tokens: u64,
         retrieved_included: usize,
         soft_compaction_needed: bool,
+        identity: xencode_context_rs::MetricsIdentity,
     ) {
         let mut m =
             xencode_context_rs::RequestMetrics::new(profile.name(), profile.ctx_tokens() as u32);
@@ -4035,6 +4058,7 @@ impl<'a> App<'a> {
         } else {
             xencode_context_rs::CompactAction::None
         };
+        identity.apply(&mut m);
         let _ = xencode_context_rs::append_metrics(xencode, &m);
     }
 
@@ -4046,6 +4070,7 @@ impl<'a> App<'a> {
         recent_text: String,
         tx: mpsc::UnboundedSender<String>,
     ) {
+        let identity = self.metrics_identity(&self.config.default_model);
         tokio::spawn(async move {
             let _ = tx.send("[CTX_START]".to_string());
             let root = xencode_context_rs::default_root();
@@ -4133,6 +4158,7 @@ impl<'a> App<'a> {
                 doc.target_tokens,
                 doc.retrieved_included,
                 doc.soft_compaction_needed,
+                identity,
             );
         });
     }
@@ -6181,7 +6207,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     let root = xencode_context_rs::default_root();
                     let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                     let profile = xencode_context_rs::HardwareProfile::Balanced;
-                    let m = xencode_context_rs::RequestMetrics::from_timings(
+                    let mut m = xencode_context_rs::RequestMetrics::from_timings(
                         profile.name(),
                         profile.ctx_tokens() as u32,
                         app.last_ctx_total_tokens.min(u32::MAX as u64) as u32,
@@ -6191,6 +6217,11 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         ts.prompt_per_second as f32,
                         app.last_ctx_retrieved_files,
                     );
+                    // The model as it was configured for this turn; llama.cpp
+                    // reports timings for whatever it has loaded, which is the
+                    // same thing unless the server was changed underneath.
+                    app.metrics_identity(&app.config.default_model.clone())
+                        .apply(&mut m);
                     let _ = xencode_context_rs::append_metrics(&xencode, &m);
                 }
             } else if token == "[HEALTH_DONE]" {
@@ -7752,6 +7783,76 @@ mod tests {
 
         app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
         assert_eq!(app.egress_of("openai/gpt-4o"), Egress::Cloud);
+    }
+
+    /// What a metrics row says about itself (CX-2): which model ran, which
+    /// client served it, and whether the prompt left the machine.
+    #[test]
+    fn a_metrics_row_names_its_model_provider_and_destination() {
+        let mut app = App::for_tests();
+        app.config.api_keys.openrouter_api_key = None;
+
+        let local = app.metrics_identity("qwen2.5:7b");
+        assert_eq!(local.model.as_deref(), Some("qwen2.5:7b"));
+        assert_eq!(local.provider.as_deref(), Some("ollama"));
+        assert_eq!(local.source, Some(xencode_context_rs::MetricSource::Local));
+        // The test app holds an unpersisted conversation with no session, and
+        // the row says so rather than inventing an identifier.
+        assert_eq!(local.session_id, None);
+
+        let cloud = app.metrics_identity("qwen:qwen3-max");
+        assert_eq!(cloud.provider.as_deref(), Some("qwen"));
+        assert_eq!(cloud.source, Some(xencode_context_rs::MetricSource::Cloud));
+        // A slashed id is OpenRouter only once a key makes that route real;
+        // the recorded provider moves with the route, not the name.
+        assert_eq!(
+            app.metrics_identity("openai/gpt-4o").provider.as_deref(),
+            Some("ollama")
+        );
+        app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
+        let routed = app.metrics_identity("openai/gpt-4o");
+        assert_eq!(routed.provider.as_deref(), Some("openrouter"));
+        assert_eq!(routed.source, Some(xencode_context_rs::MetricSource::Cloud));
+    }
+
+    /// The real writer: a row the TUI would actually record for an assembled
+    /// context, read back off disk with its identity attached.
+    #[test]
+    fn a_recorded_context_row_can_be_read_back_with_its_identity() {
+        let mut app = App::for_tests();
+        app.config.default_model = "qwen2.5:7b".to_string();
+        app.memory
+            .start_session(Some("session_1700000000".to_string()));
+        let identity = app.metrics_identity(&app.config.default_model.clone());
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("xencode-ctx-metrics-{unique}"));
+        let xencode = dir.join(".xencode");
+        App::record_ctx_metrics(
+            &xencode,
+            xencode_context_rs::HardwareProfile::Balanced,
+            5_000,
+            8_000,
+            4,
+            false,
+            identity,
+        );
+
+        let rows = xencode_context_rs::read_metrics(&xencode);
+        assert_eq!(rows.len(), 1, "nothing was recorded to {xencode:?}");
+        assert_eq!(rows[0].session_id.as_deref(), Some("session_1700000000"));
+        assert_eq!(rows[0].model.as_deref(), Some("qwen2.5:7b"));
+        assert_eq!(rows[0].provider.as_deref(), Some("ollama"));
+        assert_eq!(
+            rows[0].source,
+            Some(xencode_context_rs::MetricSource::Local)
+        );
+        assert_eq!(rows[0].prompt_tokens, 5_000);
+        assert_eq!(rows[0].retrieved_files, 4);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The rule the status bar prints is the rule a turn obeys, because both

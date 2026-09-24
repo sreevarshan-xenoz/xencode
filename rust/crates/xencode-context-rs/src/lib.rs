@@ -65,7 +65,10 @@ pub use index::{
     FileEntry, FilesIndex, Manifest, VERSION,
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
-pub use metrics::{append_metrics, read_metrics, CompactAction, RequestMetrics};
+pub use metrics::{
+    append_metrics, read_metrics, read_metrics_since, CompactAction, MetricSource, MetricsIdentity,
+    RequestMetrics,
+};
 pub use refresh::{refresh_rust_file, RefreshOutcome};
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};

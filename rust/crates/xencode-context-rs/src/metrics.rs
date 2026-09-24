@@ -19,6 +19,34 @@ pub enum CompactAction {
     Hard,
 }
 
+/// Where a recorded request was served from. Written as `local` or `cloud`,
+/// and `null` on rows from before this field existed.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MetricSource {
+    Local,
+    Cloud,
+}
+
+/// Which conversation and which model a row belongs to, so a writer can stamp
+/// a row without knowing how each field is derived.
+#[derive(Debug, Clone, Default)]
+pub struct MetricsIdentity {
+    pub session_id: Option<String>,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub source: Option<MetricSource>,
+}
+
+impl MetricsIdentity {
+    pub fn apply(self, row: &mut RequestMetrics) {
+        row.session_id = self.session_id;
+        row.model = self.model;
+        row.provider = self.provider;
+        row.source = self.source;
+    }
+}
+
 /// One row of `.xencode/cache/metrics.jsonl` (§16 schema).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestMetrics {
@@ -39,6 +67,29 @@ pub struct RequestMetrics {
     pub prompt_tok_s: f32,
     pub retrieved_files: u8,
     pub compaction: CompactAction,
+    /// The conversation this request belonged to. Without it every figure can
+    /// only be an average across all sessions at once.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// The model id as it was asked for, prefix included.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Which client the id resolved to (`ollama`, `llamacpp`, `remote`,
+    /// `openrouter`, `qwen`, …).
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Whether the prompt left this machine.
+    #[serde(default)]
+    pub source: Option<MetricSource>,
+    /// Estimated cost in micro-dollars. Nothing computes a price yet, so this
+    /// is `None` on every row written today; it exists so the cost work has
+    /// somewhere to land without changing the schema again.
+    #[serde(default)]
+    pub est_cost_micros: Option<u64>,
+    /// Power draw sampled while the request ran, in watts. Also unmeasured
+    /// until the hardware sampling exists.
+    #[serde(default)]
+    pub power_w: Option<f32>,
 }
 
 impl RequestMetrics {
@@ -56,6 +107,12 @@ impl RequestMetrics {
             prompt_tok_s: 0.0,
             retrieved_files: 0,
             compaction: CompactAction::None,
+            session_id: None,
+            model: None,
+            provider: None,
+            source: None,
+            est_cost_micros: None,
+            power_w: None,
         }
     }
 
@@ -136,6 +193,54 @@ pub fn append_metrics(xencode_dir: &Path, m: &RequestMetrics) -> std::io::Result
 /// otherwise, so that line is dropped rather than failing the read.
 pub fn read_metrics(xencode_dir: &Path) -> Vec<RequestMetrics> {
     xencode_core_rs::read_jsonl_tolerant(&metrics_path(xencode_dir)).rows
+}
+
+/// Read the rows appended since `offset`, and report where to carry on.
+///
+/// The file only grows, and a caller that wants the newest rows was re-reading
+/// and re-parsing all of them to get them. This starts at a byte position
+/// instead, and advances only over lines that are complete: a process killed
+/// mid-append leaves a partial final line, and treating that as consumed would
+/// strand the caller at a position where every later line fails to parse.
+///
+/// A file shorter than `offset` was replaced rather than appended to, so the
+/// read restarts from the beginning. A line that does not parse at all is
+/// skipped — rows this version of the reader does not recognise must not stop
+/// a rollup from catching up on the ones it does.
+pub fn read_metrics_since(xencode_dir: &Path, offset: u64) -> (Vec<RequestMetrics>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let path = metrics_path(xencode_dir);
+    let start = match fs::metadata(&path) {
+        Ok(meta) if meta.len() >= offset => offset,
+        // Missing or truncated: nothing to catch up on, and the next append
+        // should be read from the top of the new file.
+        _ => 0,
+    };
+    let Ok(opened) = fs::File::open(&path) else {
+        return (Vec::new(), start);
+    };
+    let mut file = opened;
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return (Vec::new(), start);
+    }
+    let mut bytes = Vec::new();
+    if file.read_to_end(&mut bytes).is_err() {
+        return (Vec::new(), start);
+    }
+    let Some(last_newline) = bytes.iter().rposition(|byte| *byte == b'\n') else {
+        return (Vec::new(), start);
+    };
+    let mut rows = Vec::new();
+    for line in bytes[..=last_newline].split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(row) = serde_json::from_slice::<RequestMetrics>(line) {
+            rows.push(row);
+        }
+    }
+    (rows, start + last_newline as u64 + 1)
 }
 
 #[cfg(test)]
@@ -240,5 +345,148 @@ mod tests {
         assert_eq!(latest.len(), 2);
         let bal = latest.iter().find(|r| r.profile == "BALANCED").unwrap();
         assert_eq!(bal.cached_tokens, 300);
+    }
+
+    #[test]
+    fn a_row_written_before_the_identity_fields_existed_still_reads() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        fs::create_dir_all(xencode.join("cache")).unwrap();
+        // Exactly the shape `metrics.jsonl` held before the schema grew: ten
+        // fields, none of them new.
+        fs::write(
+            metrics_path(&xencode),
+            br#"{"ts_unix_ms":1,"profile":"LOW","context_limit":4096,"prompt_tokens":10,"cached_tokens":4,"completion_tokens":2,"context_usage":0.002,"generation_tok_s":11.5,"prompt_tok_s":300.0,"retrieved_files":1,"compaction":"none"}
+"#,
+        )
+        .unwrap();
+
+        let rows = read_metrics(&xencode);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].generation_tok_s, 11.5);
+        assert_eq!(rows[0].model, None);
+        assert_eq!(rows[0].provider, None);
+        assert_eq!(rows[0].session_id, None);
+        assert_eq!(rows[0].source, None);
+        assert_eq!(rows[0].est_cost_micros, None);
+        assert_eq!(rows[0].power_w, None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_stamped_row_carries_its_model_provider_session_and_destination() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut m = RequestMetrics::from_timings("BALANCED", 8192, 5760, 848, 130, 12.3, 400.0, 5);
+        MetricsIdentity {
+            session_id: Some("session_1700000000".to_string()),
+            model: Some("qwen2.5:7b".to_string()),
+            provider: Some("ollama".to_string()),
+            source: Some(MetricSource::Local),
+        }
+        .apply(&mut m);
+        append_metrics(&xencode, &m).unwrap();
+
+        let raw = fs::read_to_string(metrics_path(&xencode)).unwrap();
+        // Lowercase, as the schema says, so a reader can grep it.
+        assert!(raw.contains(r#""source":"local""#), "{raw}");
+        assert!(raw.contains(r#""model":"qwen2.5:7b""#), "{raw}");
+        // Unmeasured fields are written as null rather than left out, so the
+        // row says it was not measured instead of looking like an old row.
+        assert!(raw.contains(r#""est_cost_micros":null"#), "{raw}");
+
+        let rows = read_metrics(&xencode);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id.as_deref(), Some("session_1700000000"));
+        assert_eq!(rows[0].provider.as_deref(), Some("ollama"));
+        assert_eq!(rows[0].source, Some(MetricSource::Local));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reading_since_an_offset_returns_only_the_new_rows_and_says_where_to_resume() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let first = RequestMetrics::new("LOW", 4096);
+        append_metrics(&xencode, &first).unwrap();
+        let after_first = metrics_path(&xencode).metadata().unwrap().len();
+
+        let (rows, offset) = read_metrics_since(&xencode, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(offset, after_first);
+
+        // Nothing new since: the same position comes back, and no rows.
+        let (rows, offset_again) = read_metrics_since(&xencode, offset);
+        assert!(rows.is_empty());
+        assert_eq!(offset_again, offset);
+
+        let mut second = RequestMetrics::new("HIGH", 32768);
+        second.retrieved_files = 7;
+        append_metrics(&xencode, &second).unwrap();
+        let (rows, _) = read_metrics_since(&xencode, offset);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].profile, "HIGH");
+        assert_eq!(rows[0].retrieved_files, 7);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_line_still_being_written_is_left_for_the_next_read() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let mut m = RequestMetrics::new("LOW", 4096);
+        m.retrieved_files = 3;
+        append_metrics(&xencode, &m).unwrap();
+        let settled = metrics_path(&xencode).metadata().unwrap().len();
+        // A writer that was killed partway through its next record.
+        use std::io::Write;
+        fs::OpenOptions::new()
+            .append(true)
+            .open(metrics_path(&xencode))
+            .unwrap()
+            .write_all(b"{\"profile\":\"HIGH\",\"context")
+            .unwrap();
+
+        let (rows, offset) = read_metrics_since(&xencode, settled);
+        assert!(rows.is_empty(), "the torn line was consumed: {rows:?}");
+        assert_eq!(offset, settled, "the reader moved past a half-written line");
+
+        // Once that record is finished, asking from the same position picks it
+        // up — the reader never advanced over the fragment.
+        let mut finished = RequestMetrics::new("HIGH", 4096);
+        finished.retrieved_files = 9;
+        let bytes = fs::read(metrics_path(&xencode)).unwrap();
+        let mut completed = String::from_utf8(bytes[..settled as usize].to_vec()).unwrap();
+        completed.push_str(&serde_json::to_string(&finished).unwrap());
+        completed.push('\n');
+        fs::write(metrics_path(&xencode), completed).unwrap();
+        let (rows, _) = read_metrics_since(&xencode, offset);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].retrieved_files, 9);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_replaced_file_is_read_from_the_start_again() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        append_metrics(&xencode, &RequestMetrics::new("LOW", 4096)).unwrap();
+        append_metrics(&xencode, &RequestMetrics::new("LOW", 4096)).unwrap();
+        let long = metrics_path(&xencode).metadata().unwrap().len();
+
+        // The file disappearing entirely is not an error, and the caller is
+        // told to start from the top of whatever comes next.
+        fs::remove_file(metrics_path(&xencode)).unwrap();
+        let (rows, offset) = read_metrics_since(&xencode, long);
+        assert!(rows.is_empty());
+        assert_eq!(offset, 0);
+
+        let mut fresh = RequestMetrics::new("HIGH", 8192);
+        fresh.retrieved_files = 1;
+        append_metrics(&xencode, &fresh).unwrap();
+        let (rows, _) = read_metrics_since(&xencode, offset);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].profile, "HIGH");
+        fs::remove_dir_all(dir).unwrap();
     }
 }

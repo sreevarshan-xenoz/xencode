@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a recorded request says which model it went to
+Each row in `.xencode/cache/metrics.jsonl` carried token counts and speeds and
+nothing about itself: no conversation, no model, no server. Anything read out of
+that file was therefore one average over every model and session ever used,
+which is the wrong denominator for a question like "is retrieval finding the
+right files". A row now also records `session_id`, `model`, `provider` (`ollama`,
+`llamacpp`, `remote`, `openrouter`, `qwen`, `anthropic`, `google_gemini`) and
+`source` (`local` or `cloud`). `est_cost_micros` and `power_w` are part of the
+shape as well and are `null` on every row written today, because nothing
+measures a price or a wattage yet and a number invented here would be
+indistinguishable from a measurement later.
+
+Old rows are untouched: those names are simply absent from them and read back as
+empty, so the profiler panel keeps working across a file holding both kinds of
+line. The provider and destination are answered by the same code that decides
+where a model id goes, which is what keeps a row from recording a local server
+for a request that was about to leave the machine. One limit worth stating: rows
+are written where a context is assembled and where llama.cpp reports timings, so
+`xencode query` writes none and a cloud request has no row yet.
+
 ### Changed — a model on the internet is off until you say yes
 The routing decision added in the previous entry only stopped a *fallback* from
 changing where your conversation goes; choosing a cloud model still worked
