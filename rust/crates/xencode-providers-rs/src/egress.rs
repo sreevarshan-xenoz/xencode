@@ -47,12 +47,24 @@ pub struct EgressPolicy {
 }
 
 impl Default for EgressPolicy {
+    /// The permissive policy, which filters nothing. A library or a test that
+    /// has no opinion about where prompts go keeps the behaviour this gate
+    /// replaced; the product itself builds its policy from the user's setting
+    /// with [`EgressPolicy::new`].
     fn default() -> Self {
         Self { allow_cloud: true }
     }
 }
 
 impl EgressPolicy {
+    /// The policy a setting implies: `true` permits cloud routes, `false`
+    /// confines every prompt to this machine. Deliberately a separate value from
+    /// "a cloud API key exists" — a key says who you are to a provider, not
+    /// that your conversation may reach it.
+    pub const fn new(allow_cloud: bool) -> Self {
+        Self { allow_cloud }
+    }
+
     /// Refuse a request whose destination the policy does not permit.
     pub fn check(&self, egress: Egress) -> Result<(), ProviderError> {
         if egress == Egress::Cloud && !self.allow_cloud {

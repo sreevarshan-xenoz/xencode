@@ -464,8 +464,20 @@ impl ProviderManager {
     }
 
     /// Refuse a route the policy does not permit, before the prompt is built.
+    ///
+    /// The refusal names the model and the setting that would allow it. A
+    /// deny-by-default posture that cannot be lifted without reading the source
+    /// is not safety, it is an outage.
     fn check_egress(&self, model: &str) -> Result<(), ProviderError> {
-        self.egress.check(self.egress_of(model))
+        let egress = self.egress_of(model);
+        if egress == Egress::Cloud && !self.egress.allow_cloud {
+            return Err(ProviderError::Egress(format!(
+                "`{model}` sends this conversation to an internet service and cloud \
+                 models are not allowed. Allow them with `xencode config set \
+                 allow_cloud_models true`, or choose a model that runs on this machine."
+            )));
+        }
+        Ok(())
     }
 
     /// The configured OpenAI-compatible endpoint, or a message saying how to

@@ -267,13 +267,22 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
     // File count
     let files_str = format!("\u{1F4C4} {}", app.file_tree.len());
 
+    // Where a prompt is allowed to go (PR-2). Read from the same setting the
+    // router builds its policy from, so the bar describes the rule in force.
+    let egress_str = if app.egress_policy().allow_cloud {
+        "\u{1F310} cloud allowed"
+    } else {
+        "\u{1F512} local only"
+    };
+
     // Build status text chunks
     let left_parts = match app.input_mode {
         InputMode::Normal => format!(
-            " {}  {} | {}  {}  {}  \u{394} {}  | ",
+            " {}  {} | {}  {}  {}  {}  \u{394} {}  | ",
             mode_str,
             branch_str,
             health_icon,
+            egress_str,
             uptime_str,
             files_str,
             app.git_status.len()
@@ -894,10 +903,14 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(app.theme.fg)
                 };
                 let prefix = if is_current { " ● " } else { "   " };
+                // The cloud label comes from the same prefix rules the router
+                // uses, not from a name pattern: `qwen-72b-chat` is an Ollama
+                // model, and `openai/gpt-4o` is off-machine only when an
+                // OpenRouter key is configured (PR-2).
                 let (badge, badge_color) =
                     if model.starts_with("llamacpp:") || model.starts_with("llama.cpp:") {
                         (" [llamacpp]", app.theme.warning)
-                    } else if model.contains('/') || model.starts_with("qwen-") {
+                    } else if app.egress_of(model) == xencode_providers_rs::Egress::Cloud {
                         (" [cloud]", app.theme.accent_secondary)
                     } else {
                         (" [ollama]", app.theme.info)
@@ -971,9 +984,18 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Line Numbers" => app.config.show_line_numbers,
                 "Cache Enabled" => app.config.cache_enabled,
                 "Memory Enabled" => app.config.memory_enabled,
+                "Cloud Models" => app.config.allow_cloud_models,
                 _ => false,
             };
-            if on {
+            if row.label == "Cloud Models" {
+                // Consent, not a preference: the row states what the rule does
+                // rather than saying "Enabled" about something unnamed (PR-2).
+                if on {
+                    "\u{1F310} Allowed".to_string()
+                } else {
+                    "\u{1F512} Local only".to_string()
+                }
+            } else if on {
                 "✅ Enabled".to_string()
             } else {
                 "❌ Disabled".to_string()

@@ -178,6 +178,17 @@ pub struct XencodeConfig {
     #[serde(default = "default_memory_items")]
     pub max_memory_items: usize,
 
+    /// Whether a prompt may be sent to an internet service at all.
+    ///
+    /// This is consent, not credentials: `api_keys` says who you are to a cloud
+    /// provider, this says whether your conversation may reach one. They are
+    /// deliberately separate — a configured key must not be read as permission
+    /// to leave the machine, or the status-bar indicator would be describing
+    /// something other than the rule actually in force. Off by default, and off
+    /// for existing configurations that predate it, which is the point.
+    #[serde(default)]
+    pub allow_cloud_models: bool,
+
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
@@ -359,6 +370,7 @@ impl Default for XencodeConfig {
             cache_enabled: true,
             memory_enabled: true,
             max_memory_items: default_memory_items(),
+            allow_cloud_models: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
@@ -568,6 +580,10 @@ mod tests {
         assert_eq!(config.colab.remote_port, 0);
         assert!(!config.colab.enabled, "the bridge is opt-in");
         assert!(
+            !config.allow_cloud_models,
+            "the example must show the posture the product ships with"
+        );
+        assert!(
             config.remote_base_url.is_empty(),
             "the example must not point at an invented endpoint"
         );
@@ -599,6 +615,36 @@ mod tests {
             again.api_keys.remote_api_key.as_deref(),
             Some("runtime-proxy-token")
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Cloud access is consent, not capability: it starts off, a config written
+    /// before the key existed loads with it off, and an explicit `true` survives
+    /// being saved and read back. Holding a provider key is not the same thing —
+    /// that is what the separate `api_keys` block is for.
+    #[test]
+    fn cloud_models_are_disallowed_until_the_config_says_otherwise() {
+        assert!(
+            !XencodeConfig::default().allow_cloud_models,
+            "cloud access must be asked for, not assumed"
+        );
+
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("egress.json");
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(!loaded.allow_cloud_models);
+        assert!(
+            loaded.api_keys.openrouter_api_key.is_none(),
+            "the test asserts on a config with no cloud key at all, so a default \
+             of `true` cannot be mistaken for one"
+        );
+
+        loaded.allow_cloud_models = true;
+        loaded.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert!(again.allow_cloud_models);
         fs::remove_dir_all(&dir).unwrap();
     }
 

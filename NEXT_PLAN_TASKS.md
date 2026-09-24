@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 872 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 880 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2821,11 +2821,11 @@ Three ground rules for reading it:
 | 15 | Task-type-aware retrieval | new in its weak form only | **AC-3**, a deterministic rule-based router; the LLM-classifier form has no published support for code agents and the review's "dramatically smarter" claim outruns the literature |
 | 16 | Execution modes (PLAN/REVIEW/DEBUG/…) | one real mode, four labels | **MD-1** (PLAN as a gate in `classify()`) + **MD-2** (tool-stripping); the rest are prompt/model differences that belong to **MI-7**, and per-mode *system prompts* would void KV reuse on every switch (**MD-3**, reject) |
 | 17 | Model specialization by task | already planned | **MI-7** (per-role profiles) |
-| 18 | Hybrid local/remote privacy router | **was new, and the hole is now closed** | **PR-1…PR-4**; `agent_step_with_fallback` used to send a local-only prompt to a cloud provider on failure (fact 10) — **PR-1 + QTR-2 fixed that on 2026-09-24**, so a fallback may no longer change where the conversation goes. What is still missing is the refusal by default (PR-2) and the redaction/preview layers (PR-3, PR-4) |
+| 18 | Hybrid local/remote privacy router | **was new, and the hole is now closed** | **PR-1…PR-4**; `agent_step_with_fallback` used to send a local-only prompt to a cloud provider on failure (fact 10) — **PR-1 + QTR-2 fixed that on 2026-09-24**, so a fallback may no longer change where the conversation goes, and **PR-2** closed the refusal by default the same day — cloud routes need `allow_cloud_models` now, and the status bar says which rule is running. What is still missing is the redaction/preview layers (PR-3, PR-4) |
 
 **The architecture diagram itself** (a `xencode-core` / `xencode-agents` /
 `xencode-memory` / `xencode-verify` / `xencode-exec` restructure) is recorded as
-a *direction*, not a task. It is a rewrite of a working 15-crate, 872-test tree
+a *direction*, not a task. It is a rewrite of a working 15-crate, 880-test tree
 into a different crate boundary, and the owner's stated preference is optional
 modes over rewrites. Every primitive in the diagram can be added to the existing
 crates — the ledger to `context-rs`/`core-rs`, the gate to `agent_tools.rs`, the
@@ -3320,6 +3320,8 @@ the ledger already.
   `api_keys` entry to exist at all. *Trap:* keys-for-transport and
   keys-for-consent are different things; keep them distinct in config, or the
   indicator lies.
+  *(Done 2026-09-24 — see W0 progress. Kept distinct as planned: the consent is
+  a new `allow_cloud_models` key, and no code reads `api_keys` as permission.)*
 - **PR-3 — Deterministic redaction of the *dynamic* tiers only** (name-based
   secret-file deny at `scanner.rs:48-63` + content scan, with a
   placeholder/restore map); the stable head is never redacted, since dynamic
@@ -4965,7 +4967,46 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
    failures, `cargo fmt --all --check` and `cargo clippy --workspace --all-targets
    -- -D warnings` clean. `small_terminal_render` needed no change: nothing is
    drawn differently yet.
- - [ ] `PR-2`
+ - **`PR-2` — Done 2026-09-24.** Cloud routes are now refused unless the config
+   says otherwise, and the TUI says which rule is running. `allow_cloud_models`
+   is a new key in `XencodeConfig` with `#[serde(default)]`, so a config written
+   before it exists loads as *off* — that is the point of the item, not an
+   oversight. It is a separate key from `api_keys` because the trap named it: a
+   key proves who you are to a provider, and reading it as consent would make the
+   indicator describe a rule nobody agreed to. The refusal the router raises names
+   the model and the command that lifts it (`xencode config set
+   allow_cloud_models true`) — a posture that cannot be lifted without reading
+   source is an outage, not a safeguard. Every place that builds a provider
+   manager takes its policy from the config: `xencode run`, the TUI's single
+   request path, the review run, and the agent loop, the last two through
+   `App::egress_policy()` so the status bar and the turn cannot disagree.
+   `EgressPolicy::default()` stays permissive on purpose: a library caller with no
+   configuration should not be silently restricted, and the product never uses the
+   default — it passes what the config says.
+   Two things the user sees: the status bar prints `🔒 local only` or `🌐 cloud
+   allowed`, and the model list's `[cloud]` badge is now computed by the same
+   `classify` the router uses. That badge was wrong before — it matched
+   `model.contains('/') || model.starts_with("qwen-")`, so the Ollama model
+   `qwen-72b-chat` was labelled cloud and `vendor/model` ids were called cloud
+   even with no OpenRouter key configured, while a `qwen:…` id was called ollama.
+   Settings → Providers gained a **Cloud Models** toggle placed below every key
+   row, and `.xencode.example.json` carries the key set to `false` with the
+   distinction spelled out in its comment.
+   Not done here, and stated rather than papered over: a `remote:` endpoint is
+   classified by the host in its URL, so the Colab forward at
+   `http://127.0.0.1:18000/v1` counts as local even though the VM on the other
+   end is Google's. Making that say *cloud* means the classifier learning about
+   the bridge; the README says the boundary out loud instead. Redaction and the
+   per-request preview remain PR-3 and PR-4.
+   Workspace: **872 → 880 tests** (one in `config.rs` for the default and the
+   round-trip, two in `tests/egress_policy.rs` — the refusal naming the setting,
+   and `EgressPolicy::new` opening a route the default refuses, against an
+   `.invalid` host so nothing is dialed, two in `app.rs` for the badge's
+   classification and for the indicator and the turn reading one rule, one in
+   `keymap.rs` for the toggle and its place in the panel, two in
+   `tests/egress_indicator.rs` rendering the bar at 100×30 and reading the text
+   off the buffer), zero failures, `cargo fmt --all --check` and
+   `cargo clippy --workspace --all-targets -- -D warnings` clean.
 
 #### W1 — Make the agent observable — 15 items
 

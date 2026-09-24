@@ -17,7 +17,7 @@ use xencode_models_rs::{
     find_llama_server, start_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient,
 };
 use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
-use xencode_providers_rs::{ChatMessage, ProviderManager};
+use xencode_providers_rs::{ChatMessage, EgressPolicy, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
 
 /// Output format for analysis results
@@ -695,6 +695,10 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 "agent_fallback_models" => {
                     config.agent_fallback_models = parse_comma_list(&value);
                 }
+                // Consent to send a prompt off this machine at all (PR-2). Kept
+                // separate from the `*_key` entries on purpose: a key proves who
+                // you are to a provider, it does not authorise the trip.
+                "allow_cloud_models" => config.allow_cloud_models = parse_bool(&value)?,
                 "mcp_timeout" => {
                     let seconds: u64 = value
                         .parse()
@@ -1421,7 +1425,8 @@ async fn run_query(
         &config.remote_base_url,
         config.api_keys.remote_api_key.clone(),
     )
-    .with_request_timeout(config.response_timeout);
+    .with_request_timeout(config.response_timeout)
+    .with_egress_policy(EgressPolicy::new(config.allow_cloud_models));
 
     let mut response_content = String::new();
     let result = provider
