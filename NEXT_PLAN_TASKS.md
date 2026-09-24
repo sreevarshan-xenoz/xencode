@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1028 tests passing, 7 ignored, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
+- [x] Workspace gates green — 15 crates, 1038 tests passing, 7 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1604,7 +1604,12 @@ never is.
   loop. M (~1-2 wk). Trap: grade the diff, not the chat; and the agent can read
   its own grader. Done-when: a pass rate is reported and the suite runs in CI
   without network. **This is the item that makes L-7 measurable instead of
-  plausible.**
+  plausible.** *(Done 2026-09-24 — see W1 progress. `xencode eval run`, in ten
+  tests that need no network and no provider account. The pass rate on the first
+  real run is **0/8**, and the reason is in the report line rather than hidden
+  under it: every case answered in prose and asked for no tool. Eight shapes, not
+  the ten-to-thirty asked for — `--repeats` multiplies the same eight, which is a
+  better sample of one model and not a wider set of defects.)*
 - **EV-2 turn trace + TUI inspector** — per-turn JSONL beside `metrics.jsonl`
   (prompt hash, tools, rounds, tokens, cost) and a `/trace` pane. S (2-4 d).
   Trap: tool output contains secrets. Done-when: the last 50 turns are browsable
@@ -5683,6 +5688,76 @@ done-when is met, and the commit that does it names the IDs.
   writes the same bytes; and the graded pass over two of the shapes described above.
   The eighth is the walk over all eight, kept out of the routine suite because it
   compiles sixteen crates.
+
+- [x] `EV-1` — 2026-09-24. The agent can now be scored on defects that were
+  written into a repository on purpose, on this machine, with no provider account
+  and nothing on the network. `xencode eval run`
+  (`rust/crates/xencode-tui-rs/src/task_eval.rs`, the CLI in `xencode-cli`) takes
+  each of the eight cases `QA-5` declares, unpacks it into its own fresh git
+  repository, hands the real agent loop the `task.md` that describes the bug, and
+  decides from disk afterwards. Three choices carry the item:
+  - **The diff is graded, not the chat.** A case passes when the seeded
+    repository's own `cargo test --offline` goes green *and* `git diff` against
+    the commit the case was seeded at names exactly the file the reference fix
+    touches. Nothing the model says in prose is evidence.
+  - **The agent shares a filesystem with its own grader.** That is unavoidable in
+    a harness that grades from disk, so it is detected rather than prevented: a
+    changed path under `tests/`, or a rewritten `task.md`, is reported as
+    `changed its own test` and can never be a pass, even with a green suite.
+  - **The permission gate stays in charge.** Every case runs in `edit-allow`, the
+    mode a person can pick in the TUI: file edits pre-approved, a shell asked
+    about and — with nobody listening — refused, the refusal counted like any
+    other call. `--allow-shell` is the caller saying otherwise, and the posture is
+    recorded on every report line and every history row, because a pass rate from
+    a run that could execute commands is a different measurement.
+  Sampling is pinned by default (temperature 0, seed 42) and a run appends to
+  `.xencode/cache/task_eval.jsonl` with its model, prompt digest, permission
+  posture and per-case verdicts; a previous number is printed beside the new one
+  only when all of those match, so a rate is never compared across a change of
+  instructions. Ten tests cover it, three of which drive the real loop, the real
+  tools and a real `cargo test` against a loopback server that answers from a
+  script — loopback is not the network, so `cargo test --workspace` scores the
+  harness anywhere.
+
+  Two things this run only learned by being run. The first is that an
+  infrastructure failure looks exactly like a capability failure unless the
+  harness says otherwise: the very first pass rate measured here was 0/8 and was
+  meaningless — the model id did not match the name the server reported, so every
+  request was refused by the model swap-in route, and eight cases that never asked
+  a question were being counted as eight failed fixes. A case whose request failed
+  is now `not run`, stays out of the denominator, and prints why; a run in which
+  nothing reached a verdict exits non-zero instead of reporting a number. The
+  second is that an uncapped answer is not a small thing on a laptop: one request
+  generated 3,726 tokens over about seven and a half minutes at 9.6 tokens a
+  second and would have gone on to the context limit, so answers are capped
+  (1,024 by default, `--max-tokens 0` to leave it to the server) and the cap is
+  named in the header line and in the history row.
+
+  Measured, on the model this machine can actually serve — `Dolphin3.0-Qwen2.5-1.5B`
+  Q4_K_M through `llama-server -c 8192 --alias dolphin --port 8099`, prompts
+  `8abca0eb4098`, `edit-allow`, temperature 0, seed 42, 512-token answers, four
+  rounds a case: **pass rate 0/8 (0%)**, all eight cases reaching a verdict, every
+  one of them `1 round, 0 tool calls · grader exit 101 · left src/lib.rs alone ·
+  answered in prose and asked for no tool`. The reason is recorded rather than
+  guessed at: reproducing one case's first request by hand against the same server
+  got `<tool name="read_file" arguments="{...}"/>` back inside the answer text,
+  repeated until the cap, with the structured tool-call field empty — while a
+  two-tool probe on the same server returned a properly structured call. The
+  server can do it and the model did not, so the number is about the model at this
+  size under these instructions, and `MI-1`'s note that everything downstream of
+  tool-calling is gated on it is now backed by a measurement rather than by
+  assumption.
+  Verified by 1038 tests, 0 failures, 7 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Ten tests are new, all in the harness: a shape named by
+  either spelling and only by its own ones; an eval that cannot start saying so
+  before it writes anything; a pass rate counting only cases that reached a
+  verdict; a green grader bought by editing the test being reported as the two
+  things it is; only a previous run taken under the same rules being comparable;
+  a run recorded and read back with its verdicts; the address named being the one
+  the model id dials; a run that changed the right file being graded from the
+  file; the same again with the grader tampered with; and an unreachable model not
+  being counted as a failed fix.
 
 #### W2 — The model/inference substrate — 15 items
 

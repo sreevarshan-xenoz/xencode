@@ -3071,9 +3071,10 @@ impl<'a> App<'a> {
 
     /// The shared delegated-run prompt builder. `root` is where the run's
     /// tools operate — the main checkout for ByteBot, a fresh worktree for
-    /// `/spawn` (I3-03) — so context is collected inside that sandbox. `brief`
-    /// is which of the registry's two delegated-run wordings frames the task.
-    fn delegated_context(
+    /// `/spawn` (I3-03), a seeded repository for a scored task (EV-1) — so
+    /// context is collected inside that sandbox. `brief` is which of the
+    /// registry's two delegated-run wordings frames the task.
+    pub(crate) fn delegated_context(
         &self,
         root: &std::path::Path,
         task: &str,
@@ -3103,7 +3104,7 @@ impl<'a> App<'a> {
     /// the system turn (I1-04). Appended there rather than assembled into the
     /// context tiers, so the byte-stable prefix and its KV-cache reuse are
     /// untouched; only a text-only system message qualifies.
-    fn chat_messages(turns: Vec<xencode_context_rs::ChatTurn>) -> Vec<ChatMessage> {
+    pub(crate) fn chat_messages(turns: Vec<xencode_context_rs::ChatTurn>) -> Vec<ChatMessage> {
         let mut messages: Vec<ChatMessage> = turns
             .into_iter()
             .map(|t| ChatMessage {

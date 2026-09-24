@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent scored on defects seeded on purpose
+`xencode eval run` takes the agent through a small repository with one bug put in it
+— an off-by-one, a swapped comparison, a missing null check, and five more — and
+answers the only question worth asking: did the fix land? The verdict comes from the
+working tree, not the chat. Each case ships a `task.md` saying what to do and a
+grader that runs the repository's own tests and exits non-zero when the defect is
+still there, so a model that writes a confident paragraph and changes nothing cannot
+score. A second check makes sure the answer was the fix and not the test: any new or
+changed file under `tests/` or a touched `task.md` voids the case, and every file the
+instructions named must appear in the diff.
+
+`xencode eval list` prints the eight shapes and every run recorded so far in
+`~/.xencode/cache/task_eval.jsonl`; a previous number is only offered for comparison
+when the instructions, model, sampling, answer cap and permission posture all match,
+so a score is never lined up against one measured under different conditions.
+Sampling is pinned (temperature 0, seed 42) and the tool shell is refused unless
+`--allow-shell` is given, with the refusal recorded.
+
+Two limits are printed rather than smoothed over. Eight shapes is not the thirty
+repositories the plan asks for — `--repeats` runs each case more often, it does not
+widen the set — and the grader is readable inside the working tree the agent edits,
+so nothing here stops a model that goes looking for it.
+
+The first run was against a 1.5B model on a local `llama-server` and scored **0/8**.
+Every case answered in prose, asked for no tool, and left the defect in place. That
+took two harness bugs to see clearly: a request that failed was being graded as a
+failed fix, so a broken server looked like a useless agent, and an uncapped answer
+generated 3,726 tokens over eight minutes, which is why `--max-tokens` exists and
+defaults to 1024. 10 tests added (1028 → 1038 passing).
+
 ### Added — a run written down, and run again
 Turn on `session_recording` (`xencode config set session_recording true`, off by
 default) and every model call of an agent turn appends one line to
