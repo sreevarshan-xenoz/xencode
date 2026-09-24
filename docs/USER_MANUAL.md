@@ -586,6 +586,24 @@ silently passed over. Truncating the end of the log is not something the file
 can detect on its own, and neither is a full rewrite that recomputes every
 digest.
 
+### Scripted Queries
+
+```bash
+# One JSON event per line, read as it arrives
+xencode query "Summarise this crate" --format ndjson | jq -j 'select(.type == "token") | .text'
+```
+
+`-j`, not `-r`: `jq -r` appends a newline after every piece it prints, and an
+answer that arrived in 47 pieces gains 47 line breaks it never had.
+
+`xencode query` writes plain words by default. `--format ndjson` writes a
+`start` line (model, client, whether the prompt stayed on this machine,
+conversation id), a `token` line per piece of the answer as it arrives, and one
+closing `done` or `error` line. Every line carries `"v": 1`, and the token lines
+always add up to the answer the `done` line reports — including when the reply
+came from the response cache. `CLI_GUIDE.md` documents each field, the version
+rules, and the one shell trap that eats line breaks in a naive consumer.
+
 ### Background Tasks
 
 ```bash

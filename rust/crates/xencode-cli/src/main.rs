@@ -27,6 +27,101 @@ enum OutputFormat {
     Json,
 }
 
+/// How `xencode query` writes its answer. `text` prints the model's words as
+/// they arrive, which is what someone reading a terminal wants. `ndjson` prints
+/// one JSON object per line — see [`query_stream`] for the shapes — which is
+/// what another program piping the output wants.
+#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug)]
+enum QueryFormat {
+    Text,
+    Ndjson,
+}
+
+/// The line protocol behind `xencode query --format ndjson`.
+///
+/// Every line is one object carrying `"v": 1`. The version is written per line
+/// rather than once at the top because a script that joins mid-stream (a pipe
+/// opened on a partial run, a `tail -f`) must still be able to tell which
+/// schema it is reading. A consumer that meets a higher `v` than 1 must stop
+/// rather than guess; a consumer that meets an unknown `type` at a `v` it does
+/// know must skip the line.
+///
+/// The one guarantee worth stating, because a script is built on it: the
+/// `text` fields of every `token` line, concatenated in order, equal the
+/// `answer` field of the terminating `done` line. That holds for a cached
+/// answer too, which is why the cached path emits the answer as a `token` line
+/// instead of only in `done`.
+mod query_stream {
+    use serde_json::Value;
+
+    /// Bumped only when a line written by the previous version would be read
+    /// wrongly, not when a field is added.
+    pub const VERSION: u8 = 1;
+
+    fn event(kind: &str) -> Value {
+        serde_json::json!({ "v": VERSION, "type": kind })
+    }
+
+    /// Emitted before any model output, once the model and route are settled.
+    /// `source` is the same word the metrics rows use: `local` or `cloud`.
+    pub fn start(model: &str, provider: &str, source: &str, session: Option<&str>) -> Value {
+        let mut line = event("start");
+        line["model"] = model.into();
+        line["provider"] = provider.into();
+        line["source"] = source.into();
+        line["session"] = match session {
+            Some(id) => Value::String(id.to_string()),
+            None => Value::Null,
+        };
+        line
+    }
+
+    /// A piece of the answer, as it arrived. The split is the network's, not
+    /// the model's: pieces do not align with words.
+    pub fn token(text: &str) -> Value {
+        let mut line = event("token");
+        line["text"] = text.into();
+        line
+    }
+
+    /// The answer, plus how it was obtained. A route reports token counts only
+    /// when its response carries them, and a llama.cpp server reports them only
+    /// when its stream ends with a usage chunk; `tokens_generated` and
+    /// `tokens_per_second` are null whenever nothing was reported — including
+    /// on a cached answer, where no generation happened. `elapsed_ms` is always
+    /// this command's own wall clock.
+    pub fn done(
+        answer: &str,
+        cached: bool,
+        elapsed_ms: u64,
+        tokens_generated: Option<u64>,
+        tokens_per_second: Option<f64>,
+    ) -> Value {
+        let mut line = event("done");
+        line["answer"] = answer.into();
+        line["cached"] = cached.into();
+        line["elapsed_ms"] = elapsed_ms.into();
+        line["tokens_generated"] = match tokens_generated {
+            Some(n) => n.into(),
+            None => Value::Null,
+        };
+        line["tokens_per_second"] = match tokens_per_second {
+            Some(rate) => serde_json::json!((rate * 100.0).round() / 100.0),
+            None => Value::Null,
+        };
+        line
+    }
+
+    /// The last line of a run that produced no answer. A failure before the
+    /// model was dialed (a bad `--json-schema`, say) still ends this way, so a
+    /// script can rely on exactly one terminating line per run.
+    pub fn error(message: &str) -> Value {
+        let mut line = event("error");
+        line["message"] = message.into();
+        line
+    }
+}
+
 /// Xencode — AI development assistant (Rust core)
 #[derive(Parser)]
 #[command(name = "xencode", version, about, long_about = None)]
@@ -125,6 +220,10 @@ enum Commands {
         /// llama.cpp sampling: JSON schema for structured output
         #[arg(long = "json-schema")]
         json_schema: Option<String>,
+
+        /// How to write the answer: plain words, or one JSON event per line
+        #[arg(long, default_value = "text")]
+        format: QueryFormat,
     },
 
     /// Manage conversation memory
@@ -483,6 +582,7 @@ async fn main() {
             max_tokens,
             grammar,
             json_schema,
+            format,
         } => {
             run_query(
                 prompt,
@@ -496,6 +596,7 @@ async fn main() {
                 max_tokens,
                 grammar,
                 json_schema,
+                format,
             )
             .await
         }
@@ -1340,7 +1441,49 @@ async fn run_query(
     max_tokens: Option<u32>,
     grammar: Option<String>,
     json_schema: Option<String>,
+    format: QueryFormat,
 ) -> Result<(), String> {
+    let outcome = run_query_once(
+        prompt,
+        model_override,
+        no_cache,
+        session_id,
+        temperature,
+        top_k,
+        min_p,
+        mirostat,
+        max_tokens,
+        grammar,
+        json_schema,
+        format,
+    )
+    .await;
+    // One terminating line, whatever failed. Without this a script sees an
+    // empty stream and cannot tell "no answer" from "still running".
+    if let (Err(message), QueryFormat::Ndjson) = (&outcome, format) {
+        println!("{}", query_stream::error(message));
+        let _ = io::stdout().flush();
+    }
+    outcome
+}
+
+#[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
+async fn run_query_once(
+    prompt: String,
+    model_override: Option<String>,
+    no_cache: bool,
+    session_id: Option<String>,
+    temperature: Option<f64>,
+    top_k: Option<i32>,
+    min_p: Option<f64>,
+    mirostat: Option<i32>,
+    max_tokens: Option<u32>,
+    grammar: Option<String>,
+    json_schema: Option<String>,
+    format: QueryFormat,
+) -> Result<(), String> {
+    let ndjson = format == QueryFormat::Ndjson;
+    let started = std::time::Instant::now();
     let config = XencodeConfig::load().unwrap_or_default();
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
 
@@ -1393,9 +1536,43 @@ async fn run_query(
         }
     }
 
+    // Where the prompt is going, from the same prefix rules the router walks.
+    // Reported before anything else so a stream that never finishes still says
+    // which model it was waiting on.
+    let routing = xencode_providers_rs::RoutingFacts {
+        openrouter_key: config.api_keys.openrouter_api_key.is_some(),
+        remote_host: (!config.remote_base_url.is_empty())
+            .then(|| xencode_providers_rs::url_host(&config.remote_base_url))
+            .flatten(),
+    };
+    if ndjson {
+        let session = memory.as_ref().and_then(|mem| mem.current_session());
+        println!(
+            "{}",
+            query_stream::start(
+                &model,
+                xencode_providers_rs::provider_for(&model, routing),
+                source_word(xencode_providers_rs::classify(&model, routing)),
+                session.map(String::as_str),
+            )
+        );
+        let _ = io::stdout().flush();
+    }
+
     if let Some(ref mut c) = cache {
         if let Some(cached_resp) = c.get(&prompt, &model) {
-            println!("{}", cached_resp);
+            if ndjson {
+                // The answer travels as a `token` line too, so a script that
+                // concatenates tokens always has the whole reply — cached or
+                // not. Nothing was generated, so there are no token counts.
+                println!("{}", query_stream::token(&cached_resp));
+                println!(
+                    "{}",
+                    query_stream::done(&cached_resp, true, elapsed_ms(started), None, None,)
+                );
+            } else {
+                println!("{}", cached_resp);
+            }
 
             if let Some(ref mut mem) = memory {
                 mem.add_message("user", &prompt, None);
@@ -1486,21 +1663,39 @@ async fn run_query(
     let mut response_content = String::new();
     let result = provider
         .generate_stream_with_options(&model, &context_messages, Some(&llamacpp_opts), |token| {
-            print!("{}", token);
+            if ndjson {
+                println!("{}", query_stream::token(token));
+            } else {
+                print!("{}", token);
+            }
             let _ = io::stdout().flush();
             response_content.push_str(token);
         })
         .await;
 
-    println!(); // Ensure final newline
-
     match result {
         Ok(_) => {
-            if let Some(timings) = provider.last_llamacpp_timings() {
+            let timings = provider.last_llamacpp_timings();
+            if ndjson {
                 println!(
-                    "\n(llama.cpp ~{} tok/s · {} tokens generated)",
-                    timings.predicted_per_second as u64, timings.tokens_generated
+                    "{}",
+                    query_stream::done(
+                        &response_content,
+                        false,
+                        elapsed_ms(started),
+                        timings.as_ref().map(|t| t.tokens_generated),
+                        timings.as_ref().map(|t| t.predicted_per_second),
+                    )
                 );
+                let _ = io::stdout().flush();
+            } else {
+                println!(); // Ensure final newline
+                if let Some(timings) = timings {
+                    println!(
+                        "\n(llama.cpp ~{} tok/s · {} tokens generated)",
+                        timings.predicted_per_second as u64, timings.tokens_generated
+                    );
+                }
             }
             if let Some(ref mut c) = cache {
                 c.set(&prompt, &model, &response_content);
@@ -1512,6 +1707,21 @@ async fn run_query(
             Ok(())
         }
         Err(e) => Err(format!("Query failed: {}", e)),
+    }
+}
+
+/// Milliseconds since this command started, including config load and context
+/// build.
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    (started.elapsed().as_secs_f64() * 1_000.0) as u64
+}
+
+/// The destination word the stream writes. Kept as one function so a test can
+/// pin it against the spelling the metrics rows already use.
+fn source_word(egress: xencode_providers_rs::Egress) -> &'static str {
+    match egress {
+        xencode_providers_rs::Egress::Local => "local",
+        xencode_providers_rs::Egress::Cloud => "cloud",
     }
 }
 
@@ -2703,5 +2913,127 @@ mod tests {
         let canon = |p: std::path::PathBuf| p.canonicalize().unwrap();
         assert_eq!(canon(toplevel), canon(dir.clone()));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A stream line as a script receives it: the rendered text must hold
+    /// exactly one JSON object, whatever the answer contained.
+    fn stream_line(event: &serde_json::Value) -> serde_json::Value {
+        let text = event.to_string();
+        assert!(
+            !text.contains('\n'),
+            "a stream line held a newline: {text:?}"
+        );
+        serde_json::from_str(&text).expect("a stream line is not valid JSON")
+    }
+
+    #[test]
+    fn every_stream_event_names_the_schema_version_and_its_kind() {
+        let events = vec![
+            super::query_stream::start("llama:", "llamacpp", "local", None),
+            super::query_stream::token("hi"),
+            super::query_stream::done("hi", false, 5, None, None),
+            super::query_stream::error("Query failed: nobody is listening"),
+        ];
+        for event in &events {
+            let parsed = stream_line(event);
+            assert_eq!(parsed["v"], super::query_stream::VERSION, "{parsed}");
+            assert!(parsed["type"].is_string(), "{parsed}");
+        }
+        let kinds: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert_eq!(kinds, vec!["start", "token", "done", "error"]);
+    }
+
+    #[test]
+    fn an_answer_full_of_newlines_and_quotes_still_fits_on_one_line() {
+        // The reason a script can read this stream by splitting on newlines.
+        let answer = "two\nlines \"quoted\"\ttab 日本語 \\ backslash";
+        assert_eq!(
+            stream_line(&super::query_stream::token(answer))["text"],
+            answer
+        );
+        assert_eq!(
+            stream_line(&super::query_stream::done(answer, false, 1, None, None))["answer"],
+            answer
+        );
+    }
+
+    #[test]
+    fn token_lines_rebuilt_in_order_are_the_answer_the_done_line_reports() {
+        // The invariant a piping script depends on, including for an answer
+        // the cache served without generating anything.
+        let pieces = ["Hel", "lo\n", "世界"];
+        let answer: String = pieces.concat();
+        let rebuilt: String = pieces
+            .iter()
+            .map(|piece| {
+                stream_line(&super::query_stream::token(piece))["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(rebuilt, answer);
+    }
+
+    #[test]
+    fn the_start_line_says_which_route_was_chosen_and_says_so_when_there_is_no_session() {
+        let with_session = stream_line(&super::query_stream::start(
+            "qwen2.5:7b",
+            "ollama",
+            "local",
+            Some("s-1"),
+        ));
+        assert_eq!(with_session["model"], "qwen2.5:7b");
+        assert_eq!(with_session["provider"], "ollama");
+        assert_eq!(with_session["session"], "s-1");
+        let without = stream_line(&super::query_stream::start(
+            "anthropic:claude",
+            "anthropic",
+            "cloud",
+            None,
+        ));
+        assert!(
+            without["session"].is_null(),
+            "a run with no conversation said otherwise: {without}"
+        );
+    }
+
+    #[test]
+    fn a_done_line_leaves_out_the_counts_no_route_reported() {
+        let measured = stream_line(&super::query_stream::done(
+            "hi",
+            false,
+            1_537,
+            Some(42),
+            Some(6.5432),
+        ));
+        assert_eq!(measured["tokens_generated"], 42);
+        assert_eq!(
+            measured["tokens_per_second"], 6.54,
+            "rate should round plainly"
+        );
+        assert_eq!(measured["elapsed_ms"], 1_537);
+        assert_eq!(measured["cached"], false);
+        let unmeasured = stream_line(&super::query_stream::done("hi", true, 3, None, None));
+        assert!(unmeasured["tokens_generated"].is_null(), "{unmeasured}");
+        assert!(unmeasured["tokens_per_second"].is_null(), "{unmeasured}");
+        assert_eq!(unmeasured["cached"], true);
+    }
+
+    #[test]
+    fn the_source_word_is_the_same_spelling_the_metrics_rows_use() {
+        use xencode_context_rs::MetricSource;
+        use xencode_providers_rs::Egress;
+        let spelled = |source: MetricSource| serde_json::to_value(source).unwrap();
+        assert_eq!(
+            spelled(MetricSource::Local),
+            super::source_word(Egress::Local),
+            "the stream and cache/metrics.jsonl disagree about what a local route is called"
+        );
+        assert_eq!(
+            spelled(MetricSource::Cloud),
+            super::source_word(Egress::Cloud),
+            "the stream and cache/metrics.jsonl disagree about what an off-machine route is called"
+        );
     }
 }
