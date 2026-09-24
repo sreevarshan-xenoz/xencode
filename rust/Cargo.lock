@@ -3797,6 +3797,7 @@ dependencies = [
  "ratatui",
  "regex",
  "reqwest",
+ "serde",
  "serde_json",
  "similar",
  "tokio",

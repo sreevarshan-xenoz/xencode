@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1028 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1038 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -138,6 +138,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **A run can be written down and lived through again.** With `session_recording` on, every model call of an agent turn appends to `.xencode/cache/sessions/<run-id>.jsonl`: the request, the response bytes as they arrived on the socket, and what each tool actually returned. `xencode replay <run-id>` serves those bytes again on a loopback port while the real agent loop, the real stream reader, the real permission gate and the real tools run against them — so a tool call that came in fifteen fragments is reassembled by the same code that reads a live server, and nothing answers from a model. Two replays of one recording write the same `tool_calls.jsonl` down to the byte, because every time in it comes from the recording rather than the clock. Tools stay gated: without `--run-tools` a call that needed approval comes back `denied` and the report says where it stopped matching.
 - **The instructions a model is given are files, not strings buried in code.** The agent system prompt, the tool vocabulary, the transcript-folding prompt and the two subagent briefs live in `rust/crates/xencode-context-rs/prompts/*.md` and are compiled in, each carrying a version that is a hash of its own text. `/ctx prompts` lists them; `/ctx eval` records retrieval scores against that set, so a score is only ever compared with a run measured under the same instructions.
 - Collaboration server exposing sessions, a WebSocket relay, auth, model/provider status, and llama.cpp load/unload routes — bearer-token gated except the public ones.
+- **The agent's own quality is measured, on this machine, with no provider account.** Eight defects are seeded on purpose — a loop one short, a lost update between two workers, a cached value that outlives what it came from, and five more — each unpacked into its own fresh git repository with a `task.md` describing the bug. `xencode eval run` hands each one to the real agent loop with the real permission gate in force (`edit-allow`: edits pre-approved, a shell refused unless you pass `--allow-shell`) and then grades what the run left on disk: the case's own `cargo test --offline` has to go green *and* the changed set has to be exactly the file the reference fix touches. A green test suite bought by editing the test is reported as `changed its own test`, never as a pass. Verdicts, model, prompt digest, sampling pins and per-case outcomes append to `.xencode/cache/task_eval.jsonl`, so today's rate is only ever printed beside a previous one taken under identical rules. First run, on a 1.5B model off a local `llama-server`: **0/8** — every case answered in prose, asked for no tool, and left the defect in place. That is the number this harness exists to produce, and it produces it whether or not it flatters the product.
 
 ---
 
@@ -284,6 +285,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Fetch** | `xencode fetch <url>` | Web extraction to research-ready text |
 | **Review** | `xencode review [--base main]` | PR-level diff triage with per-file analysis |
 | **Replay** | `xencode replay <run-id> [--run-tools]` | Run a recorded agent turn again from the bytes it was made of, with no model answering |
+| **Eval** | `xencode eval run [-c off-by-one] [-m MODEL]` | Score the agent on defects seeded on purpose, graded by the diff and an exit code |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
 | **Colab** | `xencode colab preflight` | Is the bridge usable? (CLI version, auth, ssh key) |
 | **Colab** | `xencode colab up` | Bring up a VM + inference server and tunnel it to localhost (`--reconnect` repairs a broken bridge) |
@@ -451,7 +453,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1028 passing, 7 ignored)
+cargo test                          # Full workspace suite (1038 passing, 7 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

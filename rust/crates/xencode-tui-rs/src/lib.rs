@@ -10,6 +10,7 @@ pub mod mcp;
 pub mod panic;
 pub mod replay;
 pub mod review;
+pub mod task_eval;
 pub mod theme;
 pub mod toast;
 pub mod ui;

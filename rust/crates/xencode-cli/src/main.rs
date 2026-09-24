@@ -355,6 +355,12 @@ enum Commands {
         out: Option<PathBuf>,
     },
 
+    /// Score the agent on defects that were seeded on purpose
+    Eval {
+        #[command(subcommand)]
+        action: EvalAction,
+    },
+
     /// Manage plugins
     Plugin {
         #[command(subcommand)]
@@ -369,6 +375,60 @@ enum Commands {
 
     /// Launch the Terminal User Interface
     Tui,
+}
+
+#[derive(Subcommand)]
+enum EvalAction {
+    /// List the shapes that can be run, and every run recorded so far
+    List,
+    /// Seed the defects, let the agent work on them, and grade what it changed
+    Run {
+        /// Which defect to seed (repeatable; default: all eight)
+        #[arg(short = 'c', long = "case")]
+        cases: Vec<String>,
+
+        /// Model to score, in the form the router understands: a plain name for
+        /// Ollama, `llamacpp:<name>`, or `remote:<name>` (default: the config's)
+        #[arg(short = 'm', long)]
+        model: Option<String>,
+
+        /// How many times to run each defect. Eight shapes three times is
+        /// twenty-four cases, which is the smallest sample worth reading.
+        #[arg(long, default_value_t = 1)]
+        repeats: usize,
+
+        /// Tool rounds a single case gets before the loop has to answer
+        #[arg(long)]
+        max_rounds: Option<usize>,
+
+        /// Let the model really run shell commands. Without this a `run_command`
+        /// is refused and the refusal is recorded like any other call.
+        #[arg(long)]
+        allow_shell: bool,
+
+        /// Where the seeded repositories and their diffs go
+        /// (default: a stamped directory under the system temporary directory)
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// Where an Ollama server is, for a model id with no prefix
+        #[arg(long)]
+        ollama_url: Option<String>,
+
+        /// Where a llama.cpp server is, for a `llamacpp:` model id
+        #[arg(long)]
+        llamacpp_url: Option<String>,
+
+        /// Seconds one model request may take before the case gives up on it
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+
+        /// How long one answer may be. Default 1024; a small model that will not
+        /// stop talking otherwise holds a case for minutes. `0` leaves the limit
+        /// to the server.
+        #[arg(long, default_value_t = 1024)]
+        max_tokens: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -659,6 +719,7 @@ async fn main() {
             out,
         } => run_replay(run_id, list, run_tools, tool_root, out).await,
         Commands::Plugin { action } => run_plugin_action(action),
+        Commands::Eval { action } => run_eval(action).await,
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Colab { action } => run_colab(action).await,
         Commands::Tui => run_tui().await,
@@ -1418,6 +1479,119 @@ fn run_cache(action: CacheAction) -> Result<(), String> {
             }
             Ok(())
         }
+    }
+}
+
+/// Score the agent against defects that were put there on purpose.
+///
+/// The command measures; it does not gate. A pass rate of one in eight is a
+/// correct answer and exits successfully, because the number is the product.
+/// Only a run that reached no verdict at all — every case failed before a
+/// grader could be consulted — is reported as an error.
+async fn run_eval(action: EvalAction) -> Result<(), String> {
+    use xencode_tui_rs::task_eval::{
+        parse_shape, read_task_eval_runs, run_task_eval, shape_names, TaskEvalOptions,
+    };
+
+    match action {
+        EvalAction::List => {
+            println!("defects that can be seeded:");
+            for shape in xencode_context_rs::BugShape::all() {
+                println!("  {:<20} {}", shape.slug(), shape.title());
+            }
+            let runs = read_task_eval_runs(&project_xencode_dir());
+            if runs.is_empty() {
+                println!("\nno eval run recorded yet");
+                return Ok(());
+            }
+            let now = xencode_context_rs::conversation::now_millis();
+            println!("\nrecorded runs, oldest first:");
+            for run in runs {
+                let age_minutes = now.saturating_sub(run.ts_unix_ms) / 60_000;
+                println!(
+                    "  {:>6}  {:<26} {:>3}/{:<3} graded passed  {} · prompts {} · {}",
+                    format_age_minutes(age_minutes),
+                    run.model,
+                    run.passed,
+                    run.graded,
+                    run.server,
+                    &run.prompt_version[..8.min(run.prompt_version.len())],
+                    run.approval,
+                );
+            }
+            Ok(())
+        }
+        EvalAction::Run {
+            cases,
+            model,
+            repeats,
+            max_rounds,
+            allow_shell,
+            out,
+            ollama_url,
+            llamacpp_url,
+            timeout,
+            max_tokens,
+        } => {
+            let config = XencodeConfig::load().unwrap_or_default();
+            let shapes = if cases.is_empty() {
+                xencode_context_rs::BugShape::all().to_vec()
+            } else {
+                let mut picked = Vec::with_capacity(cases.len());
+                for word in &cases {
+                    match parse_shape(word) {
+                        Some(shape) => picked.push(shape),
+                        None => {
+                            return Err(format!(
+                                "no defect is called `{word}`; the shapes are {}",
+                                shape_names().join(", ")
+                            ))
+                        }
+                    }
+                }
+                picked
+            };
+            let out_dir = out.unwrap_or_else(|| {
+                std::env::temp_dir().join(format!(
+                    "xencode-eval-{}",
+                    xencode_context_rs::conversation::now_millis()
+                ))
+            });
+            let options = TaskEvalOptions {
+                out_dir,
+                model: model.unwrap_or(config.default_model.clone()),
+                shapes,
+                repeats: repeats.max(1),
+                ollama_url,
+                llama_cpp_url: llamacpp_url,
+                remote_base_url: None,
+                max_rounds: max_rounds.unwrap_or(xencode_tui_rs::task_eval::DEFAULT_MAX_ROUNDS),
+                allow_shell,
+                temperature: Some(config.llama_cpp_temperature.unwrap_or(0.0)),
+                seed: Some(config.llama_cpp_seed.unwrap_or(42)),
+                timeout_secs: timeout,
+                max_tokens: (max_tokens > 0).then_some(max_tokens),
+                history_dir: Some(project_xencode_dir()),
+            };
+            let report = run_task_eval(&options).await?;
+            for line in report.lines() {
+                println!("{line}");
+            }
+            if report.graded() == 0 {
+                return Err("no case reached a verdict: nothing was measured".to_string());
+            }
+            Ok(())
+        }
+    }
+}
+
+/// How long ago a recorded run happened, in the unit a person would say out loud.
+fn format_age_minutes(minutes: u64) -> String {
+    match minutes {
+        0 => "now".to_string(),
+        m if m < 60 => format!("{m}m ago"),
+        m if m < 60 * 24 => format!("{}h ago", m / 60),
+        m => format!("{}d ago", m / (60 * 24)),
     }
 }
 
