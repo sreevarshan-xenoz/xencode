@@ -43,7 +43,9 @@ pub use advise::{
     advise, advise_from_snapshot, affected_dependents, broken_imports, find_cycles, hub_files,
     orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
-pub use budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
+pub use budget::{
+    est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile, ProfileDecision,
+};
 pub use compact::{
     hard_compact_prompt, parse_hard_compact_reply, should_compact, soft_compact, CompactReport,
     CompactionKind,

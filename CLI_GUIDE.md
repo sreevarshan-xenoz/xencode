@@ -200,6 +200,60 @@ number is refreshed at startup, after a llama.cpp model load or swap, and at the
 start of each turn — so a server restarted outside xencode takes effect from the
 next turn rather than the one already in flight.
 
+#### Which hardware profile the budget spends against
+
+The window says how much room there is. A second setting says how much of it a run
+is allowed to fill with project context, how many retrieved files may ride along,
+and how large each one may be — and until now that setting was fixed in the code at
+the middle of its three choices, on every machine, whatever it was running on.
+
+It is now decided per session and said out loud. `xencode query` prints the profile
+it settled on and what settled it, as the first line it writes (the lines after it
+depend on the model and are covered above and below):
+
+```console
+$ xencode query "what does this project do" -m llama:dolphin
+hardware: BALANCED profile from 15.4 GiB of RAM
+```
+
+The memory figure is this machine's own, read from `MemTotal` in `/proc/meminfo`
+(`16141080 kB`, which is 15.4 GiB). Below 8 GiB a run budgets as LOW, from 8 to 24
+GiB as BALANCED, and 24 GiB and above as HIGH. Those boundaries are a reasoned
+choice about how much memory a model and its context need together, not a
+measurement, which is why the setting exists:
+
+```console
+$ xencode config set hardware_profile low
+set hardware_profile = low
+$ xencode query "hi" -m llama:dolphin
+hardware: LOW profile set in config
+```
+
+A named profile is obeyed exactly, including when it is a worse guess than the
+machine's — someone who knows their model's size knows more than a memory reading
+does. The two failure modes are reported rather than absorbed. A word that is not a
+profile is refused where it is set (`hardware_profile must be "auto", "low",
+"balanced" or "high", not "banlanced"`), and one already sitting in the file is
+named by the run that ignores it:
+
+```console
+hardware: BALANCED profile from 15.4 GiB of RAM, though the config said "banlanced", which is not a profile
+```
+
+And a machine that reports nothing — no `/proc/meminfo`, or one with no readable
+`MemTotal` — gets the profile it got before any of this existed, with the reason
+saying so. That case was checked by running the command with `/proc/meminfo` bound
+to an empty file: `hardware: BALANCED profile this machine reported no memory size,
+so the default applies`.
+
+What the profile is not: a statement about the graphics card. Nothing here reads
+`nvidia-smi`, because the window a run fills is the one AC-1 asks the server for,
+and a card sitting in the machine may not be what serves the model. In the TUI the
+same decision appears in `/ctx kv`, where the profile line carries its reason —
+`🗂 Profile BALANCED (from 15.4 GiB of RAM) — ctx 8192 · utilization 75% · top-k 5`,
+which becomes `🗂 Profile LOW (set in config) — ctx 4096 · utilization 60% · top-k 3`
+when `hardware_profile` says `low`.
+
 #### What a prompt actually costs, counted by the model
 
 Knowing the window is one thing; knowing what the prompt is worth inside it is
@@ -552,6 +606,7 @@ xencode config reset
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |
 | `cache_enabled`, `memory_enabled` | bool | `true`/`false` |
 | `layout` | string | TUI body preset: `classic`, `chat-first`, `zen` (unknown → classic at render) |
+| `hardware_profile` | string | How much project context a run may spend: `auto` (default — chosen from this machine's memory), `low`, `balanced`, `high`; anything else is rejected by `config set` and reported by a run if it is already in the file. See [Which hardware profile the budget spends against](#which-hardware-profile-the-budget-spends-against) |
 | `rounded_borders` | bool | rounded panel corners |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |

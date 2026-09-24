@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1080 tests passing, 10 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1086 tests passing, 10 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3271,6 +3271,12 @@ the ledger already.
 - **AC-2 — Replace the hardcoded `Balanced`** with real selection: total-RAM
   probe, user override in config. *Effort: S.* *Trap:* without a GPU, RAM
   probing is guessing — keep it overridable or ship nothing.
+  *(Done 2026-09-24 — see W2 progress. Total RAM is read from `/proc/meminfo`, the
+  override is `hardware_profile` in the config, and the chosen profile is printed
+  with the reason it was chosen. The trap is answered by the override existing and
+  by a config word that is not a profile being reported rather than obeyed; the
+  probe's thresholds are stated in the code as reasoned bands, not as measurements,
+  and the GPU is deliberately not consulted.)*
 - **AC-3 — Rule-based task-shape router.** Derive the shape from signals already
   in the tree: prompt verbs (fix/rename/add/refactor/secure), whether touched
   files contain `#[test]`, the last `run_command` exit status, the git-changed
@@ -6054,6 +6060,58 @@ done-when is met, and the commit that does it names the IDs.
   `llamacpp_prefix_routes_to_llamacpp` built its client with default settings, so
   on a machine with a llama.cpp server actually running on port 8080 the test got
   a real answer instead of the routing error it asserts.
+- [x] `AC-2` — 2026-09-24, fourth item of W2. `HardwareProfile::Balanced` was a
+  constant on every live path, which is the fact this item exists to remove, and
+  the item said what to replace it with: a probe of total RAM and a config
+  override. The probe is now `/proc/meminfo`'s `MemTotal`, the override is
+  `hardware_profile` in `~/.xencode/config.json`, and the profile that governs a
+  run is decided once at startup and printed with the reason it was chosen.
+  **The thresholds are reasoned, not measured, and the item says why they can be**
+  ("without a GPU, RAM probing is guessing — keep it overridable or ship nothing"):
+  under 8 GiB of memory is LOW, 8–24 GiB is BALANCED, 24 GiB and up is HIGH. They
+  are stated in code as the size band a model plus its context has to live in,
+  because the machine this runs on has a 2 GB GeForce MX250 that nothing here uses
+  — the model's weights and the context sit in system memory, which is what the
+  budget can actually be ruined by. The escape hatch is the point rather than the
+  decoration: a wrong guess is one config word away from corrected, and the run
+  says which word it listened to.
+  **What was measured here**, on a laptop reporting `MemTotal: 16141080 kB`:
+  `hardware: BALANCED profile from 15.4 GiB of RAM`, which is the profile the
+  constant gave, so nobody's context budget moves on upgrading — the property that
+  decided where the band boundaries went rather than a preference for a different
+  answer. Setting `hardware_profile` to `low` and re-running the same command
+  printed `hardware: LOW profile set in config` with no other change, in both the
+  command line and the TUI's `/ctx kv` (`🗂 Profile LOW (set in config) — ctx 4096
+  · utilization 60% · top-k 3` against `🗂 Profile BALANCED (from 15.4 GiB of RAM)
+  — ctx 8192 · utilization 75% · top-k 5`), so the resolved profile is what the
+  budget reads rather than what the display repeats.
+  **Two paths that are not the happy one, both run rather than reasoned about.**
+  A value that names no profile is a typo and must not quietly become a budget, so
+  the machine decides and the refusal is in the sentence:
+  `xencode config set hardware_profile banlanced` is rejected at the point of
+  setting (`hardware_profile must be "auto", "low", "balanced" or "high"`), and a
+  typo already in the file gives `hardware: BALANCED profile from 15.4 GiB of RAM,
+  though the config said "banlanced", which is not a profile`. And a machine that
+  cannot be read keeps the old behaviour: inside a mount namespace with
+  `/proc/meminfo` bound to an empty file (read as zero lines), the same command
+  printed `hardware: BALANCED profile this machine reported no memory size, so the
+  default applies` — the profile every build used before there was a probe, which
+  is the only defensible answer to a machine that said nothing.
+  **Left alone deliberately**: the GPU is not probed. `nvidia-smi` was run to find
+  out what this box has (a 2048 MiB MX250) and nothing reads it, because the number
+  a run spends context against is the window AC-1 asks the server for, not a
+  capacity inferred from a card that may not be what serves the model. That leaves
+  the profile as a statement about memory, not about speed, which is what the
+  profiles in `budget.rs` are for.
+  Verified by 1086 tests, 0 failures, 10 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Six tests are new: the three band boundaries, a real
+  `MemTotal` reading landing on the profile the constant gave, `MemTotal` shapes
+  that are not an answer (absent, unparseable, zero), the config word round
+  trip including `auto` naming nothing, config-override-and-typo behaviour, and one
+  that the turn's budget actually moves with the resolved profile. The last of those
+  was checked by putting the constant back at the assembly call site and watching
+  it fail with `a narrower profile has to spend less: 6144 against 6144`.
 
 #### W2 — The model/inference substrate — 15 items
 
