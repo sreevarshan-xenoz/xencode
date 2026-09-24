@@ -99,8 +99,8 @@ pub use symbols::{
 };
 
 pub use trace::{
-    append_trace, prompt_digest, read_recent_traces, redact_secrets, tail_preview, trace_path,
-    ToolTrace, TurnTrace, TRACE_TAIL_CAP,
+    append_trace, arguments_preview, prompt_digest, read_recent_traces, redact_secrets,
+    tail_preview, trace_path, ToolTrace, TurnTrace, TRACE_ARGUMENTS_CAP, TRACE_TAIL_CAP,
 };
 pub use watcher::{
     map_kind, should_ignore, Debounce, WatchEvent, WatchKind, WatcherSession, WorkspaceWatcher,

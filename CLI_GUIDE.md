@@ -50,8 +50,10 @@ commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
 `/mcp stop`), `/plugin` (report which plugins loaded and what they changed;
 `/plugin reload` re-scans the plugin directory), `/trace [turns]` (what the
-recent agent turns did — rounds, tool calls with their outcome, and any token
-count a server reported — read from `.xencode/cache/turns.jsonl` in the project,
+recent agent turns did — rounds, tool calls with the arguments they were made
+from and their outcome, the files the context put in front of the model, whether
+the turn carried the `[d]` decision marker, and any token count a server
+reported — read from `.xencode/cache/turns.jsonl` in the project,
 so it answers with every model server down), `/cost` (tokens, KV-cache reuse,
 p50/p95 speed and spend for the turns recorded in this project, read from
 `.xencode/cache/metrics.jsonl` through its rollup sidecar and priced by

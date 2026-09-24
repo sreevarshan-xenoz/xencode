@@ -278,6 +278,35 @@ Token counts are reported only when a server actually reported one — llama.cpp
 does, Ollama does not — and cost is never estimated, so those fields are `null`
 and `/trace` says which is the case rather than printing a number it made up.
 
+### Changed — the turn record says what each call was made with
+A `/trace` row could tell you that a turn called `read_file` and that the call
+failed, but not what it asked to read, which is the first thing you want to know
+when the answer is "why did it look at the wrong file". Each tool call now
+carries the arguments the model chose, reduced to the ones that explain the call:
+paths, patterns, commands, ids. A value that is the payload rather than a
+reference — the bytes being written, the text to replace, the list of plan items —
+stands in as its size, so a 2 KB file write contributes `{"path":"copy.txt",
+"content":"[2048 bytes]"}` and the file's contents still never reach the disk
+record. Everything that survives goes through the same credential scrubbing and a
+240-character cut that the output tail already had. Two extra facts land on the
+row: the files retrieval actually put in front of the model (the ones the budget
+kept, not the candidates it trimmed), and whether your own prompt carried the `[d]`
+decision marker. `/trace` prints the marker next to the turn number, lists the
+retrieved files, and shows a call's arguments whenever it did not finish.
+
+`[d]` is read from the words you typed and from nothing else — a model writing "I
+have decided to switch frameworks" does not mark a turn, because the decision
+marker means "this turn settled something", and only you can say that. The same
+reading is what keeps a marked entry out of compaction. What the plan also floated,
+and what was not done, is recording the model's own token probabilities from
+llama.cpp: they would have been a column nothing in this build reads yet, and a
+number nobody has interpreted is not evidence of why a choice was made.
+
+Old rows keep working: the new fields are absent from them and read back as no
+arguments, no retrieved files and unmarked, which means "the record does not say",
+not "there were none". Two limits carried over from before still hold — the file
+is appended to and never trimmed, and `xencode query` writes no row.
+
 ### Changed — a recorded request says which model it went to
 Each row in `.xencode/cache/metrics.jsonl` carried token counts and speeds and
 nothing about itself: no conversation, no model, no server. Anything read out of

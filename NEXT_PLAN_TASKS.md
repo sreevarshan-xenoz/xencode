@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1017 tests passing, 6 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1021 tests passing, 6 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -4303,6 +4303,12 @@ context.
   optionally llama.cpp logprobs. *Trap:* promised causality. Model-written
   rationale is a narrative, not internals, and neither reasoning-summary form
   exists for a local small model.
+  *(Done 2026-09-24 — see W1 progress. Args, retrieved files and the marker are on
+  the row and printed by `/trace`. The logprobs are not: the plan says "optionally"
+  and nothing in this build reads them, so they would have been an uninterpreted
+  column. The trap is honored by construction — `is_decision` comes from `[d]` in
+  the user's own prompt, never from anything a model wrote, and a test asserts that
+  a model sentence about deciding does not set it.)*
 - **QA-4 — Sequential A/B/C variants recorded on EVd-1's ledger.** Best-of-N is
   real (Agentless: 32.0% SWE-bench Lite at $0.70/instance) precisely because a
   cheap verifier filters it; here it costs 3× session wall-clock, so say that.
@@ -5567,6 +5573,61 @@ done-when is met, and the commit that does it names the IDs.
   reaching the next recorded request, a replay without permission stopping where a
   headless run would, and a replay that cannot be told to overwrite the recording
   it is reading.
+- [x] `QA-3` — 2026-09-24. The turn trace can now answer the question a trace is
+  actually opened for: not *that* a call failed but *what it asked for*. Each
+  `ToolTrace` carries the arguments the model chose, a turn carries the files
+  retrieval put in front of the model, and a turn carries whether the user marked
+  it a decision. `/trace` prints all three — the `[d]` marker next to the turn
+  number, a `read for context:` line, and a call's arguments on the line where it
+  did not finish.
+  The privacy line moved rather than vanished. References are kept — a path, a
+  pattern, a command — and payloads are not: `content`, `old`, `new` and `items`
+  are replaced by their size, so a file write contributes
+  `{"path":"copy.txt","content":"[2100 bytes]"}` and the bytes themselves never
+  reach the file. What survives then goes through the same credential scrubbing
+  and length cap as the output tail (`TRACE_ARGUMENTS_CAP` = 240 characters). The
+  module doc used to say "no tool arguments"; it now says what is kept and what is
+  not, and `README.md`, `docs/USER_MANUAL.md` and `CLI_GUIDE.md` were corrected in
+  the same pass.
+  The plan's own trap — a rationale field that reads as causality — is closed
+  structurally rather than by a warning. `is_decision` is `has_decision_marker`
+  over the *user's* prompt text, the same reading compaction already uses, and a
+  test asserts that a model sentence about having decided something does not set
+  it. Nothing in the row is the model's account of itself.
+  The logprob column the plan floated as optional is not there. It was the only
+  part of the item that could have been recorded and not read: nothing in this
+  build consumes a token probability, and a number no one has interpreted is not
+  evidence about why a choice was made.
+  Two facts worth having before the next item touches this file. `retrieved_files`
+  means a list of paths on a trace row and a count on a `metrics.jsonl` row — the
+  collision is noted on the field, and unifying them is `CX-1`'s problem to decide.
+  And the still-open limits from `EV-2` are untouched: rows are appended and never
+  trimmed, and the `xencode query` path writes none.
+  One thing this change should not be trusted to have kept, and did: the approval
+  gate. The end-to-end test now has a `write_file` call in it, and it is there
+  precisely because nobody answers the prompt, so the call is denied, the file is
+  asserted never to exist, and the trace still says what the model tried to write.
+  Verified by 1021 tests, 0 failures, 6 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Four tests are
+  new (three over which arguments survive, how a bulk payload is replaced, how a
+  credential inside an argument is removed and a long argument cut; one over which
+  of the retrieved files a budget kept), and the end-to-end test and two of the
+  report's tests were rewritten rather than extended, because their assertions were
+  the old privacy line. That is 1021 passed over 47 result lines where the previous
+  count was 1017 over 45 — the suite itself grew by two binaries, not just by
+  asserts.
+  Checked against the real binary, not just in the test harness: `xencode replay
+  1790240197` in a scratch project reproduced a recorded turn whose single tool
+  call was gated and, with nobody to answer, denied. The row it wrote holds
+  `"arguments": "{\"command\":\"echo $((27 * 43))\"}"` with `"outcome": "denied"`,
+  and `/trace` in `xencode tui` printed it as `run_command (denied)
+  {"command":"echo $((27 * 43))"} output: error: the user denied this action…` —
+  which is the whole point of the item, on a real file, in the real interface. The
+  `[d]` marker was checked the same way by sending a marked prompt in a project
+  with no model server up: the turn still fails and still writes its row, and
+  `/trace 1` printed `#1 [d] 4s ago`. The `read for context:` line is the one part
+  covered only by the test with the exact expected text, because a scratch project
+  with no index retrieves nothing.
 
 #### W2 — The model/inference substrate — 15 items
 
@@ -6262,7 +6323,7 @@ option not otherwise in the tree; **narrowed** = survives only in a reduced form
 | 14 | Per-agent permission profiles, first-class | narrowed | `CAP-1`'s capability vocabulary is already the plan for this. The word "control" is wrong: brokering is real for one vendor and pre-grant-only for the rest (S-3) |
 | 15 | One approval controls everything (Approval Center) | planned | `LF-2`'s round-trip + `MD-1`'s modes + a queue in `OR-3`. Real today for Claude via `--permission-prompt-tool` over `M-5`; a queue over nothing-but-launch-flags is a display, and is honest only if it says so |
 | 16 | Agent dashboard | new | `OR-12` — a `FocusArea` panel over `AR-6`'s state and `EVd-1`'s rows. The mock in the proposal renders five states xencode cannot yet observe; `AR-6` is the item, the panel is its report |
-| 17 | Agent timeline / flight recorder | planned | `EV-2`'s turn trace + `QA-3`'s decision markers. The proposal's own closing table already identified this overlap correctly |
+| 17 | Agent timeline / flight recorder | shipped | `EV-2`'s turn trace + `QA-3`'s decision markers, both built 2026-09-24. The proposal's own closing table already identified this overlap correctly |
 | 18 | Agent-to-agent review loops (planner → implementer → reviewer → verifier → fixer) | planned | `MA-2`'s serial pipeline + `MA-1`'s clean-context reviewer + `L-7`'s exit-code done-gate. New only in that the roles can now be filled by external workers (`AR-7`) |
 | 19 | Agent voting; expose disagreement, never majority-rule | planned | `QM-4` — "report disagreement, never resolve". The proposal independently restates a rule the plan already committed to, which is the best possible sign for it |
 | 20 | Specialist swarms (`/orchestrator team security\|feature\|debugging\|…`) | narrowed | `OR-9` — named recipes as TOML data over `OR-2`, which is exactly `MA-2`'s shape. A recipe is data; a team engine is `MA-5` returning by the side door |

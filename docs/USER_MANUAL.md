@@ -398,16 +398,29 @@ selector.
 **`/trace [turns]` — looking back at what the agent actually did.** Each finished
 agent turn appends one line to `.xencode/cache/turns.jsonl` inside the project:
 how long it took, how many rounds the loop ran, the model and server that served
-it, which tools it called and how each one ended. `/trace` prints the newest 50
-of those lines (fewer with `/trace 5`), starting with a total. It reads a local
-file, so it answers even with every model server down.
+it, which tools it called and how each one ended, with the arguments each call
+was made from, which workspace files were put in front of the model, and whether
+the turn was marked as a decision. `/trace` prints the newest 50 of those lines
+(fewer with `/trace 5`), starting with a total. It reads a local file, so it
+answers even with every model server down. A marked turn prints as `#3 [d] …`,
+the same marker that keeps its transcript entries through compaction; it comes
+from `[d]` in the words you typed, never from anything a model said about its own
+reasoning. Each line also says what that turn was shown to read
+(`read for context: src/main.rs, notes.txt +1 more`), and a call that did not
+finish prints the arguments it was given before the end of its output.
 
-What it does not keep is deliberate: no prompt text (only a short digest of it),
-no tool arguments, and no full tool output — just a brief tail of each output,
-scrubbed of anything that looks like a key, token or password before it is
-stored. And because most local servers report no token usage at all, the token
-column stays empty unless one did, and cost is never estimated; `/trace` says
-which of those is the case rather than showing a number it invented.
+What it does not keep is deliberate: no prompt text (only a short digest of it)
+and no full tool output — just a brief tail of each output, scrubbed of anything
+that looks like a key, token or password before it is stored. Arguments are kept
+only as far as they explain the call: a path, a pattern, a command line stays,
+while the body of a file being written, the text an edit replaces and a plan's
+steps are recorded as their size. The file holds every call's arguments;
+`/trace` prints them for the calls that did not finish — denied, refused or
+failed — because listing them all would push the interesting lines off the
+screen. And because most local servers report
+no token usage at all, the token column stays empty unless one did, and cost is
+never estimated; `/trace` says which of those is the case rather than showing a
+number it invented.
 
 **`/cost` — what the recorded turns add up to.** Every turn that assembles a
 context appends one row to `.xencode/cache/metrics.jsonl` in the project, and

@@ -237,6 +237,16 @@ pub(crate) struct AgentRun {
     /// Digest of the text that started the turn. The prompt itself is never
     /// recorded, only this, so a trace cannot become a copy of the conversation.
     pub(crate) prompt_digest: Option<String>,
+    /// Whether the prompt that started the turn carried the `[d]` decision
+    /// marker — the same reading compaction uses to decide what always survives.
+    /// It is a fact about the user's own words, never about anything the model
+    /// wrote about its reasoning.
+    pub(crate) is_decision: bool,
+    /// The workspace files the context assembler put in front of the model for
+    /// this turn, best match first. A delegated run that assembled no retrieval
+    /// tier, and a replay, carry nothing here — the trace says what this program
+    /// actually handed over, not what it might have.
+    pub(crate) retrieved_files: Vec<String>,
     /// Where this run's recording goes, when the user asked for one (QA-1).
     /// Unlike the trace above, a recording keeps the prompts and the tool
     /// output whole — that is what makes it replayable — so it only exists
@@ -2371,22 +2381,7 @@ impl<'a> App<'a> {
                 content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
             });
         }
-        let mut context_messages: Vec<ChatMessage> = assembly
-            .turns
-            .into_iter()
-            .map(|t| ChatMessage {
-                role: t.role,
-                content: t.content.into(),
-            })
-            .collect();
-        // Teach the model the tool vocabulary (I1-04). Appended to the
-        // assembled system turn so context assembly and its KV-cache
-        // stability are untouched; only text-only system messages qualify.
-        if let Some(system) = context_messages.first_mut().filter(|m| m.role == "system") {
-            if let xencode_providers_rs::MessageContent::Text(text) = &mut system.content {
-                xencode_context_rs::prompts::append_tool_hint(text);
-            }
-        }
+        let mut context_messages = Self::chat_messages(assembly.turns);
         // Attached images become content parts on the final user turn, in
         // sorted-path order (deterministic, KV-stable like the text block).
         // A `false` here means the turn was unusable — surface it in chat
@@ -2420,7 +2415,8 @@ impl<'a> App<'a> {
             assembly.retrieved_included.min(u8::MAX as usize)
         ));
 
-        let run = self.agent_run(LoopSink::Chat, context_messages, &prompt);
+        let mut run = self.agent_run(LoopSink::Chat, context_messages, &prompt);
+        run.retrieved_files = assembly.retrieved_files;
 
         tokio::spawn(agent_rounds(run, tx));
     }
@@ -2549,6 +2545,8 @@ impl<'a> App<'a> {
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
             trace_identity: self.metrics_identity(&self.config.default_model),
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
+            is_decision: xencode_context_rs::has_decision_marker(prompt),
+            retrieved_files: Vec::new(),
             session: self.begin_recording(prompt),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
@@ -3049,15 +3047,21 @@ impl<'a> App<'a> {
         self.bytebot_log.push(format!("⚡ task: {task}"));
         self.focus = FocusArea::ByteBotPanel;
 
-        let context_messages = self.bytebot_context(&task);
-        Some(self.agent_run(LoopSink::ByteBot, context_messages, &task))
+        let assembly = self.bytebot_context(&task);
+        let mut run = self.agent_run(
+            LoopSink::ByteBot,
+            Self::chat_messages(assembly.turns),
+            &task,
+        );
+        run.retrieved_files = assembly.retrieved_files;
+        Some(run)
     }
 
     /// ByteBot's conversation: the task framed as an autonomous brief, on the
     /// same live project context a chat turn gets (guidelines, git, retrieval)
     /// and with the tool vocabulary appended. No chat history — a delegated
     /// run starts from the repository, not from whatever was said before.
-    fn bytebot_context(&self, task: &str) -> Vec<ChatMessage> {
+    fn bytebot_context(&self, task: &str) -> xencode_context_rs::ChatAssembly {
         self.delegated_context(
             &xencode_context_rs::default_root(),
             task,
@@ -3074,13 +3078,13 @@ impl<'a> App<'a> {
         root: &std::path::Path,
         task: &str,
         brief: fn(&str) -> String,
-    ) -> Vec<ChatMessage> {
+    ) -> xencode_context_rs::ChatAssembly {
         let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
         let model = self.config.default_model.clone();
         let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
         let system = self.agent_system_prompt();
         let prompt = brief(task);
-        let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
+        xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
             context_window,
             system: &system,
@@ -3092,9 +3096,15 @@ impl<'a> App<'a> {
             attached_block: "",
             history: &[],
             prompt: &prompt,
-        });
-        let mut messages: Vec<ChatMessage> = assembly
-            .turns
+        })
+    }
+
+    /// Assembled turns as provider messages, with the tool vocabulary taught on
+    /// the system turn (I1-04). Appended there rather than assembled into the
+    /// context tiers, so the byte-stable prefix and its KV-cache reuse are
+    /// untouched; only a text-only system message qualifies.
+    fn chat_messages(turns: Vec<xencode_context_rs::ChatTurn>) -> Vec<ChatMessage> {
+        let mut messages: Vec<ChatMessage> = turns
             .into_iter()
             .map(|t| ChatMessage {
                 role: t.role,
@@ -3151,12 +3161,17 @@ impl<'a> App<'a> {
 
         // A per-spawn checkpoint store: `/rewind` in the main chat reaches the
         // main checkout's turns, never a spawned worktree's edits.
-        let context_messages = self.delegated_context(
+        let assembly = self.delegated_context(
             &worktree_path,
             task,
             xencode_context_rs::prompts::worktree_brief,
         );
-        let mut run = self.agent_run(LoopSink::Spawn(id), context_messages, task);
+        let mut run = self.agent_run(
+            LoopSink::Spawn(id),
+            Self::chat_messages(assembly.turns),
+            task,
+        );
+        run.retrieved_files = assembly.retrieved_files;
         run.tool_root = worktree_path;
         run.approval.checkpoints = std::sync::Arc::new(crate::agent_tools::CheckpointStore::new());
         Some((id, branch_name, run))
@@ -6239,8 +6254,10 @@ fn count_words(count: usize, word: &str) -> String {
 }
 
 /// Render recorded turns for `/trace`: a header of totals, then one line per
-/// turn newest first, then a line of output for each tool that did not finish.
-/// Pure — the rows come from the file, so the layout is unit-testable.
+/// turn newest first — marked `[d]` when the user pinned it as a decision —
+/// then what that turn was shown, then a line of output for each tool that did
+/// not finish. Pure — the rows come from the file, so the layout is
+/// unit-testable.
 fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<String> {
     let now_ms = (now_secs.max(0.0) * 1_000.0) as u64;
     let calls: usize = rows.iter().map(|row| row.tools.len()).sum();
@@ -6299,8 +6316,9 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
                 }
             )
         };
+        let marker = if row.is_decision { " [d]" } else { "" };
         out.push(format!(
-            "#{} {} · {model} via {server} ({route}) · {} · {tools} · {}",
+            "#{}{marker} {} · {model} via {server} ({route}) · {} · {tools} · {}",
             index + 1,
             trace_age(now_ms, row.ts_unix_ms),
             count_words(row.rounds as usize, "round"),
@@ -6311,6 +6329,26 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
         ));
         if row.failed {
             out.push("   stopped on a provider error before answering".to_string());
+        }
+        if !row.retrieved_files.is_empty() {
+            // Paths only, and only the ones the budget kept: this is the answer
+            // to "what was it looking at", not a copy of the repository.
+            let shown = row
+                .retrieved_files
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>();
+            let extra = row.retrieved_files.len() - shown.len();
+            out.push(format!(
+                "   read for context: {}{}",
+                shown.join(", "),
+                if extra > 0 {
+                    format!(" +{extra} more")
+                } else {
+                    String::new()
+                }
+            ));
         }
         for tool in row.tools.iter().filter(|tool| tool.outcome != "done") {
             if let Some(tail) = &tool.tail {
@@ -6323,9 +6361,17 @@ fn trace_report(rows: &[xencode_context_rs::TurnTrace], now_secs: f64) -> Vec<St
                 } else {
                     tail.clone()
                 };
+                // The arguments a call was made with are shown here, where they
+                // explain a failure; every call's arguments are in the file, and
+                // listing them for turns that worked would push the interesting
+                // lines off the screen.
+                let asked = match &tool.arguments {
+                    Some(arguments) => format!("{arguments} "),
+                    None => String::new(),
+                };
                 out.push(format!(
-                    "   {} ({}) output: {tail}",
-                    tool.name, tool.outcome
+                    "   {} ({}) {}output: {tail}",
+                    tool.name, tool.outcome, asked
                 ));
             }
         }
@@ -6395,6 +6441,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         trace_dir,
         trace_identity,
         prompt_digest,
+        is_decision,
+        retrieved_files,
         mut session,
     } = run;
     let turn_started = std::time::Instant::now();
@@ -6564,9 +6612,15 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // without it.
             let tail =
                 xencode_context_rs::tail_preview(&result, xencode_context_rs::TRACE_TAIL_CAP);
+            // And what the model asked for, reduced to what explains the call —
+            // a trace that cannot say which file it pointed at cannot say why a
+            // call failed. Bulk payloads are replaced by their size and
+            // credentials removed, same rules as the output above.
+            let arguments = xencode_context_rs::arguments_preview(&call.arguments);
             turn_tools.push(xencode_context_rs::ToolTrace {
                 name: call.name.clone(),
                 outcome: outcome.label().to_string(),
+                arguments,
                 tail: (!tail.is_empty()).then_some(tail),
             });
             history.push(xencode_providers_rs::AgentTurn::ToolResult {
@@ -6606,6 +6660,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     trace.prompt_sha256 = prompt_digest;
     trace.tools = turn_tools;
     trace.completion_tokens = reported_tokens;
+    trace.retrieved_files = retrieved_files;
+    trace.is_decision = is_decision;
     let _ = xencode_context_rs::append_trace(&trace_dir, &trace);
     let _ = tx.send(match sink {
         LoopSink::Chat => "[DONE]".to_string(),
@@ -8800,6 +8856,25 @@ mod tests {
             Some(xencode_context_rs::MetricSource::Local),
             "the default model is a local one"
         );
+        // A decision is marked by the reader, in the user's own words — the same
+        // reading compaction uses. Nothing a model writes can set it.
+        assert!(!run.is_decision);
+        assert!(
+            app.agent_run(LoopSink::Chat, Vec::new(), "use actix-web [d]")
+                .is_decision
+        );
+        assert!(
+            !app.agent_run(
+                LoopSink::Chat,
+                Vec::new(),
+                "I have decided to switch frameworks"
+            )
+            .is_decision,
+            "the model's own account of deciding is not a marker"
+        );
+        // Which files went into the prompt is not known until a context is
+        // assembled, so an armed run carries none.
+        assert!(run.retrieved_files.is_empty());
     }
 
     #[test]
@@ -8832,6 +8907,13 @@ mod tests {
         newer.ts_unix_ms = 61_000;
         newer.rounds = 3;
         newer.failed = true;
+        newer.is_decision = true;
+        newer.retrieved_files = vec![
+            "src/main.rs".to_string(),
+            "notes.txt".to_string(),
+            "README.md".to_string(),
+            "docs/PLAN.md".to_string(),
+        ];
         newer.completion_tokens = None;
         newer.source = Some(xencode_context_rs::MetricSource::Cloud);
         newer.provider = Some("anthropic".to_string());
@@ -8840,11 +8922,13 @@ mod tests {
             xencode_context_rs::ToolTrace {
                 name: "read_file".to_string(),
                 outcome: "done".to_string(),
+                arguments: Some("{\"path\":\"notes.txt\"}".to_string()),
                 tail: None,
             },
             xencode_context_rs::ToolTrace {
                 name: "run_command".to_string(),
                 outcome: "failed".to_string(),
+                arguments: Some("{\"command\":\"cargo build\"}".to_string()),
                 tail: Some("permission denied".to_string()),
             },
         ];
@@ -8855,20 +8939,27 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "#1 4s ago · anthropic:claude-3-5-sonnet via anthropic (off-machine) · 3 rounds · 2 tools: read_file, run_command·failed · no token count",
+            "#1 [d] 4s ago · anthropic:claude-3-5-sonnet via anthropic (off-machine) · 3 rounds · 2 tools: read_file, run_command·failed · no token count",
             "{}",
             lines[1]
         );
         assert_eq!(lines[2], "   stopped on a provider error before answering");
         assert_eq!(
             lines[3],
-            "   run_command (failed) output: permission denied"
+            "   read for context: src/main.rs, notes.txt, README.md +1 more"
         );
         assert_eq!(
-            lines[4], "#2 1m ago · qwen2.5:7b via ollama (local) · 1 round · no tools · 120 tokens",
-            "{}",
-            lines[4]
+            lines[4],
+            "   run_command (failed) {\"command\":\"cargo build\"} output: permission denied"
         );
+        assert_eq!(
+            lines[5], "#2 1m ago · qwen2.5:7b via ollama (local) · 1 round · no tools · 120 tokens",
+            "{}",
+            lines[5]
+        );
+        // A turn that was not marked, retrieved nothing and took no arguments
+        // says neither — the lines are absent rather than empty.
+        assert_eq!(lines.len(), 6, "{lines:?}");
     }
 
     /// When no server reported usage the report says so, rather than showing a
@@ -8912,9 +9003,10 @@ mod tests {
         );
     }
 
-    /// The writer end to end: the real agent loop over a real socket, a real
-    /// tool call, and a key in the file the tool read. One turn must produce
-    /// one row, and that row must not carry the key.
+    /// The writer end to end: the real agent loop over a real socket, real tool
+    /// calls, a key in the file the tool read and a file the tool was refused
+    /// permission to write. One turn must produce one row, and that row must not
+    /// carry the key, the file's text, or the payload the model tried to write.
     #[tokio::test]
     async fn one_turn_of_the_real_loop_writes_one_redacted_trace_row() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -8936,7 +9028,12 @@ mod tests {
         let server = tokio::spawn(async move {
             let answers = vec![
                 serde_json::json!({"message": {"role": "assistant", "tool_calls": [
-                    {"function": {"name": "read_file", "arguments": {"path": "notes.txt"}}}
+                    {"function": {"name": "read_file", "arguments": {"path": "notes.txt"}}},
+                    {"function": {"name": "write_file", "arguments": {
+                        "path": "copy.txt",
+                        "content": "OPENAI_API_KEY=sk-abcdefghijklmnop\n".repeat(60),
+                    }}},
+                    {"function": {"name": "repo_advise", "arguments": {}}}
                 ]}, "done": true}),
                 serde_json::json!({"message": {"role": "assistant", "content": "read it"}, "done": true}),
             ];
@@ -8960,7 +9057,11 @@ mod tests {
             }
         });
 
-        let app = App::for_tests();
+        let mut app = App::for_tests();
+        // Nobody is there to answer an approval prompt, so the gated write is
+        // denied exactly as it is in a headless run. The trace still records
+        // what the model asked for.
+        app.approval_rx = None;
         let mut run = app.agent_run(
             LoopSink::Chat,
             vec![xencode_providers_rs::ChatMessage {
@@ -8972,6 +9073,7 @@ mod tests {
         run.ollama_url = format!("http://{addr}");
         run.tool_root = dir.clone();
         run.trace_dir = dir.join(xencode_context_rs::XENCODE_DIR);
+        run.retrieved_files = vec!["notes.txt".to_string(), "src/main.rs".to_string()];
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         super::agent_rounds(run, tx).await;
         while rx.try_recv().is_ok() {}
@@ -8983,12 +9085,40 @@ mod tests {
         let row = &rows[0];
         assert_eq!(row.rounds, 2, "the tool round and the answer");
         assert!(!row.failed);
-        assert_eq!(row.tools.len(), 1);
+        assert_eq!(row.tools.len(), 3);
         assert_eq!(row.tools[0].name, "read_file");
         assert_eq!(row.tools[0].outcome, "done");
+        // What the call pointed at is kept, so a wrong call can be read back.
+        assert_eq!(
+            row.tools[0].arguments.as_deref(),
+            Some("{\"path\":\"notes.txt\"}")
+        );
         let tail = row.tools[0].tail.clone().expect("output was kept");
         assert!(!tail.contains("sk-abcdefghijklmnop"), "{tail}");
         assert!(tail.contains("[redacted]"), "{tail}");
+        // A file the call tried to write is kept as its size, never as text.
+        let write = &row.tools[1];
+        assert_eq!(write.name, "write_file");
+        assert_eq!(
+            write.outcome, "denied",
+            "the approval gate is not loosened by recording arguments"
+        );
+        assert!(
+            !dir.join("copy.txt").exists(),
+            "a denied write must never reach the disk"
+        );
+        let arguments = write.arguments.clone().expect("arguments were kept");
+        assert!(arguments.contains("copy.txt"), "{arguments}");
+        assert!(arguments.contains("[2100 bytes]"), "{arguments}");
+        assert!(!arguments.contains("sk-abcdefghijklmnop"), "{arguments}");
+        assert!(!arguments.contains("OPENAI_API_KEY"), "{arguments}");
+        // A call that took nothing records nothing rather than `{}`.
+        assert_eq!(row.tools[2].name, "repo_advise");
+        assert_eq!(row.tools[2].arguments, None);
+        // The turn says which files were in front of the model, and whether the
+        // user marked it a decision. Neither is the model's claim about itself.
+        assert_eq!(row.retrieved_files, vec!["notes.txt", "src/main.rs"]);
+        assert!(!row.is_decision, "the prompt carried no [d] marker");
         assert_eq!(
             row.prompt_sha256.as_deref(),
             Some(xencode_context_rs::prompt_digest("read the note").as_str())
