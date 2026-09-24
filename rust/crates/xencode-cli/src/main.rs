@@ -1863,9 +1863,24 @@ async fn run_query_once(
         &prompt,
         xencode_context_rs::HardwareProfile::Balanced,
     );
-    // The model's real window when known (Step 3 capabilities); unknown
-    // routes defer to the profile default.
-    let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+    // The window the server is actually running with, when the model is served
+    // by a llama.cpp process that will say. A family table cannot know `-c`;
+    // every other route keeps the table's answer.
+    let server_window = if xencode_providers_rs::routes_to_llamacpp(&model) {
+        LlamaCppClient::new(&config.llama_cpp_url, 3)
+            .context_window()
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    if let Some(tokens) = server_window {
+        eprintln!(
+            "context: {tokens}-token window reported by the server at {}",
+            config.llama_cpp_url
+        );
+    }
+    let context_window = xencode_providers_rs::effective_context_window(&model, server_window);
     let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
         profile: xencode_context_rs::HardwareProfile::Balanced,
         context_window,

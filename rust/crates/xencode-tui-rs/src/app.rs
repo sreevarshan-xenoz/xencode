@@ -586,6 +586,12 @@ pub struct App<'a> {
     /// Retrieved files in the last assembly (recorded into metrics row).
     pub last_ctx_retrieved_files: u8,
 
+    /// The context window the llama.cpp server said it is running with, read
+    /// from its `/props` at startup, after a model load, and while each turn is
+    /// in flight. `None` until it says — including when no llama.cpp server is
+    /// what this session talks to.
+    pub server_context_window: Option<u32>,
+
     /// What this session has spent, from the records on disk: the status-row
     /// text, and the cost it was derived from. Refreshed when a turn finishes,
     /// never on a redraw (CX-1/L-9).
@@ -1924,6 +1930,7 @@ impl<'a> App<'a> {
             task_runtime: crate::agent_tools::new_task_runtime(),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
+            server_context_window: None,
             spend: None,
             budget_warned: false,
         };
@@ -2355,11 +2362,16 @@ impl<'a> App<'a> {
                 append_text_attachment(&mut attached_block, path);
             }
         }
-        // The model's real window when known (Step 3 capabilities); unknown
-        // routes defer to the profile default. The `/ctx` preview always
-        // shows profile-default budgeting.
+        // The window the server reported wins on the llama.cpp route (AC-1);
+        // otherwise the model family's known window, and unknown routes defer
+        // to the profile default. The `/ctx` preview always shows
+        // profile-default budgeting.
         let model = self.config.default_model.clone();
-        let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+        // Refresh what the server says while this turn is in flight, so a
+        // server restarted outside xencode is picked up by the next turn.
+        self.probe_context_window(tx.clone());
+        let context_window =
+            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
         let system = self.agent_system_prompt();
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
@@ -3083,7 +3095,8 @@ impl<'a> App<'a> {
     ) -> xencode_context_rs::ChatAssembly {
         let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
         let model = self.config.default_model.clone();
-        let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
+        let context_window =
+            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
         let system = self.agent_system_prompt();
         let prompt = brief(task);
         xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
@@ -5630,6 +5643,27 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Ask the llama.cpp server what context window it is actually running
+    /// with, and let the answer come back through the event channel as
+    /// `[CTXWINDOW]<tokens>` (AC-1).
+    ///
+    /// Nothing happens unless this session's model goes to that server — an
+    /// `llama-server` that is not running would cost a connect attempt on every
+    /// turn for nobody. A server that answers without reporting keeps the
+    /// previous value rather than resetting to a guess.
+    fn probe_context_window(&self, tx: mpsc::UnboundedSender<String>) {
+        if !xencode_providers_rs::routes_to_llamacpp(&self.config.default_model) {
+            return;
+        }
+        let url = self.config.llama_cpp_url.clone();
+        tokio::spawn(async move {
+            let client = LlamaCppClient::new(&url, 3);
+            if let Ok(Some(tokens)) = client.context_window().await {
+                let _ = tx.send(format!("[CTXWINDOW]{tokens}"));
+            }
+        });
+    }
+
     /// Auto-start `llama-server` when xencode boots, per config docs
     /// (`llama_cpp_model_path` / `llama_cpp_executable` / `llama_cpp_args`).
     ///
@@ -5668,9 +5702,13 @@ impl<'a> App<'a> {
         let ok_tx = tx.clone();
 
         tokio::spawn(async move {
-            // Already running? Attach silently.
+            // Already running? Attach silently, but ask it what window it has:
+            // that is the one thing the model family table cannot know.
             let probe = LlamaCppClient::new(&url, 3);
             if probe.ping().await.is_ok() {
+                if let Ok(Some(tokens)) = probe.context_window().await {
+                    let _ = ok_tx.send(format!("[CTXWINDOW]{tokens}"));
+                }
                 return;
             }
 
@@ -5747,6 +5785,11 @@ impl<'a> App<'a> {
 
             let pid = server.pid();
             *shared.lock().unwrap() = Some(server);
+            // This process is the authority on its own window, and it is only
+            // reachable now that it has finished loading the model.
+            if let Ok(Some(tokens)) = client.context_window().await {
+                let _ = ok_tx.send(format!("[CTXWINDOW]{tokens}"));
+            }
             let _ = ok_tx.send(format!(
                 "[LLAMACPP_MSG]✅ auto-started llama-server on {} (PID {pid}, model {})",
                 url, model_path
@@ -7105,8 +7148,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     app.last_ctx_total_tokens = parts[0].parse().unwrap_or(0);
                     app.last_ctx_retrieved_files = parts[1].parse().unwrap_or(0);
                 }
+            } else if let Some(body) = token.strip_prefix("[CTXWINDOW]") {
+                if let Ok(tokens) = body.trim().parse::<u32>() {
+                    app.server_context_window = Some(tokens);
+                }
             } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
                 app.llamacpp_action_msg = body.to_string();
+                // Loading or swapping a model can leave the server running
+                // something else than it was asked to; ask its window again
+                // instead of keeping the number from before.
+                app.probe_context_window(tx.clone());
             } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
                 if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
                     app.last_llamacpp_timings = Some(ts.clone());
@@ -8745,6 +8796,40 @@ mod tests {
 
         app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
         assert_eq!(app.egress_of("openai/gpt-4o"), Egress::Cloud);
+    }
+
+    /// A window the llama.cpp server reported reaches the budget, for the run
+    /// the user starts and for a delegated one alike (AC-1). Without the report
+    /// both fall back to the profile's 8192 × 0.75; with a 2048-token server the
+    /// budget has to shrink to what is really there, because a window larger
+    /// than the server's is how context gets silently dropped.
+    #[test]
+    fn a_window_reported_by_the_server_governs_the_run_budget() {
+        let mut app = App::for_tests();
+        app.config.default_model = "llama:dolphin".to_string();
+
+        let profile = xencode_context_rs::HardwareProfile::Balanced;
+        let unreported = app.bytebot_context("fix the failing test").target_tokens;
+        assert_eq!(
+            unreported,
+            (profile.ctx_tokens() as f64 * profile.utilization()).floor() as u64
+        );
+
+        app.server_context_window = Some(2048);
+        assert_eq!(
+            app.bytebot_context("fix the failing test").target_tokens,
+            (2048f64 * profile.utilization()).floor() as u64
+        );
+
+        // The same number arrives for an ordinary submitted turn through the
+        // same field, and a report from a server this session does not use
+        // changes nothing: the hosted route keeps its own window.
+        app.server_context_window = Some(8192);
+        app.config.default_model = "anthropic:claude-sonnet-4".to_string();
+        assert_eq!(
+            app.bytebot_context("fix the failing test").target_tokens,
+            (200_000f64 * profile.utilization()).floor() as u64
+        );
     }
 
     /// What a metrics row says about itself (CX-2): which model ran, which

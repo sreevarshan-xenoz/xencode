@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the context budget now knows the window it is spending
+A run decides how much project context to include by multiplying the model's
+context window by a fill fraction, and for a model served by llama.cpp that
+window was a guess from the hardware profile — the same arithmetic that decides
+what gets trimmed, working from a number nobody had looked up. A running
+`llama-server` does know its window: it reports it at `/props`, under
+`default_generation_settings.n_ctx`, and now that is what governs. The reported
+window also beats the model family's usual size, which is the case that matters
+most — `llama:llama-3.1-8b` is a family documented at 128k and a server started
+with `-c 4096` has 4096, and filling for 128k quietly loses everything past the
+server's own limit. `xencode query` says what it learned
+(`context: 8192-token window reported by the server at http://localhost:8080`); starting
+the same model with `-c 4096` made the same command report 4096, with no config
+change, so the number is live rather than remembered.
+
+A window learned from a llama.cpp server is never applied to a run that is not
+talking to one, so hosted routes keep their own answer, and a server that does
+not reply leaves the old behaviour in place rather than substituting a new guess.
+In the TUI the number is asked at startup, again after a llama.cpp model is
+loaded or swapped, and again at the start of each turn, so a server restarted
+outside xencode is picked up from the following turn. Two routes remain unread:
+Ollama's effective `num_ctx`, and any llama.cpp build that reports the window
+nowhere — on both, budgeting is as it was.
+
 ### Changed — a model's request has to say what it means
 Before now, a tool call whose arguments could not be read was run as a call with
 no arguments at all: a response cut off halfway through the first field looked

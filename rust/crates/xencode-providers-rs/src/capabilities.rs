@@ -13,8 +13,14 @@
 //!   `tool_calls` support, so the future agent loop can skip tool offers
 //!   where they would be ignored.
 //!
+//! The local route is the one place the table cannot answer, and the server
+//! can: a running `llama-server` reports the window it was started with, so
+//! [`effective_context_window`] prefers that over any table entry when the
+//! model actually goes to a llama.cpp server.
+//!
 //! Precedence at the call site is therefore:
-//! `known model window → hardware profile default`.
+//! `server-reported window (llama.cpp route) → known model window → hardware
+//! profile default`.
 
 /// What the context budgeter and agent loop need to know about a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +84,28 @@ fn known_context_window(lower_model: &str) -> Option<u32> {
         return Some(64_000);
     }
     None
+}
+
+/// Resolve the window to budget against, preferring what the server says.
+///
+/// `server_reported` is the running window read from a llama.cpp server's
+/// `/props` (see `xencode_models_rs::llamacpp::context_window_from_props`).
+/// It governs **only** when the model actually routes to a llama.cpp server —
+/// that number describes the process it was read from, and applying a window
+/// learned elsewhere would budget for space the model does not have. For any
+/// other route the reported value is dropped and the static table answers.
+///
+/// On the llama.cpp route the reported value wins *over the table*, not just
+/// over a `None`: `llama:llama-3.1-8b` is a family the table knows as 128k
+/// while the server may well have been started with `-c 8192`. A window
+/// larger than the server's is what silently truncates context.
+pub fn effective_context_window(model: &str, server_reported: Option<u32>) -> Option<u32> {
+    if crate::routes_to_llamacpp(model) {
+        if let Some(reported) = server_reported {
+            return Some(reported);
+        }
+    }
+    capabilities_for(model).context_window
 }
 
 /// True exactly for the routes whose streaming path parses `tool_calls`.
@@ -154,6 +182,49 @@ mod tests {
         assert_eq!(
             capabilities_for("some-future-model-xyz").context_window,
             None
+        );
+    }
+
+    #[test]
+    fn a_window_reported_by_the_server_governs_the_local_route() {
+        for model in ["llamacpp:qwen3-4b", "llama.cpp:qwen3-4b", "llama:dolphin"] {
+            assert_eq!(
+                effective_context_window(model, Some(8192)),
+                Some(8192),
+                "{model}"
+            );
+        }
+        // With nothing reported, the local route is as clueless as before.
+        assert_eq!(effective_context_window("llama:dolphin", None), None);
+    }
+
+    #[test]
+    fn a_reported_window_beats_the_family_table_on_the_local_route() {
+        // The table knows the llama-3.1 family as 128k; a server started with
+        // `-c 8192` has 8192 and no more. Budgeting for the family's window
+        // here is what silently drops context, so the measurement wins.
+        assert_eq!(
+            capabilities_for("llama:llama-3.1-8b").context_window,
+            Some(128_000)
+        );
+        assert_eq!(
+            effective_context_window("llama:llama-3.1-8b", Some(8192)),
+            Some(8192)
+        );
+    }
+
+    #[test]
+    fn a_window_from_a_different_kind_of_server_is_ignored() {
+        // That 8192 describes a llama.cpp process. Applying it to a hosted
+        // route would budget for space the API does not run out of the same way.
+        assert_eq!(
+            effective_context_window("anthropic:claude-sonnet-4", Some(8192)),
+            Some(200_000)
+        );
+        assert_eq!(effective_context_window("qwen2.5:7b", Some(8192)), None);
+        assert_eq!(
+            effective_context_window("openrouter/deepseek/deepseek-chat", Some(8192)),
+            Some(64_000)
         );
     }
 
