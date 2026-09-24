@@ -110,6 +110,24 @@ fn as_window(tokens: u64) -> Option<u32> {
     u32::try_from(tokens).ok()
 }
 
+/// Pick the token count out of a `/tokenize` response, for the `text` that was
+/// sent to get it.
+///
+/// Measured on `llama-server` b10809: the response is `{"tokens":[…]}`, one
+/// integer per token, so the answer is the length of that array. `None` covers
+/// both a body without such an array and — the case that makes `text` part of
+/// this function — an empty array given back for text that was not empty. That
+/// is what b10809 does to a request using a field name it does not read, and it
+/// answers HTTP 200 while doing it, so believing zero here would report a prompt
+/// as empty instead of reporting that nobody counted it.
+pub fn counted_tokens_from_response(body: &serde_json::Value, text: &str) -> Option<u64> {
+    let tokens = body.get("tokens").and_then(|v| v.as_array())?;
+    if tokens.is_empty() && !text.is_empty() {
+        return None;
+    }
+    Some(tokens.len() as u64)
+}
+
 /// A running `llama-server` process that xencode spawned (auto-start support).
 #[derive(Debug)]
 pub struct LlamaServerProcess {
@@ -434,6 +452,33 @@ impl LlamaCppClient {
             .await
             .map_err(|e| LlamaCppError::Parse(e.to_string()))?;
         Ok(context_window_from_props(&props))
+    }
+
+    /// How many tokens the server's own vocabulary says `text` is, asked of its
+    /// `/tokenize` endpoint. `Ok(None)` means nobody counted it — see
+    /// [`counted_tokens_from_response`] for when an answer is not believed.
+    ///
+    /// Special tokens are counted as the literal text they are written as:
+    /// `parse_special` and `add_bos` are accepted and ignored on b10809, so a
+    /// marker like `<|end|>` costs five tokens here instead of one. That only
+    /// ever pushes the count up, which is the safe direction for a budget.
+    pub async fn count_tokens(&self, text: &str) -> Result<Option<u64>, LlamaCppError> {
+        let url = format!("{}/tokenize", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "content": text }))
+            .send()
+            .await
+            .map_err(|e| LlamaCppError::Api(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let body = resp
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| LlamaCppError::Parse(e.to_string()))?;
+        Ok(counted_tokens_from_response(&body, text))
     }
 
     /// Query token-generation timing and usage for a model from the native
@@ -876,6 +921,42 @@ mod tests {
         assert_eq!(context_window_from_props(&props), Some(2048));
     }
 
+    /// `/tokenize` as answered by `llama-server` b10809 to the prose sentence
+    /// `"The context budget now knows the window it is spending."`, captured
+    /// from the running server on this machine.
+    #[test]
+    fn a_token_count_is_the_length_of_the_token_array() {
+        let body = serde_json::json!({
+            "tokens": [785, 2266, 8039, 1431, 8788, 279, 3241, 432, 374, 10164, 13]
+        });
+        assert_eq!(
+            counted_tokens_from_response(&body, "The context budget now knows…"),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn a_response_without_a_token_array_is_not_an_answer() {
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({ "token_count": 11 }),
+            serde_json::json!({ "tokens": "785 2266" }),
+            serde_json::json!({ "error": "unsupported" }),
+        ] {
+            assert_eq!(counted_tokens_from_response(&body, "some text"), None);
+        }
+    }
+
+    /// Zero tokens is a real answer about an empty string and a fake answer
+    /// about anything else: b10809 replies `{"tokens":[]}` with HTTP 200 to a
+    /// request whose field name it does not read.
+    #[test]
+    fn zero_tokens_is_only_believed_for_text_that_was_actually_empty() {
+        let empty = serde_json::json!({ "tokens": [] });
+        assert_eq!(counted_tokens_from_response(&empty, ""), Some(0));
+        assert_eq!(counted_tokens_from_response(&empty, "hello"), None);
+    }
+
     /// Live check against a running `llama-server` — needs a real server, so it
     /// is skipped by default. Point it at one with
     /// `XENCODE_TEST_LLAMA_URL=http://127.0.0.1:8099 cargo test -p
@@ -893,5 +974,27 @@ mod tests {
         let tokens = reported.expect("server reported no window");
         assert!(tokens > 0, "reported window {tokens} is not usable");
         println!("{url} is running a {tokens}-token window");
+    }
+
+    /// The same server counting a sentence it is given, with the arithmetic the
+    /// budgeter would have done instead (`ceil(chars / 4)`) printed beside it —
+    /// the comparison is the reason to ask. Needs a real server, so it is skipped
+    /// by default; see [`a_running_server_reports_its_own_window`] for the URL
+    /// variable.
+    #[tokio::test]
+    #[ignore]
+    async fn a_running_server_counts_the_text_it_is_given() {
+        let url = std::env::var("XENCODE_TEST_LLAMA_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+        let text = "The context budget now knows the window it is spending.";
+        let counted = LlamaCppClient::new(&url, 5)
+            .count_tokens(text)
+            .await
+            .expect("server did not answer /tokenize");
+        let tokens = counted.expect("server returned no usable count for non-empty text");
+        let chars = text.len();
+        let estimated = chars.div_ceil(4) as u64;
+        assert!(tokens > 0, "counted {tokens} tokens for {chars} characters");
+        println!("{url}: {chars} characters = {tokens} tokens counted, {estimated} estimated");
     }
 }
