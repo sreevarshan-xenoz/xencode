@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 936 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 945 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1559,6 +1559,13 @@ never is.
   `claude -p --output-format stream-json` and `codex exec --json` prove the shape,
   and today `--format json` emits one blob. Trap: schema churn; version it
   explicitly. Done-when: a script pipes it and CLI_GUIDE documents every event.
+  *(Done 2026-09-24 — see W1 progress. `xencode query --format ndjson` writes
+  `start` / `token` / `done` / `error`, each carrying `"v": 1`, and a `jq`
+  pipeline reassembled a live 49-line stream byte for byte. No `--stream` flag:
+  the format streams by definition and the text format already streamed, so the
+  flag would select nothing. No `tool` event either, because this command sends
+  one request and does not run the agent loop — see the W1 note before any
+  consumer is designed around tool lines.)*
 - **WF-2 GitHub PR surface over REST** (`xencode pr create|review <n>`, comment
   threads into the existing ReviewDashboard, `GH_TOKEN` or device flow; no `gh`
   dependency). M. Trap: auth sprawl, rate limits, vendor lock-in. Done-when:
@@ -5221,6 +5228,63 @@ done-when is met, and the commit that does it names the IDs.
   `~/.xencode/audit.jsonl` does not exist yet (the server has not been run with a
   session), so the real-path run confirmed the missing-file message and exit
   status 0; the tampering cases are covered in the two layers above.
+- [x] `WF-1` — 2026-09-24. `xencode query --format ndjson` writes the answer as
+  events instead of prose: one `start` line naming the model, the client that was
+  dialed, whether the prompt stayed on this machine and the conversation id; a
+  `token` line per piece as it arrives; then exactly one closing line, `done` with
+  the whole answer and the command's own elapsed milliseconds, or `error` with why
+  there is no answer. Every line carries `"v": 1`. A reader that meets a version it
+  does not know stops; one that meets a known version with an unfamiliar type skips
+  the line and keeps going. Those two rules are the whole answer to the schema-churn
+  trap — no registry, no negotiated version.
+- The done-when was met literally, with a script and a live server rather than an
+  assertion in Rust. Against a local llama.cpp on this machine a prompt answered
+  with a numbered list produced 49 lines — 1 `start`, 47 `token`, 1 `done` — and a
+  `jq` consumer reassembled the 182-byte answer, blank lines included, byte for
+  byte (`cmp` clean). A second run of the same prompt answered from the response
+  cache in 40 ms with `"cached": true`, and its single `token` line still rebuilt
+  the answer exactly, which is why a cache hit is written as a token line and not
+  only as a summary. `session` was observed as `session_1790229510` with memory on
+  and `null` with it off, and also `null` for `--session nosuch`: `switch_session`
+  refuses a name it does not have, so the stream reports what the process actually
+  used rather than what was asked for. A run whose server was never listening was
+  captured too — `start`, then `error`, exit 1, the readable message on stderr, and
+  not one unparsable byte on stdout.
+- Two things written down because they will be asked for. There is no `--stream`
+  flag: the new format streams by definition, the text format has always streamed,
+  and a flag that selected nothing would only make the two spellings of one command
+  drift. And there is no `tool` event. `xencode query` sends one request and does
+  not run the agent loop, so it has no tool call to report; a consumer designed
+  around tool lines is designing around something that does not exist here, and
+  belongs to `QA-1`/`QA-3` where the loop's trace is the record.
+- Token counts are `null` in every measured run, and that is the server's answer,
+  not a gap in the emitter: the llama.cpp build here (0.4.0-dev, 10809) publishes
+  counts only when its stream ends with a usage chunk, and this one does not. The
+  text format has always printed its summary line under the same condition, so the
+  two formats agree.
+- Both traps in this area were found by writing the consumer, not by reading the
+  producer. The first version read each token with `$(…)` and lost every line break
+  in the answer — "1. 2\n2. 3\n3. 5" came out as "1. 22. 33. 5", because command
+  substitution strips trailing newlines. The bytes had to be copied with `jq -j`.
+  That is now in `CLI_GUIDE.md` next to the schema, since it is a property of the
+  shell and not of this format.
+- A fact for whoever runs the next live check: `ResponseCache::with_persistence`
+  ignores `XCODE_CONFIG_DIR` and persists under `~/.xencode/cache/` from
+  `dirs::home_dir()`, while `ConversationMemory` honours the override. So a run
+  pointed at a throwaway config directory still writes the developer's response
+  cache — two entries landed there during this verification and were removed
+  afterwards; `~/.xencode/cache` is empty again and `~/.xencode/config.json` is
+  unchanged, verified by checksum.
+- Verified by 945 tests, 0 failures, 5 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Nine tests are new:
+  six over the line shapes (a version on every event, an answer full of newlines and
+  quotes and tabs still fitting on one line, the token-rebuild invariant, `null`
+  session versus a named one, which fields go missing when nothing was measured, and
+  the `local`/`cloud` spellings pinned against the enum the metrics rows serialise),
+  and three running the real binary with `XCODE_CONFIG_DIR` pointed at a throwaway
+  directory and the model URL at a port that was bound and released — so the failure
+  is a loopback refusal, instant and offline, and no test can reach a vendor service
+  or depend on someone having a model loaded.
 
 #### W2 — The model/inference substrate — 15 items
 

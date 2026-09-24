@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode query` can write its answer as one JSON event per line
+`--format ndjson` on `xencode query` prints a `start` line naming the model, the
+client that was dialed, whether the prompt stayed on this machine and the
+conversation id, then a `token` line per piece of the answer as it arrives, then
+exactly one closing line — `done` with the whole answer and how long it took, or
+`error` with why there is no answer. The plain words go to stdout as before when
+the flag is left off, and a failure still prints its readable message on stderr,
+so stdout of a `--format ndjson` run is parseable from first line to last. Every
+line carries `"v": 1`, and the rule a reader follows is written down: a version
+it does not know stops, an event type it does not know is skipped.
+
+The property a script is built on is that the token lines, concatenated, are
+exactly the answer the `done` line reports. A cached reply holds that too — it
+arrives as one token line, not only as a `done` line. Checked against a local
+llama.cpp server: a 49-line stream (one `start`, 47 `token`, one `done`) whose
+answer contains blank lines and a list reassembled byte for byte through `jq`,
+and a second run of the same prompt answered from cache in 40 ms with
+`"cached": true`.
+
+Token counts are `null` unless the route reported them. A llama.cpp server
+publishes them only when its stream ends with a usage chunk, and the build on
+this machine (0.4.0-dev, 10809) does not, so the measured runs above carry
+elapsed time and no rate. There is no `--stream` flag and no `tool` event:
+`--format ndjson` streams already, and `xencode query` sends a single request
+without running the agent loop, so it has no tool calls to report.
+
 ### Added — the audit log can be checked for edits made afterwards
 The session server's `audit.jsonl` recorded who did what, and nothing could say
 whether the file still held what had been written to it. Each record now carries

@@ -88,6 +88,72 @@ xencode query "List three file formats" --json-schema '{"type":"object"}'
 Sampling flags apply when the resolved model is served by llama.cpp; the
 prompt alone (no flags) goes to the configured default model.
 
+#### `xencode query --format ndjson` — the answer as events a script can read
+
+The default format prints the model's words as they arrive, which is what
+someone reading a terminal wants. `--format ndjson` prints one JSON object per
+line instead, so a program can act on the answer while it is still coming:
+
+```bash
+xencode query "Summarise this crate" --format ndjson | while IFS= read -r line; do
+    printf '%s' "$line" | jq -j '.text // empty'
+done
+```
+
+There is no `--stream` flag: `--format ndjson` always streams, one line out as
+each piece arrives, and the plain format already prints words as they land.
+
+Every line carries `"v": 1`, and the keys of an object are written in
+alphabetical order, so the same event always renders as the same bytes. Two
+rules make the version worth having: a consumer that meets a `v` above the one
+it understands must stop rather than guess, and a consumer that meets a known
+`v` with an unfamiliar `"type"` must skip that line and keep reading.
+
+| Line | Fields | Written when |
+| --- | --- | --- |
+| `start` | `model`, `provider`, `source`, `session` | Once, before any other line, as soon as the model and route are settled. `provider` is the client that was dialed (`ollama`, `llamacpp`, `remote`, `openrouter`, `qwen`, `anthropic`, `google_gemini`); `source` is `local` or `cloud`, spelled as the rows in `cache/metrics.jsonl` spell it; `session` is the conversation id, or `null` when memory is off or `--session` named one that does not exist. |
+| `token` | `text` | Once per piece as the answer arrives. Where the pieces stop is the network's choice, not the model's: a piece can end mid-word or mid-character-boundary text. |
+| `done` | `answer`, `cached`, `elapsed_ms`, `tokens_generated`, `tokens_per_second` | Once, last, on a run that produced an answer. `elapsed_ms` is this command's own wall clock. `tokens_generated` and `tokens_per_second` are `null` unless the route reported counts — a llama.cpp server only does so when its stream ends with a usage chunk, and the cached path never has any, because nothing was generated. |
+| `error` | `message` | Once, last, instead of `done`. A run that failed before dialing the model (an invalid `--json-schema`, say) still ends with this line, so exactly one line per run says how it ended. |
+
+**The one property worth building on:** the `text` of every `token` line,
+concatenated in order, is exactly the `answer` in the `done` line — including
+for a cached answer, which is why a cache hit is written as a `token` line as
+well. A real run against a local llama.cpp server, 49 lines:
+
+```jsonc
+{"model":"llamacpp:/home/sree/.lmstudio/models/bartowski/Dolphin3.0-Qwen2.5-1.5B-GGUF/Dolphin3.0-Qwen2.5-1.5B-Q4_K_M.gguf","provider":"llamacpp","session":null,"source":"local","type":"start","v":1}
+{"text":"Prime","type":"token","v":1}
+{"text":" numbers","type":"token","v":1}
+// … 45 more token lines, 47 in all …
+{"answer":"Prime numbers are numbers that have exactly two distinct positive divisors: 1 and themselves. Below are three prime numbers:\n\n1. 2\n2. 3\n3. 5\n\nThese are the first three prime numbers.","cached":false,"elapsed_ms":4373,"tokens_generated":null,"tokens_per_second":null,"type":"done","v":1}
+```
+
+A failure writes the same shape, and the human-readable copy stays on stderr
+where a parser will not trip over it. This is the whole stdout of a run whose
+model server was not listening:
+
+```text
+$ xencode query "hi" --format ndjson; echo "exit=$?"
+{"model":"qwen2.5:7b","provider":"ollama","session":null,"source":"local","type":"start","v":1}
+{"message":"Query failed: network error: error sending request for url (http://127.0.0.1:9/api/chat)","type":"error","v":1}
+exit=1
+```
+
+**A shell trap that is worth knowing before you write the consumer.** Reading a
+token with `$(…)` throws the answer's line breaks away, because command
+substitution strips trailing newlines — an answer of `1. 2\n2. 3\n3. 5` prints
+as `1. 22. 33. 5`. Copy the bytes instead:
+
+```bash
+printf '%s' "$line" | jq -j '.text'      # right: no added or stripped newline
+piece=$(printf '%s' "$line" | jq -r '.text')   # wrong for this stream
+```
+
+This format has no `tool` line. `xencode query` sends one request and does not
+run the agent loop, so there is no tool call for it to report; tools are run by
+the TUI's chat and by the WebSocket server.
+
 ### `xencode analyze <path> [--format text|json]`
 Analyze a file or directory for code issues and vulnerabilities. Image
 files take the intake path: format, dimensions, and byte size are reported
