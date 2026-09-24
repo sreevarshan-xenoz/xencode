@@ -13,6 +13,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 futures-util = "0.3"
+sha2 = "0.10"
 xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-models-rs = { path = "../xencode-models-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }

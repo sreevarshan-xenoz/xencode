@@ -7,7 +7,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-24** — 15 crates, 923 tests. Every line
+> **Verified against the tree on 2026-09-24** — 15 crates, 936 tests. Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
 > [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.
@@ -151,7 +151,7 @@ each item protects), not sequence. The icebox above still feeds it.
 ### 📈 Metrics as measured (2026-09-23)
 - **Rust Migration**: 15/15 crates — complete; the Python stack is deleted, and
   Milestone K added `xencode-colab-rs` as the 15th
-- **Test Suite**: 923 passing, 0 failing, 5 ignored (`cargo test --workspace`)
+- **Test Suite**: 936 passing, 0 failing, 5 ignored (`cargo test --workspace`)
 - **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all --check` clean
 - **Code Quality**: per-language heuristics + pattern-based OWASP scanner

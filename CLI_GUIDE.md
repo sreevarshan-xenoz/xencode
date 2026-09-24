@@ -317,6 +317,23 @@ xencode cache stats
 xencode cache clear
 ```
 
+### `xencode audit verify [PATH]`
+Check the session server's audit log for records that were changed after they
+were written. Each record carries a digest of its own contents and the digest of
+the record before it, so editing, removing or moving a line is reported on a
+specific line. Defaults to `~/.xencode/audit.jsonl`. Exits non-zero when
+something does not add up.
+
+```bash
+xencode audit verify
+xencode audit verify /path/to/audit.jsonl
+```
+
+What it cannot tell you: a log that someone truncated at the end still verifies,
+because nothing outside the file says how long it should be, and anyone willing
+to recompute every digest can rewrite the whole file. It catches an edit, not a
+rewrite.
+
 ### `xencode memory <action>`
 Conversation memory (persisted under `~/.xencode`): `list`, `show <session>`.
 
