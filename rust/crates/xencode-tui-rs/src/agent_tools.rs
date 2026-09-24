@@ -1112,6 +1112,12 @@ pub struct ApprovalCtx {
     /// Pre/post shell hooks (I3-02): matched to each approved call by tool
     /// name. Empty by default — no hooks, no change in behavior.
     pub hooks: xencode_config_rs::AgentHooks,
+    /// How each tool the model was offered describes its arguments, by name
+    /// (MI-1). The loop fills this from the definitions it sent, so a call whose
+    /// arguments do not match that description is answered with the mismatch
+    /// rather than run as if it had asked for nothing. Empty means nothing is
+    /// known, which checks the arguments that cannot be read at all and no more.
+    pub schemas: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl ApprovalCtx {
@@ -1226,6 +1232,13 @@ async fn run_and_checkpoint(
     result
 }
 
+/// Tools whose reader deliberately accepts more shapes than the description
+/// offered to the model claims — `update_plan` takes bare strings, checkbox
+/// lines and invented key names because that is what small models write, and a
+/// wrong plan is fixed by the next call rather than by a refusal. Enforcing the
+/// description strictly on these would turn a working list into an error.
+const LENIENT_READERS: &[&str] = &["update_plan"];
+
 /// The loop's entry point (I1-04): policy first, prompt if the policy says
 /// `Ask`, execute only on a yes. The result string is always something the
 /// model can act on — a denial is stated as a denial.
@@ -1236,7 +1249,24 @@ pub async fn execute_tool_call_approved(
     ctx: &ApprovalCtx,
     mcp: Option<&crate::mcp::McpHub>,
 ) -> String {
-    let args = call.arguments_object();
+    // Before any policy is consulted or any prompt is opened: a call whose
+    // arguments cannot be read as what the tool asked for is not a call the agent
+    // meant to make, and running it with an empty set of arguments would be a
+    // guess at someone's intent (MI-1).
+    //
+    // `LENIENT_READERS` opts a tool out of the shape check, not of the read: its
+    // own reader accepts more than the description claims, on purpose.
+    let shape = if LENIENT_READERS.contains(&call.name.as_str()) {
+        None
+    } else {
+        ctx.schemas.get(&call.name)
+    };
+    let args = match call.arguments_for(shape) {
+        Ok(args) => args,
+        Err(reason) => {
+            return err(format!("{} was not carried out: {reason}", call.name));
+        }
+    };
     match classify(root, &call.name, &args, ctx.mode, &ctx.granted()) {
         // Refused without asking: the path is outside what the agent may
         // touch in any mode, so a prompt would only invite a mistake.
@@ -2411,6 +2441,7 @@ mod tests {
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
                 hooks: xencode_config_rs::AgentHooks::default(),
+                schemas: std::collections::HashMap::new(),
             },
             prompts: rx,
         }
@@ -2464,6 +2495,155 @@ mod tests {
             finished = &mut running => return finished.unwrap(),
         }
         running.await.unwrap()
+    }
+
+    /// The schemas the chat loop offers to the model, in the shape the
+    /// executor holds them.
+    fn offered_schemas() -> std::collections::HashMap<String, serde_json::Value> {
+        let mut tools = xencode_providers_rs::file_tools();
+        tools.extend(xencode_providers_rs::command_tools());
+        tools.extend(xencode_providers_rs::plan_tools());
+        tools
+            .into_iter()
+            .map(|def| (def.name, def.parameters))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn arguments_that_stop_halfway_are_answered_not_run_as_an_empty_call() {
+        let root = temp_root("args-unreadable");
+        let mut h = harness(ApprovalMode::Ask);
+        h.ctx.schemas = offered_schemas();
+        // The model meant to write a file and its arguments were cut off. Read
+        // the permissive way, that is a call with no arguments at all — and a
+        // no-argument write is a guess at what the model wanted.
+        let cut_off = ToolCall {
+            id: "call_0".to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::Value::String(r#"{"path": "hi.txt", "con"#.to_string()),
+        };
+        let result =
+            execute_tool_call_approved(&new_task_runtime(), &root, &cut_off, &h.ctx, None).await;
+        assert!(
+            result.starts_with("error: write_file was not carried out"),
+            "{result}"
+        );
+        assert!(result.contains("not readable as text"), "{result}");
+        // The refusal happens before the policy is consulted, so no prompt was
+        // ever raised for the user to answer.
+        assert!(h.prompts.try_recv().is_err(), "a prompt was raised");
+        assert!(!root.join("hi.txt").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_call_that_does_not_fit_the_schema_offered_for_it_is_refused() {
+        let root = temp_root("args-schema");
+        // The most permissive mode there is: even here, a call that ignores the
+        // description the model was given does not run. `content` is required
+        // by write_file, and a write without it would empty the file.
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &call("write_file", serde_json::json!({"path": "keep.txt"})),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            result.contains("write_file was not carried out"),
+            "{result}"
+        );
+        assert!(result.contains("content"), "{result}");
+        assert!(!root.join("keep.txt").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_call_that_fits_its_schema_runs_as_if_nothing_was_checked() {
+        let root = temp_root("args-valid");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("ok.txt", "hello"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(result.starts_with("created ok.txt"), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("ok.txt")).unwrap(),
+            "hello"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_argument_the_schema_says_nothing_about_is_still_accepted() {
+        let root = temp_root("args-extra");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.schemas = offered_schemas();
+        // The tool descriptions say which fields must be there and what type
+        // each one has; they do not forbid extra fields. A model that sends
+        // one anyway is not refused for it.
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &call(
+                "run_command",
+                serde_json::json!({"command": "printf line > made.txt", "reason": "checking"}),
+            ),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(!result.starts_with("error"), "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("made.txt")).unwrap(),
+            "line"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_tool_whose_reader_is_lenient_on_purpose_is_not_refused_for_its_shape() {
+        let root = temp_root("args-lenient");
+        let mut h = harness(ApprovalMode::Ask);
+        h.ctx.schemas = offered_schemas();
+        // update_plan is described as a list of objects with `text`, and its
+        // reader has always taken bare checkbox lines too, because that is what
+        // small models write. Enforcing the description would break a list that
+        // was working before this check existed.
+        let answer = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &plan_call(serde_json::json!(["[x] recon", "[ ] fix"])),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            answer.starts_with("plan updated: 2 step(s), 1 done"),
+            "{answer}"
+        );
+        // The exemption covers the shape, not the reading: plan arguments that
+        // cannot be parsed at all are still an error rather than an empty list.
+        let unreadable = ToolCall {
+            id: "call_1".to_string(),
+            name: "update_plan".to_string(),
+            arguments: serde_json::Value::String(r#"{"items": ["recon", "#.to_string()),
+        };
+        let answer =
+            execute_tool_call_approved(&new_task_runtime(), &root, &unreadable, &h.ctx, None).await;
+        assert!(
+            answer.contains("update_plan was not carried out"),
+            "{answer}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[tokio::test]
@@ -2735,6 +2915,7 @@ mod tests {
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
                 hooks: xencode_config_rs::AgentHooks::default(),
+                schemas: std::collections::HashMap::new(),
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(

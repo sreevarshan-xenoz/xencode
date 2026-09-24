@@ -1667,6 +1667,16 @@ fn parse_json_schema(schema: Option<String>) -> Result<Option<serde_json::Value>
         .transpose()
 }
 
+/// Whether an answer may be given as one that satisfies `--json-schema`. With no
+/// schema declared there is nothing to satisfy; with one, the text has to be that
+/// JSON and nothing else.
+fn structured_answer_fits(answer: &str, schema: Option<&serde_json::Value>) -> bool {
+    match schema {
+        None => true,
+        Some(schema) => xencode_providers_rs::schema::read_answer(answer, schema).is_ok(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)] // CLI flags map 1:1 to sampling options; a struct would just rename them
 async fn run_query(
     prompt: String,
@@ -1725,6 +1735,10 @@ async fn run_query_once(
     format: QueryFormat,
 ) -> Result<(), String> {
     let ndjson = format == QueryFormat::Ndjson;
+    // Read before the cache is consulted or anything is printed: a schema that
+    // is not JSON is the caller's mistake, and a schema that is one is a promise
+    // about the answer.
+    let schema = parse_json_schema(json_schema)?;
     let started = std::time::Instant::now();
     let config = XencodeConfig::load().unwrap_or_default();
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
@@ -1803,24 +1817,29 @@ async fn run_query_once(
 
     if let Some(ref mut c) = cache {
         if let Some(cached_resp) = c.get(&prompt, &model) {
-            if ndjson {
-                // The answer travels as a `token` line too, so a script that
-                // concatenates tokens always has the whole reply — cached or
-                // not. Nothing was generated, so there are no token counts.
-                println!("{}", query_stream::token(&cached_resp));
-                println!(
-                    "{}",
-                    query_stream::done(&cached_resp, true, elapsed_ms(started), None, None,)
-                );
-            } else {
-                println!("{}", cached_resp);
-            }
+            // A cached reply was written against whatever was asked the first
+            // time, so it is only this run's answer if it still fits the schema
+            // being declared now. If it does not, the model is asked again.
+            if structured_answer_fits(&cached_resp, schema.as_ref()) {
+                if ndjson {
+                    // The answer travels as a `token` line too, so a script that
+                    // concatenates tokens always has the whole reply — cached or
+                    // not. Nothing was generated, so there are no token counts.
+                    println!("{}", query_stream::token(&cached_resp));
+                    println!(
+                        "{}",
+                        query_stream::done(&cached_resp, true, elapsed_ms(started), None, None,)
+                    );
+                } else {
+                    println!("{}", cached_resp);
+                }
 
-            if let Some(ref mut mem) = memory {
-                mem.add_message("user", &prompt, None);
-                mem.add_message("assistant", &cached_resp, Some(model.clone()));
+                if let Some(ref mut mem) = memory {
+                    mem.add_message("user", &prompt, None);
+                    mem.add_message("assistant", &cached_resp, Some(model.clone()));
+                }
+                return Ok(());
             }
-            return Ok(());
         }
     }
 
@@ -1885,7 +1904,7 @@ async fn run_query_once(
         max_tokens,
         seed,
         grammar,
-        json_schema: parse_json_schema(json_schema)?,
+        json_schema: schema.clone(),
     };
 
     let provider = ProviderManager::new(
@@ -1918,6 +1937,17 @@ async fn run_query_once(
 
     match result {
         Ok(_) => {
+            // The tokens have already streamed, so this cannot unsay them; what
+            // it can do is end the stream with a failure instead of a completion,
+            // and keep an answer that does not fit out of the cache and the
+            // conversation.
+            if let Some(ref schema) = schema {
+                if let Err(reason) =
+                    xencode_providers_rs::schema::read_answer(&response_content, schema)
+                {
+                    return Err(format!("the answer does not fit --json-schema: {reason}"));
+                }
+            }
             let timings = provider.last_llamacpp_timings();
             if ndjson {
                 println!(
@@ -3177,6 +3207,31 @@ mod tests {
         assert_eq!(super::parse_json_schema(None).unwrap(), None);
         let err = super::parse_json_schema(Some("{broken".to_string())).unwrap_err();
         assert!(err.contains("invalid --json-schema"), "{err}");
+    }
+
+    #[test]
+    fn a_declared_schema_decides_what_counts_as_an_answer() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["files"],
+            "properties": {"files": {"type": "array", "items": {"type": "string"}}}
+        });
+        assert!(super::structured_answer_fits(
+            "{\"files\": [\"a.rs\"]}\n",
+            Some(&schema)
+        ));
+        // Nothing declared, nothing to fit.
+        assert!(super::structured_answer_fits("any prose at all", None));
+        // Prose, the wrong shape of JSON, and an empty reply all fail.
+        assert!(!super::structured_answer_fits(
+            "here you go: {\"files\": \"a.rs\"}",
+            Some(&schema)
+        ));
+        assert!(!super::structured_answer_fits(
+            r#"{"files": "a.rs"}"#,
+            Some(&schema)
+        ));
+        assert!(!super::structured_answer_fits("", Some(&schema)));
     }
 
     #[test]

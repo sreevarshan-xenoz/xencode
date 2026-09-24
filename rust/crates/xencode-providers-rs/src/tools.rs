@@ -58,6 +58,11 @@ pub struct ToolCall {
 impl ToolCall {
     /// Arguments as an object: strings are parsed, objects pass through,
     /// anything else becomes `{}`.
+    ///
+    /// Prefer [`ToolCall::arguments_checked`]. This one cannot tell a call that
+    /// asked for nothing from a call whose arguments arrived as text that would not
+    /// parse, and executing the second as though it were the first is how a broken
+    /// answer becomes a wrong action (MI-1).
     pub fn arguments_object(&self) -> serde_json::Map<String, serde_json::Value> {
         match &self.arguments {
             serde_json::Value::Object(map) => map.clone(),
@@ -66,12 +71,66 @@ impl ToolCall {
         }
     }
 
+    /// The arguments, as an object, or the reason they cannot be read as one.
+    ///
+    /// A backend that sends no arguments at all answers with `null`, which is
+    /// honestly empty; a string that will not parse is not.
+    pub fn arguments_checked(&self) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+        match &self.arguments {
+            serde_json::Value::Object(map) => Ok(map.clone()),
+            serde_json::Value::Null => Ok(serde_json::Map::new()),
+            serde_json::Value::String(text) => {
+                match serde_json::from_str::<serde_json::Value>(text) {
+                    Ok(serde_json::Value::Object(map)) => Ok(map),
+                    Ok(other) => Err(format!(
+                        "the arguments were not a set of fields, they were {}",
+                        crate::schema::kind_of(&other)
+                    )),
+                    Err(error) => Err(format!(
+                        "the arguments were not readable as text: {error} — it began {}",
+                        short_quote(text)
+                    )),
+                }
+            }
+            other => Err(format!(
+                "the arguments were not a set of fields, they were {}",
+                crate::schema::kind_of(other)
+            )),
+        }
+    }
+
+    /// The arguments, checked against the schema this tool was offered to the model
+    /// with. `None` for a tool whose schema is not known here, which is not the
+    /// same as a tool that accepts anything.
+    pub fn arguments_for(
+        &self,
+        schema: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+        let args = self.arguments_checked()?;
+        if let Some(schema) = schema {
+            crate::schema::check(schema, &serde_json::Value::Object(args.clone()))?;
+        }
+        Ok(args)
+    }
+
     /// Arguments rendered as a JSON string for OpenAI-style echo/history.
     pub fn arguments_json(&self) -> String {
         match &self.arguments {
             serde_json::Value::String(s) => s.clone(),
             other => serde_json::to_string(other).unwrap_or_else(|_| "{}".to_string()),
         }
+    }
+}
+
+/// The start of a model's text, quoted, for an error message that has to describe
+/// something that is not valid JSON without repeating all of it.
+fn short_quote(text: &str) -> String {
+    let trimmed = text.trim();
+    let cut: String = trimmed.chars().take(60).collect();
+    if cut.chars().count() < trimmed.chars().count() {
+        format!("`{cut}…`")
+    } else {
+        format!("`{cut}`")
     }
 }
 
@@ -870,5 +929,64 @@ mod tests {
         let ollama = render_history(&base, &[], HistoryStyle::Ollama);
         assert_eq!(ollama[0]["content"], "see");
         assert_eq!(ollama[0]["images"], serde_json::json!(["AAAA"]));
+    }
+
+    fn write_call_with(arguments: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: "call_0".to_string(),
+            name: "write_file".to_string(),
+            arguments,
+        }
+    }
+
+    #[test]
+    fn arguments_that_arrive_as_text_are_parsed_or_rejected_not_guessed() {
+        // A backend sends null when the tool takes no arguments: that is
+        // honestly empty.
+        assert_eq!(
+            write_call_with(serde_json::Value::Null)
+                .arguments_checked()
+                .unwrap(),
+            serde_json::Map::new()
+        );
+        // A whole object in a string parses like the object itself.
+        let packed = write_call_with(serde_json::Value::String(
+            r#"{"path":"a.txt","content":"hi"}"#.to_string(),
+        ));
+        assert_eq!(packed.arguments_checked().unwrap()["path"], "a.txt");
+        // A truncated one is not "no arguments", and the unchecked reader
+        // answered it with an empty object.
+        let broken = write_call_with(serde_json::Value::String(
+            r#"{"path": "notes.txt", "con"#.to_string(),
+        ));
+        let reason = broken.arguments_checked().unwrap_err();
+        assert!(reason.contains("not readable as text"), "{reason}");
+        assert!(reason.contains(r#"`{"path": "#), "{reason}");
+        assert!(broken.arguments_object().is_empty());
+    }
+
+    #[test]
+    fn arguments_are_checked_against_the_schema_they_were_offered_with() {
+        let schema = file_tools()
+            .into_iter()
+            .find(|tool| tool.name == "write_file")
+            .unwrap()
+            .parameters;
+        let incomplete = write_call_with(serde_json::json!({"path": "a.txt"}));
+        let reason = incomplete.arguments_for(Some(&schema)).unwrap_err();
+        assert!(reason.contains("content"), "{reason}");
+        let wrong_type = write_call_with(serde_json::json!({"path": 7, "content": "x"}));
+        let reason = wrong_type.arguments_for(Some(&schema)).unwrap_err();
+        assert!(reason.contains("path"), "{reason}");
+        let good = write_call_with(serde_json::json!({"path": "a.txt", "content": "hi"}));
+        assert_eq!(good.arguments_for(Some(&schema)).unwrap()["content"], "hi");
+        // Unknown schema: the arguments still have to be readable, but no
+        // shape is claimed for them.
+        assert!(incomplete.arguments_for(None).is_ok());
+        assert!(
+            write_call_with(serde_json::Value::String("not json".to_string()))
+                .arguments_for(None)
+                .is_err()
+        );
     }
 }

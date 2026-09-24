@@ -125,6 +125,44 @@ xencode query "List three file formats" --json-schema '{"type":"object"}'
 Sampling flags apply when the resolved model is served by llama.cpp; the
 prompt alone (no flags) goes to the configured default model.
 
+#### What `--json-schema` guarantees, and what it does not
+
+The schema is sent to a llama.cpp server as `response_format` of type
+`json_schema`, with every `$ref` written out by xencode first — a server that
+has to resolve the references itself has been seen to give up and answer
+unconstrained. Whatever route the model is on, the answer is then checked here,
+against the schema that was asked for:
+
+* it fits: exit 0, and the reply is cached and remembered like any other;
+* it does not: the tokens have already been printed, so they are not unsaid, but
+  the run ends with `error: the answer does not fit --json-schema: …` and exit 1,
+  and nothing bad-tempered gets stored. Under `--format ndjson` the stream ends
+  with the `error` event instead of `done`, which is what a script should be
+  watching.
+
+Nothing is repaired on the way: a reply wrapped in a code fence, or introduced by
+a sentence, is reported rather than trimmed into fitting, because guessing where
+the answer begins is the mistake this check exists to avoid. A cached reply is
+only reused if it still fits the schema being declared now, so a second run with a
+different schema re-asks instead of replaying.
+
+Measured here on `llama-server` build 10809 with a 1.5B model, asking for
+`{"answer": "yes"|"no", "reason": string}`: with `--max-tokens 60` the reply was
+cut off inside the `reason` string and reported as
+`the answer was not JSON: EOF while parsing a string at line 3 column 261`
+with exit 1; with `--max-tokens 200` the same request answered
+`{"answer": "yes", "reason": "Rust is designed for systems programming…"}` and
+exit 0. A schema is not a substitute for a token budget.
+
+On the agent side the same rule runs the other way: each tool call the model
+requests is checked against the argument description that tool was offered with,
+before the approval prompt is opened, and a call that does not fit is answered
+with the mismatch instead of being run. That includes a call whose arguments
+arrive as text that stops halfway, which used to be read as a call that asked for
+nothing at all. `update_plan` is the one exception, deliberately: its reader has
+always accepted bare strings and invented key names because that is what small
+models write, and its worst outcome is a list the next call corrects.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without
