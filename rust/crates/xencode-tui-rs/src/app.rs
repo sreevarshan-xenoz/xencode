@@ -1621,6 +1621,39 @@ fn one_shot_messages(root: &std::path::Path, prompt: String) -> Vec<ChatMessage>
     ]
 }
 
+/// What a server-side token count is worth saying, given the estimate it is
+/// being compared to, the window the server reported, and whether a human asked
+/// to see it.
+///
+/// `note` is that last question: a `/ctx` preview passes a phrase and always
+/// gets its line, because showing `≈ 1200` next to the real number is the point
+/// of looking. A real turn passes `None` and stays silent — the count runs on
+/// every turn and a chat narrated one line per turn at a number nobody asked
+/// about is noise. What both paths do speak up about is `window`: a prompt the
+/// server counts larger than the window the server said it has is not a budget
+/// estimate being pessimistic, and the pieces that made it that big — attached
+/// files and the question itself, which the budgeter is not allowed to trim —
+/// are exactly the ones nobody checked.
+fn count_report(
+    counted: u64,
+    estimated: u64,
+    window: Option<u32>,
+    note: Option<&str>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(note) = note {
+        lines.push(format!(
+            "[CTX]🔢 {note}: {counted} tokens counted by the server, {estimated} by character arithmetic"
+        ));
+    }
+    if let Some(window) = window {
+        if counted > window as u64 {
+            lines.push(format!("[CTXOVER]{counted}|{window}"));
+        }
+    }
+    lines
+}
+
 impl<'a> App<'a> {
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
@@ -2393,6 +2426,15 @@ impl<'a> App<'a> {
                 content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
             });
         }
+        // Once per turn, in the background: what the server itself counts this
+        // prompt at. Silent unless the answer says the prompt does not fit.
+        self.probe_token_count(
+            assembly.prompt_text(),
+            assembly.total_tokens,
+            self.server_context_window,
+            None,
+            tx.clone(),
+        );
         let mut context_messages = Self::chat_messages(assembly.turns);
         // Attached images become content parts on the final user turn, in
         // sorted-path order (deterministic, KV-stable like the text block).
@@ -4445,6 +4487,16 @@ impl<'a> App<'a> {
         tx: mpsc::UnboundedSender<String>,
     ) {
         let identity = self.metrics_identity(&self.config.default_model);
+        // Where to ask for a real token count of the text this preview assembles,
+        // if anywhere: the same server that would have to read it.
+        let count_probe = if xencode_providers_rs::routes_to_llamacpp(&self.config.default_model) {
+            Some((
+                self.config.llama_cpp_url.clone(),
+                self.server_context_window,
+            ))
+        } else {
+            None
+        };
         tokio::spawn(async move {
             let _ = tx.send("[CTX_START]".to_string());
             let root = xencode_context_rs::default_root();
@@ -4515,6 +4567,16 @@ impl<'a> App<'a> {
                 doc.total_tokens.min(u32::MAX as u64),
                 doc.retrieved_included.min(u8::MAX as usize)
             ));
+            if let Some((url, window)) = count_probe {
+                let client = LlamaCppClient::new(&url, 3);
+                if let Ok(Some(counted)) = client.count_tokens(&doc.text).await {
+                    for line in
+                        count_report(counted, doc.total_tokens, window, Some("that context"))
+                    {
+                        let _ = tx.send(line);
+                    }
+                }
+            }
             if doc.truncated {
                 let _ =
                     tx.send("[CTX]⚠ Some retrieved files dropped to fit the budget.".to_string());
@@ -5660,6 +5722,31 @@ impl<'a> App<'a> {
             let client = LlamaCppClient::new(&url, 3);
             if let Ok(Some(tokens)) = client.context_window().await {
                 let _ = tx.send(format!("[CTXWINDOW]{tokens}"));
+            }
+        });
+    }
+
+    /// Ask that same server to count a prompt with its own vocabulary (AC-5),
+    /// instead of trusting `chars / 4`, and report what comes back through
+    /// [`count_report`]. See there for when this says anything at all.
+    fn probe_token_count(
+        &self,
+        text: String,
+        estimated: u64,
+        window: Option<u32>,
+        note: Option<&'static str>,
+        tx: mpsc::UnboundedSender<String>,
+    ) {
+        if !xencode_providers_rs::routes_to_llamacpp(&self.config.default_model) {
+            return;
+        }
+        let url = self.config.llama_cpp_url.clone();
+        tokio::spawn(async move {
+            let client = LlamaCppClient::new(&url, 3);
+            if let Ok(Some(tokens)) = client.count_tokens(&text).await {
+                for line in count_report(tokens, estimated, window, note) {
+                    let _ = tx.send(line);
+                }
             }
         });
     }
@@ -7152,6 +7239,20 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 if let Ok(tokens) = body.trim().parse::<u32>() {
                     app.server_context_window = Some(tokens);
                 }
+            } else if let Some(body) = token.strip_prefix("[CTXOVER]") {
+                // The server counted the prompt bigger than the window it says it
+                // has. Both numbers are the server's own, so this is not a
+                // warning about an estimate.
+                let parts: Vec<&str> = body.splitn(2, '|').collect();
+                if parts.len() == 2 {
+                    app.messages.push(UiMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "⚠ the prompt was counted at {} tokens by the server, which is running a {}-token window",
+                            parts[0], parts[1]
+                        ),
+                    });
+                }
             } else if let Some(body) = token.strip_prefix("[LLAMACPP]") {
                 app.llamacpp_action_msg = body.to_string();
                 // Loading or swapping a model can leave the server running
@@ -7464,7 +7565,7 @@ pub fn set_secret_value(config: &mut XencodeConfig, label: &str, value: Option<S
 #[cfg(test)]
 mod tests {
     use super::{
-        cap_at_line, first_output_line, format_advise_report, format_watch_warning,
+        cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
         parse_porcelain_z, parse_term_suggestions, parse_voice_level, trace_age, trace_report,
         watch_warning_for, App, ConversationMemory, Egress, FocusArea, LoopSink, SpawnRecord,
@@ -8830,6 +8931,27 @@ mod tests {
             app.bytebot_context("fix the failing test").target_tokens,
             (200_000f64 * profile.utilization()).floor() as u64
         );
+    }
+
+    /// AC-5: a real count is reported beside the number it replaces when a human
+    /// asked to see it, and by itself when it contradicts the budget.
+    #[test]
+    fn a_server_count_is_shown_when_asked_and_when_it_does_not_fit() {
+        let lines = count_report(1200, 1300, Some(4096), Some("that context"));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0],
+            "[CTX]🔢 that context: 1200 tokens counted by the server, 1300 by character arithmetic"
+        );
+        // A turn that fits the window is not worth a line of chat.
+        assert!(count_report(1200, 1300, Some(4096), None).is_empty());
+        // A turn that does not, names both numbers.
+        assert_eq!(
+            count_report(5000, 4800, Some(4096), None),
+            vec!["[CTXOVER]5000|4096".to_string()]
+        );
+        // With no window reported there is nothing to be over.
+        assert!(count_report(5000, 4800, None, None).is_empty());
     }
 
     /// What a metrics row says about itself (CX-2): which model ran, which

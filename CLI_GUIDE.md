@@ -200,6 +200,65 @@ number is refreshed at startup, after a llama.cpp model load or swap, and at the
 start of each turn — so a server restarted outside xencode takes effect from the
 next turn rather than the one already in flight.
 
+#### What a prompt actually costs, counted by the model
+
+Knowing the window is one thing; knowing what the prompt is worth inside it is
+another. Until now the only figure was arithmetic on character counts — one
+token per four characters of prose, one per three of code. `xencode query` now
+also asks the llama.cpp server that is about to read the prompt what that prompt
+counts as, through the server's own `/tokenize` endpoint, and prints the two
+side by side:
+
+```console
+$ xencode query --model llama:dolphin "What does est_tokens do?"
+context: 8192-token window reported by the server at http://localhost:8080
+context: 113 tokens counted by the server, 88 by character arithmetic
+```
+
+Neither number is simply the better one, which is why both are shown. The counted
+number describes the text the turn is made of and nothing else: the chat
+template's per-message markers are added by the server afterwards, so the count
+is a floor. The character figure is what the trimmable parts were fitted to, and
+it stops there — the question and any attached files are the parts xencode is not
+allowed to trim, so a turn that overflows reports less than it costs. Started
+against a server restarted with `-c 512`, a long repeated question gave three
+numbers for one prompt:
+
+```console
+context: 566 tokens counted by the server, 384 by character arithmetic
+warning: the prompt was counted at 566 tokens, which is more than the 512-token window this server is running with
+error: Query failed: API error: llama.cpp 400 - {"error":{"code":400,"message":"request (579 tokens) exceeds the available context size (512 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":579,"n_ctx":512}}
+```
+
+All three are true: 384 is what the budgeter spent, 566 is what the prompt's text
+is worth in this model's vocabulary, 579 is what the request cost once the
+template's framing was added. The warning says "counted at 566" rather than
+promising the request fails, because a count of the text cannot see the framing —
+but it is the first moment this overflow can be named at all, since the server's
+own refusal arrives only after the request.
+
+The count is asked once per turn, of the server that turn goes to, and only when
+the model is served by llama.cpp; an Ollama run has no counting endpoint and keeps
+the character figure. A server that does not answer `/tokenize` — or that answers
+in a way xencode does not recognise, which includes a build that has never heard
+of the field the request uses — is reported as not having counted the prompt,
+rather than believed to have counted it as zero.
+
+In the TUI the same question is asked in the background, so no turn waits for it:
+a `/ctx` preview prints the count next to its estimate, and a real turn stays
+silent unless what was counted does not fit the window the server reported, in
+which case a line says what was counted and against what.
+
+What the counting showed about the estimator, measured on files from this
+repository: the prose divisor is close, within about 10% on the documents tried
+and in both directions. The code divisor is not — counting a token per three
+characters priced Rust files at +26% to +40% above what this model's vocabulary
+needs, because this vocabulary reads Rust at about four characters per token.
+Nothing has been retuned on the strength of one vocabulary: a divisor fitted to
+one model is wrong for the next, and the answer to a wrong divisor is the count
+above rather than a better guess. The caps AC-4 scales are the next thing that
+should read this number.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without

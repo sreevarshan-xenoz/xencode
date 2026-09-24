@@ -330,6 +330,25 @@ pub struct ChatAssembly {
     pub history_total: usize,
 }
 
+impl ChatAssembly {
+    /// Everything the model is about to be shown, as one plain string, for a
+    /// server that counts tokens for text rather than for a message list
+    /// (llama.cpp's `/tokenize`).
+    ///
+    /// Roles are left out and the turns are joined with a blank line, so the
+    /// count that comes back is what the pieces contain — not the rendered
+    /// request, which additionally carries the chat template's per-message
+    /// markers. Those are the framing `HISTORY_TURN_OVERHEAD_TOKENS` stands for
+    /// in the estimate, and they are missing here: the counted number is a floor.
+    pub fn prompt_text(&self) -> String {
+        self.turns
+            .iter()
+            .map(|turn| turn.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
 /// Build the per-turn chat messages the model actually receives.
 ///
 /// Same §10 tier discipline as [`assemble_prompt`], but conversation history
@@ -896,6 +915,31 @@ mod tests {
         assert_eq!(chat.history_total, 2);
         assert!(chat.total_tokens <= chat.target_tokens);
         assert!(!chat.truncated);
+    }
+
+    /// What a server gets asked to count when it is asked to count the prompt:
+    /// every turn's text, in the order the model is shown them, with nothing
+    /// from the message list (roles) mixed in.
+    #[test]
+    fn prompt_text_holds_every_turn_in_order() {
+        let history = sample_history();
+        let chat = assemble_chat(sample_chat_input(sample_retrieved(), &history));
+        let text = chat.prompt_text();
+        let mut past = 0usize;
+        for turn in &chat.turns {
+            let found = text[past..]
+                .find(&turn.content)
+                .unwrap_or_else(|| panic!("the {} turn is not in the counted text", turn.role));
+            past += found + turn.content.len();
+        }
+        // The budgeter's own figure covers this text plus the framing and the
+        // harder divisor for code, so it can never be below a plain-prose count
+        // of the same bytes.
+        // Nothing is added to or taken from a turn on the way here: the only
+        // extra bytes are the blank line between pieces, so a count of this text
+        // is a count of exactly what the budget kept.
+        let turns: usize = chat.turns.iter().map(|t| t.content.len()).sum();
+        assert_eq!(text.len(), turns + 2 * (chat.turns.len() - 1));
     }
 
     /// The trace names the files a turn was shown, and only the ones the budget

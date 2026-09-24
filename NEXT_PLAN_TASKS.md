@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1075 tests passing, 9 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1080 tests passing, 10 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3291,6 +3291,11 @@ the ledger already.
   assembled prompt once per turn. *Effort: M.* Prerequisite for AC-4 being
   honest. *Trap:* Ollama has no count endpoint, so this diverges the local
   routes again; do not add HF `tokenizers` — wrong vocab for GGUF.
+  *(Done 2026-09-24 — see W2 progress. The endpoint exists on the build actually
+  installed here (b10809, `/tokenize` reads the field `content`) and is now asked
+  once per turn on both surfaces; the pure-Rust vocab read stayed unnecessary,
+  and the Ollama half of the trap is exactly what happened — that route keeps the
+  arithmetic, because there is nothing to ask.)*
 - **AC-6 — Symbol-only repo-map tier** for LOW/4k budgets, ranked by existing
   `DepEdge` in-degree from seed files (PageRank-lite). *Effort: M.* *Trap:* a map
   only helps if the model then asks for the right file, and a 4B may just spend
@@ -5982,6 +5987,73 @@ done-when is met, and the commit that does it names the IDs.
   plumbing, which is what makes that last one fail. A tenth test is a real request
   to a real server and is skipped unless one is running:
   `XENCODE_TEST_LLAMA_URL=http://127.0.0.1:8080 cargo test -p xencode-models-rs -- --ignored`.
+- [x] `AC-5` — 2026-09-24, third item of W2. The item's own instruction was to
+  probe before planning on the endpoint, and the probe is what made this item
+  cheap: `llama-server` b10809 — the build actually installed on this machine, not
+  the b11120 the item was written against — exposes `/tokenize`, and it counts a
+  string with the vocabulary of the model it is serving. The pure-Rust GGUF vocab
+  read (`llama-gguf`, `shimmytok`) therefore stayed unwritten: no dependency, no
+  second vocabulary to keep in step with the server's.
+  **What the probe found beyond "it exists"**, all of it now encoded in the
+  reader: the request field is `content`, and a field the build does not read —
+  `prompt`, the name the generation endpoints use — is answered
+  `{"tokens": []}` with **HTTP 200**, silently. So an empty answer about
+  non-empty text is treated as nobody counted it, not as a prompt worth zero
+  tokens. `parse_special` and `add_bos` are accepted and ignored: `<|end|>` costs
+  five tokens either way, because it is counted as the five characters of its own
+  name. A special-token-heavy prompt is therefore counted high rather than low,
+  which is the safe direction for a budget, and the count of a turn's plain text
+  is still a floor on the request, because the chat template's per-message
+  framing is added after xencode is done.
+  **What was built**: `LlamaCppClient::count_tokens()` for the request, with the
+  believing rule in a separate pure function so it is tested against the shapes
+  above rather than against a mock server; `ChatAssembly::prompt_text()`, which is
+  the assembled turn's text and nothing else — the roles are for the provider, not
+  for the model's eyes, and the only bytes added are the blank lines between
+  pieces (checked by a test that walks the turns in order). The command line asks
+  once per run, before the request goes out, because that is the only moment a
+  count exists: a reply's own usage figures arrive after the tokens have been
+  paid for. The TUI cannot ask inline, so it asks in the background — once per
+  turn, and once for a `/ctx` preview — through one function that decides what a
+  count is worth saying: a preview always prints its number beside the estimate it
+  replaces, a turn stays silent unless the count does not fit the window AC-1
+  reads, because a chat narrated one line per turn at a number nobody asked about
+  is noise.
+  **Measured on real runs**, this machine, `dolphin` (a 1.5B Qwen2.5): an ordinary
+  turn counted 113 tokens where the arithmetic said 88. Against a server restarted
+  with `-c 512`, a long repeated question gave 384 budgeted, 566 counted, and a
+  refusal naming 579 — three true numbers for one prompt, and the gap between the
+  first two is precisely what this item was for: `total_tokens` is what the
+  trimmable tiers were fitted to, and the question plus any attached files are the
+  parts the budgeter may not trim, so an overflowing turn used to report a figure
+  below its own size and nothing said otherwise. The warning fired before the
+  request; the server's 400 arrived after it.
+  **What the counting says about AC-4's trap** ("the chars/3–4 estimator is often
+  ±20–30% on code") — measured on files from this repository, so AC-4 can be
+  planned against numbers rather than against a range quoted from a proposal: the
+  prose divisor lands within about 10% in both directions, and the code divisor is
+  the broken half, pricing Rust files at +26% to +40% above what this vocabulary
+  needs (context.rs, budget.rs and llamacpp.rs measured at 3.8–4.2 characters per
+  token, not 3). No divisor was retuned: one vocabulary is not a basis, and the
+  answer to a wrong constant is the count this item added.
+  **Not done, on purpose**: the Ollama half of the trap is not a trap the code can
+  escape — that server has no counting endpoint, so an `ollama`/`qwen2.5:7b` run
+  keeps the arithmetic and says so, exactly as AC-1 left its window unread.
+  Verified by 1080 tests, 0 failures, 10 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Five tests are new: the length of a real captured
+  `/tokenize` answer, four response shapes that are not answers, zero-believed-
+  only-for-empty-text, the counted text holding every turn in order, and the rule
+  for when a count is printed / when it warns / when both numbers agree the turn
+  fits. A sixth is a real count from a real server, skipped unless one is running,
+  and it printed its comparison rather than asserting a ratio:
+  `55 characters = 11 tokens counted, 14 estimated`. Each of the three new rules
+  was checked by breaking it — suppressing the warning, joining the turns with
+  nothing, believing an empty count — and watching the matching test fail. One
+  unrelated failure surfaced on the way and is fixed in its own commit:
+  `llamacpp_prefix_routes_to_llamacpp` built its client with default settings, so
+  on a machine with a llama.cpp server actually running on port 8080 the test got
+  a real answer instead of the routing error it asserts.
 
 #### W2 — The model/inference substrate — 15 items
 

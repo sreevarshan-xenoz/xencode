@@ -1866,13 +1866,11 @@ async fn run_query_once(
     // The window the server is actually running with, when the model is served
     // by a llama.cpp process that will say. A family table cannot know `-c`;
     // every other route keeps the table's answer.
-    let server_window = if xencode_providers_rs::routes_to_llamacpp(&model) {
-        LlamaCppClient::new(&config.llama_cpp_url, 3)
-            .context_window()
-            .await
-            .unwrap_or(None)
-    } else {
-        None
+    let probe = xencode_providers_rs::routes_to_llamacpp(&model)
+        .then(|| LlamaCppClient::new(&config.llama_cpp_url, 3));
+    let server_window = match &probe {
+        Some(client) => client.context_window().await.unwrap_or(None),
+        None => None,
     };
     if let Some(tokens) = server_window {
         eprintln!(
@@ -1894,6 +1892,45 @@ async fn run_query_once(
         history: &history,
         prompt: &prompt,
     });
+    // What the prompt costs in the model's own vocabulary, asked of the server
+    // once before the request goes out — the only moment a count exists at all,
+    // since a reply's usage figures arrive after it has been paid for. The
+    // budgeter's figure is printed beside it, and neither is a better number than
+    // the other: the server's count misses the framing a chat template adds
+    // around each message, and the budgeter's stops at what it was allowed to
+    // spend, because the question and any attached files are the parts it may not
+    // trim. Printed together, a run that is about to overflow shows it. Measured
+    // on a 512-token server here: the arithmetic said 384, the server counted 566
+    // of the same turn, and the request was refused at 579 tokens.
+    let counted = match &probe {
+        Some(client) => client
+            .count_tokens(&assembly.prompt_text())
+            .await
+            .unwrap_or(None),
+        None => None,
+    };
+    match counted {
+        Some(tokens) => {
+            eprintln!(
+                "context: {tokens} tokens counted by the server, {} by character arithmetic",
+                assembly.total_tokens
+            );
+            if let Some(window) = server_window {
+                if tokens > window as u64 {
+                    eprintln!(
+                        "warning: the prompt was counted at {tokens} tokens, which is more than the {window}-token window this server is running with"
+                    );
+                }
+            }
+        }
+        None if probe.is_some() => {
+            eprintln!(
+                "context: {} tokens by character arithmetic (this server did not answer /tokenize)",
+                assembly.total_tokens
+            );
+        }
+        _ => {}
+    }
     if !live.index_present {
         eprintln!(
             "hint: run `xencode` → /init once for project-aware answers (continuing with guidelines + history only)."

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a prompt's cost, counted by the model that has to read it
+
+Everything that decides how much project context survives has been working from
+one number, and that number was arithmetic: a token for every four characters of
+prose, every three of code. The model reading the prompt has a vocabulary of its
+own, and a running `llama-server` will use it if asked, so a turn is now counted
+as well as estimated. `xencode query` prints both before it sends anything
+(`context: 113 tokens counted by the server, 88 by character arithmetic`), and in
+the TUI the count runs in the background — printed beside the estimate on a `/ctx`
+preview, silent on a real turn unless the turn does not fit.
+
+Not fitting is the reason this exists. The budgeter's figure is what the
+trimmable parts were fitted to, and the question and any attached files are the
+parts it may not trim, so an oversized prompt used to report a number below its
+own size and nothing said otherwise. Measured against a server started with
+`-c 512`: 384 budgeted, 566 counted, and the request refused at 579 tokens — and
+the warning naming the overflow arrived before the request, not after it. A
+counted prompt is still a floor, because the server adds its per-message framing
+afterwards; the numbers are shown side by side rather than one replacing the
+other, and an Ollama run keeps the arithmetic, having no endpoint to be asked.
+
 ### Fixed — the context budget now knows the window it is spending
 A run decides how much project context to include by multiplying the model's
 context window by a fill fraction, and for a model served by llama.cpp that
