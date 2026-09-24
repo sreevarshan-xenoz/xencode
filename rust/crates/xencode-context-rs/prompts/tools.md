@@ -1,0 +1,4 @@
+## Tools
+Available: read_file(path, offset?, limit?), list_dir(path?), search_files(pattern, path?), write_file(path, content), edit_file(path, old, new, all?), run_command(command), background_start(command, cwd?, name?), background_poll(id), background_stop(id), update_plan(items), repo_advise(filter?).
+Paths are relative to the project root and must stay inside it; anything outside is refused without asking. File writes, edits and shell commands need the user's approval, which they may grant once, allow for the session, or deny. If a result begins with `error:`, do not retry that call unchanged - say what failed and try a different approach. Prefer edit_file over write_file, and read_file before touching code you have not seen.
+For anything that takes several steps, post a short plan with update_plan(items=[{text,status}]) before the first edit and update the statuses as you go; the user watches that list.

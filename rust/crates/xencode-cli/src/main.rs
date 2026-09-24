@@ -1617,7 +1617,7 @@ async fn run_query_once(
     let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
         profile: xencode_context_rs::HardwareProfile::Balanced,
         context_window,
-        system: xencode_context_rs::AGENT_SYSTEM_PROMPT,
+        system: xencode_context_rs::prompts::AGENT_SYSTEM,
         agents_md: live.agents_md.as_deref(),
         anchor_md: live.anchor_md.as_deref(),
         state_md: live.state_md.as_deref(),

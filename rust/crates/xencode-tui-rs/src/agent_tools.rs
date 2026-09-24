@@ -13,21 +13,11 @@ use tokio::sync::{mpsc, oneshot};
 use xencode_core_rs::{TaskError, TaskManager, TaskRecord};
 use xencode_providers_rs::ToolCall;
 
-/// How many assistant→tool→assistant rounds one user turn may take before
-/// tools stop being offered and the model must answer in prose. The budget
-/// itself is the `agent_max_rounds` config key (default 16, clamped to
-/// 1..=64 by the loop); this is the wording the model is taught.
-pub const TOOL_HINT: &str = "\n\n## Tools\n\
-Available: read_file(path, offset?, limit?), list_dir(path?), search_files(pattern, path?), \
-write_file(path, content), edit_file(path, old, new, all?), run_command(command), \
-background_start(command, cwd?, name?), \
-background_poll(id), background_stop(id), update_plan(items), repo_advise(filter?).\n\
-Paths are relative to the project root and must stay inside it; anything outside is refused without asking. \
-File writes, edits and shell commands need the user's approval, which they may grant once, allow for the \
-session, or deny. If a result begins with `error:`, do not retry that call unchanged - say what failed and \
-try a different approach. Prefer edit_file over write_file, and read_file before touching code you have not seen.\n\
-For anything that takes several steps, post a short plan with update_plan(items=[{text,status}]) before the \
-first edit and update the statuses as you go; the user watches that list.";
+// How many assistant→tool→assistant rounds one user turn may take before tools
+// stop being offered and the model must answer in prose: the `agent_max_rounds`
+// config key (default 16, clamped to 1..=64 by the loop). The wording that
+// teaches it lives with the tool vocabulary, at
+// `xencode_context_rs::prompts::TOOLS`.
 
 // ── Permission policy (I1-01) ───────────────────────────────────────────
 // One source of truth for "may the agent run this call?". The chat loop

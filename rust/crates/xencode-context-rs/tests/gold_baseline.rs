@@ -13,6 +13,11 @@
 //! The numbers it prints are the ones a retrieval change is expected to move.
 //! They are reported, never asserted: this repo's file set changes and a fixed
 //! threshold would turn the measurement into a fixture.
+//!
+//! Each arm is also appended to `.xencode/cache/eval.jsonl` with the prompt-set
+//! digest this build carries, so a later run can say whether a difference came
+//! from the retriever or from a prompt edit — and refuse to compare when it was
+//! the prompts that moved.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -45,6 +50,15 @@ fn gold_scores_against_the_real_index() {
 
     let gold = xencode_context_rs::default_gold();
     let no_changes = HashSet::new();
+    // What this build tells a model to do, as one digest. Retrieval does not read
+    // the prompts, so a score only means something next to the gold set and this
+    // digest — a later run can tell whether the difference is the retriever.
+    let prompts_now = xencode_context_rs::prompts::set_version();
+    println!(
+        "prompt set {prompts_now} ({} prompts)",
+        xencode_context_rs::prompts::registry().len()
+    );
+    let prior = xencode_context_rs::read_eval_runs(&xencode);
     // Three arms, so the run prices each addition separately: structural only,
     // plus a lexical arm over path and symbols, plus the same with the files'
     // documentation prose indexed too.
@@ -76,6 +90,28 @@ fn gold_scores_against_the_real_index() {
             report.mrr,
             started.elapsed().as_secs_f64() * 1000.0 / gold.len().max(1) as f64,
         );
+        // The comparison is with the newest earlier run of this arm at this depth
+        // that was measured under the same prompt set. Anything else is stated as
+        // not comparable rather than quietly reported as progress.
+        let label = label.trim();
+        match xencode_context_rs::comparable_previous_eval_run(&prior, label, 5, prompts_now) {
+            Some(prev) => println!(
+                "  {label}  MRR {:.3} → {:.3} ({:+.3}) under prompts {prompts_now}",
+                prev.mrr,
+                report.mrr,
+                report.mrr - prev.mrr
+            ),
+            None => {
+                let why = match xencode_context_rs::previous_eval_run(&prior, label, 5) {
+                    Some(other) => format!(
+                        "the last run of this arm used prompts {}",
+                        other.prompt_version
+                    ),
+                    None => "no earlier run of this arm is recorded".to_string(),
+                };
+                println!("  {label}  no comparison available — {why}");
+            }
+        }
         for (query, _, rank, _) in &report.hits {
             let shown = if *rank == usize::MAX {
                 "outside top 5".to_string()
@@ -84,5 +120,14 @@ fn gold_scores_against_the_real_index() {
             };
             println!("  {shown:>14}  {query}");
         }
+        xencode_context_rs::append_eval_run(
+            &xencode,
+            &xencode_context_rs::EvalRunRecord::from_report(label, &report),
+        )
+        .expect("write the eval run to the log");
     }
+    println!(
+        "recorded to {}",
+        xencode_context_rs::eval_log_path(&xencode).display()
+    );
 }

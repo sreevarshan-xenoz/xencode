@@ -1,0 +1,1 @@
+Delegated task — work it end to end with the tools, reading before you edit and testing what you change. Post your steps with update_plan as you go. Stop when it is done or when you are blocked, and say which; never report an outcome you did not observe.

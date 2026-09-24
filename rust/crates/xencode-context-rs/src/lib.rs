@@ -25,6 +25,7 @@ pub mod index;
 pub mod init;
 pub mod metrics;
 pub mod pricing;
+pub mod prompts;
 pub mod refresh;
 pub mod retrieve;
 pub mod rollup;
@@ -48,7 +49,7 @@ pub use compact::{
 pub use context::{
     assemble_chat, assemble_prompt, collect_live_context, git_summary_text, read_retrieved_bodies,
     stable_system_text, ChatAssembly, ChatInput, ChatTurn, LiveContext, RetrievedBlock, TierDoc,
-    AGENT_SYSTEM_PROMPT, HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
+    HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
 pub use documents::{
@@ -57,7 +58,9 @@ pub use documents::{
 };
 pub use embed::{hybrid_select, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT};
 pub use eval::{
-    default_gold, evaluate, evaluate_with, gold_from_disk, EvalItem, EvalReport, EvalRun,
+    append_eval_run, comparable_previous_eval_run, default_gold, eval_log_path, evaluate,
+    evaluate_with, gold_from_disk, previous_eval_run, read_eval_runs, EvalItem, EvalReport,
+    EvalRun, EvalRunRecord,
 };
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,

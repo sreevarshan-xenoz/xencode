@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 980 tests passing, 5 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 990 tests passing, 5 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1615,6 +1615,12 @@ never is.
 - **EV-3 prompt registry with versioning** — named prompt files, version hashed
   into metrics and eval rows. S (2-3 d). Trap: see the KV-prefix constraint in
   N-0. Done-when: `/ctx` shows the active version and eval output groups by it.
+  *(Done 2026-09-24 — see W1 progress. The five prompts are markdown under
+  `rust/crates/xencode-context-rs/prompts/`, compiled in so the byte-stable head
+  cannot move underneath a session; versions are digests of the text, listed by
+  `/ctx prompts` and stamped on `.xencode/cache/metrics.jsonl`,
+  `turns.jsonl` and the new `eval.jsonl`, where a score is only compared with a
+  run taken under the same instructions.)*
 - **EV-4 cross-session memory with relevance retrieval** — distilled facts scored
   through the existing `retrieve()` signals. M (~1 wk). Trap: stale facts poison
   context; needs expiry and review. Done-when: an eval-style test shows the right
@@ -5425,6 +5431,73 @@ done-when is met, and the commit that does it names the IDs.
   number rows — clearing it gives unset, and `twelve` typed over a value gives
   unset rather than zero — and one over the three report wordings from rows read
   back off disk.
+
+- [x] `EV-3` — 2026-09-24. The instructions this program sends to a model are
+  files with versions now, and a recorded number says which of them produced it.
+- What moved: five prompt strings that were written inside Rust — the agent system
+  prompt in `context.rs`, the tool vocabulary in `agent_tools.rs`, the
+  transcript-folding prompt in `compact.rs`, and the two subagent briefs in
+  `app.rs` — are markdown under `rust/crates/xencode-context-rs/prompts/`, pulled
+  in with `include_str!` and listed by `prompts::registry()`. The wording is
+  unchanged; byte-for-byte equality was proven by testing each assembled request
+  against the literal it replaced, running those checks, and only then deleting the
+  literals. The joiners a request needs — the blank lines before the tool list, the
+  `Task:` line after a brief — stayed in code, so a file holds only instructions and
+  its last byte is a byte a model reads.
+- Why compiled in rather than read at runtime: the trap the item names. llama.cpp
+  reuses its KV cache across requests that share a prefix (§13), so the front of
+  every request has to be the same bytes until the program is rebuilt. A prompt file
+  an editor saved mid-session would quietly cost every later request that cache, and
+  nothing would report it.
+- A version is a digest, not a number someone bumps: 8 hex over a prompt's name and
+  text, 12 hex over the set. Name inside the hash so two prompts with the same
+  wording cannot be confused. The set digest is stamped on
+  `.xencode/cache/metrics.jsonl` and `turns.jsonl` as `prompt_version`, and a row
+  written by an older build reads back as "not recorded" rather than guessing.
+- `/ctx prompts` lists each prompt's name, version and file, then the set digest the
+  rows carry, and `/ctx <query>` ends its assembly line with it.
+- "Eval output groups by it" is made real rather than decorative: `/ctx eval` and
+  the `gold_baseline` measurement both append one row per arm to
+  `.xencode/cache/eval.jsonl` — arm, depth, query count, MRR, recall@k, the
+  timestamp and the digest, through `EvalRunRecord::from_report`, which takes the
+  digest from the build because a caller allowed to pass its own could record a
+  comparison that cannot be made. A change is printed only against the newest
+  earlier row of the same arm at the same depth with the same digest; anything else
+  reports the digest it refused to compare with.
+- Measured, this repo's built-in gold set of 18 queries at top-5: deterministic
+  0.349 MRR, +text (path+symbol) 0.769, +text +doc prose 0.787, at 6.3 / 71.1 / 93.4
+  ms per query on this CPU-only laptop. A second run reported `+0.000` for all three
+  arms, which is the repeatability the eval log exists to show. Then, end to end:
+  adding one sentence to `prompts/agent-system.md` moved the digest from
+  `8abca0eb4098` to `c908e9589468` and turned all three comparisons into the refusal
+  naming the old digest; reverting the file brought both back. Reverted by
+  checksum-verified restore, and the working tree is byte-identical to what it
+  replaced.
+- Two limits worth stating before anyone reads more into the grouping. Retrieval
+  scoring never reads these prompts, so a prompt edit cannot move a score — what the
+  digest buys is that a score which *does* move is not blamed on the retriever when
+  something else changed. And the log starts empty: no eval figure recorded before
+  this change can be compared at all.
+- One behaviour that is deliberate, because it looked like a bug while measuring:
+  appending a lone newline to a prompt file does not move its version. That newline
+  is trimmed before hashing and before sending, so the bytes a model sees did not
+  change — the version tracks the request, not the editor.
+- Verified by 990 tests, 0 failures, 5 ignored, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. Ten tests are new:
+  seven over the prompt files (every prompt named, non-empty and free of trailing
+  whitespace; each entry matching the file it claims by path; a version moving for a
+  reword and a rename but not for a stray newline; the set digest following the
+  prompt under it; the tool hint landing with its joiners intact; each brief being
+  its own file plus the task; the folding prompt having no unfilled holes), one that
+  a metrics row carries this build's digest, one over the eval log's round trip and
+  the refusal to compare across a prompt change, and one in the TUI that the
+  `/ctx prompts` panel prints the digest the rows are stamped with and names every
+  prompt and file. Three existing tests were tightened rather than added: the turn
+  trace's round trip now checks for a digest and the two "written by an older build"
+  cases check that the absence of one reads back as none.
+- What this does not close: `xencode query` still writes no metrics row, so a CLI
+  turn carries no digest either, and the plan's `N-0` KV-prefix work remains the
+  place where the prefix itself is guarded.
 
 #### W2 — The model/inference substrate — 15 items
 

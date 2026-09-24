@@ -29,10 +29,6 @@ pub const RECENT_MIN_TOKENS: u64 = 40;
 /// The marker that closes the stable prefix (byte-identical every request).
 pub const STABLE_END_MARKER: &str = "<!-- xencode:stable-prefix-end -->";
 
-/// Frozen identity line every model request starts with (tier 1 head).
-pub const AGENT_SYSTEM_PROMPT: &str =
-    "You are Xencode, a coding agent. Follow the project guidelines below exactly.";
-
 /// A retrieved file's fenced body, ready to inject.
 #[derive(Debug, Clone)]
 pub struct RetrievedBlock {

@@ -109,7 +109,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 ### In the TUI
 ```
 /init [abort|status]  - Generate & control project docs
-/ctx <sub>            - Context engine (status/track/compact/eval/kv/archive)
+/ctx <sub>            - Context engine (status/track/compact/eval/kv/archive/prompts)
 /advise [filter]      - Repository insights (cycles, hubs, orphans, broken imports)
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it

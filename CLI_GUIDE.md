@@ -65,6 +65,37 @@ back with `(spawn #<id> · <task>)`, and `/spawn status` lists every
 registered run with its worktree location. Your main chat keeps working
 while the subagent works.
 
+#### What the build tells the model: `/ctx prompts`
+
+The instructions this program sends with every request are plain markdown files
+under `rust/crates/xencode-context-rs/prompts/` — the agent system prompt, the
+tool vocabulary, the transcript-folding prompt, and the two subagent briefs.
+`/ctx prompts` lists them by name with the file each one lives in and a version,
+which is a hash of that file's text, plus one digest for the set. Edit a file and
+the version moves; there is no number to forget to bump, and no wording change
+that can be recorded as "nothing changed". The files are compiled in, so a rebuild
+is required — which also means a saved edit cannot change the instructions under a
+running session, the property llama.cpp's prompt-cache reuse depends on.
+
+The set digest is written into every metrics and turn row from now on
+(`.xencode/cache/metrics.jsonl`, `.xencode/cache/turns.jsonl`), and `/ctx eval`
+records each retrieval arm's score with it in `.xencode/cache/eval.jsonl`. The
+eval panel then compares a score only with an earlier run of the same arm at the
+same depth taken under the same prompts, and says so when it cannot:
+
+```text
+[CTX]🧪 Retrieval eval — 18 gold queries, top-5 (18 gold files) · prompts 8abca0eb4098
+[CTX]   deterministic         previous run of these prompts: MRR 0.349 → 0.349 (+0.000)
+[CTX]   + text (path+symbol)  no comparison: the last run of this arm used prompts 12ab34cd56ef, this one uses 8abca0eb4098
+```
+
+The first line is a repeat measurement of this repo's built-in gold set; the
+second is what a run looks like after someone edited a prompt file in between.
+A prompt edit and a retrieval change are two different things, and before this
+they were easy to mistake for each other.
+`cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture`
+measures the same three arms from the command line and appends to the same log.
+
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
 
