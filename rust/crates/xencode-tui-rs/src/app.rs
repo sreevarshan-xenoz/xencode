@@ -19,7 +19,8 @@ use xencode_models_rs::{
     LlamaCppClient, LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
 use xencode_providers_rs::{
-    ChatMessage, ContentPart, ImageUrlPart, MessageContent, ProviderManager,
+    classify, url_host, ChatMessage, ContentPart, Egress, EgressPolicy, ImageUrlPart,
+    MessageContent, ProviderManager, RoutingFacts,
 };
 
 pub use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
@@ -236,6 +237,10 @@ struct AgentRun {
     remote_base_url: String,
     remote_api_key: Option<String>,
     llama_opts: LlamaCppOptions,
+    /// Where this session's prompts may go (PR-2). Carried as the policy itself
+    /// instead of re-read from config per request, so the status bar and the
+    /// router cannot disagree about which rule is in force.
+    egress: EgressPolicy,
 }
 
 pub struct App<'a> {
@@ -1486,6 +1491,10 @@ struct SingleShot {
     gemini_key: Option<String>,
     remote_api_key: Option<String>,
     llama_opts: LlamaCppOptions,
+    /// Where this session's prompts may go (PR-2). Carried as the policy itself
+    /// instead of re-read from config per request, so the status bar and the
+    /// router cannot disagree about which rule is in force.
+    egress: EgressPolicy,
 }
 
 impl SingleShot {
@@ -1500,6 +1509,7 @@ impl SingleShot {
             qwen_key: config.api_keys.qwen_api_key.clone(),
             gemini_key: config.api_keys.google_gemini_api_key.clone(),
             remote_api_key: config.api_keys.remote_api_key.clone(),
+            egress: EgressPolicy::new(config.allow_cloud_models),
             llama_opts: LlamaCppOptions {
                 temperature: config.llama_cpp_temperature,
                 top_k: config.llama_cpp_top_k,
@@ -1525,7 +1535,8 @@ impl SingleShot {
             None,
         )
         .with_llama_cpp(llama_client)
-        .with_remote(&self.remote_base_url, self.remote_api_key.clone());
+        .with_remote(&self.remote_base_url, self.remote_api_key.clone())
+        .with_egress_policy(self.egress);
         manager
             .generate_with_options(&self.model, messages, Some(&self.llama_opts))
             .await
@@ -2411,6 +2422,30 @@ impl<'a> App<'a> {
         std::borrow::Cow::Owned(format!("{prefix}\n\n{CTX_SYSTEM}"))
     }
 
+    /// The egress rule this session obeys (PR-2). Every provider manager a turn
+    /// builds takes it from here, and the status bar reads it from here, so the
+    /// indicator cannot describe a rule the router is not applying.
+    pub fn egress_policy(&self) -> EgressPolicy {
+        EgressPolicy::new(self.config.allow_cloud_models)
+    }
+
+    /// Where a model id would send a prompt under this session's configuration.
+    ///
+    /// Deliberately not `api_keys`-shaped: a configured key proves who you are
+    /// to a provider, not that the conversation may reach it.
+    pub fn egress_of(&self, model: &str) -> Egress {
+        classify(model, self.routing_facts())
+    }
+
+    fn routing_facts(&self) -> RoutingFacts<'_> {
+        RoutingFacts {
+            openrouter_key: self.config.api_keys.openrouter_api_key.is_some(),
+            remote_host: (!self.config.remote_base_url.is_empty())
+                .then(|| url_host(&self.config.remote_base_url))
+                .flatten(),
+        }
+    }
+
     /// A tool-loop run carrying this session's providers, permission state,
     /// checkpoint group and budgets. Read at the moment a turn starts, so a
     /// settings change lands on the next turn; chat and ByteBot build the same
@@ -2426,6 +2461,7 @@ impl<'a> App<'a> {
             // Keep at least one tool round; 0 would offer tools on no turn.
             max_rounds: self.config.agent_max_rounds.clamp(1, 64),
             fallback_models: self.config.agent_fallback_models.clone(),
+            egress: self.egress_policy(),
             ollama_url: self.config.ollama_url.clone(),
             llama_cpp_url: self.config.llama_cpp_url.clone(),
             timeout: self.config.response_timeout,
@@ -5379,6 +5415,7 @@ impl<'a> App<'a> {
                 let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
                 let remote_url = self.config.remote_base_url.clone();
                 let remote_key = self.config.api_keys.remote_api_key.clone();
+                let egress = self.egress_policy();
                 let llama_opts = LlamaCppOptions {
                     temperature: self.config.llama_cpp_temperature,
                     top_k: self.config.llama_cpp_top_k,
@@ -5394,7 +5431,8 @@ impl<'a> App<'a> {
                     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
                     let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                         .with_llama_cpp(llama_client)
-                        .with_remote(&remote_url, remote_key);
+                        .with_remote(&remote_url, remote_key)
+                        .with_egress_policy(egress);
                     let _ = manager
                         .generate_stream_with_options(
                             &model,
@@ -5554,6 +5592,7 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
         remote_base_url,
         remote_api_key,
         llama_opts,
+        egress,
     } = run;
 
     let client = OllamaClient::new(&ollama_url, timeout);
@@ -5561,7 +5600,8 @@ async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
         .with_llama_cpp(llama_client)
         .with_request_timeout(timeout)
-        .with_remote(&remote_base_url, remote_api_key);
+        .with_remote(&remote_base_url, remote_api_key)
+        .with_egress_policy(egress);
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
@@ -6428,7 +6468,7 @@ mod tests {
         cap_at_line, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
         parse_porcelain_z, parse_term_suggestions, parse_voice_level, watch_warning_for, App,
-        ConversationMemory, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        ConversationMemory, Egress, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -7684,6 +7724,50 @@ mod tests {
             !lines.iter().any(|line| line.contains("trying anthropic")),
             "a skipped candidate must never be attempted, got {lines:?}"
         );
+    }
+
+    /// PR-2: the model list's `[cloud]` label and the router's decision are the
+    /// same computation, so a badge cannot promise a destination the turn will
+    /// not honour. `qwen-72b-chat` is an Ollama model with a misleading name,
+    /// and `openai/gpt-4o` is off-machine only once an OpenRouter key exists.
+    #[test]
+    fn a_model_is_called_cloud_by_the_same_rules_the_router_uses() {
+        let mut app = App::for_tests();
+        app.config.api_keys.openrouter_api_key = None;
+        assert_eq!(
+            app.egress_of("openai/gpt-4o"),
+            Egress::Local,
+            "with no OpenRouter key the id falls through to local Ollama"
+        );
+        assert_eq!(
+            app.egress_of("qwen-72b-chat"),
+            Egress::Local,
+            "an Ollama model name that looks like the Qwen cloud prefix"
+        );
+        assert_eq!(
+            app.egress_of("qwen:qwen3-max"),
+            Egress::Cloud,
+            "the prefix is the route"
+        );
+
+        app.config.api_keys.openrouter_api_key = Some("or-key".to_string());
+        assert_eq!(app.egress_of("openai/gpt-4o"), Egress::Cloud);
+    }
+
+    /// The rule the status bar prints is the rule a turn obeys, because both
+    /// come from one function reading one setting (PR-2).
+    #[test]
+    fn the_indicator_and_the_turn_read_the_same_egress_rule() {
+        let mut app = App::for_tests();
+        assert!(
+            !app.egress_policy().allow_cloud,
+            "cloud is off until the config asks for it"
+        );
+        assert!(!app.agent_run(LoopSink::Chat, Vec::new()).egress.allow_cloud);
+
+        app.config.allow_cloud_models = true;
+        assert!(app.egress_policy().allow_cloud);
+        assert!(app.agent_run(LoopSink::Chat, Vec::new()).egress.allow_cloud);
     }
 
     /// `/bytebot <task>` from the chat is the same run, and an argument-less

@@ -839,6 +839,7 @@ fn settings_toggle(app: &mut App, label: &str) -> bool {
         "Line Numbers" => &mut app.config.show_line_numbers,
         "Cache Enabled" => &mut app.config.cache_enabled,
         "Memory Enabled" => &mut app.config.memory_enabled,
+        "Cloud Models" => &mut app.config.allow_cloud_models,
         _ => return false,
     };
     *flag = !*flag;
@@ -1938,6 +1939,42 @@ mod tests {
             app.settings_cursor,
             crate::focus::settings_row_index("Llama.cpp URL")
         );
+    }
+
+    #[test]
+    fn the_cloud_models_row_switches_consent_and_sits_below_the_keys() {
+        use crate::focus::{settings_row_index, SettingKind, SETTINGS_ITEMS};
+
+        let mut app = app_with(FocusArea::Settings);
+        app.config = XencodeConfig::default();
+        assert!(
+            !app.egress_policy().allow_cloud,
+            "a session starts confined to this machine"
+        );
+
+        app.settings_cursor = settings_row_index("Cloud Models");
+        press(&mut app, KeyCode::Right);
+        assert!(app.egress_policy().allow_cloud, "the row is the switch");
+        press(&mut app, KeyCode::Right);
+        assert!(
+            !app.egress_policy().allow_cloud,
+            "and it can be turned back off"
+        );
+
+        // It ends the Providers section, below every key row: a key is
+        // transport for a cloud provider, this row is permission to use one,
+        // and the panel should read in that order.
+        let providers: Vec<&str> = SETTINGS_ITEMS
+            .iter()
+            .filter(|row| row.section == "Providers")
+            .map(|row| row.label)
+            .collect();
+        assert_eq!(providers.last().copied(), Some("Cloud Models"));
+        let consent = SETTINGS_ITEMS
+            .iter()
+            .find(|row| row.label == "Cloud Models")
+            .unwrap();
+        assert_eq!(consent.kind, SettingKind::Toggle);
     }
 
     #[test]

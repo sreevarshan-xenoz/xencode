@@ -43,6 +43,59 @@ async fn a_denied_cloud_route_is_refused_before_it_is_dialled() {
     );
 }
 
+/// A refusal that cannot be lifted is an outage, not a safety feature, so it
+/// carries the model it refused and the command that would allow it.
+#[tokio::test]
+async fn a_refusal_names_the_model_and_the_setting_to_lift_it() {
+    let manager = manager().with_egress_policy(EgressPolicy::new(false));
+
+    let message = manager
+        .generate("qwen:qwen2.5:72b", &test_messages())
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        message.contains("qwen:qwen2.5:72b"),
+        "named the model: {message}"
+    );
+    assert!(
+        message.contains("allow_cloud_models"),
+        "named the setting: {message}"
+    );
+}
+
+/// The constructor a configuration feeds: `true` is the opt-in, and it opens
+/// cloud routes rather than one prefix at a time.
+///
+/// The endpoint is under `.invalid`, which no resolver answers for (RFC 2606),
+/// so nothing reaches anywhere — the point is which error comes back, not that
+/// a request arrived.
+#[tokio::test]
+async fn allowing_cloud_opens_a_route_the_default_refuses() {
+    let refused = manager()
+        .with_remote("http://inference.example.invalid/v1", Some("k".to_string()))
+        .with_egress_policy(EgressPolicy::new(false));
+    let result = refused
+        .generate("remote:qwen2.5-coder", &test_messages())
+        .await;
+    assert!(
+        matches!(result, Err(ProviderError::Egress(_))),
+        "a `remote:` endpoint that is not on this machine is a cloud route, got {result:?}"
+    );
+
+    let allowed = manager()
+        .with_remote("http://inference.example.invalid/v1", Some("k".to_string()))
+        .with_egress_policy(EgressPolicy::new(true));
+    let result = allowed
+        .generate("remote:qwen2.5-coder", &test_messages())
+        .await;
+    assert!(
+        !matches!(result, Err(ProviderError::Egress(_))),
+        "an opted-in manager must go on and fail where it was going, got {result:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_denied_cloud_route_still_allows_local_models() {
     let manager = manager().with_egress_policy(EgressPolicy { allow_cloud: false });

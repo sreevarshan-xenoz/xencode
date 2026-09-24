@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a model on the internet is off until you say yes
+The routing decision added in the previous entry only stopped a *fallback* from
+changing where your conversation goes; choosing a cloud model still worked
+without asking. Now there is a setting for that: `allow_cloud_models` in
+config.json, off by default. While it is off, a `qwen:…`, `google_gemini:…`,
+OpenRouter-style `vendor/model` or `remote:…`-at-a-remote-host model is refused
+before any connection is opened, and the refusal names the model and the command
+that would allow it. Turn it on with
+`xencode config set allow_cloud_models true`, or with the new **Cloud Models**
+row in Settings → Providers.
+
+**If you use a cloud provider today, this is the one thing to know:** a config
+written by an older version has no such key, and no key means off. Set it once
+and it stays set. A key in `api_keys` is deliberately not treated as permission
+— filling in a Qwen or OpenRouter key says who you are to that service, not that
+your code may go there.
+
+The TUI now says which rule is running: the status bar reads `🔒 local only` or
+`🌐 cloud allowed`, and the model list's `[cloud]` label is computed by the same
+rules the request routers use. That label used to guess from the name, which got
+two things wrong in the same list — an Ollama model called `qwen-72b-chat` was
+marked cloud, and `vendor/model` ids were marked cloud even with no OpenRouter
+key configured, which is the one case where such a model runs locally.
+
+One boundary is stated rather than glossed: the rule looks at the server this
+program talks to, so `remote:` is judged by the address in `remote_base_url`. A
+Colab GPU reached through `xencode colab up` arrives at `127.0.0.1`, so it is
+allowed while `allow_cloud_models` is off; the virtual machine on the far end of
+that tunnel is still Google's, and `xencode colab down` is what ends it.
+
 ### Fixed — a provider going down no longer moves your conversation elsewhere
 A local model that failed — Ollama restarting, a rate limit, a bad key — handed
 the whole exchange to the next entry in `agent_fallback_models`, whatever that
@@ -31,10 +61,11 @@ and a candidate that was skipped for that reason is named in the transcript as
 and now look different. A request refused by policy ends the turn: no retry, and
 no next candidate, because a refusal is a decision rather than a failure.
 
-Nothing is refused by default yet. The policy that decides whether an
-internet-connected route may be used at all ships allowing every route, which is
-today's behaviour, and the classifier and the fallback rule are what this change
-delivers; making the local-first posture the default is the next step.
+Nothing was refused by that change on its own. The setting that decides whether
+an internet-connected route may be used at all shipped allowing every route,
+which is today's behaviour, and the classifier plus the fallback rule are what
+this entry delivers; making the local-first choice the default is the entry
+above.
 
 ### Fixed — an attached screenshot no longer goes out at full size
 Attaching an image sent the file's bytes exactly as they sat on disk. A

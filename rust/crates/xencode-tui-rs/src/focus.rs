@@ -304,6 +304,13 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         section: "Providers",
         kind: SettingKind::Secret,
     },
+    // Consent sits below the keys on purpose: filling in a key says who you are
+    // to a provider, this row says whether a prompt may reach one at all.
+    SettingRow {
+        label: "Cloud Models",
+        section: "Providers",
+        kind: SettingKind::Toggle,
+    },
     SettingRow {
         label: "Factory Reset",
         section: "Actions",

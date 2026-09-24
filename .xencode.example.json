@@ -1,5 +1,5 @@
 {
-  "_comment": "Example of ~/.xencode/config.json (or $XCODE_CONFIG_DIR/config.json). Copy it there, or set individual keys with `xencode config set <KEY> <VALUE>`. Only the keys below exist — unknown keys are ignored by the loader. Cloud providers are selected by model prefix: `qwen:...`, `google_gemini:...`, or an OpenRouter-style `vendor/model` id; the local model is `default_model`. A `remote:` prefix (any OpenAI-compatible server, including one the Colab bridge tunnels to your laptop) uses `remote_base_url` + `api_keys.remote_api_key`. The `colab` block configures `xencode colab up`; a successful bring-up rewrites `llama_cpp_url` (or `ollama_url`) and `remote_base_url` to point at the local forward. `agent_fallback_models` is tried in order by the agent, only while nothing has streamed yet; a `vendor/model` entry needs `openrouter_api_key`.",
+  "_comment": "Example of ~/.xencode/config.json (or $XCODE_CONFIG_DIR/config.json). Copy it there, or set individual keys with `xencode config set <KEY> <VALUE>`. Only the keys below exist — unknown keys are ignored by the loader. Cloud providers are selected by model prefix: `qwen:...`, `google_gemini:...`, or an OpenRouter-style `vendor/model` id; the local model is `default_model`. A `remote:` prefix (any OpenAI-compatible server, including one the Colab bridge tunnels to your laptop) uses `remote_base_url` + `api_keys.remote_api_key`. The `colab` block configures `xencode colab up`; a successful bring-up rewrites `llama_cpp_url` (or `ollama_url`) and `remote_base_url` to point at the local forward. `agent_fallback_models` is tried in order by the agent, only while nothing has streamed yet; a `vendor/model` entry needs `openrouter_api_key`. Cloud routes are switched off until `allow_cloud_models` is true — a key in `api_keys` identifies you to a provider, it does not permit the trip.",
   "default_model": "qwen2.5:7b",
   "api_keys": {
     "openai_api_key": null,
@@ -16,6 +16,7 @@
     "qwen2.5:14b",
     "openai/gpt-4o-mini"
   ],
+  "allow_cloud_models": false,
   "agent_hooks": {
     "before": {
       "edit_file": "test -z \"$(git diff --name-only)\" || echo 'dirty tree' >&2"
