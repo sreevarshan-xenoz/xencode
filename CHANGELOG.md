@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the instructions a model is given, named and versioned
+Five prompts went over the wire from strings written in the middle of Rust code:
+the agent system prompt, the tool vocabulary that rides on the end of it, the
+transcript-folding prompt, and the two subagent briefs. They are files now, under
+`rust/crates/xencode-context-rs/prompts/`, pulled in at build time. As files a
+reworded instruction is a readable diff instead of a line inside a `format!`, and
+as compiled-in text they cannot change underneath a running session — which is
+what llama.cpp's prompt-cache reuse needs from the front of every request (§13).
+Each prompt's version is a hash of its own text and each set's digest a hash of
+those, so there is no number to forget to bump and an edit cannot be filed as
+"nothing changed". A stray trailing newline is the one thing that does *not* move
+a version: it is trimmed before hashing, because it is trimmed before sending too.
+
+The set digest now rides on every metrics line in `.xencode/cache/metrics.jsonl`
+and every turn line in `.xencode/cache/turns.jsonl`, so a slow or good answer can
+be traced back to the instructions that produced it. A line written by an older
+build reads back as "no prompt set recorded", which is the truth rather than a
+guess. `/ctx prompts` lists each prompt with its version and the file it came
+from, and prints the digest the rows carry.
+
+`/ctx eval` now appends every arm's score, its depth and that digest to
+`.xencode/cache/eval.jsonl`, and only prints a change against an earlier run of
+the same arm at the same depth taken under the same instructions — otherwise it
+says which digest the earlier run used instead. Measured end to end on this
+repo's own gold set: three arms at MRR 0.349 / 0.769 / 0.787 over 18 queries, a
+second run reporting `+0.000` for all three, and appending one sentence to
+`prompts/agent-system.md` moving the digest from `8abca0eb4098` to `c908e9589468`
+and turning all three comparisons into the refusal. Reverting the file brought the
+digest and the comparisons back. Two things to keep honest about that: retrieval
+scoring does not read any of these prompts, so a prompt edit cannot change a
+score — what the grouping buys is that a score change is not *blamed* on the
+retriever when something else moved; and the log starts empty, so no eval number
+from before this change can be compared at all. 10 tests added (980 → 990).
+
 ### Added — answers that can be produced again
 A llama.cpp request carried a temperature but no seed, so the server drew a fresh
 one every time and nothing about a turn's output could be repeated. Two settings

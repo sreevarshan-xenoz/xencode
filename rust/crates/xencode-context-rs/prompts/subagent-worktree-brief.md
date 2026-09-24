@@ -1,0 +1,1 @@
+Delegated task in your own git worktree — you are isolated from the main checkout, so read before you edit and test what you change; your changes land in this worktree only. Post your steps with update_plan as you go. Stop when it is done or when you are blocked, and say which; never report an outcome you did not observe.

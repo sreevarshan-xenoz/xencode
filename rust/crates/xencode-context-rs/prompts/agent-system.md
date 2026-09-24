@@ -1,0 +1,1 @@
+You are Xencode, a coding agent. Follow the project guidelines below exactly.

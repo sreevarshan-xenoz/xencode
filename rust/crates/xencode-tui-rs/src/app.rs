@@ -28,7 +28,7 @@ pub use crate::theme::ThemeColors;
 use crate::ui;
 
 /// System block injected as tier 1 when previewing `/ctx` context assembly.
-const CTX_SYSTEM: &str = xencode_context_rs::AGENT_SYSTEM_PROMPT;
+const CTX_SYSTEM: &str = xencode_context_rs::prompts::AGENT_SYSTEM;
 
 /// Hardware profile the live chat path budgets against. Must stay in sync
 /// with the llama.cpp `--ctx-size` the auto-start uses for this profile.
@@ -166,14 +166,9 @@ const PROFILER_SAMPLE_MS: u64 = 250;
 /// Persisted metric rows the profiler lists, newest first.
 const PROFILER_METRIC_ROWS: usize = 6;
 
-/// How a spawn's task is framed for the model. The worktree is the whole
-/// deal: everything it touches is inside it, and it must say that plainly.
-const SPAWN_BRIEF: &str = "Delegated task in your own git worktree — you are isolated \
-                           from the main checkout, so read before you edit and test what \
-                           you change; your changes land in this worktree only. Post your \
-                           steps with update_plan as you go. Stop when it is done or when \
-                           you are blocked, and say which; never report an outcome you \
-                           did not observe.\n\nTask: ";
+// How a spawn's task is framed for the model lives in the prompt registry
+// (`prompts::worktree_brief`): the worktree is the whole deal, so the brief says
+// plainly that everything it touches is inside it.
 
 /// One `/spawn <task> [#branch]` subagent (I3-03). Kept on the app so
 /// `/spawn status` is honest without a provider: the record mutates only from
@@ -194,14 +189,6 @@ impl SpawnRecord {
         format!("{done}/{} call(s) completed", self.steps.len())
     }
 }
-
-/// How a delegated run is framed for the model. Deliberately short: the tools
-/// themselves are taught by `TOOL_HINT`, which rides on the system turn.
-const BYTEBOT_BRIEF: &str = "Delegated task — work it end to end with the tools, \
-                             reading before you edit and testing what you change. \
-                             Post your steps with update_plan as you go. Stop when it \
-                             is done or when you are blocked, and say which; never \
-                             report an outcome you did not observe.\n\nTask: ";
 
 /// What the ByteBot progress bar means: the share of calls made so far that
 /// came back. It can move backwards when the model makes another call — which
@@ -2392,7 +2379,7 @@ impl<'a> App<'a> {
         // stability are untouched; only text-only system messages qualify.
         if let Some(system) = context_messages.first_mut().filter(|m| m.role == "system") {
             if let xencode_providers_rs::MessageContent::Text(text) = &mut system.content {
-                text.push_str(crate::agent_tools::TOOL_HINT);
+                xencode_context_rs::prompts::append_tool_hint(text);
             }
         }
         // Attached images become content parts on the final user turn, in
@@ -3016,22 +3003,28 @@ impl<'a> App<'a> {
     /// and with the tool vocabulary appended. No chat history — a delegated
     /// run starts from the repository, not from whatever was said before.
     fn bytebot_context(&self, task: &str) -> Vec<ChatMessage> {
-        self.delegated_context(&xencode_context_rs::default_root(), task, BYTEBOT_BRIEF)
+        self.delegated_context(
+            &xencode_context_rs::default_root(),
+            task,
+            xencode_context_rs::prompts::subagent_brief,
+        )
     }
 
     /// The shared delegated-run prompt builder. `root` is where the run's
     /// tools operate — the main checkout for ByteBot, a fresh worktree for
-    /// `/spawn` (I3-03) — so context is collected inside that sandbox.
+    /// `/spawn` (I3-03) — so context is collected inside that sandbox. `brief`
+    /// is which of the registry's two delegated-run wordings frames the task.
     fn delegated_context(
         &self,
         root: &std::path::Path,
         task: &str,
-        brief: &str,
+        brief: fn(&str) -> String,
     ) -> Vec<ChatMessage> {
         let live = xencode_context_rs::collect_live_context(root, task, CTX_PROFILE);
         let model = self.config.default_model.clone();
         let context_window = xencode_providers_rs::capabilities_for(&model).context_window;
         let system = self.agent_system_prompt();
+        let prompt = brief(task);
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: CTX_PROFILE,
             context_window,
@@ -3043,7 +3036,7 @@ impl<'a> App<'a> {
             retrieved: live.blocks,
             attached_block: "",
             history: &[],
-            prompt: &format!("{brief}{task}"),
+            prompt: &prompt,
         });
         let mut messages: Vec<ChatMessage> = assembly
             .turns
@@ -3055,7 +3048,7 @@ impl<'a> App<'a> {
             .collect();
         if let Some(system) = messages.first_mut().filter(|m| m.role == "system") {
             if let xencode_providers_rs::MessageContent::Text(text) = &mut system.content {
-                text.push_str(crate::agent_tools::TOOL_HINT);
+                xencode_context_rs::prompts::append_tool_hint(text);
             }
         }
         messages
@@ -3103,7 +3096,11 @@ impl<'a> App<'a> {
 
         // A per-spawn checkpoint store: `/rewind` in the main chat reaches the
         // main checkout's turns, never a spawned worktree's edits.
-        let context_messages = self.delegated_context(&worktree_path, task, SPAWN_BRIEF);
+        let context_messages = self.delegated_context(
+            &worktree_path,
+            task,
+            xencode_context_rs::prompts::worktree_brief,
+        );
         let mut run = self.agent_run(LoopSink::Spawn(id), context_messages, task);
         run.tool_root = worktree_path;
         run.approval.checkpoints = std::sync::Arc::new(crate::agent_tools::CheckpointStore::new());
@@ -3578,9 +3575,13 @@ impl<'a> App<'a> {
                         xencode_context_rs::evaluate_with(&index, &gold, k, &dirty, opts)
                     })
                     .collect();
+                // Read the history before this run is added to it, so "the
+                // previous run" is the last time this was measured and not itself.
+                let prior = xencode_context_rs::read_eval_runs(&xencode);
+                let prompts_now = xencode_context_rs::prompts::set_version();
                 let _ = tx.send("[CTX_START]".to_string());
                 let _ = tx.send(format!(
-                    "[CTX]🧪 Retrieval eval — {} gold queries, top-{} ({} gold file{})",
+                    "[CTX]🧪 Retrieval eval — {} gold queries, top-{} ({} gold file{}) · prompts {}",
                     reports[0].queries,
                     k,
                     if gold.iter().all(|g| g.expected.is_empty()) {
@@ -3588,16 +3589,65 @@ impl<'a> App<'a> {
                     } else {
                         reports[0].queries
                     },
-                    if reports[0].queries == 1 { "" } else { "s" }
+                    if reports[0].queries == 1 { "" } else { "s" },
+                    prompts_now
                 ));
                 let base_mrr = reports[0].mrr;
+                let mut logged = true;
                 for ((label, _), rep) in arms.iter().zip(&reports) {
+                    let label = label.trim();
                     let _ = tx.send(format!(
-                        "[CTX]   {label} : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
+                        "[CTX]   {label:<19} : MRR {:.3} · recall@1 {:.0}% · recall@3 {:.0}% · P@1 {:.0}%",
                         rep.mrr,
                         rep.recall_at.first().map(|v| v * 100.0).unwrap_or(0.0),
                         rep.recall_at.get(2).map(|v| v * 100.0).unwrap_or(0.0),
                         rep.precision_at.first().map(|v| v * 100.0).unwrap_or(0.0),
+                    ));
+                    // A delta is only printed against a run whose prompts matched
+                    // this one's. Otherwise the difference would be a description
+                    // of the prompt edit, filed as a retrieval change.
+                    match xencode_context_rs::comparable_previous_eval_run(
+                        &prior,
+                        label,
+                        k,
+                        prompts_now,
+                    ) {
+                        Some(prev) => {
+                            let _ = tx.send(format!(
+                                "[CTX]   {label:<19}   previous run of these prompts: MRR {:.3} → {:.3} ({:+.3})",
+                                prev.mrr,
+                                rep.mrr,
+                                rep.mrr - prev.mrr
+                            ));
+                        }
+                        None => match xencode_context_rs::previous_eval_run(&prior, label, k) {
+                            Some(other) => {
+                                let _ = tx.send(format!(
+                                    "[CTX]   {label:<19}   no comparison: the last run of this arm used prompts {}, this one uses {}",
+                                    other.prompt_version, prompts_now
+                                ));
+                            }
+                            None => {
+                                let _ = tx.send(format!(
+                                    "[CTX]   {label:<19}   first run of this arm recorded — later runs can be compared"
+                                ));
+                            }
+                        },
+                    }
+                    if let Err(e) = xencode_context_rs::append_eval_run(
+                        &xencode,
+                        &xencode_context_rs::EvalRunRecord::from_report(label, rep),
+                    ) {
+                        let _ = tx.send(format!(
+                            "[CTX]⚠️ Could not record this run to the eval log: {e}"
+                        ));
+                        logged = false;
+                    }
+                }
+                if logged {
+                    let _ = tx.send(format!(
+                        "[CTX]🗃 Every arm recorded to {} — a score is only ever compared with a run of the same prompts.",
+                        xencode_context_rs::eval_log_path(&xencode).display()
                     ));
                 }
                 let best = reports
@@ -3782,6 +3832,31 @@ impl<'a> App<'a> {
                 for line in prompt.lines() {
                     let _ = tx.send(format!("[CTX]    {line}"));
                 }
+            }
+            Some("prompts") => {
+                let _ = tx.send("[CTX_START]".to_string());
+                let prompts = xencode_context_rs::prompts::registry();
+                let _ = tx.send(format!(
+                    "[CTX]📝 Prompt registry — {} prompts, active set {}",
+                    prompts.len(),
+                    xencode_context_rs::prompts::set_version()
+                ));
+                for prompt in &prompts {
+                    let _ = tx.send(format!(
+                        "[CTX]   {:<24} {:>8}  {}",
+                        prompt.name,
+                        prompt.version(),
+                        prompt.path
+                    ));
+                }
+                let _ = tx.send(
+                    "[CTX]   Each version is a hash of the text, so rewording a prompt moves it and a metrics row says which instructions produced it."
+                        .to_string(),
+                );
+                let _ = tx.send(
+                    "[CTX]   These files are compiled in: a rebuild is required, and an edit cannot change the prompt under a running session."
+                        .to_string(),
+                );
             }
             _ => {
                 let query = if let Some(rest) = rest.strip_prefix("retrieve") {
@@ -4341,12 +4416,13 @@ impl<'a> App<'a> {
             );
             let stable_tokens: u64 = doc.tiers.iter().take(3).map(|t| t.tokens).sum();
             let _ = tx.send(format!(
-                "[CTX]📦 Assembled context ≈ {} / {} tokens target — {} / {} retrieved files in — stable prefix {} tokens",
+                "[CTX]📦 Assembled context ≈ {} / {} tokens target — {} / {} retrieved files in — stable prefix {} tokens — prompts {}",
                 doc.total_tokens,
                 doc.target_tokens,
                 doc.retrieved_included,
                 doc.retrieved_total,
-                stable_tokens
+                stable_tokens,
+                xencode_context_rs::prompts::set_version()
             ));
             // Capture for the KV-reuse metrics on the next llama.cpp timings.
             let _ = tx.send(format!(
@@ -9104,6 +9180,45 @@ mod tests {
         assert!(lines[0].contains("`xencode/spawn-1`"), "{}", lines[0]);
         assert!(lines[1].contains("#2 done    "), "{}", lines[1]);
         assert!(lines[1].contains("1 call(s)"), "{}", lines[1]);
+    }
+
+    /// `/ctx prompts` is where the instructions a model was given get checked, so
+    /// it has to print the same digest the metric rows carry rather than a second
+    /// calculation of it, and list every prompt the registry knows about.
+    #[test]
+    fn ctx_prompts_lists_every_prompt_with_the_active_digest() {
+        let mut app = App::for_tests();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        app.handle_ctx_command("/ctx prompts", tx);
+        let mut lines = Vec::new();
+        while let Ok(line) = rx.try_recv() {
+            lines.push(line);
+        }
+        let text = lines.join("\n");
+        assert!(
+            text.contains(&format!(
+                "active set {}",
+                xencode_context_rs::prompts::set_version()
+            )),
+            "the panel does not show the digest the rows are stamped with: {text}"
+        );
+        for prompt in xencode_context_rs::prompts::registry() {
+            assert!(
+                text.contains(prompt.name),
+                "{} missing from {text}",
+                prompt.name
+            );
+            assert!(
+                text.contains(&prompt.version()),
+                "{}'s version never reached the panel",
+                prompt.name
+            );
+            assert!(
+                text.contains(prompt.path),
+                "{}'s file is not named",
+                prompt.name
+            );
+        }
     }
 
     #[test]

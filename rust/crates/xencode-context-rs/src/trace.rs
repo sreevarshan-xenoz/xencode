@@ -84,6 +84,12 @@ pub struct TurnTrace {
     /// and an estimate in this column would be mistaken for one later.
     #[serde(default)]
     pub est_cost_micros: Option<u64>,
+    /// The digest of the instruction set this turn ran under, from the prompt
+    /// registry. `prompt_sha256` above identifies the user's words; this
+    /// identifies what the program told the model to do with them, so a turn from
+    /// before a prompt edit and one after are not compared as if they were alike.
+    #[serde(default)]
+    pub prompt_version: Option<String>,
 }
 
 impl TurnTrace {
@@ -103,6 +109,7 @@ impl TurnTrace {
             completion_tokens: None,
             prompt_tokens: None,
             est_cost_micros: None,
+            prompt_version: Some(crate::prompts::set_version().to_string()),
         }
     }
 
@@ -290,6 +297,11 @@ mod tests {
         assert_eq!(rows[0].duration_ms, 4_200);
         assert_eq!(rows[0].tools[0].name, "read_file");
         assert_eq!(rows[0].completion_tokens, Some(412));
+        // The turn says which instructions it ran under, not just what the user typed.
+        assert_eq!(
+            rows[0].prompt_version.as_deref(),
+            Some(crate::prompts::set_version())
+        );
         // Nothing prices a request yet, so nothing pretends to.
         assert_eq!(rows[0].est_cost_micros, None);
         fs::remove_dir_all(dir).unwrap();
@@ -328,6 +340,9 @@ mod tests {
         assert_eq!(rows[0].duration_ms, 9);
         assert!(rows[0].session_id.is_none());
         assert_eq!(rows[0].completion_tokens, None);
+        // A turn from before prompts were versioned claims no prompt set, which is
+        // right: that build did not know what its instructions were worth.
+        assert_eq!(rows[0].prompt_version, None);
         fs::remove_dir_all(dir).unwrap();
     }
 

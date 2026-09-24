@@ -100,6 +100,12 @@ pub struct RequestMetrics {
     /// seed asks the server to keep choosing, so it means the same as absent.
     #[serde(default)]
     pub seed: Option<i64>,
+    /// Which set of instructions the turn was asked to obey, as a short digest of
+    /// the prompt registry ([`crate::prompts::set_version`]). A row written before
+    /// prompts were versioned reads back as `None`, which is the honest answer:
+    /// that build did not know what its prompts were worth.
+    #[serde(default)]
+    pub prompt_version: Option<String>,
 }
 
 impl RequestMetrics {
@@ -125,6 +131,7 @@ impl RequestMetrics {
             power_w: None,
             temperature: None,
             seed: None,
+            prompt_version: Some(crate::prompts::set_version().to_string()),
         }
     }
 
@@ -516,6 +523,8 @@ mod tests {
         assert_eq!(rows[0].power_w, None);
         assert_eq!(rows[0].temperature, None);
         assert_eq!(rows[0].seed, None);
+        // A row from before prompts were versioned does not claim a prompt set.
+        assert_eq!(rows[0].prompt_version, None);
         // Reading an old row is not the same as claiming it repeats: with no
         // sampling recorded, the only honest answer is that the server chose.
         assert!(!rows[0].repeatable());
@@ -545,6 +554,28 @@ mod tests {
         assert!(rows[1].repeatable());
         assert_eq!(rows[1].temperature, Some(0.0));
         assert_eq!(rows[1].seed, Some(0));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A turn has to say which instructions it was asked to obey, or the score it
+    /// produced cannot be lined up with the one from before a prompt was reworded.
+    #[test]
+    fn every_row_records_the_prompt_set_this_build_carries() {
+        let dir = temp_dir();
+        let xencode = dir.join(".xencode");
+        let row = RequestMetrics::from_timings("LOW", 4096, 100, 100, 10, 11.0, 300.0, 1);
+        assert_eq!(
+            row.prompt_version.as_deref(),
+            Some(crate::prompts::set_version()),
+            "a fresh row names the prompts it was built with"
+        );
+        append_metrics(&xencode, &row).unwrap();
+        let raw = fs::read_to_string(metrics_path(&xencode)).unwrap();
+        assert!(
+            raw.contains(r#""prompt_version":""#),
+            "the digest never reached the file: {raw}"
+        );
+        assert_eq!(read_metrics(&xencode)[0].prompt_version, row.prompt_version);
         fs::remove_dir_all(dir).unwrap();
     }
 

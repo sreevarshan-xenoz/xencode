@@ -94,25 +94,12 @@ pub fn hard_compact_prompt(state: &ContextState, transcript: &Transcript) -> Str
         .map(|e| format!("{}: {}", e.role, e.content))
         .collect::<Vec<_>>()
         .join("\n");
-    format!(
-        "You are compressing a working coding conversation into its durable layers. \
-Keep immutable facts, decisions, the current task, completed work, and unresolved issues. \
-Never invent facts. Keep the last 6 messages verbatim.\n\n\
-# Current state\n{}\n\n\
-# Transcript tail (this is the working window being folded)\n{TRANSCRIPT_TAIL}\n\n\
-Return ONLY this exact markdown shape:\n\n\
-## working-on\n<one parallel sentence>\n\n\
-## completed\n- <item>\n\n\
-## decisions\n- <decision [d]>\n\n\
-## unresolved\n- <item>\n\n\
-## recent (last 6 messages, verbatim)\n{recent}",
-        if state.present() {
-            state.to_markdown()
-        } else {
-            "(empty)".to_string()
-        },
-        TRANSCRIPT_TAIL = transcript_tail(transcript),
-    )
+    let state_text = if state.present() {
+        state.to_markdown()
+    } else {
+        "(empty)".to_string()
+    };
+    crate::prompts::compaction_prompt(&state_text, &transcript_tail(transcript), &recent)
 }
 
 fn transcript_tail(transcript: &Transcript) -> String {

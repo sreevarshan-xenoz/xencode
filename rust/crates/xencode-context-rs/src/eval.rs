@@ -189,6 +189,97 @@ pub fn evaluate(
     )
 }
 
+/// One retrieval-eval run as recorded on disk.
+///
+/// Eval numbers only mean something next to the two things that produced them:
+/// the gold set and the instructions the build carries. A score stored on its own
+/// invites the next person to compare it with a run whose prompts had been edited
+/// in between, and call the difference a retrieval change.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EvalRunRecord {
+    /// UTC epoch millis when the run finished.
+    pub ts_unix_ms: u64,
+    /// Which arm was measured, in the label the runner gave it.
+    pub arm: String,
+    pub top_k: usize,
+    /// How many gold queries were asked.
+    pub queries: usize,
+    /// The prompt-set digest this build sent, from [`crate::prompts`].
+    pub prompt_version: String,
+    pub mrr: f64,
+    /// recall@k for k = 1..=top_k, same shape as [`EvalReport::recall_at`].
+    #[serde(default)]
+    pub recall_at: Vec<f64>,
+}
+
+impl EvalRunRecord {
+    /// One row for a finished arm. The prompt version is taken from the build
+    /// rather than passed in, because the build is the only honest source for it:
+    /// a caller that got it wrong would record a comparison that cannot be made.
+    pub fn from_report(arm: &str, report: &EvalReport) -> Self {
+        Self {
+            ts_unix_ms: crate::conversation::now_millis(),
+            arm: arm.to_string(),
+            top_k: report.top_k,
+            queries: report.queries,
+            prompt_version: crate::prompts::set_version().to_string(),
+            mrr: report.mrr,
+            recall_at: report.recall_at.clone(),
+        }
+    }
+}
+
+pub fn eval_log_path(xencode_dir: &std::path::Path) -> std::path::PathBuf {
+    xencode_dir.join("cache").join("eval.jsonl")
+}
+
+/// Append one run to `cache/eval.jsonl`. Nothing is trimmed: the point of the log
+/// is that a score from an older build is still there to be compared, or refused.
+pub fn append_eval_run(
+    xencode_dir: &std::path::Path,
+    record: &EvalRunRecord,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = eval_log_path(xencode_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    writeln!(file, "{}", serde_json::to_string(record)?)
+}
+
+/// Every recorded run, oldest first. A line that does not parse is skipped rather
+/// than ending the read, so one interrupted write cannot hide the history.
+pub fn read_eval_runs(xencode_dir: &std::path::Path) -> Vec<EvalRunRecord> {
+    xencode_core_rs::read_jsonl_tolerant(&eval_log_path(xencode_dir)).rows
+}
+
+/// The newest recorded run of `arm` at `top_k`, whatever its prompts were — which
+/// is why the caller is shown the version rather than being handed a delta.
+pub fn previous_eval_run<'a>(
+    runs: &'a [EvalRunRecord],
+    arm: &str,
+    top_k: usize,
+) -> Option<&'a EvalRunRecord> {
+    runs.iter().rev().find(|r| r.top_k == top_k && r.arm == arm)
+}
+
+/// The newest recorded run of `arm` at `top_k` that a score can honestly be
+/// compared with: same prompts, or nothing.
+pub fn comparable_previous_eval_run<'a>(
+    runs: &'a [EvalRunRecord],
+    arm: &str,
+    top_k: usize,
+    prompt_version: &str,
+) -> Option<&'a EvalRunRecord> {
+    runs.iter()
+        .rev()
+        .find(|r| r.top_k == top_k && r.arm == arm && r.prompt_version == prompt_version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +469,61 @@ mod tests {
             .and_then(|p| p.parent())
             .expect("crate sits at <root>/rust/crates/<name>")
             .to_path_buf()
+    }
+
+    fn record(arm: &str, top_k: usize, prompt_version: &str, mrr: f64, ts: u64) -> EvalRunRecord {
+        EvalRunRecord {
+            ts_unix_ms: ts,
+            arm: arm.to_string(),
+            top_k,
+            queries: 12,
+            prompt_version: prompt_version.to_string(),
+            mrr,
+            recall_at: vec![mrr],
+        }
+    }
+
+    #[test]
+    fn a_run_written_to_disk_comes_back_and_carries_its_prompts() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("xencode-eval-log-test-{unique}"));
+        let older = record("hybrid", 5, "aaaaaaaaaaaa", 0.41, 1);
+        let newer = record("hybrid", 5, "bbbbbbbbbbbb", 0.38, 2);
+        append_eval_run(&dir, &older).unwrap();
+
+        let runs = read_eval_runs(&dir);
+        assert_eq!(
+            runs,
+            vec![older.clone()],
+            "the log reads back what was written"
+        );
+        // The first run of a new prompt set has nothing to be compared against:
+        // the caller must say so rather than reach past the prompt change.
+        assert_eq!(
+            comparable_previous_eval_run(&runs, "hybrid", 5, "bbbbbbbbbbbb"),
+            None,
+            "a run under different prompts was offered as comparable"
+        );
+        assert_eq!(previous_eval_run(&runs, "hybrid", 5), Some(&older));
+
+        append_eval_run(&dir, &newer).unwrap();
+        let runs = read_eval_runs(&dir);
+        assert_eq!(runs.len(), 2, "appends accumulate instead of replacing");
+        assert_eq!(runs[1], newer);
+        assert_eq!(runs[1].recall_at, vec![0.38]);
+        // Same arm and depth, older prompts: still findable, so the version can be
+        // reported to the user as the reason a delta was withheld.
+        assert_eq!(
+            comparable_previous_eval_run(&runs, "hybrid", 5, "aaaaaaaaaaaa"),
+            Some(&older)
+        );
+        // A different arm or depth is a different measurement, not a delta.
+        assert_eq!(previous_eval_run(&runs, "structural", 5), None);
+        assert_eq!(previous_eval_run(&runs, "hybrid", 10), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

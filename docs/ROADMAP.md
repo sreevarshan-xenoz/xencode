@@ -7,7 +7,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-24** — 15 crates, 980 tests. Every line
+> **Verified against the tree on 2026-09-24** — 15 crates, 990 tests. Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
 > [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.
@@ -111,6 +111,10 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / 
 4. **Every TUI panel tells the truth** (Milestone J, J-01…J-08) — the seven
    scripted panels were replaced with real scans, measurements, model calls and
    microphone capture, and plugin manifests now load
+5. **A run that can be looked at afterwards** (Milestone R, W1) — a rollup over the
+   metrics log, per-turn traces read back by `/trace`, a seed that travels with a
+   llama.cpp request, and the instructions a model is given now living as versioned
+   prompt files whose digest is recorded with every metric, trace and eval score
 
 ### 🚀 Next up
 No *committed* milestone. **Milestone K** (remote providers + the Google Colab GPU
@@ -151,7 +155,7 @@ each item protects), not sequence. The icebox above still feeds it.
 ### 📈 Metrics as measured (2026-09-23)
 - **Rust Migration**: 15/15 crates — complete; the Python stack is deleted, and
   Milestone K added `xencode-colab-rs` as the 15th
-- **Test Suite**: 980 passing, 0 failing, 5 ignored (`cargo test --workspace`)
+- **Test Suite**: 990 passing, 0 failing, 5 ignored (`cargo test --workspace`)
 - **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all --check` clean
 - **Code Quality**: per-language heuristics + pattern-based OWASP scanner
