@@ -24,8 +24,10 @@ pub mod gitinfo;
 pub mod index;
 pub mod init;
 pub mod metrics;
+pub mod pricing;
 pub mod refresh;
 pub mod retrieve;
+pub mod rollup;
 pub mod scanner;
 pub mod stale;
 pub mod state;
@@ -67,11 +69,18 @@ pub use index::{
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use metrics::{
-    append_metrics, read_metrics, read_metrics_since, CompactAction, MetricSource, MetricsIdentity,
-    RequestMetrics,
+    append_metrics, metrics_path, read_metrics, read_metrics_since, read_metrics_tail,
+    CompactAction, MetricSource, MetricsIdentity, RequestMetrics,
+};
+pub use pricing::{
+    cost_of, format_usd, pricing_path, CostReport, ModelCost, ModelPrice, PriceTable,
 };
 pub use refresh::{refresh_rust_file, RefreshOutcome};
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
+pub use rollup::{
+    read_rollup, refresh_rollup, rollup_path, write_rollup, MetricsRollup, Percentiles,
+    ProfileSample, SessionTotals, TokenTotals, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
+};
 pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};

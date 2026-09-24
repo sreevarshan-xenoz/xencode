@@ -388,6 +388,7 @@ Type `/` in the chat input and press `Tab` to list them:
 /plugin [reload]        Report which plugins took effect / re-scan the dir
 /spawn <task> [#branch] Run a subagent in a fresh sibling git worktree
 /trace [turns]          What the recent agent turns did, from the local turn log
+/cost                   Tokens, KV-cache reuse, speed and spend for this project
 ```
 
 There is no `/help`, `/clear`, `/exit` or `/models`: press `?` (or `F1`) for
@@ -407,6 +408,49 @@ scrubbed of anything that looks like a key, token or password before it is
 stored. And because most local servers report no token usage at all, the token
 column stays empty unless one did, and cost is never estimated; `/trace` says
 which of those is the case rather than showing a number it invented.
+
+**`/cost` — what the recorded turns add up to.** Every turn that assembles a
+context appends one row to `.xencode/cache/metrics.jsonl` in the project, and
+those rows are folded into `.xencode/cache/metrics-rollup.json` so the answer
+does not depend on how large the log has grown. `/cost` prints the fold: how many
+records and sessions it covers and over what span, tokens prompted and generated,
+the share of the prompt served from the KV cache, p50 and p95 generation and
+prompt-evaluation speed over the newest 512 records that reported a rate, then
+the breakdown per session (the current one marked with `→`) and per model. Like
+`/trace` it reads local files and asks no model anything, so it answers with
+every server down.
+
+Money only exists if you say what things cost. Put a table in the project at
+`.xencode/pricing.json`:
+
+```json
+{
+  "models": {
+    "qwen2.5:7b": { "input_usd_per_mtok": 0.0, "output_usd_per_mtok": 0.0 },
+    "openai/gpt-4o": {
+      "input_usd_per_mtok": 2.5,
+      "output_usd_per_mtok": 10.0,
+      "cached_input_usd_per_mtok": 1.25
+    }
+  }
+}
+```
+
+Prices are dollars per million tokens, and editing that file changes the figures
+on the next `/cost` — nothing is compiled in, and a price list update is a data
+change. What the report refuses to do is guess: a model with no entry is listed
+as `price unknown for N model`, a partly priced session reports `at least $x (no
+price for N model)` rather than a total, a missing file says so, and a line that
+did not parse is named in the report instead of being quietly dropped. Cache
+reads priced separately are set with `cached_input_usd_per_mtok`; leave it out and
+they are billed at the input price, which the report states.
+
+Set `cost_budget_usd_micros` in `~/.xencode/config.json` (micro-dollars, so
+`5000000` is $5.00) and the status bar carries this session's spend, refreshed
+when each turn finishes — `💸 $0.42/$5.00` once every model it used has a price,
+or `💸 13120 tok` while one does not — and crossing the budget prints one warning
+in the transcript. The budget is a warning, not a stop: nothing refuses a request
+over it.
 
 ### First Run
 

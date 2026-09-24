@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `/cost` says what this project's turns add up to
+The TUI has been writing one line to `.xencode/cache/metrics.jsonl` for every
+turn that assembles a context, and a performance panel that re-read that whole
+file each time it was opened. Both halves are now finished: the lines are folded
+into a small sidecar, and the fold is what the cost answer is built from.
+
+`.xencode/cache/metrics-rollup.json` holds the running totals — rows seen, tokens
+prompted, served from the KV cache and generated, the same split per session and
+per model, the newest line each hardware profile produced, and p50/p95
+generation and prompt-evaluation speed over the last 512 turns that reported a
+rate. Folding is incremental: a refresh reads only what was appended since the
+last one. If the log is replaced or truncated the totals are rebuilt from
+scratch rather than quietly double-counted, and a sidecar from another version or
+half-written is discarded and recomputed. Percentiles are exact ranks over the
+samples kept, each printed with how many samples it covers, and a turn whose
+server reported no rate is left out of the window instead of counting as zero.
+Measured against the 164 lines a real session had already left in this
+repository's log (42,199 bytes, 21 sessions): the rollup's totals matched an
+independent hand sum of the raw JSON exactly — 18,395 tokens prompted, none
+cached, none generated — and at that size reading the log cost 135 µs against
+46 µs for the sidecar (optimized build, this laptop). Repeating the same lines to
+16,400 rows, 4.1 MiB, is where the difference is the point: 12.3 ms for the full
+read, while the sidecar stays 8 KiB and 36 µs. Those rows carry no server speeds,
+which is why the speed windows are empty for them; the report says "No server
+reported a speed for these records" rather than showing a rate.
+
+`/cost` prints all of it in the chat pane — records, sessions and the span they
+cover, prompted versus generated tokens and the KV-cache share, the two speed
+figures, then the breakdown per session (the current one marked `→`) and per
+model. It reads local files and asks no model anything, so it answers with every
+server down, like `/trace`.
+
+Money is only known if you say what things cost, so prices live in
+`.xencode/pricing.json` in the project as dollars per million tokens per model,
+with an optional separate rate for cache reads. Editing that file changes the
+next answer; nothing is compiled in. A model with no entry is reported as `price
+unknown`, a partly priced session as `at least $x (no price for N model)`, a
+missing file as missing, and a line that would not parse is named in the report
+instead of being dropped. No figure is ever invented, and `$0` means a price of
+zero was written down, not that a price is absent.
+
+`cost_budget_usd_micros` in `config.json` turns the session's spend into a status
+bar row — `💸 $0.42/$5.00` when every model used has a price, `💸 13120 tok` when
+one does not — updated as each turn finishes, with one warning line when the
+budget is crossed. It warns and does nothing else: no request is refused over it.
+
+The performance panel and `/ctx kv` read through the same sidecar now, and the
+recent-turn rows there come from a bounded 256 KiB read of the end of the log
+instead of the whole file. 27 tests added (945 → 972), covering the fold, its
+rebuild cases, the price rules and the report wording.
+
 ### Added — `xencode query` can write its answer as one JSON event per line
 `--format ndjson` on `xencode query` prints a `start` line naming the model, the
 client that was dialed, whether the prompt stayed on this machine and the
