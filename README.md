@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1122 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1142 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -127,7 +127,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **MCP tool servers** — declare stdio servers under `mcp_servers` in config and `/mcp` starts them on request; their tools reach the model as `mcp__<server>__<tool>` behind the same approval gate (`External` class — always a `y`/`n`, never waved through by autonomy), with `mcp_timeout` bounding each call and a broken server failing in its own words.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
 - Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
-- CLI with 16 subcommands: `scan`, `config`, `models`, `cache`, `query`, `memory`, `tasks`, `worktree`, `advise`, `server`, `analyze`, `fetch`, `review`, `plugin`, `llamacpp`, `tui`.
+- CLI with 21 subcommands: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `eval`, `plugin`, `llamacpp`, `hw`, `tui`.
 
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
@@ -287,6 +287,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Replay** | `xencode replay <run-id> [--run-tools]` | Run a recorded agent turn again from the bytes it was made of, with no model answering |
 | **Eval** | `xencode eval run [-c off-by-one] [-m MODEL] [--judge]` | Score the agent on defects seeded on purpose, graded by the diff and an exit code, with an optional ranking of the attempts that came closest |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
+| **Hw** | `xencode hw probe` | What this machine can serve: RAM, cores and the server's own compute devices, then the launch flags that fit |
 | **Colab** | `xencode colab preflight` | Is the bridge usable? (CLI version, auth, ssh key) |
 | **Colab** | `xencode colab up` | Bring up a VM + inference server and tunnel it to localhost (`--reconnect` repairs a broken bridge) |
 | **Colab** | `xencode colab status` / `down` | Forward/session/endpoint health, then kill the forward and release the VM |
@@ -386,6 +387,12 @@ flowchart TD
 - Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
   TUI Settings panel. Only the keys in the struct are read; unknown keys are
   ignored.
+- **What a local server can afford is read off the machine, not guessed.**
+  `xencode hw probe` prints the memory and cores, the compute devices as
+  `llama-server` itself reports them (PCI config space cannot see video memory:
+  this box's card shows a 256 MiB window and holds 2048 MiB), the model file's own
+  geometry and what its cache costs per token, and then the flags to start with. It
+  writes nothing; the line to keep them with is printed for you to paste.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
   for a local llama-server, `remote:…` for any OpenAI-compatible server at
@@ -459,7 +466,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1122 passing, 11 ignored)
+cargo test                          # Full workspace suite (1142 passing, 11 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

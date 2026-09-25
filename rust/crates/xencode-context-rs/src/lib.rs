@@ -21,6 +21,7 @@ pub mod documents;
 pub mod embed;
 pub mod eval;
 pub mod gitinfo;
+pub mod hwprobe;
 pub mod index;
 pub mod init;
 pub mod metrics;

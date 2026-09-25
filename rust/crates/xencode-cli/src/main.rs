@@ -373,6 +373,12 @@ enum Commands {
         action: LlamacppAction,
     },
 
+    /// What this machine can serve, read from the machine
+    Hw {
+        #[command(subcommand)]
+        action: HwAction,
+    },
+
     /// Launch the Terminal User Interface
     Tui,
 }
@@ -570,6 +576,21 @@ enum LlamacppAction {
 }
 
 #[derive(Subcommand)]
+enum HwAction {
+    /// Read RAM, cores and compute devices, and recommend launch flags
+    Probe {
+        /// GGUF file to size the answer against (defaults to the configured
+        /// model, then to any GGUF in the usual cache directory)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// llama-server binary to ask what it can offload to
+        #[arg(long)]
+        exec: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum CacheAction {
     /// Show cache statistics
     Stats,
@@ -732,6 +753,7 @@ async fn main() {
         Commands::Plugin { action } => run_plugin_action(action),
         Commands::Eval { action } => run_eval(action).await,
         Commands::Llamacpp { action } => run_llamacpp(action).await,
+        Commands::Hw { action } => run_hw(action),
         Commands::Colab { action } => run_colab(action).await,
         Commands::Tui => run_tui().await,
     };
@@ -1090,6 +1112,193 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Report this machine as a place a model could be served, and the flags to
+/// start a server with. Everything printed here is read from a named source at
+/// run time, including the server's own device list — the two sources disagree
+/// routinely and the point of the command is to show both, not to average them.
+fn run_hw(action: HwAction) -> Result<(), String> {
+    use xencode_context_rs::hwprobe;
+
+    let HwAction::Probe { model, exec } = action;
+    let config = XencodeConfig::load().unwrap_or_default();
+
+    let total_kib = xencode_context_rs::budget::total_memory_kib();
+    let available_kib = hwprobe::available_memory_kib();
+    let fmt = |kib: Option<u64>| match kib {
+        Some(kib) => format!("{:.1} GiB", kib as f64 / (1024.0 * 1024.0)),
+        None => "unknown".to_string(),
+    };
+    println!(
+        "ram:     {} total, {} available",
+        fmt(total_kib),
+        fmt(available_kib)
+    );
+    println!(
+        "cores:   {}",
+        hwprobe::cpu_core_count()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    );
+
+    let asked_exec = exec
+        .as_deref()
+        .or(if config.llama_cpp_executable.is_empty() {
+            None
+        } else {
+            Some(config.llama_cpp_executable.as_str())
+        });
+    let exe = xencode_models_rs::llamacpp::find_llama_server(asked_exec);
+    match &exe {
+        Some(exe) => match hwprobe::server_version(exe) {
+            Some(version) => println!("server:  {exe}  version {version}"),
+            None => println!("server:  {exe}"),
+        },
+        None => println!(
+            "server:  no llama-server found — set config llama_cpp_executable or pass --exec, \
+             because what the binary can offload to cannot be read without asking it"
+        ),
+    }
+    let devices: Vec<hwprobe::ComputeDevice> = match &exe {
+        Some(exe) => match hwprobe::server_devices(exe) {
+            Some(text) => hwprobe::parse_llama_devices(&text),
+            None => {
+                println!(
+                    "devices: this server does not answer --list-devices, so what it can offload \
+                     to is unknown rather than absent"
+                );
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
+    let cards = hwprobe::drm_cards(std::path::Path::new("/sys/class/drm"));
+    if !cards.is_empty() {
+        println!("cards:   the kernel's view, which does not report memory at all");
+        for card in &cards {
+            println!(
+                "         {} · {} {} · driver {}{}",
+                card.card,
+                hwprobe::vendor_name(&card.vendor),
+                card.device,
+                if card.driver.is_empty() {
+                    "none"
+                } else {
+                    &card.driver
+                },
+                if card.has_connector {
+                    ", driving a display"
+                } else {
+                    ", no display attached"
+                }
+            );
+        }
+    }
+    if !cards.is_empty() {
+        println!(
+            "         no memory figure is printed for a card here: PCI config space is what the \
+             kernel exposes without a vendor tool, and on this box it reports a 256 MiB window \
+             for a 2048 MiB device. The sizes below come from the server."
+        );
+    }
+    if !devices.is_empty() {
+        println!("devices  what the server itself can use:");
+        let ram_total_mib = total_kib.map(|k| k / 1024).unwrap_or(0);
+        for device in &devices {
+            let kind = if !device.is_offload_target() {
+                "the CPU path, reported as a device and not one"
+            } else if hwprobe::is_shared_memory_device(device.total_mib, ram_total_mib) {
+                "shares system memory — measured slower than the CPU here"
+            } else {
+                "its own memory"
+            };
+            println!(
+                "         {:<9} {:<40} {:>6} MiB total, {:>6} MiB free · {}",
+                device.id, device.name, device.total_mib, device.free_mib, kind
+            );
+        }
+    }
+
+    let model_path = model
+        .clone()
+        .or_else(|| {
+            if config.llama_cpp_model_path.trim().is_empty() {
+                None
+            } else {
+                Some(config.llama_cpp_model_path.clone())
+            }
+        })
+        .or_else(|| xencode_models_rs::llamacpp::resolve_gguf_model(None, None));
+    let shape = model_path.as_deref().and_then(hwprobe::read_gguf_shape);
+    match (&model_path, &shape) {
+        (Some(path), Some(shape)) => println!(
+            "model:   {path}\n         {} · {} blocks · {} KV heads · head width {} · {} MiB of \
+             weights",
+            if shape.name.is_empty() {
+                shape.architecture.as_str()
+            } else {
+                shape.name.as_str()
+            },
+            shape.block_count,
+            shape.kv_head_count,
+            shape.head_dim,
+            shape.file_bytes / 1024 / 1024
+        ),
+        (Some(path), None) => println!("model:   {path} · no GGUF geometry could be read from it"),
+        (None, _) => println!(
+            "model:   none given — `--model <path.gguf>`, or set llama_cpp_model_path, and the \
+             cache arithmetic below has a number under it"
+        ),
+    }
+    if let Some(shape) = &shape {
+        println!(
+            "cache:   {:.1} KiB per token at 16-bit, {:.1} at {} keys and {} values — this is \
+             what sits on top of the weights and it grows with every token of context",
+            shape.kv_kib_per_token("f16", "f16"),
+            shape.kv_kib_per_token(hwprobe::CACHE_K, hwprobe::CACHE_V),
+            hwprobe::CACHE_K,
+            hwprobe::CACHE_V
+        );
+    }
+    if let (Some(available_kib), Some(shape)) = (available_kib, &shape) {
+        let weights_mib = shape.file_bytes / 1024 / 1024;
+        println!(
+            "mmap:    the weights are read off disk as they are used; {} MiB available now \
+             against {} MiB of model, and a build that fills the page cache is what turns a \
+             serving model into a stalling one",
+            available_kib / 1024,
+            weights_mib
+        );
+    }
+
+    let decision = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
+    let ram_total_mib = total_kib.map(|k| k / 1024).unwrap_or(0);
+    let rec = hwprobe::recommend(
+        &devices,
+        shape.as_ref(),
+        ram_total_mib,
+        decision.profile.ctx_tokens(),
+    );
+    println!(
+        "budget:  {} · the token budget layer works with a {} token window",
+        decision.describe(),
+        decision.profile.ctx_tokens()
+    );
+    println!("recommend");
+    for note in &rec.notes {
+        println!("         · {note}");
+    }
+    let flags: Vec<&str> = rec.args.iter().map(String::as_str).collect();
+    println!("         flags: {}", flags.join(" "));
+    println!(
+        "         to keep them: xencode config set llama_cpp_args \"{}\"\n         \
+         (config args are passed last, and llama-server takes the later of a repeated flag, so \
+         this overrides the profile's own --ctx-size)",
+        flags.join(" ")
+    );
+    Ok(())
 }
 
 async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {

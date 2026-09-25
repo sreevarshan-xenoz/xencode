@@ -74,6 +74,15 @@ approval comes back `denied` unless you pass `--run-tools`. Ollama, llama.cpp, a
 `remote:` endpoint and OpenRouter can be recorded; models served by Anthropic,
 Gemini or Qwen cannot, and the command says so rather than writing a paraphrase.
 
+### Ask what this machine can serve
+```bash
+xencode hw probe
+```
+Memory, cores, the compute devices `llama-server` itself reports — not the ones
+PCI pretends to hold — what the model file's cache costs per token, and the flags
+to start a local server with. It prints the `config set` line that keeps them and
+changes nothing.
+
 ### Analyze a path
 ```bash
 xencode analyze ./src
