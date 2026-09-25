@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a turn that says something is broken retrieves where the tests are
+A prompt asking "why is the token count wrong" and a prompt asking "what does this
+file do" used to be retrieved the same way. Now the first one is recognised — from
+the words it uses, with no model call and no classifier — and a file that declares
+a test whose name uses those same words is scored above a file that merely
+resembles them. `xencode query` and `/ctx find` say which reading they used and
+the words that gave it away:
+
+```text
+read as bugfix work — the prompt says fix, wrong
+```
+
+`/ctx eval` now reports the bias against the same questions with it switched off,
+on this repository's index (189 files, 893 test names over 101 files, 25
+questions, top-5). **The honest size of the gain is one arm's worth:** over
+deterministic retrieval those four questions went from a mean reciprocal rank of
+0.050 to 0.237, and on the hybrid retrieval that ships — which already puts all
+four first — the change is 0.000. Two other readings were built on the same
+mechanism and measured the same way: treating a rename as a reason to weigh shared
+symbol names more heavily, and treating a request for new code as a reason to lift
+the project's own guide and manifest files. Both scored **0.000 on their own
+questions, on both arms**, so neither changed any weight and neither shipped: a
+reading that moves no score is a label, not a feature.
+
 ### Changed — how much context retrieval gets is now sized by the last prompt
 Retrieval asked for a fixed number of files, and a fixed number of characters
 from each, chosen by the hardware profile: five files and 16,000 characters each

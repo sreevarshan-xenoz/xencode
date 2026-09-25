@@ -67,11 +67,43 @@
     },
     {
       "query": "a metrics row cut off by a crash is dropped and the earlier ones survive",
-      "expected": ["rust/crates/xencode-context-rs/src/metrics.rs"]
+      "expected": ["rust/crates/xencode-context-rs/src/metrics.rs"],
+      "shape": "bugfix"
     },
     {
       "query": "which state sections may be rewritten and where the decision marker lives",
       "expected": ["rust/crates/xencode-context-rs/src/state.rs"]
+    },
+    {
+      "query": "the compact step drops the oldest decisions, that is a regression",
+      "expected": ["rust/crates/xencode-context-rs/src/compact.rs"],
+      "shape": "bugfix"
+    },
+    {
+      "query": "counts are missing from the final stream chunk and the number is wrong",
+      "expected": ["rust/crates/xencode-providers-rs/src/compatible.rs"],
+      "shape": "bugfix"
+    },
+    {
+      "query": "a storm of editor saves never gets reported, fix the watcher",
+      "expected": ["rust/crates/xencode-context-rs/src/watcher.rs"],
+      "shape": "bugfix"
+    },
+    {
+      "query": "rename retrieve and every symbol it returns",
+      "expected": ["rust/crates/xencode-context-rs/src/retrieve.rs"]
+    },
+    {
+      "query": "extract the symbol lists into one function and rename it",
+      "expected": ["rust/crates/xencode-context-rs/src/symbols.rs"]
+    },
+    {
+      "query": "add a section to the readme for the new command",
+      "expected": ["README.md"]
+    },
+    {
+      "query": "introduce a rule in the agents guide about committing every change separately",
+      "expected": ["AGENTS.md"]
     }
   ]
 }

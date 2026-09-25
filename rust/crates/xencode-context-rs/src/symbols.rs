@@ -60,6 +60,13 @@ pub struct PerFileSymbols {
     /// `type Alias = …` declarations.
     #[serde(default)]
     pub types: Vec<String>,
+    /// Functions annotated `#[test]`. They are in `functions` too — this list
+    /// exists so a retrieval shape can weigh a name that describes a behaviour
+    /// (`truncate_cuts_at_line_boundary_and_under_cap`) differently from a name
+    /// that declares one, which matters because the first is written in the
+    /// words a bug report uses.
+    #[serde(default)]
+    pub tests: Vec<String>,
     /// The file's documentation comments joined into one string, capped at
     /// [`DOC_TEXT_CAP`] bytes. Symbol names and file names are identifiers
     /// someone wrote for the compiler; this is the only prose in the inventory,
@@ -191,8 +198,57 @@ pub fn extract_rust_symbols(content: &str) -> PerFileSymbols {
         traits: collect(&c.traits),
         impls,
         types: collect(&c.types),
+        tests: test_names(content),
         docs: doc_text(content),
     }
+}
+
+/// Names of the functions this file marks `#[test]`.
+///
+/// Read line by line rather than by pattern across the whole text: an attribute,
+/// any number of further attributes (`#[test] #[ignore]`), and then the
+/// declaration is the real shape, and a pattern loose enough to find it in one
+/// sweep would also claim the function that happens to follow a `#[test]`
+/// mentioned inside a doc comment.
+fn test_names(content: &str) -> Vec<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut names: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if !(line.starts_with("#[test]") || line.starts_with("#[test(")) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < lines.len() && j <= i + 4 {
+            let next = lines[j].trim();
+            if next.starts_with('#') || next.is_empty() {
+                j += 1;
+                continue;
+            }
+            if let Some(rest) = next
+                .strip_prefix("async fn ")
+                .or_else(|| next.strip_prefix("fn "))
+                .or_else(|| next.strip_prefix("unsafe fn "))
+                .or_else(|| next.strip_prefix("pub async fn "))
+                .or_else(|| next.strip_prefix("pub fn "))
+            {
+                let name: String = rest
+                    .chars()
+                    .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+                    .collect();
+                if !name.is_empty() {
+                    names.push(name);
+                }
+            }
+            break;
+        }
+        i += 1;
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// The documentation prose of a file: every `//!` and `///` line, in source

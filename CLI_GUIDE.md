@@ -86,13 +86,37 @@ eval panel then compares a score only with an earlier run of the same arm at the
 same depth taken under the same prompts, and says so when it cannot:
 
 ```text
-[CTX]🧪 Retrieval eval — 18 gold queries, top-5 (18 gold files) · prompts 8abca0eb4098
-[CTX]   deterministic         previous run of these prompts: MRR 0.349 → 0.349 (+0.000)
-[CTX]   + text (path+symbol)  no comparison: the last run of this arm used prompts 12ab34cd56ef, this one uses 8abca0eb4098
+[CTX]🧪 Retrieval eval — 25 gold queries, top-5 (25 gold files) · prompts f6062cc81640
+[CTX]   deterministic         previous run of these prompts: MRR 0.329 → 0.329 (+0.000)
+[CTX]   + text (path+symbol)  no comparison: the last run of this arm used prompts 12ab34cd56ef, this one uses f6062cc81640
 ```
 
 The first line is a repeat measurement of this repo's built-in gold set; the
 second is what a run looks like after someone edited a prompt file in between.
+
+Below the three arms, the same panel prices each retrieval bias on the questions
+written for it, against those same questions with the bias switched off, on both
+arms:
+
+```text
+[CTX]   shape biases, per partition · 893 test names over 101 files:
+[CTX]     on the deterministic arm:
+[CTX]       general  21 probes · control, no weight moves: MRR 0.347
+[CTX]       bugfix    4 probes · MRR 0.050 → 0.237 (+0.188) with the bias
+[CTX]     on the + text + doc prose arm:
+[CTX]       general  21 probes · control, no weight moves: MRR 0.722
+[CTX]       bugfix    4 probes · MRR 1.000 → 1.000 (+0.000) with the bias
+[CTX]   improved: bugfix on deterministic
+```
+
+`general` is printed as the control it is — it moves no weight, so its two numbers
+are always equal — and a bias that improves nothing says so on the last line
+instead of disappearing from the panel. Measuring per partition is what keeps an
+overall score from rising on one kind of question while a bias quietly damages
+another. The sample above is a run of the same measurement from a clean tree, via
+`cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture`;
+`/ctx eval` also counts the files git reports as changed, so in a dirty working
+tree its numbers can sit slightly differently.
 A prompt edit and a retrieval change are two different things, and before this
 they were easy to mistake for each other.
 `cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture`
@@ -276,6 +300,7 @@ side by side:
 $ xencode query "Which module owns the caps?"
 hardware: BALANCED profile from 15.4 GiB of RAM
 retrieval: up to 5 files, 16000 characters each (character arithmetic, not measured)
+read as general work — no word for broken code in the prompt, so the weights are used as they stand
 context: 8192-token window reported by the server at http://127.0.0.1:8080
 context: 1311 tokens counted by the server, 1313 by character arithmetic
 ```
@@ -284,6 +309,15 @@ The `retrieval:` line is said out loud because a command that runs once has no
 earlier turn to size itself from: it uses the profile's own numbers and does not
 pretend they were measured. An interactive session scales them instead — see
 [How much retrieval gets](#how-much-retrieval-gets) below.
+
+The `read as …` line says which retrieval weights the prompt was scored with, and
+the words that decided it. A turn whose prompt says something is broken is read as
+`bugfix work`, and a file holding a test whose name uses those same words is then
+scored above one that merely shares a symbol name with the question; every other
+prompt is `general work`, which changes no weight. The reading is a whole-word look
+at the prompt and nothing else — no model call, no classifier — and asking for new
+code or for a rename reads as `general`, because both were measured on this
+repository's gold set at 0.000 and price no weight.
 
 Neither number is simply the better one, which is why both are shown. The counted
 number describes the text the turn is made of and nothing else: the chat

@@ -12,6 +12,15 @@
 //! | symbol hit              | +8/unique (capped +16) |
 //! | git-changed file        | +4     |
 //! | dependency hop from seed| +3/hop (≤3 hops)       |
+//! | test named after the prompt, on a bugfix turn | +8 |
+//!
+//! A [`crate::shape::TaskShape`] widens one row of this table: on a turn whose
+//! prompt says something is broken, a file whose own test names use the words of
+//! the prompt gets [`TEST_NAME_BONUS`]. `General` changes nothing at all. Two
+//! other biases were built and measured on this repository's gold set — a wider
+//! symbol cap for a rename, a lift for the project's rule and manifest files on a
+//! new-feature turn — and both moved mean reciprocal rank by 0.000 on their own
+//! probes, so they are gone; see [`crate::shape`].
 //!
 //! Empty/absent queries seed from git-changed + most recently touched files.
 //!
@@ -22,6 +31,7 @@
 //! already made it. That hybrid stage is off by default; `/ctx eval` runs both.
 
 use crate::index::{FileEntry, FilesIndex, Manifest};
+use crate::shape::TaskShape;
 use crate::symbols::{DepEdge, PerFileSymbols};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -34,6 +44,15 @@ pub const SEED_THRESHOLD: u64 = 10;
 pub const DEFAULT_EXPAND_HOPS: usize = 3;
 /// Per-unique-symbol-hit bonus, capped at this total.
 pub const SYMBOL_CAP: u64 = 16;
+/// How much a file whose own test names match the prompt is worth on a turn that
+/// is chasing something broken. One hit is enough to earn it: a test name is a
+/// sentence, so a second match on the same subject says little more.
+///
+/// This is the only shape bias that survived being measured. On the four
+/// bugfix probes of this repository's gold set it raised mean reciprocal rank
+/// from 0.050 to 0.237 over deterministic retrieval; on the hybrid arm that ships
+/// it changed nothing, because that arm already ranks all four first.
+pub const TEST_NAME_BONUS: u64 = 8;
 
 /// A retrieved candidate with an explanation of why it scored.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +76,10 @@ pub struct RetrieveOptions {
     /// What the lexical arm may do to a candidate list, and the knob the eval
     /// turns to price the documentation prose.
     pub lexical_docs: bool,
+    /// The kind of work this turn looks like. `General` leaves every weight in
+    /// [`score_file`] exactly as it is; the other shapes each move one arm of
+    /// that table, and nothing else. See [`crate::shape`].
+    pub shape: TaskShape,
 }
 
 impl Default for RetrieveOptions {
@@ -68,6 +91,7 @@ impl Default for RetrieveOptions {
             empty_query_seeds: 6,
             lexical: false,
             lexical_docs: true,
+            shape: TaskShape::General,
         }
     }
 }
@@ -75,14 +99,14 @@ impl Default for RetrieveOptions {
 impl RetrieveOptions {
     /// What the product does with a query: the lexical arm is on by default,
     /// because it measured better on this repository's gold set (mean
-    /// reciprocal rank 0.796 against 0.338), and `XCODE_HYBRID=0` switches it
-    /// back off.
+    /// reciprocal rank 0.767 against 0.329 over 25 probes), and `XCODE_HYBRID=0`
+    /// switches it back off.
     ///
     /// Deliberately *not* the `Default`, which stays the structural baseline so
     /// the eval can run both arms in one process. Every live caller goes through
     /// here, so the `/ctx find` preview cannot disagree with what a turn
-    /// actually sends.
-    pub fn for_live_chat(top_k: usize) -> Self {
+    /// actually sends — including which [`TaskShape`] it was retrieved as.
+    pub fn for_live_chat(top_k: usize, shape: TaskShape) -> Self {
         let lexical = match std::env::var("XCODE_HYBRID") {
             // Anything that is not an explicit "no" keeps the arm on.
             Ok(v) => !matches!(v.trim(), "0" | "false" | "no" | "off"),
@@ -91,6 +115,7 @@ impl RetrieveOptions {
         Self {
             top_k,
             lexical,
+            shape,
             ..Default::default()
         }
     }
@@ -199,7 +224,14 @@ pub fn retrieve(
         if entry.secret || entry.binary {
             continue;
         }
-        let (total, reasons) = score_file(entry, &query_words, index, changed, &forced_seeds);
+        let (total, reasons) = score_file(
+            entry,
+            &query_words,
+            index,
+            changed,
+            &forced_seeds,
+            options.shape,
+        );
         if total >= MIN_SCORE {
             scores.insert(entry.path.clone(), Score::new(total, reasons));
         }
@@ -284,6 +316,7 @@ fn score_file(
     index: &RetrievalIndex,
     changed: &HashSet<String>,
     forced_seeds: &[String],
+    shape: TaskShape,
 ) -> (u64, Vec<String>) {
     let mut total: u64 = 0;
     let mut reasons: Vec<String> = Vec::new();
@@ -355,7 +388,137 @@ fn score_file(
         total += 4;
         reasons.push("git-changed".to_string());
     }
+    // The one shape arm. It widens a signal the table above already has rather
+    // than inventing a new one.
+    if shape == TaskShape::Bugfix {
+        if let Some(syms) = index.symbols.get(path) {
+            if test_names_match(syms, query_words) {
+                total += TEST_NAME_BONUS;
+                reasons.push("a test of this behaviour lives here".to_string());
+            }
+        }
+    }
     (total, reasons)
+}
+
+/// English words that appear inside a test's name as grammar rather than as its
+/// subject.
+///
+/// A test name is a sentence, and sentences are mostly `the`, `is`, `and`,
+/// `with`. Matching those would make the bonus fire on nearly every prompt — a
+/// count of this workspace's test names found `the` in 329 of them, `a` in 283,
+/// `and` in 236, `is` in 176 — which is the same no-information the marker
+/// itself carries: 100 of the 127 Rust files here contain a test, so "this file
+/// has a test" says nothing and neither does "this test mentions `with`".
+/// Anything three characters or shorter falls out on the same reasoning without
+/// needing to be listed.
+fn is_grammar_word(word: &str) -> bool {
+    word.len() <= 3
+        || matches!(
+            word,
+            "a" | "an"
+                | "the"
+                | "and"
+                | "or"
+                | "nor"
+                | "but"
+                | "if"
+                | "then"
+                | "than"
+                | "as"
+                | "at"
+                | "by"
+                | "for"
+                | "from"
+                | "in"
+                | "into"
+                | "of"
+                | "off"
+                | "on"
+                | "onto"
+                | "out"
+                | "over"
+                | "per"
+                | "so"
+                | "to"
+                | "up"
+                | "upon"
+                | "via"
+                | "with"
+                | "within"
+                | "without"
+                | "this"
+                | "that"
+                | "these"
+                | "those"
+                | "there"
+                | "here"
+                | "they"
+                | "them"
+                | "their"
+                | "we"
+                | "you"
+                | "he"
+                | "she"
+                | "his"
+                | "her"
+                | "its"
+                | "our"
+                | "is"
+                | "are"
+                | "was"
+                | "were"
+                | "be"
+                | "been"
+                | "being"
+                | "am"
+                | "do"
+                | "does"
+                | "did"
+                | "done"
+                | "have"
+                | "has"
+                | "had"
+                | "not"
+                | "no"
+                | "none"
+                | "all"
+                | "any"
+                | "each"
+                | "every"
+                | "both"
+                | "other"
+                | "some"
+                | "such"
+                | "only"
+                | "same"
+                | "too"
+                | "very"
+                | "just"
+                | "also"
+                | "still"
+                | "more"
+                | "most"
+                | "one"
+                | "two"
+        )
+}
+
+/// Whether any test declared in this file is named after the words the prompt
+/// used.
+///
+/// One shared word is enough, because a test name states a behaviour —
+/// `soft_compact_drops_oldest_30pct_but_keeps_decisions` — and that is the
+/// vocabulary a broken thing gets reported in. Pieces are matched whole rather
+/// than as substrings, unlike the symbol arm above, because a symbol is an
+/// identifier and a test name is English: `fix` is a substring of `fixture`, and
+/// the two are not the same subject.
+fn test_names_match(symbols: &PerFileSymbols, query_words: &[String]) -> bool {
+    symbols.tests.iter().any(|test| {
+        test.to_ascii_lowercase()
+            .split('_')
+            .any(|piece| !is_grammar_word(piece) && query_words.iter().any(|word| word == piece))
+    })
 }
 
 /// Forward map: file → directly imported files.
@@ -566,5 +729,147 @@ mod tests {
     #[test]
     fn load_returns_none_without_index() {
         assert!(RetrievalIndex::load(Path::new("C:/definitely/missing/xencode")).is_none());
+    }
+
+    /// One file, its symbols, and whether the scanner would call it a guide.
+    fn shaped_file(
+        path: &str,
+        symbols: PerFileSymbols,
+        important: bool,
+    ) -> (FileEntry, (String, PerFileSymbols)) {
+        let mut entry = file(path, 100);
+        entry.important = important;
+        (entry, (path.to_string(), symbols))
+    }
+
+    fn score_of(
+        files: Vec<(FileEntry, (String, PerFileSymbols))>,
+        query: &str,
+        shape: TaskShape,
+    ) -> Vec<RetrievedFile> {
+        let idx = RetrievalIndex {
+            files: files.iter().map(|(entry, _)| entry.clone()).collect(),
+            symbols: files
+                .into_iter()
+                .map(|(_, (path, symbols))| (path, symbols))
+                .collect(),
+            deps: vec![],
+            mtimes: BTreeMap::new(),
+        };
+        retrieve(
+            query,
+            &idx,
+            &HashSet::new(),
+            &RetrieveOptions {
+                shape,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn declares(path: &str, fns: &[&str], tests: &[&str]) -> (FileEntry, (String, PerFileSymbols)) {
+        shaped_file(
+            path,
+            PerFileSymbols {
+                functions: fns.iter().map(|s| s.to_string()).collect(),
+                tests: tests.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            },
+            false,
+        )
+    }
+
+    #[test]
+    fn a_bugfix_prompt_prefers_the_file_that_tests_the_behaviour() {
+        // Both files declare a `compact` and both are named for one of the two
+        // subjects in the prompt, so structurally they are level; only one holds
+        // a test whose name is the sentence the bug report paraphrases.
+        let files = vec![
+            declares(
+                "src/compact.rs",
+                &["compact"],
+                &["soft_compact_keeps_decisions"],
+            ),
+            declares("src/decisions.rs", &["compact"], &[]),
+        ];
+        let query = "compact decisions fix";
+        let general = score_of(files.clone(), query, TaskShape::General);
+        let bugfix = score_of(files, query, TaskShape::Bugfix);
+        assert_eq!(
+            general
+                .iter()
+                .find(|r| r.path == "src/compact.rs")
+                .unwrap()
+                .score,
+            general
+                .iter()
+                .find(|r| r.path == "src/decisions.rs")
+                .unwrap()
+                .score,
+            "the baseline should not already separate them: {general:?}"
+        );
+        let tested = bugfix.iter().find(|r| r.path == "src/compact.rs").unwrap();
+        assert!(
+            tested
+                .reasons
+                .iter()
+                .any(|r| r == "a test of this behaviour lives here"),
+            "{:?}",
+            tested.reasons
+        );
+        assert_eq!(bugfix.first().unwrap().path, "src/compact.rs");
+    }
+
+    #[test]
+    fn a_test_name_saying_only_grammar_earns_nothing() {
+        // `that`, `is`, `not`, `it` are in most test names and most prompts, so a
+        // match on them alone is the same no-signal as "this file has a test".
+        let files = vec![declares("src/thing.rs", &["thing"], &["that_is_not_it"])];
+        let results = score_of(
+            files,
+            "why does that thing fail, is it not there",
+            TaskShape::Bugfix,
+        );
+        assert!(
+            !results[0]
+                .reasons
+                .iter()
+                .any(|r| r == "a test of this behaviour lives here"),
+            "{:?}",
+            results[0].reasons
+        );
+    }
+
+    #[test]
+    fn no_bias_but_the_test_name_one_moves_a_weight() {
+        // A wider symbol cap for a rename and a lift for the files the project
+        // writes its rules in were both built, both measured 0.000 on their own
+        // probes of this repository's gold set, and both taken out. This is the
+        // guard that keeps them out: nothing besides [`TEST_NAME_BONUS`] may
+        // change what a file is worth, and the cap stays 16 however many symbols
+        // agree with the prompt.
+        let files = vec![
+            declares(
+                "src/auth.rs",
+                &["auth", "authenticate", "authorize", "auth_session"],
+                &[],
+            ),
+            shaped_file("README.md", PerFileSymbols::default(), true),
+        ];
+        for shape in [TaskShape::General, TaskShape::Bugfix] {
+            let auth = &score_of(files.clone(), "rename auth everywhere", shape)[0];
+            assert_eq!(auth.path, "src/auth.rs");
+            // filename substring (+6) + path segment (+5) + 16's worth of symbols.
+            assert_eq!(auth.score, 11 + SYMBOL_CAP, "{shape} widened the cap");
+        }
+        let guide = score_of(
+            files,
+            "add a readme section for the new command",
+            TaskShape::General,
+        )
+        .into_iter()
+        .find(|r| r.path == "README.md")
+        .expect("the readme is reachable by its own name");
+        assert_eq!(guide.score, 11, "name (+6) and path (+5), and nothing else");
     }
 }

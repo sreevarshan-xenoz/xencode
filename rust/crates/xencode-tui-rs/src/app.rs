@@ -3728,7 +3728,10 @@ impl<'a> App<'a> {
                 // Three arms, so the run says what each addition is worth: the
                 // structural pipeline on its own, that pipeline with the
                 // lexical arm over path + symbols, and the same with each
-                // file's documentation prose added to what it indexes.
+                // file's documentation prose added to what it indexes. A probe
+                // that carries a shape is scored as that shape in every arm, so
+                // what is compared here is the lexical stage; the shape's own
+                // contribution is measured per partition below.
                 let arms: [(&str, xencode_context_rs::RetrieveOptions); 3] = [
                     ("deterministic       ", Default::default()),
                     (
@@ -3875,6 +3878,73 @@ impl<'a> App<'a> {
                         ));
                     }
                 }
+                // Then the shape biases, measured per partition on both arms. An
+                // overall number can rise while one kind of query is quietly
+                // damaged, so each shape is scored against the same probes with
+                // its weights turned off, and `general` — the shape that changes
+                // no weight — is printed as the control it is. The structural arm
+                // is shown beside the shipped one because a bias that only pays
+                // for itself when the lexical arm is switched off
+                // (`XCODE_HYBRID=0`) is a different claim, and printing one arm
+                // would hide the difference.
+                let tests_indexed = index.symbols.values().map(|s| s.tests.len()).sum::<usize>();
+                let files_with_tests = index
+                    .symbols
+                    .values()
+                    .filter(|s| !s.tests.is_empty())
+                    .count();
+                let _ = tx.send(format!(
+                    "[CTX]   shape biases, per partition · {tests_indexed} test names over \
+                     {files_with_tests} files:"
+                ));
+                let mut earned: Vec<String> = Vec::new();
+                for (arm, opts) in [
+                    (
+                        "deterministic",
+                        xencode_context_rs::RetrieveOptions::default(),
+                    ),
+                    (
+                        "+ text + doc prose",
+                        xencode_context_rs::RetrieveOptions {
+                            lexical: true,
+                            lexical_docs: true,
+                            ..Default::default()
+                        },
+                    ),
+                ] {
+                    let _ = tx.send(format!("[CTX]     on the {arm} arm:"));
+                    for part in &xencode_context_rs::compare_shapes(&index, &gold, k, &dirty, &opts)
+                    {
+                        if part.shape == xencode_context_rs::TaskShape::General {
+                            let _ = tx.send(format!(
+                                "[CTX]       {:<8} {:>2} probes · control, no weight moves: MRR {:.3}",
+                                part.shape.as_str(),
+                                part.queries,
+                                part.tuned.mrr
+                            ));
+                            continue;
+                        }
+                        let _ = tx.send(format!(
+                            "[CTX]       {:<8} {:>2} probes · MRR {:.3} → {:.3} ({:+.3}) with the bias",
+                            part.shape.as_str(),
+                            part.queries,
+                            part.untuned.mrr,
+                            part.tuned.mrr,
+                            part.mrr_delta()
+                        ));
+                        if part.mrr_delta() > 1e-6 {
+                            earned.push(format!("{} on {arm}", part.shape.as_str()));
+                        }
+                    }
+                }
+                let _ = tx.send(format!(
+                    "[CTX]   {}",
+                    if earned.is_empty() {
+                        "no shape bias improved its own partition on this gold set".to_string()
+                    } else {
+                        format!("improved: {}", earned.join(", "))
+                    }
+                ));
             }
             Some("kv") => {
                 let profile = self.hardware.profile;
@@ -4588,7 +4658,8 @@ impl<'a> App<'a> {
                 let _ = tx.send("[CTX]❌ No project index — run /init first.".to_string());
                 return;
             };
-            let opts = xencode_context_rs::RetrieveOptions::for_live_chat(caps.top_k);
+            let shape = xencode_context_rs::shape_of(&query);
+            let opts = xencode_context_rs::RetrieveOptions::for_live_chat(caps.top_k, shape.shape);
             let changed: HashSet<String> =
                 xencode_context_rs::dirty_paths(&root).into_iter().collect();
             let results = xencode_context_rs::retrieve(&query, &index, &changed, &opts);
@@ -4609,6 +4680,14 @@ impl<'a> App<'a> {
                     Some(tokens) => format!(", room left after {tokens} tokens of prompt"),
                     None => ", no prompt measured yet".to_string(),
                 }
+            ));
+            // The shape is part of what was decided, not a footnote: it changed
+            // which weights were used, so a surprising result should be traceable
+            // to the reading that produced it.
+            let _ = tx.send(format!(
+                "[CTX]   read as {} work — {}",
+                shape.shape,
+                shape.reasons.join("; ")
             ));
             for r in &results {
                 let _ = tx.send(format!(

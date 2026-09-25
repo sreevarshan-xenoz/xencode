@@ -25,6 +25,32 @@ pub struct EvalItem {
     /// Repo-relative paths that SHOULD surface in the top-K.
     #[serde(default)]
     pub expected: Vec<String>,
+    /// What kind of work this probe is a request for, as the word
+    /// [`crate::TaskShape`] prints it — `bugfix`, or nothing at all. Left out, the probe
+    /// is run with whatever shape the arm being measured carries; a gold query is
+    /// a prompt without a session behind it, so most probes honestly have no
+    /// label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+}
+
+impl EvalItem {
+    /// The labelled shape, or `None` when the probe carries no label. A label
+    /// that is not a shape — a typo, or a word from a future version of the
+    /// table — reads as no label too, so one bad row cannot end the run; the
+    /// built-in set is checked word by word by a test.
+    pub fn task_shape(&self) -> Option<crate::TaskShape> {
+        self.shape.as_deref().and_then(crate::TaskShape::parse)
+    }
+
+    /// The same probe with its label removed, which is how a measurement asks
+    /// the retriever to score it as though the shape had never been read.
+    pub fn without_shape(&self) -> Self {
+        Self {
+            shape: None,
+            ..self.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +136,15 @@ pub fn evaluate_with(
     let mut hits: Vec<(String, Vec<String>, usize, Vec<String>)> = Vec::new();
 
     for item in gold {
-        let ranked = retrieve(&item.query, index, dirty, &opts);
+        // A probe's own label wins over the arm's shape, because the label is
+        // the claim being tested: "a bug-report-shaped query retrieves better
+        // with the bugfix weights". A probe with no label is scored with
+        // whatever shape the arm carries.
+        let item_options = RetrieveOptions {
+            shape: item.task_shape().unwrap_or(opts.shape),
+            ..opts.clone()
+        };
+        let ranked = retrieve(&item.query, index, dirty, &item_options);
         let ranked_paths: Vec<String> = ranked.iter().map(|r| r.path.clone()).collect();
         if item.expected.is_empty() {
             hits.push((
@@ -187,6 +221,98 @@ pub fn evaluate(
             ..Default::default()
         },
     )
+}
+
+/// The gold set split by the shape each probe was written as, in a fixed order.
+///
+/// Probes carrying no label are `general` ones: the weight table as it stands is
+/// exactly what they ask for, so they belong to the partition that changes
+/// nothing rather than being left out of the measurement.
+pub fn gold_by_shape(gold: &[EvalItem]) -> Vec<(crate::TaskShape, Vec<EvalItem>)> {
+    let mut partitions: Vec<(crate::TaskShape, Vec<EvalItem>)> =
+        [crate::TaskShape::General, crate::TaskShape::Bugfix]
+            .into_iter()
+            .map(|shape| (shape, Vec::new()))
+            .collect();
+    for item in gold {
+        let shape = item.task_shape().unwrap_or(crate::TaskShape::General);
+        if let Some((_, bucket)) = partitions.iter_mut().find(|(s, _)| *s == shape) {
+            bucket.push(item.clone());
+        }
+    }
+    partitions.retain(|(_, bucket)| !bucket.is_empty());
+    partitions
+}
+
+/// One shape's gold probes measured twice: once with the shape's weights turned
+/// off, once with them on.
+#[derive(Debug, Clone)]
+pub struct ShapeComparison {
+    pub shape: crate::TaskShape,
+    pub queries: usize,
+    /// Every probe scored with `general` weights, labels ignored.
+    pub untuned: EvalReport,
+    /// Every probe scored as its own label says, which is what the product does.
+    pub tuned: EvalReport,
+}
+
+impl ShapeComparison {
+    /// What the shape's weights did to mean reciprocal rank on its own probes.
+    pub fn mrr_delta(&self) -> f64 {
+        self.tuned.mrr - self.untuned.mrr
+    }
+}
+
+/// Measure each shape on its own probes, against the same probes with the shape
+/// weights switched off.
+///
+/// This is the check a bias has to pass before it ships. The plan's warning was
+/// that a per-shape weight table is a story unless the gold set can be
+/// partitioned by shape and measured per partition, because an overall number
+/// can rise on one kind of query while the shape quietly damages another.
+/// `options` is the arm under test — the lexical stage on or off — and is held
+/// identical across both sides of every comparison, so the only difference
+/// between `untuned` and `tuned` is the shape.
+pub fn compare_shapes(
+    index: &RetrievalIndex,
+    gold: &[EvalItem],
+    top_k: usize,
+    dirty: &HashSet<String>,
+    options: &RetrieveOptions,
+) -> Vec<ShapeComparison> {
+    gold_by_shape(gold)
+        .into_iter()
+        .map(|(shape, items)| {
+            let queries = items.len();
+            let untuned_items: Vec<EvalItem> = items.iter().map(EvalItem::without_shape).collect();
+            let untuned = evaluate_with(
+                index,
+                &untuned_items,
+                top_k,
+                dirty,
+                &RetrieveOptions {
+                    shape: crate::TaskShape::General,
+                    ..options.clone()
+                },
+            );
+            let tuned = evaluate_with(
+                index,
+                &items,
+                top_k,
+                dirty,
+                &RetrieveOptions {
+                    shape,
+                    ..options.clone()
+                },
+            );
+            ShapeComparison {
+                shape,
+                queries,
+                untuned,
+                tuned,
+            }
+        })
+        .collect()
 }
 
 /// One retrieval-eval run as recorded on disk.
@@ -285,6 +411,7 @@ mod tests {
     use super::*;
     use crate::index::FileEntry;
     use crate::symbols::PerFileSymbols;
+    use crate::TaskShape;
 
     fn file(path: &str) -> FileEntry {
         FileEntry {
@@ -350,19 +477,24 @@ mod tests {
     }
 
     fn gold() -> Vec<EvalItem> {
+        let probe = |query: &str, expected: &str| EvalItem {
+            query: query.to_string(),
+            expected: vec![expected.to_string()],
+            shape: None,
+        };
         vec![
-            EvalItem {
-                query: "retrieve top files by score".to_string(),
-                expected: vec!["crates/xencode-context-rs/src/retrieve.rs".to_string()],
-            },
-            EvalItem {
-                query: "token budget truncation estimates".to_string(),
-                expected: vec!["crates/xencode-context-rs/src/budget.rs".to_string()],
-            },
-            EvalItem {
-                query: "submit the chat message".to_string(),
-                expected: vec!["crates/xencode-tui-rs/src/app.rs".to_string()],
-            },
+            probe(
+                "retrieve top files by score",
+                "crates/xencode-context-rs/src/retrieve.rs",
+            ),
+            probe(
+                "token budget truncation estimates",
+                "crates/xencode-context-rs/src/budget.rs",
+            ),
+            probe(
+                "submit the chat message",
+                "crates/xencode-tui-rs/src/app.rs",
+            ),
         ]
     }
 
@@ -384,6 +516,7 @@ mod tests {
         let gold = vec![EvalItem {
             query: "unrelated websocket framing".to_string(),
             expected: vec!["crates/nope.rs".to_string()],
+            shape: None,
         }];
         let rep = evaluate(&idx, &gold, 3, &HashSet::new(), false);
         assert_eq!(rep.mrr, 0.0);
@@ -400,6 +533,132 @@ mod tests {
     }
 
     #[test]
+    fn a_label_that_is_not_a_shape_is_no_label() {
+        let item = EvalItem {
+            query: "harden the token check".to_string(),
+            expected: vec![],
+            shape: Some("secure".to_string()),
+        };
+        // `secure` is a word the plan uses for a shape nobody has priced. A gold
+        // set carrying a future label must not stop the run over it.
+        assert_eq!(item.task_shape(), None);
+        assert_eq!(item.without_shape().shape, None);
+        assert_eq!(
+            EvalItem {
+                query: String::new(),
+                expected: vec![],
+                shape: Some("bugfix".to_string()),
+            }
+            .task_shape(),
+            Some(crate::TaskShape::Bugfix)
+        );
+    }
+
+    #[test]
+    fn a_shape_bias_is_measured_as_a_bias_and_not_as_a_different_retriever() {
+        // Both files match the query identically on path and symbol; only one
+        // holds a test whose name says what the prompt says. So the difference
+        // between the two arms can only be the shape — which is the whole point
+        // of `compare_shapes`, and the reason its inputs are held fixed.
+        let idx = RetrievalIndex {
+            files: vec![file("src/a_tail.rs"), file("src/z_tail.rs")],
+            symbols: std::collections::BTreeMap::from([
+                (
+                    "src/a_tail.rs".to_string(),
+                    PerFileSymbols {
+                        functions: vec!["tail".to_string()],
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "src/z_tail.rs".to_string(),
+                    PerFileSymbols {
+                        functions: vec!["tail".to_string()],
+                        tests: vec!["tail_keeps_the_last_line".to_string()],
+                        ..Default::default()
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
+        let bugfix = EvalItem {
+            query: "tail keeps the last line fix".to_string(),
+            expected: vec!["src/z_tail.rs".to_string()],
+            shape: Some("bugfix".to_string()),
+        };
+        let plain = EvalItem {
+            query: "the tail of a file".to_string(),
+            expected: vec!["src/a_tail.rs".to_string()],
+            shape: None,
+        };
+        let comparisons = structural_comparison(&idx, &[bugfix, plain]);
+        let shaped = comparisons
+            .iter()
+            .find(|c| c.shape == crate::TaskShape::Bugfix)
+            .expect("the bugfix partition");
+        assert_eq!(shaped.queries, 1);
+        // Without the bias the tied pair is ordered by path, so the answer is second.
+        assert_eq!(shaped.untuned.mrr, 0.5);
+        assert_eq!(shaped.tuned.mrr, 1.0);
+        assert!(shaped.mrr_delta() > 0.0);
+        // The control: probes with no label are the `general` partition, whose
+        // weights are the table as it stands. A nonzero delta here would mean the
+        // two arms differed in something besides the shape.
+        let control = comparisons
+            .iter()
+            .find(|c| c.shape == crate::TaskShape::General)
+            .expect("the general partition");
+        assert_eq!(control.untuned.mrr, 1.0, "the control should retrieve");
+        assert_eq!(control.mrr_delta(), 0.0);
+    }
+
+    /// `compare_shapes` under the structural arm, which is what a unit test can
+    /// hold fixed — the lexical arm reaches into file text on disk.
+    fn structural_comparison(index: &RetrievalIndex, gold: &[EvalItem]) -> Vec<ShapeComparison> {
+        compare_shapes(index, gold, 5, &HashSet::new(), &RetrieveOptions::default())
+    }
+
+    #[test]
+    fn every_probe_is_a_shape_the_words_in_the_probe_would_also_give() {
+        // A label the retriever would never reach on its own measures a pairing
+        // the product cannot produce, so a gain on it would be a gain in a
+        // fiction. Every probe is therefore checked against the reading a prompt
+        // gets on its own — including the unlabelled ones, which must really read
+        // as `general`, or the general partition would quietly contain shaped
+        // queries measured with the wrong weights.
+        let gold = default_gold();
+        let mut labelled = 0;
+        for item in &gold {
+            let read = crate::shape_of(&item.query);
+            let shape = match &item.shape {
+                None => TaskShape::General,
+                Some(word) => {
+                    labelled += 1;
+                    item.task_shape()
+                        .unwrap_or_else(|| panic!("unknown shape label {word:?} in {}", item.query))
+                }
+            };
+            assert_eq!(
+                read.shape, shape,
+                "probe {:?} is labelled {shape} but its own words read as {} ({:?})",
+                item.query, read.shape, read.reasons
+            );
+        }
+        assert!(
+            labelled >= 4,
+            "the built-in set must be partitionable, not merely labelled: {labelled} of {} \
+             probes carry a shape",
+            gold.len()
+        );
+        assert!(
+            gold.iter()
+                .any(|i| i.task_shape() == Some(TaskShape::Bugfix)),
+            "no probe asks about bugfix work, so the one priced bias has no partition to be \
+             measured on"
+        );
+    }
+
+    #[test]
     fn every_gold_answer_is_reachable_from_its_own_file() {
         // The corpus must not rot in either direction: each expected path has to
         // be a real file in this workspace (`cmd_output.rs` was not, and a gold
@@ -409,13 +668,16 @@ mod tests {
         // signals — its own name plus the symbols it declares — to put it first.
         //
         // The haystack is the answer plus three unrelated files. Being first
-        // here says the pairing is sound; it deliberately says nothing about
-        // whether the answer survives a whole repo, which is the part the
-        // measurement in `tests/gold_baseline.rs` reports.
+        // here says the pairing is sound: the probe names something the answer
+        // file carries, its declared symbols or — for a prose file, which
+        // declares none — the fact that the project keeps its rules and manuals
+        // in it. It deliberately says nothing about whether the answer survives a
+        // whole repo, which is the part the measurement in
+        // `tests/gold_baseline.rs` reports.
         let root = workspace_root();
         let gold = default_gold();
         assert!(
-            gold.len() >= 16,
+            gold.len() >= 24,
             "the built-in corpus widened once; it must not shrink back"
         );
 
