@@ -601,6 +601,57 @@ context in 1 slot(s) asked for — later flags win, so check llama_cpp_args`.
 The same check is available in the TUI: it is the status line under the model
 list (`m`).
 
+**What the machine can hold is asked before the server is started**, from the
+same three readings `xencode hw probe` uses: the device list off the server
+binary, the model geometry out of the `.gguf` header, and the free memory out of
+`/proc/meminfo`. Three outcomes, and a launch that is fine says nothing at all:
+
+```text
+# nothing on this machine can hold the weights — no server is started:
+error: this model is 20480 MiB and the largest place to put it here is 10406 MiB
+of system memory free, so no window makes it servable. A smaller quantization of
+the same model is the usual answer: `xencode hw probe --model <file>` …
+
+# the window asked for does not fit on any device — it is started shorter:
+131072 tokens needs about 4018 MiB once the cache this launch carries is counted,
+which is more than any device here can hold; the biggest is NVIDIA GeForce MX250
+with 1677 MiB of its own memory free. Starting at 46080 tokens instead.
+```
+
+The cache is priced at the quantization the command line really carries — the
+last `--cache-type-k`/`--cache-type-v` on it, which is the one the server obeys,
+and 16-bit when nothing names one, since that is `llama-server`'s own default.
+
+**A server that dies is reported as having died, with what it said.** Its error
+output is kept, so a launch that fails says why in the first seconds instead of
+after the whole deadline:
+
+```text
+error: llama-server stopped before it answered: exited with code 1
+the server's own last 6 lines:
+  0.00.087.316 E llama_model_load: error loading model: llama_model_loader: failed to load model from /tmp/nope.gguf
+  …
+  0.00.087.584 E srv  llama_server: exiting due to model loading error
+```
+
+Readiness is asked strictly: `llama-server` answers `/health` with 503
+`Loading model` while it loads and 200 `{"status":"ok"}` when it is done, and the
+first of those is not the second. That matters because the failure this path
+exists for happens *during* the load: a key-value cache the card cannot allocate.
+When what the server said was about memory, xencode starts it again at half the
+window and says that it did —
+
+```text
+  llama-server ran out of memory at 46080 tokens; starting again at 22528.
+```
+
+— and stops after that one retry, naming what is actually there to try next
+(`xencode hw probe --model <file>`, `xencode colab up`, or
+`xencode config set remote_base_url <url>`). There is no model download command,
+so it does not suggest one. All three of those blocks above are output from real
+launches on this laptop, including the restart at 22528, which came up and
+confirmed its own window.
+
 **How much the model may think** is a launch setting too. `llama_cpp_reasoning`
 takes `auto` (leave it to the model), `off`, or a token budget as a plain number:
 
@@ -804,8 +855,13 @@ set `XCODE_CONFIG_DIR` to point Xencode at a different directory.
 xencode config show
 xencode config set default_model qwen3:4b
 xencode config set mcp_timeout 30
+xencode config set llama_cpp_args "--n-gpu-layers all --device Vulkan1"
 xencode config reset
 ```
+
+A value that begins with a dash is taken as the value rather than as an option to
+`config set`, because the line `xencode hw probe` hands back to paste starts with
+`--n-gpu-layers` and quoting it was refused until this was fixed.
 
 `config set` keys (values are validated; `config show` prints the JSON):
 `mcp_servers`, `agent_hooks` and `model_profiles` are nested structures, so they are edited directly in the JSON instead, or managed in the TUI where a panel exists for them.

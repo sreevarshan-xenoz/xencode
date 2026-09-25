@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1142 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1173 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1239,7 +1239,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       loaded and the 938 MiB run that did not; the mmap one ships as the relation
       and the warning, not as a measurement of a build that was not run. No quant is
       recommended, because nothing here can price one.)*
-- [ ] **L-6 — budget preflight and OOM recovery.** Before launch, refuse a
+- [x] **L-6 — budget preflight and OOM recovery.** Before launch, refuse a
       model whose measured footprint exceeds available memory and say what would
       fit. On an exit-137 / killed-server signature, step quant or context down
       and retry once, then escalate with a concrete "or `xencode remote add …` /
@@ -1247,6 +1247,18 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** deliberately asking for a model two sizes too big produces
       the refusal before download, and a real OOM produces the stepped-down
       retry rather than a silent hang.
+      *(Done 2026-09-25 — see W2 progress. Both halves were run for real on this
+      laptop. Three departures from the item's wording, each for a reason: the
+      refusal happens before **launch**, because there is no download step to
+      refuse before — the downloader is `L-10` and the escalation says plainly
+      that xencode has none; only the window is stepped, never the quantization,
+      for the same reason (there is nothing to switch to on disk); and the
+      escalation names `xencode config set remote_base_url <url>` instead of
+      `xencode remote add …`, because that command exists and this one does not.
+      The step that was not in the item and turned out to be the whole thing:
+      readiness was being decided by a reply that means "still loading", so a
+      server that died four seconds into its load had already been called
+      running — see the write-up.)*
 
 #### Track A — the agent finishes its own work
 
@@ -6535,6 +6547,95 @@ done-when is met, and the commit that does it names the IDs.
   the real run: on this laptop it recommends `--n-gpu-layers all --device Vulkan1
   --cache-type-k q8_0 --cache-type-v q4_0 --flash-attn on --ctx-size 8192`, which is
   the window measured loading and answering at 70.7 tokens/s.
+
+- [x] `L-6` — 2026-09-25, tenth item of W2. A local server this machine cannot
+  serve is refused, shortened, or reported as dead — in under a second where
+  possible, with the server's own words, and restarted once when the reason is
+  memory.
+  **The item asked for two things; the defect that mattered was a third, and it
+  was only visible by running it.** The two asked-for halves are in place — the
+  readings are taken before the launch, and a memory death is retried once at half
+  the window — but the first end-to-end run of the retry did not reach the retry at
+  all. It printed `llama-server ready`, then `the server reported no settings`, and
+  sat there. The reason: readiness was asked of `ping()`, which counts the HTTP 503
+  `Loading model` that `llama-server` returns *while* it is loading as a healthy
+  answer, so the launch was declared successful at second two and the process died
+  at second four, after the decision had already been made. No amount of watching
+  the child fixes that, because the wait had already stopped. Measured directly
+  against a real launch on this laptop: 503 at t=2s, 200 `{"status":"ok"}` at t=3s.
+  `wait_until_ready()` asks `model_ready()` now, and `ping()` keeps its looser
+  meaning — "something is answering" is the honest thing for a status row to say,
+  and it is the wrong thing to build a launch decision on.
+  **What the preflight is, and what it is not.** Three readings, all fresh at the
+  moment of the launch, because all three change under a path that still looks the
+  same: the device list from `llama-server --list-devices`, the geometry from the
+  `.gguf` header, and the memory free from `/proc/meminfo`. A model whose weights
+  exceed every pool is refused and nothing is started. A window no device can hold
+  is started at the largest that can, and the sentence says which device was too
+  small and what it had. A launch that is fine prints nothing, because a report on
+  every successful start is a report that gets scrolled past. What it is *not* is a
+  guarantee: the same card refused 46080 tokens that the arithmetic had just said
+  fitted, because the reserve is a fraction of what the server reports free with
+  nothing loaded, and it has to cover the model, the cache, and the server's own
+  buffers with one number. That is why the retry exists and why the preflight is
+  allowed to be wrong in the direction of optimism.
+  **The cache is priced off the command line, and that changed a number.** The
+  first version priced the key-value cache at a constant q8_0 keys and q4_0 values,
+  which is what the probe's recommended line emits — but the profile this machine
+  was given emits `--cache-type-v q8_0`, and a config can name anything. The price
+  now comes from the last `--cache-type-k`/`--cache-type-v` on the line about to be
+  run, defaulting to 16-bit when nothing names one, because that is the server's own
+  default and an unknown must not make a plan look cheaper. On this model the three
+  prices are 56.0, 28.4 and 21.4 KiB per token, so the difference is the whole
+  window. What the machine said when the constant came back is worth recording:
+  131072 tokens at the flag-read price needed 4018 MiB and was stepped to 46080,
+  where the constant had said 61440 — and *both* of those died, with the real
+  `ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory`. The manual
+  run pinned the allocation at 1,052,835,840 bytes for 46080 tokens, which is
+  22.3 KiB per token: llama.cpp's own 8-bit value cache costs about what a 4-bit one
+  was priced at here, not the sum of the two sides. So the flag read is kept because
+  it is the right question to ask, and because a 16-bit cache really is 2.6 times
+  the 8-bit one — but the honest claim is that the preflight narrows the guess, not
+  that it settles it.
+  **The retry, run for real.** The same launch that died at 46080 printed
+  `llama-server ran out of memory at 46080 tokens; starting again at 22528.`, came
+  up, and the check afterwards read back `22528 tokens of context in 1 slot(s)` from
+  the server itself. A death is only retried when the server's own words are about
+  memory, and only once; a second one stops and quotes what it said. The other two
+  fast paths were run the same way: a 20 GiB model file refused in **0.45 s** with
+  exit status 1 and no process started, and `/tmp/nope.gguf` reported in **0.72 s**
+  quoting `llama_model_loader: failed to load model from /tmp/nope.gguf` and
+  `exiting due to model loading error` — the code before this waited the full **60 s**
+  for that one and called it a timeout, which is the lie this item exists to kill.
+  **Three departures from the item's wording.** It says the refusal comes *before
+  download*; there is no download step in xencode — that is `L-10` — so it comes
+  before launch, and the escalation says plainly that there is no downloader rather
+  than naming a command that does not exist. It says step *quant or context* down;
+  only the window is stepped, because switching quantization means a file that is
+  not on disk. And it escalates with `xencode remote add …`, which was never built;
+  the command that exists is `xencode config set remote_base_url <url>`, so that is
+  what is printed, along with `xencode hw probe --model <file>` and
+  `xencode colab up`.
+  **One rough edge left, on the record.** After a stepped launch the settings line
+  still says `not the 8192 tokens of context in 1 slot(s) asked for — later flags
+  win, so check llama_cpp_args`, which blames the config for a number xencode itself
+  chose. The note above it says what actually happened, so nothing printed is false,
+  but the two lines disagree about who to tell.
+  Verified by 1173 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Thirty-one tests are new across the two crates: the whole
+  launch-and-wait machine (a server that dies, a server that stays silent, a death
+  that is not about memory quoted rather than retried, the retry that prints its
+  note and the second failure that stops), the preflight's three outcomes, the
+  halving that stops at the floor, and the cache price read from the line. Two of
+  them were checked by putting the old behaviour back and watching them fail — the
+  readiness test reports `a server that dies during the load is not Ready` when the
+  wait goes back to `ping()`, and the pricing test prints `61440 against 61440` when
+  the constants come back. Also in this pass, and only found by typing the advice
+  the probe prints: `xencode config set llama_cpp_args "--n-gpu-layers all …"` was
+  refused by clap as an unexpected argument, so `config set` now takes a value
+  beginning with a dash as the value.
+
 
 #### W2 — The model/inference substrate — 15 items
 

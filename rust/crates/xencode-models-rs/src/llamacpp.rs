@@ -244,11 +244,129 @@ pub fn settings_check_line(label: &str, asked: ServerReport, got: ServerReport) 
     )
 }
 
+/// How a server process that xencode started came to an end.
+///
+/// The two shapes matter separately. A server that exits on its own knows why
+/// and said so; a server the kernel's out-of-memory killer takes is stopped
+/// dead with no line of its own, which is why the signal is reported as loudly
+/// as the message. A shell adds the same fact twice over: `kill -9` is signal
+/// 9, and the `137` a script sees is that number plus 128.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerExit {
+    /// The exit code, when the process got as far as setting one.
+    pub code: Option<i32>,
+    /// The signal that ended it, when one did.
+    pub signal: Option<i32>,
+}
+
+impl ServerExit {
+    fn new(status: &std::process::ExitStatus) -> Self {
+        ServerExit {
+            code: status.code(),
+            signal: exit_signal(status),
+        }
+    }
+
+    /// One line saying how it died, in the words a user can act on.
+    pub fn describe(&self) -> String {
+        match (self.signal, self.code) {
+            (Some(9), _) => {
+                "killed by signal 9 — the kernel's out-of-memory killer sends this one".to_string()
+            }
+            (Some(signal), _) => format!("killed by signal {signal}"),
+            (None, Some(code)) => format!("exited with code {code}"),
+            (None, None) => "ended without reporting anything".to_string(),
+        }
+    }
+
+    /// Whether this death looks like a memory problem rather than a bad command
+    /// line. The signal alone counts, because the kernel's killer gives the
+    /// process no chance to explain itself; beyond that it is the server's own
+    /// words.
+    ///
+    /// The comparison drops spaces, underscores and punctuation on purpose: the
+    /// same fact reaches the terminal as `out of memory`, `std::bad_alloc` and
+    /// — what this build of `llama-server` printed when a device ran out,
+    /// measured here — `ggml_vulkan: vk::Device::allocateMemory:
+    /// ErrorOutOfDeviceMemory`. Each of those compacts to one of the words
+    /// below; a plain substring match against any of them misses two of three.
+    pub fn looks_like_out_of_memory(&self, tail: &[String]) -> bool {
+        if self.signal == Some(9) {
+            return true;
+        }
+        const MEMORY_WORDS: [&str; 5] = [
+            "outofmemory",
+            "outofdevicememory",
+            "cannotallocate",
+            "failedtoallocate",
+            "badalloc",
+        ];
+        tail.iter().any(|line| {
+            let compacted: String = line
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(|c| c.to_lowercase())
+                .collect();
+            MEMORY_WORDS.iter().any(|word| compacted.contains(word))
+        })
+    }
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
+/// How many of a server's own error lines are kept for reporting.
+const LOG_TAIL_LINES: usize = 40;
+
+/// The last few lines a server wrote to its own error output.
+///
+/// A reader thread fills this while the process runs and stops at the end of
+/// the pipe, so what killed the server is still there to be quoted after it is
+/// gone. The list is capped: this exists to explain a failure, not to hold a
+/// log, and an unbounded one is a slow leak in a program that starts a server
+/// per session.
+#[derive(Debug, Clone, Default)]
+pub struct ServerLog {
+    lines: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+}
+
+impl ServerLog {
+    fn push(&self, line: String) {
+        if let Ok(mut lines) = self.lines.lock() {
+            if lines.len() == LOG_TAIL_LINES {
+                lines.pop_front();
+            }
+            lines.push_back(line);
+        }
+    }
+
+    /// What the server said last, oldest first.
+    pub fn tail(&self) -> Vec<String> {
+        self.lines
+            .lock()
+            .map(|lines| lines.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
 /// A running `llama-server` process that xencode spawned (auto-start support).
 #[derive(Debug)]
 pub struct LlamaServerProcess {
     child: std::process::Child,
     pub base_url: String,
+    log: ServerLog,
+    /// The thread copying the server's error output, kept so it can be waited
+    /// for. Reading the tail before it finishes is how a report ends up quoting
+    /// half a sentence — or none of the sentence that explained the failure.
+    reader: Option<std::thread::JoinHandle<()>>,
 }
 
 impl LlamaServerProcess {
@@ -262,12 +380,327 @@ impl LlamaServerProcess {
         self.child.try_wait().map(|s| s.is_none()).unwrap_or(false)
     }
 
+    /// How the server ended, if it has. `None` while it is still running.
+    ///
+    /// This is the check a launch loop is supposed to make before it keeps
+    /// waiting: a process that died at the third second does not become ready
+    /// in the hundred and twentieth, and waiting the difference out reports a
+    /// timeout as if that were what happened.
+    pub fn exit_status(&mut self) -> Option<ServerExit> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => Some(ServerExit::new(&status)),
+            Ok(None) => None,
+            // Cannot ask; treat as still running and let the caller's own
+            // deadline decide, rather than claiming a death that was not seen.
+            Err(_) => None,
+        }
+    }
+
+    /// What the server said on its own error output. Waiting for the reader
+    /// first, so the answer is the whole tail rather than the part of it that
+    /// had arrived by the time the process disappeared.
+    pub fn log(&mut self) -> Vec<String> {
+        self.drain_log();
+        self.log.tail()
+    }
+
+    fn drain_log(&mut self) {
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+
     /// Terminate the spawned server process.
     pub fn stop(&mut self) -> Result<(), LlamaCppError> {
         self.child
             .kill()
-            .map_err(|e| LlamaCppError::Api(format!("failed to stop llama-server: {e}")))
+            .map_err(|e| LlamaCppError::Api(format!("failed to stop llama-server: {e}")))?;
+        // Reap it: a child left dead but unwaited-for stays in the process
+        // table, and `wait` is also what closes the error pipe the reader
+        // thread is holding open.
+        self.child
+            .wait()
+            .map_err(|e| LlamaCppError::Api(format!("failed to stop llama-server: {e}")))?;
+        self.drain_log();
+        Ok(())
     }
+
+    /// Start waiting where a launch left off: ask the server if its model is
+    /// in, and stop asking the moment it is clear that it never will be.
+    ///
+    /// The liveness check inside the loop is the point. A launch that only
+    /// counts attempts cannot tell a server that is still loading a model from
+    /// one that died three seconds in, so it waits out the whole deadline and
+    /// then reports the one thing that was never true — that it timed out.
+    /// Readiness is asked for strictly for the same reason: a server that
+    /// answers `Loading model` and then dies during the cache allocation is
+    /// exactly the failure this loop exists to catch.
+    pub async fn wait_until_ready(
+        &mut self,
+        tries: u32,
+        gap: std::time::Duration,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> ServerStart {
+        let client = LlamaCppClient::new(&self.base_url, 3);
+        for _ in 0..tries {
+            if cancelled() {
+                let _ = self.stop();
+                return ServerStart::Cancelled;
+            }
+            if client.model_ready().await {
+                return ServerStart::Ready;
+            }
+            if let Some(exit) = self.exit_status() {
+                self.drain_log();
+                return ServerStart::Died {
+                    exit,
+                    tail: self.log.tail(),
+                };
+            }
+            tokio::time::sleep(gap).await;
+        }
+        match self.exit_status() {
+            Some(exit) => {
+                self.drain_log();
+                ServerStart::Died {
+                    exit,
+                    tail: self.log.tail(),
+                }
+            }
+            None => ServerStart::NotReady,
+        }
+    }
+}
+
+/// What waiting for a freshly started server turned out to mean.
+#[derive(Debug, Clone)]
+pub enum ServerStart {
+    /// It is answering.
+    Ready,
+    /// The process went away. `tail` is what it said last, which is the only
+    /// account of why that exists.
+    Died { exit: ServerExit, tail: Vec<String> },
+    /// Still alive, still not answering.
+    NotReady,
+    /// xencode is going away, and the server was stopped on the way out.
+    Cancelled,
+}
+
+/// What starting a server and waiting for it turned out to mean.
+#[derive(Debug)]
+pub enum LaunchOutcome {
+    /// It is answering. `notes` is what the machine said along the way — a
+    /// launch that had to be made smaller to work is a success worth reading,
+    /// because the next person to change a flag needs to know it was already at
+    /// the edge.
+    Started {
+        server: LlamaServerProcess,
+        notes: Vec<String>,
+    },
+    /// There is no server. Every line here says something true about why,
+    /// including the lines the server printed itself.
+    Failed { lines: Vec<String> },
+    /// xencode is going away; a server that had started was stopped first.
+    Cancelled,
+}
+
+/// The window a set of launch arguments actually asks for: the last
+/// `--ctx-size`/`-c` value in the list, which is the one `llama-server` runs
+/// with. `None` when no window is named at all, which means the server's own
+/// default and nothing here can halve a number that was never written.
+pub fn ctx_size_in(args: &[String]) -> Option<u64> {
+    let mut found = None;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let value = if arg == "--ctx-size" || arg == "-c" {
+            index += 1;
+            args.get(index).map(|s| s.as_str())
+        } else {
+            arg.strip_prefix("--ctx-size=")
+                .or_else(|| arg.strip_prefix("-c="))
+        };
+        if let Some(value) = value {
+            if let Ok(tokens) = value.trim().parse::<u64>() {
+                found = Some(tokens);
+            }
+        }
+        index += 1;
+    }
+    found
+}
+
+/// How long a launch is willing to wait for a server to answer: a number of
+/// attempts and the pause between them. Loading a model is the slow part this
+/// exists for, and it is slow by the size of the file rather than by anything
+/// xencode controls.
+#[derive(Debug, Clone, Copy)]
+pub struct Patience {
+    pub tries: u32,
+    pub gap: std::time::Duration,
+}
+
+/// Start a server, wait for it to answer, and — if the machine said it ran out
+/// of memory — try once more at a shorter window before giving up.
+///
+/// This is what both launch sites in xencode were missing. Each of them counted
+/// attempts without ever looking at the process, so a server that died during
+/// model loading was reported two minutes later as one that "did not become
+/// ready in time" — a timeout, which is not what happened, and which points
+/// whoever reads it at the wrong thing. Waiting on the process instead means the
+/// first answer is either "it's up" or "it's gone, and here is what it said".
+///
+/// `step_down` is the budget layer's arithmetic passed in rather than
+/// duplicated: it is given the window in force and returns a smaller one, or
+/// `None` when there is nothing left to give. Only one retry is made, because
+/// the failure this is aimed at is the machine's size, and a second attempt at
+/// half of a half asks the same question.
+pub async fn launch_and_wait(
+    executable: &str,
+    model_path: &str,
+    port: u16,
+    args: &[String],
+    patience: Patience,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    step_down: &(dyn Fn(u64) -> Option<u64> + Sync),
+) -> LaunchOutcome {
+    let Patience { tries, gap } = patience;
+    let mut args = args.to_vec();
+    let mut notes: Vec<String> = Vec::new();
+    let mut retried = false;
+
+    loop {
+        let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let mut server = match start_llama_server(executable, model_path, port, &refs) {
+            Ok(server) => server,
+            Err(e) => {
+                return LaunchOutcome::Failed {
+                    lines: vec![format!("could not start llama-server: {e}")],
+                }
+            }
+        };
+        match server.wait_until_ready(tries, gap, cancelled).await {
+            ServerStart::Ready => {
+                return LaunchOutcome::Started { server, notes };
+            }
+            ServerStart::Cancelled => return LaunchOutcome::Cancelled,
+            ServerStart::NotReady => {
+                // Still running, still silent. The log is the only place a
+                // reason could be, and it is quoted rather than summarised.
+                let tail = server.log();
+                let _ = server.stop();
+                let mut lines = vec![format!(
+                    "llama-server is still running after {} attempts and has not answered on \
+                     port {port}",
+                    pretty_attempts(tries, gap)
+                )];
+                lines.extend(quote_tail(&tail));
+                return LaunchOutcome::Failed { lines };
+            }
+            ServerStart::Died { exit, tail } => {
+                if !exit.looks_like_out_of_memory(&tail) {
+                    let mut lines = vec![format!(
+                        "llama-server stopped before it answered: {}",
+                        exit.describe()
+                    )];
+                    lines.extend(quote_tail(&tail));
+                    return LaunchOutcome::Failed { lines };
+                }
+                // Out of memory, which is the one failure here that a smaller
+                // request can answer. What was asked is whatever the arguments
+                // in force name, including the value this function appended on
+                // its own retry.
+                let in_force = ctx_size_in(&args);
+                let smaller = in_force.and_then(step_down);
+                if retried {
+                    let asked = in_force
+                        .map(|tokens| tokens.to_string())
+                        .unwrap_or_else(|| "the window asked for".to_string());
+                    let mut lines = vec![format!(
+                        "llama-server ran out of memory at {asked} tokens as well, so this \
+                         machine cannot serve {model_path} with a window worth having"
+                    )];
+                    lines.extend(std::mem::take(&mut notes));
+                    lines.extend(quote_tail(&tail));
+                    lines.extend(escalation());
+                    return LaunchOutcome::Failed { lines };
+                }
+                match (in_force, smaller) {
+                    (Some(first), Some(second)) => {
+                        notes.push(format!(
+                            "llama-server ran out of memory at {first} tokens; starting again at \
+                             {second}."
+                        ));
+                        retried = true;
+                        args.push("--ctx-size".to_string());
+                        args.push(second.to_string());
+                    }
+                    (Some(first), None) => {
+                        let mut lines = vec![format!(
+                            "llama-server ran out of memory at {first} tokens and there is no \
+                             shorter window to try"
+                        )];
+                        lines.extend(quote_tail(&tail));
+                        lines.extend(escalation());
+                        return LaunchOutcome::Failed { lines };
+                    }
+                    (None, _) => {
+                        let mut lines = vec![
+                            "llama-server ran out of memory, and no context size was asked for, \
+                             so there is no window here to make smaller"
+                                .to_string(),
+                        ];
+                        lines.extend(quote_tail(&tail));
+                        lines.extend(escalation());
+                        return LaunchOutcome::Failed { lines };
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How a launch attempt's patience would be described in a sentence.
+fn pretty_attempts(tries: u32, gap: std::time::Duration) -> String {
+    let total = gap * tries;
+    format!("{tries} attempts over {:.0} seconds", total.as_secs_f64())
+}
+
+/// The last lines the server printed, kept verbatim and attributed. Paraphrasing
+/// these is how a report ends up claiming something the program never said.
+fn quote_tail(tail: &[String]) -> Vec<String> {
+    let lines: Vec<&str> = tail
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(6)
+        .collect();
+    if lines.is_empty() {
+        return vec!["the server printed nothing before it stopped".to_string()];
+    }
+    let mut out = vec![format!(
+        "the server's own last {} line{}:",
+        lines.len(),
+        if lines.len() == 1 { "" } else { "s" }
+    )];
+    out.extend(lines.into_iter().rev().map(|line| format!("  {line}")));
+    out
+}
+
+/// What to do when this machine is simply too small. Only commands that exist
+/// are named, and the one thing that does not exist yet is said plainly.
+fn escalation() -> Vec<String> {
+    vec![
+        "`xencode hw probe` prints what this machine can hold and the flags to start a server \
+         with; `xencode colab up` runs the model on a machine that can hold it, and \
+         `xencode config set remote_base_url <url>` points xencode at a server already running \
+         elsewhere."
+            .to_string(),
+        "A smaller quantization of the same model is the other way onto this card; xencode has no \
+         model downloader yet, so that file has to be fetched outside it."
+            .to_string(),
+    ]
 }
 
 /// Errors from llama.cpp operations.
@@ -353,6 +786,27 @@ impl LlamaCppClient {
     }
 
     /// Check if llama.cpp server is reachable and responsive, returning roundtrip latency in seconds.
+    /// Whether the server has its model in and will answer a request — as
+    /// opposed to having merely opened its socket.
+    ///
+    /// Measured on b10809 at two and three seconds into a launch: while the
+    /// weights and the key-value cache are being put in place `/health` answers
+    /// 503 `{"error":{"message":"Loading model", …}}`, and when it is done it
+    /// answers 200 `{"status":"ok"}`. [`ping`](Self::ping) counts both, because
+    /// for a status line "something is there" is the honest answer — but a
+    /// launch that treats the first as readiness calls a server running seconds
+    /// before it fails to allocate the cache, and then never notices it died.
+    pub async fn model_ready(&self) -> bool {
+        let health_url = format!("{}/health", self.base_url);
+        match self.client.get(&health_url).send().await {
+            Ok(r) if r.status().as_u16() == 503 => false,
+            Ok(r) if r.status().is_success() => true,
+            // A server with no `/health` to ask is as far as this can see, so
+            // fall back on the one thing only a loaded model can answer.
+            _ => matches!(self.context_window().await, Ok(Some(_))),
+        }
+    }
+
     pub async fn ping(&self) -> Result<f64, LlamaCppError> {
         let start = Instant::now();
 
@@ -706,15 +1160,47 @@ pub fn start_llama_server(
     cmd.arg("--model").arg(model_path);
     cmd.args(extra_args);
     cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
+    // What a server says while failing is the whole difference between
+    // "it did not become ready" and "the device ran out of memory". Discarding
+    // it — which is what sending this to the null device did — left every
+    // launch in this program able to report only that something did not happen.
+    cmd.stderr(Stdio::piped());
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| LlamaCppError::Api(format!("failed to start llama-server: {e}")))?;
+    let log = ServerLog::default();
+    let mut reader = None;
+    if let Some(stderr) = child.stderr.take() {
+        let filled = log.clone();
+        match std::thread::Builder::new()
+            .name("llama-server-log".to_string())
+            .spawn(move || {
+                use std::io::BufRead;
+                let reader = std::io::BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    filled.push(line);
+                }
+            }) {
+            Ok(handle) => reader = Some(handle),
+            Err(e) => {
+                // A server whose failures cannot be read is a server that fails
+                // quietly, which is the thing this whole path exists to prevent,
+                // so stop the one just started instead of handing it back.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(LlamaCppError::Api(format!(
+                    "failed to watch llama-server output: {e}"
+                )));
+            }
+        }
+    }
 
     Ok(LlamaServerProcess {
         child,
         base_url: format!("http://127.0.0.1:{}", port),
+        log,
+        reader,
     })
 }
 
@@ -1458,5 +1944,624 @@ mod tests {
         ] {
             assert_eq!(report_from_props(&props).slots, None, "{props}");
         }
+    }
+
+    /// A directory of its own for a test that writes an executable: the suite
+    /// runs in parallel, and two tests pointed at one directory overwrite each
+    /// other's script.
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let dir = std::env::temp_dir().join(format!("xencode-llamacpp-{name}-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Write a program that behaves like a server with a bad launch: it says
+    /// something on its error output and then ends. The process, the pipe, the
+    /// exit code and the signal are the real ones — only the program is small.
+    #[cfg(unix)]
+    fn dying_server(script_body: &str) -> (std::path::PathBuf, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch_dir("server");
+        let path = dir.join("server");
+        std::fs::write(&path, format!("#!/bin/sh\n{script_body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let executable = path.to_string_lossy().to_string();
+        (dir, executable)
+    }
+
+    #[cfg(unix)]
+    fn wait_for_exit(server: &mut LlamaServerProcess) -> ServerExit {
+        for _ in 0..400 {
+            if let Some(exit) = server.exit_status() {
+                return exit;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        panic!("the process did not end within ten seconds");
+    }
+
+    #[test]
+    fn a_death_by_signal_9_says_which_number_the_kernel_used() {
+        // The number a shell reports for the same death is 137, which is 128 + 9;
+        // this is the pair the plan's exit-137 signature refers to.
+        let exit = ServerExit {
+            code: None,
+            signal: Some(9),
+        };
+        assert_eq!(
+            exit.describe(),
+            "killed by signal 9 — the kernel's out-of-memory killer sends this one"
+        );
+        assert!(exit.looks_like_out_of_memory(&[]));
+        assert_eq!(
+            ServerExit {
+                code: Some(1),
+                signal: None
+            }
+            .describe(),
+            "exited with code 1"
+        );
+    }
+
+    #[test]
+    fn a_server_that_exits_cleanly_is_not_reported_as_a_failure() {
+        let exit = ServerExit {
+            code: Some(0),
+            signal: None,
+        };
+        assert!(!exit.looks_like_out_of_memory(&[]), "{}", exit.describe());
+    }
+
+    #[test]
+    fn the_ways_a_server_says_it_ran_out_are_all_recognised() {
+        let exit = ServerExit {
+            code: Some(1),
+            signal: None,
+        };
+        for line in [
+            "CUDA Error: out of memory at ggml-cuda.cu:1234",
+            "terminate called after throwing an instance of 'std::bad_alloc'",
+            "ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory",
+            "ggml_backend_cpu_buffer_from_buffer: failed to allocate buffer",
+        ] {
+            assert!(
+                exit.looks_like_out_of_memory(&[line.to_string()]),
+                "not recognised as a memory failure: {line}"
+            );
+        }
+        // The two things a launch fails with that must not be retried as though
+        // memory were the reason. The first is the interesting one: that line
+        // appears on servers that are running fine, any time `--n-gpu-layers` is
+        // pinned by the caller, so treating it as a failure would explain a
+        // healthy server's unrelated death by the wrong thing.
+        assert!(!exit.looks_like_out_of_memory(&[
+            "error: invalid argument [o]: unknown option".to_string()
+        ]));
+        assert!(!exit.looks_like_out_of_memory(&[
+            "W common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 99/-2, abort".to_string()
+        ]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn what_the_server_printed_before_it_died_is_still_there_to_quote() {
+        let (dir, executable) = dying_server(
+            "echo 'ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory' >&2\nexit 1",
+        );
+        let mut server = start_llama_server(&executable, "unused.gguf", 0, &[]).unwrap();
+        let exit = wait_for_exit(&mut server);
+        assert_eq!(exit.code, Some(1));
+        assert_eq!(exit.signal, None);
+        let tail = server.log();
+        assert!(
+            tail.iter()
+                .any(|line| line.contains("ErrorOutOfDeviceMemory")),
+            "nothing was captured: {tail:?}"
+        );
+        assert!(exit.looks_like_out_of_memory(&tail));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_server_killed_by_a_signal_reports_the_signal_rather_than_a_code() {
+        // Killing its own process group by name is how a shell reaches itself
+        // with SIGKILL, which is the death the out-of-memory killer gives.
+        let (dir, executable) = dying_server("kill -9 $$");
+        let mut server = start_llama_server(&executable, "unused.gguf", 0, &[]).unwrap();
+        let exit = wait_for_exit(&mut server);
+        assert_eq!(exit.signal, Some(9), "{exit:?}");
+        assert_eq!(exit.code, None);
+        assert!(exit.looks_like_out_of_memory(&server.log()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_the_last_forty_lines_of_a_server_are_kept() {
+        let (dir, executable) =
+            dying_server("for i in $(seq 1 200); do echo \"line $i\" >&2; done");
+        let mut server = start_llama_server(&executable, "unused.gguf", 0, &[]).unwrap();
+        wait_for_exit(&mut server);
+        // Reaping the process closes the pipe, and the reader stops with it, so
+        // by the time it is done the whole run has passed through.
+        for _ in 0..400 {
+            if server.log().len() == LOG_TAIL_LINES {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let tail = server.log();
+        assert_eq!(tail.len(), LOG_TAIL_LINES, "{tail:?}");
+        assert_eq!(tail.last().map(String::as_str), Some("line 200"));
+        assert!(
+            !tail.iter().any(|line| line == "line 1"),
+            "the oldest lines should have made room: {tail:?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_running_server_has_not_exited_and_stop_leaves_nothing_behind() {
+        let (dir, executable) = dying_server("sleep 30");
+        let mut server = start_llama_server(&executable, "unused.gguf", 0, &[]).unwrap();
+        assert!(server.exit_status().is_none());
+        assert!(server.is_running());
+        server.stop().unwrap();
+        assert!(!server.is_running());
+        assert_eq!(server.exit_status().map(|exit| exit.signal), Some(Some(9)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A port nothing is listening on, chosen by the OS so two tests running at
+    /// once do not answer each other.
+    fn unused_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn waiting_for_a_dead_server_stops_when_it_dies_and_quotes_why() {
+        let (dir, executable) =
+            dying_server("echo 'ggml_backend: cannot allocate buffer' >&2; kill -9 $$");
+        let mut server =
+            start_llama_server(&executable, "unused.gguf", unused_port(), &[]).unwrap();
+        let waited = std::time::Instant::now();
+        // 400 tries at 50 ms is twenty seconds of patience. The point of the
+        // test is that this never comes close to using it.
+        let outcome = server
+            .wait_until_ready(400, std::time::Duration::from_millis(50), &|| false)
+            .await;
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(5),
+            "waited {:?} for a process that had already gone",
+            waited.elapsed()
+        );
+        match outcome {
+            ServerStart::Died { exit, tail } => {
+                assert_eq!(exit.signal, Some(9), "{}", exit.describe());
+                assert!(exit.looks_like_out_of_memory(&tail), "{tail:?}");
+                assert!(
+                    tail.iter()
+                        .any(|line| line.contains("cannot allocate buffer")),
+                    "{tail:?}"
+                );
+            }
+            other => panic!("expected the death of the process, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_server_that_answers_is_ready_rather_than_slow() {
+        // The answering socket is a real one on a real port; only the program
+        // behind it is small, because what is under test here is what the wait
+        // loop does with an answer, not what produces one.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let answer = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut bytes = [0u8; 512];
+                let _ = stream.read(&mut bytes);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                );
+                let _ = stream.flush();
+            }
+        });
+        let (dir, executable) = dying_server("sleep 30");
+        let mut server = start_llama_server(&executable, "unused.gguf", port, &[]).unwrap();
+        let outcome = server
+            .wait_until_ready(200, std::time::Duration::from_millis(50), &|| false)
+            .await;
+        assert!(matches!(outcome, ServerStart::Ready), "{outcome:?}");
+        server.stop().ok();
+        let _ = answer.join();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_server_still_loading_its_model_is_not_ready_and_its_death_is_found() {
+        // The reply this test's socket gives is the one measured from
+        // `llama-server` b10809 two seconds into a real launch, and the line the
+        // program prints is the one it wrote three seconds in when the key-value
+        // cache did not fit. Reading the first as readiness is what let a launch
+        // report success for a server that was about to die, so the wait has to
+        // keep going past it and find the death.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let answering = stop.clone();
+        let answer = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            while !answering.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut bytes = [0u8; 512];
+                        let _ = stream.read(&mut bytes);
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 503 Service Unavailable\r\n\
+                              connection: close\r\ncontent-length: 0\r\n\r\n",
+                        );
+                        let _ = stream.flush();
+                    }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                }
+            }
+        });
+        let (dir, executable) = dying_server(
+            "sleep 3
+             echo 'ggml_vulkan: Device memory allocation of size 1052835840 failed.' >&2
+             echo 'ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory' >&2
+             echo 'llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache' >&2
+             exit 1",
+        );
+        let mut server = start_llama_server(&executable, "unused.gguf", port, &[]).unwrap();
+        let started = std::time::Instant::now();
+        let outcome = server
+            .wait_until_ready(400, std::time::Duration::from_millis(50), &|| false)
+            .await;
+        stop.store(true, Ordering::Relaxed);
+        let _ = answer.join();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "waited {:?} on a server that had already gone",
+            started.elapsed()
+        );
+        match outcome {
+            ServerStart::Died { exit, tail } => {
+                assert_eq!(exit.code, Some(1), "{}", exit.describe());
+                assert!(exit.looks_like_out_of_memory(&tail), "{tail:?}");
+                assert!(
+                    tail.iter()
+                        .any(|line| line.contains("ErrorOutOfDeviceMemory")),
+                    "{tail:?}"
+                );
+            }
+            other => panic!("a server that dies during the load is not {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_live_server_that_has_not_answered_yet_is_the_only_thing_called_slow() {
+        let (dir, executable) = dying_server("sleep 30");
+        let mut server =
+            start_llama_server(&executable, "unused.gguf", unused_port(), &[]).unwrap();
+        let outcome = server
+            .wait_until_ready(3, std::time::Duration::from_millis(20), &|| false)
+            .await;
+        assert!(matches!(outcome, ServerStart::NotReady), "{outcome:?}");
+        server.stop().ok();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn giving_up_on_a_server_leaves_no_process_behind() {
+        let (dir, executable) = dying_server("sleep 30");
+        let mut server =
+            start_llama_server(&executable, "unused.gguf", unused_port(), &[]).unwrap();
+        let pid = server.pid();
+        let outcome = server
+            .wait_until_ready(200, std::time::Duration::from_millis(50), &|| true)
+            .await;
+        assert!(matches!(outcome, ServerStart::Cancelled), "{outcome:?}");
+        assert!(!server.is_running(), "PID {pid} outlived the wait");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A program that keeps count of how many times it has been started, in a
+    /// file next to itself, so a test can tell "launched once" from "launched
+    /// twice" instead of trusting the report.
+    #[cfg(unix)]
+    const COUNT_AND_OUT_OF_MEMORY: &str = "D=$(dirname \"$0\")\necho x >> \"$D/attempts\"\n\
+        echo 'ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory' >&2\nexit 1";
+
+    #[cfg(unix)]
+    fn attempts(dir: &std::path::Path) -> usize {
+        std::fs::read_to_string(dir.join("attempts"))
+            .map(|text| text.lines().count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn the_context_size_in_force_is_the_last_one_written() {
+        // `llama-server` runs with the final value given for a flag, measured on
+        // b10809, so "what was asked" is the last of them — including one this
+        // function appends itself when it retries.
+        let args: Vec<String> = ["--ctx-size", "8192", "--flash-attn", "on"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(ctx_size_in(&args), Some(8_192));
+        let overridden: Vec<String> = [
+            "--ctx-size",
+            "8192",
+            "--ctx-size",
+            "4096",
+            "--n-gpu-layers",
+            "all",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(ctx_size_in(&overridden), Some(4_096));
+        let short: Vec<String> = ["-c", "2048"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(ctx_size_in(&short), Some(2_048));
+        let equals: Vec<String> = ["--ctx-size=1024"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(ctx_size_in(&equals), Some(1_024));
+        assert_eq!(ctx_size_in(&[]), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_model_that_only_fits_at_a_shorter_window_is_started_at_that_window() {
+        // The whole point of the retry: the first launch dies the way an
+        // out-of-memory launch dies, the second one is smaller, and the server
+        // that comes up is the one handed back.
+        let (dir, executable) = dying_server(
+            "D=$(dirname \"$0\")\necho x >> \"$D/attempts\"\nn=$(wc -l < \"$D/attempts\")\n\
+             if [ \"$n\" -lt 2 ]; then\n\
+             \x20 echo 'ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory' >&2\n\
+             \x20 exit 1\n\
+             fi\nexec sleep 30",
+        );
+        // Something has to answer on the port for the second attempt to be
+        // considered ready, and it answers the first attempt "no" because that
+        // is what a server that has not loaded its model does.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served_dir = dir.clone();
+        let served = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { break };
+                let started = std::fs::read_to_string(served_dir.join("attempts"))
+                    .map(|text| text.lines().count())
+                    .unwrap_or(0);
+                let mut bytes = [0u8; 512];
+                let _ = stream.read(&mut bytes);
+                if started >= 2 {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                    );
+                    let _ = stream.flush();
+                }
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+        });
+
+        let args: Vec<String> = ["--ctx-size", "8192"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let step_down = |tokens: u64| {
+            if tokens / 2 >= 1024 {
+                Some(tokens / 2)
+            } else {
+                None
+            }
+        };
+        let outcome = launch_and_wait(
+            &executable,
+            "unused.gguf",
+            port,
+            &args,
+            Patience {
+                tries: 40,
+                gap: std::time::Duration::from_millis(50),
+            },
+            &|| false,
+            &step_down,
+        )
+        .await;
+        let LaunchOutcome::Started { mut server, notes } = outcome else {
+            match outcome {
+                LaunchOutcome::Failed { lines } => panic!("the retry never came up: {lines:?}"),
+                LaunchOutcome::Cancelled => panic!("cancelled with nothing to cancel"),
+                LaunchOutcome::Started { .. } => unreachable!(),
+            }
+        };
+        assert_eq!(attempts(&dir), 2, "one death, one retry");
+        assert_eq!(
+            notes,
+            vec!["llama-server ran out of memory at 8192 tokens; starting again at 4096."]
+        );
+        assert!(server.is_running());
+        server.stop().ok();
+        // The answering thread is left where it is: it holds the only socket on
+        // that port and the test is over.
+        drop(served);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn running_out_twice_says_so_once_quotes_the_server_and_names_the_next_step() {
+        let (dir, executable) = dying_server(COUNT_AND_OUT_OF_MEMORY);
+        let args: Vec<String> = ["--ctx-size", "8192", "--n-gpu-layers", "all"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let step_down = |tokens: u64| {
+            if tokens / 2 >= 1024 {
+                Some(tokens / 2)
+            } else {
+                None
+            }
+        };
+        let outcome = launch_and_wait(
+            &executable,
+            "/tmp/unused.gguf",
+            unused_port(),
+            &args,
+            Patience {
+                tries: 40,
+                gap: std::time::Duration::from_millis(50),
+            },
+            &|| false,
+            &step_down,
+        )
+        .await;
+        let LaunchOutcome::Failed { lines } = outcome else {
+            panic!("a server that never comes up cannot be a start: {outcome:?}");
+        };
+        // Exactly one retry — a machine too small is not out-guessed by asking
+        // it four more times.
+        assert_eq!(attempts(&dir), 2, "{lines:?}");
+        let text = lines.join("\n");
+        assert!(text.contains("ran out of memory at 8192 tokens"), "{text}");
+        assert!(
+            text.contains("at 4096 tokens as well"),
+            "the second death should say the smaller window died too: {text}"
+        );
+        assert!(
+            text.contains("ErrorOutOfDeviceMemory"),
+            "the server's own words belong in the report: {text}"
+        );
+        assert!(text.contains("/tmp/unused.gguf"), "{text}");
+        assert!(text.contains("xencode hw probe"), "{text}");
+        assert!(text.contains("xencode colab up"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_memory_death_with_no_window_named_is_not_guessed_at() {
+        // Halving a number that was never written would be inventing it, and the
+        // report would then claim a retry that no one asked for.
+        let (dir, executable) = dying_server(COUNT_AND_OUT_OF_MEMORY);
+        let outcome = launch_and_wait(
+            &executable,
+            "unused.gguf",
+            unused_port(),
+            &[],
+            Patience {
+                tries: 20,
+                gap: std::time::Duration::from_millis(50),
+            },
+            &|| false,
+            &|_| Some(1024),
+        )
+        .await;
+        let LaunchOutcome::Failed { lines } = outcome else {
+            panic!("expected the failure to be reported: {outcome:?}");
+        };
+        assert_eq!(attempts(&dir), 1, "{lines:?}");
+        let text = lines.join("\n");
+        assert!(text.contains("no context size was asked for"), "{text}");
+        assert!(text.contains("ErrorOutOfDeviceMemory"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_death_that_is_not_about_memory_is_quoted_and_not_retried() {
+        let (dir, executable) = dying_server(
+            "D=$(dirname \"$0\")\necho x >> \"$D/attempts\"\n\
+             echo 'error: unable to load model: bad magic' >&2\nexit 1",
+        );
+        let args: Vec<String> = ["--ctx-size", "8192"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let outcome = launch_and_wait(
+            &executable,
+            "unused.gguf",
+            unused_port(),
+            &args,
+            Patience {
+                tries: 20,
+                gap: std::time::Duration::from_millis(50),
+            },
+            &|| false,
+            &|tokens| Some(tokens / 2),
+        )
+        .await;
+        let LaunchOutcome::Failed { lines } = outcome else {
+            panic!("expected the failure to be reported: {outcome:?}");
+        };
+        assert_eq!(attempts(&dir), 1, "a broken file is not a memory problem");
+        let text = lines.join("\n");
+        assert!(text.contains("stopped before it answered"), "{text}");
+        assert!(text.contains("unable to load model"), "{text}");
+        assert!(
+            !text.contains("starting again"),
+            "the retry belongs to memory failures only: {text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_server_that_stays_silent_is_reported_as_that_with_what_it_printed() {
+        let (dir, executable) = dying_server(
+            "D=$(dirname \"$0\")\necho x >> \"$D/attempts\"\n\
+             echo 'waiting for the model to load' >&2\nexec sleep 30",
+        );
+        let args: Vec<String> = ["--ctx-size", "8192"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let outcome = launch_and_wait(
+            &executable,
+            "unused.gguf",
+            unused_port(),
+            &args,
+            Patience {
+                tries: 2,
+                gap: std::time::Duration::from_millis(20),
+            },
+            &|| false,
+            &|tokens| Some(tokens / 2),
+        )
+        .await;
+        let LaunchOutcome::Failed { lines } = outcome else {
+            panic!("a server that never answers is not a start: {outcome:?}");
+        };
+        assert_eq!(attempts(&dir), 1, "patience is not retried");
+        let text = lines.join("\n");
+        assert!(text.contains("has not answered"), "{text}");
+        assert!(text.contains("waiting for the model to load"), "{text}");
+        // The process is not left running behind the report.
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

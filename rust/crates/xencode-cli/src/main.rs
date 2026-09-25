@@ -13,9 +13,7 @@ use xencode_cache_rs::ResponseCache;
 use xencode_config_rs::XencodeConfig;
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
-use xencode_models_rs::{
-    find_llama_server, start_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient,
-};
+use xencode_models_rs::{find_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient};
 use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
 use xencode_providers_rs::{ChatMessage, EgressPolicy, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
@@ -471,7 +469,11 @@ enum ConfigAction {
     Set {
         /// Configuration key (e.g., default_model, ollama_url)
         key: String,
-        /// Value to set
+        /// Value to set. A leading hyphen is allowed because the value people
+        /// set most often is `llama_cpp_args`, which is a server command line,
+        /// and the line `xencode hw probe` hands them to paste starts with a
+        /// flag.
+        #[arg(allow_hyphen_values = true)]
         value: String,
     },
     /// Reset configuration to defaults
@@ -1420,34 +1422,71 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             )?;
             let mut preset = profile.profile.llama_cpp_args();
             preset.extend_from_slice(&reasoning);
-            let args = xencode_models_rs::llamacpp::server_launch_args(
+            let mut args = xencode_models_rs::llamacpp::server_launch_args(
                 &preset,
                 None,
                 &config.llama_cpp_args,
             );
-            let extra: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-            println!("  flags: {}", extra.join(" "));
-            let mut server =
-                start_llama_server(&exe, &model_path, port, &extra).map_err(|e| e.to_string())?;
 
-            // Save PID so `xencode llamacpp stop` can terminate it later.
-            let _ = write_pid_file(&pid_file(), server.pid());
+            // Ask the machine before the server, from the server's own device
+            // list and the model's own header: a model no memory here can hold
+            // is said so once, in the second before anything starts, instead of
+            // being launched, waited on for two minutes, and reported as a
+            // timeout that never happened.
+            // The window the command line will actually run with is the last
+            // `--ctx-size` in it, because the config's own flags come after the
+            // preset and the later value is the one `llama-server` obeys.
+            let window = xencode_models_rs::ctx_size_in(&args)
+                .unwrap_or_else(|| profile.profile.ctx_tokens());
+            let preflight =
+                xencode_context_rs::hwprobe::launch_preflight(&exe, &model_path, window, &args);
+            for line in &preflight.lines {
+                println!("  {line}");
+            }
+            if let Some(reason) = preflight.refuse {
+                return Err(reason);
+            }
+            if let Some(shorter) = preflight.window {
+                // Appended last, which is the position that decides the value
+                // `llama-server` runs with.
+                args.push("--ctx-size".to_string());
+                args.push(shorter.to_string());
+            }
+            println!("  flags: {}", args.join(" "));
 
-            // Wait for the server to become healthy (ping until success).
-            let client = LlamaCppClient::new(&server.base_url, 5);
-            let mut ready = false;
-            for _ in 0..120 {
-                if client.ping().await.is_ok() {
-                    ready = true;
-                    break;
+            let mut server = match xencode_models_rs::launch_and_wait(
+                &exe,
+                &model_path,
+                port,
+                &args,
+                xencode_models_rs::Patience {
+                    tries: 120,
+                    gap: std::time::Duration::from_millis(500),
+                },
+                &|| false,
+                &xencode_context_rs::hwprobe::smaller_window,
+            )
+            .await
+            {
+                xencode_models_rs::LaunchOutcome::Started { server, notes } => {
+                    for note in notes {
+                        println!("  {note}");
+                    }
+                    server
                 }
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-            if !ready {
-                let _ = server.stop();
-                let _ = std::fs::remove_file(pid_file());
-                return Err("llama-server did not become ready in time".to_string());
-            }
+                xencode_models_rs::LaunchOutcome::Failed { lines } => {
+                    return Err(lines.join("\n"));
+                }
+                xencode_models_rs::LaunchOutcome::Cancelled => {
+                    return Err("stopped before the server answered".to_string());
+                }
+            };
+
+            // Save PID once the server is known to be alive: a file naming a
+            // process that died during load is a `xencode llamacpp stop` that
+            // reports stopping something it never started.
+            let _ = write_pid_file(&pid_file(), server.pid());
+            let client = LlamaCppClient::new(&server.base_url, 5);
 
             config.llama_cpp_url = server.base_url.clone();
             config.llama_cpp_model_path = model_path.clone();

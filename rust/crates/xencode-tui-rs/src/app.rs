@@ -15,8 +15,8 @@ use xencode_context_rs::{init_project, DocError, DocText, HardwareProfile};
 use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{
-    current_timestamp, find_llama_server, resolve_gguf_model, start_llama_server, HealthStatus,
-    LlamaCppClient, LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
+    current_timestamp, find_llama_server, resolve_gguf_model, HealthStatus, LlamaCppClient,
+    LlamaCppOptions, LlamaCppTimings, LlamaServerProcess, OllamaClient,
 };
 use xencode_providers_rs::{
     classify, url_host, ChatMessage, ContentPart, Egress, EgressPolicy, ImageUrlPart,
@@ -5997,7 +5997,7 @@ impl<'a> App<'a> {
             // between slots, and the budget fills the whole one.
             slots: Some(1),
         };
-        let (args, reasoning_warning) = self.llama_launch_plan(alias.as_deref());
+        let (mut args, reasoning_warning) = self.llama_launch_plan(alias.as_deref());
         if let Some(problem) = reasoning_warning {
             let _ = tx.send(format!("[LLAMACPP_MSG]⚠️ {problem}"));
         }
@@ -6054,43 +6054,80 @@ impl<'a> App<'a> {
             };
 
             let port = parse_llama_port(&url);
-            let extra: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-            let mut server = match start_llama_server(&exe, &model_path, port, &extra) {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = err_tx.send(format!("[LLAMACPP_MSG]⚠️ auto-start failed: {e}"));
+
+            // Ask the machine before starting anything: whether any memory here
+            // can hold the model at all, and whether a device can hold the
+            // window the profile asked for. An auto-start nobody is watching is
+            // exactly where a two-minute wait on a server that died in three
+            // seconds does the most damage, so the refusal arrives in the first
+            // second and the shortened window is said out loud when it happens.
+            let preflight = xencode_context_rs::hwprobe::launch_preflight(
+                &exe,
+                &model_path,
+                // Whatever the assembled command line will really run with: the
+                // config's own flags come after the preset, and the last
+                // `--ctx-size` is the one `llama-server` obeys.
+                xencode_models_rs::llamacpp::ctx_size_in(&args).unwrap_or(profile.ctx_tokens()),
+                // The same line, for the cache type: what the launch will store
+                // its cache in decides what the window costs.
+                &args,
+            );
+            for line in &preflight.lines {
+                let _ = ok_tx.send(format!("[LLAMACPP_MSG]ℹ️ {line}"));
+            }
+            if let Some(reason) = preflight.refuse {
+                let _ = err_tx.send(format!("[LLAMACPP_MSG]⚠️ auto-start refused: {reason}"));
+                let _ =
+                    err_tx.send("[HEALTH]llamacpp|unavailable|0|auto-start refused".to_string());
+                return;
+            }
+            if let Some(shorter) = preflight.window {
+                // Last, which is the position that decides the value.
+                args.push("--ctx-size".to_string());
+                args.push(shorter.to_string());
+            }
+
+            let mut server = match xencode_models_rs::launch_and_wait(
+                &exe,
+                &model_path,
+                port,
+                &args,
+                xencode_models_rs::Patience {
+                    tries: 120,
+                    gap: Duration::from_secs(1),
+                },
+                &|| cancel.load(Ordering::Relaxed),
+                &xencode_context_rs::hwprobe::smaller_window,
+            )
+            .await
+            {
+                xencode_models_rs::LaunchOutcome::Started { server, notes } => {
+                    for note in notes {
+                        let _ = ok_tx.send(format!("[LLAMACPP_MSG]ℹ️ {note}"));
+                    }
+                    server
+                }
+                xencode_models_rs::LaunchOutcome::Failed { lines } => {
+                    for line in lines {
+                        let _ = err_tx.send(format!("[LLAMACPP_MSG]⚠️ auto-start failed: {line}"));
+                    }
+                    let _ =
+                        err_tx.send("[HEALTH]llamacpp|unavailable|0|auto-start failed".to_string());
+                    return;
+                }
+                xencode_models_rs::LaunchOutcome::Cancelled => {
+                    // xencode is already going away and the server was stopped
+                    // on the way out; reporting anything here reaches nobody.
                     return;
                 }
             };
-
-            // Wait for the server to become healthy (model load can take a while).
-            let client = LlamaCppClient::new(&server.base_url, 3);
-            let mut ready = false;
-            for _ in 0..120 {
-                if cancel.load(Ordering::Relaxed) {
-                    let _ = server.stop();
-                    return; // xencode already exited — don't orphan the server
-                }
-                if client.ping().await.is_ok() {
-                    ready = true;
-                    break;
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            if !ready {
-                let _ = server.stop();
-                let _ = err_tx.send(
-                    "[LLAMACPP_MSG]⚠️ auto-started llama-server did not become ready in time"
-                        .to_string(),
-                );
-                return;
-            }
             if cancel.load(Ordering::Relaxed) {
                 let _ = server.stop();
                 return;
             }
 
             let pid = server.pid();
+            let client = LlamaCppClient::new(&server.base_url, 3);
             *shared.lock().unwrap() = Some(server);
             // This process is the authority on its own window, and it is only
             // worth asking once the model is in: a server answers `/props` with

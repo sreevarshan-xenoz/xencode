@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a local server that cannot run now says so, instead of being waited on
+Starting a local `llama-server` that the machine cannot serve used to end one of
+two ways, and neither of them was true. The command either reported
+`did not become ready in time` after waiting out its whole deadline for a process
+that had already been gone for a minute, or reported the server as running and
+then never answered another request. Both are fixed at the same two points.
+
+**The wait now watches the process, and asks a stricter question.** A launch that
+only counted attempts could not tell a server that is still loading from one that
+died, so the loop checks the child between every attempt and stops the moment it
+is gone. What it waits *for* changed too: `llama-server` answers `/health` with
+503 `Loading model` while it puts the weights and the key-value cache in place and
+with 200 `{"status":"ok"}` when it is done — measured two and three seconds into a
+launch here — and the old readiness check counted the first as the second. A
+server that fails its cache allocation four seconds later had therefore already
+been called ready. It is asked strictly now, so the failure arrives as the failure
+it is. Nothing the server said used to survive at all, because its error output
+went to the null device; it is kept now, and the last few lines are quoted in the
+report, which is the only account of why a server stopped that exists.
+
+**The machine is consulted before the server, not after.** `xencode llamacpp
+start` and the TUI's auto-start now read the device list from the server binary,
+the geometry from the model file's own header, and the memory free from
+`/proc/meminfo`, and then either refuse, shorten, or say nothing. A model no
+memory here could hold is refused in the second before anything starts, with the
+size that would fit. A window no device can hold is started at one that it can,
+and the sentence says so. The key-value cache is priced at the quantization the
+command line actually carries — read off it, last flag wins — because this
+machine's preset keeps cache values at 8 bits where the probe's recommended line
+keeps them at 4, and pricing the dearer launch at the cheaper figure handed back a
+window the card then refused to allocate.
+
+**If it runs out of memory anyway, it is started again once, smaller.** Only when
+what the server said was about memory, and only down to half the window, and it
+says that it did. The second failure stops and names the next step that exists:
+`xencode hw probe --model <file>` for what this machine can serve, `xencode colab
+up` for a machine that can hold it, `xencode config set remote_base_url <url>` for
+a server that is already elsewhere. There is still no model downloader in
+xencode, and the message says so rather than inventing a command.
+
+Measured on this laptop (i5-1035G1, 16 GiB, a 2 GiB MX250, Qwen3-0.6B at Q4_K_M)
+by running the command: a 20 GiB model file was refused in **0.45 s** without a
+server being started; a model path that does not exist came back in **0.72 s**
+quoting `llama_model_loader: failed to load model from /tmp/nope.gguf`, where the
+code before this waited **60 s** and called it a timeout; and asking
+`llama_cpp_args` for 131072 tokens stepped to 46080, died on
+`ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory` exactly as the
+same flags had in the manual run, restarted at 22528 and came up — the settings
+check confirming `22528 tokens of context in 1 slot(s)`.
+
+`xencode config set` also takes a value that starts with a dash now. The key
+people set most is `llama_cpp_args`, whose value is a server command line, and the
+line `xencode hw probe` prints to keep it with begins with `--n-gpu-layers` — so
+the advice this tool prints was refused by its own command.
+
 ### Added — `xencode hw probe` says what this machine can serve, and shows the arithmetic
 Choosing local server settings meant reading a man page and guessing at memory.
 `xencode hw probe` reads the machine instead and prints the flags to start a

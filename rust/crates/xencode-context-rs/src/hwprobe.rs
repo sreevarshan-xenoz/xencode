@@ -292,6 +292,63 @@ pub fn cache_bytes_per_element(cache_type: &str) -> f64 {
     }
 }
 
+/// What a launch will really store its key-value cache in, per side.
+///
+/// Priced from the command line that is about to be run rather than from a
+/// constant, because the two disagree in practice: `llama_cpp_args` overrides
+/// the preset, and the profile for this machine asks for 8-bit values where the
+/// probe's recommended line asks for 4-bit — a quarter of the cache cost, which
+/// is a quarter of the window. A type this module does not know prices as
+/// 16-bit, so the unknown makes a plan look dearer rather than cheaper.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheTypes {
+    pub keys: String,
+    pub values: String,
+}
+
+impl Default for CacheTypes {
+    /// What `llama-server` runs with when the command line names no cache type
+    /// at all: full 16-bit on both sides.
+    fn default() -> Self {
+        Self {
+            keys: "f16".to_string(),
+            values: "f16".to_string(),
+        }
+    }
+}
+
+impl CacheTypes {
+    /// The cache types in force in a composed `llama-server` command line.
+    /// The last of a repeated flag is the one the server obeys, so a preset
+    /// overridden by `llama_cpp_args` is read as the override.
+    pub fn in_args(args: &[String]) -> Self {
+        let mut found = Self::default();
+        for (flag, slot) in [
+            ("--cache-type-k", &mut found.keys),
+            ("--cache-type-v", &mut found.values),
+        ] {
+            let mut value_after_flag = false;
+            for arg in args {
+                if value_after_flag {
+                    *slot = arg.clone();
+                    value_after_flag = false;
+                    continue;
+                }
+                if let Some(rest) = arg.strip_prefix(&format!("{flag}=")) {
+                    *slot = rest.to_string();
+                } else if arg == flag {
+                    value_after_flag = true;
+                }
+            }
+        }
+        found
+    }
+
+    pub fn kib_per_token(&self, shape: &ModelShape) -> f64 {
+        shape.kv_kib_per_token(&self.keys, &self.values)
+    }
+}
+
 /// Read the geometry out of a GGUF file's own metadata, plus its size on disk.
 /// `None` when the file cannot be opened, is not a GGUF, or does not carry
 /// `block_count` within the window read — an unknown geometry, which the caller
@@ -516,6 +573,289 @@ pub fn is_shared_memory_device(total_mib: u64, ram_total_mib: u64) -> bool {
 pub const RESERVE_NUMERATOR: u64 = 3;
 pub const RESERVE_DENOMINATOR: u64 = 4;
 
+/// The smallest window worth starting a server with. Below this the budget
+/// layer has nothing to fill, so a recommendation that goes under it is a
+/// refusal wearing a number.
+pub const MIN_WINDOW: u64 = 1024;
+
+/// One place this machine could put a model: a device with memory of its own,
+/// or the machine's own memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryPool {
+    /// What to call it in a sentence the user reads, including how much is
+    /// free on it: every place a pool is named, its size is the point.
+    pub label: String,
+    pub usable_mib: u64,
+    /// Whether this is a device's own memory rather than the machine's.
+    pub is_device: bool,
+}
+
+/// Every place a launch could put the model, largest first.
+///
+/// A device gets the same treatment as in [`recommend`]: only memory that is
+/// its own, and only three quarters of what is free on it. System memory is
+/// listed without the reserve, for two reasons — the reserve stands for a
+/// device's compute buffers, which a process running on the CPU pays for out of
+/// the same pool it is measured against anyway, and a model that does not fit
+/// in free RAM is slowed by paging rather than refused, which nothing here can
+/// predict. The consequence is deliberate: this list can only ever say a launch
+/// is impossible when it is impossible in *every* place.
+pub fn memory_pools(
+    devices: &[ComputeDevice],
+    ram_total_mib: u64,
+    available_mib: u64,
+) -> Vec<MemoryPool> {
+    let mut pools: Vec<MemoryPool> = devices
+        .iter()
+        .filter(|device| device.is_offload_target())
+        .filter(|device| !is_shared_memory_device(device.total_mib, ram_total_mib))
+        .map(|device| MemoryPool {
+            label: format!(
+                "{} with {} MiB of its own memory free",
+                device.name,
+                device.free_mib * RESERVE_NUMERATOR / RESERVE_DENOMINATOR
+            ),
+            usable_mib: device.free_mib * RESERVE_NUMERATOR / RESERVE_DENOMINATOR,
+            is_device: true,
+        })
+        .collect();
+    if available_mib > 0 {
+        pools.push(MemoryPool {
+            label: format!("{available_mib} MiB of system memory free"),
+            usable_mib: available_mib,
+            is_device: false,
+        });
+    }
+    // Biggest first, and a device wins a tie: it is the pool a launch would
+    // rather be told about, because the memory on it is not also running the
+    // desktop.
+    pools.sort_by(|a, b| {
+        b.usable_mib
+            .cmp(&a.usable_mib)
+            .then(b.is_device.cmp(&a.is_device))
+    });
+    pools
+}
+
+/// What a launch should know before it starts a server: whether the model and
+/// the window it was asked for can go anywhere on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchCheck {
+    /// Nothing was measured, so nothing is claimed. A launch must not read this
+    /// as permission — it reads it as "no idea", and starts.
+    Unknown,
+    /// One of the pools holds the model and the window as asked.
+    Fits { pool: String },
+    /// The weights are bigger than every pool. No window makes this launchable,
+    /// which is the one thing worth refusing a launch for.
+    NoPoolHoldsTheModel {
+        weights_mib: u64,
+        biggest_pool: String,
+        biggest_usable_mib: u64,
+    },
+    /// The model fits somewhere; the window asked for does not fit on any
+    /// device. `suggested_window` is the largest that does, on the biggest one.
+    WindowTooWideForEveryDevice {
+        asked: u64,
+        needed_mib: u64,
+        biggest_device: String,
+        biggest_usable_mib: u64,
+        suggested_window: u64,
+    },
+}
+
+/// Check a launch against what the machine has.
+///
+/// The two halves ask different pools on purpose, because the two failures are
+/// different in kind. Whether the *model* fits is asked of every place it could
+/// go — that failure is the same everywhere and ends the launch. Whether the
+/// *window* fits is asked only of devices with their own memory, because that
+/// is the only place this was measured to fail outright: an 8192 token window
+/// loaded on the 2 GiB card at 10240 tokens' worth of cache and an out-of-memory
+/// error followed, while a process on the CPU that outgrows free RAM is slowed
+/// by paging, which nothing here can bound and which this check will not
+/// pretend to predict. With no device in the list, the window goes unchecked.
+///
+/// The cache is priced at the quantization the command line actually carries,
+/// which the caller reads off the composed arguments — preset first, the user's
+/// `llama_cpp_args` last — and not off a constant. The probe's recommended line
+/// and this machine's preset do not ask for the same thing, so a fixed price
+/// here is wrong for one of them whichever way it is chosen.
+pub fn check_launch(
+    devices: &[ComputeDevice],
+    shape: Option<&ModelShape>,
+    ram_total_mib: u64,
+    available_mib: u64,
+    window: u64,
+    cache: &CacheTypes,
+) -> LaunchCheck {
+    let Some(shape) = shape else {
+        return LaunchCheck::Unknown;
+    };
+    let pools = memory_pools(devices, ram_total_mib, available_mib);
+    let Some(biggest) = pools.first() else {
+        return LaunchCheck::Unknown;
+    };
+    let weights_mib = shape.file_bytes as f64 / 1024.0 / 1024.0;
+    if weights_mib > biggest.usable_mib as f64 {
+        return LaunchCheck::NoPoolHoldsTheModel {
+            weights_mib: weights_mib as u64,
+            biggest_pool: biggest.label.clone(),
+            biggest_usable_mib: biggest.usable_mib,
+        };
+    }
+    let kv_kib = cache.kib_per_token(shape);
+    let needed_mib = weights_mib + window as f64 * kv_kib / 1024.0;
+    let devices: Vec<&MemoryPool> = pools.iter().filter(|pool| pool.is_device).collect();
+    let Some(biggest_device) = devices.first() else {
+        // Nothing to offload to, so nothing to size the cache against: the CPU
+        // path fails by paging, not by refusing.
+        return LaunchCheck::Fits {
+            pool: biggest.label.clone(),
+        };
+    };
+    if let Some(holds) = devices
+        .iter()
+        .find(|pool| needed_mib <= pool.usable_mib as f64)
+    {
+        return LaunchCheck::Fits {
+            pool: holds.label.clone(),
+        };
+    }
+    LaunchCheck::WindowTooWideForEveryDevice {
+        asked: window,
+        needed_mib: needed_mib as u64,
+        biggest_device: biggest_device.label.clone(),
+        biggest_usable_mib: biggest_device.usable_mib,
+        suggested_window: largest_context(
+            weights_mib,
+            kv_kib,
+            biggest_device.usable_mib as f64,
+            MIN_WINDOW,
+        ),
+    }
+}
+
+/// What to do about a launch, decided before the server is started.
+///
+/// Three outcomes: start as asked (every field empty), start at a shorter
+/// window (`window`), or do not start (`refuse`). It is a struct rather than a
+/// match at each call site because the same decision is made in two places —
+/// the command that starts a server by name and the one that starts it when
+/// xencode boots — and a refusal worded differently in the two is a refusal
+/// someone can talk themselves past.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Preflight {
+    /// Start the server at this window rather than the one the profile asked for.
+    pub window: Option<u64>,
+    /// Sentences to show with the launch.
+    pub lines: Vec<String>,
+    /// Why this launch should not happen at all.
+    pub refuse: Option<String>,
+}
+
+impl Preflight {
+    /// Turn a measurement into a decision. Only the cases that change something
+    /// or stop say anything: a check that reports on every successful launch
+    /// is a check whose report gets scrolled past, and the one time it says
+    /// "this cannot run" is the report that matters.
+    pub fn from_check(check: &LaunchCheck) -> Self {
+        match check {
+            LaunchCheck::Unknown | LaunchCheck::Fits { .. } => Self::default(),
+            LaunchCheck::NoPoolHoldsTheModel {
+                weights_mib,
+                biggest_pool,
+                ..
+            } => Self {
+                refuse: Some(format!(
+                    "this model is {weights_mib} MiB and the largest place to put it here is \
+                     {biggest_pool}, so no window makes it servable. A smaller quantization of \
+                     the same model is the usual answer: `xencode hw probe --model <file>` prints \
+                     what fits on this machine, and `xencode colab up` brings up one that can \
+                     hold it."
+                )),
+                ..Self::default()
+            },
+            LaunchCheck::WindowTooWideForEveryDevice {
+                asked,
+                needed_mib,
+                biggest_device,
+                suggested_window,
+                ..
+            } => {
+                let step = (*suggested_window < *asked).then_some(*suggested_window);
+                let line = match step {
+                    Some(window) => format!(
+                        "{asked} tokens needs about {needed_mib} MiB once the cache this launch \
+                         carries is counted, which is more than any device here can hold; the \
+                         biggest is {biggest_device}. Starting at {window} tokens instead."
+                    ),
+                    None => format!(
+                        "{asked} tokens needs about {needed_mib} MiB once the cache this launch \
+                         carries is counted, which is more than any device here can hold; the \
+                         biggest is {biggest_device}. {MIN_WINDOW} tokens is the shortest window \
+                         worth serving, and there is nothing smaller left to ask for."
+                    ),
+                };
+                Self {
+                    window: step,
+                    lines: vec![line],
+                    refuse: None,
+                }
+            }
+        }
+    }
+}
+
+/// Check a launch against the machine it is about to run on, reading every
+/// fact fresh.
+///
+/// The server binary is asked what it can offload to, the GGUF header is read
+/// for the model's own geometry, and `/proc/meminfo` is read for what is free
+/// right now — all three change under a path that still looks the same, which
+/// is why nothing here is cached from an earlier command. A fact that cannot be
+/// read is left unmeasured rather than guessed, and [`check_launch`] answers
+/// "no idea" to that, which means the launch proceeds: the point of this is to
+/// stop the launches that cannot possibly work, not to add its own failures to
+/// the list of reasons a server did not start.
+///
+/// `args` is the command line the server is about to be started with, so the
+/// cache is priced at the type that launch will use rather than at a guess.
+pub fn launch_preflight(
+    executable: &str,
+    model_path: &str,
+    window: u64,
+    args: &[String],
+) -> Preflight {
+    let devices = server_devices(executable)
+        .map(|text| parse_llama_devices(&text))
+        .unwrap_or_default();
+    let shape = read_gguf_shape(model_path);
+    let ram_total_mib = crate::budget::total_memory_kib()
+        .map(|kib| kib / 1024)
+        .unwrap_or(0);
+    let available_mib = available_memory_kib().map(|kib| kib / 1024).unwrap_or(0);
+    Preflight::from_check(&check_launch(
+        &devices,
+        shape.as_ref(),
+        ram_total_mib,
+        available_mib,
+        window,
+        &CacheTypes::in_args(args),
+    ))
+}
+
+/// Halve a window for a retry, rounded down to a whole 1024-token block.
+///
+/// `None` means there is nothing left to give: below [`MIN_WINDOW`] the request
+/// is not shorter, it is unanswered, so a server that runs out of memory at the
+/// floor has run out of machine and the honest remaining step is a different
+/// machine or a different model.
+pub fn smaller_window(asked: u64) -> Option<u64> {
+    let half = asked / 2 / MIN_WINDOW * MIN_WINDOW;
+    (half >= MIN_WINDOW && half < asked).then_some(half)
+}
+
 /// The recommendation: what to start a server with, and why, in one line each.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recommendation {
@@ -573,9 +913,6 @@ pub fn recommend(
 
     let usable_mib = chosen.free_mib * RESERVE_NUMERATOR / RESERVE_DENOMINATOR;
     let kv_kib = shape.map_or(0.0, |s| s.kv_kib_per_token(CACHE_K, CACHE_V));
-    // The smallest window worth starting a server for: below it the answer is
-    // not a shorter context, it is that this device is the wrong device.
-    const MIN_WINDOW: u64 = 1024;
     let fits = if kv_kib > 0.0 {
         largest_context(weights_mib, kv_kib, usable_mib as f64, MIN_WINDOW)
     } else {
@@ -1062,5 +1399,359 @@ mod tests {
         b.extend_from_slice(&7u64.to_le_bytes()); // metadata count
         b.extend_from_slice(&body);
         b
+    }
+
+    /// What this program's presets ask for, and the price the probe's own
+    /// recommended line is computed at — the tests below are stated in those
+    /// figures, so they pass them by hand rather than inheriting a default.
+    fn cache(keys: &str, values: &str) -> CacheTypes {
+        CacheTypes {
+            keys: keys.to_string(),
+            values: values.to_string(),
+        }
+    }
+
+    /// The machine's own figures from the module header: 16141 MiB of RAM,
+    /// 8908 MiB of it free while a desktop and a build were running.
+    const RAM_TOTAL_MIB: u64 = 16_141;
+    const RAM_FREE_MIB: u64 = 8_908;
+
+    #[test]
+    fn the_places_a_model_could_go_are_the_card_and_the_machine_not_the_window() {
+        let devices = parse_llama_devices(DEVICES);
+        let pools = memory_pools(&devices, RAM_TOTAL_MIB, RAM_FREE_MIB);
+        assert_eq!(pools.len(), 2, "got {pools:?}");
+        // System memory is bigger than the card, so it leads the list; the
+        // integrated chip is in neither, because it is system memory wearing a
+        // device name.
+        assert!(!pools[0].is_device);
+        assert_eq!(pools[0].usable_mib, RAM_FREE_MIB);
+        assert!(pools[1].is_device);
+        assert_eq!(pools[1].usable_mib, 867);
+        assert_eq!(
+            pools[1].label,
+            "NVIDIA GeForce MX250 with 867 MiB of its own memory free"
+        );
+    }
+
+    #[test]
+    fn the_model_on_this_machine_fits_on_the_card_at_the_window_asked() {
+        let devices = parse_llama_devices(DEVICES);
+        let check = check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            8_192,
+            &cache("q8_0", "q4_0"),
+        );
+        assert_eq!(
+            check,
+            LaunchCheck::Fits {
+                pool: "NVIDIA GeForce MX250 with 867 MiB of its own memory free".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_window_no_device_holds_is_a_window_answer_with_a_number_in_it() {
+        let devices = parse_llama_devices(DEVICES);
+        let check = check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            32_768,
+            &cache("q8_0", "q4_0"),
+        );
+        let LaunchCheck::WindowTooWideForEveryDevice {
+            asked,
+            needed_mib,
+            biggest_usable_mib,
+            suggested_window,
+            ..
+        } = check
+        else {
+            panic!("expected a window verdict, got {check:?}");
+        };
+        assert_eq!(asked, 32_768);
+        // 378 MiB of weights plus 686 MiB of cache, against 867 usable.
+        assert_eq!(needed_mib, 1_064);
+        assert_eq!(biggest_usable_mib, 867);
+        assert_eq!(
+            suggested_window, 22_528,
+            "the largest window the card holds at this cache"
+        );
+        assert!(suggested_window < asked);
+    }
+
+    #[test]
+    fn a_launch_that_fits_as_asked_says_nothing_at_all() {
+        let devices = parse_llama_devices(DEVICES);
+        let fits = check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            8_192,
+            &cache("q8_0", "q4_0"),
+        );
+        assert_eq!(Preflight::from_check(&fits), Preflight::default());
+        // "Not measured" is not permission either, but it is not a problem the
+        // user can act on, so it stays quiet and lets the launch speak for
+        // itself.
+        assert_eq!(
+            Preflight::from_check(&LaunchCheck::Unknown),
+            Preflight::default()
+        );
+    }
+
+    #[test]
+    fn a_window_too_wide_becomes_a_shorter_one_and_a_sentence_saying_so() {
+        let devices = parse_llama_devices(DEVICES);
+        let check = check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            32_768,
+            &cache("q8_0", "q4_0"),
+        );
+        let preflight = Preflight::from_check(&check);
+        assert_eq!(preflight.window, Some(22_528));
+        assert_eq!(
+            preflight.lines[0],
+            "32768 tokens needs about 1064 MiB once the cache this launch carries is counted, \
+             which is more than any device here can hold; the biggest is NVIDIA GeForce MX250 \
+             with 867 MiB of its own memory free. Starting at 22528 tokens instead."
+        );
+        assert!(preflight.refuse.is_none());
+        assert_eq!(preflight.lines.len(), 1);
+    }
+
+    #[test]
+    fn the_window_is_priced_at_the_cache_the_command_line_actually_carries() {
+        // The numbers from the real launch that got this wrong: this card with
+        // 2236 MiB free (nothing else using it), this model, and a window asked
+        // for in `llama_cpp_args`. The preset this machine's profile emits keeps
+        // the cache values at 8 bits where the probe's recommended line keeps
+        // them at 4 — 28.4 against 21.4 KiB per token — and pricing the dearer
+        // launch at the cheaper figure handed back a window that the server then
+        // could not load: 61440 tokens asked for 2084 MiB against 1677.
+        let devices = parse_llama_devices(
+            "Available devices:
+  BLAS: OpenBLAS (0 MiB, 0 MiB free)
+  Vulkan0: Intel(R) UHD Graphics (ICL GT1) (11822 MiB, 10289 MiB free)
+  Vulkan1: NVIDIA GeForce MX250 (2294 MiB, 2236 MiB free)
+",
+        );
+        let suggested = |cache: &CacheTypes| match check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            131_072,
+            cache,
+        ) {
+            LaunchCheck::WindowTooWideForEveryDevice {
+                suggested_window, ..
+            } => suggested_window,
+            other => panic!("expected the window to be stepped down, got {other:?}"),
+        };
+        let wide_cache = suggested(&cache("q8_0", "q4_0"));
+        let narrow_cache = suggested(&cache("q8_0", "q8_0"));
+        assert_eq!(wide_cache, 61_440, "the figure the buggy price produced");
+        assert!(
+            narrow_cache < wide_cache,
+            "an 8-bit value cache cannot afford the same window as a 4-bit one: \
+             {narrow_cache} against {wide_cache}"
+        );
+        // What is handed back has to be affordable at the price the launch pays,
+        // which is the whole point of pricing it from the launch.
+        let usable = 2236 * 3 / 4;
+        let kib = cache("q8_0", "q8_0").kib_per_token(&qwen3());
+        let weights = qwen3().file_bytes as f64 / 1024.0 / 1024.0;
+        assert!(
+            weights + narrow_cache as f64 * kib / 1024.0 <= usable as f64,
+            "{narrow_cache} tokens still does not fit"
+        );
+        assert!(
+            weights + wide_cache as f64 * kib / 1024.0 > usable as f64,
+            "the cheaper price's window would have fit an 8-bit cache too"
+        );
+    }
+
+    #[test]
+    fn a_cache_type_is_the_last_one_on_the_line_and_an_absent_one_is_16_bit() {
+        let args: Vec<String> = [
+            "--cache-type-k",
+            "q8_0",
+            "--cache-type-v",
+            "q4_0",
+            "--ctx-size",
+            "8192",
+            "--cache-type-v",
+            "q8_0",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let cache = CacheTypes::in_args(&args);
+        assert_eq!(cache.keys, "q8_0");
+        assert_eq!(
+            cache.values, "q8_0",
+            "the config's own flags come after the preset's and the later one is obeyed"
+        );
+        assert_eq!(
+            CacheTypes::in_args(&[]).values,
+            "f16",
+            "what llama-server uses when nothing is named"
+        );
+        // The unknown-sides figure is the one that was measured on this model,
+        // and it is the widest: a type this module has not heard of can only
+        // make a plan look dearer, never cheaper.
+        let priced = CacheTypes::default().kib_per_token(&qwen3());
+        assert!((priced - 56.0).abs() < 0.5, "{priced}");
+        assert!(
+            (cache.kib_per_token(&qwen3()) - 28.4).abs() < 0.5,
+            "{}",
+            cache.kib_per_token(&qwen3())
+        );
+        let equals_form: Vec<String> = ["--cache-type-k=q4_0"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(CacheTypes::in_args(&equals_form).keys, "q4_0");
+    }
+
+    #[test]
+    fn a_window_that_cannot_be_stepped_down_without_asking_for_nothing_is_not_stepped() {
+        // The suggested floor is not a smaller request than the one made, so
+        // there is no launch to hand back — but the reason still gets said.
+        let preflight = Preflight::from_check(&LaunchCheck::WindowTooWideForEveryDevice {
+            asked: 512,
+            needed_mib: 900,
+            biggest_device: "NVIDIA GeForce MX250 with 867 MiB of its own memory free".to_string(),
+            biggest_usable_mib: 867,
+            suggested_window: MIN_WINDOW,
+        });
+        assert_eq!(preflight.window, None);
+        assert!(preflight.refuse.is_none());
+        assert_eq!(preflight.lines.len(), 1);
+        assert!(
+            preflight.lines[0].contains("1024"),
+            "{}",
+            preflight.lines[0]
+        );
+    }
+
+    #[test]
+    fn a_model_with_nowhere_to_put_it_is_refused_by_name_and_pointed_at_the_next_step() {
+        let devices = parse_llama_devices(DEVICES);
+        let mut huge = qwen3();
+        huge.file_bytes = 20 * 1024 * 1024 * 1024;
+        let check = check_launch(
+            &devices,
+            Some(&huge),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            4_096,
+            &cache("q8_0", "q4_0"),
+        );
+        let preflight = Preflight::from_check(&check);
+        assert_eq!(preflight.window, None);
+        assert!(preflight.lines.is_empty());
+        let refusal = preflight.refuse.expect("a refusal was asked for");
+        assert!(refusal.contains("20480"), "{refusal}");
+        // Only commands that exist, and only the two that a person standing at
+        // this machine could actually run next.
+        assert!(refusal.contains("xencode hw probe"), "{refusal}");
+        assert!(refusal.contains("xencode colab up"), "{refusal}");
+    }
+
+    #[test]
+    fn halving_a_window_stops_when_the_floor_reaches() {
+        assert_eq!(smaller_window(8_192), Some(4_096));
+        assert_eq!(smaller_window(10_240), Some(5_120));
+        assert_eq!(smaller_window(2_048), Some(MIN_WINDOW));
+        // At the floor there is nothing left to give, and below it the number
+        // would round to zero.
+        assert_eq!(smaller_window(MIN_WINDOW), None);
+        assert_eq!(smaller_window(1_500), None);
+        assert_eq!(smaller_window(0), None);
+    }
+
+    #[test]
+    fn a_model_bigger_than_everything_here_is_the_one_thing_refused_before_launch() {
+        let mut huge = qwen3();
+        // Twenty gibibytes: the size class that turns this machine's biggest
+        // pool into a rounding error.
+        huge.file_bytes = 20 * 1024 * 1024 * 1024;
+        let devices = parse_llama_devices(DEVICES);
+        let check = check_launch(
+            &devices,
+            Some(&huge),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            4_096,
+            &cache("q8_0", "q4_0"),
+        );
+        let LaunchCheck::NoPoolHoldsTheModel {
+            weights_mib,
+            biggest_pool,
+            biggest_usable_mib,
+        } = check
+        else {
+            panic!("expected a refusal, got {check:?}");
+        };
+        assert_eq!(weights_mib, 20_480);
+        assert_eq!(biggest_usable_mib, RAM_FREE_MIB);
+        assert!(biggest_pool.contains("system memory"), "{biggest_pool}");
+    }
+
+    #[test]
+    fn with_nothing_to_offload_to_the_window_is_not_checked_at_all() {
+        // A CPU-only box has no pool that fails by refusing; it fails by
+        // paging, which this cannot size. Saying "too wide" there would be a
+        // claim about memory that is not being used.
+        let devices = parse_llama_devices("  BLAS: OpenBLAS (0 MiB, 0 MiB free)\n");
+        let check = check_launch(
+            &devices,
+            Some(&qwen3()),
+            RAM_TOTAL_MIB,
+            RAM_FREE_MIB,
+            32_768,
+            &cache("q8_0", "q4_0"),
+        );
+        assert!(
+            matches!(&check, LaunchCheck::Fits { pool } if pool.contains("system memory")),
+            "{check:?}"
+        );
+    }
+
+    #[test]
+    fn a_launch_with_nothing_measured_gets_no_verdict_rather_than_permission() {
+        assert_eq!(
+            check_launch(
+                &[],
+                None,
+                RAM_TOTAL_MIB,
+                RAM_FREE_MIB,
+                8_192,
+                &cache("q8_0", "q4_0")
+            ),
+            LaunchCheck::Unknown
+        );
+        assert_eq!(
+            check_launch(
+                &[],
+                Some(&qwen3()),
+                RAM_TOTAL_MIB,
+                0,
+                8_192,
+                &cache("q8_0", "q4_0")
+            ),
+            LaunchCheck::Unknown
+        );
     }
 }

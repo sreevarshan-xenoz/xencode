@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1142 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1173 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -393,6 +393,11 @@ flowchart TD
   this box's card shows a 256 MiB window and holds 2048 MiB), the model file's own
   geometry and what its cache costs per token, and then the flags to start with. It
   writes nothing; the line to keep them with is printed for you to paste.
+  A server xencode starts itself consults the same three readings first: a model no
+  memory here could hold is refused in the second before anything launches, a window
+  no device can hold is started shorter and says so, and a server that dies during
+  its own load is reported as having died — with the lines it printed, and restarted
+  once at half the window when what it said was about memory.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
   for a local llama-server, `remote:…` for any OpenAI-compatible server at
@@ -466,7 +471,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1142 passing, 11 ignored)
+cargo test                          # Full workspace suite (1173 passing, 11 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
