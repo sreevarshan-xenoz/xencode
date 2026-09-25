@@ -1929,7 +1929,15 @@ async fn run_query_once(
     // worse than a budget that says so.
     let hardware = xencode_context_rs::ProfileDecision::resolve(&config.hardware_profile);
     eprintln!("hardware: {}", hardware.describe());
-    let live = xencode_context_rs::collect_live_context(&root, &prompt, hardware.profile);
+    // A command that runs once has no earlier request to measure this turn's
+    // prompt against, so it has nothing to scale retrieval from and keeps the
+    // profile's own numbers. The interactive session sizes them per turn instead.
+    let caps = xencode_context_rs::ContextCaps::from_profile(hardware.profile);
+    eprintln!(
+        "retrieval: up to {} files, {} characters each (character arithmetic, not measured)",
+        caps.top_k, caps.content_cap_chars
+    );
+    let live = xencode_context_rs::collect_live_context(&root, &prompt, caps);
     // The window the server is actually running with, when the model is served
     // by a llama.cpp process that will say. A family table cannot know `-c`;
     // every other route keeps the table's answer.
@@ -1963,21 +1971,25 @@ async fn run_query_once(
     // once before the request goes out — the only moment a count exists at all,
     // since a reply's usage figures arrive after it has been paid for. The
     // budgeter's figure is printed beside it, and neither is a better number than
-    // the other: the server's count misses the framing a chat template adds
-    // around each message, and the budgeter's stops at what it was allowed to
-    // spend, because the question and any attached files are the parts it may not
-    // trim. Printed together, a run that is about to overflow shows it. Measured
-    // on a 512-token server here: the arithmetic said 384, the server counted 566
-    // of the same turn, and the request was refused at 579 tokens.
+    // the other: a plain `/tokenize` of the whole prompt leaves out the framing a
+    // chat template adds around each message — 13 tokens for the two-message
+    // request measured here, out of 5,753 — while the budgeter's figure stops at
+    // what it was allowed to spend, because the question and any attached files
+    // are the parts it may not trim. Printed together, a run that is about to
+    // overflow shows it. Measured on a 512-token server here: the arithmetic said
+    // 384, the server counted 566 of the same turn, and the request was refused at
+    // 579 tokens.
     let counted = match &probe {
-        Some(client) => client
-            .count_tokens(&assembly.prompt_text())
-            .await
-            .unwrap_or(None),
+        Some(client) => Some(
+            client
+                .count_tokens(&assembly.prompt_text())
+                .await
+                .map_err(|e| e.to_string()),
+        ),
         None => None,
     };
     match counted {
-        Some(tokens) => {
+        Some(Ok(Some(tokens))) => {
             eprintln!(
                 "context: {tokens} tokens counted by the server, {} by character arithmetic",
                 assembly.total_tokens
@@ -1990,13 +2002,23 @@ async fn run_query_once(
                 }
             }
         }
-        None if probe.is_some() => {
+        Some(Ok(None)) => {
+            // The server answered the count request and refused it — a build
+            // without /tokenize, or one that rejected this text.
             eprintln!(
-                "context: {} tokens by character arithmetic (this server did not answer /tokenize)",
+                "context: {} tokens by character arithmetic (this server gave no count for /tokenize)",
                 assembly.total_tokens
             );
         }
-        _ => {}
+        Some(Err(reason)) => {
+            // Nothing was ever counted, so the arithmetic line is not "the server
+            // declined" — it is the only number there is because the ask failed.
+            eprintln!(
+                "context: {} tokens by character arithmetic (no count could be asked of this server: {reason})",
+                assembly.total_tokens
+            );
+        }
+        None => {}
     }
     if !live.index_present {
         eprintln!(

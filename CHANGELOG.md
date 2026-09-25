@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — how much context retrieval gets is now sized by the last prompt
+Retrieval asked for a fixed number of files, and a fixed number of characters
+from each, chosen by the hardware profile: five files and 16,000 characters each
+on a balanced machine, no matter what the conversation already occupied. They are
+now scaled from the room the prompt actually left. The room comes from the
+server's own count of the prompt it just processed, less the part of it that was
+retrieved file bodies, averaged over recent turns so one unusually large reply
+cannot empty the next turn's retrieval, and reported in steps of 256 tokens. The
+count itself needed fixing first: a streamed reply carries no usage unless the
+request asks for it, so what the token figures in `/ctx kv` had been built from
+was an estimate of the prompt and a count of tokens evaluated that was always
+zero — which made every turn look as though all of it had been served from the
+cache. A balanced session that had run one turn against an 8192-token server
+moved from `retrieval top-5 at 16000 characters
+each, from the profile's own numbers, with no prompt measured yet` to
+`retrieval top-6 at 1536 characters each, from 3072 tokens of prompt the server
+measured`, and its row for that turn read `prompt 3018 · cached 0 · reuse 0%`
+because the prompt really was new; the turn after it reported 2841 of 5611 tokens
+read from the cache. Extra room buys more files rather than bigger ones, up
+to the eight-file ceiling, and only then a longer excerpt from each; a tight
+prompt is what produced the six files of 1,536 characters above, where the
+profile alone would have asked for five of 16,000. A long conversation therefore
+narrows retrieval, because the conversation is part of what the prompt costs. A command that runs
+once has no earlier turn to measure, so `xencode query` keeps the profile's
+numbers and prints that it did, and a model served by Ollama reports no usage on
+a stream, so that route keeps them too. The count line that appears when a
+prompt cannot be measured now says which of the two happened: the server refused
+to count it, or the server was not there to be asked.
+
 ### Added — a local model's thinking can be capped or switched off
 A reasoning model spends most of its answer on a chain of thought nobody asked
 for, and xencode had no say in the matter: the launch carried no thinking flags,

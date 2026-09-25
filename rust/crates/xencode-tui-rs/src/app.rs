@@ -576,11 +576,23 @@ pub struct App<'a> {
     // Last llama.cpp generation timings (tok/s) reported by the server
     pub last_llamacpp_timings: Option<LlamaCppTimings>,
 
-    /// Total prompt tokens of the last `/ctx` assembly preview — used to derive
-    /// `cached_tokens` from llama.cpp `tokens_evaluated` (§13).
+    /// Total prompt tokens of the last `/ctx` assembly preview — the fallback
+    /// prompt size for a metrics row when the server did not report one (§13).
     pub last_ctx_total_tokens: u64,
     /// Retrieved files in the last assembly (recorded into metrics row).
     pub last_ctx_retrieved_files: u8,
+
+    /// What the parts of a turn that are not retrieved files cost, averaged over
+    /// what the server said recent turns cost. This is what the next turn's
+    /// retrieval is sized against, because retrieval happens before the prompt is
+    /// built and so cannot see it (AC-4).
+    pub prompt_overhead: xencode_context_rs::PromptOverhead,
+    /// Characters of the prompt the last generation was built from, and how many
+    /// of them were retrieved bodies. The server reports one token count for the
+    /// whole prompt, so splitting it between retrieval and everything else is
+    /// done by what xencode put in.
+    pub last_prompt_chars: usize,
+    pub last_prompt_retrieved_chars: usize,
 
     /// The context window the llama.cpp server said it is running with, read
     /// from its `/props` at startup, after a model load, and while each turn is
@@ -1974,6 +1986,9 @@ impl<'a> App<'a> {
             task_runtime: crate::agent_tools::new_task_runtime(),
             last_ctx_total_tokens: 0,
             last_ctx_retrieved_files: 0,
+            prompt_overhead: xencode_context_rs::PromptOverhead::default(),
+            last_prompt_chars: 0,
+            last_prompt_retrieved_chars: 0,
             server_context_window: None,
             hardware,
             spend: None,
@@ -2378,7 +2393,24 @@ impl<'a> App<'a> {
             history.pop();
         }
         let root = xencode_context_rs::default_root();
-        let live = xencode_context_rs::collect_live_context(&root, &prompt, self.hardware.profile);
+        let model = self.config.default_model.clone();
+        // The window the server reported wins on the llama.cpp route (AC-1);
+        // otherwise the model family's known window, and unknown routes defer
+        // to the profile default. The `/ctx` preview always shows
+        // profile-default budgeting.
+        let context_window =
+            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
+        // Retrieval is sized by the space the prompt will actually leave, which
+        // is only known from the turn before this one (AC-4).
+        let caps = xencode_context_rs::ContextCaps::for_turn(
+            self.hardware.profile,
+            self.prompt_overhead
+                .free_tokens(xencode_context_rs::fill_target(
+                    self.hardware.profile,
+                    context_window,
+                )),
+        );
+        let live = xencode_context_rs::collect_live_context(&root, &prompt, caps);
         // Sorted for a deterministic prompt (and KV prefix) across turns.
         // Images ride as message parts, not inlined text: read_to_string
         // would silently drop them, and raw bytes would corrupt the prompt.
@@ -2407,16 +2439,9 @@ impl<'a> App<'a> {
                 append_text_attachment(&mut attached_block, path);
             }
         }
-        // The window the server reported wins on the llama.cpp route (AC-1);
-        // otherwise the model family's known window, and unknown routes defer
-        // to the profile default. The `/ctx` preview always shows
-        // profile-default budgeting.
-        let model = self.config.default_model.clone();
         // Refresh what the server says while this turn is in flight, so a
         // server restarted outside xencode is picked up by the next turn.
         self.probe_context_window(tx.clone());
-        let context_window =
-            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
         let system = self.agent_system_prompt();
         let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
             profile: self.hardware.profile,
@@ -2438,6 +2463,10 @@ impl<'a> App<'a> {
                 content: "Project index not found — run /init once for project-aware answers. Continuing with guidelines + history only.".to_string(),
             });
         }
+        // What the server will report the cost of, split between retrieval and
+        // the rest of the turn, for the next turn's caps (AC-4).
+        self.last_prompt_chars = assembly.prompt_chars();
+        self.last_prompt_retrieved_chars = assembly.retrieved_chars();
         // Once per turn, in the background: what the server itself counts this
         // prompt at. Silent unless the answer says the prompt does not fit.
         self.probe_token_count(
@@ -3147,7 +3176,18 @@ impl<'a> App<'a> {
         task: &str,
         brief: fn(&str) -> String,
     ) -> xencode_context_rs::ChatAssembly {
-        let live = xencode_context_rs::collect_live_context(root, task, self.hardware.profile);
+        let caps = xencode_context_rs::ContextCaps::for_turn(
+            self.hardware.profile,
+            self.prompt_overhead
+                .free_tokens(xencode_context_rs::fill_target(
+                    self.hardware.profile,
+                    xencode_providers_rs::effective_context_window(
+                        &self.config.default_model.clone(),
+                        self.server_context_window,
+                    ),
+                )),
+        );
+        let live = xencode_context_rs::collect_live_context(root, task, caps);
         let model = self.config.default_model.clone();
         let context_window =
             xencode_providers_rs::effective_context_window(&model, self.server_context_window);
@@ -3871,13 +3911,28 @@ impl<'a> App<'a> {
                 );
                 let stable_ok = doc_a.stable_prefix == doc_b.stable_prefix;
                 let _ = tx.send("[CTX_START]".to_string());
+                let caps = xencode_context_rs::ContextCaps::for_turn(
+                    profile,
+                    self.prompt_overhead
+                        .free_tokens(xencode_context_rs::fill_target(
+                            profile,
+                            self.server_context_window,
+                        )),
+                );
                 let _ = tx.send(format!(
-                    "[CTX]🗂 Profile {} ({}) — ctx {} · utilization {}% · top-k {}",
+                    "[CTX]🗂 Profile {} ({}) — ctx {} · utilization {}% · retrieval top-{} at {} characters each, from {}",
                     profile.name(),
                     self.hardware.reason,
                     profile.ctx_tokens(),
                     (profile.utilization() * 100.0) as u64,
-                    profile.top_k(),
+                    caps.top_k,
+                    caps.content_cap_chars,
+                    match self.prompt_overhead.tokens() {
+                        Some(tokens) =>
+                            format!("{} tokens of prompt the server measured", tokens),
+                        None => "the profile's own numbers, with no prompt measured yet"
+                            .to_string(),
+                    }
                 ));
                 let _ = tx.send(format!(
                     "[CTX]⚙️ llama.cpp args: {}",
@@ -4510,6 +4565,21 @@ impl<'a> App<'a> {
             None
         };
         let profile = self.hardware.profile;
+        // The same numbers a real turn will retrieve with, so the preview lists
+        // what would actually be sent rather than what the profile ladder says on
+        // a machine that has since measured its own prompts.
+        let caps = xencode_context_rs::ContextCaps::for_turn(
+            profile,
+            self.prompt_overhead
+                .free_tokens(xencode_context_rs::fill_target(
+                    profile,
+                    xencode_providers_rs::effective_context_window(
+                        &self.config.default_model.clone(),
+                        self.server_context_window,
+                    ),
+                )),
+        );
+        let measured = self.prompt_overhead.tokens();
         tokio::spawn(async move {
             let _ = tx.send("[CTX_START]".to_string());
             let root = xencode_context_rs::default_root();
@@ -4518,7 +4588,7 @@ impl<'a> App<'a> {
                 let _ = tx.send("[CTX]❌ No project index — run /init first.".to_string());
                 return;
             };
-            let opts = xencode_context_rs::RetrieveOptions::for_live_chat(profile.top_k());
+            let opts = xencode_context_rs::RetrieveOptions::for_live_chat(caps.top_k);
             let changed: HashSet<String> =
                 xencode_context_rs::dirty_paths(&root).into_iter().collect();
             let results = xencode_context_rs::retrieve(&query, &index, &changed, &opts);
@@ -4530,9 +4600,15 @@ impl<'a> App<'a> {
                 return;
             }
             let _ = tx.send(format!(
-                "[CTX]🎯 Retrieval ({} profile, top-{}):",
+                "[CTX]🎯 Retrieval ({} profile, top-{} of {}, {} characters each{}):",
                 profile.name(),
-                results.len()
+                results.len(),
+                caps.top_k,
+                caps.content_cap_chars,
+                match measured {
+                    Some(tokens) => format!(", room left after {tokens} tokens of prompt"),
+                    None => ", no prompt measured yet".to_string(),
+                }
             ));
             for r in &results {
                 let _ = tx.send(format!(
@@ -4547,7 +4623,7 @@ impl<'a> App<'a> {
                 &root,
                 &index.files,
                 &results,
-                profile.content_cap_chars(),
+                caps.content_cap_chars,
             );
             let agents = std::fs::read_to_string(root.join("AGENTS.md")).ok();
             let anchor = std::fs::read_to_string(xencode.join("anchor.md")).ok();
@@ -7340,17 +7416,32 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if let Some(body) = token.strip_prefix("[TIMINGS]") {
                 if let Ok(ts) = serde_json::from_str::<LlamaCppTimings>(body) {
                     app.last_llamacpp_timings = Some(ts.clone());
-                    // Record a §13 metrics row: cached = prompt_total − actually
-                    // evaluated. prompt_total comes from the last /ctx assembly,
-                    // evaluated from llama.cpp — a ~0 cached_tokens with a large
-                    // stable prefix means prefix stability broke somewhere.
+                    // What this turn cost, in the server's own tokens, is the
+                    // only advance notice the next turn gets about how much room
+                    // its retrieval has (AC-4).
+                    app.prompt_overhead.observe(
+                        ts.prompt_tokens,
+                        app.last_prompt_retrieved_chars,
+                        app.last_prompt_chars,
+                    );
+                    // Record a §13 metrics row: `cached_tokens` is how much of
+                    // the prompt the server said it did not have to evaluate.
+                    // Where the server reported a prompt at all, both numbers are
+                    // its own; where it reported none, the size of the prompt
+                    // xencode built is all there is and is labelled an estimate by
+                    // having no evaluated count to subtract from it.
                     let root = xencode_context_rs::default_root();
                     let xencode = root.join(xencode_context_rs::XENCODE_DIR);
                     let profile = app.hardware.profile;
+                    let prompt_tokens = if ts.prompt_tokens > 0 {
+                        ts.prompt_tokens
+                    } else {
+                        app.last_ctx_total_tokens
+                    };
                     let mut m = xencode_context_rs::RequestMetrics::from_timings(
                         profile.name(),
                         profile.ctx_tokens() as u32,
-                        app.last_ctx_total_tokens.min(u32::MAX as u64) as u32,
+                        prompt_tokens.min(u32::MAX as u64) as u32,
                         ts.tokens_evaluated.min(u32::MAX as u64) as u32,
                         ts.tokens_generated.min(u32::MAX as u64) as u32,
                         ts.predicted_per_second as f32,

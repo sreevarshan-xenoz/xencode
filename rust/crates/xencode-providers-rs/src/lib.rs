@@ -497,10 +497,22 @@ impl ProviderManager {
         .await
     }
 
-    /// Record token-usage timing observed from a llama.cpp completion.
-    fn record_llamacpp_timings(&self, tokens: u64, elapsed: f64) {
-        *self.llamacpp_timings.lock().unwrap() =
-            Some(LlamaCppTimings::from_elapsed(tokens, elapsed));
+    /// Record token usage and timing from what a llama.cpp completion reported.
+    ///
+    /// Every count here is the server's own — see
+    /// [`LlamaCppTimings::from_usage`] for what b10809 was measured to say.
+    /// Nothing is recorded for a request the server never processed, which is
+    /// the case where it reported neither a prompt nor a reply.
+    fn maybe_record_llamacpp_timings(&self, counts: compatible::UsageCounts, elapsed: f64) {
+        if counts.prompt_tokens == 0 && counts.completion_tokens == 0 {
+            return;
+        }
+        *self.llamacpp_timings.lock().unwrap() = Some(LlamaCppTimings::from_usage(
+            counts.completion_tokens,
+            counts.prompt_tokens,
+            counts.cached_tokens,
+            elapsed,
+        ));
     }
 
     /// Most recent llama.cpp generation timing (tokens generated + tok/s).
@@ -1287,6 +1299,15 @@ impl ProviderManager {
         struct LlamaCppUsage {
             #[serde(default)]
             completion_tokens: u64,
+            #[serde(default)]
+            prompt_tokens: u64,
+            #[serde(default)]
+            prompt_tokens_details: Option<LlamaCppPromptDetails>,
+        }
+        #[derive(Deserialize)]
+        struct LlamaCppPromptDetails {
+            #[serde(default)]
+            cached_tokens: u64,
         }
 
         let body: LlamaCppResponse = response
@@ -1294,14 +1315,20 @@ impl ProviderManager {
             .await
             .map_err(|e| ProviderError::Parse(format!("llama.cpp parse error: {e}")))?;
 
-        let tokens = body
+        let counts = body
             .usage
             .as_ref()
-            .map(|u| u.completion_tokens)
-            .unwrap_or(0);
-        if tokens > 0 {
-            self.record_llamacpp_timings(tokens, start.elapsed().as_secs_f64());
-        }
+            .map(|u| compatible::UsageCounts {
+                completion_tokens: u.completion_tokens,
+                prompt_tokens: u.prompt_tokens,
+                cached_tokens: u
+                    .prompt_tokens_details
+                    .as_ref()
+                    .map(|d| d.cached_tokens)
+                    .unwrap_or(0),
+            })
+            .unwrap_or_default();
+        self.maybe_record_llamacpp_timings(counts, start.elapsed().as_secs_f64());
 
         body.choices
             .first()
@@ -1334,6 +1361,7 @@ impl ProviderManager {
             "messages": messages,
             "stream": true
         });
+        compatible::ask_for_usage(&mut payload);
 
         if let Some(opts) = options {
             merge_llamacpp_options(&mut payload, opts);
@@ -1355,7 +1383,7 @@ impl ProviderManager {
 
         let mut stream = response.bytes_stream();
         let mut full_response = String::new();
-        let mut completion_tokens: u64 = 0;
+        let mut usage = compatible::UsageCounts::default();
         let mut acc = tools::ToolCallAccumulator::default();
         let mut lines = frames::FrameLines::default();
 
@@ -1366,7 +1394,7 @@ impl ProviderManager {
                 compatible::ingest_line(
                     line,
                     &mut full_response,
-                    &mut completion_tokens,
+                    &mut usage,
                     &mut acc,
                     &mut callback,
                 )
@@ -1376,15 +1404,13 @@ impl ProviderManager {
             compatible::ingest_line(
                 line,
                 &mut full_response,
-                &mut completion_tokens,
+                &mut usage,
                 &mut acc,
                 &mut callback,
             )
         });
 
-        if completion_tokens > 0 {
-            self.record_llamacpp_timings(completion_tokens, start.elapsed().as_secs_f64());
-        }
+        self.maybe_record_llamacpp_timings(usage, start.elapsed().as_secs_f64());
 
         Ok(full_response)
     }
@@ -1420,6 +1446,7 @@ impl ProviderManager {
             "messages": rendered,
             "stream": true
         });
+        compatible::ask_for_usage(&mut payload);
         if !tools.is_empty() {
             payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
             payload["tool_choice"] = serde_json::Value::String("auto".to_string());
@@ -1443,9 +1470,7 @@ impl ProviderManager {
         )
         .await?;
 
-        if outcome.completion_tokens > 0 {
-            self.record_llamacpp_timings(outcome.completion_tokens, start.elapsed().as_secs_f64());
-        }
+        self.maybe_record_llamacpp_timings(outcome.usage, start.elapsed().as_secs_f64());
 
         Ok(outcome.step)
     }

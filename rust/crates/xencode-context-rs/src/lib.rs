@@ -44,7 +44,8 @@ pub use advise::{
     orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
 };
 pub use budget::{
-    est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile, ProfileDecision,
+    est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, ContextCaps,
+    HardwareProfile, ProfileDecision, PromptOverhead, TOKENS_PER_RETRIEVED_FILE,
 };
 pub use compact::{
     hard_compact_prompt, parse_hard_compact_reply, should_compact, soft_compact, CompactReport,
