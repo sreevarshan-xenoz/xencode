@@ -1938,6 +1938,14 @@ async fn run_query_once(
         caps.top_k, caps.content_cap_chars
     );
     let live = xencode_context_rs::collect_live_context(&root, &prompt, caps);
+    // Which weights retrieval used, and the words in the prompt that chose them:
+    // a turn read as bugfix scores differently from one read as a rename, and
+    // without this line the difference looks like a random result.
+    eprintln!(
+        "read as {} work — {}",
+        live.shape.shape,
+        live.shape.reasons.join("; ")
+    );
     // The window the server is actually running with, when the model is served
     // by a llama.cpp process that will say. A family table cannot know `-c`;
     // every other route keeps the table's answer.

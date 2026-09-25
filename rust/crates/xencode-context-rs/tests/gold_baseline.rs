@@ -18,6 +18,10 @@
 //! digest this build carries, so a later run can say whether a difference came
 //! from the retriever or from a prompt edit — and refuse to compare when it was
 //! the prompts that moved.
+//!
+//! After the arms, the per-shape biases are measured probe-partition by
+//! probe-partition against the same probes with the bias off, which is the only
+//! way a weight that helps one kind of turn and hurts another can be seen.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -61,7 +65,10 @@ fn gold_scores_against_the_real_index() {
     let prior = xencode_context_rs::read_eval_runs(&xencode);
     // Three arms, so the run prices each addition separately: structural only,
     // plus a lexical arm over path and symbols, plus the same with the files'
-    // documentation prose indexed too.
+    // documentation prose indexed too. A probe that carries a `shape` is scored
+    // as that shape in every arm, so what is compared here is the lexical stage
+    // and nothing else; the shape's own contribution is measured per partition
+    // below.
     let arms: [(&str, xencode_context_rs::RetrieveOptions); 3] = [
         ("deterministic      ", Default::default()),
         (
@@ -130,4 +137,57 @@ fn gold_scores_against_the_real_index() {
         "recorded to {}",
         xencode_context_rs::eval_log_path(&xencode).display()
     );
+    // The shape biases last, on both arms. Each shape is scored against the same
+    // probes with its own weight turned off, so a bias that only pays for itself
+    // on one kind of turn cannot hide inside an overall average — and a bias that
+    // pays for nothing shows up as 0.000 rather than as a rumour. The structural
+    // arm is measured too because the hybrid arm already solves most probes, and
+    // a bias that can only help where the stronger arm is not running is a
+    // different claim from one that helps in the shipped configuration.
+    let tests_indexed: usize = index.symbols.values().map(|s| s.tests.len()).sum();
+    let files_with_tests = index
+        .symbols
+        .values()
+        .filter(|s| !s.tests.is_empty())
+        .count();
+    println!(
+        "\nshape biases, per partition ({} test names over {files_with_tests} files indexed):",
+        tests_indexed
+    );
+    let arms_by_name = [
+        (
+            "deterministic",
+            xencode_context_rs::RetrieveOptions::default(),
+        ),
+        (
+            "+ text + doc prose",
+            xencode_context_rs::RetrieveOptions {
+                lexical: true,
+                lexical_docs: true,
+                ..Default::default()
+            },
+        ),
+    ];
+    for (arm, opts) in &arms_by_name {
+        println!("  on the {arm} arm:");
+        for part in &xencode_context_rs::compare_shapes(&index, &gold, 5, &no_changes, opts) {
+            if part.shape == xencode_context_rs::TaskShape::General {
+                println!(
+                    "    {:<8} {:>2} probes · control, no weight moves: MRR {:.3}",
+                    part.shape.as_str(),
+                    part.queries,
+                    part.tuned.mrr
+                );
+                continue;
+            }
+            println!(
+                "    {:<8} {:>2} probes · MRR {:.3} → {:.3} ({:+.3}) with the bias",
+                part.shape.as_str(),
+                part.queries,
+                part.untuned.mrr,
+                part.tuned.mrr,
+                part.mrr_delta()
+            );
+        }
+    }
 }

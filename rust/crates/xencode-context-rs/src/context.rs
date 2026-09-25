@@ -557,6 +557,10 @@ pub struct LiveContext {
     pub index_present: bool,
     /// Retrieval candidates before unreadable-file filtering.
     pub retrieved_total: usize,
+    /// Which kind of work the prompt was read as, and the words that said so.
+    /// Retrieval was already weighted by it; this is here so the interface can
+    /// show the reading instead of leaving a changed file list unexplained.
+    pub shape: crate::ShapeRead,
 }
 
 /// Gather project context for one user query: stable-layer files, git summary,
@@ -574,13 +578,16 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     let anchor_md = std::fs::read_to_string(xencode.join("anchor.md")).ok();
     let state_md = std::fs::read_to_string(xencode.join("state.md")).ok();
     let git_summary = git_summary_text(root).unwrap_or_default();
+    // Read once, and used for the weights and for what is reported about them,
+    // so the two cannot disagree about which shape the turn was retrieved as.
+    let shape = crate::shape_of(query);
     let mut blocks = Vec::new();
     let mut index_present = false;
     let mut retrieved_total = 0;
     if let Some(index) = RetrievalIndex::load(&xencode) {
         index_present = true;
         let changed: HashSet<String> = dirty_paths(root).into_iter().collect();
-        let opts = RetrieveOptions::for_live_chat(caps.top_k);
+        let opts = RetrieveOptions::for_live_chat(caps.top_k, shape.shape);
         let results = retrieve(query, &index, &changed, &opts);
         retrieved_total = results.len();
         blocks = read_retrieved_bodies(root, &index.files, &results, caps.content_cap_chars);
@@ -593,6 +600,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         blocks,
         index_present,
         retrieved_total,
+        shape,
     }
 }
 

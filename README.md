@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1110 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1122 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -377,6 +377,12 @@ flowchart TD
 - `XCODE_HYBRID=0` ranks the workspace files for a turn by name, symbol and
   dependency distance alone, skipping the BM25 pass over each file's
   documentation. On by default; the `/ctx eval` command prints both numbers.
+- **A turn that says something is broken is read as such.** The prompt is
+  scanned for words for broken code; on a match, a file carrying a test whose
+  name shares the prompt's words is favoured in the ranking. `/ctx find` and
+  `xencode query` say which reading they took and why. Only that one bias
+  ships — the other two candidates scored 0.000 on their own queries and were
+  removed.
 - Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
   TUI Settings panel. Only the keys in the struct are read; unknown keys are
   ignored.
@@ -453,7 +459,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1110 passing, 11 ignored)
+cargo test                          # Full workspace suite (1122 passing, 11 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

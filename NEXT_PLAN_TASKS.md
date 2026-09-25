@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1110 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1122 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -6384,6 +6384,58 @@ done-when is met, and the commit that does it names the IDs.
   releasing the eight-file ceiling, charging the overhead to the retrieved share
   instead of the rest, reporting the average unrounded, and never setting
   `stream_options` — and watching each fail with the number it was guarding.
+
+- [x] `AC-3` — 2026-09-25, eighth item of W2. Retrieval now reads one thing off
+  the prompt — whether it is about something broken — and scores a file whose own
+  test names use the prompt's words above one that merely declares a matching
+  symbol. `xencode query` and `/ctx find` both say which reading was used and the
+  words that produced it (`read as bugfix work — the prompt says fix, wrong`), and
+  `/ctx eval` plus the ignored `gold_baseline` measurement price the bias on its
+  own partition of the gold set. Measured on this workspace — 189 indexed files,
+  128 with a symbol inventory holding 893 test names over 101 files, 25 probes,
+  top-5: **the bugfix bias moved mean reciprocal rank 0.050 → 0.237 (+0.188) over
+  deterministic retrieval**, and **0.000 on the hybrid arm that ships**, which
+  already ranks all four bugfix probes first. So the number beside this item is
+  one arm's gain and the shipped arm's nothing, stated that way rather than as
+  "task-aware retrieval is smarter".
+  **The other two shapes were built, measured, and deleted.** A wider symbol cap
+  for a rename (16 → 24) and a lift for the project's rule and manifest files on a
+  new-feature turn both moved mean reciprocal rank by **0.000 on their own probes
+  on both arms** — the cap raises every candidate's ceiling at once, so the file
+  that was outranked is still outranked, and +6 is nowhere near the 11–27 a file
+  with a matching name and symbols earns. A shape that changes no weight is a
+  label, so `TaskShape` is `General` or `Bugfix`, and the guard test
+  (`no_bias_but_the_test_name_one_moves_a_weight`) is what keeps them out. The
+  plan's `secure` verb is absent for the same reason: nothing is priced to respond
+  to it.
+  **Three findings that changed the design, all counted here rather than
+  assumed.** (1) `#[test]` presence carries no information — **100 of the 127 Rust
+  files** in this tree contain one — so the item's "touched files contain `#[test]`"
+  signal became test-*name* matching. (2) A test name is a sentence and a sentence
+  is mostly grammar: counting words across this workspace's test names gives `the`
+  329, `a` 283, `and` 236, `is` 176, so matching bare pieces fires on nearly any
+  prompt, which is why `is_grammar_word` exists and why a test
+  (`a_test_name_saying_only_grammar_earns_nothing`) checks a name made of `that`,
+  `is`, `not`, `it` earns nothing. (3) **The last `run_command` exit status is not
+  in the tree**: a command's result reaches the model as text whose *first* line is
+  `exit <n>`, and the per-turn trace stores only a redacted *tail* of that result
+  (last 300 characters), so the one part that says whether a build passed is
+  exactly what is not kept — and a gold query has no previous turn for it to
+  describe, so no partition could have shown it earning a weight. The git-changed
+  set needed no shape to carry it, because retrieval already scores those files
+  directly.
+  The evaluation half is what made this honest rather than a story: `EvalItem`
+  gained a `shape` label, `compare_shapes` scores each partition against the same
+  probes with the label ignored, and a gold probe may only be labelled with the
+  shape its own words already read as (`every_probe_is_a_shape_the_words_in_the_
+  probe_would_also_give`), so no partition can contain a pairing the product cannot
+  produce. `evaluate_with` honours a probe's label in every arm, which is why the
+  three arms reported above are the same shape on both sides of each comparison.
+  Verified by 1122 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean, and by running the binary: `xencode query` on a broken-counts
+  prompt printed the bugfix reading and asked a server on localhost, which was not
+  there.
 
 #### W2 — The model/inference substrate — 15 items
 

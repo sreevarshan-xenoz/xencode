@@ -32,6 +32,7 @@ pub mod rollup;
 pub mod scanner;
 pub mod seeds;
 pub mod session;
+pub mod shape;
 pub mod stale;
 pub mod state;
 pub mod symbols;
@@ -63,9 +64,9 @@ pub use documents::{
 };
 pub use embed::{hybrid_select, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT};
 pub use eval::{
-    append_eval_run, comparable_previous_eval_run, default_gold, eval_log_path, evaluate,
-    evaluate_with, gold_from_disk, previous_eval_run, read_eval_runs, EvalItem, EvalReport,
-    EvalRun, EvalRunRecord,
+    append_eval_run, comparable_previous_eval_run, compare_shapes, default_gold, eval_log_path,
+    evaluate, evaluate_with, gold_by_shape, gold_from_disk, previous_eval_run, read_eval_runs,
+    EvalItem, EvalReport, EvalRun, EvalRunRecord, ShapeComparison,
 };
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
@@ -99,6 +100,7 @@ pub use session::{
     RecordedCall, RecordedRun, RecordedToolCall, Session, SessionLine, SessionWriter,
     SESSION_FORMAT,
 };
+pub use shape::{shape_of, ShapeRead, TaskShape};
 pub use stale::{FileContextTracker, FileStateKind, LoadedRecord, LoadedState, TrackedFile};
 pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
