@@ -630,6 +630,56 @@ Two limits worth knowing, both measured against `llama-server` b10809 with
   well; with `off` it answered 9 in 32 tokens. One question, one small model —
   a reason to treat a budget as a speed and length control, not a quality one.
 
+### `xencode hw <action>`
+Ask this machine what it can serve, instead of guessing.
+
+```bash
+xencode hw probe                        # configured model, llama-server on PATH
+xencode hw probe --model ~/models/foo.gguf --exec /opt/llama.cpp/bin/llama-server
+```
+
+`probe` prints, in order: the RAM and core counts, the `llama-server` build it
+found, the graphics devices the kernel sees, the compute devices the server can
+actually use, the model file's own geometry, what its cache costs per token, how
+much memory is free against how much the weights need, and the window the context
+budget is currently working with. It ends with the flags to start the server with
+and the `xencode config set llama_cpp_args "…"` line that keeps them. **It writes
+nothing** and starts nothing.
+
+Two of those sections carry a warning rather than a number, on purpose:
+
+- **Video memory does not come from `lspci` or PCI config space.** On the machine
+  this was written on, the graphics card's largest PCI window is 256 MiB and the
+  card holds 2048 MiB. The sizes printed for the devices are read from
+  `llama-server --list-devices`, which is the only source that both knows the
+  memory and knows what the binary in front of you can offload to — a build with
+  no CUDA support offloads over Vulkan, so reasoning from the vendor ID alone
+  points at the wrong answer.
+- **A device is not necessarily a graphics card with its own memory.** An
+  integrated window reported here as 11822 MiB is three quarters of the machine's
+  RAM and serving from it measured 15 tokens/s against 58 on the CPU. A device
+  whose total reaches half the machine's memory is labelled as sharing system
+  memory and is not chosen; the free memory the server reports is what the
+  recommendation is built on.
+
+The context size is where the arithmetic matters. The KV cache sits on top of the
+weights and grows with every token, so a window that looks affordable by the file
+size alone is the failure mode: with the model fully offloaded, this machine loaded
+an 8192 token window and stopped with an out-of-memory error at 10240, with 1156 MiB
+of device memory free. The probe holds a quarter of the free memory back for the
+server's own buffers and rounds the window down, and it never recommends a window
+larger than the context budget asked for — a bigger window that spends the memory
+on cache instead of the model was measured answering at 43 tokens/s here, which is
+slower than running the same model on the CPU. When the weights themselves do not
+fit, it says so and says a smaller quant or a remote server is the way out, instead
+of recommending a window small enough to squeeze the model in.
+
+Two things it cannot tell you, both because the server does not say: which device a
+running server put the model on (`/props` reports a context size, slots and build
+info, and no device or offload field), and what a build competing for the same
+memory will do to it. The `mmap` line states the relationship and leaves the
+measurement to you.
+
 ### `xencode colab <action>`
 Google Colab bridge: run the inference server on a Colab VM (T4 GPU etc.)
 and reach it from this machine. The only supported transport is the official

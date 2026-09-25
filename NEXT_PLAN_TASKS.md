@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1122 tests passing, 11 ignored, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
+- [x] Workspace gates green — 15 crates, 1142 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1220,7 +1220,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** a host-key change is refused with an actionable message,
       the bootstrap makes one TCP connection instead of ~10, and a second user
       on the remote box cannot read the endpoint.
-- [ ] **L-5 — `xencode hw probe`: local hardware → launch flags.** Read
+- [x] **L-5 — `xencode hw probe`: local hardware → launch flags.** Read
       VRAM/RAM/cores from `lspci`, `/proc/meminfo`, `/sys/class/drm` and emit a
       recommended quant, context size and `-ngl` layer count — including the two
       silent killers the numbers hide: KV cache on top of weights, and a
@@ -1229,6 +1229,16 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** its recommendation for this laptop (i5-1035G1, 15 GB,
       MX250) is a size that actually loads and answers, and every field it reads
       is documented.
+      *(Done 2026-09-25 — see W2 progress. `lspci` turned out to be the wrong
+      source: this card's largest PCI window is 256 MiB while it holds 2048 MiB, so
+      the sizes come from `llama-server --list-devices` and the GPU is named rather
+      than counted. It recommends `--n-gpu-layers all --device Vulkan1` at 8192
+      tokens — the window measured loading and answering at 70.7 tokens/s, where the
+      server's own default leaves the model on the CPU at 58. The cache-on-top-of
+      weights killer is the three-quarters reserve, bounded by the 826 MiB run that
+      loaded and the 938 MiB run that did not; the mmap one ships as the relation
+      and the warning, not as a measurement of a build that was not run. No quant is
+      recommended, because nothing here can price one.)*
 - [ ] **L-6 — budget preflight and OOM recovery.** Before launch, refuse a
       model whose measured footprint exceeds available memory and say what would
       fit. On an exit-137 / killed-server signature, step quant or context down
@@ -3972,6 +3982,14 @@ here is inherited from the reviewer's assumptions.
    models, so **no decision in L–P changes** — but any future claim of the form
    "this box has no GPU" is wrong and must be phrased "no GPU that can serve a
    4B model" instead.
+   **Corrected 2026-09-25 by `L-5`: "cannot serve the target models" was too wide.**
+   It serves the one model on this disk — a 378 MiB Qwen3-0.6B Q4_K_M — with the
+   whole model offloaded at an 8192 token window, at **70.7 tokens/s** against 58 on
+   the CPU, and it stops with an out-of-memory error at 10240 with a plain 16-bit
+   cache. The 4B claim is untouched because no 4B model was ever loaded here; it is
+   untested, not confirmed. Any later sentence about this card should say what it
+   was measured on, and the number that was too big — a 4B quant at any window —
+   has still not been tried.
 2. **`~/.xencode/config.json` is mode 644 with plaintext provider keys in it
    right now.** `stat -c %a` → `644`; the directory is 755; grep across
    `xencode-config-rs` finds **no permission-setting code at all**. SE-1 exists
@@ -6436,6 +6454,87 @@ done-when is met, and the commit that does it names the IDs.
   -D warnings` clean, and by running the binary: `xencode query` on a broken-counts
   prompt printed the bugfix reading and asked a server on localhost, which was not
   there.
+
+- [x] `L-5` — 2026-09-25, ninth item of W2. `xencode hw probe` reads this
+  machine and prints the flags to start a local server with, and the arithmetic
+  behind each one.
+  **The item's own method was wrong, and being wrong in the interesting
+  direction.** It says to read VRAM from `lspci`. The largest base address register
+  on this box's NVIDIA device is **256 MiB** — the card has 2048 MiB. Video memory
+  is not in PCI config space; only a vendor tool can see it. What can see it is the
+  inference server being configured, so the probe asks it: `llama-server
+  --list-devices` on b10809 answers `BLAS: OpenBLAS (0 MiB, 0 MiB free)`,
+  `Vulkan0: Intel(R) UHD Graphics (ICL GT1) (11822 MiB, 8560 MiB free)` and
+  `Vulkan1: NVIDIA GeForce MX250 (2294 MiB, 1156 MiB free)`. That single difference
+  is worth twenty per cent: this build links no CUDA (`ldd` is clean) and offloads
+  over Vulkan, so a probe that reasoned from `lspci` plus a missing `libcudart`
+  would have concluded there was nothing to offload to and recommended the CPU.
+  `/sys/class/drm` is still walked — for the vendor, device and whether a card
+  drives a display — but it is labelled in the output as the kernel's view, which
+  reports no memory at all.
+  **The flag the item asks the probe to emit is the one the server gets wrong.**
+  `--n-gpu-layers` defaults to `auto`, and `auto` on this machine leaves the model
+  on the CPU: 150-token generations ran at **57.76 and 58.28 tokens/s** with `0`, at
+  **58.45** with the server's own choice, and at **70.34** with `all`
+  (**69.60–70.13** when the card is named). The recommendation is `all` plus
+  `--device Vulkan1`. Naming a device matters because the list contains a trap: the
+  integrated window is the biggest thing on the machine at 11822 MiB, and serving
+  from it measured **15.11 and 13.85 tokens/s** on a 4.24 second load. It is system
+  memory the chip is sharing, which is why a device whose total reaches half the
+  machine's RAM is not an offload target — 73 per cent here against 14 per cent for
+  the card that is. Naming a number has a second effect the probe states: it
+  switches llama.cpp's own memory fitter off (`W common_fit_params: failed to fit
+  params to free device memory: n_gpu_layers already set by user to 99/-2, abort`),
+  which is what makes the next paragraph the probe's job rather than the server's.
+  **KV cache on top of weights, the first silent killer, is now arithmetic with a
+  measured constant.** With offload pinned and a plain 16-bit cache this model
+  loaded and answered at 4096 (**70.60**) and 8192 (**70.70**) and died with
+  `ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory` at **10240,
+  12288, 14336 and 16384**. The sums explain it: 826 MiB of weights-plus-cache
+  loaded, 938 MiB did not, against 1156 MiB free — so the reserve held back is three
+  quarters of what is free, 867 MiB, bounded on both sides by those two runs rather
+  than rounded for looks. Per-token cost comes from the GGUF's own header, not from
+  a table: this file is 28 blocks × 8 key-value heads × width 64, which is **56.0
+  KiB per token at 16-bit and 21.4 at q8_0 keys with q4_0 values**, and the probe
+  recomputes it for whatever file it is pointed at. There is deliberately no
+  gigabytes-per-billion-parameters constant anywhere in it — this model is 378 MiB
+  at 0.6B because a 151k-token embedding dominates it, so any such ratio would be a
+  guess dressed as a rule.
+  **The first real run of this produced an untested recommendation, and that is
+  worth recording as the mistake.** It printed `--ctx-size 22528`: arithmetically
+  inside the reserve with the quantized cache, and past the 16384 that was measured
+  loading at **43.66 tokens/s — slower than the CPU**. A window that fits is not the
+  same as a window worth having. The fitted size is therefore capped by what the
+  budget layer asked for (8192 on this machine), and when the cap or the fitting
+  shortens it, the output says by how much and that the cache, not a setting, is
+  what costs.
+  **The second killer — a concurrent build evicting the mmap — ships as the
+  relation, not as a measurement.** The probe prints the memory free now against the
+  size of the weights and says what fills a page cache; it does not pretend to have
+  watched a `cargo` build it did not run.
+  **What it does not do.** It prints the flags and the `xencode config set
+  llama_cpp_args "…"` line to keep them with, and writes nothing: the auto-start
+  preset is unchanged, and the output notes that config arguments go last, so a
+  repeated `--ctx-size` is settled by the later one. It also cannot verify a running
+  server — `/props` on b10809 reports a context size, slots and build info and no
+  device or offload field at all — so what it prints is a starting point, never a
+  reading of what is live.
+  Verified by 1142 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Twenty tests are new, all of them on the parsing and the
+  arithmetic, against the strings captured from this machine: the device list
+  including a name with parentheses in it, `/proc/meminfo` read for `MemAvailable`
+  and not `MemTotal`, a core range list, the 11822-against-2294 pair that separates a
+  shared window from a card, the reserve landing between 827 and 938, the 56.0 and
+  21.4 KiB figures this model actually has, a card directory tree with the render
+  nodes excluded, and the refusal when the weights alone do not fit. **Three bugs
+  were found only by running the command** — the 1 MiB metadata read window dying on
+  the tokenizer's 151k-entry array (a short read now ends the walk and keeps the
+  geometry read before it), `renderD128`/`renderD129` being printed as cards, and
+  `llama-server --version` writing to stderr rather than stdout. The done-when is
+  the real run: on this laptop it recommends `--n-gpu-layers all --device Vulkan1
+  --cache-type-k q8_0 --cache-type-v q4_0 --flash-attn on --ctx-size 8192`, which is
+  the window measured loading and answering at 70.7 tokens/s.
 
 #### W2 — The model/inference substrate — 15 items
 

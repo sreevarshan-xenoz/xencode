@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode hw probe` says what this machine can serve, and shows the arithmetic
+Choosing local server settings meant reading a man page and guessing at memory.
+`xencode hw probe` reads the machine instead and prints the flags to start a
+server with — but not from where the plan for it assumed. **Video memory is not
+visible in PCI config space:** this laptop's graphics card exposes a 256 MiB
+window and holds 2048 MiB, and the binary in use offloads over Vulkan with no CUDA
+linked in at all. A probe reasoning from `lspci` would have concluded there was
+nothing to offload to. So the sizes come from the one program that both knows them
+and knows what it can use — `llama-server --list-devices`:
+
+```text
+devices  what the server itself can use:
+         BLAS      OpenBLAS                                      0 MiB total,      0 MiB free · the CPU path, reported as a device and not one
+         Vulkan0   Intel(R) UHD Graphics (ICL GT1)           11822 MiB total,   7992 MiB free · shares system memory — measured slower than the CPU here
+         Vulkan1   NVIDIA GeForce MX250                       2294 MiB total,   1156 MiB free · its own memory
+```
+
+Those two lines carry two traps the probe now answers. The biggest "GPU" on the
+machine is not a GPU — it is three quarters of the system RAM, and serving from it
+measured **15 tokens/s against 58 on the CPU**, so a device whose total reaches
+half the machine's memory is never chosen. And `llama-server`'s own default for
+`--n-gpu-layers` is `auto`, which on this machine leaves the model on the CPU
+entirely: **58.45 tokens/s measured against 70.34** with the model fully
+offloaded. The recommendation names the layers and the device, and says that
+naming a number also switches the server's own memory fitter off — which is what
+makes sizing the context this probe's job rather than the server's.
+
+**The context size is the part that used to kill a working server.** The key-value
+cache sits on top of the weights and grows with every token of context, and it is
+computed from the model file's own header here — 28 layers × 8 cache heads × width
+64 is 56.0 KiB per token at 16-bit, 21.4 with a quantized cache — not from a
+rule of thumb about model size, because a 0.6-billion-parameter model can be 378
+MiB almost entirely of word embeddings. Measured on this card: a window of 8192
+loads and answers at 70.7 tokens/s, and 10240 does not load at all, failing with
+an out-of-memory error against 1156 MiB free. The reserve held back, three quarters
+of the free memory, is bounded by exactly those two runs. Two more rules come from
+measurements rather than caution: the fitted window never exceeds what the context
+budget asked for (the first real run of this command printed 22528, which fits on
+paper and measured **43.66 tokens/s — slower than the CPU**), and when the weights
+themselves do not fit, the probe refuses and says a smaller quant or a remote
+server is the way out, rather than recommending a window small enough to squeeze
+the model in.
+
+It prints the `xencode config set llama_cpp_args "…"` line to keep the result
+with and writes nothing, because config arguments are passed last and a repeated
+flag is settled by the later one. What it cannot do is check a server already
+running: `/props` reports a context size, slots and build info, and no device or
+offload field at all.
+
 ### Changed — a turn that says something is broken retrieves where the tests are
 A prompt asking "why is the token count wrong" and a prompt asking "what does this
 file do" used to be retrieved the same way. Now the first one is recognised — from

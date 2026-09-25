@@ -729,8 +729,10 @@ Commands:
   fetch     Fetch a web page and extract research-ready text
   review    Review the diff between a base branch and HEAD, file by file
   replay    Run a recorded session again from the bytes it was made of
+  eval      Score the agent on defects that were seeded on purpose
   plugin    Manage plugins
   llamacpp  llama.cpp server management (status/start/stop/load/unload)
+  hw        What this machine can serve, read from the machine
   tui       Launch the Terminal User Interface
   help      Print this message or the help of the given subcommand(s)
 
