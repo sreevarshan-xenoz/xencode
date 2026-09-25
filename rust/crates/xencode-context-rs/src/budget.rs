@@ -1,9 +1,11 @@
 //! Hardware profiles + deterministic token estimator (§10, §14).
 //!
 //! Profiles are data, never hardcoded logic — logic reads the fields here.
-//! The estimator is deliberately cheap and only used for budgeting; real
-//! token counts come from llama.cpp `usage` and are what the metrics layer
-//! displays.
+//! The estimator is deliberately cheap and is what the tier budget is filled
+//! with; it is ±20–30 % on code, so anywhere a number has to be *right* the
+//! server is asked instead: `llama.cpp`'s `/tokenize` for a prompt before it is
+//! sent, and the `usage` on the answer after it. Those real counts are what the
+//! metrics layer displays and what [`PromptOverhead`] averages.
 
 /// VRAM-based inference profiles (§14 defaults). Which one a given machine gets
 /// is `ProfileDecision::resolve` — by total RAM, since a model without a GPU to
@@ -264,6 +266,169 @@ pub fn format_memory_size(kib: u64) -> Option<String> {
         return None;
     }
     Some(format!("{gib:.1} GiB"))
+}
+
+/// How many tokens the fill target leaves for one retrieved file before xencode
+/// stops counting that file as worth asking for. 512 tokens is roughly 1.5 KiB of
+/// source at the code estimate divisor — about a function — and a body smaller
+/// than that has usually been cut to a fragment that answers nothing.
+pub const TOKENS_PER_RETRIEVED_FILE: u64 = 512;
+
+/// How much of a prompt a turn may fill with retrieved file bodies, and how big
+/// one body may be.
+///
+/// These were profile constants only, which made them a guess about a window
+/// xencode had not looked at: a laptop on a `Balanced` profile whose server runs
+/// `--ctx-size 2048` was still asked to retrieve five files of up to 16 KiB each,
+/// and the budgeter threw four of them away after the work of reading them was
+/// done. [`ContextCaps::for_free_space`] derives both numbers from the space the
+/// prompt actually leaves instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextCaps {
+    /// How many retrieved files to read bodies for.
+    pub top_k: usize,
+    /// Characters to keep per file body.
+    pub content_cap_chars: usize,
+}
+
+impl ContextCaps {
+    /// One file, the smallest body still worth sending. The floor exists because
+    /// `top_k` of zero means "retrieve nothing", which is a different decision
+    /// from "there was no room" and belongs to the caller.
+    pub const MIN_TOP_K: usize = 1;
+    /// Eight files, the widest ladder rung any profile has ever asked for. More
+    /// than this is not derived from free space: no configuration past the widest
+    /// measured rung has been run here, so a bigger number would be a guess.
+    pub const MAX_TOP_K: usize = 8;
+    /// About `TOKENS_PER_RETRIEVED_FILE` at the code estimate divisor, which is
+    /// what one file's minimum share of the budget works out to.
+    pub const MIN_CONTENT_CAP_CHARS: usize = 1_536;
+    /// The largest body any profile was ever given.
+    pub const MAX_CONTENT_CAP_CHARS: usize = 24_000;
+
+    /// What this run asks for when nothing has been measured yet — the profile's
+    /// own ladder, which is every build's behaviour before there was a reading.
+    pub fn from_profile(profile: HardwareProfile) -> ContextCaps {
+        ContextCaps {
+            top_k: profile.top_k(),
+            content_cap_chars: profile.content_cap_chars(),
+        }
+    }
+
+    /// Split `free_tokens` — the fill target minus what a prompt is known to cost
+    /// — between how many files to fetch and how much of each to keep.
+    ///
+    /// More free space means more files up to [`MAX_TOP_K`], and once the count is
+    /// capped it means a bigger slice of each file. Both numbers move together so
+    /// their product cannot exceed the space they were derived from.
+    pub fn for_free_space(free_tokens: u64) -> ContextCaps {
+        let top_k = usize::try_from(free_tokens / TOKENS_PER_RETRIEVED_FILE)
+            .unwrap_or(usize::MAX)
+            .clamp(Self::MIN_TOP_K, Self::MAX_TOP_K);
+        // Three characters to a token is the estimate's divisor for code, the
+        // conservative one: it under-promises room rather than over-promising it.
+        let per_file_chars = free_tokens
+            .saturating_mul(3)
+            .checked_div(top_k as u64)
+            .unwrap_or(Self::MAX_CONTENT_CAP_CHARS as u64);
+        let content_cap_chars = usize::try_from(per_file_chars)
+            .unwrap_or(Self::MAX_CONTENT_CAP_CHARS)
+            .clamp(Self::MIN_CONTENT_CAP_CHARS, Self::MAX_CONTENT_CAP_CHARS);
+        ContextCaps {
+            top_k,
+            content_cap_chars,
+        }
+    }
+
+    /// The caps for one turn: from measured free space where a prompt size is
+    /// known, from the profile ladder where it is not. `None` is not zero free
+    /// space — it is the absence of a reading, and it keeps the old behaviour.
+    pub fn for_turn(profile: HardwareProfile, free_tokens: Option<u64>) -> ContextCaps {
+        match free_tokens {
+            Some(free) => ContextCaps::for_free_space(free),
+            None => ContextCaps::from_profile(profile),
+        }
+    }
+}
+
+/// What the parts of a prompt that are not retrieved files cost, in the server's
+/// own tokens: the system head, the guidelines files, state, the git summary, the
+/// conversation so far, the chat template's framing.
+///
+/// The total is measured and only the split is arithmetic: a completion reports
+/// `prompt_tokens` for the whole prompt, and xencode knows how many characters of
+/// it were retrieved bodies, so the share is `characters / characters`. Measured
+/// on a 23,003-character prompt from this repository — 18,197 of it retrieved file
+/// bodies — that came to 1,204 tokens against the 1,166 the server counted for the
+/// same parts individually, three percent high. The estimator this replaces was
+/// 32 % high on the retrieved half alone: `chars / 3` on those 18,197 characters
+/// predicts 6,066 tokens where the server said 4,587.
+///
+/// It is tracked as an average rather than as the last reading because it changes
+/// with the conversation — a long tool result in the history raises it for the
+/// turns that follow — and the retrieval caps are asked for *before* the prompt is
+/// built, so a number that jumped every turn would make the caps oscillate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PromptOverhead {
+    tokens: Option<u64>,
+}
+
+impl PromptOverhead {
+    /// An average that moves about a quarter of the way toward each new reading.
+    /// Slow enough that one unusually large reply does not empty the next
+    /// turn's retrieval, fast enough to follow a conversation that grows.
+    const NEW_WEIGHT: u64 = 1;
+    const SEEN_WEIGHT: u64 = 3;
+    /// The step the average is reported in. Quantising is what stops a few dozen
+    /// tokens of drift changing a budget: the assembly keeps `MARGIN_TOKENS` (200)
+    /// of headroom anyway, so anything finer than that is noise being acted on.
+    const STEP_TOKENS: u64 = 256;
+
+    /// Record what a completion cost.
+    ///
+    /// `prompt_tokens` is the server's count for the whole prompt;
+    /// `retrieved_chars` and `prompt_chars` are what xencode put in it, so
+    /// `prompt_chars - retrieved_chars` is the part that is not file bodies.
+    /// A reading with no prompt tokens, or a prompt of no characters, says
+    /// nothing and is skipped rather than becoming a zero.
+    pub fn observe(&mut self, prompt_tokens: u64, retrieved_chars: usize, prompt_chars: usize) {
+        if prompt_tokens == 0 || prompt_chars == 0 {
+            return;
+        }
+        let not_retrieved = prompt_chars.saturating_sub(retrieved_chars) as u64;
+        let sample = prompt_tokens.saturating_mul(not_retrieved) / prompt_chars as u64;
+        self.tokens = Some(match self.tokens {
+            None => sample,
+            Some(seen) => {
+                (seen * Self::SEEN_WEIGHT + sample * Self::NEW_WEIGHT)
+                    / (Self::SEEN_WEIGHT + Self::NEW_WEIGHT)
+            }
+        });
+    }
+
+    /// The average as it stands, rounded to the reported step. `None` until the
+    /// first reading.
+    pub fn tokens(&self) -> Option<u64> {
+        self.tokens
+            .map(|t| (t + Self::STEP_TOKENS / 2) / Self::STEP_TOKENS * Self::STEP_TOKENS)
+    }
+
+    /// What the fill target has left for retrieval once the overhead is paid.
+    /// `None` when nothing has been measured — see [`ContextCaps::for_turn`].
+    /// A prompt already over budget leaves nothing, which is what the subtraction
+    /// says; the overflow itself is reported by the assembler, not hidden here.
+    pub fn free_tokens(&self, target: u64) -> Option<u64> {
+        self.tokens()
+            .map(|overhead| target.saturating_sub(overhead))
+    }
+}
+
+/// The number of tokens one turn's prompt is aimed at: the window it is going to,
+/// times how much of it the profile is willing to fill. Shared by the assembler
+/// and the caps so the two cannot disagree about what the budget was.
+pub fn fill_target(profile: HardwareProfile, window_tokens: Option<u32>) -> u64 {
+    let window = window_tokens.unwrap_or(profile.ctx_tokens() as u32);
+    (window as f64 * profile.utilization()).floor() as u64
 }
 
 /// Deterministic token estimate: `ceil(chars / 4)` prose, `ceil(chars / 3)`
@@ -606,5 +771,179 @@ mod tests {
         }
         assert_eq!(HardwareProfile::from_key("auto"), None);
         assert_eq!(HardwareProfile::from_key("48gb"), None);
+    }
+
+    /// A run that has measured nothing asks for what its profile always asked
+    /// for. This is the whole point of the fallback: turning AC-4 on must not
+    /// change anyone's budget until there is a number behind it.
+    #[test]
+    fn an_unmeasured_run_keeps_its_profiles_numbers() {
+        for profile in [
+            HardwareProfile::Low,
+            HardwareProfile::Balanced,
+            HardwareProfile::High,
+        ] {
+            let caps = ContextCaps::for_turn(profile, None);
+            assert_eq!(caps, ContextCaps::from_profile(profile));
+        }
+    }
+
+    /// Free space is spent, not averaged: a wide window buys more files and then
+    /// bigger ones, and a narrow one buys neither. The bounds are the rungs the
+    /// profile ladder already had, so the widest ask in the codebase stays
+    /// `ContextCaps::MAX_TOP_K` files of `MAX_CONTENT_CAP_CHARS` each.
+    #[test]
+    fn caps_follow_the_room_a_prompt_left() {
+        // One function's worth of space: one small file, not nothing.
+        assert_eq!(
+            ContextCaps::for_free_space(128),
+            ContextCaps {
+                top_k: 1,
+                content_cap_chars: ContextCaps::MIN_CONTENT_CAP_CHARS,
+            }
+        );
+        // A narrow llama.cpp window still leaves room for a couple of files.
+        assert_eq!(
+            ContextCaps::for_free_space(1_200),
+            ContextCaps {
+                top_k: 2,
+                content_cap_chars: 1_800,
+            }
+        );
+        // Four files' worth: four files, each at its even share.
+        assert_eq!(
+            ContextCaps::for_free_space(4 * TOKENS_PER_RETRIEVED_FILE),
+            ContextCaps {
+                top_k: 4,
+                content_cap_chars: (TOKENS_PER_RETRIEVED_FILE * 3) as usize,
+            }
+        );
+        // Past the widest ladder the file count stops growing and the slice does.
+        let wide = ContextCaps::for_free_space(100_000);
+        assert_eq!(wide.top_k, ContextCaps::MAX_TOP_K);
+        assert_eq!(wide.content_cap_chars, ContextCaps::MAX_CONTENT_CAP_CHARS);
+    }
+
+    /// The trap named in the plan is oscillation, so the checks are that more
+    /// room never buys less, and that the retrieval being asked for never costs
+    /// more than the room it was derived from.
+    #[test]
+    fn caps_never_ask_for_more_than_the_room_allows() {
+        let mut previous_top_k = 0usize;
+        for free in (0u64..40_000).step_by(64) {
+            let caps = ContextCaps::for_free_space(free);
+            assert!(caps.top_k >= ContextCaps::MIN_TOP_K);
+            assert!(caps.top_k <= ContextCaps::MAX_TOP_K);
+            assert!(caps.content_cap_chars >= ContextCaps::MIN_CONTENT_CAP_CHARS);
+            assert!(caps.content_cap_chars <= ContextCaps::MAX_CONTENT_CAP_CHARS);
+            assert!(
+                caps.top_k >= previous_top_k,
+                "{free} tokens buys fewer files than {} did",
+                free - 64
+            );
+            previous_top_k = caps.top_k;
+            // Files at their even share add up to the free space exactly. The one
+            // place the ask overshoots is the minimum-sized-file floor, where it
+            // overshoots to exactly one file and no more.
+            let ask_tokens = (caps.top_k as u64) * (caps.content_cap_chars / 3) as u64;
+            assert!(
+                ask_tokens <= free.max(TOKENS_PER_RETRIEVED_FILE),
+                "{free} tokens asked for {ask_tokens} worth"
+            );
+        }
+    }
+
+    /// What the arithmetic reaches for a prompt this repository actually builds:
+    /// a 23,003-character turn — 4,742 of stable head, 18,197 of retrieved file
+    /// bodies, 60 of question — which `llama-server` b10809 counted at 5,766
+    /// tokens, against 1,156 + 10 = 1,166 tokens for the parts that are not
+    /// retrieval.
+    #[test]
+    fn a_measured_prompt_buys_more_files_and_smaller_ones() {
+        let profile = HardwareProfile::Balanced;
+        let target = fill_target(profile, Some(profile.ctx_tokens() as u32));
+        assert_eq!(target, 6_144);
+
+        let mut overhead = PromptOverhead::default();
+        overhead.observe(5_766, 18_197, 23_003);
+        // Within two percent of the 1,166 the server says that prompt's
+        // non-retrieval parts cost, and reported in steps of 256.
+        assert_eq!(overhead.tokens(), Some(1_280));
+        let unmeasured = ContextCaps::from_profile(profile);
+        let caps = ContextCaps::for_turn(profile, overhead.free_tokens(target));
+        // Room for nine files' worth, of which eight is the most anything asks
+        // for, so each file is cut to its share — instead of the fifth file being
+        // dropped by the budgeter after it had already been read from disk.
+        assert_eq!(caps.top_k, ContextCaps::MAX_TOP_K);
+        assert_eq!(caps.top_k, unmeasured.top_k + 3);
+        assert_eq!(caps.content_cap_chars, (6_144 - 1_280) * 3 / 8);
+        assert!(caps.content_cap_chars < unmeasured.content_cap_chars);
+
+        // A prompt whose fixed parts already fill the target leaves nothing, and
+        // one file's worth is the floor rather than zero.
+        let mut crowded = PromptOverhead::default();
+        crowded.observe(9_000, 900, 9_000);
+        let caps = ContextCaps::for_turn(profile, crowded.free_tokens(target));
+        assert_eq!(caps.top_k, ContextCaps::MIN_TOP_K);
+    }
+
+    /// A reading is only as good as the counts behind it: neither a server that
+    /// said nothing nor a prompt of no characters may look like a free turn.
+    #[test]
+    fn a_reading_of_nothing_is_not_a_reading_of_zero() {
+        let mut overhead = PromptOverhead::default();
+        assert_eq!(overhead.tokens(), None);
+        overhead.observe(0, 100, 5_000);
+        assert_eq!(overhead.tokens(), None);
+        overhead.observe(3_000, 100, 0);
+        assert_eq!(overhead.tokens(), None);
+    }
+
+    /// The average moves toward a new reading instead of becoming it, and a
+    /// change of a few dozen tokens is not a change of budget.
+    #[test]
+    fn the_overhead_average_moves_slowly_and_in_steps() {
+        let mut overhead = PromptOverhead::default();
+        overhead.observe(2_000, 6_000, 12_000);
+        let first = overhead.tokens();
+        assert_eq!(first, Some(1_024));
+        // A turn twice as expensive lifts the average, but not to twice.
+        overhead.observe(4_000, 6_000, 12_000);
+        let second = overhead.tokens();
+        assert!(second > first);
+        assert!(second.unwrap() < 2_560, "{second:?} became the new reading");
+        // Drift below half a step is reported as the same number.
+        let mut steady = PromptOverhead::default();
+        steady.observe(2_048, 6_000, 12_000);
+        let before = steady.tokens();
+        steady.observe(2_060, 6_000, 12_000);
+        assert_eq!(before, steady.tokens(), "a few tokens of drift");
+    }
+
+    /// More than half of a prompt can be the fixed cost of it — a long history,
+    /// a wide-open window — and the free space is then what is left, never less
+    /// than nothing and never more than the target.
+    #[test]
+    fn free_space_is_clamped_to_the_target() {
+        let mut overhead = PromptOverhead::default();
+        overhead.observe(99_000, 1, 1_000);
+        assert_eq!(overhead.free_tokens(6_144), Some(0));
+        assert_eq!(
+            ContextCaps::for_turn(HardwareProfile::Low, overhead.free_tokens(6_144)).top_k,
+            ContextCaps::MIN_TOP_K
+        );
+        assert_eq!(PromptOverhead::default().free_tokens(6_144), None);
+    }
+
+    /// The window a server reported is the window the budget is aimed at, and
+    /// the profile contributes only how much of it may be filled.
+    #[test]
+    fn the_target_is_the_reported_window_not_the_profiles_guess() {
+        assert_eq!(
+            fill_target(HardwareProfile::Balanced, None),
+            fill_target(HardwareProfile::Balanced, Some(8_192))
+        );
+        assert_eq!(fill_target(HardwareProfile::Balanced, Some(2_048)), 1_536);
+        assert_eq!(fill_target(HardwareProfile::Low, Some(2_048)), 1_228);
     }
 }

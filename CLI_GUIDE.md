@@ -247,12 +247,14 @@ to an empty file: `hardware: BALANCED profile this machine reported no memory si
 so the default applies`.
 
 What the profile is not: a statement about the graphics card. Nothing here reads
-`nvidia-smi`, because the window a run fills is the one AC-1 asks the server for,
-and a card sitting in the machine may not be what serves the model. In the TUI the
-same decision appears in `/ctx kv`, where the profile line carries its reason —
-`🗂 Profile BALANCED (from 15.4 GiB of RAM) — ctx 8192 · utilization 75% · top-k 5`,
-which becomes `🗂 Profile LOW (set in config) — ctx 4096 · utilization 60% · top-k 3`
-when `hardware_profile` says `low`.
+`nvidia-smi`, because the window a run fills is the one asked of the server at
+startup, and a card sitting in the machine may not be what serves the model. In
+the TUI the same decision appears in `/ctx kv`, where the profile line carries its
+reason and the retrieval it has decided on —
+`🗂 Profile BALANCED (from 15.4 GiB of RAM) — ctx 8192 · utilization 75% ·
+retrieval top-5 at 16000 characters each, from the profile's own numbers, with no
+prompt measured yet` — and where `hardware_profile` in the config says which of
+those numbers came from the machine and which from a word someone set.
 
 The same profile now also decides how a server this program starts is launched:
 `xencode llamacpp start` and the TUI's auto-start pass a preset that matches the
@@ -271,10 +273,17 @@ counts as, through the server's own `/tokenize` endpoint, and prints the two
 side by side:
 
 ```console
-$ xencode query --model llama:dolphin "What does est_tokens do?"
-context: 8192-token window reported by the server at http://localhost:8080
-context: 113 tokens counted by the server, 88 by character arithmetic
+$ xencode query "Which module owns the caps?"
+hardware: BALANCED profile from 15.4 GiB of RAM
+retrieval: up to 5 files, 16000 characters each (character arithmetic, not measured)
+context: 8192-token window reported by the server at http://127.0.0.1:8080
+context: 1311 tokens counted by the server, 1313 by character arithmetic
 ```
+
+The `retrieval:` line is said out loud because a command that runs once has no
+earlier turn to size itself from: it uses the profile's own numbers and does not
+pretend they were measured. An interactive session scales them instead — see
+[How much retrieval gets](#how-much-retrieval-gets) below.
 
 Neither number is simply the better one, which is why both are shown. The counted
 number describes the text the turn is made of and nothing else: the chat
@@ -300,10 +309,20 @@ own refusal arrives only after the request.
 
 The count is asked once per turn, of the server that turn goes to, and only when
 the model is served by llama.cpp; an Ollama run has no counting endpoint and keeps
-the character figure. A server that does not answer `/tokenize` — or that answers
-in a way xencode does not recognise, which includes a build that has never heard
-of the field the request uses — is reported as not having counted the prompt,
-rather than believed to have counted it as zero.
+the character figure. A server that gives no count and a server that was never
+asked are different answers, and each prints its own line rather than one
+sentence covering both:
+
+```console
+context: 1313 tokens by character arithmetic (this server gave no count for /tokenize)
+context: 1313 tokens by character arithmetic (no count could be asked of this server: llama.cpp API error: error sending request for url (http://127.0.0.1:8096/tokenize))
+```
+
+The first is a server that answered the request and refused it — including a build
+that has never heard of the field the request uses — and the second is one that was
+not reachable at all. Neither is reported as a prompt of zero tokens. Both lines
+were run rather than reasoned about: the refusal against a server replying `404` to
+every request, the unreachable one against a port nothing listens on.
 
 In the TUI the same question is asked in the background, so no turn waits for it:
 a `/ctx` preview prints the count next to its estimate, and a real turn stays
@@ -317,8 +336,72 @@ characters priced Rust files at +26% to +40% above what this model's vocabulary
 needs, because this vocabulary reads Rust at about four characters per token.
 Nothing has been retuned on the strength of one vocabulary: a divisor fitted to
 one model is wrong for the next, and the answer to a wrong divisor is the count
-above rather than a better guess. The caps AC-4 scales are the next thing that
-should read this number.
+above rather than a better guess. The retrieval caps now read the server's own
+number instead of the divisor — see below.
+
+#### How much retrieval gets
+
+Retrieval has to fit in what the rest of the prompt leaves, and until now it did
+not look: the hardware profile fixed both numbers, five files on a balanced
+machine and 16,000 characters of each, whatever the conversation already held.
+
+An interactive session now scales those two numbers from what the server said the
+last prompt cost. What counts as overhead is everything in a prompt that is not a
+retrieved file body — the system head, the guidelines files, project state, the
+git summary, the conversation so far, and the framing the chat template adds — and
+its size is the server's own `prompt_tokens` for the request, with the retrieved
+share taken out by proportion of characters. A turn that cost 5,766 tokens of
+which 18,197 of 23,003 characters were file bodies leaves 1,204 tokens of
+overhead; counting those same parts one at a time gave 1,166, so the split is
+three percent high, where the character divisor it replaces was 32 % high on the
+retrieved half alone (6,066 predicted for bodies the server read as 4,587).
+
+That figure is averaged rather than taken from the last turn, and the average is
+only ever reported rounded to a multiple of 256 tokens. Both are there for the
+same reason: the caps are chosen before the next prompt is built, so a number that
+moved with every reply would make retrieval oscillate between turns. A new reading
+moves the average about a quarter of the way toward itself, and drift smaller than
+a step changes nothing at all.
+
+The room that is left then buys files at 512 tokens each: the file count is that
+many tokens at a time, held between one and eight, and the characters kept from
+each file are the remaining space divided at three characters per token, held
+between 1,536 and 24,000. Space below the eight-file ceiling buys *more files* at
+roughly the smallest excerpt worth sending; only past the ceiling does it buy
+longer ones. So the character figure can go down while the budget goes up, and
+what is guaranteed instead is that the whole retrieval cannot exceed the room it
+was given.
+
+In `/ctx kv`, and in the header of a `/ctx <query>` preview, this is visible in
+words:
+
+```console
+🗂 Profile BALANCED (from 15.4 GiB of RAM) — ctx 8192 · utilization 75% · retrieval top-5 at 16000 characters each, from the profile's own numbers, with no prompt measured yet
+🗂 Profile BALANCED (from 15.4 GiB of RAM) — ctx 8192 · utilization 75% · retrieval top-6 at 1536 characters each, from 3072 tokens of prompt the server measured
+🎯 Retrieval (BALANCED profile, top-6 of 6, 1664 characters each, room left after 2816 tokens of prompt):
+```
+
+The first two are one session in this repository against a server started with
+`--ctx-size 8192`, before and after its first real turn: 6144 tokens of fill target
+minus a 3072-token prompt leaves 3072 for retrieval, which is six files, and each
+file at the 1,536-character floor. That turn's metrics row read `BALANCED — prompt
+3018 · cached 0 · reuse 0%`, and the turn after it reported 2841 of 5611 tokens read
+from the cache. The third line is a `/ctx <query>` preview from an earlier session of
+the same build, and its figures differ for the same reason the others do not repeat:
+a prompt measured in another conversation costs a different amount.
+
+A streamed answer carries no usage unless the request asks for it, and until now none
+of them did, so the figures above are the first ones that came from the server rather
+than from xencode's own arithmetic.
+
+Because the overhead includes the conversation, a long chat narrows retrieval as
+it fills up. That is the intended direction — the room is the room — but it is
+also counted twice, since history has its own trimming, so a long conversation
+errs toward fetching less rather than overflowing.
+
+Neither scaling applies where there is nothing to average: `xencode query` runs
+once and says so on its `retrieval:` line, and a model served by Ollama has no
+usage reported on a stream, so that route keeps the profile's numbers.
 
 #### Repeatable answers: `--seed`, and what it does not cover
 

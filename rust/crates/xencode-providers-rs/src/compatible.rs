@@ -18,7 +18,20 @@ use crate::{AgentStep, ProviderError, ToolDefinition};
 #[derive(Debug)]
 pub(crate) struct StreamOutcome {
     pub step: AgentStep,
+    pub usage: UsageCounts,
+}
+
+/// What a server said the request cost, from the `usage` object the last chunk of
+/// a stream carries. All three are the server's own counts: `prompt_tokens` is
+/// the whole prompt including the chat template, and `cached_tokens` is how much
+/// of it was already in the server's memory — measured on `llama-server` b10809,
+/// where a first-seen prompt of 3,202 tokens reported 1 cached and the same prompt
+/// sent again reported 3,201.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct UsageCounts {
     pub completion_tokens: u64,
+    pub prompt_tokens: u64,
+    pub cached_tokens: u64,
 }
 
 /// Generic client for any OpenAI-compatible `/chat/completions` endpoint.
@@ -230,7 +243,7 @@ where
         .to_string();
     let mut stream = response.bytes_stream();
     let mut text = String::new();
-    let mut completion_tokens: u64 = 0;
+    let mut usage = UsageCounts::default();
     let mut acc = ToolCallAccumulator::default();
     let mut lines = crate::frames::FrameLines::default();
     // Kept only for a recording: the bytes as they arrived, before the frame
@@ -245,24 +258,10 @@ where
             raw.extend_from_slice(&chunk);
         }
         lines.feed(&chunk, &mut |line| {
-            ingest_line(
-                line,
-                &mut text,
-                &mut completion_tokens,
-                &mut acc,
-                &mut callback,
-            )
+            ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback)
         });
     }
-    lines.finish(&mut |line| {
-        ingest_line(
-            line,
-            &mut text,
-            &mut completion_tokens,
-            &mut acc,
-            &mut callback,
-        )
-    });
+    lines.finish(&mut |line| ingest_line(line, &mut text, &mut usage, &mut acc, &mut callback));
 
     // A body that is not text is not recorded at all: half of it written down
     // would come back later as an answer the model never gave.
@@ -286,7 +285,7 @@ where
             text,
             tool_calls: acc.finish(),
         },
-        completion_tokens,
+        usage,
     })
 }
 
@@ -294,7 +293,7 @@ where
 pub(crate) fn ingest_line<F: FnMut(&str)>(
     line: &str,
     text: &mut String,
-    completion_tokens: &mut u64,
+    usage: &mut UsageCounts,
     acc: &mut ToolCallAccumulator,
     callback: &mut F,
 ) {
@@ -308,13 +307,39 @@ pub(crate) fn ingest_line<F: FnMut(&str)>(
     let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
         return;
     };
-    // The final chunk carries usage (with an empty choices array).
-    if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-        if let Some(tokens) = usage.get("completion_tokens").and_then(|v| v.as_u64()) {
-            *completion_tokens = tokens;
+    // The final chunk carries usage (with an empty choices array). A server only
+    // sends that chunk when asked — see `ask_for_usage`.
+    if let Some(counts) = json.get("usage").and_then(|u| u.as_object()) {
+        if let Some(tokens) = counts.get("completion_tokens").and_then(|v| v.as_u64()) {
+            usage.completion_tokens = tokens;
+        }
+        if let Some(tokens) = counts.get("prompt_tokens").and_then(|v| v.as_u64()) {
+            usage.prompt_tokens = tokens;
+        }
+        if let Some(tokens) = counts
+            .get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+        {
+            usage.cached_tokens = tokens;
         }
     }
     tools::ingest_oai_chunk(&json, text, acc, callback);
+}
+
+/// Ask an OpenAI-style server to say what the request cost.
+///
+/// Without this the streaming answer carries no `usage` object at all, which was
+/// measured on `llama-server` b10809: the same request sent as a stream returned
+/// six chunks and no token counts, and with this key added it returned a seventh
+/// carrying `prompt_tokens: 2222, cached_tokens: 2221`. A stream that ends without
+/// usage is then the same case as before — nothing is invented for it.
+///
+/// Only the llama.cpp requests ask. How a hosted server reacts to an unknown key
+/// in a stream request is unverified here, and an answer that stops arriving is
+/// worse than a token count we do not have.
+pub(crate) fn ask_for_usage(payload: &mut serde_json::Value) {
+    payload["stream_options"] = serde_json::json!({ "include_usage": true });
 }
 
 #[cfg(test)]
@@ -335,6 +360,62 @@ mod tests {
         assert_eq!(p.completions_url(), "https://x.example/v1/chat/completions");
         let p = OpenAICompatibleProvider::new("https://x.example/v1", None);
         assert_eq!(p.completions_url(), "https://x.example/v1/chat/completions");
+    }
+
+    /// The last chunk of a streamed answer carries the counts, with no text in
+    /// it. A chunk with neither is a heartbeat, not an answer.
+    #[test]
+    fn the_final_stream_chunk_carries_the_servers_counts() {
+        let mut text = String::new();
+        let mut usage = UsageCounts::default();
+        let mut acc = ToolCallAccumulator::default();
+        ingest_line(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}",
+            &mut text,
+            &mut usage,
+            &mut acc,
+            &mut |_| {},
+        );
+        ingest_line(
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2222,\
+             \"completion_tokens\":7,\
+             \"prompt_tokens_details\":{\"cached_tokens\":2221}}}",
+            &mut text,
+            &mut usage,
+            &mut acc,
+            &mut |_| {},
+        );
+        assert_eq!(text, "hi");
+        assert_eq!(usage.prompt_tokens, 2222);
+        assert_eq!(usage.cached_tokens, 2221);
+        assert_eq!(usage.completion_tokens, 7);
+    }
+
+    /// A server that answers without a `usage` object at all — which is what a
+    /// stream looks like when it was never asked for one — leaves the counts at
+    /// zero rather than inventing them.
+    #[test]
+    fn a_stream_that_reports_nothing_costs_nothing_as_far_as_we_know() {
+        let mut text = String::new();
+        let mut usage = UsageCounts::default();
+        let mut acc = ToolCallAccumulator::default();
+        ingest_line(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}",
+            &mut text,
+            &mut usage,
+            &mut acc,
+            &mut |_| {},
+        );
+        assert_eq!(usage, UsageCounts::default());
+    }
+
+    /// Sending the key is not optional: measured on `llama-server` b10809, the
+    /// same request as a stream carried no usage at all until this was added.
+    #[test]
+    fn a_streamed_llama_request_asks_for_its_own_cost() {
+        let mut payload = serde_json::json!({"model": "m", "stream": true});
+        ask_for_usage(&mut payload);
+        assert_eq!(payload["stream_options"]["include_usage"], true);
     }
 
     #[test]

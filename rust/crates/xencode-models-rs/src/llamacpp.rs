@@ -32,31 +32,73 @@ struct OpenAIModelEntry {
 }
 
 /// Completion timing and token usage reported by a llama.cpp server.
+///
+/// The three token counts come from the server's own `usage` object on a
+/// completion response. Measured on `llama-server` b10809 hosting a 0.6B Q4_K_M
+/// GGUF, with a 23,003-character prompt made of a 4,742-character stable head,
+/// 18,197 characters of retrieved file bodies and a 60-character question:
+///
+/// | what was asked | what came back |
+/// | --- | --- |
+/// | the prompt as one chat request | `prompt_tokens: 5766` |
+/// | the same text, no conversation sent yet | `cached_tokens: 1` |
+/// | that request sent again, unchanged | `cached_tokens: 5765` |
+/// | the same text through `/tokenize` | 5753 tokens |
+///
+/// `prompt_tokens` is therefore the whole prompt including the chat template's
+/// framing, and the difference from a plain `/tokenize` of the same text is 13
+/// tokens for a two-message request — the template, not the content.
+/// `cached_tokens` is a reading of the server's own memory rather than arithmetic,
+/// which is why it is kept: it is the only number here that says whether the
+/// byte-stable prefix did its job.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LlamaCppTimings {
     /// Number of tokens generated.
     pub tokens_generated: u64,
-    /// Number of tokens consumed as prompt.
+    /// Prompt tokens the server had to evaluate this time, which is its prompt
+    /// total minus whatever prefix it reused.
     pub tokens_evaluated: u64,
+    /// Whole prompt size as the server counted it, chat template included.
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    /// Prompt tokens reused from the server's own memory rather than evaluated.
+    #[serde(default)]
+    pub cached_tokens: u64,
     /// Generation throughput in tokens per second (tok/s).
     pub predicted_per_second: f64,
-    /// Prompt processing throughput in tokens per second.
+    /// Prompt processing throughput in tokens per second. A completion response
+    /// says how many prompt tokens there were, not how long evaluating them took,
+    /// so this stays unmeasured unless a server says otherwise.
     pub prompt_per_second: f64,
     /// Total wall clock time of the generation in seconds.
     pub total_seconds: f64,
 }
 
 impl LlamaCppTimings {
-    /// Compute throughput from a token count and elapsed time.
-    pub fn from_elapsed(tokens: u64, elapsed: f64) -> Self {
+    /// Build the record from what a completion response's `usage` said.
+    ///
+    /// `prompt_tokens` and `cached_tokens` arrive as the server's counts;
+    /// `tokens_evaluated` is derived from them rather than reported, and
+    /// saturating so a server that claims more reuse than prompt cannot produce
+    /// a negative evaluation.
+    pub fn from_usage(
+        generated: u64,
+        prompt_tokens: u64,
+        cached_tokens: u64,
+        elapsed: f64,
+    ) -> Self {
         Self {
-            tokens_generated: tokens,
+            tokens_generated: generated,
+            tokens_evaluated: prompt_tokens.saturating_sub(cached_tokens),
+            prompt_tokens,
+            cached_tokens,
             predicted_per_second: if elapsed > 0.0 {
-                tokens as f64 / elapsed
+                generated as f64 / elapsed
             } else {
                 0.0
             },
-            ..Self::default()
+            prompt_per_second: 0.0,
+            total_seconds: elapsed,
         }
     }
 }
@@ -943,17 +985,39 @@ mod tests {
         assert!(opts.min_p.is_none());
     }
 
+    /// The record a completion response's `usage` produces: what the server
+    /// counted, what it reused, and what is left over as the work it actually did.
     #[test]
-    fn timings_from_elapsed_computes_rate() {
-        let t = LlamaCppTimings::from_elapsed(100, 2.0);
+    fn timings_keep_the_servers_counts_and_derive_the_work() {
+        // The numbers from a real b10809 reply: 3,202 prompt tokens, of which
+        // 3,201 were already in memory.
+        let t = LlamaCppTimings::from_usage(100, 3202, 3201, 2.0);
         assert_eq!(t.tokens_generated, 100);
+        assert_eq!(t.prompt_tokens, 3202);
+        assert_eq!(t.cached_tokens, 3201);
+        assert_eq!(
+            t.tokens_evaluated, 1,
+            "a reused prefix is not work the server repeated"
+        );
         assert_eq!(t.predicted_per_second, 50.0);
+        assert_eq!(t.total_seconds, 2.0);
+        // Nothing is claimed about prompt speed that the response does not say.
+        assert_eq!(t.prompt_per_second, 0.0);
+
+        let cold = LlamaCppTimings::from_usage(8, 3202, 1, 4.0);
+        assert_eq!(cold.tokens_evaluated, 3201, "a first prompt is all work");
     }
 
+    /// A server that reports more reuse than prompt is nonsense rather than a
+    /// panic or a wrap-around into a huge evaluation count.
     #[test]
-    fn timings_from_elapsed_zero_time_is_zero_rate() {
-        let t = LlamaCppTimings::from_elapsed(100, 0.0);
+    fn timings_survive_no_elapsed_time_and_too_much_reuse() {
+        let t = LlamaCppTimings::from_usage(100, 0, 0, 0.0);
         assert_eq!(t.predicted_per_second, 0.0);
+        assert_eq!(t.tokens_evaluated, 0);
+
+        let impossible = LlamaCppTimings::from_usage(10, 5, 500, 1.0);
+        assert_eq!(impossible.tokens_evaluated, 0, "{impossible:?}");
     }
 
     #[test]

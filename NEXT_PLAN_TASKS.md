@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, tui
-- [x] Workspace gates green — 15 crates, 1099 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1110 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3303,6 +3303,13 @@ the ledger already.
   "adaptive context engine" that isn't already planned. *Trap:* oscillation
   without hysteresis, and the chars/3–4 estimator is often ±20–30% on code — so
   this is adapting on noise until **AC-5** exists.
+  *(Done 2026-09-25 — see W2 progress. Its premise needed fixing first: a streamed
+  request records no `usage` unless it asks for one, so nothing was being recorded
+  per request at all, and the overhead is now measured from the counts the server
+  gives back for the prompt it actually received. The oscillation trap is answered
+  twice over — an average weighted toward what it already knows, reported only in
+  256-token steps — and the estimator trap does not apply, because the numbers
+  scaled from are the server's own rather than characters divided by three.)*
 - **AC-5 — Tokenizer truth**: `llama-server`'s `/tokenize` endpoint *(UNVERIFIED
   that pinned build b11120 exposes it — check `--help` before planning work)*, or
   a pure-Rust GGUF vocab read (`llama-gguf`, `shimmytok`) offline; count the
@@ -6259,6 +6266,124 @@ done-when is met, and the commit that does it names the IDs.
   flags, while an unparseable value yields the report and no flag. Two were confirmed
   by breaking what they guard — letting a negative budget through, and dropping the
   reasoning flags out of the launch command — and watching each fail.
+- [x] `AC-4` — 2026-09-25, the seventh item of W2. How many files retrieval fetches
+  and how much of each it sends were three constants per hardware profile; they are
+  now derived from the room this conversation's own prompt left, measured by the
+  server that ran it.
+  **The item's premise was false and had to be fixed first.** It asks for "a
+  prompt-overhead EMA from the `usage` already recorded per request", and no such
+  usage was recorded: a streamed completion carries no `usage` object unless the
+  request asks for one. Measured on `llama-server` b10809, the same request sent as
+  a stream returned six chunks and no counts, and with
+  `stream_options: {"include_usage": true}` added it returned a seventh carrying
+  `prompt_tokens: 2222, cached_tokens: 2221`. What the row carried instead was
+  arithmetic wearing the same clothes: the timings object was built from a token
+  count and an elapsed time and nothing else, so `tokens_evaluated` was always zero,
+  and `cached_tokens = prompt − evaluated` therefore equalled the whole prompt —
+  every llama.cpp turn reported 100% reuse and the panel's `⚡` line reported
+  `evaluated 0`. That is read off the previous commit's code rather than off a
+  stored row, because no llama.cpp turn row predates this change: the route had not
+  been run with a binary that wrote one. Streams now ask, on the llama.cpp routes
+  only: how a hosted server reacts to an unknown key in a stream request was not
+  verified here, and an answer that stops arriving is a worse trade than a count we
+  do not have. A request whose server reported nothing records nothing, rather than
+  a turn that cost zero.
+  **Measured before any arithmetic was written**, on b10809 with the 0.6B Q4_K_M
+  model and a 23,003-character prompt built from this repository — a 4,742-character
+  stable head, 18,197 characters of retrieved file bodies, a 60-character question:
+
+  | what was asked of the server | what came back |
+  | --- | --- |
+  | the prompt as one two-message chat request | `prompt_tokens: 5766` |
+  | that request, first time the server saw it | `cached_tokens: 1` |
+  | the same request sent again, unchanged | `cached_tokens: 5765` |
+  | the whole prompt through `/tokenize` | 5753 tokens |
+  | its head, its retrieved bodies, its question, each through `/tokenize` | 1156, 4587, 10 |
+
+  Three things follow from that table. The three parts sum to the whole exactly, so
+  counting the tiers separately buys nothing for the joins the assembler makes
+  between them. A plain `/tokenize` of the prompt under-counts the chat request by 13
+  tokens out of 5,753, which is the framing a chat template adds around each message:
+  small enough that the count AC-5 asks for can be used as it stands instead of being
+  corrected upward. And the estimator this item displaces priced those retrieved
+  bodies at 6,066 tokens where the server said 4,587: 32% high, on Rust averaging
+  3.97 characters per token where the code divisor assumes three.
+  **The overhead, and what is arithmetic in it.** The total is the server's; only
+  the split is arithmetic — `prompt_tokens × (prompt_chars − retrieved_chars) /
+  prompt_chars`, everything in a prompt that is not a retrieved file body. On the
+  fixture above that gives 1,204 tokens where the same parts counted individually
+  gave 1,166, three percent high. Hysteresis, which the item names as the trap, is
+  handled twice: the average moves a quarter of the way toward each new reading,
+  and it is only ever reported rounded to 256-token steps — finer than that is
+  noise, and the assembly keeps 200 tokens of margin anyway.
+  **The room then buys files at 512 tokens each** (`TOKENS_PER_RETRIEVED_FILE`):
+  the count is `free / 512` clamped to the 1–8 range the ladder already used, and
+  each file's character cap is the remaining room shared equally at three
+  characters per token, clamped to 1,536–24,000. Under the count ceiling every
+  file gets the 1,536-character floor and extra room buys *more files*; only once
+  eight are asked for does extra room buy *bigger* ones. That is why nothing asserts
+  that the character cap grows with free space — 1,023 tokens free buys one file of
+  3,069 characters and 1,024 buys two of 1,536, fewer characters each. What is
+  asserted, over a sweep of free space from 0 to 40,000, is that the file count
+  never falls as room grows and that the retrieval can never exceed the room it was
+  given.
+  **Live through the product**, in this repository against a server running an 8192
+  token window, in a fresh session with xencode's own response caching switched off so
+  the first turn had nothing cached to lean on. Before any request had been measured,
+  `/ctx kv` said so and kept the profile's numbers: `🗂 Profile BALANCED (from 15.4
+  GiB of RAM) — ctx 8192 · utilization 75% · retrieval top-5 at 16000 characters
+  each, from the profile's own numbers, with no prompt measured yet` — the ladder,
+  which is also what the test holding an unmeasured run's behaviour asserts. After
+  the first real turn of that session it printed `retrieval top-6 at 1536 characters
+  each, from 3072 tokens of prompt the server measured`, which is the room arithmetic
+  coming out as designed: 6144 tokens of fill target minus a 3072-token overhead
+  leaves 3072, six files at 512 tokens each, and each file at the 1,536-character
+  floor. The panel's row for that turn read `BALANCED — prompt 3018 · cached 0 ·
+  reuse 0% · 22.265879 tok/s` with `⚡ Last llama.cpp run — evaluated 3018 ·
+  generated 403` under it, and 3018 − 0 = 3018 is the server's own two figures, not a
+  third reading. A second turn in the same conversation then wrote the row that makes
+  the column worth having: `prompt_tokens: 5611, cached_tokens: 2841,
+  completion_tokens: 275` in `.xencode/cache/metrics.jsonl` — half a warm prompt
+  served from the cache. That one is quoted from the file rather than the panel
+  because the session was already answering the second turn when its pane stopped
+  redrawing, so the number was read where it was written.
+  **Where it errs, stated rather than smoothed over.** The overhead is "everything
+  that is not a retrieved file", which includes the conversation so far, so a long
+  chat tightens retrieval caps on the turns that follow. That is the direction the
+  item wants — the room is the room — but it counts history twice, once here and
+  once in the history tier's own trimming, so a long conversation gets a smaller
+  retrieval than strictly necessary rather than an overflowing one.
+  **Not done, on purpose.** `xencode query` keeps the profile's numbers and prints
+  `retrieval: up to 5 files, 16000 characters each (character arithmetic, not
+  measured)`, because a command that runs once has no earlier request to scale from
+  and an average of one reading is not a hedge against anything; the honest fix there
+  is the `/tokenize` count AC-5 already makes before the request goes out, not an
+  EMA. The Ollama route keeps the constants too — that server reports no usage on a
+  stream, so there is nothing to average. And the count line the same command prints
+  when it cannot get a number was split into the two answers it now gives, because
+  one sentence covered both: `this server gave no count for /tokenize` for a server
+  that answered and refused, verified against a stub replying 404, and
+  `no count could be asked of this server: …` for one that was not there, verified
+  against a port nothing listens on. A live server gives the third:
+  `context: 1311 tokens counted by the server, 1313 by character arithmetic`.
+  Verified by 1110 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Thirteen tests are new and two are gone: the two that checked
+  a rate computed from elapsed time alone went with the constructor they tested,
+  replaced by one that the server's three counts survive a round trip and that
+  `evaluated` is the difference rather than a report, and one that no elapsed time
+  and absurdly much reuse produce a zero rate and no negative work. In the context
+  crate: an unmeasured run keeps the profile's numbers, the caps follow the room a
+  prompt left, the caps never ask for more than the room allows, a measured prompt
+  buys more files and smaller ones, a reading of nothing is not a reading of zero,
+  the average moves slowly and in steps, free space is clamped to the target, and
+  the target is the reported window rather than the profile's guess. On the wire:
+  the last chunk of a real captured stream fills all three counts, a stream that
+  reports none leaves the record untouched, and a streamed llama.cpp request carries
+  the key that asks. Four of them were confirmed by breaking what they guard —
+  releasing the eight-file ceiling, charging the overhead to the retrieved share
+  instead of the rest, reporting the average unrounded, and never setting
+  `stream_options` — and watching each fail with the number it was guarding.
 
 #### W2 — The model/inference substrate — 15 items
 

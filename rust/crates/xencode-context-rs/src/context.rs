@@ -8,7 +8,10 @@
 //! Pure/disk-free (`assemble_prompt` takes strings and pre-built fenced
 //! blocks), which keeps the budget logic unit-testable without a repository.
 
-use crate::budget::{est_tokens, truncate_tail_to_tokens, truncate_to_tokens, HardwareProfile};
+use crate::budget::{
+    est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, ContextCaps,
+    HardwareProfile,
+};
 use crate::gitinfo::{current_git_info, dirty_paths};
 use crate::index::FileEntry;
 use crate::retrieve::{retrieve, RetrievalIndex, RetrieveOptions, RetrievedFile};
@@ -321,6 +324,10 @@ pub struct ChatAssembly {
     pub soft_compaction_needed: bool,
     pub retrieved_included: usize,
     pub retrieved_total: usize,
+    /// Characters across the [`retrieved_included`] bodies, with their `File:`
+    /// header and code fence. Kept so a server's token count for a prompt can be
+    /// split between retrieval and the fixed cost of a turn.
+    pub retrieved_chars_included: usize,
     /// Which files those [`retrieved_included`] bodies came from, best-match
     /// first — the ones the budget kept, not the candidates it trimmed. The
     /// turn trace records this list so a turn can be asked what it was looking
@@ -347,6 +354,19 @@ impl ChatAssembly {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+
+    /// Characters of prompt text, which is what a server's token count for it is
+    /// a proportion of — see [`crate::PromptOverhead::observe`].
+    pub fn prompt_chars(&self) -> usize {
+        self.turns.iter().map(|turn| turn.content.len()).sum()
+    }
+
+    /// Characters of the retrieved file bodies that made it into this prompt,
+    /// which is the part of it that is project code rather than the fixed cost of
+    /// a turn. Zero when the budget kept no files.
+    pub fn retrieved_chars(&self) -> usize {
+        self.retrieved_chars_included
+    }
 }
 
 /// Build the per-turn chat messages the model actually receives.
@@ -361,10 +381,7 @@ impl ChatAssembly {
 pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     // The model's real window when known (Step 3 capabilities); the profile
     // only supplies the default window plus the fill/utilization policy.
-    let window = input
-        .context_window
-        .unwrap_or(input.profile.ctx_tokens() as u32);
-    let target = (window as f64 * input.profile.utilization()).floor() as u64;
+    let target = fill_target(input.profile, input.context_window);
     let mut tiers: Vec<TierDoc> = Vec::new();
     let mut truncated = false;
 
@@ -421,6 +438,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
     // ── Tier 6: retrieved files ──────────────────────────────────────────
     let retrieved_total = input.retrieved.len();
     let mut retrieved_included = 0usize;
+    let mut retrieved_chars_included = 0usize;
     let mut retrieved_head: Vec<RetrievedBlock> = Vec::new();
     for block in input.retrieved {
         let block_tok = est_tokens(block.body.len(), true);
@@ -430,6 +448,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         }
         remaining = remaining.saturating_sub(block_tok);
         retrieved_included += 1;
+        retrieved_chars_included += block.body.len();
         tiers.push(TierDoc {
             name: "retrieved",
             tokens: block_tok,
@@ -518,6 +537,7 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         retrieved_included,
         retrieved_total,
         retrieved_files: retrieved_head.iter().map(|b| b.path.clone()).collect(),
+        retrieved_chars_included,
         history_kept,
         history_total,
     }
@@ -542,9 +562,13 @@ pub struct LiveContext {
 /// Gather project context for one user query: stable-layer files, git summary,
 /// and deterministic retrieval against the `/init` index when present.
 ///
+/// `caps` is how much retrieval this turn may ask for — see
+/// [`ContextCaps::for_turn`] for where the number comes from, since retrieval
+/// happens here and therefore cannot see the prompt it is being retrieved for.
+///
 /// Never fails — every source degrades to empty independently, so a missing
 /// index or unreadable file can never break a generation.
-pub fn collect_live_context(root: &Path, query: &str, profile: HardwareProfile) -> LiveContext {
+pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> LiveContext {
     let xencode = root.join(crate::XENCODE_DIR);
     let agents_md = std::fs::read_to_string(root.join("AGENTS.md")).ok();
     let anchor_md = std::fs::read_to_string(xencode.join("anchor.md")).ok();
@@ -556,10 +580,10 @@ pub fn collect_live_context(root: &Path, query: &str, profile: HardwareProfile) 
     if let Some(index) = RetrievalIndex::load(&xencode) {
         index_present = true;
         let changed: HashSet<String> = dirty_paths(root).into_iter().collect();
-        let opts = RetrieveOptions::for_live_chat(profile.top_k());
+        let opts = RetrieveOptions::for_live_chat(caps.top_k);
         let results = retrieve(query, &index, &changed, &opts);
         retrieved_total = results.len();
-        blocks = read_retrieved_bodies(root, &index.files, &results, profile.content_cap_chars());
+        blocks = read_retrieved_bodies(root, &index.files, &results, caps.content_cap_chars);
     }
     LiveContext {
         agents_md,
@@ -1050,7 +1074,11 @@ mod tests {
         let dir = fixture_project("indexed");
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         init_project(&dir, cancel, |_| {}).expect("fixture /init must succeed");
-        let live = collect_live_context(&dir, "authenticate", HardwareProfile::Balanced);
+        let live = collect_live_context(
+            &dir,
+            "authenticate",
+            ContextCaps::from_profile(HardwareProfile::Balanced),
+        );
         assert!(live.index_present);
         assert!(live.retrieved_total > 0);
         assert!(!live.blocks.is_empty());
@@ -1087,7 +1115,11 @@ mod tests {
     #[test]
     fn live_context_without_index_reports_missing() {
         let dir = fixture_project("plain");
-        let live = collect_live_context(&dir, "authenticate", HardwareProfile::Balanced);
+        let live = collect_live_context(
+            &dir,
+            "authenticate",
+            ContextCaps::from_profile(HardwareProfile::Balanced),
+        );
         assert!(!live.index_present);
         assert!(live.blocks.is_empty());
         // The model still gets identity + guidelines + the question.
