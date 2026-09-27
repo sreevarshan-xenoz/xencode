@@ -377,6 +377,12 @@ enum Commands {
         action: HwAction,
     },
 
+    /// How fast this repository's history is to ask about, and how to speed it up
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+    },
+
     /// Launch the Terminal User Interface
     Tui,
 }
@@ -596,6 +602,40 @@ enum HwAction {
 }
 
 #[derive(Subcommand)]
+enum HistoryAction {
+    /// Show which history indexes exist here and time the queries that use them
+    Status {
+        /// Repository to look at (default: the current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// File to run a blame probe on (default: README.md, else the first
+        /// tracked file)
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the commit-graph and the multi-pack-index, then time them
+    Setup {
+        /// Repository to write into (default: the current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// File to run a blame probe on (default: README.md, else the first
+        /// tracked file)
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Emit JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum CacheAction {
     /// Show cache statistics
     Stats,
@@ -759,6 +799,7 @@ async fn main() {
         Commands::Eval { action } => run_eval(action).await,
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Hw { action } => run_hw(action),
+        Commands::History { action } => run_history(action),
         Commands::Colab { action } => run_colab(action).await,
         Commands::Tui => run_tui().await,
     };
@@ -1290,6 +1331,168 @@ fn default_gguf_path(file_name: &str) -> String {
         .join(file_name)
         .display()
         .to_string()
+}
+
+/// A duration git was measured taking, in milliseconds with one decimal,
+/// because a warm repository answers in single-digit milliseconds and rounding
+/// to whole numbers would print several probes as 0 ms.
+fn history_ms(microseconds: u128) -> String {
+    format!("{:.1} ms", microseconds as f64 / 1000.0)
+}
+
+/// How much a query handed back — what a model would have to pay to be shown
+/// the history. Under a kibibyte the number is given in bytes, because "0 KiB"
+/// for a line of text reads like "nothing".
+fn history_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else {
+        format!("{:.0} KiB", bytes as f64 / 1024.0)
+    }
+}
+
+/// Print one status page: what exists, what it costs, what to do about it.
+fn print_history_status(status: &xencode_context_rs::HistoryStatus) {
+    println!("repo:    {}", status.git_dir);
+    println!(
+        "history: {} reachable commit(s){}{}",
+        status.reachable_commits,
+        if status.shallow { ", shallow" } else { "" },
+        status
+            .partial_clone
+            .as_ref()
+            .map(|f| format!(", partial clone (filter {f})"))
+            .unwrap_or_default(),
+    );
+    match &status.commit_graph {
+        Some(graph) => println!(
+            "commit-graph: {} ({}){}",
+            graph.path,
+            history_bytes(graph.size as usize),
+            match graph.verifies {
+                Some(true) => ", verifies",
+                Some(false) => ", DOES NOT VERIFY against the objects here",
+                None => "",
+            }
+        ),
+        None => println!("commit-graph: none"),
+    }
+    match &status.pack_index {
+        Some(index) => println!(
+            "multi-pack-index: {} ({}) over {} pack(s)",
+            index.path,
+            history_bytes(index.size as usize),
+            index.packs
+        ),
+        None => println!("multi-pack-index: none"),
+    }
+    println!("timed now:");
+    for query in &status.queries {
+        match &query.failed {
+            Some(reason) => println!("  {:<46} failed: {reason}", query.label),
+            None => println!(
+                "  {:<46} {:>9}  {} out",
+                query.label,
+                history_ms(query.microseconds),
+                history_bytes(query.bytes),
+            ),
+        }
+    }
+    for action in status.actions() {
+        println!("todo:    {action}");
+    }
+}
+
+/// `xencode history` — read what makes history queries fast here, or write it.
+fn run_history(action: HistoryAction) -> Result<(), String> {
+    use xencode_context_rs::{default_blame_target, history_setup, history_status};
+
+    let (command, path, file, json) = match action {
+        HistoryAction::Status { path, file, json } => ("status", path, file, json),
+        HistoryAction::Setup { path, file, json } => ("setup", path, file, json),
+    };
+    let blame = match file {
+        Some(file) => Some(file),
+        None => default_blame_target(&path),
+    };
+
+    if command == "setup" {
+        let setup = history_setup(&path, blame.as_deref())?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&setup).unwrap_or_default()
+            );
+            return Ok(());
+        }
+        print_history_status(&setup.before);
+        println!();
+        for line in &setup.wrote {
+            println!("wrote:   {line}");
+        }
+        for line in &setup.refused {
+            println!("skipped: {line}");
+        }
+        println!();
+        println!(
+            "after:  (timed in the same run, so this table also has the operating system's page \
+             cache warmed by the one above — read it as an upper bound, not as the index's own \
+             effect)"
+        );
+        print_history_status(&setup.after);
+        // The point of the command is the speed, so say plainly whether it
+        // moved rather than leaving the reader to compare two tables. Two
+        // runs of the same query on the same machine differ by a couple of
+        // milliseconds, so a claim needs to clear both a share and a floor.
+        const MIN_RATIO: f64 = 1.2;
+        const MIN_FLOOR_US: u128 = 2_000;
+        let mut moved = false;
+        for (before, after) in setup.before.queries.iter().zip(&setup.after.queries) {
+            if before.failed.is_some() || after.failed.is_some() || after.microseconds == 0 {
+                continue;
+            }
+            let gap = before.microseconds.abs_diff(after.microseconds);
+            if gap < MIN_FLOOR_US {
+                continue;
+            }
+            let ratio = before.microseconds as f64 / after.microseconds as f64;
+            let words = if ratio >= MIN_RATIO {
+                moved = true;
+                format!("{ratio:.1}× faster")
+            } else if ratio <= 1.0 / MIN_RATIO {
+                moved = true;
+                format!("{:.1}× slower", 1.0 / ratio)
+            } else {
+                continue;
+            };
+            println!(
+                "{}: {} → {} ({words})",
+                after.label,
+                history_ms(before.microseconds),
+                history_ms(after.microseconds),
+            );
+        }
+        if !moved {
+            println!(
+                "no query changed by more than both 20% and 2 ms — on {} commits the commit \
+                 chain was not the cost, so these indexes are there for the queries built on \
+                 history rather than for the ones timed above",
+                setup.before.reachable_commits
+            );
+        }
+        return Ok(());
+    }
+
+    let status = history_status(&path, blame.as_deref())?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&status).unwrap_or_default()
+        );
+    } else {
+        print_history_status(&status);
+    }
+    Ok(())
 }
 
 /// Report this machine as a place a model could be served, and the flags to

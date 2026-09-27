@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1284 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1296 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -128,7 +128,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - **MCP tool servers** — declare stdio servers under `mcp_servers` in config and `/mcp` starts them on request; their tools reach the model as `mcp__<server>__<tool>` behind the same approval gate (`External` class — always a `y`/`n`, never waved through by autonomy), with `mcp_timeout` bounding each call and a broken server failing in its own words.
 - Code analysis with per-language heuristics for Python, JavaScript/TypeScript, and Rust.
 - Per-file diff review in the TUI (`Ctrl+Y`, base toggle HEAD ↔ main) and rename-aware triage on the CLI (`xencode review`).
-- CLI with 21 subcommands: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `eval`, `plugin`, `llamacpp`, `hw`, `tui`.
+- CLI with 22 subcommands: `scan`, `config`, `models`, `cache`, `audit`, `query`, `memory`, `tasks`, `worktree`, `colab`, `advise`, `server`, `analyze`, `fetch`, `review`, `replay`, `eval`, `plugin`, `llamacpp`, `hw`, `history`, `tui`.
 
 ### Reliability + Ops
 - Two-tier cache (memory + disk) with LRU eviction.
@@ -290,6 +290,7 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Eval** | `xencode eval run [-c off-by-one] [-m MODEL] [--judge]` | Score the agent on defects seeded on purpose, graded by the diff and an exit code, with an optional ranking of the attempts that came closest |
 | **LlamaCpp** | `xencode llamacpp status` | Local llama-server status and timings |
 | **Hw** | `xencode hw probe` | What this machine can serve: RAM, cores and the server's own compute devices, then the launch flags that fit |
+| **History** | `xencode history status` | Which git history indexes exist here, and the timings of the queries that use them — `history setup` writes them and re-times |
 | **Colab** | `xencode colab preflight` | Is the bridge usable? (CLI version, auth, ssh key) |
 | **Colab** | `xencode colab up` | Bring up a VM + inference server and tunnel it to localhost (`--reconnect` repairs a broken bridge) |
 | **Colab** | `xencode colab status` / `down` | Forward/session/endpoint health, then kill the forward and release the VM |
@@ -400,6 +401,16 @@ flowchart TD
   no device can hold is started shorter and says so, and a server that dies during
   its own load is reported as having died — with the lines it printed, and restarted
   once at half the window when what it said was about memory.
+- **Git history is measured, not assumed slow.** `xencode history status` prints
+  whether this repository has a commit-graph and a multi-pack-index, how many
+  commits are reachable, and the times of the history queries that use them —
+  each one from a `git` process that just ran, so a number is never carried over
+  from a document. `xencode history setup` writes the two indexes and times them
+  again. On this repository (813 commits, 2 packs) that comparison moved only the
+  commit count, from 2.7 ms to 2.0 ms, and the command says so rather than
+  claiming the rest got faster; what it does report as expensive is a full-history
+  `--numstat` at 11.3 s and a `git log -S` at 12.9 s, which no index here fixes.
+  `history` is read-only apart from those two writes, and both are idempotent.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
   for a local llama-server, `remote:…` for any OpenAI-compatible server at
@@ -473,7 +484,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1284 passing, 12 ignored)
+cargo test                          # Full workspace suite (1296 passing, 12 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

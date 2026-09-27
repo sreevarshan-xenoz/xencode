@@ -13,8 +13,8 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1284 tests passing, 12 ignored, zero warnings
+- [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
+- [x] Workspace gates green — 15 crates, 1296 tests passing, 12 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2145,14 +2145,23 @@ All verified by reading the file at the line given, on 2026-09-23.
     under auto-generated IDs only (`xencode-memory-rs/src/lib.rs:52-129`), no
     naming and no `--resume`.
 20. **Git history is cheap where it matters, expensive in two specific
-    places.** All git access shells out through one seam,
-    `git_stdout` (`xencode-context-rs/src/gitinfo.rs:74`); no `git2`/`gix`/
-    `libgit2` dependency exists. Measured on this repo (758 commits, `.git`
-    599 MiB, commit-graph + multi-pack-index already present, `git` 2.55.0):
-    `log --format='%h %s'` 60.8 KB / 13 ms, full-history `--name-only` 44 ms,
-    `--follow` one file 90 ms, `blame -L 1,120` 11.7 KB — but
-    **`--numstat` 15.2 s and `git log -S` 17.8 s**. Crucially, **git context
-    already lives below the KV marker**: tier 5 (`context.rs:192-203`, built by
+    places.** All git access in the context builder shells out through one seam,
+    `git_stdout` (`xencode-context-rs/src/gitinfo.rs`); no `git2`/`gix`/
+    `libgit2` dependency exists. **The figures first written here were wrong and
+    were re-measured by GH-9 on 2026-09-27.** This repository has **813**
+    reachable commits, `.git` is **608 MiB**, `git` is 2.55.0, there are 2 packs,
+    and there was **no commit-graph at all** — the "commit-graph + multi-pack-index
+    already present" claim was false; only the multi-pack-index existed, 417 KiB
+    over the 2 packs. Writing the commit-graph (49 KiB) changed one of four timed
+    queries, and slightly: `rev-list --all --count` 2.7 → 2.0 ms, while commit
+    subjects sat at 11.9–13.5 ms, `log --name-only` at 51–54 ms, and a full-file
+    blame at 21.5–22.0 ms across runs, so the honest reading is that the commit
+    chain is not the cost at this size. Re-measured costs: `--follow` one file
+    **51 ms**, `blame -L 1,120` one file **10 ms**, whole-history `git log
+    --numstat` **11.3 s**, `git log -S build_graph --all` **12.9 s** — the last two
+    stay expensive with both indexes in place, and no commit-graph fixes them.
+    Crucially, **git context already lives below the KV marker**: tier 5
+    (`context.rs:192-203`, built by
     `git_summary_text` `:559`) with `GIT_CAP_TOKENS = 300` (`:21`), and
     retrieved files are tier 6 — neither is inside `stable_head`
     (`:96-119`, closed by `STABLE_END_MARKER` `:30`). The KV-prefix tax recorded
@@ -2170,9 +2179,15 @@ All verified by reading the file at the line given, on 2026-09-23.
 22. **A cross-cutting security note that applies to O-2 and O-4 together:**
     commit subjects and fetched pages are attacker-controlled text arriving in
     a prompt — the same class as N-0 fact 3 and SE-2/SE-3. Independently, git
-    invocations at `gitinfo.rs:74` carry neither `-c core.fsmonitor=false` nor
-    `GIT_CONFIG_NOSYSTEM`, so the GitSpawn-class repo-config execution hazard
-    already applies today, before any history feature is added.
+    invocations carried neither `-c core.fsmonitor=false` nor `GIT_CONFIG_NOSYSTEM`,
+    so the GitSpawn-class repo-config execution hazard already applies today,
+    before any history feature is added. **Closed for the context crate on
+    2026-09-27 by GH-9:** `git_stdout` (`gitinfo.rs`) sets both, and its
+    `history.rs` caller goes through it, so the history surfaces are covered; a
+    test asserts that file has exactly one `git` start site carrying both
+    settings. **Seven start sites outside that seam are still unhardened** —
+    `xencode-cli/src/main.rs:3500` and the TUI's `app.rs:50`, `:1820`, `:2189`,
+    `keymap.rs:914`, `review.rs:48`, `task_eval.rs:836`.
 23. **Machine envelope, because several options are CPU-bound:** 8 cores,
     15 GiB RAM, rustc/LLVM stable-only (1.98.1 / 22.1.8), 55,555 LOC across 15
     crates with 398 locked deps. `cargo-miri` is installed; `llvm-tools`,
@@ -2462,7 +2477,11 @@ prefix, so these do not pay the tax that taxes N's context ideas.
 - **GH-9 `xencode history setup`** — `commit-graph write --reachable` plus a
   multi-pack-index, so all of the above stay fast. **S**. Trap:
   `--filter=blob:none` partial clones make cheap queries cheaper and make
-  blame/pickaxe fetch a blob per lookup.
+  blame/pickaxe fetch a blob per lookup. *(Built 2026-09-27, with
+  `xencode history status` beside it; of the four queries timed on this
+  repository exactly one got faster, and the partial-clone trap is now reported
+  by the command rather than left to the reader — see the W4 record and the
+  correction to fact 20.)*
 
 **Rejected here:** history in the stable head or `anchor.md` (it is read at
 `context.rs:529`; drift voids every KV reuse); blanket `git log -p` dumps; a
@@ -7142,6 +7161,58 @@ done-when is met, and the commit that does it names the IDs.
   and that was measured rather than assumed: after the four call sites moved, a rebuilt
   index of this workspace holds 200 files across every language the scanner names and
   exactly 137 with symbols — the same 137 Rust files, no more, none missing.
+
+- [x] `GH-9` — 2026-09-27, first item of W4. `xencode history setup` writes the
+  commit-graph with `git commit-graph write --reachable` and the multi-pack-index
+  with `git multi-pack-index write`, then re-measures; `xencode history status`
+  reports what exists and how long the history queries take, from `git` processes
+  started by that command. The new module is `xencode-context-rs/src/history.rs`
+  (10 tests): four timed probes — every commit subject, every commit with the
+  paths it touched, `rev-list --all --count`, and a blame of one file — plus the
+  two index files found by name across `objects/info`, `info` and `objects/pack`,
+  `git commit-graph verify`, the pack count, `rev-parse --is-shallow-repository`,
+  and `config --get extensions.partialClone` so a partial clone is annotated with
+  why blame and pickaxe fetch a blob per commit there.
+  `xencode history status --json` gives the same shape as data.
+  **The measurement result is a negative, and the command prints it as one.** On
+  this repository — 813 commits, 608 MiB `.git`, 2 packs, git 2.55.0 — the
+  commit-graph was **missing**, contrary to what fact 20 of this file asserted,
+  and writing it changed only the commit count: 2.7 ms → 2.0 ms. Subject listing
+  (11.9 → 13.5 ms), `--name-only` (53.8 → 51.0 ms) and blame (22.0 → 21.5 ms) sat
+  inside the run-to-run spread, so `history setup` states that no query cleared
+  both a 20% and a 2 ms floor, and that the indexes are there for the queries
+  built on history rather than for these. Two consecutive full runs differ by
+  ~1.5 ms on the same query, which is why that floor exists and why the earlier
+  10% rule was reporting a 2.5 ms swing as "1.2× slower". The genuinely expensive
+  things on this repository remain unfixable by an index: whole-history `git log
+  --numstat` measured 11.3 s and `git log -S build_graph --all` 12.9 s; `--follow`
+  on one file is 51 ms and `blame -L 1,120` on one file 10 ms.
+  **What the item did not build.** `git multi-pack-index write` is invoked as
+  written but cannot be exercised on this machine's own repository beyond its
+  existing 417 KiB index over 2 packs — under two packs git exits 255 with `error:
+  no pack files to index.`, which `history setup` reports in git's own words rather
+  than as a success. A real `--filter=blob:none` clone could not be produced
+  either: a local clone from this repository is refused filtering
+  (`uploadpack.allowFilter` is off), so the partial-clone path is tested by setting
+  `extensions.partialClone` in a fixture and saying so in the test.
+  **Found and fixed on the way, in the same seam.** Two changes to `git_stdout` in
+  `gitinfo.rs`, the one place this crate starts `git`: `-c core.fsmonitor=false`
+  and `GIT_CONFIG_NOSYSTEM=1`, closing the repo-config execution and
+  machine-wide-config redirection hazards fact 22 records for this path (other
+  crates still start `git` directly), with a test that reads the file's own source
+  and asserts there is exactly one start site carrying both — watched to fail at
+  `left: 2, right: 1` when a second one was added. And `git rev-parse HEAD` on a
+  repository before its first commit exits 128 while printing the literal `HEAD`;
+  the old reader accepted it, so the manifest and the resume check compared two
+  different wrong values that coincidentally agreed, and a repository with no
+  commits rebuilt its index on every run. `GitInfo::revision()` now means "no
+  revision" in one place, which also makes the `(unborn HEAD)` label in the init
+  progress line and in the tier-5 git summary reachable instead of slicing an
+  empty string.
+  **Verified by** 1296 tests, 0 failures, 12 ignored over 46 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean, and by running both subcommands against this repository:
+  the numbers quoted above are that run's output.
 
 
 #### W2 — The model/inference substrate — 15 items

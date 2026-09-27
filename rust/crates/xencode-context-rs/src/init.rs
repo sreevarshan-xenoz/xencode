@@ -159,7 +159,7 @@ pub fn init_project(
     emit(&mut progress, "phase_start:Resume check");
     let prior_manifest =
         crate::index::read_json::<Manifest>(&crate::index::manifest_path(&xencode));
-    let current_head = current_git_info(&root).map(|g| g.head);
+    let current_head = current_git_info(&root).and_then(|g| g.revision().map(str::to_string));
 
     let prior_files =
         crate::index::read_json::<FilesIndex>(&crate::index::file_index_path(&xencode));
@@ -196,17 +196,12 @@ pub fn init_project(
     let git = current_git_info(&root);
     let git_filter = git_file_set(&root);
     if let Some(info) = &git {
-        let head_short = truncate(&info.head, 8);
         emit(
             &mut progress,
             &format!(
                 "log:🎋 {} @ {} — {} file(s) dirty",
                 info.branch,
-                if head_short.is_empty() {
-                    "(unborn HEAD)".to_string()
-                } else {
-                    head_short
-                },
+                info.revision_label(),
                 info.dirty
             ),
         );
@@ -345,13 +340,7 @@ pub fn init_project(
     }
     let manifest = Manifest {
         version: crate::index::VERSION,
-        git_head: git.as_ref().and_then(|g| {
-            if g.head.is_empty() {
-                None
-            } else {
-                Some(g.head.clone())
-            }
-        }),
+        git_head: git.as_ref().and_then(|g| g.revision().map(str::to_string)),
         branch: git.as_ref().map(|g| g.branch.clone()),
         dirty: git.as_ref().map(|g| g.dirty).unwrap_or(0),
         skipped: scan.skipped,
@@ -480,14 +469,6 @@ fn now_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n {
-        s.to_string()
-    } else {
-        s[..n].to_string()
-    }
 }
 
 fn fs_create_dir_all(path: &Path) -> Result<(), ContextError> {
