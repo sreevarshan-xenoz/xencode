@@ -3683,6 +3683,7 @@ dependencies = [
 name = "xencode-context-rs"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "notify",
  "pdf-extract",
  "regex",

@@ -877,6 +877,7 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     secret = true;
                 }
                 "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
+                "llama_cpp_model_url" => config.llama_cpp_model_url = value.clone(),
                 "llama_cpp_executable" => config.llama_cpp_executable = value.clone(),
                 "llama_cpp_args" => {
                     config.llama_cpp_args =
@@ -1303,6 +1304,73 @@ fn run_hw(action: HwAction) -> Result<(), String> {
     Ok(())
 }
 
+/// Bring a GGUF file onto the machine, saying how far it has got as it goes.
+///
+/// A model file is the one part of running a local server that takes minutes
+/// rather than seconds, which makes it both the part worth interrupting and the
+/// part whose interruption should not cost the entire transfer again. The bytes
+/// land in a sidecar `.part` file and the next attempt asks the server for the
+/// tail of it, so re-running the command after a Ctrl-C or a closed laptop lid
+/// continues where it stopped.
+async fn fetch_model(url: &str, path: &str) -> Result<(), String> {
+    use std::io::IsTerminal;
+    let free = xencode_context_rs::hwprobe::free_disk_bytes(path);
+    let left_off = xencode_models_rs::partial_bytes(path);
+    if left_off > 0 {
+        println!(
+            "  {path} is not there yet, but a stopped download is: {} of its bytes are on disk.",
+            xencode_models_rs::human_bytes(left_off)
+        );
+    } else {
+        println!("  {path} is not there yet; fetching it now.");
+    }
+    println!("  from {url}");
+
+    let tty = io::stdout().is_terminal();
+    // The callback is shared as a plain `Fn`, so the throttle keeps its own
+    // state rather than borrowing one from here.
+    let last_percent = std::sync::atomic::AtomicI64::new(-1);
+    let on_progress = |progress: xencode_models_rs::Progress| {
+        let line = progress.label();
+        if tty {
+            print!("\r  {line}");
+            let _ = io::stdout().flush();
+        } else if let Some(fraction) = progress.fraction() {
+            // One line every five percent when the output is being piped or
+            // saved, where a carriage return would only be clutter.
+            let percent = (fraction * 100.0) as i64;
+            if percent >= last_percent.load(std::sync::atomic::Ordering::Relaxed) + 5 {
+                last_percent.store(percent, std::sync::atomic::Ordering::Relaxed);
+                println!("  {line}");
+            }
+        } else {
+            println!("  {line}");
+        }
+    };
+    let result = xencode_models_rs::fetch_model_file(url, path, free, &on_progress).await;
+    if tty {
+        println!();
+    }
+    let got = result.map_err(|e| format!("the model download did not finish: {e}"))?;
+    println!(
+        "  model ready: {}",
+        xencode_models_rs::human_bytes(got.bytes)
+    );
+    if got.resumed_from > 0 {
+        println!(
+            "  {} of that came from the bytes the earlier attempt had already fetched.",
+            xencode_models_rs::human_bytes(got.resumed_from)
+        );
+    }
+    if got.resume_refused {
+        println!(
+            "  note: the server sent the whole file rather than the part that was still \
+             missing, so an interruption here would start the transfer over."
+        );
+    }
+    Ok(())
+}
+
 async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
     fn pid_file() -> std::path::PathBuf {
         dirs::home_dir()
@@ -1390,6 +1458,18 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
                     "no GGUF model path set (use --model or `xencode config set llama_cpp_model_path <path>`)"
                         .to_string(),
                 );
+            }
+            // Nothing below this line means anything without a model on disk, so
+            // the fetch comes first: it is the longest step of a bring-up and the
+            // only one that can be interrupted and picked up again.
+            if !std::path::Path::new(&model_path).exists() {
+                let url = config.llama_cpp_model_url.trim().to_string();
+                if url.is_empty() {
+                    return Err(format!(
+                        "no model at {model_path}, and nowhere to get it from (set config llama_cpp_model_url to the HTTPS address of the GGUF)"
+                    ));
+                }
+                fetch_model(&url, &model_path).await?;
             }
             let exe = find_llama_server(exec.as_deref().or(
                 if config.llama_cpp_executable.is_empty() {

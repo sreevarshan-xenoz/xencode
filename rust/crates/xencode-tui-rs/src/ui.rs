@@ -74,6 +74,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_toasts(f, app, outer[1]);
     }
 
+    // A model file arriving over the network, one line, over the body.
+    if let Some(progress) = app.model_download.clone() {
+        draw_model_download(f, app, outer[1], &progress);
+    }
+
     // Help overlay is modal; the approval prompt outranks even that.
     if app.help_visible {
         draw_help_overlay(f, app, f.area());
@@ -172,6 +177,39 @@ fn draw_toasts(f: &mut Frame, app: &App, area: Rect) {
         .block(block)
         .wrap(Wrap { trim: false });
     f.render_widget(para, popup);
+}
+
+/// One line, set just inside the top of the body, saying how much of a model
+/// file has arrived. It is drawn on the body rather than in the model panel
+/// because the download happens during bring-up, when nobody has deliberately
+/// opened anything yet.
+fn draw_model_download(f: &mut Frame, app: &App, area: Rect, progress: &str) {
+    if area.width < 24 || area.height < 4 {
+        return;
+    }
+    let width = area.width.min(64);
+    let strip = Rect::new(area.x, area.y + 1, width, 1).intersection(area);
+    let text = format!(" ⬇  {progress}");
+    let text = if text.chars().count() > strip.width as usize {
+        let mut kept: String = text
+            .chars()
+            .take(strip.width.saturating_sub(1) as usize)
+            .collect();
+        kept.push('…');
+        kept
+    } else {
+        text
+    };
+    f.render_widget(Clear, strip);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            text,
+            Style::default()
+                .fg(app.theme.accent)
+                .bg(app.theme.status_bg),
+        )),
+        strip,
+    );
 }
 
 fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {

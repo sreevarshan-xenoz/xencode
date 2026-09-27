@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1173 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1185 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1295,11 +1295,14 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
 
 #### Track E — extend both (after either track lands)
 
-- [ ] **L-10 — resumable, disk-aware GGUF download.** Check free disk before
+- [x] **L-10 — resumable, disk-aware GGUF download.** Check free disk before
       starting, resume a partial file instead of restarting, and surface progress
       in the TUI — it is the longest and least observable step of a bring-up.
       **Done-when:** killing a download mid-file and re-running `up` resumes it,
       and a too-small target refuses before writing anything.
+      *(Done 2026-09-27 — see W2 progress. Both clauses run for real against
+      huggingface.co; `up` is not a command this product has, so the bring-up
+      path that was verified is `llamacpp start` and the TUI's auto-start.)*
 - [ ] **L-11 — free hosted inference routes (`groq:…`, `nvidia:…`).** Route
       through the existing OpenAI-compatible path with a per-prefix base URL so a
       first-run user gets real capacity without renting anything. Groq's free
@@ -6635,6 +6638,54 @@ done-when is met, and the commit that does it names the IDs.
   the probe prints: `xencode config set llama_cpp_args "--n-gpu-layers all …"` was
   refused by clap as an unexpected argument, so `config set` now takes a value
   beginning with a dash as the value.
+
+- [x] `L-10` — 2026-09-27, eleventh item of W2. A model file that is not on
+  disk is fetched from a configured URL: priced against the disk before any
+  byte is written, resumable across interruptions, and observable in the TUI.
+  **Both done-when clauses were run against the real thing, not a local
+  server.** The refusal: an 18.5 GiB public GGUF aimed at `/boot`, which had
+  765.9 MiB free, printed `the file is 18.5 GiB and the disk holding … has
+  765.9 MiB free` and exited 1 — with `/boot` free-bytes identical before and
+  after (803,115,008), so the pricing happens before the first write, which is
+  also why the test target was chosen to be a filesystem the user cannot write
+  to: a broken check would have died on permissions rather than filled the data
+  disk. The resume: a 468.6 MiB file interrupted twice (at 38.5 MiB and later
+  at 344.3 MiB) continued from the `.part` each time — `a stopped download is:
+  344.3 MiB of its bytes are on disk` — and landed at exactly 491,400,032
+  bytes, then served a live `llama-server`. The TUI path auto-starts the same
+  fetch and renders a `⬇` progress strip over the body; killed at a known
+  173,088,822-byte `.part` and relaunched, its first tick read 165.1 MiB — the
+  partial, not zero.
+  **Shape of it.** The downloader lives in `xencode-models-rs` (which depends
+  on nothing internal), so the disk reading is injected as a plain
+  `free_bytes` argument — measured by `hwprobe::free_disk_bytes` in
+  xencode-context-rs via `statvfs` on the nearest existing ancestor of the
+  target path, the same no-new-crate-edge trick L-6's callback used. Bytes go
+  to `<path>.part` and are `rename`d into place only when complete, so a file
+  that exists is always a whole one; a resumed attempt asks
+  `Range: bytes=<n>-` and takes the true total from `Content-Range`. A server
+  that ignores ranges (plain 200 to a ranged ask) or reports the partial as
+  past-end (416) discards the partial and restarts, saying so. Both fetch
+  callers — `llamacpp start` and the TUI auto-start — print progress; the TUI
+  gets its own always-visible strip because the existing llama.cpp message
+  line only renders inside the model popup.
+  **What it deliberately does not claim.** The only check on a finished file
+  is its byte count; nothing verifies the bytes are the model the URL
+  advertised, which the module and the manual both say. The size to price
+  against comes from `Content-Length`/`Content-Range`, so a server that lies
+  about it defeats the disk check — it is a guard against filling the machine,
+  not against a hostile URL.
+  Verified by 1185 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Twelve tests are new: ten in `download.rs` against a
+  real local HTTP server (whole-file, resume-from-partial, no-range restart,
+  416 on a stale oversized partial, early-ending body that keeps its bytes and
+  is then finished by a second attempt, the too-small-disk refusal asserting
+  the target directory is never created, and progress/human-size formatting),
+  and two in `hwprobe.rs` (pricing a path that does not exist yet against the
+  disk it would go on, measured by writing 32 MiB and watching the reading
+  drop — with a 90 % tolerance because `/tmp` is shared with other tests — and
+  a path with no existing ancestor reporting unknown).
 
 
 #### W2 — The model/inference substrate — 15 items

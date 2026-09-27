@@ -567,6 +567,11 @@ pub struct App<'a> {
     pub llamacpp_path_buffer: String,
     pub llamacpp_path_cursor: usize,
     pub llamacpp_action_msg: String,
+    /// One line about a model file that is being downloaded right now, and
+    /// `None` when nothing is. The download is the only part of bringing a
+    /// local server up that takes minutes, so it gets its own visible line
+    /// rather than a message that scrolls past in a panel nobody has open.
+    pub model_download: Option<String>,
     // llama.cpp sampling options (temperature, top-k, min-p, max-tokens)
     pub sampling_temp_editing: bool,
     pub sampling_temp_buffer: String,
@@ -1975,6 +1980,7 @@ impl<'a> App<'a> {
             llamacpp_path_buffer: String::new(),
             llamacpp_path_cursor: 0,
             llamacpp_action_msg: String::new(),
+            model_download: None,
             sampling_temp_editing: false,
             sampling_temp_buffer: String::new(),
             sampling_int_editing: false,
@@ -5985,6 +5991,7 @@ impl<'a> App<'a> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
         let model_path = self.config.llama_cpp_model_path.clone();
+        let model_url = self.config.llama_cpp_model_url.clone();
         let exec = self.config.llama_cpp_executable.clone();
         let url = self.config.llama_cpp_url.clone();
         // The profile's preset first, the user's own flags last: a flag written
@@ -6052,6 +6059,70 @@ impl<'a> App<'a> {
                 );
                 return;
             };
+
+            // The model has to be on disk before any of what follows means
+            // anything, and fetching it is the one step of a bring-up that takes
+            // minutes rather than seconds — so it is the step drawn on screen
+            // while it runs, and the one that picks up where a previous,
+            // interrupted attempt stopped.
+            if !std::path::Path::new(&model_path).exists() {
+                let url = model_url.trim().to_string();
+                if url.is_empty() {
+                    let _ = err_tx.send(format!(
+                        "[LLAMACPP_MSG]⚠️ auto-start skipped: no model at {model_path}"
+                    ));
+                    let _ = err_tx.send(
+                        "[LLAMACPP_MSG]💡 set config llama_cpp_model_url to the HTTPS address of the GGUF and xencode will fetch it (xencode config set llama_cpp_model_url <url>)".to_string(),
+                    );
+                    let _ = err_tx.send("[HEALTH]llamacpp|unavailable|0|no model file".to_string());
+                    return;
+                }
+                let left_off = xencode_models_rs::partial_bytes(&model_path);
+                let _ = ok_tx.send(format!(
+                    "[DOWNLOAD]fetching the model{}",
+                    if left_off > 0 {
+                        format!(
+                            " (continuing a stopped download: {} already here)",
+                            xencode_models_rs::human_bytes(left_off)
+                        )
+                    } else {
+                        String::new()
+                    }
+                ));
+                let bar_tx = ok_tx.clone();
+                let on_progress = move |progress: xencode_models_rs::Progress| {
+                    let _ = bar_tx.send(format!("[DOWNLOAD]{}", progress.label()));
+                };
+                match xencode_models_rs::fetch_model_file(
+                    &url,
+                    &model_path,
+                    xencode_context_rs::hwprobe::free_disk_bytes(&model_path),
+                    &on_progress,
+                )
+                .await
+                {
+                    Ok(got) => {
+                        let _ = ok_tx.send("[DOWNLOAD]".to_string());
+                        let _ = ok_tx.send(format!(
+                            "[LLAMACPP_MSG]✅ model downloaded: {}",
+                            xencode_models_rs::human_bytes(got.bytes)
+                        ));
+                        if got.resume_refused {
+                            let _ = ok_tx.send(
+                                "[LLAMACPP_MSG]ℹ️ the server sent the whole file rather than the part that was missing, so an interruption would start the transfer over".to_string(),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        let _ = ok_tx.send("[DOWNLOAD]".to_string());
+                        let _ = err_tx.send(format!("[LLAMACPP_MSG]⚠️ model download failed: {e}"));
+                        let _ = err_tx.send(
+                            "[HEALTH]llamacpp|unavailable|0|model download failed".to_string(),
+                        );
+                        return;
+                    }
+                }
+            }
 
             let port = parse_llama_port(&url);
 
@@ -7284,6 +7355,13 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 app.refresh_models(tx.clone());
             } else if let Some(body) = token.strip_prefix("[LLAMACPP_MSG]") {
                 app.llamacpp_action_msg = body.to_string();
+            } else if let Some(body) = token.strip_prefix("[DOWNLOAD]") {
+                // Empty clears the line: the download is over, one way or another.
+                app.model_download = if body.is_empty() {
+                    None
+                } else {
+                    Some(body.to_string())
+                };
             } else if let Some(body) = token.strip_prefix("[VOICE]") {
                 if let Some(s) = body.strip_prefix("status:") {
                     let new_status = s.to_string();

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a local model file that is missing is now fetched, resumed, and priced against the disk
+Bringing a llama.cpp model up used to stop at the file: if the `.gguf` named by
+`llama_cpp_model_path` was not on disk, nothing could put it there. Now
+`llama_cpp_model_url` can name the HTTPS address of the file itself, and
+`xencode llamacpp start` (and the TUI's auto-start) fetch it when it is absent.
+
+**The disk is consulted before the first byte, not after the failure.** The
+file's advertised size, minus whatever a stopped attempt already put on disk, is
+compared against the free space of the filesystem the target path will live on —
+found by walking up to the nearest directory that exists, so a path whose folder
+is not created yet is priced against the disk it would go onto. A file that
+would not fit is refused with both numbers and nothing is written; measured on
+this machine against a real 18.5 GiB file aimed at a partition with 765.9 MiB
+free, the space on that partition was byte-for-byte unchanged afterwards.
+
+**An interrupted download continues where it stopped.** Bytes accumulate in a
+`<path>.part` file beside the target and move into place only when complete, so
+a file that exists is always a whole one. A repeated start asks the server for
+just the missing tail and says what it found: `a stopped download is: 344.3 MiB
+of its bytes are on disk`. Verified against a real download interrupted twice —
+it resumed, landed at exactly the file's 491,400,032 bytes, and the model then
+served live. If the server does not honour partial requests, the partial file
+is discarded, the whole file is re-fetched, and that is said out loud.
+
+**Progress is visible in the TUI**, where a model fetch is the longest and,
+until now, least observable step of a bring-up: a `⬇` line over the body shows
+`165.1 MiB of 468.6 MiB (35 %)` and updates as bytes arrive. What the result is
+checked against is its size, and nothing more — the manuals say so plainly,
+because byte-level verification would need a checksum the URL's owner has to be
+trusted to publish.
+
 ### Changed — a local server that cannot run now says so, instead of being waited on
 Starting a local `llama-server` that the machine cannot serve used to end one of
 two ways, and neither of them was true. The command either reported
