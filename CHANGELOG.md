@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent can edit a declaration by name, and the edit is checked before it lands
+
+`edit_symbol(path, symbol, new_body)` is the twelfth tool the chat model can call, and the
+first edit that finds its target by reading the code. The plain text edit asks for the string
+to find and the string to put in its place, so a model has to reproduce the exact bytes it is
+removing — indentation included — and an edit that lands inside a string literal or a comment
+instead of the code it meant is accepted without complaint. This one asks for a name: `fn
+total` means the function called `total`, found in the parse tree, and the replacement is
+confined to that declaration's own body.
+
+The result is parsed before it is kept, and refused if it does not hold up. A tree-sitter parse
+never reports failure — a file with a brace missing still produces a tree, because error
+recovery invents a plausible shape — so the check is for what recovery invented, on the file
+as it stands and on the file as the edit would leave it. `{ let = 4; }` as a new body is
+refused with the line the fault lands on, and a body that swallows its own declaration is
+refused too, even though it is valid Rust, because the name would then not be the one
+declaration it was. A name that is absent comes back with the names the file does declare; a
+name declared twice is refused with both line numbers rather than guessed; `mod helpers;` is
+named as having no body in that file; a text that is not a whole braced block is rejected
+before anything is parsed. Every refusal writes nothing.
+
+What the approval modal shows is the same computation that produces the bytes, so the diff a
+person approves is the diff that lands, and a call that would be refused is shown as that
+refusal instead of an empty diff. A symbol edit is an edit like any other at the gate: it stops
+at the `y`/`a`/`n` prompt in `ask` mode, paths outside the workspace are refused, and `/rewind`
+brings the file back byte for byte. Only Rust can be edited this way — the one grammar loaded
+is Rust's, so a Python file is refused as the file it is, saying it does not parse, rather than
+being told its names are missing.
+
 ### Fixed — the repository index reads Rust, instead of guessing from how a line starts
 
 The symbol list a file gets in `.xencode/symbols.json` was produced by nine patterns
