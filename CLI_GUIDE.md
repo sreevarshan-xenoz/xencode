@@ -618,6 +618,51 @@ Neither scaling applies where there is nothing to average: `xencode query` runs
 once and says so on its `retrieval:` line, and a model served by Ollama has no
 usage reported on a stream, so that route keeps the profile's numbers.
 
+#### What a small window is given instead: the repo map
+
+A 4096-token model has no room to be shown a few files and told the rest of the
+project exists somewhere. When a turn's budget is that tight — 2 457 tokens, the
+figure a `Low` machine fills to — the prompt carries a map of names just before
+the file bodies. Its rows are files that declare something, ranked by how near
+they sit to the files the turn is already about (dependency edges, two hops at
+most), the most depended-on first, three declared names each and `+N more` past
+that. It never costs more than 300 tokens, a row is admitted whole or not at all
+so a path is never cut in half, and its last line says how many named files went
+unlisted:
+
+```text
+Repo map — files nearest the current work, most depended-on first, names only:
+  • rust/crates/xencode-context-rs/src/index.rs [the current work]: FileEntry, FilesIndex, Manifest, +9 more
+  • rust/crates/xencode-context-rs/src/symbols.rs [the current work]: DepEdge, PerFileSymbols, RegexCache, +35 more
+  • rust/crates/xencode-context-rs/src/gitinfo.rs [the current work]: DiffFile, GitInfo, changed_paths_between, +13 more
+  • rust/crates/xencode-context-rs/src/retrieve.rs [1 hop(s) from the current work]: RetrievalIndex, RetrieveOptions, RetrievedFile, +18 more
+  • rust/crates/xencode-context-rs/src/init.rs [1 hop(s) from the current work]: InitSummary, ContextError, auto_gitignore_index_dir, +14 more
+  • rust/crates/xencode-context-rs/src/advise.rs [1 hop(s) from the current work]: Advice, AdviceKind, advise, +9 more
+  • rust/crates/xencode-context-rs/src/context.rs [1 hop(s) from the current work]: ChatAssembly, ChatInput, ChatTurn, +23 more
+  • rust/crates/xencode-context-rs/src/embed.rs [1 hop(s) from the current work]: Bm25, build, file, +6 more
+  … +126 more files in the index, not listed
+```
+
+That is the map this repository's index produces for the query
+`where is the login handler?`, printed by
+`cargo test -p xencode-context-rs --test repo_map_live -- --ignored --nocapture`,
+and the `/ctx` preview summarises the tier it put in the prompt:
+
+```console
+[CTX]🗺 repo map tier: 8 files named in 283 tokens
+```
+
+What the tier buys is a name the model can ask for. Retrieval on that budget
+sends three file bodies, so on a question whose answer is not one of them the
+model either guesses or says it does not know where the code is; the map is what
+lets it answer "read `rust/crates/…/auth.rs`" instead. Over the 25 gold queries
+at Low's three-file budget, the bodies alone named the expected file in 7 and
+the bodies plus the map named it in 9, for a median 283 tokens out of 2 457.
+
+A wider budget leaves the tier out, because there the bodies themselves are the
+orientation — which is why the line above does not appear in a `/ctx` preview on
+this machine: it has enough memory to be a `Balanced` one.
+
 #### Repeatable answers: `--seed`, and what it does not cover
 
 `--seed <n>` sends the sampler seed to llama.cpp. Without it — and without

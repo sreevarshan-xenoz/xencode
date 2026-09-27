@@ -29,6 +29,18 @@ pub const MARGIN_TOKENS: u64 = 200;
 /// Below this much room for recent messages → soft compaction should trigger.
 pub const RECENT_MIN_TOKENS: u64 = 40;
 
+/// A prompt budgeted at or below what the `Low` profile fills gets a symbol-only
+/// repo map instead of more file bodies: at that size the retrieval tier holds
+/// one to three files and the model has no view of the rest of the repository.
+/// The rule is about the budget, not the profile name, because a `Balanced`
+/// machine behind a small server is in the same position as a `Low` one — the
+/// lesson AC-4 learned about caps.
+pub fn budget_wants_repo_map(target_tokens: u64) -> bool {
+    let low = (HardwareProfile::Low.ctx_tokens() as f64 * HardwareProfile::Low.utilization())
+        .floor() as u64;
+    target_tokens <= low
+}
+
 /// The marker that closes the stable prefix (byte-identical every request).
 pub const STABLE_END_MARKER: &str = "<!-- xencode:stable-prefix-end -->";
 
@@ -76,6 +88,20 @@ impl ContextDoc {
         hasher.update(self.stable_prefix.as_bytes());
         format!("{:x}", hasher.finalize())
     }
+}
+
+/// The repo map tier, admitted only when the prompt is budgeted like `Low` and
+/// the map fits in the room still left after the tiers above it. Returns the
+/// text to emit (`None` = no tier) and what it cost.
+fn repo_map_tier(repo_map: &str, target: u64, remaining: u64) -> (Option<String>, u64) {
+    if repo_map.trim().is_empty() || !budget_wants_repo_map(target) {
+        return (None, 0);
+    }
+    let tokens = crate::budget::est_tokens(repo_map.len(), false);
+    if remaining < tokens + MARGIN_TOKENS {
+        return (None, 0);
+    }
+    (Some(repo_map.to_string()), tokens)
 }
 
 /// Tiers 1–3 (§10): SYSTEM + AGENTS.md + anchor.md + end marker.
@@ -147,6 +173,7 @@ pub fn assemble_prompt(
     anchor_md: Option<&str>,
     state_md: Option<&str>,
     git_summary: &str,
+    repo_map: &str,
     retrieved: Vec<RetrievedBlock>,
     recent_text: &str,
 ) -> ContextDoc {
@@ -199,6 +226,16 @@ pub fn assemble_prompt(
         remaining = remaining.saturating_sub(git_tok);
     }
 
+    // ── Tier 5b: repo map, on a small-budget prompt only ─────────────────
+    let (map_head, map_tok) = repo_map_tier(repo_map, target, remaining);
+    if map_head.is_some() {
+        tiers.push(TierDoc {
+            name: "repo map",
+            tokens: map_tok,
+        });
+        remaining = remaining.saturating_sub(map_tok);
+    }
+
     // ── Tier 6: retrieved files ──────────────────────────────────────────
     let retrieved_total = retrieved.len();
     let mut retrieved_included = 0usize;
@@ -241,6 +278,10 @@ pub fn assemble_prompt(
     if git_included {
         text.push_str("\n\n## Git\n\n");
         text.push_str(&git_head);
+    }
+    if let Some(map) = &map_head {
+        text.push_str("\n\n## Repo Map\n\n");
+        text.push_str(map);
     }
     if !retrieved_head.is_empty() {
         text.push_str("\n\n## Retrieval\n\n");
@@ -299,6 +340,9 @@ pub struct ChatInput<'a> {
     pub anchor_md: Option<&'a str>,
     pub state_md: Option<&'a str>,
     pub git_summary: &'a str,
+    /// The symbol-only repo map ([`crate::repo_map_text`]); admitted only on a
+    /// prompt budgeted like `Low`, and empty when there is no index.
+    pub repo_map: &'a str,
     /// Best-first retrieved blocks; the budgeter trims from the bottom.
     pub retrieved: Vec<RetrievedBlock>,
     /// Pre-rendered explicitly-attached files (e.g. `<file path=…>` blocks).
@@ -435,6 +479,16 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         remaining = remaining.saturating_sub(git_tok);
     }
 
+    // ── Tier 5b: repo map, on a small-budget prompt only ─────────────────
+    let (map_head, map_tok) = repo_map_tier(input.repo_map, target, remaining);
+    if map_head.is_some() {
+        tiers.push(TierDoc {
+            name: "repo map",
+            tokens: map_tok,
+        });
+        remaining = remaining.saturating_sub(map_tok);
+    }
+
     // ── Tier 6: retrieved files ──────────────────────────────────────────
     let retrieved_total = input.retrieved.len();
     let mut retrieved_included = 0usize;
@@ -504,6 +558,11 @@ pub fn assemble_chat(input: ChatInput) -> ChatAssembly {
         user_turn.push_str(&git_head);
         user_turn.push_str("\n\n");
     }
+    if let Some(map) = &map_head {
+        user_turn.push_str("## Repo Map\n\n");
+        user_turn.push_str(map);
+        user_turn.push_str("\n\n");
+    }
     if !retrieved_head.is_empty() {
         user_turn.push_str("## Retrieval\n\n");
         let blocks: Vec<String> = retrieved_head.iter().map(|b| b.body.clone()).collect();
@@ -550,6 +609,11 @@ pub struct LiveContext {
     pub anchor_md: Option<String>,
     pub state_md: Option<String>,
     pub git_summary: String,
+    /// The symbol-only repo map for this turn, built from the index and seeded
+    /// by what retrieval and the working tree already picked. Whether it is
+    /// worth tokens at all is the budgeter's decision, not this one's — see
+    /// [`budget_wants_repo_map`].
+    pub repo_map: String,
     pub blocks: Vec<RetrievedBlock>,
     /// Whether `.xencode/` holds a usable retrieval index. `false` means the
     /// model still gets identity + guidelines + history, just no file bodies —
@@ -582,6 +646,7 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
     // so the two cannot disagree about which shape the turn was retrieved as.
     let shape = crate::shape_of(query);
     let mut blocks = Vec::new();
+    let mut repo_map = String::new();
     let mut index_present = false;
     let mut retrieved_total = 0;
     if let Some(index) = RetrievalIndex::load(&xencode) {
@@ -591,12 +656,18 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
         let results = retrieve(query, &index, &changed, &opts);
         retrieved_total = results.len();
         blocks = read_retrieved_bodies(root, &index.files, &results, caps.content_cap_chars);
+        // Seeded by what this turn is already about, so the map points away from
+        // the bodies the model is being handed rather than repeating them.
+        let mut seeds: Vec<String> = blocks.iter().map(|b| b.path.clone()).collect();
+        seeds.extend(changed.iter().cloned());
+        repo_map = crate::repo_map::repo_map_text(&index, &seeds);
     }
     LiveContext {
         agents_md,
         anchor_md,
         state_md,
         git_summary,
+        repo_map,
         blocks,
         index_present,
         retrieved_total,
@@ -721,6 +792,7 @@ mod tests {
             Some(ANCHOR),
             None,
             "",
+            "",
             vec![],
             "",
         );
@@ -734,6 +806,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            "",
             "",
             vec![],
             "user: hello",
@@ -749,6 +822,7 @@ mod tests {
             None,
             None,
             None,
+            "",
             "",
             vec![],
             &recent,
@@ -770,6 +844,7 @@ mod tests {
             None,
             Some(&state),
             "",
+            "",
             vec![],
             "",
         );
@@ -785,6 +860,7 @@ mod tests {
             Some(AGENTS),
             Some(ANCHOR),
             None,
+            "",
             "",
             Vec::new(),
             "",
@@ -813,6 +889,7 @@ mod tests {
             Some(ANCHOR),
             Some("# state: fixing auth"),
             "🎋 main @ abc1234 — 1 dirty file(s)",
+            "",
             sample_retrieved(),
             &recent,
         );
@@ -844,6 +921,7 @@ mod tests {
             Some(&"# Anchor\n\n".repeat(200)),
             None,
             "",
+            "",
             long_retrieved,
             "",
         );
@@ -862,6 +940,7 @@ mod tests {
             None,
             None,
             None,
+            "",
             "",
             Vec::new(),
             "",
@@ -893,11 +972,97 @@ mod tests {
             anchor_md: Some(ANCHOR),
             state_md: Some("# state: fixing auth"),
             git_summary: "main @ abc1234",
+            repo_map: "",
             retrieved,
             attached_block: "",
             history,
             prompt: "where is the login handler?",
         }
+    }
+
+    /// The map tier, in the words the assemblers will show the model.
+    fn sample_map() -> String {
+        "Repo map — files nearest the current work, most depended-on first, names only:\n\
+          • src/auth.rs [the current work]: Session, login\n"
+            .to_string()
+    }
+
+    #[test]
+    fn a_low_budget_prompt_is_offered_the_repo_map_and_a_wide_one_is_not() {
+        let low = assemble_prompt(
+            HardwareProfile::Low,
+            SYSTEM,
+            None,
+            None,
+            None,
+            "",
+            &sample_map(),
+            Vec::new(),
+            "user: hello",
+        );
+        assert!(low.text.contains("## Repo Map"), "{}", low.text);
+        assert!(low.tiers.iter().any(|t| t.name == "repo map"));
+        assert!(
+            low.total_tokens <= low.target_tokens,
+            "{} over {}",
+            low.total_tokens,
+            low.target_tokens
+        );
+
+        let high = assemble_prompt(
+            HardwareProfile::High,
+            SYSTEM,
+            None,
+            None,
+            None,
+            "",
+            &sample_map(),
+            Vec::new(),
+            "user: hello",
+        );
+        assert!(!high.text.contains("## Repo Map"));
+        assert!(!high.tiers.iter().any(|t| t.name == "repo map"));
+    }
+
+    #[test]
+    fn the_map_is_paid_for_before_the_files_it_orients() {
+        // Admitting the tier is charged to the budget, not slipped in, and it
+        // sits above the bodies so it orients the reader before them.
+        let map = sample_map();
+        let low = assemble_chat(ChatInput {
+            profile: HardwareProfile::Low,
+            context_window: Some(HardwareProfile::Low.ctx_tokens() as u32),
+            repo_map: &map,
+            ..sample_chat_input(sample_retrieved(), &[])
+        });
+        assert!(
+            budget_wants_repo_map(low.target_tokens),
+            "a Low window is a Low-budget prompt"
+        );
+        let last = low.turns.last().unwrap().content.clone();
+        assert!(last.contains("## Repo Map"), "{last}");
+        assert!(
+            last.find("## Repo Map") < last.find("## Retrieval"),
+            "the map comes before the bodies: {last}"
+        );
+        assert!(
+            low.total_tokens <= low.target_tokens,
+            "{} over {}",
+            low.total_tokens,
+            low.target_tokens
+        );
+        assert!(low.tiers.iter().any(|t| t.name == "repo map"));
+
+        let balanced = assemble_chat(ChatInput {
+            repo_map: &map,
+            ..sample_chat_input(sample_retrieved(), &[])
+        });
+        assert!(!balanced
+            .turns
+            .last()
+            .unwrap()
+            .content
+            .contains("## Repo Map"));
     }
 
     #[test]
@@ -911,6 +1076,7 @@ mod tests {
             Some(ANCHOR),
             Some("# state: fixing auth"),
             "main @ abc1234",
+            "",
             sample_retrieved(),
             "",
         );
@@ -1139,6 +1305,7 @@ mod tests {
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
             git_summary: &live.git_summary,
+            repo_map: "",
             retrieved: live.blocks,
             attached_block: "",
             history: &[],

@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1306 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1315 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -381,6 +381,17 @@ flowchart TD
 - `XCODE_HYBRID=0` ranks the workspace files for a turn by name, symbol and
   dependency distance alone, skipping the BM25 pass over each file's
   documentation. On by default; the `/ctx eval` command prints both numbers.
+- **A tight window gets a map of the rest.** When a turn's budget is the one a
+  4096-token model leaves — 2 457 tokens — the prompt carries a symbol-only repo
+  map just before the retrieved file bodies: files that declare names, nearest
+  the work the turn is already about and most depended-on first, three names
+  each, twelve rows at the very most. It never costs more than 300 tokens — on
+  this repository the ceiling stops it at eight rows, with a line saying how
+  many named files went unlisted — a row is added whole or not at all, so a path
+  is never cut in half, and it names files rather than sending their contents:
+  the model can then ask for one by name. A wider budget skips the tier, because
+  there the file bodies themselves orient. A `/ctx <query>` preview in the TUI
+  prints it as `🗺 repo map tier: 8 files named in 283 tokens`.
 - **A turn that says something is broken is read as such.** The prompt is
   scanned for words for broken code; on a match, a file carrying a test whose
   name shares the prompt's words is favoured in the ranking. `/ctx find` and
@@ -484,7 +495,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1306 passing, 12 ignored)
+cargo test                          # Full workspace suite (1315 passing, 13 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

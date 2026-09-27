@@ -769,6 +769,32 @@ fn parse_attached_document(path: &str) -> Result<DocText, String> {
     })
 }
 
+/// The repo map for the `/ctx` preview, seeded the way the live turn seeds it
+/// (retrieval hits plus the working-tree changes), so the preview's tier
+/// breakdown is what the next generation would actually have been given.
+fn preview_repo_map(
+    index: &xencode_context_rs::RetrievalIndex,
+    results: &[xencode_context_rs::RetrievedFile],
+    changed: &HashSet<String>,
+) -> String {
+    let mut seeds: Vec<String> = results.iter().map(|r| r.path.clone()).collect();
+    seeds.extend(changed.iter().cloned());
+    xencode_context_rs::repo_map_text(index, &seeds)
+}
+
+/// The `/ctx` line reporting the repo map tier, or `None` when the assembly
+/// left it out because the budget was wide enough for file bodies instead.
+/// The row count is taken from the prompt text rather than from the tier,
+/// because the tier reports tokens and the model sees rows.
+fn repo_map_tier_line(doc: &xencode_context_rs::context::ContextDoc) -> Option<String> {
+    let map = doc.tiers.iter().find(|t| t.name == "repo map")?;
+    let rows = doc.text.lines().filter(|l| l.starts_with("  • ")).count();
+    Some(format!(
+        "🗺 repo map tier: {rows} files named in {} tokens",
+        map.tokens
+    ))
+}
+
 /// Render a parsed document as an attached-block entry: extracted text when
 /// present, an explicit note when the document held nothing extractable
 /// (scanned PDFs) or failed to parse. Pure — unit-tested.
@@ -2506,6 +2532,7 @@ impl<'a> App<'a> {
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
             git_summary: &live.git_summary,
+            repo_map: &live.repo_map,
             retrieved: live.blocks,
             attached_block: &attached_block,
             history: &history,
@@ -3314,6 +3341,7 @@ impl<'a> App<'a> {
             anchor_md: live.anchor_md.as_deref(),
             state_md: live.state_md.as_deref(),
             git_summary: &live.git_summary,
+            repo_map: &live.repo_map,
             retrieved: live.blocks,
             attached_block: "",
             history: &[],
@@ -4079,6 +4107,7 @@ impl<'a> App<'a> {
                     anchor.as_deref(),
                     state.as_deref(),
                     &git,
+                    "",
                     Vec::new(),
                     recent_a,
                 );
@@ -4089,6 +4118,7 @@ impl<'a> App<'a> {
                     anchor.as_deref(),
                     state.as_deref(),
                     &git,
+                    "",
                     Vec::new(),
                     recent_b,
                 );
@@ -4828,6 +4858,7 @@ impl<'a> App<'a> {
                 anchor.as_deref(),
                 state.as_deref(),
                 &git,
+                &preview_repo_map(&index, &results, &changed),
                 blocks,
                 &recent_text,
             );
@@ -4856,6 +4887,11 @@ impl<'a> App<'a> {
                         let _ = tx.send(line);
                     }
                 }
+            }
+            // Say so when the small-budget tier was admitted: on a Low prompt it
+            // is most of what the model learns about the files it was not given.
+            if let Some(line) = repo_map_tier_line(&doc) {
+                let _ = tx.send(format!("[CTX]{line}"));
             }
             if doc.truncated {
                 let _ =
@@ -8333,9 +8369,9 @@ mod tests {
     use super::{
         cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
-        parse_porcelain_z, parse_term_suggestions, parse_voice_level, trace_age, trace_report,
-        watch_warning_for, App, ConversationMemory, Egress, FocusArea, LoopSink, SpawnRecord,
-        XencodeConfig, CTX_SYSTEM,
+        parse_porcelain_z, parse_term_suggestions, parse_voice_level, preview_repo_map,
+        repo_map_tier_line, trace_age, trace_report, watch_warning_for, App, ConversationMemory,
+        Egress, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -9846,6 +9882,95 @@ mod tests {
         );
         // With no window reported there is nothing to be over.
         assert!(count_report(5000, 4800, None, None).is_empty());
+    }
+
+    /// AC-6: the preview's repo-map line is built from the prompt the assembly
+    /// actually produced, and only when that assembly admitted the tier.
+    #[test]
+    fn the_preview_reports_the_map_it_admitted_and_says_nothing_when_it_did_not() {
+        use xencode_context_rs::{
+            FileEntry, HardwareProfile, PerFileSymbols, RetrievalIndex, RetrievedBlock,
+            RetrievedFile,
+        };
+
+        let mut index = RetrievalIndex::default();
+        for name in ["a", "b", "c"] {
+            let path = format!("src/{name}.rs");
+            index.files.push(FileEntry {
+                path: path.clone(),
+                language: "rust".to_string(),
+                size: 100,
+                loc: 10,
+                ext: "rs".to_string(),
+                important: false,
+                secret: false,
+                binary: false,
+            });
+            index.symbols.insert(
+                path.clone(),
+                PerFileSymbols {
+                    structs: vec![format!("{name}Thing")],
+                    functions: vec![format!("{name}_run")],
+                    ..Default::default()
+                },
+            );
+            if name != "a" {
+                index.deps.push(xencode_context_rs::DepEdge {
+                    from: path,
+                    to: "src/a.rs".to_string(),
+                    via: "crate::a".to_string(),
+                });
+            }
+        }
+        let hits = vec![RetrievedFile {
+            path: "src/a.rs".to_string(),
+            score: 20,
+            reasons: vec!["symbol match".to_string()],
+        }];
+        let map = preview_repo_map(&index, &hits, &HashSet::new());
+        assert!(
+            map.contains("src/b.rs") && map.contains("src/c.rs"),
+            "{map}"
+        );
+
+        let assemble = |profile: HardwareProfile, bodies: Vec<RetrievedBlock>| {
+            xencode_context_rs::assemble_prompt(
+                profile, "system", None, None, None, "", &map, bodies, "",
+            )
+        };
+        let body = |path: &str| RetrievedBlock {
+            path: path.to_string(),
+            score: 20,
+            body: format!("File: {path}\n```rust\nfn main() {{}}\n```\n"),
+        };
+
+        let low = assemble(HardwareProfile::Low, vec![body("src/a.rs")]);
+        let line = repo_map_tier_line(&low).expect("a Low preview carries the tier");
+        let rows = low.text.lines().filter(|l| l.starts_with("  • ")).count();
+        let tokens = low
+            .tiers
+            .iter()
+            .find(|t| t.name == "repo map")
+            .unwrap()
+            .tokens;
+        assert_eq!(
+            line,
+            format!("🗺 repo map tier: {rows} files named in {tokens} tokens")
+        );
+        assert_eq!(rows, 3, "every named file on this index: {}", low.text);
+
+        // The wide budget sends bodies instead, and says nothing about a map.
+        let bodies = ["a", "b", "c"]
+            .iter()
+            .map(|name| body(&format!("src/{name}.rs")))
+            .collect::<Vec<_>>();
+        let balanced = assemble(HardwareProfile::Balanced, bodies);
+        assert!(
+            repo_map_tier_line(&balanced).is_none(),
+            "a Balanced prompt is not a Low-budget prompt"
+        );
+        assert!(!balanced.text.contains("## Repo Map"), "{}", balanced.text);
+        assert!(balanced.text.contains("src/c.rs"), "the bodies are the map");
     }
 
     /// What a metrics row says about itself (CX-2): which model ran, which

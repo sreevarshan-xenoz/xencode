@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a turn on a small model now gets a map of the project, not just a few files
+
+A four-thousand-token model spends its budget before it has learned what else
+exists. Retrieval on that machine hands over three file bodies and the prompt is
+nearly full, so when the code the question is about is not one of those three,
+the model has nothing to go on: it guesses a path or says it does not know where
+the login handler lives. The prompt now carries a map of names immediately
+before the file bodies on exactly that budget — files that declare something,
+ranked by how near they sit to the files the turn is already about, the
+most-depended-on first, three declared names each:
+
+```text
+Repo map — files nearest the current work, most depended-on first, names only:
+  • rust/crates/xencode-context-rs/src/index.rs [the current work]: FileEntry, FilesIndex, Manifest, +9 more
+  • rust/crates/xencode-context-rs/src/retrieve.rs [1 hop(s) from the current work]: RetrievalIndex, RetrieveOptions, RetrievedFile, +18 more
+  … +126 more files in the index, not listed
+```
+
+Names, not contents: what the tier buys is a file the model can then ask for by
+name. The map is built from the index the project already has — its dependency
+edges give the distance from the current work, and how many files depend on a
+file breaks ties. Rows are admitted whole or not at all, so a path is never cut
+in half mid-name, and a line at the end says how many named files went
+unlisted. The whole tier cannot cost more than 300 tokens, and a row carries
+three names rather than five because that is what the measurement rewarded: five
+names filled the ceiling in five rows and named the expected file for 8 of this
+repository's 25 test questions, three names fitted eight rows and reached 9.
+
+It is offered by budget, not by a setting. A prompt whose target is what a
+4096-token machine fills — 2 457 tokens — gets the tier; anything wider skips it,
+because with room for the bodies the bodies are the orientation. Over those same
+25 questions at the three-file budget, the bodies alone named the answer in 7,
+and the bodies together with the map in 9, for a median 283 tokens spent out of
+2 457. A `/ctx` preview says what it put in: `[CTX]🗺 repo map tier: 8 files
+named in 283 tokens`.
+
 ### Added — the agent can read a dependency's own source, at the version this project locked
 
 Asked "why does `serde::from_str` reject this?", a coding agent has to guess,
