@@ -4470,9 +4470,10 @@ context.
   A/B. *(Done 2026-09-23 — see W0 progress. The rerank stage was replaced by a
   candidate stage rather than moved, because moving it as written could not
   change recall at all.)*
-- **QN-3 — RRF (k=60) instead of the `score + 8×bm25` linear blend.** *Effort:
+- **QN-3 — RRF (k=60) instead of the `score + 4×bm25` linear blend.** *Effort:
   S.* Rank fusion beats tuned linear blends untuned, which matters when nobody is
-  tuning.
+  tuning. *(Done 2026-09-27 — see W4 progress. Built and measured on this
+  repository's gold set; it lost, so the blend ships and the code is reverted.)*
 - **QN-4 — Teach the verify pattern instead of building semantic search.**
   `search_files` is already a full regex engine and `run_command` already reaches
   `grep -L`, so "find files **without** a null check" is expressible today as
@@ -7290,6 +7291,61 @@ done-when is met, and the commit that does it names the IDs.
   -D warnings` clean. The live outputs above are from that run, taken with
   `--nocapture`; the temporary print was removed afterwards and the test re-run.
 
+- [x] `QN-3` — 2026-09-27, third item of W4, **built, measured, and reverted**:
+  the shipped scoring path is still the tuned linear blend. Reciprocal rank
+  fusion (two ranked arms, each file scored `1/(60 + rank)`, summed) replaced
+  `structural + round(4 × bm25)` in `embed.rs::hybrid_select`, was run against
+  this repository's real 25-query gold set at top-5, and lost on every measure
+  except one. Four variants were measured, all on the same index, in the same
+  run order as the baseline:
+
+  | arm | recall@1 | recall@5 | MRR |
+  |---|---|---|---|
+  | shipped blend, structure only (baseline) | 0.240 | 0.520 | 0.311 |
+  | shipped blend, + text (path + symbols) | 0.680 | 0.840 | 0.743 |
+  | shipped blend, + text + doc prose | 0.680 | **0.880** | **0.755** |
+  | rank fusion, + text | 0.560 | 0.880 | 0.673 |
+  | rank fusion, + text + doc prose | 0.520 | 0.880 | 0.651 |
+  | rank fusion + raw-signal tie-breaks, + text | 0.560 | 0.880 | 0.671 |
+  | rank fusion + raw-signal tie-breaks, + text + doc prose | 0.520 | 0.880 | 0.658 |
+  | rank fusion with the structural arm weighted 2×, + text | 0.440 | 0.880 | 0.589 |
+  | rank fusion with the structural arm weighted 2×, + text + doc prose | 0.520 | 0.760 | 0.607 |
+
+  **Why it loses here, in the numbers.** Rank fusion throws away magnitude: a
+  file the structural arm scored 16 (the symbol cap) and one it scored 3 (its
+  floor) occupy adjacent ranks, so the blend's "strong structural signal" is
+  invisible to the fused total. The only thing fusion bought was recall@5 in the
+  path + symbol arm, 0.840 → 0.880, and it paid for that with recall@1
+  0.680 → 0.560 and MRR 0.743 → 0.673 — one more file in the top five, three
+  wrong files at the head. Re-weighting the structural arm to 2× made it worse
+  on all three measures (recall@1 0.440), which is the expected shape: fusion's
+  premise is that the arms are comparable, and this pair is not.
+  **Two claims this pass corrected about the row itself.** The row says
+  `score + 8×bm25`; the shipped constant is `LEXICAL_WEIGHT = 4.0`
+  (`embed.rs:37`), so the blend being compared against was twice as weak as the
+  plan described — the comparison was run at the real value, not the written one.
+  And the plan's premise, "rank fusion beats tuned linear blends untuned, which
+  matters when nobody is tuning", is not testable here as stated, because this
+  blend *is* tuned: 4.0 was chosen by this same eval. Fusion lost to a tuned
+  weight, which is the case the row admits; whether it would beat an untuned one
+  is not measured and is not claimed.
+  **What the attempt left behind, deliberately.** The scoring table's
+  documentation now states that position-based fusion was measured and rejected,
+  so the next pass does not spend another four runs rediscovering it; the two
+  fusion-only tests were removed with the code they tested. The per-file
+  rank reasons ("text rank 3") and the windowed candidate cut were part of the
+  experiment and are reverted too. Recorded the same way `retrieve.rs` records
+  the two shape biases that measured 0.000 on their own probes and were deleted.
+  **Verified by** re-running the gold baseline after the revert, which prints the
+  baseline row above (recall@1 0.680, recall@5 0.880, MRR 0.755 on the doc-prose
+  arm) — the numbers in the table are run output, not expectations. The tree is
+  back at 1306 tests, 0 failures, 12 ignored over 46 result lines, the same total
+  as the commit before the experiment, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean; the only code
+  left standing is the note on `LEXICAL_WEIGHT` that records what was tried. The
+  runs for this comparison appended to `.xencode/cache/eval.jsonl` (now 51 rows),
+  which is gitignored and kept as the raw record behind this table.
+
 
 #### W2 — The model/inference substrate — 15 items
 
@@ -7344,7 +7400,7 @@ CI-2/CI-6 (W3) supply the structural terms. The git-history terms (GH-1, GH-3, G
 | **GH-3** | Co-change and recency as scoring terms in `retrieve()` | capability | co-change + recency as retrieval terms |
 | **GH-9** | `xencode history setup` | capability | commit-graph + history setup |
 | **QM-3** | buy ordering before top_k | capability | buy ordering before top_k |
-| **QN-3** | RRF (k=60) instead of the `score + 8×bm25` linear blend | capability | RRF instead of the linear blend |
+| **QN-3** | RRF (k=60) instead of the `score + 4×bm25` linear blend | capability | RRF instead of the linear blend |
 | **QN-4** | Teach the verify pattern instead of building semantic search | capability | teach the verify pattern, not semantic search |
 | **RS-3** | Widen the read-only roots to the local registry and toolchain docs | capability | local registry + toolchain docs roots — one of the two offline gains |
 | **RS-4** | `read_docs(crate, version, path)` | capability | version-pinned docs intake over RS-3 |
