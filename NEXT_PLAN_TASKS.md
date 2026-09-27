@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1185 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1210 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1820,6 +1820,20 @@ redundant.
   visible verified/unsigned badge in the model panel. S-M. Trap: hashing after
   download proves nothing about the *source*; say what it does and does not
   establish.
+  *(Done 2026-09-27, together with MI-6 in one change. All three clauses are in: a
+  `/resolve/<revision>/` address with a SHA256 supplied from outside the transfer,
+  the bytes hashed as they arrive — so a resumed download is checked as a whole
+  file, not as its second half — and the same check run before any local server is
+  opened on a file, in the CLI, the TUI's auto-start and the panel's own load. The
+  panel says `verified` or `unsigned` in its status line. The trap is the part
+  worth recording: the revision is not on the response that carries the bytes.
+  Hugging Face names it in the `x-repo-commit` header of its own redirect, and the
+  delivery network answering for the file knows nothing about repositories, so the
+  redirect chain is walked deliberately to catch it. And a matching digest proves
+  the transfer was faithful to a number, never that the publisher wrote the bytes:
+  a file nothing was pinned to is called `unsigned`, and the `.provenance.json`
+  note left beside one xencode fetched is its own record of what it saw, not a
+  signature.)*
 - **LF-8 offline conformance suite** — a CI run with networking off proving every
   panel degrades honestly instead of rendering zeros for measurements that never
   happened. S. This is the testable version of "local-first" as a product claim.
@@ -2191,6 +2205,21 @@ requests we already know how to make and don't.**
   verification on `/resolve/<rev>/` downloads. **M/L**. Trap: the table rots in
   months; without a maintenance cadence it becomes fiction in the product.
   Overlaps LF-7 (weight provenance) — same work, don't build twice.
+  *(Done 2026-09-27 with LF-7 as one change, which is what "don't build twice"
+  asked for. The names and sizes are no longer code: `model_advice.json` maps the
+  largest memory pool measured on this machine to a tier, and each entry carries
+  its repository, file, revision, size and checksum, with the shipped table
+  checked into the binary and `~/.xencode/model_advice.json` read instead when a
+  person writes one. The rot the trap predicted is printed rather than hidden —
+  `xencode models advice` answers with the date the table was checked, how many
+  days ago that was, and calls anything older than 180 days out of date. Every
+  digest and size in it was re-read from the repository API on the day of writing
+  and matched; a test over the shipped table insists on 40-character revisions and
+  64-character digests, because these values are transcribed by hand and a
+  shortened one would otherwise sit there looking like a pin. What is *not* here is
+  any way for xencode to refresh the table by itself: the age signal is the whole
+  maintenance story, and the next person to open this item should assume the dates
+  are worse than they look.)*
 - **MI-7 Task-shaped model profiles** — a deterministic per-task
   model+options mapping (small model to summarise/classify, big model to edit),
   presented as profiles rather than a "router". **S**, mostly UI over the

@@ -572,6 +572,11 @@ pub struct App<'a> {
     /// local server up that takes minutes, so it gets its own visible line
     /// rather than a message that scrolls past in a panel nobody has open.
     pub model_download: Option<String>,
+    /// What is known about the bytes of the model file that was just used:
+    /// `verified`, `unsigned`, or the reason a server was not started on them.
+    /// Set by the same pass that brings the server up, because that is the only
+    /// moment the file is guaranteed to have been looked at.
+    pub model_integrity: Option<String>,
     // llama.cpp sampling options (temperature, top-k, min-p, max-tokens)
     pub sampling_temp_editing: bool,
     pub sampling_temp_buffer: String,
@@ -1981,6 +1986,7 @@ impl<'a> App<'a> {
             llamacpp_path_cursor: 0,
             llamacpp_action_msg: String::new(),
             model_download: None,
+            model_integrity: None,
             sampling_temp_editing: false,
             sampling_temp_buffer: String::new(),
             sampling_int_editing: false,
@@ -2727,6 +2733,10 @@ impl<'a> App<'a> {
     /// - "load"        : load `target` (a model id) or the configured GGUF path.
     /// - "switch"      : swap to `target` (a model id) — unloads first if we can.
     /// - "unload"      : unload whatever is loaded.
+    ///
+    /// A load or switch that names a file on this machine is checked against the
+    /// pinned checksum before the server is asked, and the panel's integrity
+    /// badge is updated with what was found.
     pub fn llamacpp_control(
         &mut self,
         command: &str,
@@ -2755,7 +2765,36 @@ impl<'a> App<'a> {
 
         let (url, path) = (llamacpp_url, load_target.clone());
         let is_unload = command == "unload";
+        let pinned = self.config.llama_cpp_model_sha256.clone();
         tokio::spawn(async move {
+            // Loading a file this machine holds is the same moment a launch is:
+            // the bytes are about to answer as the model. A request that names
+            // an alias instead of a path is left alone, because the file it
+            // points at is the server's business and calling a name "verified"
+            // would say more than was checked.
+            if !is_unload && std::path::Path::new(&path).is_file() {
+                let trimmed = pinned.trim();
+                let expected = (!trimmed.is_empty()).then_some(trimmed);
+                let check = xencode_models_rs::check_model_file(&path, expected);
+                let state = match &check {
+                    xencode_models_rs::FileCheck::Verified { .. } => "verified".to_string(),
+                    xencode_models_rs::FileCheck::Unsigned { .. } => "unsigned".to_string(),
+                    other => other.label(),
+                };
+                let _ = tx.send(format!("[MODEL_CHECK]{state}"));
+                if !matches!(
+                    check,
+                    xencode_models_rs::FileCheck::Verified { .. }
+                        | xencode_models_rs::FileCheck::Unsigned { .. }
+                ) {
+                    let _ = tx.send(format!(
+                        "[LLAMACPP_MSG]⚠️ not loading {path}: {}",
+                        check.label()
+                    ));
+                    return;
+                }
+            }
+
             let client = LlamaCppClient::new(&url, timeout);
             let result = if is_unload {
                 client.unload_models().await
@@ -5992,6 +6031,7 @@ impl<'a> App<'a> {
             .filter(|s| !s.is_empty());
         let model_path = self.config.llama_cpp_model_path.clone();
         let model_url = self.config.llama_cpp_model_url.clone();
+        let model_sha = self.config.llama_cpp_model_sha256.clone();
         let exec = self.config.llama_cpp_executable.clone();
         let url = self.config.llama_cpp_url.clone();
         // The profile's preset first, the user's own flags last: a flag written
@@ -6065,6 +6105,7 @@ impl<'a> App<'a> {
             // minutes rather than seconds — so it is the step drawn on screen
             // while it runs, and the one that picks up where a previous,
             // interrupted attempt stopped.
+            let mut downloaded = false;
             if !std::path::Path::new(&model_path).exists() {
                 let url = model_url.trim().to_string();
                 if url.is_empty() {
@@ -6093,10 +6134,19 @@ impl<'a> App<'a> {
                 let on_progress = move |progress: xencode_models_rs::Progress| {
                     let _ = bar_tx.send(format!("[DOWNLOAD]{}", progress.label()));
                 };
+                let expected = {
+                    let trimmed = model_sha.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                };
                 match xencode_models_rs::fetch_model_file(
                     &url,
                     &model_path,
                     xencode_context_rs::hwprobe::free_disk_bytes(&model_path),
+                    expected,
                     &on_progress,
                 )
                 .await
@@ -6107,11 +6157,27 @@ impl<'a> App<'a> {
                             "[LLAMACPP_MSG]✅ model downloaded: {}",
                             xencode_models_rs::human_bytes(got.bytes)
                         ));
+                        // The bytes were hashed as they arrived, so the answer
+                        // to "is this the file" is already known and the file
+                        // does not have to be read a second time.
+                        let _ = ok_tx.send(format!(
+                            "[MODEL_CHECK]{}",
+                            if got.verified { "verified" } else { "unsigned" }
+                        ));
+                        if !got.verified {
+                            let _ = ok_tx.send(format!(
+                                "[LLAMACPP_MSG]ℹ️ nothing was expected, so this file is unsigned: \
+                                 it hashes to {}…, which describes these bytes and proves nothing \
+                                 about where they came from",
+                                xencode_models_rs::short_rev(&got.sha256)
+                            ));
+                        }
                         if got.resume_refused {
                             let _ = ok_tx.send(
                                 "[LLAMACPP_MSG]ℹ️ the server sent the whole file rather than the part that was missing, so an interruption would start the transfer over".to_string(),
                             );
                         }
+                        downloaded = true;
                     }
                     Err(e) => {
                         let _ = ok_tx.send("[DOWNLOAD]".to_string());
@@ -6119,6 +6185,43 @@ impl<'a> App<'a> {
                         let _ = err_tx.send(
                             "[HEALTH]llamacpp|unavailable|0|model download failed".to_string(),
                         );
+                        return;
+                    }
+                }
+            }
+
+            // A file that was already on disk has not been looked at since it
+            // arrived, and a server started on the wrong bytes answers in a way
+            // that reads like a bad model rather than a bad file. One read of
+            // the file settles it, in the second before the launch.
+            if !downloaded {
+                let trimmed = model_sha.trim();
+                let expected = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                };
+                match xencode_models_rs::check_model_file(&model_path, expected) {
+                    xencode_models_rs::FileCheck::Verified { .. } => {
+                        let _ = ok_tx.send("[MODEL_CHECK]verified".to_string());
+                    }
+                    xencode_models_rs::FileCheck::Unsigned { .. } => {
+                        let _ = ok_tx.send("[MODEL_CHECK]unsigned".to_string());
+                    }
+                    bad => {
+                        let reason = bad.label();
+                        let _ = ok_tx.send(format!("[MODEL_CHECK]{reason}"));
+                        let _ = err_tx.send(format!(
+                            "[LLAMACPP_MSG]⚠️ not starting a server: {model_path} {reason}"
+                        ));
+                        let _ = err_tx.send(format!(
+                            "[HEALTH]llamacpp|unavailable|0|{}",
+                            if matches!(bad, xencode_models_rs::FileCheck::Mismatch { .. }) {
+                                "model checksum mismatch"
+                            } else {
+                                "model file unreadable"
+                            }
+                        ));
                         return;
                     }
                 }
@@ -7358,6 +7461,12 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             } else if let Some(body) = token.strip_prefix("[DOWNLOAD]") {
                 // Empty clears the line: the download is over, one way or another.
                 app.model_download = if body.is_empty() {
+                    None
+                } else {
+                    Some(body.to_string())
+                };
+            } else if let Some(body) = token.strip_prefix("[MODEL_CHECK]") {
+                app.model_integrity = if body.is_empty() {
                     None
                 } else {
                     Some(body.to_string())
@@ -11356,6 +11465,96 @@ mod tests {
             .unwrap_or_default()
             .starts_with("error: the user denied"));
         assert!(!std::path::Path::new("/tmp/xencode-panel-must-not-run").exists());
+    }
+
+    /// A file the panel is about to hand to a running server is hashed first,
+    /// against the checksum it was pinned to. The server is never told about a
+    /// file that failed: a model answering from the wrong bytes reads like a bad
+    /// model, not like a bad file.
+    #[tokio::test]
+    async fn a_panel_load_of_a_file_that_failed_its_checksum_never_reaches_the_server() {
+        let dir = temp_case_dir("panel-check-mismatch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("model.gguf");
+        std::fs::write(&file, b"not the bytes anyone pinned").unwrap();
+
+        let mut app = App::for_tests();
+        app.config.llama_cpp_url = "http://127.0.0.1:1".to_string();
+        app.config.llama_cpp_model_sha256 = "0".repeat(64);
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        app.llamacpp_control("load", Some(file.display().to_string()), tx);
+
+        let badge = rx.recv().await.expect("no integrity badge");
+        assert!(
+            badge.starts_with("[MODEL_CHECK]does not match its checksum"),
+            "the badge has to name the failure: {badge}"
+        );
+        let msg = rx.recv().await.expect("no refusal line");
+        assert!(
+            msg.starts_with("[LLAMACPP_MSG]⚠️ not loading ") && msg.contains("checksum"),
+            "the panel has to say what it refused: {msg}"
+        );
+        let late = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+        if let Ok(Some(token)) = late {
+            panic!("the server was asked about the file anyway: {token}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// With no checksum configured there is nothing to compare against, and the
+    /// badge says `unsigned` rather than nothing — then the load goes ahead,
+    /// because an unverified file is not a broken one.
+    #[tokio::test]
+    async fn a_panel_load_with_nothing_pinned_says_unsigned_and_still_asks() {
+        let dir = temp_case_dir("panel-check-unsigned");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("model.gguf");
+        std::fs::write(&file, b"an ordinary file with no pin").unwrap();
+
+        let mut app = App::for_tests();
+        app.config.llama_cpp_url = "http://127.0.0.1:1".to_string();
+        app.config.llama_cpp_model_sha256 = String::new();
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        app.llamacpp_control("load", Some(file.display().to_string()), tx);
+
+        assert_eq!(
+            rx.recv().await.expect("no integrity badge"),
+            "[MODEL_CHECK]unsigned"
+        );
+        let answer = rx.recv().await.expect("the load was not attempted");
+        assert!(
+            answer.starts_with("[LLAMACPP]❌"),
+            "the request should still have gone out: {answer}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A load that names a model alias is a name the server resolves, not a file
+    /// this machine can look at. Nothing is checked, and nothing is claimed.
+    #[tokio::test]
+    async fn a_panel_load_of_an_alias_is_not_reported_as_verified() {
+        let mut app = App::for_tests();
+        app.config.llama_cpp_url = "http://127.0.0.1:1".to_string();
+        app.config.llama_cpp_model_sha256 = "0".repeat(64);
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        app.llamacpp_control("load", Some("qwen3-4b".to_string()), tx);
+
+        let answer = rx.recv().await.expect("no server answer");
+        assert!(
+            answer.starts_with("[LLAMACPP]"),
+            "an alias goes straight to the server: {answer}"
+        );
+    }
+
+    fn temp_case_dir(case: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("xencode-{case}-{}-{nanos}", std::process::id()))
     }
 
     fn git(root: &std::path::Path, args: &[&str]) {

@@ -984,7 +984,17 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
         } else if app.config.llama_cpp_model_path.is_empty() {
             "Hint: set a GGUF path in Settings → Llama.cpp Model for 'l'/'u'".to_string()
         } else {
-            format!("Llama.cpp GGUF: {}", app.config.llama_cpp_model_path)
+            // The badge says what the checksum check actually concluded for
+            // this file: "verified" only when the bytes matched a digest that
+            // came from somewhere other than this transfer, "unsigned" when
+            // nothing was configured to compare against. Anything else is the
+            // reason the server refused to start, shown in full.
+            let badge = app
+                .model_integrity
+                .as_deref()
+                .map(|state| format!(" · {state}"))
+                .unwrap_or_default();
+            format!("Llama.cpp GGUF: {}{badge}", app.config.llama_cpp_model_path)
         };
         let width = popup_area.width.saturating_sub(2).max(1) as usize;
         let status = if status.chars().count() > width {

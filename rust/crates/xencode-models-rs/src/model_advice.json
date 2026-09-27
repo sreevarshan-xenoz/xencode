@@ -1,0 +1,72 @@
+{
+  "as_of": "2026-09-27",
+  "note": "Every size, checksum and revision below was read from huggingface.co on the as_of date via the repository tree API, and every Ollama tag exists on ollama.com/library on that date. These entries drift: a repository can force-push, retire a file, or ship a better quantization. Check the date before trusting a line, and replace this file by writing your own at ~/.xencode/model_advice.json — xencode reads that one instead and says which file it answered from.",
+  "ollama_preference": [
+    "qwen3",
+    "llama3.3",
+    "llama3.2",
+    "gemma3",
+    "phi4-mini",
+    "qwen2.5"
+  ],
+  "tiers": [
+    {
+      "name": "small",
+      "max_file_bytes": 1717986918,
+      "gguf": [
+        {
+          "label": "Qwen2.5 0.5B Instruct, 4-bit",
+          "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+          "file": "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+          "revision": "9217f5db79a29953eb74d5343926648285ec7e67",
+          "size_bytes": 491400032,
+          "sha256": "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+        },
+        {
+          "label": "Qwen3 1.7B, 4-bit",
+          "repo": "unsloth/Qwen3-1.7B-GGUF",
+          "file": "Qwen3-1.7B-Q4_K_M.gguf",
+          "revision": "d7f544eead698dbd1f15126ef60b45a1e1933222",
+          "size_bytes": 1107409472,
+          "sha256": "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897"
+        }
+      ]
+    },
+    {
+      "name": "medium",
+      "max_file_bytes": 3221225472,
+      "gguf": [
+        {
+          "label": "Llama 3.2 3B Instruct, 4-bit",
+          "repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+          "file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+          "revision": "5ab33fa94d1d04e903623ae72c95d1696f09f9e8",
+          "size_bytes": 2019377696,
+          "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff"
+        },
+        {
+          "label": "Qwen3 4B, 4-bit",
+          "repo": "unsloth/Qwen3-4B-GGUF",
+          "file": "Qwen3-4B-Q4_K_M.gguf",
+          "revision": "22c9fc8a8c7700b76a1789366280a6a5a1ad1120",
+          "size_bytes": 2497281312,
+          "sha256": "f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a"
+        }
+      ]
+    },
+    {
+      "name": "large",
+      "max_file_bytes": 12884901888,
+      "gguf": [
+        {
+          "label": "Qwen3 14B, 4-bit",
+          "repo": "unsloth/Qwen3-14B-GGUF",
+          "file": "Qwen3-14B-Q4_K_M.gguf",
+          "revision": "a04a82c4739b3ef5fa6da7d10261db2c67dd1985",
+          "size_bytes": 9001753984,
+          "sha256": "5eaa0870bd81ed3b58a630a271234cfa604e43ffb3a19cd68e54a80dd9d52a66"
+        }
+      ]
+    }
+  ]
+}
