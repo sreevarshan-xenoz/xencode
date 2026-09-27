@@ -19,4 +19,4 @@ pub use llamacpp::{
     LaunchOutcome, LlamaCppClient, LlamaCppError, LlamaCppModelInfo, LlamaCppOptions,
     LlamaCppTimings, LlamaServerProcess, Patience, ServerExit, ServerStart,
 };
-pub use ollama::{ModelInfo, OllamaClient, OllamaError};
+pub use ollama::{ModelInfo, ModelShow, OllamaClient, OllamaError};

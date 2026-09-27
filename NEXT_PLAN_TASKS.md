@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1210 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1227 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2172,6 +2172,19 @@ requests we already know how to make and don't.**
   (fact 2), discovering capability via `/api/show`. **S**. Trap:
   tools+`format` interop on sub-7B models is weak; `/api/show` becomes a new
   probe surface that can fail.
+  *(Done 2026-09-27 — see W2 progress. All four fields ride the request now, and
+  each one was seen in the bytes actually sent to a server on this machine. Two
+  of this item's instructions did not survive that: the schema goes out as
+  Ollama's own `format` object rather than as a grammar converted from it,
+  because the server takes a schema directly and derives its own constrained
+  decoding, so converting it would be a translation for a server that never
+  asked for one; and the item's `num_ctx` half turned out to matter more than a
+  parity field — a request that omits it makes the server reload the model at
+  its own default window, which was watched happening here. Of the two traps:
+  the probe surface is real and handled, an unanswerable `/api/show` ends as
+  "nothing learned" and keeps the window that was asked for rather than
+  replacing it with a zero; tools+`format` on a sub-7B model was not measured,
+  so nothing is claimed about it either way.)*
 - **MI-3 Hardware-profile server presets** — emit `-fa`, `-ctk q8_0`,
   `-ctv q8_0`, `-np`, `-b`, `--ctx-size` per LOW/BALANCED/HIGH for the
   self-spawned server and verify the values came back through `/props` (which
@@ -6715,6 +6728,71 @@ done-when is met, and the commit that does it names the IDs.
   disk it would go on, measured by writing 32 MiB and watching the reading
   drop — with a 90 % tolerance because `/tmp` is shared with other tests — and
   a path with no existing ancestor reporting unknown).
+
+- [x] `MI-2` — 2026-09-27, twelfth item of W2. A request to Ollama now says what
+  shape the answer must be in, whether the model may think first, how long to stay
+  loaded, and how large a window it is being asked to hold.
+  **What was wrong, in the worst of the four:** the context was filled for one
+  window and the request never mentioned it, so the server used its own default and
+  the conversation was cut, and a later request that wanted a different window made
+  the server unload and reload the model. That reload was watched happening here:
+  the same model, asked twice, once without a window, produced `unload completed`
+  and then a server starting with `-c 4096` — its own figure for the 1.9 GiB free
+  where this machine had filled the prompt for 8,192. The other three were quieter:
+  a JSON-shaped answer was hoped for and never required, thinking followed the
+  model's default rather than the setting, and no `keep_alive` meant the model was
+  unloaded five minutes after every turn.
+  **How it was verified, and how honestly it could be verified.** Against a real
+  Ollama 0.34.4 on this machine with two local models of different ages — one that
+  says it can think and was trained for 40,960 tokens, one that says neither — the
+  `query` route printed `asking Ollama for a 8192-token window` and the server's own
+  log showed it starting with `-c 8192`, and `/api/ps` afterwards reported
+  `context_length: 8192` with an expiry about ten minutes out, which is the
+  keep-alive arriving as well as the window. A TUI chat turn against the same server
+  left the model loaded at that window with zero reloads in the log. The four fields
+  were confirmed in the bytes actually sent — `format` holding the schema,
+  `keep_alive: "10m"`, `num_ctx: 8192`, `think: true` — but by a stand-in server on
+  a loopback port, not by packet capture: reading the traffic off the interface needs
+  a permission this session does not have and was not given.
+  **The two decisions the asking is for.** A window larger than the weights were
+  trained for is brought down to it and said out loud, because the server reduces it
+  silently anyway; and `think` is sent as `true` only when the model has said it can
+  think, because asking one that cannot is a refusal of the whole request, not a
+  no-op. A model the server knows nothing about is left unclamped and unasked:
+  an unanswerable question ends as *nothing learned*, which is the same path a server
+  that is down gives, rather than as a window of zero.
+  **What it deliberately does not claim.** The item asked for the schema to be
+  converted into a grammar before it is sent. It is not: the server is handed the
+  schema under its own `format` key and builds its own constrained decoding from it,
+  so converting would be a translation for a server that never asked for one. A
+  grammar string and a mirostat setting have no name this server reads at all, so
+  when the model is on Ollama they are not sent, and `query` now says so on its
+  standard error instead of accepting them quietly. The trap the item names about
+  small models doing both tools and a required shape was not measured, and the
+  single-shot ask outside a chat conversation carries the same fields by sharing the
+  decision with the routes that were captured, but was not itself seen on the wire.
+  **One thing found on the way that is not this item.** The stand-in Ollama the
+  agent-loop tests use replies from a script, one reply per request; a turn that now
+  asks a question first was answering itself with a reply meant for the model, and
+  it surfaced as an agent turn reporting one round where two were expected. The
+  stand-in answers the question itself now, the way a real server answers for a model
+  it does not have.
+  Verified by 1227 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Seventeen tests are new: five reading a captured answer from a
+  real 0.34.4 server (the window and the thinking claim found under the names that
+  server uses, including behind an architecture prefix, a capability matched on the
+  word rather than its position, an answer saying nothing read as unknown rather than
+  as zero, non-text capability values not counted), eleven for the rules themselves
+  (every value landing under the name Ollama reads, nothing added that nobody asked
+  for, the window clamped and announced, an unknown ceiling left alone, thinking
+  withheld from a model that cannot do it, thinking switched off needing no
+  permission, keep-alive passed through as text, the window the machine can serve
+  rather than the one the model advertises, and only a bare model name asked of
+  Ollama), and one for the settings row. Two of them were checked by putting the old
+  behaviour back and watching them fail — the window-reading test prints `left: None,
+  right: Some(32768)` when the key is looked for under a wrong name, and the clamp
+  test fails 1 of 146 when the comparison is removed.
 
 
 #### W2 — The model/inference substrate — 15 items

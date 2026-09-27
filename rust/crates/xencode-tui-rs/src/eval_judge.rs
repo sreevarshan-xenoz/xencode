@@ -328,7 +328,15 @@ pub async fn judge(options: &TaskEvalOptions, report: &TaskEvalReport) -> JudgeR
     let reversed: Vec<usize> = listing.iter().rev().copied().collect();
     let second_request = eval_judge_prompt(&render_attempts(&shown_cases, &reversed, &by_case));
 
-    let manager = manager_for(options);
+    let mut manager = manager_for(options);
+    // The judge asks on the same terms a chat turn does: a request with no
+    // `options.num_ctx` is a different model configuration to Ollama, which would
+    // reload the model at the server's own window for two ranking answers and
+    // again when the next attempt runs. The window is sized the way a first turn
+    // sizes it, since no turn has been served here yet to learn a better number.
+    manager
+        .prepare_ollama_request(&model, judge_ollama_ask(&model))
+        .await;
     let answer_a = ask(&manager, &model, options, &request).await;
     let answer_b = ask(&manager, &model, options, &second_request).await;
     let (answer_a, answer_b) = match (answer_a, answer_b) {
@@ -354,6 +362,25 @@ pub async fn judge(options: &TaskEvalOptions, report: &TaskEvalReport) -> JudgeR
         order,
         stable,
         ..empty
+    }
+}
+
+/// What this judge asks of an Ollama server, sized the way a first chat turn is:
+/// the window comes from the model's own table entry capped by what this machine's
+/// memory profile can serve, and nothing is asked about reasoning or how long the
+/// model stays loaded, because the eval pins sampling rather than behaviour.
+fn judge_ollama_ask(model: &str) -> xencode_providers_rs::OllamaRequest {
+    use xencode_providers_rs::{effective_context_window, ollama_window_asked, routes_to_ollama};
+    if !routes_to_ollama(model) {
+        return xencode_providers_rs::OllamaRequest::default();
+    }
+    let profile = xencode_context_rs::ProfileDecision::resolve("auto").profile;
+    xencode_providers_rs::OllamaRequest {
+        num_ctx: Some(ollama_window_asked(
+            effective_context_window(model, None),
+            profile.ctx_tokens() as u32,
+        )),
+        ..Default::default()
     }
 }
 

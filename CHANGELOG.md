@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a request to Ollama now says what it needs, instead of leaving the server to guess
+
+Four things were never sent to an Ollama server: the shape a JSON answer had to be
+in, whether the model may think before answering, how long it should stay loaded,
+and how large a window the conversation was built for. The last one cost the most.
+The context was filled for one window and the request said nothing, so the server
+used its own figure — on this machine, 4,096 tokens against a prompt built for
+8,192 — and a later request wanting a different window made it unload the model and
+load it again. That reload was observed here in the server's own log, and the fix
+observed the same way: with the window sent, the server starts at `-c 8192` and a
+follow-up request reloads nothing.
+
+Before a request goes out, the program now asks the server what the model can do.
+That answer decides two things. A window bigger than the weights were trained for is
+brought down to it and the change is said out loud, because the server reduces it
+silently anyway; and a model is only asked to think first if it has said it can,
+because asking one that cannot is a refusal of the whole request. A model the server
+knows nothing about is left unclamped and unasked — an unanswerable question ends as
+*nothing learned*, the same as a server that is down, rather than as a window of
+zero.
+
+Two settings drive the rest, `ollama_reasoning` (`off`, `auto`, `on`) and
+`ollama_keep_alive`, and both apply to every route that speaks to Ollama: a chat
+turn, the code review, the model comparison, and a one-off `xencode query`. A
+grammar or a mirostat setting has no name an Ollama server reads, so when the model
+is on Ollama those are not sent and `query` now says so instead of accepting them
+quietly.
+
 ### Added — model bytes are checked against a checksum, and this machine is told which model it can hold
 
 A downloaded model used to be believed because of its size. Two things replace

@@ -1212,31 +1212,14 @@ mod tests {
     /// seeded repository, and the files left on disk decide the verdict. What it
     /// removes is only the part that would otherwise need a trained model and a
     /// network — which is what lets the suite check the harness in CI.
+    ///
+    /// The helper answers the `/api/show` window probe with a plain "not found"
+    /// instead of a scripted reply, so a turn that probes first still gets every
+    /// answer it was written with.
     async fn scripted(answers: Vec<serde_json::Value>) -> (String, tokio::task::JoinHandle<()>) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            for answer in answers {
-                let (mut sock, _) = listener.accept().await.unwrap();
-                let mut buf = [0u8; 4096];
-                loop {
-                    let read = sock.read(&mut buf).await.unwrap_or(0);
-                    if read == 0 || buf[..read].windows(4).any(|w| w == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let body = format!("{answer}\n");
-                let reply = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\n\
-                     Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
-                    body.len(),
-                    body
-                );
-                let _ = sock.write_all(reply.as_bytes()).await;
-                let _ = sock.shutdown().await;
-            }
-        });
+        let server = tokio::spawn(crate::app::serve_scripted_answers(listener, answers));
         (format!("http://{addr}"), server)
     }
 

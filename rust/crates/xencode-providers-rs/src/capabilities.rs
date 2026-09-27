@@ -16,11 +16,13 @@
 //! The local route is the one place the table cannot answer, and the server
 //! can: a running `llama-server` reports the window it was started with, so
 //! [`effective_context_window`] prefers that over any table entry when the
-//! model actually goes to a llama.cpp server.
+//! model actually goes to a llama.cpp server. Ollama does not report a window
+//! per process, so on that route the number carried here is the one this
+//! program asked Ollama to use — see [`crate::ollama_window_asked`].
 //!
 //! Precedence at the call site is therefore:
-//! `server-reported window (llama.cpp route) → known model window → hardware
-//! profile default`.
+//! `window the serving side runs with (llama.cpp) or was asked to use (Ollama)
+//! → known model window → hardware profile default`.
 
 /// What the context budgeter and agent loop need to know about a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,13 +101,35 @@ fn known_context_window(lower_model: &str) -> Option<u32> {
 /// over a `None`: `llama:llama-3.1-8b` is a family the table knows as 128k
 /// while the server may well have been started with `-c 8192`. A window
 /// larger than the server's is what silently truncates context.
+///
+/// The Ollama route takes a reported number too, with one difference in where
+/// it came from: Ollama is not asked what window it is running with, because it
+/// answers that per model rather than per process, and the value carried here is
+/// the window this program decided to request on every request for that model
+/// (`options.num_ctx`, which Ollama then honours). The two sources must not be
+/// mixed up in a caller's head — one is a measurement of a running server, the
+/// other is the thing we asked for and can therefore rely on.
 pub fn effective_context_window(model: &str, server_reported: Option<u32>) -> Option<u32> {
-    if crate::routes_to_llamacpp(model) {
+    if crate::routes_to_llamacpp(model) || crate::routes_to_ollama(model) {
         if let Some(reported) = server_reported {
             return Some(reported);
         }
     }
     capabilities_for(model).context_window
+}
+
+/// What to ask a local Ollama for as the window, before the model itself gets a
+/// say (see [`crate::ollama_request_for`], which reduces this further to what
+/// the weights were trained on).
+///
+/// Never the family table's number on its own: `qwen3-coder` is a 256,000-token
+/// model in the table and a set of weights someone is loading on a laptop here,
+/// and asking Ollama for a window the machine cannot hold spends the turn on a
+/// server that is trying to allocate a cache it has no room for. The profile is
+/// the measured answer about this machine, so it is the ceiling; the table only
+/// gets to lower the number, never raise it above what the machine reported.
+pub fn ollama_window_asked(table: Option<u32>, profile_tokens: u32) -> u32 {
+    table.unwrap_or(profile_tokens).min(profile_tokens)
 }
 
 /// True exactly for the routes whose streaming path parses `tool_calls`.
@@ -221,11 +245,31 @@ mod tests {
             effective_context_window("anthropic:claude-sonnet-4", Some(8192)),
             Some(200_000)
         );
-        assert_eq!(effective_context_window("qwen2.5:7b", Some(8192)), None);
         assert_eq!(
             effective_context_window("openrouter/deepseek/deepseek-chat", Some(8192)),
             Some(64_000)
         );
+    }
+
+    #[test]
+    fn a_window_asked_of_ollama_governs_the_ollama_route() {
+        // `qwen2.5:7b` is an Ollama tag the table has nothing to say about, and
+        // for a model that goes there the number carried in is the window this
+        // program asked Ollama to serve — the same number the request body
+        // carries. Budgeting against anything else is how a turn ends up filling
+        // a window the server was not told to open.
+        assert_eq!(
+            effective_context_window("qwen2.5:7b", Some(8192)),
+            Some(8192)
+        );
+        // A model the table does know still defers to the window in use here:
+        // `qwen3-coder` is 256k as a service, and 8192 as the request said.
+        assert_eq!(
+            effective_context_window("qwen3-coder:30b", Some(8192)),
+            Some(8192)
+        );
+        // Nothing decided yet, nothing to prefer.
+        assert_eq!(effective_context_window("qwen2.5:7b", None), None);
     }
 
     #[test]

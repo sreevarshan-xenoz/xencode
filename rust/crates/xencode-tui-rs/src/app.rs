@@ -20,7 +20,7 @@ use xencode_models_rs::{
 };
 use xencode_providers_rs::{
     classify, url_host, ChatMessage, ContentPart, Egress, EgressPolicy, ImageUrlPart,
-    MessageContent, ProviderManager, RoutingFacts,
+    MessageContent, OllamaRequest, ProviderManager, RoutingFacts,
 };
 
 pub use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
@@ -243,6 +243,15 @@ pub(crate) struct AgentRun {
     /// tier, and a replay, carry nothing here — the trace says what this program
     /// actually handed over, not what it might have.
     pub(crate) retrieved_files: Vec<String>,
+    /// What to ask Ollama on this model's requests: the window the turn is
+    /// budgeted for, how long the model stays loaded afterwards, and whether a
+    /// reasoning model may think (MI-2).
+    pub(crate) ollama_asks: OllamaRequest,
+    /// A reasoning or keep-alive setting that names nothing, worded for the
+    /// transcript. A value put into the config file by hand is reported and then
+    /// left alone, which puts the field back where it was before the setting
+    /// existed.
+    pub(crate) ollama_setting_problem: Option<String>,
     /// Where this run's recording goes, when the user asked for one (QA-1).
     /// Unlike the trace above, a recording keeps the prompts and the tool
     /// output whole — that is what makes it replayable — so it only exists
@@ -609,6 +618,14 @@ pub struct App<'a> {
     /// in flight. `None` until it says — including when no llama.cpp server is
     /// what this session talks to.
     pub server_context_window: Option<u32>,
+
+    /// The window this session asks Ollama to serve a model with, from the model
+    /// file's own `context_length` where Ollama will say it and from the hardware
+    /// profile otherwise (MI-2). Kept apart from the number above on purpose:
+    /// that one is a measurement of a llama.cpp process, this one is a decision
+    /// about what to request, and putting a llama.cpp server's `-c` in front of
+    /// an Ollama model would budget the turn for room nobody opened.
+    pub ollama_window: Option<u32>,
 
     /// The hardware profile this session budgets project context against, and
     /// the reason it was picked: `hardware_profile` in the config if it names
@@ -1573,6 +1590,11 @@ struct SingleShot {
     /// instead of re-read from config per request, so the status bar and the
     /// router cannot disagree about which rule is in force.
     egress: EgressPolicy,
+    /// What this session asks Ollama for, including the window. A one-shot that
+    /// leaves `options.num_ctx` out is a different model configuration to the
+    /// server, which reloads the model at its own default window instead of
+    /// keeping the one the chat turn asked for.
+    ollama_asks: OllamaRequest,
 }
 
 impl SingleShot {
@@ -1598,6 +1620,15 @@ impl SingleShot {
                 json_schema: None,
                 mirostat: None,
             },
+            // A request built straight from config asks for no window, because
+            // only the session knows which window it is budgeting for. `App::
+            // single_shot` fills that in; this default is what a one-shot ends up
+            // with if a setting could not be read at all.
+            ollama_asks: OllamaRequest::from_settings(
+                config.ollama_reasoning.as_deref(),
+                config.ollama_keep_alive.as_deref(),
+            )
+            .unwrap_or_default(),
         }
     }
 
@@ -1606,7 +1637,7 @@ impl SingleShot {
     async fn ask(&self, messages: &[ChatMessage]) -> Result<String, String> {
         let client = OllamaClient::new(&self.ollama_url, self.timeout);
         let llama_client = LlamaCppClient::new(&self.llama_cpp_url, self.timeout);
-        let manager = ProviderManager::new(
+        let mut manager = ProviderManager::new(
             client,
             self.openrouter_key.clone(),
             self.qwen_key.clone(),
@@ -1616,6 +1647,13 @@ impl SingleShot {
         .with_llama_cpp(llama_client)
         .with_remote(&self.remote_base_url, self.remote_api_key.clone())
         .with_egress_policy(self.egress);
+        // Decide what Ollama may serve before the prompt is committed to a
+        // window, so a one-shot and a chat turn cannot load the same model twice
+        // at two different windows. What it gives up is not reported here: a
+        // panel has no chat line to put it in.
+        manager
+            .prepare_ollama_request(&self.model, self.ollama_asks.clone())
+            .await;
         manager
             .generate_with_options(&self.model, messages, Some(&self.llama_opts))
             .await
@@ -2002,6 +2040,7 @@ impl<'a> App<'a> {
             last_prompt_chars: 0,
             last_prompt_retrieved_chars: 0,
             server_context_window: None,
+            ollama_window: None,
             hardware,
             spend: None,
             budget_warned: false,
@@ -2411,7 +2450,7 @@ impl<'a> App<'a> {
         // to the profile default. The `/ctx` preview always shows
         // profile-default budgeting.
         let context_window =
-            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
+            xencode_providers_rs::effective_context_window(&model, self.window_for(&model));
         // Retrieval is sized by the space the prompt will actually leave, which
         // is only known from the turn before this one (AC-4).
         let caps = xencode_context_rs::ContextCaps::for_turn(
@@ -2639,6 +2678,8 @@ impl<'a> App<'a> {
         prompt: &str,
     ) -> AgentRun {
         let root = xencode_context_rs::default_root();
+        let (ollama_asks, ollama_setting_problem) =
+            self.ollama_request_for_turn(&self.config.default_model);
         AgentRun {
             sink,
             model: self.config.default_model.clone(),
@@ -2674,6 +2715,8 @@ impl<'a> App<'a> {
                 json_schema: None,
                 mirostat: None,
             },
+            ollama_asks,
+            ollama_setting_problem,
         }
     }
 
@@ -3228,14 +3271,14 @@ impl<'a> App<'a> {
                     self.hardware.profile,
                     xencode_providers_rs::effective_context_window(
                         &self.config.default_model.clone(),
-                        self.server_context_window,
+                        self.window_for(&self.config.default_model),
                     ),
                 )),
         );
         let live = xencode_context_rs::collect_live_context(root, task, caps);
         let model = self.config.default_model.clone();
         let context_window =
-            xencode_providers_rs::effective_context_window(&model, self.server_context_window);
+            xencode_providers_rs::effective_context_window(&model, self.window_for(&model));
         let system = self.agent_system_prompt();
         let prompt = brief(task);
         xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
@@ -4031,7 +4074,7 @@ impl<'a> App<'a> {
                     self.prompt_overhead
                         .free_tokens(xencode_context_rs::fill_target(
                             profile,
-                            self.server_context_window,
+                            self.window_for(&self.config.default_model),
                         )),
                 );
                 let _ = tx.send(format!(
@@ -4690,7 +4733,7 @@ impl<'a> App<'a> {
                     profile,
                     xencode_providers_rs::effective_context_window(
                         &self.config.default_model.clone(),
-                        self.server_context_window,
+                        self.window_for(&self.config.default_model),
                     ),
                 )),
         );
@@ -5032,7 +5075,7 @@ impl<'a> App<'a> {
         // Same frozen system head as chat turns, so the instruction that shapes
         // the reply rides in the user message and the cache stays warm.
         let messages = one_shot_messages(&root, prompt);
-        let call = SingleShot::from_config(&self.config);
+        let call = self.single_shot();
 
         tokio::spawn(async move {
             match call.ask(&messages).await {
@@ -5346,8 +5389,11 @@ impl<'a> App<'a> {
         };
         self.models_busy = true;
         self.models_status = format!("asking {}…", profile.model);
-        let mut call = SingleShot::from_config(&self.config);
+        let mut call = self.single_shot();
         call.model = profile.model.clone();
+        // The window is a property of the model being served, so a profile that
+        // names a different model has to be asked for this one.
+        call.ollama_asks = self.ollama_request_for_turn(&call.model).0;
         call.llama_opts.temperature = profile.temperature.or(self.config.llama_cpp_temperature);
         call.llama_opts.max_tokens = profile.max_tokens.or(self.config.llama_cpp_max_tokens);
         let messages = vec![ChatMessage {
@@ -5472,7 +5518,7 @@ impl<'a> App<'a> {
              the correct choice, and `why` is one sentence on why it is correct.",
         );
         let messages = one_shot_messages(&self.learn_root, prompt);
-        let call = SingleShot::from_config(&self.config);
+        let call = self.single_shot();
         tokio::spawn(async move {
             let token = match call.ask(&messages).await {
                 Ok(reply) => format!("[LEARN]quiz:{reply}"),
@@ -5634,7 +5680,7 @@ impl<'a> App<'a> {
         );
         self.lang_translate_output = format!("Asking {}…", self.config.default_model);
         let messages = one_shot_messages(&xencode_context_rs::default_root(), prompt);
-        let call = SingleShot::from_config(&self.config);
+        let call = self.single_shot();
         tokio::spawn(async move {
             let token = match call.ask(&messages).await {
                 Ok(reply) => format!("[TRANS]out:{}", reply.trim_end()),
@@ -5917,16 +5963,94 @@ impl<'a> App<'a> {
         });
     }
 
-    /// Ask the llama.cpp server what context window it is actually running
-    /// with, and let the answer come back through the event channel as
-    /// `[CTXWINDOW]<tokens>` (AC-1).
+    /// The window a turn should be budgeted for on the route this model actually
+    /// goes to: what the llama.cpp process reported, what was decided to ask
+    /// Ollama to serve, or nothing at all — which lets the model family's table
+    /// entry answer, and the hardware profile after that.
     ///
-    /// Nothing happens unless this session's model goes to that server — an
-    /// `llama-server` that is not running would cost a connect attempt on every
-    /// turn for nobody. A server that answers without reporting keeps the
-    /// previous value rather than resetting to a guess.
+    /// The two numbers are kept apart because they mean different things and come
+    /// from different places, and a session can talk to both servers without
+    /// changing model.
+    fn window_for(&self, model: &str) -> Option<u32> {
+        if xencode_providers_rs::routes_to_llamacpp(model) {
+            self.server_context_window
+        } else if xencode_providers_rs::routes_to_ollama(model) {
+            self.ollama_window
+        } else {
+            None
+        }
+    }
+
+    /// What to ask Ollama on this model's requests: the two config settings, plus
+    /// the very window the turn is being budgeted for. One number for both, so
+    /// the context written into the request body is the context the server was
+    /// told to open — the alternative is a turn that fills a window nobody
+    /// measured out, which Ollama refuses part-way through rather than trimming.
+    ///
+    /// The second half of the answer is a setting that names nothing: a value put
+    /// into the file by hand is reported and then left alone, which puts the field
+    /// back where it was before the setting existed.
+    fn ollama_request_for_turn(&self, model: &str) -> (OllamaRequest, Option<String>) {
+        let (mut request, problem) = match xencode_providers_rs::OllamaRequest::from_settings(
+            self.config.ollama_reasoning.as_deref(),
+            self.config.ollama_keep_alive.as_deref(),
+        ) {
+            Ok(request) => (request, None),
+            Err(problem) => (
+                OllamaRequest::default(),
+                Some(format!("{problem} — nothing is asked of the model either")),
+            ),
+        };
+        if xencode_providers_rs::routes_to_ollama(model) {
+            request.num_ctx = Some(xencode_providers_rs::ollama_window_asked(
+                xencode_providers_rs::effective_context_window(model, self.window_for(model)),
+                self.hardware.profile.ctx_tokens() as u32,
+            ));
+        }
+        (request, problem)
+    }
+
+    /// A one-shot request carrying the same window the chat turn is using, so a
+    /// panel answer does not make Ollama reload the model at its own default.
+    fn single_shot(&self) -> SingleShot {
+        let mut call = SingleShot::from_config(&self.config);
+        call.ollama_asks = self.ollama_request_for_turn(&call.model).0;
+        call
+    }
+
+    /// Ask the server behind this model what window it has, and let the answer
+    /// come back through the event channel — `[CTXWINDOW]<tokens>` for a llama.cpp
+    /// server reporting what it was started with (AC-1), `[OLLAMAWINDOW]<tokens>`
+    /// for what this model's own weights hold on Ollama.
+    ///
+    /// Nothing happens unless this session's model goes to one of those two
+    /// servers — a server that is not running would cost a connect attempt on
+    /// every turn for nobody. A server that answers without reporting keeps the
+    /// previous value rather than resetting to a guess. The window is what comes
+    /// back from here; what was given up on a request is said by the turn that
+    /// made it, so the two are never reported twice.
     fn probe_context_window(&self, tx: mpsc::UnboundedSender<String>) {
-        if !xencode_providers_rs::routes_to_llamacpp(&self.config.default_model) {
+        let model = self.config.default_model.clone();
+        if xencode_providers_rs::routes_to_ollama(&model) {
+            let url = self.config.ollama_url.clone();
+            let asked = self.ollama_request_for_turn(&model).0.num_ctx;
+            tokio::spawn(async move {
+                let client = OllamaClient::new(&url, 3);
+                let Ok(show) = client.show_model(&model).await else {
+                    return;
+                };
+                let asked = OllamaRequest {
+                    num_ctx: asked,
+                    ..Default::default()
+                };
+                let (decided, _) = xencode_providers_rs::ollama_request_for(Some(&show), asked);
+                if let Some(tokens) = decided.num_ctx {
+                    let _ = tx.send(format!("[OLLAMAWINDOW]{tokens}"));
+                }
+            });
+            return;
+        }
+        if !xencode_providers_rs::routes_to_llamacpp(&model) {
             return;
         }
         let url = self.config.llama_cpp_url.clone();
@@ -6369,6 +6493,7 @@ impl<'a> App<'a> {
                     },
                 ];
                 let model = self.config.default_model.clone();
+                let ollama_asks = self.ollama_request_for_turn(&model).0;
                 let ollama_url = self.config.ollama_url.clone();
                 let llama_cpp_url = self.config.llama_cpp_url.clone();
                 let timeout = self.config.response_timeout;
@@ -6392,10 +6517,16 @@ impl<'a> App<'a> {
                 tokio::spawn(async move {
                     let client = OllamaClient::new(&ollama_url, timeout);
                     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
-                    let manager = ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
-                        .with_llama_cpp(llama_client)
-                        .with_remote(&remote_url, remote_key)
-                        .with_egress_policy(egress);
+                    let mut manager =
+                        ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
+                            .with_llama_cpp(llama_client)
+                            .with_remote(&remote_url, remote_key)
+                            .with_egress_policy(egress);
+                    // Same window as a chat turn, and the same words when the
+                    // server cannot honour part of the ask.
+                    for note in manager.prepare_ollama_request(&model, ollama_asks).await {
+                        let _ = tx.send(format!("[OLLAMA]{note}"));
+                    }
                     let _ = manager
                         .generate_stream_with_options(
                             &model,
@@ -7013,6 +7144,8 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         remote_base_url,
         remote_api_key,
         llama_opts,
+        ollama_asks,
+        ollama_setting_problem,
         egress,
         trace_dir,
         trace_identity,
@@ -7042,12 +7175,29 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     let recorder = session
         .as_ref()
         .map(|_| xencode_providers_rs::traffic::TrafficRecorder::new());
-    let manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
+    let mut manager = ProviderManager::new(client, openrouter_key, qwen_key, gemini_key, None)
         .with_llama_cpp(llama_client)
         .with_request_timeout(timeout)
         .with_remote(&remote_base_url, remote_api_key)
         .with_egress_policy(egress)
         .with_traffic(recorder.clone());
+    // Ask Ollama what this model is before asking it for an answer (MI-2), so the
+    // window in the request is one the model's own weights hold and a round of
+    // thinking is only requested from a model that said it can. The notes are for
+    // the chat transcript: a turn that got less than it asked for should say so
+    // rather than look like it did what was asked. ByteBot and a delegated run
+    // keep their panels clean, the same way a provider fallback does.
+    if let Some(problem) = ollama_setting_problem {
+        if sink == LoopSink::Chat {
+            let _ = tx.send(format!("[OLLAMA]{problem}"));
+        }
+    }
+    let ollama_notes = manager.prepare_ollama_request(&model, ollama_asks).await;
+    if sink == LoopSink::Chat {
+        for note in ollama_notes {
+            let _ = tx.send(format!("[OLLAMA]{note}"));
+        }
+    }
     let mut tools = xencode_providers_rs::background_tools();
     tools.extend(xencode_providers_rs::advise_tools());
     tools.extend(xencode_providers_rs::file_tools());
@@ -7696,6 +7846,22 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 if let Ok(tokens) = body.trim().parse::<u32>() {
                     app.server_context_window = Some(tokens);
                 }
+            } else if let Some(body) = token.strip_prefix("[OLLAMAWINDOW]") {
+                // Checked before `[OLLAMA]`, whose prefix this starts with: a
+                // window number arriving as a transcript line would be both
+                // wrong on screen and lost as a budget.
+                if let Ok(tokens) = body.trim().parse::<u32>() {
+                    app.ollama_window = Some(tokens);
+                }
+            } else if let Some(body) = token.strip_prefix("[OLLAMA]") {
+                // What a request to Ollama asked for and did not get (MI-2): a
+                // window the model's own weights cannot hold, a round of thinking
+                // the model never claimed. The turn still runs — this says what it
+                // ran without.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("ℹ️ {body}"),
+                });
             } else if let Some(body) = token.strip_prefix("[CTXOVER]") {
                 // The server counted the prompt bigger than the window it says it
                 // has. Both numbers are the server's own, so this is not a
@@ -8032,6 +8198,56 @@ pub fn set_secret_value(config: &mut XencodeConfig, label: &str, value: Option<S
     };
     *slot = value;
     true
+}
+
+/// A stand-in Ollama for the tests that need one: it answers on a real loopback
+/// socket, in the shape that server replies in, with one scripted reply per chat
+/// request, and stops once those replies are spent.
+///
+/// The window probe a turn now makes first (`/api/show`, MI-2) is answered the way
+/// Ollama answers for a model it does not have, so asking costs the test no reply of
+/// its own and the turn takes the same "nothing was learned" path a server that is
+/// down would give it.
+#[cfg(test)]
+pub(crate) async fn serve_scripted_answers(
+    listener: tokio::net::TcpListener,
+    answers: Vec<serde_json::Value>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut served = 0;
+    while served < answers.len() {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let mut head: Vec<u8> = Vec::new();
+        loop {
+            let read = sock.read(&mut buf).await.unwrap_or(0);
+            if read == 0 {
+                break;
+            }
+            head.extend_from_slice(&buf[..read]);
+            if head.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        if head.starts_with(b"POST /api/show") {
+            let _ = sock
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 27\r\nConnection: close\r\n\r\n{\"error\":\"model not found\"}",
+                )
+                .await;
+            let _ = sock.shutdown().await;
+            continue;
+        }
+        let body = format!("{}\n", answers[served]);
+        served += 1;
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            body.len(),
+            body
+        );
+        let _ = sock.write_all(reply.as_bytes()).await;
+        let _ = sock.shutdown().await;
+    }
 }
 
 #[cfg(test)]
@@ -9828,8 +10044,6 @@ mod tests {
     /// executor the same descriptions it handed the model.
     #[tokio::test]
     async fn the_loop_refuses_a_tool_call_whose_arguments_do_not_fit() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         let dir = std::env::temp_dir().join(format!(
             "xencode-args-loop-{}-{}",
             std::process::id(),
@@ -9839,33 +10053,16 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let answers = vec![
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
                 serde_json::json!({"message": {"role": "assistant", "tool_calls": [
                     {"function": {"name": "write_file", "arguments": "{\"path\": \"bad.txt\", \"co"}},
                     {"function": {"name": "search_files", "arguments": {}}}
                 ]}, "done": true}),
                 serde_json::json!({"message": {"role": "assistant", "content": "retried"}, "done": true}),
-            ];
-            for answer in answers {
-                let (mut sock, _) = listener.accept().await.unwrap();
-                let mut buf = [0u8; 4096];
-                loop {
-                    let read = sock.read(&mut buf).await.unwrap_or(0);
-                    if read == 0 || buf[..read].windows(4).any(|w| w == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let body = format!("{answer}\n");
-                let reply = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
-                    body.len(),
-                    body
-                );
-                let _ = sock.write_all(reply.as_bytes()).await;
-                let _ = sock.shutdown().await;
-            }
-        });
+            ],
+        ));
 
         let mut app = App::for_tests();
         app.config.agent_approval = "all-allow".to_string();
@@ -9910,8 +10107,6 @@ mod tests {
     /// carry the key, the file's text, or the payload the model tried to write.
     #[tokio::test]
     async fn one_turn_of_the_real_loop_writes_one_redacted_trace_row() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         let dir = std::env::temp_dir().join(format!(
             "xencode-trace-turn-{}-{}",
             std::process::id(),
@@ -9926,8 +10121,9 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let answers = vec![
+        let server = tokio::spawn(super::serve_scripted_answers(
+            listener,
+            vec![
                 serde_json::json!({"message": {"role": "assistant", "tool_calls": [
                     {"function": {"name": "read_file", "arguments": {"path": "notes.txt"}}},
                     {"function": {"name": "write_file", "arguments": {
@@ -9937,26 +10133,8 @@ mod tests {
                     {"function": {"name": "repo_advise", "arguments": {}}}
                 ]}, "done": true}),
                 serde_json::json!({"message": {"role": "assistant", "content": "read it"}, "done": true}),
-            ];
-            for answer in answers {
-                let (mut sock, _) = listener.accept().await.unwrap();
-                let mut buf = [0u8; 4096];
-                loop {
-                    let read = sock.read(&mut buf).await.unwrap_or(0);
-                    if read == 0 || buf[..read].windows(4).any(|w| w == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let body = format!("{answer}\n");
-                let reply = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
-                    body.len(),
-                    body
-                );
-                let _ = sock.write_all(reply.as_bytes()).await;
-                let _ = sock.shutdown().await;
-            }
-        });
+            ],
+        ));
 
         let mut app = App::for_tests();
         // Nobody is there to answer an approval prompt, so the gated write is
