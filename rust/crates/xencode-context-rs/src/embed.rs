@@ -34,6 +34,12 @@ const B: f64 = 0.75;
 /// a typical strong lexical match scores 2–6, so ×4 lets prose place a file
 /// alongside one weak structural signal and a dense match outrank a filename
 /// substring, without letting vocabulary alone beat an exact filename hit.
+///
+/// The arms are added, not fused by rank, on purpose: reciprocal rank fusion
+/// (`1/(60 + rank)` per arm) was built and measured against this value on the
+/// repository's 25-query gold set, and cost recall@1 (0.680 → 0.560) and MRR
+/// (0.743 → 0.673) to gain one file in the top five. Ranking discards the
+/// magnitude that tells a score-16 symbol hit apart from a score-3 one.
 pub const LEXICAL_WEIGHT: f64 = 4.0;
 
 /// Lowercase word tokenizer; tokens must be ≥2 chars and not in [`STOP`].
