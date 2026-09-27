@@ -169,6 +169,16 @@
   that gates everything after it. Nothing in the appendix is built or scheduled to be built: it is
   recorded, placed in the wave order, and left gated on that first measurement.
   Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone S.
+- 🧭 **Milestone T planned** (2026-09-27): a gated research intake for the
+  [3,600-candidate catalog](Xencode_Next_Research_Pool_3600.md), not 3,600 new
+  implementation commitments. The source has 36 ordered waves and 3,600 unique
+  IDs, but repeats capability themes across generic subsystem labels; its first
+  50 investigations are not actually marked. T starts with the supplied first
+  ten questions and audits its first four waves against existing M, S and W0–W17
+  work before proposing any new IDs. Research can proceed alongside S; overlapping
+  construction stays gated on `AR-1` measuring the installed worker CLIs. The
+  external standards are dated and qualified in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+  § Milestone T.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
