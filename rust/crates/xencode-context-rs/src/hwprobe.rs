@@ -219,6 +219,42 @@ pub fn available_memory_kib() -> Option<u64> {
     parse_meminfo_available_kib(&meminfo)
 }
 
+/// Bytes the filesystem that would hold `path` can still take.
+///
+/// `path` itself does not have to exist — this is asked before a model file is
+/// written, when there is nothing to ask about yet — so the question goes to
+/// the nearest directory above it that does exist. The count is available
+/// blocks rather than free blocks: the difference is the space a filesystem
+/// reserves for root, which a download cannot use.
+///
+/// `None` means the filesystem refused to answer, which is not the same as an
+/// empty disk: a caller that cannot price the write has to say so rather than
+/// assume either way.
+pub fn free_disk_bytes(path: &str) -> Option<u64> {
+    let dir = existing_ancestor(Path::new(path))?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let c_dir = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: `stat` is a valid, fully-sized destination for the struct and
+    // `c_dir` is a NUL-terminated path that outlives the call.
+    let rc = unsafe { libc::statvfs(c_dir.as_ptr(), &mut stat) };
+    if rc != 0 {
+        return None;
+    }
+    let block = stat.f_frsize.max(1) as u64;
+    Some(stat.f_bavail as u64 * block)
+}
+
+/// The nearest directory at or above `path` that exists on disk.
+fn existing_ancestor(path: &Path) -> Option<&Path> {
+    let mut cursor = path;
+    loop {
+        if cursor.is_dir() {
+            return Some(cursor);
+        }
+        cursor = cursor.parent()?;
+    }
+}
+
 /// Turn `/sys/devices/system/cpu/online` (`0-7`, or `0-3,8-11`) into a count.
 pub fn parse_cpu_online(text: &str) -> Option<usize> {
     let text = text.trim();
@@ -1753,5 +1789,50 @@ mod tests {
             ),
             LaunchCheck::Unknown
         );
+    }
+
+    #[test]
+    fn a_file_that_is_not_on_disk_yet_is_priced_against_the_disk_it_would_go_to() {
+        // The case a download needs: the path does not exist, and neither does
+        // the directory above it, and the question still has an answer.
+        let dir = std::env::temp_dir().join(format!("xencode-free-disk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("models").join("qwen3.gguf");
+        let missing_str = missing.to_str().unwrap();
+
+        let priced = free_disk_bytes(missing_str);
+        assert!(
+            priced.is_some(),
+            "a path with no file and no parent still has a disk"
+        );
+        let before = priced.unwrap();
+        assert!(
+            before > 32 * 1024 * 1024,
+            "the temp directory should sit on a disk with room: {before} bytes free"
+        );
+
+        // Writing real bytes to the same filesystem has to move the number,
+        // otherwise this is measuring something other than the disk. The
+        // tolerance is for the rest of the machine: `/tmp` is shared, and other
+        // tests clean up after themselves while this one is reading.
+        let written = 32 * 1024 * 1024usize;
+        std::fs::write(dir.join("payload"), vec![7u8; written]).unwrap();
+        let after = free_disk_bytes(missing_str).unwrap();
+        assert!(
+            before - after >= written as u64 * 9 / 10,
+            "writing {} bytes only moved the reading by {}",
+            written,
+            before - after
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_path_with_nothing_above_it_to_ask_is_reported_as_unknown() {
+        // Every real path ends at a mounted directory, so this is the shape of
+        // the answer on a machine where the question cannot be asked: `None`,
+        // which a caller must treat as "unpriced" rather than as a full disk.
+        assert_eq!(free_disk_bytes(""), None);
     }
 }

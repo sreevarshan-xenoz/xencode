@@ -647,10 +647,41 @@ window and says that it did —
 
 — and stops after that one retry, naming what is actually there to try next
 (`xencode hw probe --model <file>`, `xencode colab up`, or
-`xencode config set remote_base_url <url>`). There is no model download command,
-so it does not suggest one. All three of those blocks above are output from real
-launches on this laptop, including the restart at 22528, which came up and
-confirmed its own window.
+`xencode config set remote_base_url <url>`). A server killed by memory is not a
+missing file, so a download would fix nothing and is not suggested. All three of
+those blocks above are output from real launches on this laptop, including the
+restart at 22528, which came up and confirmed its own window.
+
+**A model file that is not on disk is fetched, if you say from where.**
+`llama_cpp_model_url` is the HTTPS URL of the `.gguf` itself — not of a page that
+links it. `llamacpp start` with a missing file and no URL stops and prints the
+`xencode config set llama_cpp_model_url <url>` line. With one, the disk is
+checked before a single byte is written, using the file's own advertised size
+minus whatever a stopped attempt already downloaded:
+
+```text
+error: the model download did not finish: the file is 18.5 GiB and the disk holding /boot/xencode-l10/model.gguf has 765.9 MiB free
+```
+
+Bytes land in `<path>.part` and move to the real path only once complete, so a
+file that exists is always a whole one. Interrupting mid-download and re-running
+continues from the last byte rather than restarting (measured here: a killed
+468.6 MiB fetch resumed at 344.3 MiB and finished):
+
+```text
+l10-resume-test.gguf is not there yet, but a stopped download is: 344.3 MiB of its bytes are on disk.
+  344.3 MiB of 468.6 MiB (73 %)
+  …
+  model ready: 468.6 MiB
+  344.3 MiB of that came from the bytes the earlier attempt had already fetched.
+```
+
+A server that ignores range requests gets its partial file discarded and the
+whole file re-fetched, with a note saying so. The only check on the result is
+the byte count — a URL serving something other than what it advertises cannot
+be told apart here, so pick the URL the way you would pick any download source.
+The TUI's auto-start fetches the same way and shows a `⬇` progress line over the
+body while it runs.
 
 **How much the model may think** is a launch setting too. `llama_cpp_reasoning`
 takes `auto` (leave it to the model), `off`, or a token budget as a plain number:
@@ -880,6 +911,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `colab_local_port`, `colab_remote_port` | number | Laptop side of the forward / VM-side port (`0` = runtime-native: llama.cpp `18080`, ollama `11434`) |
 | `colab_auto_connect` | bool | Persisted but not acted on yet — nothing reconnects without an explicit `xencode colab up` |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
+| `llama_cpp_model_url` | string | HTTPS URL of the GGUF file itself; `llamacpp start` fetches the model into `llama_cpp_model_path` from here when it is missing — disk-priced first, resumable — see [xencode llamacpp](#xencode-llamacpp-action) |
 | `llama_cpp_args` | string | split on whitespace; passed to a self-started `llama-server` after the hardware profile's own flags, so a repeated flag is decided here |
 | `llama_cpp_reasoning` | string | how much a local model may think before answering: `auto` or empty for no flag, `off` for `--reasoning off`, or a token budget as a number for `--reasoning-budget`. A launch setting — see [How much the model may think](#how-much-the-model-may-think) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |

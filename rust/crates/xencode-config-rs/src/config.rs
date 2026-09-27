@@ -145,6 +145,13 @@ pub struct XencodeConfig {
     #[serde(default = "default_llama_cpp_model_path")]
     pub llama_cpp_model_path: String,
 
+    /// Where `llama_cpp_model_path` comes from when it is not on disk yet: an
+    /// HTTPS URL of the GGUF itself, not of a page that links it. Bring-up
+    /// fetches it into that path, resuming a partial file instead of
+    /// restarting one. Empty means xencode has nowhere to get it and says so.
+    #[serde(default)]
+    pub llama_cpp_model_url: String,
+
     /// Path to the llama-server executable (empty = resolved from PATH).
     #[serde(default)]
     pub llama_cpp_executable: String,
@@ -417,6 +424,7 @@ impl Default for XencodeConfig {
             remote_base_url: String::new(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
             llama_cpp_executable: String::new(),
+            llama_cpp_model_url: String::new(),
             llama_cpp_args: Vec::new(),
             llama_cpp_temperature: None,
             llama_cpp_top_k: None,
