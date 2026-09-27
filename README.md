@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1333 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1345 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -422,6 +422,17 @@ flowchart TD
   claiming the rest got faster; what it does report as expensive is a full-history
   `--numstat` at 11.3 s and a `git log -S` at 12.9 s, which no index here fixes.
   `history` is read-only apart from those two writes, and both are idempotent.
+- **A failing build answers with rustc's own diagnosis.** A plain `cargo build`
+  or `cargo check` that the model asks for is run with `--message-format=json` and
+  rebuilt from what the compiler reports about itself: the error code, the file
+  and line, the fix rustc offers with the exact replacement text, and the entry
+  for that code from the error index, which ships inside the compiler. The
+  previous path kept the last 8 KiB of a text dump, so on a large build the
+  explanation of the *first* error was the part that got cut. The account is
+  bounded and says what it left out — twenty diagnostics, three codes explained,
+  6 KiB — and only a single, plain build or check is rewritten: composed
+  commands, `cargo test`, `--`-pass-through arguments and a build started with
+  `background_start` are untouched.
 - **Co-change history is mined once, and priced.** `/init` reads the whole
   `git log` once — 93 ms here, over the 782 commits that counted — and stores,
   per file, the files it is committed alongside in
@@ -508,7 +519,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1333 passing, 13 ignored)
+cargo test                          # Full workspace suite (1345 passing, 14 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a failing build answers with rustc's own diagnosis
+
+A build that fails used to reach the model as the tail of an output dump, keeping
+the last 8 KiB. On a real workspace that is the wrong end: the error the compiler
+explained first is the one that gets cut, and nothing that follows the dump says
+why the type was wrong.
+
+`run_command` now asks a plain `cargo build` or `cargo check` for rustc's
+machine-readable output and rebuilds the answer from what the compiler reports
+about itself — the error code, the file and line, the help lines with the exact
+text rustc would substitute (and whether it considers that substitution safe to
+apply mechanically), and for every `E`-code the full entry from the error index,
+which ships inside the compiler and had never been read by anything here:
+
+```text
+$ cargo build --message-format=json
+exit 101
+1 error(s), 0 warning(s) from rustc:
+  error E0308: mismatched types — src/lib.rs:1:27
+      help: you can convert a `u32` to a `u64` ⇒ .into()
+      rustc can apply this itself (src/lib.rs:1:28): .into()
+
+What rustc's own error index says about E0308:
+Expected type did not match the received type.
+```
+
+Measured on one error from a scratch crate: 1 432 bytes handed to the model,
+where cargo's machine-readable stream is 11 252 bytes and rustc's rendered text is
+1 271. The account is bounded so that what is left out is named — twenty
+diagnostics, three error codes explained, 1 200 characters per explanation, 6 KiB
+in total — because an unbounded one would be cut from the front by the same
+output ceiling it was meant to escape. cargo's own summary line is kept, and so is
+everything the old path printed when the output is not a machine-readable build.
+
+The rewrite is deliberately narrow: only a single `cargo build` or `cargo check`
+is asked this way. A composed command (`cargo build && cargo test`) would take the
+flag on the wrong word, anything after `--` belongs to rustc rather than cargo,
+`cargo test` has run output worth reading as text, and a command that already
+chose a format is left alone. A build started with `background_start` still keeps
+its ordinary line output.
+
 ### Added — the index now carries commit history, and a measurement of what it is worth
 
 `/init` has a new phase, "Mine commit history": one `git log` over the whole

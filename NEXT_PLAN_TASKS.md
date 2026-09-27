@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1333 tests passing, 13 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1345 tests passing, 14 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2362,6 +2362,15 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
   **S**, zero network, zero corpus, zero model training. Trap: covers rustc
   only — test-framework, prose and CI failures have no public machine-readable
   knowledge base, however much it is wanted. **OFFLINE-OK.**
+  *(Built 2026-09-27 as `xencode-core-rs::rustc_json`, wired into the
+  `run_command` foreground path. What the row did not say and the build had to
+  settle: the JSON arrives on **stdout**, not stderr; a cached failure replays
+  with no JSON at all, so the reader has to answer "not a machine-readable
+  build" rather than "no errors"; the fix text lives on the diagnostic's
+  `children[]` help spans, not on the top-level `suggestions` field, which is
+  not there at all on the real messages; and `code.explanation` is populated for `E`
+  codes and `null` for lint names. The row's own trap holds — `cargo test`,
+  composed commands and `background_start` are left on the old path.)*
 - **RS-7 `llms.txt` probing as a branch inside RS-1** — **S**. Trap: checked
   across the Rust ecosystem and it is absent everywhere (docs.rs, tokio.rs,
   actix.rs, doc.rust-lang.org, the cargo book all 404); adoption is real only
@@ -7445,6 +7454,55 @@ done-when is met, and the commit that does it names the IDs.
   history-arm deltas above are from re-running `cargo test -p xencode-context-rs
   --test gold_baseline -- --ignored --nocapture` on this tree; rows appended to
   the gitignored `.xencode/cache/eval.jsonl` (now 81) are the raw record.
+
+- [x] `RS-6` — 2026-09-27, sixth item of W4: a failing build answers with
+  rustc's own diagnosis. `xencode-core-rs::rustc_json` (new) reads cargo's
+  machine-readable stream and renders the account back — code, file and line,
+  the help lines with the exact text rustc would substitute and whether it calls
+  that substitution machine-applicable, and the error-index entry for the code,
+  which ships inside the compiler and had never been read by anything here.
+  `run_foreground` in `agent_tools.rs` asks a plain `cargo build` or
+  `cargo check` for that form; the command line shown in the transcript is the
+  command that ran, flag included, so nothing is done behind the model's back.
+  **What the row did not know and the build had to find out, by running cargo
+  rather than reading about it.** The JSON comes back on **stdout**, with cargo's
+  progress and its one-line summary left on stderr, so the two are handled apart
+  and the summary survives. A replayed cached failure prints its summary with
+  **no JSON at all** — measured twice, because the second of two identical
+  failing builds is the cached one — which is why the reader returns "this is not
+  a machine-readable build" instead of an empty report, and why the live test
+  rewrites the source between the two builds. There is no top-level
+  `suggestions` field on the real messages; the fix text is on the diagnostic's
+  `children[]` help spans. `code.explanation` is filled for `E`-codes and null
+  for lint names, so the lint case is rendered without invented text.
+  **The measurement that decided the shape.** For one error in a scratch crate:
+  rustc's rendered text 1 271 bytes, cargo's JSON stream 11 252 bytes, the
+  account 1 432 bytes. The account is larger than the old text for a single
+  error and that is the point — the extra 710 bytes are rustc's own explanation,
+  which the previous path had no way to reach. Its bound matters more than its
+  size: twenty diagnostics, three codes explained, 1 200 characters each, 6 KiB
+  in total, and it says what it left out. Without that bound the tool's own
+  8 KiB tail rule would have cut the errors and kept the textbook pages.
+  **What was deliberately not rewritten.** The flag is appended only to a
+  single, plain `cargo build` or `cargo check`. `cargo build && cargo test`
+  would take it on the wrong word, everything after `--` belongs to rustc and
+  not cargo, `cargo test` has run output worth reading as text, a command that
+  already chose a format is left alone, and a build started with
+  `background_start` still keeps ordinary line output — the known-error channel
+  covers the foreground path, which is where the model reads a build.
+  **Verified by** 13 new tests, 12 of them in the normal run: 11 in
+  `rustc_json` over a fixture copied from real cargo output (fields read,
+  position, one-award explanation, non-build input untouched, list and byte
+  budgets named rather than silent) and 1 in `agent_tools.rs` that runs the tool
+  against a scratch crate that does not compile and asserts the answer carries
+  "error E0308: mismatched types — src/lib.rs:1:27", the compiler's own
+  conversion help ending in ".into()", the error-index section, and cargo's
+  summary line — and carries no raw JSON. The thirteenth is
+  `--ignored` and compiles twice with the installed toolchain, printing the byte
+  counts above: `cargo test -p xencode-core-rs --lib a_live_build -- --ignored
+  --nocapture`. Tree at 1345 tests, 0 failures, 14 ignored over 47 result lines,
+  with `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean.
 
 
 #### W2 — The model/inference substrate — 15 items
