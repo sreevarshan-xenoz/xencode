@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the index now carries commit history, and a measurement of what it is worth
+
+`/init` has a new phase, "Mine commit history": one `git log` over the whole
+history listing the files each commit touched, written to
+`.xencode/index/history.json`. Per file it records which other files it is
+committed alongside, how often, and when it was last touched. Two rules keep the
+signal honest. A commit that touches 25 or more files teaches nothing, so it is
+skipped — a rename sweep is not a design relationship. And a file edited
+alongside everything is a hub, not a companion: `README.md` sits in 163 of this
+repository's 782 commits that counted, against a median of 1 elsewhere, so a file
+that frequent gets no partner list and cannot be pulled in by one. The log is
+re-read only when the commit the index was built at has moved; otherwise the
+rebuild reports that the history was reused.
+
+The history does not pick files yet, deliberately. Scoring retrieval by co-change
+and by recency was measured against this repository's 25-question retrieval test
+at two weights. At a weight strong enough to move a ranking it cost 0.002 of mean
+reciprocal rank; at a weight weak enough to only reorder what retrieval had
+already found it changed nothing at all — 0.680 for the first file, 0.880 for the
+first five, before and after. The reason is on the record: the text the search
+now uses already reaches every file the history could name. The two options
+exist (`RetrieveOptions::cochange`, `RetrieveOptions::recency`, both off) and the
+comparison is reproducible as two of the arms of `cargo test -p
+xencode-context-rs --test gold_baseline -- --ignored --nocapture`, so a project
+whose text search is weaker can re-run the measurement instead of rebuilding the
+machinery.
+
 ### Added — a turn on a small model now gets a map of the project, not just a few files
 
 A four-thousand-token model spends its budget before it has learned what else

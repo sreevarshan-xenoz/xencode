@@ -14,6 +14,7 @@
 
 pub mod advise;
 pub mod budget;
+pub mod cochange;
 pub mod compact;
 pub mod context;
 pub mod conversation;
@@ -55,6 +56,11 @@ pub use budget::{
     est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, ContextCaps,
     HardwareProfile, ProfileDecision, PromptOverhead, TOKENS_PER_RETRIEVED_FILE,
 };
+pub use cochange::{
+    load_history, mine_commit_history, parse_commit_log, save_history, CommitHistory, FileCommits,
+    COCHANGE_BONUS, COMMIT_LOG_LIMIT, HUB_COMMIT_DIVISOR, MASS_COMMIT_FILES, RECENCY_BONUS,
+    RECENCY_WINDOW_DAYS, TOP_PARTNERS,
+};
 pub use compact::{
     hard_compact_prompt, parse_hard_compact_reply, should_compact, soft_compact, CompactReport,
     CompactionKind,
@@ -88,8 +94,8 @@ pub use impact::{
     impact, impact_from_snapshot, ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,
 };
 pub use index::{
-    deps_json_path, file_index_path, read_json, symbols_json_path, write_atomic, write_str_atomic,
-    FileEntry, FilesIndex, Manifest, VERSION,
+    deps_json_path, file_index_path, history_json_path, read_json, symbols_json_path, write_atomic,
+    write_str_atomic, FileEntry, FilesIndex, Manifest, VERSION,
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
 pub use metrics::{

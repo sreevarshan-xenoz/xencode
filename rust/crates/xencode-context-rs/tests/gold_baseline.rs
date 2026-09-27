@@ -3,8 +3,8 @@
 //! project index (about a second) and writes it into `.xencode/`, which is
 //! git-ignored but shared with the TUI.
 //!
-//! Run it to see what the structural retriever and the two hybrid arms
-//! actually score on the built-in gold set:
+//! Run it to see what the structural retriever, the two hybrid arms and the two
+//! commit-history arms actually score on the built-in gold set:
 //!
 //! ```text
 //! cargo test -p xencode-context-rs --test gold_baseline -- --ignored --nocapture
@@ -63,13 +63,14 @@ fn gold_scores_against_the_real_index() {
         xencode_context_rs::prompts::registry().len()
     );
     let prior = xencode_context_rs::read_eval_runs(&xencode);
-    // Three arms, so the run prices each addition separately: structural only,
+    // Five arms, so the run prices each addition separately: structural only,
     // plus a lexical arm over path and symbols, plus the same with the files'
-    // documentation prose indexed too. A probe that carries a `shape` is scored
-    // as that shape in every arm, so what is compared here is the lexical stage
-    // and nothing else; the shape's own contribution is measured per partition
-    // below.
-    let arms: [(&str, xencode_context_rs::RetrieveOptions); 3] = [
+    // documentation prose indexed too, then that shipped arm with each of the two
+    // commit-history terms spent on top. A probe that carries a `shape` is scored
+    // as that shape in every arm, so what is compared here is the stage being
+    // priced and nothing else; the shape's own contribution is measured per
+    // partition below.
+    let arms: [(&str, xencode_context_rs::RetrieveOptions); 5] = [
         ("deterministic      ", Default::default()),
         (
             "+ text (path+symbol)",
@@ -86,7 +87,25 @@ fn gold_scores_against_the_real_index() {
                 ..Default::default()
             },
         ),
+        (
+            "+ history co-change",
+            xencode_context_rs::RetrieveOptions {
+                lexical: true,
+                cochange: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "+ history + recency",
+            xencode_context_rs::RetrieveOptions {
+                lexical: true,
+                cochange: true,
+                recency: true,
+                ..Default::default()
+            },
+        ),
     ];
+    let mut measured: Vec<(String, f64, f64, f64)> = Vec::new();
     for (label, opts) in &arms {
         let started = std::time::Instant::now();
         let report = xencode_context_rs::evaluate_with(&index, &gold, 5, &no_changes, opts);
@@ -97,6 +116,12 @@ fn gold_scores_against_the_real_index() {
             report.mrr,
             started.elapsed().as_secs_f64() * 1000.0 / gold.len().max(1) as f64,
         );
+        measured.push((
+            label.trim().to_string(),
+            report.recall_at[0],
+            report.recall_at[4],
+            report.mrr,
+        ));
         // The comparison is with the newest earlier run of this arm at this depth
         // that was measured under the same prompt set. Anything else is stated as
         // not comparable rather than quietly reported as progress.
@@ -137,6 +162,26 @@ fn gold_scores_against_the_real_index() {
         "recorded to {}",
         xencode_context_rs::eval_log_path(&xencode).display()
     );
+    // The commit-history arms are worth one line each: they are changes to the
+    // shipped arm, so their only claim is the difference it produces on the same
+    // probes. Stated against the shipped numbers rather than as raw scores,
+    // because "MRR 0.755" means nothing without the 0.755 it was measured next to.
+    let shipped = measured
+        .iter()
+        .find(|(label, ..)| label == "+ text + doc prose")
+        .expect("the shipped arm is always measured");
+    println!("\n{} files with mined history:", index.history.len());
+    for (label, r1, r5, mrr) in measured
+        .iter()
+        .filter(|(label, ..)| label.starts_with("+ history"))
+    {
+        println!(
+            "  {label:<20} recall@1 {:+.3}  recall@5 {:+.3}  MRR {:+.3} against the shipped arm",
+            r1 - shipped.1,
+            r5 - shipped.2,
+            mrr - shipped.3
+        );
+    }
     // The shape biases last, on both arms. Each shape is scored against the same
     // probes with its own weight turned off, so a bias that only pays for itself
     // on one kind of turn cannot hide inside an overall average — and a bias that

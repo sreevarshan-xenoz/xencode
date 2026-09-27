@@ -13,6 +13,19 @@
 //! | git-changed file        | +4     |
 //! | dependency hop from seed| +3/hop (≤3 hops)       |
 //! | test named after the prompt, on a bugfix turn | +8 |
+//! | history changes it alongside a seed | +5 (co-change) |
+//! | committed with the newest work      | +2 (recency)   |
+//!
+//! The last two rows are [`crate::cochange`], and they are off by default because
+//! they measured as nothing: on this repository's 25 gold probes, added to the
+//! shipped arm, co-change moved recall@1 by 0.000, recall@5 by 0.000 and mean
+//! reciprocal rank by -0.002 at a weight of 5, and all three by 0.000 at a weight
+//! of 2 (where a file cannot enter on history alone). Two reasons, both visible in
+//! the numbers: the text arm already reaches every file the history could name, so
+//! there is no introduction left for history to do; and a hub file — one edited
+//! alongside everything — turns the term into a popularity contest, which is what
+//! the first, unfiltered run cost 0.440 of recall@1. [`crate::shape`] records the
+//! two other biases that measured 0.000 on their own probes and were not shipped.
 //!
 //! A [`crate::shape::TaskShape`] widens one row of this table: on a turn whose
 //! prompt says something is broken, a file whose own test names use the words of
@@ -30,6 +43,7 @@
 //! carry it into the injection set instead of only reordering files that
 //! already made it. That hybrid stage is off by default; `/ctx eval` runs both.
 
+use crate::cochange::{COCHANGE_BONUS, RECENCY_BONUS};
 use crate::index::{FileEntry, FilesIndex, Manifest};
 use crate::shape::TaskShape;
 use crate::symbols::{DepEdge, PerFileSymbols};
@@ -80,6 +94,15 @@ pub struct RetrieveOptions {
     /// [`score_file`] exactly as it is; the other shapes each move one arm of
     /// that table, and nothing else. See [`crate::shape`].
     pub shape: TaskShape,
+    /// Spend the co-change term: a file this repository's history changes
+    /// alongside one of the turn's seeds. Off in [`Default`] and off in
+    /// [`RetrieveOptions::for_live_chat`], because it measured 0.000 recall and
+    /// -0.002 mean reciprocal rank on the gold set; the eval runs it so a
+    /// repository with a weaker text arm can check the number for itself.
+    pub cochange: bool,
+    /// Spend the recency term, on files something else already scored. Never
+    /// brings a file in on its own: "committed lately" is not an answer.
+    pub recency: bool,
 }
 
 impl Default for RetrieveOptions {
@@ -92,6 +115,8 @@ impl Default for RetrieveOptions {
             lexical: false,
             lexical_docs: true,
             shape: TaskShape::General,
+            cochange: false,
+            recency: false,
         }
     }
 }
@@ -129,6 +154,10 @@ pub struct RetrievalIndex {
     pub deps: Vec<DepEdge>,
     /// Relative path (`/`) → modified epoch-millis, from the manifest.
     pub mtimes: BTreeMap<String, u64>,
+    /// Which files this repository's history changes together, from
+    /// `history.json`. Empty when the repository has no mined history, which is
+    /// what every index written before it existed looks like to retrieval.
+    pub history: crate::cochange::CommitHistory,
 }
 
 impl RetrievalIndex {
@@ -142,11 +171,13 @@ impl RetrievalIndex {
             crate::index::read_json(&crate::index::deps_json_path(xencode_dir))?;
         let manifest: Manifest =
             crate::index::read_json(&crate::index::manifest_path(xencode_dir))?;
+        let history = crate::cochange::load_history(xencode_dir);
         Some(RetrievalIndex {
             files: files.files,
             symbols,
             deps,
             mtimes: manifest.mtime_map,
+            history,
         })
     }
 
@@ -266,6 +297,61 @@ pub fn retrieve(
             }
         }
         frontier = next;
+    }
+
+    // History: what this repository's commits change together. Applied after
+    // the dependency walk and on the same seed set, so it points at the files
+    // that live near the turn's subject without importing them.
+    if !index.history.is_empty() && (options.cochange || options.recency) {
+        // A mined partner list outlives the files in it: a pair recorded three
+        // years ago can name a path that has since been deleted, and injecting
+        // that path costs a slot in the prompt for an empty body.
+        let indexed: HashSet<&str> = index.files.iter().map(|f| f.path.as_str()).collect();
+        // One award per candidate file, from its strongest pair. A file that is
+        // a historical partner of five of this turn's seeds is not five times
+        // the evidence of one that is a partner of one — it is the same fact,
+        // "this changes with that", seen repeatedly — and an uncapped sum lets
+        // any repository's well-connected files outrank the answer. (Measured:
+        // uncapped, `README.md` reached 575 against the right file's 157 here.)
+        let mut paired: BTreeMap<&str, (u32, &str)> = BTreeMap::new();
+        if options.cochange {
+            for path in &seeds {
+                let partners = index
+                    .history
+                    .get(path.as_str())
+                    .map(|record| record.partners.as_slice())
+                    .unwrap_or(&[]);
+                for (partner, count) in partners {
+                    let partner = partner.as_str();
+                    if partner == path.as_str() || !indexed.contains(partner) {
+                        continue;
+                    }
+                    let best = paired.entry(partner).or_insert((0, path.as_str()));
+                    if *count > best.0 {
+                        *best = (*count, path.as_str());
+                    }
+                }
+            }
+        }
+        for (partner, (count, seed)) in paired {
+            let score = scores
+                .entry(partner.to_string())
+                .or_insert_with(|| Score::new(0, vec![]));
+            score.total += COCHANGE_BONUS;
+            score
+                .reasons
+                .push(format!("co-change: {count} commit(s) with {seed}"));
+        }
+        if options.recency {
+            for (path, score) in scores.iter_mut() {
+                // Only files something else already valued: recency on its own
+                // says the file was worked on, not that it answers the query.
+                if score.total > 0 && index.history.is_recent(path.as_str()) {
+                    score.total += RECENCY_BONUS;
+                    score.reasons.push("recently committed".to_string());
+                }
+            }
+        }
     }
 
     let candidates: Vec<(String, u64, Vec<String>)> = scores
@@ -537,6 +623,7 @@ fn forward_map(deps: &[DepEdge]) -> HashMap<String, Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cochange::{CommitHistory, FileCommits};
 
     fn file(path: &str, loc: u64) -> FileEntry {
         FileEntry {
@@ -597,6 +684,7 @@ mod tests {
                 },
             ],
             mtimes: BTreeMap::new(),
+            history: Default::default(),
         }
     }
 
@@ -671,6 +759,7 @@ mod tests {
             symbols: BTreeMap::new(),
             deps: vec![],
             mtimes: BTreeMap::new(),
+            history: Default::default(),
         };
         let results = retrieve("style", &idx, &HashSet::new(), &RetrieveOptions::default());
         assert_eq!(results.len(), 1);
@@ -699,6 +788,7 @@ mod tests {
             )]),
             deps: vec![],
             mtimes: BTreeMap::new(),
+            history: Default::default(),
         };
         let changed = HashSet::new();
         let query = "signed cookie restart";
@@ -755,6 +845,7 @@ mod tests {
                 .collect(),
             deps: vec![],
             mtimes: BTreeMap::new(),
+            history: Default::default(),
         };
         retrieve(
             query,
@@ -871,5 +962,260 @@ mod tests {
         .find(|r| r.path == "README.md")
         .expect("the readme is reachable by its own name");
         assert_eq!(guide.score, 11, "name (+6) and path (+5), and nothing else");
+    }
+
+    /// This repository's history, as the index would hand it over: `src/auth.rs`
+    /// and `src/rotation.rs` are committed together and nothing else touches
+    /// either, and only `auth.rs` was committed inside the recency window.
+    /// `src/deleted.rs` is the partner whose file no longer exists.
+    fn history_index() -> RetrievalIndex {
+        let newest = 1_700_000_000u64;
+        RetrievalIndex {
+            files: vec![
+                file("src/auth.rs", 100),
+                file("src/rotation.rs", 20),
+                file("src/unrelated.rs", 20),
+            ],
+            history: CommitHistory::from(BTreeMap::from([
+                (
+                    "src/auth.rs".to_string(),
+                    FileCommits {
+                        partners: vec![
+                            ("src/rotation.rs".to_string(), 4),
+                            ("src/deleted.rs".to_string(), 3),
+                        ],
+                        commits: 4,
+                        last_commit: newest,
+                        hub: false,
+                    },
+                ),
+                (
+                    "src/rotation.rs".to_string(),
+                    FileCommits {
+                        partners: vec![("src/auth.rs".to_string(), 4)],
+                        commits: 4,
+                        last_commit: newest - 40 * 86_400,
+                        hub: false,
+                    },
+                ),
+            ])),
+            ..Default::default()
+        }
+    }
+
+    fn paths(results: &[RetrievedFile]) -> Vec<String> {
+        results.iter().map(|r| r.path.clone()).collect()
+    }
+
+    #[test]
+    fn history_terms_are_off_unless_the_caller_asks() {
+        let index = history_index();
+        let without = retrieve("auth", &index, &HashSet::new(), &RetrieveOptions::default());
+        assert_eq!(paths(&without), vec!["src/auth.rs".to_string()]);
+    }
+
+    #[test]
+    fn co_change_reaches_a_file_the_query_never_named() {
+        let index = history_index();
+        let with = retrieve(
+            "auth",
+            &index,
+            &HashSet::new(),
+            &RetrieveOptions {
+                cochange: true,
+                ..Default::default()
+            },
+        );
+        let rotation = with
+            .iter()
+            .find(|r| r.path == "src/rotation.rs")
+            .expect("the partner file is reachable through history");
+        assert_eq!(rotation.score, COCHANGE_BONUS, "history alone");
+        assert!(
+            rotation
+                .reasons
+                .iter()
+                .any(|r| r == "co-change: 4 commit(s) with src/auth.rs"),
+            "{:?}",
+            rotation.reasons
+        );
+        // A file with neither a textual nor a historical link stays out.
+        assert!(!paths(&with).contains(&"src/unrelated.rs".to_string()));
+    }
+
+    #[test]
+    fn a_partner_deleted_since_the_commit_is_not_injected() {
+        let index = history_index();
+        let with = retrieve(
+            "auth",
+            &index,
+            &HashSet::new(),
+            &RetrieveOptions {
+                cochange: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            !paths(&with).contains(&"src/deleted.rs".to_string()),
+            "the mined pair is real but the file is gone: {:?} would waste a slot",
+            paths(&with)
+        );
+    }
+
+    #[test]
+    fn recency_lifts_a_file_already_scored_and_never_arrives_on_its_own() {
+        let index = history_index();
+        let recent = retrieve(
+            "auth",
+            &index,
+            &HashSet::new(),
+            &RetrieveOptions {
+                recency: true,
+                ..Default::default()
+            },
+        );
+        let auth = &recent[0];
+        assert_eq!(auth.path, "src/auth.rs");
+        assert_eq!(
+            auth.score,
+            15 + RECENCY_BONUS,
+            "filename exact (+10) and path segment (+5), plus the newest commit"
+        );
+        assert!(auth.reasons.contains(&"recently committed".to_string()));
+        // rotation.rs scores nothing without the co-change term, so the fact
+        // that it was committed — 40 days ago, and outside the window anyway —
+        // cannot put it in the prompt by itself.
+        assert_eq!(paths(&recent), vec!["src/auth.rs".to_string()]);
+    }
+
+    #[test]
+    fn a_partner_outside_the_recency_window_gets_the_pair_bonus_only() {
+        let index = history_index();
+        let both = retrieve(
+            "auth",
+            &index,
+            &HashSet::new(),
+            &RetrieveOptions {
+                cochange: true,
+                recency: true,
+                ..Default::default()
+            },
+        );
+        let by_path: BTreeMap<&str, u64> =
+            both.iter().map(|r| (r.path.as_str(), r.score)).collect();
+        assert_eq!(by_path["src/auth.rs"], 15 + RECENCY_BONUS);
+        assert_eq!(
+            by_path["src/rotation.rs"], COCHANGE_BONUS,
+            "committed 40 days ago: paired, not recent"
+        );
+    }
+
+    /// Two files that name the same query word, so both are seeds and both are
+    /// historical partners of `src/rotation.rs`.
+    fn two_seed_index() -> RetrievalIndex {
+        RetrievalIndex {
+            files: vec![
+                file("src/author.rs", 100),
+                file("src/authority.rs", 100),
+                file("src/rotation.rs", 20),
+            ],
+            history: CommitHistory::from(BTreeMap::from([
+                (
+                    "src/author.rs".to_string(),
+                    FileCommits {
+                        partners: vec![("src/rotation.rs".to_string(), 2)],
+                        commits: 2,
+                        last_commit: 1_700_000_000,
+                        hub: false,
+                    },
+                ),
+                (
+                    "src/authority.rs".to_string(),
+                    FileCommits {
+                        partners: vec![("src/rotation.rs".to_string(), 5)],
+                        commits: 5,
+                        last_commit: 1_700_000_000,
+                        hub: false,
+                    },
+                ),
+                (
+                    "src/rotation.rs".to_string(),
+                    FileCommits {
+                        partners: vec![
+                            ("src/authority.rs".to_string(), 5),
+                            ("src/author.rs".to_string(), 2),
+                        ],
+                        commits: 7,
+                        last_commit: 1_700_000_000,
+                        hub: false,
+                    },
+                ),
+            ])),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn several_seeds_that_name_the_same_partner_award_the_bonus_once() {
+        let with = retrieve(
+            "author",
+            &two_seed_index(),
+            &HashSet::new(),
+            &RetrieveOptions {
+                cochange: true,
+                ..Default::default()
+            },
+        );
+        let ranked = paths(&with);
+        assert!(
+            ranked.contains(&"src/author.rs".to_string())
+                && ranked.contains(&"src/authority.rs".to_string()),
+            "both files are seeds, or the test proves nothing: {ranked:?}"
+        );
+        let rotation = with
+            .iter()
+            .find(|r| r.path == "src/rotation.rs")
+            .expect("the partner is reachable");
+        assert_eq!(
+            rotation.score, COCHANGE_BONUS,
+            "two seeds paired with it, one award: {:?}",
+            rotation.reasons
+        );
+        assert_eq!(
+            rotation
+                .reasons
+                .iter()
+                .filter(|r| r.starts_with("co-change"))
+                .count(),
+            1,
+            "{:?}",
+            rotation.reasons
+        );
+        assert!(
+            rotation
+                .reasons
+                .iter()
+                .any(|r| r == "co-change: 5 commit(s) with src/authority.rs"),
+            "the strongest pair is the one named: {:?}",
+            rotation.reasons
+        );
+    }
+
+    #[test]
+    fn asking_for_history_the_index_does_not_have_changes_nothing() {
+        let mut index = history_index();
+        index.history = CommitHistory::default();
+        let empty = retrieve(
+            "auth",
+            &index,
+            &HashSet::new(),
+            &RetrieveOptions {
+                cochange: true,
+                recency: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(paths(&empty), vec!["src/auth.rs".to_string()]);
+        assert_eq!(empty[0].score, 15, "no window to be recent in");
     }
 }

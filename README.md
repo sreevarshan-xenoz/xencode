@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1315 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1333 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -422,6 +422,19 @@ flowchart TD
   claiming the rest got faster; what it does report as expensive is a full-history
   `--numstat` at 11.3 s and a `git log -S` at 12.9 s, which no index here fixes.
   `history` is read-only apart from those two writes, and both are idempotent.
+- **Co-change history is mined once, and priced.** `/init` reads the whole
+  `git log` once — 93 ms here, over the 782 commits that counted — and stores,
+  per file, the files it is committed alongside in
+  `.xencode/index/history.json`; a rebuild at an unchanged commit reuses that
+  file instead of re-reading it. Commits that touch 25 or more files are
+  dropped, and a file edited alongside everything — `README.md`, in 163 of those
+  782 — is treated as background rather than as a companion. Ranking retrieval by
+  this history was then measured against the 25-question retrieval test: it cost
+  0.002 of mean reciprocal rank at a weight strong enough to move a ranking, and
+  changed nothing at a weight weak enough to only reorder what retrieval had
+  already found, because the text search reaches every file the history could
+  name. The two scoring options therefore ship switched off, and the comparison
+  stays runnable as two arms of that same test.
 - Routing is by **model prefix** on `default_model` (and each fallback entry):
   `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model`, `llamacpp:…`
   for a local llama-server, `remote:…` for any OpenAI-compatible server at
@@ -495,7 +508,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1315 passing, 13 ignored)
+cargo test                          # Full workspace suite (1333 passing, 13 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
