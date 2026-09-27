@@ -209,11 +209,23 @@ pub fn classify(
     // tools; a server's own `path` argument means something in the server's
     // filesystem, so refusing it here would break the server rather than
     // protect the workspace. Those calls still always prompt, where the
-    // arguments are shown.
+    // arguments are shown. The one carve-out is read-only and narrow, described
+    // by the `CRATE_AWARE_TOOLS` list.
     if !external {
         for key in ["path", "cwd"] {
             if let Some(serde_json::Value::String(raw)) = args.get(key) {
-                if !raw.is_empty() && !path_allowed(root, raw) {
+                if raw.is_empty() {
+                    continue;
+                }
+                // A `crate:` address is a read and nothing else, so it is
+                // reachable only as `path` on one of the three read tools.
+                // Anything else that escapes the workspace stays refused.
+                let reachable = if crate::crate_sources::is_crate_spec(raw) {
+                    key == "path" && readable_path(root, tool, raw).is_ok()
+                } else {
+                    path_allowed(root, raw)
+                };
+                if !reachable {
                     return Permission::Deny;
                 }
             }
@@ -279,6 +291,13 @@ fn arg_bool(args: &serde_json::Map<String, serde_json::Value>, key: &str) -> boo
     }
 }
 
+/// The three tools that may also read the unpacked source of a dependency this
+/// project locked. Deliberately a list rather than "every read-only tool":
+/// `what_breaks` and `repo_advise` take a path that has to mean something to
+/// *this* project's index, so widening them would answer a question about a
+/// crate in the registry and present it as an answer about this workspace.
+const CRATE_AWARE_TOOLS: &[&str] = &["read_file", "list_dir", "search_files"];
+
 /// Resolve a model-supplied path to an absolute in-workspace path, returning
 /// the hard-deny error string when it escapes (outside the root, `.git/`,
 /// config dir). This is the executor-side mirror of `classify`'s path rule:
@@ -288,6 +307,12 @@ fn workspace_path(root: &Path, raw: &str) -> Result<(PathBuf, String), String> {
     if raw.trim().is_empty() {
         return Err(err("\"path\" must not be empty"));
     }
+    if crate::crate_sources::is_crate_spec(raw) {
+        return Err(err(format!(
+            "{raw} addresses a dependency's own source, which is read-only here: read_file, \
+             list_dir and search_files can read it"
+        )));
+    }
     if !path_allowed(root, raw) {
         return Err(err(format!(
             "path outside the workspace (or a forbidden directory): {raw}"
@@ -295,6 +320,51 @@ fn workspace_path(root: &Path, raw: &str) -> Result<(PathBuf, String), String> {
     }
     let full = resolve_path(root, raw);
     Ok((full, raw.trim().to_string()))
+}
+
+/// The path rule for a *read*: the workspace, plus — for the tools in
+/// [`CRATE_AWARE_TOOLS`] — the unpacked source of a crate the lock file pins.
+/// The third arm is the only carve-out, and it is read-only: a write, an edit or
+/// a `cwd` still goes through [`workspace_path`].
+///
+/// Returns the path, the label to show the model, and the crate the path came
+/// from when it was not the workspace.
+fn readable_path(
+    root: &Path,
+    tool: &str,
+    raw: &str,
+) -> Result<(PathBuf, String, Option<crate::crate_sources::CrateSource>), String> {
+    if raw.trim().is_empty() {
+        return Err(err("\"path\" must not be empty"));
+    }
+    if CRATE_AWARE_TOOLS.contains(&tool) {
+        if crate::crate_sources::is_crate_spec(raw) {
+            let (full, source) = crate::crate_sources::resolve_crate_spec(root, raw)?;
+            return Ok((full, raw.trim().to_string(), Some(source)));
+        }
+        let candidate = resolve_path(root, raw);
+        if !path_allowed(root, raw) {
+            if let Some(source) = crate::crate_sources::crate_source_for_path(root, &candidate) {
+                return Ok((candidate, raw.trim().to_string(), Some(source)));
+            }
+        }
+    }
+    workspace_path(root, raw).map(|(path, display)| (path, display, None))
+}
+
+/// The line that tells the model which crate and version a read came from, and
+/// how to ask for it again without spelling out a registry path. Empty for a
+/// workspace read, so ordinary output is unchanged.
+fn crate_provenance(source: Option<&crate::crate_sources::CrateSource>, path: &Path) -> String {
+    let Some(source) = source else {
+        return String::new();
+    };
+    let inside = source.inside(path).unwrap_or_default();
+    format!(
+        "[{} — read from {}, unpacked by cargo]\n",
+        source.label(),
+        source.spec_for(&inside)
+    )
 }
 
 /// Read a workspace file as text; unreadable, binary and non-UTF-8 files
@@ -330,17 +400,31 @@ fn tool_read_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
     let Some(raw) = arg_str(args, "path") else {
         return err("read_file needs a string \"path\"");
     };
-    let (full, display) = match workspace_path(root, raw) {
+    let (full, display, source) = match readable_path(root, "read_file", raw) {
         Ok(ok) => ok,
         Err(e) => return e,
     };
+    let provenance = crate_provenance(source.as_ref(), &full);
+    if full.is_dir() {
+        let hint = source
+            .as_ref()
+            .map(|s| {
+                format!(
+                    " — ask for a file inside it, for example {} or {}",
+                    s.spec_for("Cargo.toml"),
+                    s.spec_for("README.md")
+                )
+            })
+            .unwrap_or_default();
+        return err(format!("{display} is a directory{hint}"));
+    }
     let text = match read_text(&full, &display) {
         Ok(t) => t,
         Err(e) => return e,
     };
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
-        return format!("{display}: empty file");
+        return format!("{provenance}{display}: empty file");
     }
     let offset = arg_usize(args, "offset").unwrap_or(1).max(1);
     let limit = arg_usize(args, "limit")
@@ -353,7 +437,7 @@ fn tool_read_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
         ));
     }
     let end = lines.len().min(offset - 1 + limit);
-    let mut out = String::new();
+    let mut out = provenance;
     for (i, line) in lines[offset - 1..end].iter().enumerate() {
         out.push_str(&format!("{}\t{line}\n", offset + i));
     }
@@ -370,12 +454,12 @@ fn tool_read_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
 
 fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
-    let (full, display) = match raw {
-        Some(raw) => match workspace_path(root, raw) {
+    let (full, display, source) = match raw {
+        Some(raw) => match readable_path(root, "list_dir", raw) {
             Ok(ok) => ok,
             Err(e) => return e,
         },
-        None => (workspace_root(root), ".".to_string()),
+        None => (workspace_root(root), ".".to_string(), None),
     };
     let Ok(entries) = std::fs::read_dir(&full) else {
         return err(format!("cannot list {display}: is it a directory?"));
@@ -392,10 +476,17 @@ fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>)
         names.truncate(LIST_MAX_ENTRIES);
         names.push(format!("… +{} more entries", total - LIST_MAX_ENTRIES));
     }
+    let provenance = crate_provenance(source.as_ref(), &full);
     if names.is_empty() {
-        return format!("{display}: empty");
+        return format!("{provenance}{display}: empty");
     }
-    format!("{display}:\n{}", names.join("\n"))
+    if let Some(source) = source.as_ref() {
+        names.push(format!(
+            "… every path here is addressable as crate:{}/<path>",
+            source.name
+        ));
+    }
+    format!("{provenance}{display}:\n{}", names.join("\n"))
 }
 
 fn is_skipped_dir(name: &str) -> bool {
@@ -467,33 +558,45 @@ fn tool_search_files(root: &Path, args: &serde_json::Map<String, serde_json::Val
         return err(format!("invalid regular expression: {pattern}"));
     };
     let raw = arg_str(args, "path").filter(|s| !s.trim().is_empty());
-    let scope = match raw {
-        Some(raw) => match workspace_path(root, raw) {
-            Ok((full, _)) => full,
+    let (scope, source) = match raw {
+        Some(raw) => match readable_path(root, "search_files", raw) {
+            Ok((full, _, source)) => (full, source),
             Err(e) => return e,
         },
-        None => workspace_root(root),
+        None => (workspace_root(root), None),
+    };
+    // Inside a locked crate the label each hit carries is the `crate:` address,
+    // so a hit can be opened again without copying a registry path out of it.
+    let display_of = |file: &Path| -> String {
+        match source.as_ref().and_then(|s| s.inside(file)) {
+            Some(inside) => source
+                .as_ref()
+                .map(|s| s.spec_for(&inside))
+                .unwrap_or_default(),
+            None => relative_display(root, file),
+        }
     };
     let mut hits: Vec<String> = Vec::new();
     if scope.is_file() {
-        let display = relative_display(root, &scope);
+        let display = display_of(&scope);
         let _ = search_one_file(&scope, &display, &re, &mut hits);
     } else {
         let mut files = Vec::new();
         walk_files(&scope, 0, &mut files);
         files.sort();
         for file in files {
-            let display = relative_display(root, &file);
+            let display = display_of(&file);
             let _ = search_one_file(&file, &display, &re, &mut hits);
             if hits.len() >= SEARCH_MAX_HITS {
                 break;
             }
         }
     }
+    let provenance = crate_provenance(source.as_ref(), &scope);
     if hits.is_empty() {
-        return format!("no matches for /{pattern}/");
+        return format!("{provenance}no matches for /{pattern}/");
     }
-    let mut out = format!("{} match(es):\n", hits.len());
+    let mut out = format!("{provenance}{} match(es):\n", hits.len());
     out.push_str(&hits.join("\n"));
     if hits.len() >= SEARCH_MAX_HITS {
         out.push_str(&format!(
@@ -2445,6 +2548,130 @@ mod tests {
         let missing = tool_read_file(&root, &args_of(serde_json::json!({"path": "nope.txt"})));
         assert!(missing.starts_with("error: cannot read"), "{missing}");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The carve-out is read-only. A `crate:` address is refused by the policy
+    /// for a write and by the executor for a write, whatever the lock says.
+    #[test]
+    fn a_crate_address_reaches_reads_only_and_never_a_write() {
+        let root = temp_root("crate-policy");
+        std::fs::write(
+            root.join("Cargo.lock"),
+            "[[package]]\nname = \"serde\"\nversion = \"1.0.229\"\n",
+        )
+        .unwrap();
+        let args = || {
+            args_of(serde_json::json!({
+                "path": "crate:serde/Cargo.toml",
+                "content": "clobbered",
+            }))
+        };
+        assert_eq!(
+            classify(
+                &root,
+                "write_file",
+                &args(),
+                ApprovalMode::AllAllow,
+                &[ToolClass::Edit],
+            ),
+            Permission::Deny,
+            "even all-allow plus a session grant must not write into a dependency's source"
+        );
+        let refused = tool_write_file(&root, &args());
+        assert!(refused.contains("read-only here"), "{refused}");
+        assert!(refused.contains("crate:serde"), "{refused}");
+        // `cwd` is a path too, and it never reaches outside whatever the tool is.
+        assert_eq!(
+            classify(
+                &root,
+                "run_command",
+                &args_of(serde_json::json!({"command": "ls", "cwd": "/tmp"})),
+                ApprovalMode::AllAllow,
+                &[],
+            ),
+            Permission::Deny
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// This is the live check for the read side: it runs against the real
+    /// `Cargo.lock` of this workspace and the real directory cargo unpacked the
+    /// registry sources into. On a machine with no registry it asserts nothing,
+    /// which is why the manual run quoted in NEXT_PLAN_TASKS.md matters.
+    #[test]
+    fn a_locked_crate_read_on_this_machine_names_the_version_it_came_from() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the crates directory")
+            .to_path_buf();
+        let Some(home) = crate::crate_sources::cargo_home() else {
+            return;
+        };
+        let dirs = crate::crate_sources::registry_src_dirs(&home);
+        if dirs.is_empty() {
+            return;
+        }
+        let locked = crate::crate_sources::locked_packages_for(&workspace);
+        // A crate whose own Cargo.toml states the version it was locked at:
+        // some inherit it from a workspace, and those would not show anything.
+        let stated = |n: &str, v: &str| -> bool {
+            dirs.iter()
+                .map(|d| d.join(format!("{n}-{v}")).join("Cargo.toml"))
+                .find(|p| p.is_file())
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .is_some_and(|text| text.contains(&format!("version = \"{v}\"")))
+        };
+        let (name, version) = locked
+            .iter()
+            .find(|(n, v)| stated(n, v))
+            .expect("no locked dependency on this machine states its version in its Cargo.toml");
+
+        let read = tool_read_file(
+            &workspace,
+            &args_of(serde_json::json!({"path": format!("crate:{name}/Cargo.toml")})),
+        );
+        assert_eq!(
+            classify(
+                &workspace,
+                "read_file",
+                &args_of(serde_json::json!({"path": format!("crate:{name}/Cargo.toml")})),
+                ApprovalMode::Ask,
+                &[],
+            ),
+            Permission::Allow,
+            "the policy has to open the same door the executor reads through"
+        );
+        assert!(
+            read.starts_with(&format!("[{name} {version} —")),
+            "{}",
+            &read[..read.len().min(120)]
+        );
+        assert!(
+            read.contains(&format!("version = \"{version}\"")),
+            "the label and the file must agree on the version: {read}"
+        );
+
+        // A directory address says so and offers a file inside, rather than
+        // reporting an operating-system error the model cannot act on.
+        let dir = tool_read_file(
+            &workspace,
+            &args_of(serde_json::json!({"path": format!("crate:{name}")})),
+        );
+        assert!(dir.contains("is a directory"), "{dir}");
+        assert!(dir.contains(&format!("crate:{name}/Cargo.toml")), "{dir}");
+
+        // Hits inside a dependency are labelled by the address that reopens them.
+        let search = tool_search_files(
+            &workspace,
+            &args_of(serde_json::json!({
+                "pattern": "^version=|^version = ",
+                "path": format!("crate:{name}"),
+            })),
+        );
+        assert!(
+            search.contains(&format!("crate:{name}/Cargo.toml:")),
+            "{search}"
+        );
     }
 
     #[test]

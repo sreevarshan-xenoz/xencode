@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1296 tests passing, 12 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1306 tests passing, 12 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2173,9 +2173,16 @@ All verified by reading the file at the line given, on 2026-09-23.
     (source + README + CHANGELOG, all version-present), `rust-docs` is 908 MB,
     `rustc --explain E0308` works, and `cargo build --message-format=json`
     emits `code.explanation` (711 chars for E0308) *plus* machine-readable
-    suggestions. None of it is reachable by the agent today, because the
-    path-allow rule denies anything outside the workspace
-    (`agent_tools.rs:186-205`).
+    suggestions. None of it was reachable by the agent when this row was
+    written, because the path-allow rule denied anything outside the workspace
+    (`path_allowed` and
+    `workspace_path` in `agent_tools.rs` — the file's line numbers have moved
+    twice since this row was written, so it names them by function).
+    **Re-measured for RS-3 on 2026-09-27:** that directory now holds **1023**
+    crate directories in 1.4 GB, and the `rust-docs` half of the row is 908 MB of
+    **HTML** — two markdown files in the whole tree, and no `rust-src` component,
+    so there is no readable standard-library source on this machine. Only the
+    registry half was worth a path rule.
 22. **A cross-cutting security note that applies to O-2 and O-4 together:**
     commit subjects and fetched pages are attacker-controlled text arriving in
     a prompt — the same class as N-0 fact 3 and SE-2/SE-3. Independently, git
@@ -2329,9 +2336,15 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
 - **RS-3 Widen the read-only roots to the local registry and toolchain docs**
   (fact 21) so `search_files`/`read_file` can reach the *exact locked version's*
   upstream source, `README.md` and `CHANGELOG.md`. **S**. Trap: this is a
-  deliberate carve-out in the path-deny rule (`agent_tools.rs:186-205`) and
+  deliberate carve-out in the path-deny rule (`path_allowed` / `workspace_path`
+  in `agent_tools.rs`) and
   must resolve ambiguity through `Cargo.lock`, not "whatever version is on
-  disk". **OFFLINE-OK.**
+  disk". **OFFLINE-OK.** *(Registry half built 2026-09-27 as
+  `crate:<name>[/<path>]` on the three read tools, resolved through
+  `Cargo.lock` and labelled with the version it read; the toolchain-docs half is
+  not built, because what is on this machine is 908 MB of HTML with two markdown
+  files in it and no `rust-src` component — reading it raw is RS-8's shaping
+  work, not a widening of a root. See the W4 record.)*
 - **RS-4 `read_docs(crate, version, path)`** — deterministic intake over RS-3,
   falling back to `crates.io/api/v1/crates/<c>/<v>/readme` and
   `docs.rs/crate/<c>/<v>/source/<file>` only on a local miss. **M**. This is
@@ -7213,6 +7226,69 @@ done-when is met, and the commit that does it names the IDs.
   `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
   -D warnings` clean, and by running both subcommands against this repository:
   the numbers quoted above are that run's output.
+
+- [x] `RS-3` — 2026-09-27, second item of W4 (the registry half; the
+  toolchain-docs half is re-scoped, see below). The three read tools —
+  `read_file`, `list_dir`, `search_files` — gained one extra address form,
+  `crate:<name>[/<path inside the crate>]`, which reaches the source cargo
+  unpacked for the version this project's `Cargo.lock` pins. New module
+  `xencode-tui-rs/src/crate_sources.rs` (8 tests): a tolerant `[[package]]` line
+  reader over the lock text (no TOML dependency added to the path checker —
+  deliberately, because this code decides what a model may read), a lock-file
+  search that walks up only to the directory holding `.git`, the
+  `$CARGO_HOME/registry/src/<registry>/<name>-<version>` layout, and the address
+  parser. Ambiguity is refused rather than resolved by guesswork: a name pinned
+  in two versions with both unpacked lists both directories and says to pass one
+  as a path; a name the lock does not contain is refused by name; a pinned name
+  with nothing unpacked names `cargo fetch`. `crate:serde/../../etc/passwd`,
+  `crate:serde/.git/config` and an absolute path after the name are refused
+  before any I/O, and `crate:serde` can no longer become a file literally named
+  that, because `workspace_path` rejects the prefix for every other tool.
+  **Why the lock and not the disk**: `$CARGO_HOME/registry/src` here holds 1023
+  crate directories with several versions side by side — both `serde-1.0.219`
+  and `serde-1.0.229` are present while the lock pins 1.0.229 — so "whatever is
+  on disk" answers a question about a build this project does not have. The unit
+  test that pins this behaviour asserts the 1.0.229 directory is chosen and that
+  a path under 1.0.219 comes back as *not a source of truth*.
+  **Every such read is labelled**, so a model cannot quote a dependency without
+  saying which version: the two outputs below, plus the directory hint, are the
+  live run of `a_locked_crate_read_on_this_machine_names_the_version_it_came_from`
+  against this workspace's real lock and this machine's real registry.
+  ```text
+  [adler2 2.0.1 — the version this project's Cargo.lock pins — read from crate:adler2/Cargo.toml, unpacked by cargo]
+  1   # THIS FILE IS AUTOMATICALLY GENERATED BY CARGO
+  …
+  error: crate:adler2 is a directory — ask for a file inside it, for example crate:adler2/Cargo.toml or crate:adler2/README.md
+  [adler2 2.0.1 — … read from crate:adler2, unpacked by cargo]
+  6 match(es):
+  crate:adler2/Cargo.toml:15:version = "2.0.1"
+  …
+  ```
+  **The carve-out is read-only, in both places that could allow a write.**
+  `classify` lets a `crate:` address stand only as a `path` argument of a tool in
+  `CRATE_AWARE_TOOLS`; anything else — `write_file`, `edit_file`, `edit_symbol`,
+  a `cwd` — is `Deny` even in `AllAllow` with the edit class already granted for
+  the session, and the executor refuses again with the message quoted in the
+  block above. `what_breaks` and `repo_advise` were left workspace-only on
+  purpose: their answers are about *this* project's index, and reaching into a
+  registry crate would let a dependency's consumers be presented as yours.
+  This guard was watched to fail before it held: the policy test reported
+  `left: Allow, right: Deny` while `crate:` still resolved as an ordinary
+  relative path, which is also how the "file named `crate:serde`" hole was
+  found and closed.
+  **What was not built, and why.** The row's other half — toolchain docs — is not
+  a path rule waiting to be written. Measured today: `rust-docs` on this machine
+  is 908 MB of HTML containing two markdown files, and `rust-src` is not
+  installed, so there is no standard-library source tree to read at all
+  (`$(rustc --print sysroot)/lib/rustlib/src/rust/library` does not exist).
+  Handing the model `std/string/struct.String.html` is noise, and turning it into
+  something readable is RS-8's deferred corpus work; the structured part of the
+  same surface is RS-6's `code.explanation`. Recorded as re-scoped, not done.
+  **Verified by** 1306 tests, 0 failures, 12 ignored over 46 result lines (up
+  from 1296: 8 new in `crate_sources.rs`, 2 new in `agent_tools.rs`), with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. The live outputs above are from that run, taken with
+  `--nocapture`; the temporary print was removed afterwards and the test re-run.
 
 
 #### W2 — The model/inference substrate — 15 items

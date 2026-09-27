@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent can read a dependency's own source, at the version this project locked
+
+Asked "why does `serde::from_str` reject this?", a coding agent has to guess,
+because the code that would answer it is on the machine and the agent was not
+allowed to see it: every path outside the workspace was refused. The three read
+tools — `read_file`, `list_dir`, `search_files` — now accept one extra address
+form, `crate:<name>[/<path inside the crate>]`, for example
+`crate:serde/src/de.rs`.
+
+The version is chosen by `Cargo.lock`, not by whatever cargo happens to have
+left unpacked. That distinction matters: `~/.cargo/registry/src` on this machine
+holds 1023 crate directories with several versions of the same crate side by side
+(both `serde-1.0.219` and `serde-1.0.229` are present, while the lock pins
+1.0.229), so reading "the" serde source without consulting the lock would answer
+a question about a build this project does not have. When the lock names one
+version the read goes to that directory; when a name is pinned in two, the tool
+lists both directories rather than picking one; when the crate is not a
+dependency at all, or is pinned but never downloaded, the answer says so and
+names the command that would fix it (`cargo fetch`).
+
+Every such read is labelled with the version and the address it came from, so an
+answer cannot quote a dependency without saying which one:
+
+```
+[adler2 2.0.1 — the version this project's Cargo.lock pins — read from crate:adler2/Cargo.toml, unpacked by cargo]
+```
+
+This is a read-only carve-out. A `crate:` address in a write, an edit or a shell
+command's working directory is refused by the permission policy and again by the
+executor, and it is refused even in the most permissive approval mode with edits
+already granted for the session. A `crate:` address can never reach outside the
+crate directory it names, and the workspace still refuses a file literally named
+`crate:…`.
+
 ### Added — `xencode history` says how fast this repository's history is, in milliseconds that were just measured
 
 `xencode history status` prints where the repository data lives, how many commits

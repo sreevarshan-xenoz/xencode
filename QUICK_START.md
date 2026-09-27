@@ -48,7 +48,10 @@ images ride as message parts the model actually sees, shrunk first to a
 PDFs/DOCXs parse to
 text), `/ctx` retrieval,
 `/advise` repo insights, `/plan` for the agent's todo list, `/rewind` to undo agent edits, `/mcp` to bring up your MCP tool servers, `/plugin` to see which plugins took effect, `/spawn` to run a subagent in its own git worktree, `/trace` to look back at what recent turns actually did, `/cost` for what those
-turns add up to in tokens and money, model picker, and more.
+turns add up to in tokens and money, model picker, and more. Ask about a library
+and the agent can read the upstream source of the exact version your
+`Cargo.lock` pins, already on disk — address it as `crate:serde/src/de.rs`.
+Those reads are read-only, and the answer names the version it came from.
 
 ### One-shot query
 ```bash
