@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — what is known to be wrong with a dependency, answered offline
+
+Asked whether a crate version is affected by something, a model answers from
+memory and invents: an advisory number that was never published, or a version it
+believes is safe. Neither claim can be checked from inside the machine. Xencode
+now keeps the two public advisory databases for crates locally and answers from
+them.
+
+`xencode advisories sync` is the one command that reaches out. It makes a shallow
+clone of the RustSec advisory repository (6.3 MB, 1 251 advisories over 942 crate
+directories at revision `e2111519b`) and downloads OSV's `crates.io/all.zip`
+(3 490 826 bytes, unpacking to 2 856 records), then writes a tab-separated index
+of 4 857 lines so a lookup for one crate name reads the index and the few files it
+points at. The download took 3.4 s here; the corpus occupies 20 MB. Everything
+after that is disk:
+
+```text
+$ xencode advisories check --path rust
+/home/sree/Projects/xencode/rust/Cargo.lock — 419 locked packages; 4 of them are named by 5 advisory record(s):
+  lru 0.12.5
+    RUSTSEC-2026-0002 [rustsec] 2026-01-07 — affected, 0.16.3 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/224
+    RUSTSEC-2026-0253 [rustsec] 2026-05-12 — affected, 0.18.2 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/238
+  paste 1.0.15
+    RUSTSEC-2024-0436 [rustsec] 2024-10-07 — informational (unmaintained)
+      https://github.com/dtolnay/paste
+  rustls-pemfile 2.2.0
+    RUSTSEC-2025-0134 [rustsec] 2025-11-28 — informational (unmaintained)
+      https://github.com/rustls/pemfile/issues/61
+  ttf-parser 0.25.1
+    RUSTSEC-2026-0192 [rustsec] 2026-06-28 — informational (unmaintained)
+      https://github.com/harfbuzz/ttf-parser/issues/217
+```
+
+Four of this project's own 419 locked packages are named, in 0.238 s, and none of
+them is a vulnerability being ignored: two are unsoundness advisories with a
+version to move to, three are crates with no maintained successor to upgrade into.
+
+Two databases rather than one is a measured decision. Of the 2 856 OSV records,
+1 196 carry a RustSec number as their own id and 872 link one through `aliases`,
+but 732 — covering 791 crates the curated database does not name at all — have no
+link. And where they do overlap, the mirror often carries a rating the curated
+record has no room for: 380 of the 822 RustSec advisories without a CVSS vector
+gain a one-word severity from their OSV copy, which is how
+`RUSTSEC-2026-0002` above reads `severity GHSA LOW`. So an OSV record is dropped
+only when the RustSec record it mirrors is actually present, and its rating
+transfers to the record kept.
+
+The judgements are the corpus's own, not a guess at it. The whole RustSec schema
+was read from the downloaded files before any rule was written, which is how two
+things were settled: there is no `broken` field in that database, so a record is
+treated as withdrawn first, then matched against its `unaffected` versions, then
+its `patched` requirements, then reported as an informational notice — and a
+requirement string can be a conjunction (`"< 2.3.0, >= 1.3.0"`), and OSV ranges
+can span more than two events and hold partial versions (`"0.62"`), so both are
+compared with the `semver` crate rather than a hand-written parser. An
+informational notice is never worded as a vulnerability, and a version that is
+not `major.minor.patch` is refused rather than guessed at.
+
+The agent gets the same answer through `lookup_advisory`, which is read-only in
+every approval mode and has no network path at all — a dependency question inside
+a turn cannot become traffic. Without a version it uses the one this project's
+lock file pins and says that is where it came from:
+
+```text
+judging version 0.12.5, which this project's Cargo.lock pins
+3 advisory record(s) for lru — corpus synced today, rustsec revision e2111519b
+assessed against version 0.12.5:
+  RUSTSEC-2026-0253 [rustsec] 2026-05-12: Potential use-after-free due to lack of panic safety in `LruCache::pop()` — informational: unsound
+      see: https://github.com/jeromefroe/lru-rs/pull/238
+      this version: AFFECTED here — the corpus offers 0.18.2 as safe
+  …
+```
+
+The two answers that must not read as an all-clear are worded for exactly that. A
+crate no one has published an advisory for is answered as `no advisory in the
+local corpus` with the corpus size, its date and the revision it was taken at, and
+the note that absence of an advisory is not a statement of safety. A machine that
+has never synced gets:
+
+```text
+error: no advisory corpus at /home/sree/.xencode/advisories — advisory state is unknown, not clean. Run `xencode advisories sync` (needs network once).
+```
+
+Nineteen tests come with it: fourteen for parsing both formats, turning OSV's
+event lists into affected intervals, the dedup and severity transfer, and the
+refusals — one of which reads the real corpora on this machine and is kept behind
+`--ignored` (`cargo test -p xencode-analysis-rs -- --ignored syncing_the_real_corpora`)
+and asserts that every one of the 1 251 files and 2 856 records parses; four for
+the tool, including its answer through the executor by name and its
+unknown-corpus message; and one for the tool schema. `cargo audit` is not
+shelled out to anywhere: the corpora are read directly, so an answer cannot
+disappear because a third-party binary changed its output format. The workspace
+suite now measures 1 375 passing, 17 ignored.
+
 ### Added — the agent can read how another crate documents itself
 
 A dependency's source is one thing and its documentation is another: `read_file`

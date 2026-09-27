@@ -53,7 +53,26 @@ and the agent can read the upstream source of the exact version your
 `Cargo.lock` pins, already on disk — address it as `crate:serde/src/de.rs`.
 Those reads are read-only, and the answer names the version it came from.
 `read_docs` is the same idea for prose: it answers with the readme a crate points
-at itself, plus a list of the other documents it ships.
+at itself, plus a list of the other documents it ships. `lookup_advisory` answers
+the security question — what is known to be wrong with this crate, judged against
+the version your lock file pins — from the advisory corpora on disk, which you
+download once:
+
+```bash
+xencode advisories sync                 # the one command that needs network here
+xencode advisories check --path rust    # offline, over every locked package
+```
+
+```text
+$ xencode advisories check --path rust
+/home/sree/Projects/xencode/rust/Cargo.lock — 419 locked packages; 4 of them are named by 5 advisory record(s):
+  lru 0.12.5
+    RUSTSEC-2026-0002 [rustsec] 2026-01-07 — affected, 0.16.3 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/224
+    RUSTSEC-2026-0253 [rustsec] 2026-05-12 — affected, 0.18.2 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/238
+  …
+```
 
 ### One-shot query
 ```bash

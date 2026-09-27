@@ -174,6 +174,12 @@ enum Commands {
         action: AuditAction,
     },
 
+    /// Known security advisories for the crates this project depends on
+    Advisories {
+        #[command(subcommand)]
+        action: AdvisoryAction,
+    },
+
     /// Send a query to a model
     Query {
         /// The prompt to send
@@ -653,6 +659,45 @@ enum AuditAction {
 }
 
 #[derive(Subcommand)]
+enum AdvisoryAction {
+    /// Download both corpora: 6.3 MB of RustSec text plus a 3.5 MB OSV archive, about 20 MB unpacked
+    Sync {
+        /// Where to keep them (default: <config dir>/advisories)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// What the corpus says about one crate, judged against a version when given
+    Show {
+        /// Crate name, as it appears in Cargo.lock
+        crate_name: String,
+
+        /// Version to judge; without it the records are listed but not assessed
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Corpus location (default: <config dir>/advisories)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Judge every package in this project's Cargo.lock against the corpus
+    Check {
+        /// Project to read Cargo.lock from (default: the current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// Corpus location (default: <config dir>/advisories)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Whether a corpus exists here, how big it is, and when it was taken
+    Status {
+        /// Corpus location (default: <config dir>/advisories)
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum MemoryAction {
     /// List all conversation sessions
     List,
@@ -737,6 +782,7 @@ async fn main() {
         Commands::Models { action } => run_models(action).await,
         Commands::Cache { action } => run_cache(action),
         Commands::Audit { action } => run_audit(action),
+        Commands::Advisories { action } => run_advisories(action).await,
         Commands::Query {
             prompt,
             model,
@@ -2520,6 +2566,139 @@ fn run_audit(action: AuditAction) -> Result<(), String> {
                     path.display()
                 ))
             }
+        }
+    }
+}
+
+/// Where the advisory corpora live. `--dir` exists so a corpus can be kept on a
+/// shared or offline path without touching the config directory.
+fn advisory_corpus(dir: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(dir) = dir {
+        return Ok(dir);
+    }
+    let config_dir = XencodeConfig::config_dir().map_err(|e| e.to_string())?;
+    Ok(xencode_analysis_rs::advisories::corpus_dir(&config_dir))
+}
+
+async fn run_advisories(action: AdvisoryAction) -> Result<(), String> {
+    use xencode_analysis_rs::advisories as adv;
+
+    match action {
+        AdvisoryAction::Sync { dir } => {
+            let corpus = advisory_corpus(dir)?;
+            let outcome = adv::sync(&corpus).await.map_err(|e| e.to_string())?;
+            println!(
+                "corpus at {} — {} RustSec advisories, {} OSV records, {} index lines",
+                corpus.display(),
+                outcome.info.rustsec_advisories,
+                outcome.info.osv_records,
+                outcome.info.index_lines
+            );
+            println!(
+                "RustSec revision {} ({}); OSV download {} bytes",
+                outcome.info.rustsec_revision,
+                if outcome.rustsec_pulled {
+                    "pulled"
+                } else {
+                    "cloned fresh"
+                },
+                outcome.osv_bytes
+            );
+            println!(
+                "lookups are offline from here; run `xencode advisories check` to read Cargo.lock"
+            );
+            Ok(())
+        }
+        AdvisoryAction::Show {
+            crate_name,
+            version,
+            dir,
+        } => {
+            let corpus = advisory_corpus(dir)?;
+            let lookup = match adv::advisories_for(&corpus, &crate_name) {
+                Ok(lookup) => lookup,
+                Err(e) => return Err(e.to_string()),
+            };
+            print!("{}", adv::render_lookup(&lookup, version.as_deref()));
+            Ok(())
+        }
+        AdvisoryAction::Check { path, dir } => {
+            let corpus = advisory_corpus(dir)?;
+            let lock = xencode_tui_rs::crate_sources::lock_file(&path).ok_or_else(|| {
+                format!(
+                    "no Cargo.lock is readable for {} — the search stops at the project root, \
+                     so pass --path to the directory that holds the lock file",
+                    path.display()
+                )
+            })?;
+            let text =
+                std::fs::read_to_string(&lock).map_err(|e| format!("{}: {e}", lock.display()))?;
+            let packages = adv::locked_packages(&text);
+            let hits = adv::check_lockfile(&corpus, &text).map_err(|e| e.to_string())?;
+            let affected_packages = hits
+                .iter()
+                .map(|(package, ..)| package)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            println!(
+                "{} — {} locked packages; {} of them are named by {} advisory record(s):",
+                lock.display(),
+                packages.len(),
+                affected_packages,
+                hits.len()
+            );
+            let mut last = String::new();
+            for (package, version, advisory, outcome) in &hits {
+                if package != &last {
+                    println!("  {package} {version}");
+                    last = package.clone();
+                }
+                let verdict = match outcome {
+                    adv::Outcome::Vulnerable { fix: Some(fix) } => {
+                        format!("affected, {} is offered as safe", fix)
+                    }
+                    adv::Outcome::Vulnerable { fix: None } => {
+                        "affected, no safe version".to_string()
+                    }
+                    adv::Outcome::Notice { kind } => format!("informational ({kind})"),
+                    other => format!("{other:?}"),
+                };
+                println!(
+                    "    {} [{}] {} — {}",
+                    advisory.id,
+                    advisory.corpus.label(),
+                    advisory.date,
+                    verdict
+                );
+                if let Some(url) = &advisory.url {
+                    println!("      {url}");
+                }
+            }
+            if hits.is_empty() {
+                println!(
+                    "  nothing — but that means no advisory matches these versions, not that \
+                     the dependencies are safe"
+                );
+            }
+            Ok(())
+        }
+        AdvisoryAction::Status { dir } => {
+            let corpus = advisory_corpus(dir)?;
+            match adv::sync_info(&corpus) {
+                Ok(info) => {
+                    println!("corpus: {}", corpus.display());
+                    println!(
+                        "  {} RustSec advisories at revision {}, {} OSV records, {} index lines",
+                        info.rustsec_advisories,
+                        info.rustsec_revision,
+                        info.osv_records,
+                        info.index_lines
+                    );
+                    println!("  synced {}", adv::age_days(info.synced_at_unix));
+                }
+                Err(e) => println!("{e}"),
+            }
+            Ok(())
         }
     }
 }

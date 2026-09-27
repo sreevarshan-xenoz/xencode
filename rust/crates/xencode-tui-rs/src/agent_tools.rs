@@ -119,7 +119,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     }
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
-        | "search_files" | "read_docs" | "update_plan" => ToolClass::ReadOnly,
+        | "search_files" | "read_docs" | "lookup_advisory" | "update_plan" => ToolClass::ReadOnly,
         "write_file" | "edit_file" | "edit_symbol" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
@@ -553,6 +553,60 @@ fn missing_doc(copy: &crate::crate_docs::LocalCopy, asked: &str) -> String {
         "{} {} has no {asked}; {listing}",
         copy.source.name, copy.source.version
     ))
+}
+
+/// `lookup_advisory` (RS-5): what the security corpora downloaded onto this
+/// machine say about a crate. Reads only — and only from disk. The corpus is
+/// fetched by the explicit `xencode advisories sync`, never from here, so a
+/// turn inside the agent loop cannot produce a network request under the
+/// name of a safety check.
+fn tool_lookup_advisory(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    use xencode_analysis_rs::advisories as adv;
+
+    let Some(name) = arg_str(args, "crate").map(str::trim) else {
+        return err("lookup_advisory needs a string \"crate\", as in {\"crate\": \"chrono\"}");
+    };
+    let config_dir = match xencode_config_rs::XencodeConfig::config_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            return err(format!(
+                "lookup_advisory cannot locate the config directory: {e}"
+            ))
+        }
+    };
+    let corpus = adv::corpus_dir(&config_dir);
+    let asked = arg_str(args, "version")
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let pinned = if asked.is_none() {
+        pinned_version(root, name)
+    } else {
+        None
+    };
+    let version = asked.or_else(|| pinned.clone());
+    let lookup = match adv::advisories_for(&corpus, name) {
+        Ok(lookup) => lookup,
+        Err(e) => return err(e.to_string()),
+    };
+    let mut out = String::new();
+    if let Some(pinned) = &pinned {
+        out.push_str(&format!(
+            "judging version {pinned}, which this project's Cargo.lock pins\n"
+        ));
+    }
+    out.push_str(&adv::render_lookup(&lookup, version.as_deref()));
+    out
+}
+
+/// The version of `crate_name` this workspace builds, from its lock file, when
+/// the model asked about a crate without naming a version — so the answer is
+/// about the dependency in front of it rather than a list to interpret.
+fn pinned_version(root: &Path, crate_name: &str) -> Option<String> {
+    crate::crate_sources::locked_packages_for(root)
+        .into_iter()
+        .find(|(name, _)| name == crate_name)
+        .map(|(_, version)| version)
 }
 
 /// The fetched half: the two endpoints that publish by version, each reached
@@ -1445,6 +1499,7 @@ async fn execute_tool_call_plan(
         "list_dir" => tool_list_dir(root, &args),
         "search_files" => tool_search_files(root, &args),
         "read_docs" => tool_read_docs(root, &args, online_docs).await,
+        "lookup_advisory" => tool_lookup_advisory(root, &args),
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
@@ -3070,6 +3125,248 @@ mod tests {
             missing.contains("serde 9.9.9") && missing.contains("readme"),
             "{missing}"
         );
+    }
+
+    /// Repointing `XCODE_CONFIG_DIR` is process-global, so these tests take a
+    /// lock and put back whatever the environment held afterwards. It is the
+    /// async kind because one of them runs the executor, which needs an await.
+    static ADVISORY_CONFIG: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    struct ConfigDirGuard(Option<std::ffi::OsString>);
+
+    impl ConfigDirGuard {
+        fn new(dir: &Path) -> Self {
+            let previous = std::env::var_os("XCODE_CONFIG_DIR");
+            std::env::set_var("XCODE_CONFIG_DIR", dir);
+            Self(previous)
+        }
+    }
+
+    impl Drop for ConfigDirGuard {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+                None => std::env::remove_var("XCODE_CONFIG_DIR"),
+            }
+        }
+    }
+
+    /// One advisory file in the shape `sync` leaves the corpus in, patched
+    /// from `fixed` onwards, indexed and dated — enough for a lookup to find.
+    fn write_advisory(corpus: &Path, crate_name: &str, fixed: &str) {
+        use xencode_analysis_rs::advisories as adv;
+        let dir = corpus
+            .join(adv::RUSTSEC_SUBDIR)
+            .join("crates")
+            .join(crate_name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("RUSTSEC-2020-0000.md"),
+            format!(
+                r#"# Memory safety problem in the parser
+
+Affected versions of this crate may transmute an unvalidated string.
+
+```toml
+[advisory]
+id = "RUSTSEC-2020-0000"
+package = "{crate_name}"
+date = "2020-11-10"
+url = "https://github.com/example/{crate_name}/issues/1"
+
+[versions]
+patched = ["{fixed}"]
+```
+"#
+            ),
+        )
+        .unwrap();
+        let lines = adv::build_index(corpus).unwrap();
+        let info = adv::SyncInfo {
+            synced_at_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            rustsec_revision: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            rustsec_advisories: 1,
+            osv_records: 0,
+            index_lines: lines,
+        };
+        std::fs::write(
+            corpus.join(adv::SYNC_FILE),
+            serde_json::to_string(&info).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn lookup_advisory_is_read_only_and_a_missing_corpus_is_not_clean() {
+        let _serial = ADVISORY_CONFIG.lock().await;
+        let config = temp_root("advisories-none");
+        let _dir = ConfigDirGuard::new(&config);
+        assert_eq!(tool_class("lookup_advisory"), ToolClass::ReadOnly);
+
+        let workspace = this_workspace();
+        let args = args_of(serde_json::json!({"crate": "chrono"}));
+        assert_eq!(
+            classify(&workspace, "lookup_advisory", &args, ApprovalMode::Ask, &[]),
+            Permission::Allow,
+            "reading a downloaded text file opens nothing the model could not already read"
+        );
+        let out = tool_lookup_advisory(&workspace, &args);
+        assert!(out.starts_with("error:"), "{out}");
+        assert!(out.contains("advisory state is unknown"), "{out}");
+        assert!(out.contains("advisories sync"), "{out}");
+        assert!(
+            !out.contains("safe"),
+            "an absent corpus must not be worded as an all-clear: {out}"
+        );
+
+        // Without the name there is nothing to look up, and that is said.
+        let bare = tool_lookup_advisory(&workspace, &args_of(serde_json::json!({})));
+        assert!(bare.starts_with("error:"), "{bare}");
+        assert!(bare.contains("needs a string"), "{bare}");
+    }
+
+    #[tokio::test]
+    async fn lookup_advisory_judges_the_version_the_lock_file_pins() {
+        let _serial = ADVISORY_CONFIG.lock().await;
+        let config = temp_root("advisories-corpus");
+        let _dir = ConfigDirGuard::new(&config);
+        let workspace = this_workspace();
+        // A crate this workspace really builds, so the pinned version is a
+        // fact about this project rather than a value written into the test.
+        let locked = crate::crate_sources::locked_packages_for(&workspace);
+        let (name, version) = locked
+            .iter()
+            .find(|(candidate, _)| {
+                locked
+                    .iter()
+                    .filter(|(other, _)| other == candidate)
+                    .count()
+                    == 1
+            })
+            .cloned()
+            .expect("this workspace has a Cargo.lock with a single-versions crate");
+        write_advisory(
+            &xencode_analysis_rs::advisories::corpus_dir(&config),
+            &name,
+            ">= 99.0.0",
+        );
+
+        let out = tool_lookup_advisory(&workspace, &args_of(serde_json::json!({"crate": &name})));
+        assert!(
+            out.contains(&format!(
+                "judging version {version}, which this project's Cargo.lock pins"
+            )),
+            "{out}"
+        );
+        assert!(
+            out.contains("AFFECTED here — the corpus offers 99.0.0 as safe"),
+            "{out}"
+        );
+        assert!(out.contains("synced today"), "{out}");
+        assert!(
+            out.contains("https://github.com/example"),
+            "the answer carries where to read it: {out}"
+        );
+
+        // An explicit version is judged instead, and the lock is not mentioned.
+        let explicit = tool_lookup_advisory(
+            &workspace,
+            &args_of(serde_json::json!({"crate": &name, "version": "99.1.0"})),
+        );
+        assert!(explicit.contains("not affected"), "{explicit}");
+        assert!(!explicit.contains("Cargo.lock pins"), "{explicit}");
+        assert!(
+            !explicit.contains(&format!("assessed against version {version}")),
+            "{explicit}"
+        );
+
+        // A crate nobody has published an advisory for is said as not covered.
+        let unknown = tool_lookup_advisory(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "no-such-crate-anywhere"})),
+        );
+        assert!(
+            unknown.contains("no advisory in the local corpus"),
+            "{unknown}"
+        );
+        assert!(
+            unknown.contains("absence of an advisory is not a statement"),
+            "{unknown}"
+        );
+    }
+
+    /// The offline read against the corpora actually on this machine, so it is
+    /// ignored by default:
+    /// `cargo test -p xencode-tui-rs --lib -- --ignored lookup_advisory`.
+    /// It needs `xencode advisories sync` to have run once; it makes no request.
+    #[tokio::test]
+    #[ignore]
+    async fn lookup_advisory_answers_from_the_corpus_on_this_machine() {
+        let _serial = ADVISORY_CONFIG.lock().await;
+        let previous = std::env::var_os("XCODE_CONFIG_DIR");
+        std::env::remove_var("XCODE_CONFIG_DIR");
+        let workspace = this_workspace();
+        let affected = tool_lookup_advisory(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "chrono", "version": "0.4.19"})),
+        );
+        let safe = tool_lookup_advisory(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "chrono", "version": "0.4.20"})),
+        );
+        match previous {
+            Some(value) => std::env::set_var("XCODE_CONFIG_DIR", value),
+            None => std::env::remove_var("XCODE_CONFIG_DIR"),
+        }
+        assert!(!affected.starts_with("error:"), "{affected}");
+        assert!(affected.contains("RUSTSEC-2020-0159"), "{affected}");
+        assert!(affected.contains("AFFECTED here"), "{affected}");
+        assert!(safe.contains("not affected"), "{safe}");
+    }
+
+    /// The name has to reach the implementation through the executor, not just
+    /// have one: a tool offered to the model with no arm in the match answers
+    /// `unknown tool`, which a model reads as "this cannot be asked".
+    #[tokio::test]
+    async fn lookup_advisory_reaches_the_executor_by_name() {
+        let _serial = ADVISORY_CONFIG.lock().await;
+        let config = temp_root("advisories-executor");
+        let _dir = ConfigDirGuard::new(&config);
+        let workspace = this_workspace();
+        let out = timed(
+            &workspace,
+            call("lookup_advisory", serde_json::json!({"crate": "chrono"})),
+            10,
+        )
+        .await;
+        assert!(!out.contains("unknown tool"), "{out}");
+        assert!(out.contains("advisory state is unknown"), "{out}");
+
+        // With a corpus present, the same route answers a real question about
+        // a crate this workspace builds.
+        let locked = crate::crate_sources::locked_packages_for(&workspace);
+        let (name, _) = locked
+            .iter()
+            .find(|(candidate, _)| {
+                locked.iter().filter(|(other, _)| other == candidate).count() == 1
+            })
+            .cloned()
+            .unwrap();
+        write_advisory(
+            &xencode_analysis_rs::advisories::corpus_dir(&config),
+            &name,
+            ">= 99.0.0",
+        );
+        let answered = timed(
+            &workspace,
+            call("lookup_advisory", serde_json::json!({"crate": &name})),
+            10,
+        )
+        .await;
+        assert!(answered.contains("Cargo.lock pins"), "{answered}");
     }
 
     #[test]
