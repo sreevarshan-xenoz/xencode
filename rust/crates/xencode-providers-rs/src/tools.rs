@@ -639,6 +639,35 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "lookup_advisory".to_string(),
+            description: "Ask what is known to be wrong with a crate, from the security \
+                          advisories the user has downloaded to this machine. With a version \
+                          it answers whether that exact version is affected and names the \
+                          lowest version the corpus offers as safe; without one it lists every \
+                          record for the crate. It never reaches the network: if the corpus has \
+                          not been synced it says the advisory state is unknown, which is not \
+                          the same as saying the crate is safe. Use it before recommending a \
+                          dependency version, and never answer a security question about a \
+                          crate from memory when this tool is available."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "crate": {
+                        "type": "string",
+                        "description": "Package name, exactly as Cargo.lock spells it \
+                                        (e.g. chrono)"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "The version to judge, usually the one this project's \
+                                        Cargo.lock pins; leave it out to list every record"
+                    }
+                },
+                "required": ["crate"]
+            }),
+        },
+        ToolDefinition {
             name: "write_file".to_string(),
             description: "Create or overwrite a UTF-8 text file in the \
                           workspace with the given content. Parent \
@@ -847,6 +876,7 @@ mod tests {
                 "list_dir",
                 "search_files",
                 "read_docs",
+                "lookup_advisory",
                 "write_file",
                 "edit_file",
                 "edit_symbol"
@@ -870,7 +900,7 @@ mod tests {
             }
         }
         assert_eq!(tools[0].parameters["required"][0], "path");
-        assert_eq!(tools[5].parameters["required"][2], "new");
+        assert_eq!(tools[6].parameters["required"][2], "new");
     }
 
     /// `read_docs` (RS-4) takes a crate name and, optionally, a version and a
@@ -889,6 +919,26 @@ mod tests {
         let props = params["properties"].as_object().unwrap();
         assert_eq!(props.len(), 3);
         for key in ["crate", "version", "path"] {
+            assert_eq!(props[key]["type"], "string", "{key}");
+        }
+    }
+
+    /// `lookup_advisory` (RS-5) takes the crate name and, optionally, the
+    /// version to judge — and the version is left out when the model wants
+    /// every record for the crate rather than one verdict.
+    #[test]
+    fn lookup_advisory_takes_a_crate_and_an_optional_version() {
+        let tools = file_tools();
+        let lookup = tools
+            .iter()
+            .find(|t| t.name == "lookup_advisory")
+            .expect("lookup_advisory is offered with the other file tools");
+        let value = lookup.to_api_value();
+        let params = &value["function"]["parameters"];
+        assert_eq!(params["required"].as_array().unwrap(), &vec!["crate"]);
+        let props = params["properties"].as_object().unwrap();
+        assert_eq!(props.len(), 2);
+        for key in ["crate", "version"] {
             assert_eq!(props[key]["type"], "string", "{key}");
         }
     }

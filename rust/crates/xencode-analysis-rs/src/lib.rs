@@ -1,3 +1,4 @@
+pub mod advisories;
 pub mod analyzer;
 pub mod images;
 pub mod issues;

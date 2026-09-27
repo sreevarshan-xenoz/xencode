@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1358 tests passing, 15 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1375 tests passing, 17 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2377,6 +2377,15 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
   (3.3 MB) and query locally; refresh is an explicit command. **M**. Trap: do
   not shell out to `cargo audit` — its maintainer stepped down in 2025.
   **OFFLINE-OK after one sync.**
+  *(Built 2026-09-27 as `xencode-analysis-rs::advisories`, the
+  `xencode advisories sync|show|check|status` command and the `lookup_advisory`
+  tool. The row's numbers were re-measured and two of them were wrong: 1 251
+  advisories over 942 crate directories at revision `e2111519b`, and a 3 490 826
+  -byte archive of 2 856 OSV records. The schema census is what shaped the code —
+  there is no `broken` field in RustSec at all, and OSV ranges hold more than two
+  events and partial versions — so the assessment order and the `semver`/`toml`
+  comparison came from reading the corpus, not from assuming it. See the W4
+  record.)*
 - **RS-6 Known-error channel from rustc's own JSON** — run
   `cargo build --message-format=json` and keep `code.explanation` plus the
   structured suggestions instead of dumping stderr at the model (fact 21).
@@ -7582,6 +7591,69 @@ done-when is met, and the commit that does it names the IDs.
   1358 tests, 0 failures, 15 ignored over 47 result lines, with
   `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
   -D warnings` clean.
+
+- [x] `RS-5` — 2026-09-27, eighth item of W4: the advisory corpora and the
+  `lookup_advisory` tool, in `xencode-analysis-rs::advisories` (new) with a CLI
+  command (`xencode advisories sync|show|check|status`) and the tool wired into
+  the agent loop. The row's own numbers were re-measured before any of it was
+  built: the shallow clone is **6.3 MB** holding **1 251** `RUSTSEC-*.md` files
+  over **942** crate directories at revision
+  `e2111519ba6d14a5da59a7b2e5c8083ae8a37c01`, and OSV's `crates.io/all.zip` is
+  **3 490 826 bytes** (the row said 3.3 MB) unpacking to **2 856** records. Both
+  together index to **4 857** lines and sit at **20 MB** on disk; a re-sync that
+  pulls rather than clones took **3.417 s** here.
+  **Why two databases, decided by counting rather than by reputation.** Of the
+  2 856 OSV records, **1 196** carry a RustSec number as their own `id` and
+  **872** link one through `aliases` (**56** do both), but **732 have no link to
+  RustSec at all and cover 791 crates the curated database does not name** — that
+  is the second corpus's whole justification, and it is why an OSV record is
+  dropped only when the RustSec record it mirrors is actually present. The
+  overlap pays a second way: **1 584** records carry
+  `database_specific.severity`, and **380 of the 822 RustSec advisories with no
+  CVSS vector** gain a one-word rating from their mirror (`tokio`
+  RUSTSEC-2021-0072 → `GHSA MODERATE`), which transfers onto the curated record
+  that is kept.
+  **What the row did not know about the formats.** The whole RustSec schema was
+  censused from the downloaded files, and two of its shapes are load-bearing:
+  there is **no `broken` field anywhere in the corpus**, so the assessment order
+  had to be derived from what is there (withdrawn → `unaffected` matches →
+  `patched` matches → `informational` notice), and requirement strings are
+  conjunctions (`"< 2.3.0, >= 1.3.0"`) with arrays spanning lines, which killed
+  the hand-rolled TOML subset in favour of `toml` plus `semver`. OSV is worse:
+  **3 813 SEMVER and 199 ECOSYSTEM ranges** with events keyed `introduced` 2 486 /
+  `fixed` 3 497 / `last_affected` 248, **137 ranges holding more than two events**
+  and **8 malformed partial versions** (`"0"`, `"0.62"`, `"0.35"`), which `semver`
+  compares as the corpus means them to. 124 OSV records are withdrawn — counted,
+  and never printed as content.
+  **The trap the row named is honoured**: `cargo audit` is not shelled out to
+  anywhere in this workspace. The files are read directly, so an answer cannot
+  vanish because a third-party binary changed its output format. Git is invoked,
+  for `clone --depth 1` and `pull --ff-only` and nothing else.
+  **Safety wording was treated as a feature, not a footer.** No network call sits
+  inside the agent loop — sync is a separate, explicit command, and the tool has
+  no request in it. A crate with no advisory is answered with the corpus size, its
+  date, its revision, and the line that absence of an advisory is not a statement
+  of safety; a machine that has never synced is answered with `advisory state is
+  unknown, not clean` and the command to run. `check` counts packages and records
+  separately, and its empty result says what the emptiness does not mean.
+  **Measured on this project's own lock file: 419 locked packages in 0.238 s, 4 of
+  them named by 5 records** — `lru 0.12.5` (RUSTSEC-2026-0002, fix 0.16.3;
+  RUSTSEC-2026-0253, fix 0.18.2) and three unmaintained notices with nothing to
+  upgrade into: `paste 1.0.15`, `rustls-pemfile 2.2.0`, `ttf-parser 0.25.1`.
+  19 tests come with it: 14 in the new module, including one `--ignored` that
+  reads the real corpora and asserts every one of the 1 251 files and 2 856
+  records parses (`cargo test -p xencode-analysis-rs -- --ignored
+  syncing_the_real_corpora`); 4 for the tool, one of them driving the executor by
+  name; 1 for the schema. Three guards were watched to fail before they were
+  trusted: the all-clear guard, by rewriting the missing-corpus message to say
+  `your dependencies are safe` and seeing the test refuse it; the executor
+  wiring, by deleting the dispatch arm and getting
+  `error: unknown tool lookup_advisory`; and the pinned-version header, which
+  appears only when the lock file names the crate. Tree at 1 375 tests, 0
+  failures, 17 ignored over 47 result lines, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. The 20 MB corpus
+  was left in `~/.xencode/advisories` on purpose — it is what the offline lookups
+  read.
 
 
 #### W2 — The model/inference substrate — 15 items

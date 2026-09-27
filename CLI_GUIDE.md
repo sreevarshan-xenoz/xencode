@@ -230,6 +230,62 @@ in every approval mode, like the three read tools, and it is not a way to write:
 the only files it opens are documentation, and a fetched document is handed to the
 model as text, never saved.
 
+#### Asking what is known to be wrong with a dependency: `lookup_advisory`
+
+The third thing a model gets wrong about a dependency is its history: asked
+whether a version is affected by something, it answers from memory and names an
+advisory number that was never published. `lookup_advisory` answers from the
+corpus on this machine instead — the RustSec advisory database and Google's OSV
+records for crates.io, both downloaded by `xencode advisories sync` (see below)
+and both read from disk from then on. It is read-only in every approval mode,
+and the tool itself has no network path at all: a turn inside the agent loop
+cannot make a request under the name of a safety check.
+
+Ask for a crate and it lists what the corpus holds; ask with a version, or leave
+the version out in a project whose lock file pins one, and it judges that version.
+Here it is in this project, with no version supplied — `lru` is what
+`rust/Cargo.lock` pins:
+
+```text
+judging version 0.12.5, which this project's Cargo.lock pins
+3 advisory record(s) for lru — corpus synced today, rustsec revision e2111519b
+assessed against version 0.12.5:
+  RUSTSEC-2026-0253 [rustsec] 2026-05-12: Potential use-after-free due to lack of panic safety in `LruCache::pop()` — informational: unsound
+      see: https://github.com/jeromefroe/lru-rs/pull/238
+      this version: AFFECTED here — the corpus offers 0.18.2 as safe
+  RUSTSEC-2026-0002 [rustsec] 2026-01-07: `IterMut` violates Stacked Borrows by invalidating internal pointer — severity GHSA LOW — informational: unsound
+      see: https://github.com/jeromefroe/lru-rs/pull/224
+      this version: AFFECTED here — the corpus offers 0.16.3 as safe
+  RUSTSEC-2021-0130 [rustsec] 2021-12-21: Use after free in lru crate — severity GHSA HIGH
+      see: https://github.com/jeromefroe/lru-rs/issues/120
+      this version: not affected (this version is at or above the 0.7.1 fix)
+      affected function lru::LruCache::iter in < 0.7.1
+      affected function lru::LruCache::iter_mut in < 0.7.1
+```
+
+The header says where the version came from, because "0.12.5 is affected" about
+this project is a different claim from the same words about a version someone
+typed. A record that names the functions it concerns prints them under the
+verdict, up to four of them, and the pinned record is judged on its own facts: an
+advisory that was fixed long ago is said to be fixed here, not feared.
+
+Two answers are deliberately worded so they cannot be read as an all-clear. A
+crate nobody has published an advisory for comes back as `no advisory in the
+local corpus` followed by the size of the corpus, its sync date and the RustSec
+revision it was taken at, and the note that absence of an advisory is not a
+statement that the crate is safe. A machine that has never synced comes back
+with nothing at all:
+
+```text
+error: no advisory corpus at /home/sree/.xencode/advisories — advisory state is unknown, not clean. Run `xencode advisories sync` (needs network once).
+```
+
+Where the two corpora overlap, the RustSec record is the one kept, since it is
+curated; the OSV mirror of it is dropped, except that a rating the curated record
+does not carry is transferred onto it — 380 of the 822 RustSec advisories with no
+CVSS vector gain a one-word GHSA rating that way, which is why both corpora are
+downloaded rather than one.
+
 #### What a failing build answers with
 
 A `cargo build` or `cargo check` the model asks for is run with
@@ -1705,6 +1761,88 @@ inventory). `--base HEAD` reviews uncommitted changes. Unanalyzable files
 xencode review --base main
 xencode review --base HEAD --format json | jq '.files[] | {path, issues: (.issues|length)}'
 ```
+
+### `xencode advisories <action>`
+
+The security advisories that have been published about Rust crates live in two
+databases: the curated [RustSec] advisory repository and Google's OSV service,
+which mirrors it and adds records of its own. `xencode advisories sync` downloads
+both to `<config dir>/advisories` — a shallow clone of the advisory repository,
+plus OSV's `crates.io/all.zip` unpacked into one JSON file per record — and every
+command after that reads only those files. Nothing here shells out to `cargo
+audit`, and the agent's `lookup_advisory` tool makes no request: the network is
+used by this one command, when you choose to run it.
+
+Measured on this machine, re-syncing a corpus that already exists:
+
+```text
+$ time xencode advisories sync
+corpus at /home/sree/.xencode/advisories — 1251 RustSec advisories, 2856 OSV records, 4857 index lines
+RustSec revision e2111519ba6d14a5da59a7b2e5c8083ae8a37c01 (pulled); OSV download 3490826 bytes
+lookups are offline from here; run `xencode advisories check` to read Cargo.lock
+
+real	0m3.417s
+$ du -sh /home/sree/.xencode/advisories
+20M	/home/sree/.xencode/advisories
+```
+
+The two corpora are not redundant: 732 of the OSV records have no link to a
+RustSec number at all and cover 791 crates the curated database does not name,
+and the mirrors that do overlap carry a one-word severity the curated record has
+no room for. Both are kept in one directory with a tab-separated index
+(`package`, `corpus`, file), so a lookup for one crate name reads the index and
+then the handful of files it points at.
+
+`xencode advisories check [--path DIR]` judges every package in a lock file:
+
+```text
+$ xencode advisories check --path rust
+/home/sree/Projects/xencode/rust/Cargo.lock — 419 locked packages; 4 of them are named by 5 advisory record(s):
+  lru 0.12.5
+    RUSTSEC-2026-0002 [rustsec] 2026-01-07 — affected, 0.16.3 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/224
+    RUSTSEC-2026-0253 [rustsec] 2026-05-12 — affected, 0.18.2 is offered as safe
+      https://github.com/jeromefroe/lru-rs/pull/238
+  paste 1.0.15
+    RUSTSEC-2024-0436 [rustsec] 2024-10-07 — informational (unmaintained)
+      https://github.com/dtolnay/paste
+  rustls-pemfile 2.2.0
+    RUSTSEC-2025-0134 [rustsec] 2025-11-28 — informational (unmaintained)
+      https://github.com/rustls/pemfile/issues/61
+  ttf-parser 0.25.1
+    RUSTSEC-2026-0192 [rustsec] 2026-06-28 — informational (unmaintained)
+      https://github.com/harfbuzz/ttf-parser/issues/217
+```
+
+That took 0.238 s. Two things in it are deliberate: the header counts packages
+and records separately, because one crate can be named by several advisories, and
+`informational` rows are not vulnerabilities — an unmaintained crate has nothing
+to upgrade to. An empty result says so in the same breath:
+
+```text
+  nothing — but that means no advisory matches these versions, not that the dependencies are safe
+```
+
+The lock file is looked for from `--path` upwards and the search stops at the
+project root (a directory containing `.git`), so in this repository the command
+is `xencode advisories check --path rust` — the workspace root has no `Cargo.lock`
+of its own, and the error says which flag to use rather than going quiet.
+
+`xencode advisories show CRATE [--version V]` answers for one crate, assessed
+against `V` when given (see the `lookup_advisory` section above for the same
+text as the model receives). `xencode advisories status` reports what corpus
+exists here, how big it is, which RustSec revision it was taken at, and how old
+the download is. Every one of them takes `--dir PATH` to read a corpus from
+somewhere other than `<config dir>/advisories`.
+
+```bash
+xencode advisories sync                       # once; needs network
+xencode advisories check --path rust          # offline
+xencode advisories show chrono --version 0.4.19
+xencode advisories status
+```
+
+[RustSec]: https://github.com/RustSec/advisory-db
 
 ## 🎯 Usage Examples
 
