@@ -122,3 +122,107 @@ fn an_unknown_format_is_refused_before_anything_runs() {
     assert!(stderr.contains("possible values"), "{stderr}");
     assert!(stderr.contains("ndjson"), "{stderr}");
 }
+
+/// A config carrying one profile marked for bugfix work. `routing` is the
+/// `model_routing` switch, so the same profile can be run both enabled and not.
+/// The server is still a port nobody holds: what these runs pin is which model
+/// the run says it is about to ask, which is settled before any request.
+fn profiled_config(dir: &Path, routing: bool) -> std::path::PathBuf {
+    let config_dir = dir.join("xencode");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    let port = dead_port();
+    let body = serde_json::json!({
+        "default_model": "test-model:latest",
+        "ollama_url": format!("http://127.0.0.1:{port}"),
+        "llama_cpp_url": format!("http://127.0.0.1:{port}"),
+        "remote_base_url": "",
+        "cache_enabled": false,
+        "memory_enabled": false,
+        "response_timeout": 5,
+        "allow_cloud_models": false,
+        "model_routing": routing,
+        "model_profiles": [{
+            "name": "fixer",
+            "model": "small:latest",
+            "temperature": 0.2,
+            "max_tokens": 512,
+            "for_task": "bugfix",
+        }],
+    });
+    std::fs::write(
+        config_dir.join("config.json"),
+        serde_json::to_vec_pretty(&body).unwrap(),
+    )
+    .unwrap();
+    config_dir
+}
+
+fn ask(config_dir: &Path, prompt: &str, extra: &[&str]) -> Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_xencode"))
+        .arg("query")
+        .arg(prompt)
+        .args(["--no-cache", "--format", "ndjson"])
+        .args(extra)
+        .env("XCODE_CONFIG_DIR", config_dir)
+        .output()
+        .expect("xencode is built by the time these tests run")
+}
+
+const BROKEN: &str = "the parser fails on a trailing comma, fix it";
+const PLAIN: &str = "what is two plus two?";
+
+/// MI-7, end to end: a turn whose prompt says something is broken goes to the
+/// profile marked for that work, and the run says who took it — on stderr, so
+/// the ndjson stream a script parses stays one JSON object per line.
+#[test]
+fn a_bugfix_prompt_is_answered_by_the_profile_marked_for_bugfix_work() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = profiled_config(dir.path(), true);
+    let output = ask(&config, BROKEN, &[]);
+    let lines = events(&output.stdout);
+    assert_eq!(
+        lines[0]["model"], "small:latest",
+        "the bugfix profile should have taken the turn: {lines:#?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("profile: fixer"), "{stderr}");
+    assert!(stderr.contains("fails"), "{stderr}");
+}
+
+#[test]
+fn a_prompt_that_says_nothing_is_broken_keeps_the_configured_model() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = profiled_config(dir.path(), true);
+    let output = ask(&config, PLAIN, &[]);
+    let lines = events(&output.stdout);
+    assert_eq!(lines[0]["model"], "test-model:latest");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("profile:"),
+        "a turn no profile claimed has nothing to report: {stderr}"
+    );
+}
+
+#[test]
+fn a_profile_marked_for_work_stays_put_until_routing_is_turned_on() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = profiled_config(dir.path(), false);
+    let output = ask(&config, BROKEN, &[]);
+    let lines = events(&output.stdout);
+    assert_eq!(
+        lines[0]["model"], "test-model:latest",
+        "a marking that was never enabled must not answer a turn"
+    );
+}
+
+/// `--model` is an answer, not a question, so a rule does not overrule it.
+#[test]
+fn a_model_named_on_the_command_line_outranks_a_profile_marked_for_the_work() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = profiled_config(dir.path(), true);
+    let output = ask(&config, BROKEN, &["--model", "other:latest"]);
+    let lines = events(&output.stdout);
+    assert_eq!(lines[0]["model"], "other:latest");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("profile:"), "{stderr}");
+}

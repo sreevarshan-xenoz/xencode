@@ -1041,6 +1041,11 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.
                 "session_recording" => config.session_recording = parse_bool(&value)?,
+                // Let a saved profile take a turn on its own when the prompt reads
+                // as the kind of work it is marked for. Off until it is asked for,
+                // because a model the user did not choose answering a query is a
+                // surprise a script cannot see in its own output.
+                "model_routing" => config.model_routing = parse_bool(&value)?,
                 "mcp_timeout" => {
                     let seconds: u64 = value
                         .parse()
@@ -2400,6 +2405,7 @@ async fn run_query_once(
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
 
     // If no model override is provided, verify default model against Ollama's installed models
+    let named_a_model = model_override.is_some();
     let model = match model_override {
         Some(m) => m,
         None => {
@@ -2427,6 +2433,31 @@ async fn run_query_once(
             }
         }
     };
+
+    // A saved profile marked for the kind of work this prompt reads as takes the
+    // turn (MI-7) — unless `--model` named one, which is an answer rather than a
+    // question, and a rule does not overrule it. The sampling rides with the
+    // profile only where a flag left it unset, for the same reason. Said on stderr
+    // before anything about the request, so `-f ndjson` output stays parsable and a
+    // script's `start` line still names the model that will actually answer.
+    let mut model = model;
+    let mut temperature = temperature;
+    let mut max_tokens = max_tokens;
+    if !named_a_model {
+        let choice = xencode_tui_rs::task_profiles::choose_profile(&config, &model, &prompt);
+        if let Some(profile) = choice.profile() {
+            model = profile.model.clone();
+            if temperature.is_none() {
+                temperature = profile.temperature;
+            }
+            if max_tokens.is_none() {
+                max_tokens = profile.max_tokens;
+            }
+        }
+        if let Some(note) = choice.note() {
+            eprintln!("profile: {note}");
+        }
+    }
 
     let mut cache = if config.cache_enabled && !no_cache {
         ResponseCache::with_persistence(config.max_cache_size, config.response_timeout as f64).ok()

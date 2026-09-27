@@ -100,19 +100,23 @@ fn populated(focus: FocusArea) -> App<'static> {
     app.lang_translate_output = "vāṅkai maṇippu".into();
     app.lang_editing = Some(xencode_tui_rs::focus::LangField::Target);
     // J-05: profiles are config's rows, so the sweep covers a tuned profile,
-    // an unset one (drawn as "unset", never as 0) and a status line.
+    // an unset one (drawn as "unset", never as 0) and a status line. MI-7 adds
+    // the kind of turn a profile may take on its own, which is the difference
+    // between the two rows here.
     app.model_profiles = vec![
         xencode_config_rs::ModelProfile {
             name: "tight".into(),
             model: "ollama:qwen2.5:7b".into(),
             temperature: Some(0.2),
             max_tokens: Some(2048),
+            for_task: Some("bugfix".into()),
         },
         xencode_config_rs::ModelProfile {
             name: "server default".into(),
             model: "llamacpp:gemma-3n-e4b".into(),
             temperature: None,
             max_tokens: None,
+            for_task: None,
         },
     ];
     app.models_selected = 0;
@@ -463,6 +467,10 @@ fn custom_models_panel_shows_config_profiles() {
     assert!(text.contains("temperature 0.2"), "the status line: {text}");
     assert!(text.contains("0.20"), "{text}");
     assert!(text.contains("2048"), "{text}");
+    assert!(
+        text.contains("for turn bugfix"),
+        "MI-7: which turn may take this profile on its own: {text}"
+    );
     for canned in [
         "Code Assistant",
         "Creative Writer",
@@ -481,6 +489,18 @@ fn custom_models_panel_shows_config_profiles() {
     let text = render_text(&mut app, 160, 44);
     assert!(text.contains("unset"), "{text}");
     assert!(text.contains("llamacpp:gemma-3n-e4b"), "{text}");
+    assert!(
+        text.contains("by hand only"),
+        "a profile with no turn marked for it says so rather than looking broken: {text}"
+    );
+    assert!(
+        text.contains("model_routing is off"),
+        "a marking that cannot fire yet must say so: {text}"
+    );
+    assert!(
+        text.contains("xencode config set model_routing true"),
+        "and say where to turn it on, since no key in this panel does: {text}"
+    );
 }
 
 /// The Learning panel's lesson is a file and its own text; the quiz is the

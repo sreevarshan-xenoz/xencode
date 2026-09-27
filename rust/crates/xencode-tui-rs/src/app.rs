@@ -252,6 +252,10 @@ pub(crate) struct AgentRun {
     /// left alone, which puts the field back where it was before the setting
     /// existed.
     pub(crate) ollama_setting_problem: Option<String>,
+    /// Which saved profile took this turn, or why the one that matched was not
+    /// used (MI-7). `None` when no profile claimed it, which is every turn before
+    /// `model_routing` is turned on.
+    pub(crate) profile_note: Option<String>,
     /// Where this run's recording goes, when the user asked for one (QA-1).
     /// Unlike the trace above, a recording keeps the prompts and the tool
     /// output whole — that is what makes it replayable — so it only exists
@@ -2678,11 +2682,31 @@ impl<'a> App<'a> {
         prompt: &str,
     ) -> AgentRun {
         let root = xencode_context_rs::default_root();
-        let (ollama_asks, ollama_setting_problem) =
-            self.ollama_request_for_turn(&self.config.default_model);
+        // A saved profile marked for the kind of work this prompt reads as takes
+        // the turn, when the user turned that on (MI-7). It is decided here, at
+        // the one place a turn's model is chosen, because everything below belongs
+        // to the model that will actually answer: the window asked of Ollama, the
+        // sampling sent to llama.cpp, and the identity the trace is kept under.
+        let choice =
+            crate::task_profiles::choose_profile(&self.config, &self.config.default_model, prompt);
+        let profile = choice.profile().cloned();
+        let model = profile
+            .as_ref()
+            .map(|profile| profile.model.clone())
+            .unwrap_or_else(|| self.config.default_model.clone());
+        let trace_identity = self.metrics_identity(&model);
+        let temperature = profile
+            .as_ref()
+            .and_then(|profile| profile.temperature)
+            .or(self.config.llama_cpp_temperature);
+        let max_tokens = profile
+            .as_ref()
+            .and_then(|profile| profile.max_tokens)
+            .or(self.config.llama_cpp_max_tokens);
+        let (ollama_asks, ollama_setting_problem) = self.ollama_request_for_turn(&model);
         AgentRun {
             sink,
-            model: self.config.default_model.clone(),
+            model,
             context_messages,
             approval: self.approval_ctx(),
             task_runtime: self.task_runtime.clone(),
@@ -2692,7 +2716,7 @@ impl<'a> App<'a> {
             fallback_models: self.config.agent_fallback_models.clone(),
             egress: self.egress_policy(),
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
-            trace_identity: self.metrics_identity(&self.config.default_model),
+            trace_identity,
             prompt_digest: Some(xencode_context_rs::prompt_digest(prompt)),
             is_decision: xencode_context_rs::has_decision_marker(prompt),
             retrieved_files: Vec::new(),
@@ -2706,17 +2730,18 @@ impl<'a> App<'a> {
             remote_base_url: self.config.remote_base_url.clone(),
             remote_api_key: self.config.api_keys.remote_api_key.clone(),
             llama_opts: LlamaCppOptions {
-                temperature: self.config.llama_cpp_temperature,
+                temperature,
                 top_k: self.config.llama_cpp_top_k,
                 min_p: self.config.llama_cpp_min_p,
                 seed: self.config.llama_cpp_seed,
-                max_tokens: self.config.llama_cpp_max_tokens,
+                max_tokens,
                 grammar: None,
                 json_schema: None,
                 mirostat: None,
             },
             ollama_asks,
             ollama_setting_problem,
+            profile_note: choice.note(),
         }
     }
 
@@ -5261,6 +5286,9 @@ impl<'a> App<'a> {
             model: self.config.default_model.clone(),
             temperature: self.config.llama_cpp_temperature,
             max_tokens: self.config.llama_cpp_max_tokens,
+            // A new profile applies by hand until someone says what kind of turn
+            // it is for; `nothing claims a turn on its own` is the safe default.
+            for_task: None,
         });
         self.models_selected = self.model_profiles.len() - 1;
         self.models_dirty = true;
@@ -5307,6 +5335,38 @@ impl<'a> App<'a> {
         self.model_profiles[idx].max_tokens = Some(MODEL_TOKEN_STEPS[at]);
         self.models_dirty = true;
         self.models_status.clear();
+    }
+
+    /// `f`: say what kind of turn this profile is for. The three states step in a
+    /// fixed order — nothing, then bugfix work, then everything that is not — and
+    /// the words are exactly the ones the reading can produce, so a profile cannot
+    /// be marked for a kind of turn no turn is ever read as.
+    pub fn cycle_model_profile_task(&mut self) {
+        let Some(idx) = self.selected_profile_index() else {
+            return;
+        };
+        let next = match self.model_profiles[idx].for_task.as_deref() {
+            None => Some("bugfix"),
+            Some("bugfix") => Some("general"),
+            _ => None,
+        };
+        self.model_profiles[idx].for_task = next.map(str::to_string);
+        self.models_dirty = true;
+        self.models_status = match next {
+            None => format!(
+                "{} now applies by hand only.",
+                self.model_profiles[idx].name
+            ),
+            Some("bugfix") => format!(
+                "{} now takes a turn whose prompt says something is broken.",
+                self.model_profiles[idx].name
+            ),
+            Some(_) => format!(
+                "{} now takes every turn that is not read as bugfix work — a wide net, \
+                 and a second default model in all but name.",
+                self.model_profiles[idx].name
+            ),
+        };
     }
 
     /// `Enter`: this profile's model and sampling become the session's, so the
@@ -7146,6 +7206,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         llama_opts,
         ollama_asks,
         ollama_setting_problem,
+        profile_note,
         egress,
         trace_dir,
         trace_identity,
@@ -7181,6 +7242,14 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         .with_remote(&remote_base_url, remote_api_key)
         .with_egress_policy(egress)
         .with_traffic(recorder.clone());
+    // Which profile took this turn, and the words that gave it the turn (MI-7).
+    // Said before anything about the request, because the model the request goes
+    // to is decided by the answer.
+    if sink == LoopSink::Chat {
+        if let Some(note) = profile_note {
+            let _ = tx.send(format!("[TURNPROFILE]{note}"));
+        }
+    }
     // Ask Ollama what this model is before asking it for an answer (MI-2), so the
     // window in the request is one the model's own weights hold and a round of
     // thinking is only requested from a model that said it can. The notes are for
@@ -7853,6 +7922,15 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 if let Ok(tokens) = body.trim().parse::<u32>() {
                     app.ollama_window = Some(tokens);
                 }
+            } else if let Some(body) = token.strip_prefix("[TURNPROFILE]") {
+                // A saved profile took this turn, or a matching one was declined
+                // and this says why (MI-7). A turn that ran on a model the user did
+                // not pick has to be visible, not inferred from an answer that
+                // seemed unlike the usual one.
+                app.messages.push(UiMessage {
+                    role: "system".to_string(),
+                    content: format!("ℹ️ {body}"),
+                });
             } else if let Some(body) = token.strip_prefix("[OLLAMA]") {
                 // What a request to Ollama asked for and did not get (MI-2): a
                 // window the model's own weights cannot hold, a round of thinking
@@ -9909,6 +9987,55 @@ mod tests {
         // Which files went into the prompt is not known until a context is
         // assembled, so an armed run carries none.
         assert!(run.retrieved_files.is_empty());
+    }
+
+    /// A profile marked for a kind of work takes that turn end to end (MI-7):
+    /// the model the request goes to, the sampling that rides with it, and the
+    /// identity the trace row is kept under all follow the profile, not the
+    /// config's default. Nothing on screen says so while the turn runs, so the
+    /// run carries the line that will be said.
+    #[test]
+    fn a_profile_marked_for_a_kind_of_turn_takes_that_turn() {
+        let mut app = App::for_tests();
+        app.config.default_model = "ollama:coder-large:latest".to_string();
+        app.config.model_profiles = vec![xencode_config_rs::ModelProfile {
+            name: "fixer".to_string(),
+            model: "ollama:qwen2.5:7b".to_string(),
+            temperature: Some(0.2),
+            max_tokens: Some(512),
+            for_task: Some("bugfix".to_string()),
+        }];
+        let prompt = "the parser fails on a trailing comma";
+
+        let off = app.agent_run(LoopSink::Chat, Vec::new(), prompt);
+        assert_eq!(
+            off.model, "ollama:coder-large:latest",
+            "routing is off until the config says otherwise"
+        );
+        assert_eq!(off.llama_opts.temperature, None);
+        assert!(off.profile_note.is_none());
+
+        app.config.model_routing = true;
+        let on = app.agent_run(LoopSink::Chat, Vec::new(), prompt);
+        assert_eq!(on.model, "ollama:qwen2.5:7b");
+        assert_eq!(on.llama_opts.temperature, Some(0.2));
+        assert_eq!(on.llama_opts.max_tokens, Some(512));
+        assert_eq!(
+            on.trace_identity.model.as_deref(),
+            Some("ollama:qwen2.5:7b"),
+            "the trace is kept under the model that answered, not the one configured"
+        );
+        let note = on.profile_note.expect("a taken turn says who took it");
+        assert!(
+            note.contains("fixer") && note.contains("qwen2.5:7b"),
+            "{note}"
+        );
+
+        // A turn that says nothing about broken code belongs to no bugfix profile,
+        // even with routing on.
+        let plain = app.agent_run(LoopSink::Chat, Vec::new(), "explain this file");
+        assert_eq!(plain.model, "ollama:coder-large:latest");
+        assert!(plain.profile_note.is_none());
     }
 
     #[test]
