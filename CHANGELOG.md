@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a saved model profile can take a turn of the kind it was marked for
+
+A profile has always been a model plus two sampling numbers, and it has always
+applied only when someone remembered to pick it. A profile can now carry `for_task`
+— `bugfix` for the turns that say something is broken, `general` for the rest — and a
+new setting, `model_routing`, decides whether anything acts on that. It is off by
+default, so nothing moves a model until it is switched on.
+
+The reading is the same whole-word rule the context retrieval already used, not a
+classifier, and it has two values because those are the two that were measured here.
+A mark naming a reading this version does not have is kept as written and matches
+nothing, so a newer config file still opens.
+
+Two things are refused rather than done quietly. A profile that would move a
+llama.cpp model is not applied: a running `llama-server` holds one model at a time,
+and the chat prints the reason instead of the swap — measured here, that kind of
+move costs between 3.8 and 8.0 seconds against 1.2 to 1.8 for a turn that reuses what
+is already loaded. And sampling numbers on a route that has nowhere to put them are
+named as no-ops, so a profile moved onto Ollama says the model's own defaults
+answered rather than claiming a temperature the request never carried.
+
+The Custom Models panel gained `f` to cycle the mark, and shows whether the setting
+is on. `xencode query` follows the same rule and prints the reason on standard error,
+so machine-readable output is unchanged; `-m` naming a model wins over the rule and
+says nothing about it.
+
 ### Fixed — a request to Ollama now says what it needs, instead of leaving the server to guess
 
 Four things were never sent to an Ollama server: the shape a JSON answer had to be

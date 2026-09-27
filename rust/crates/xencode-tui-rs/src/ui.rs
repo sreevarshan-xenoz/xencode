@@ -3858,6 +3858,11 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )));
         detail_lines.push(Line::from(format!("  model    {}", profile.model)));
+        // Which kind of turn may take this profile without being asked (MI-7).
+        detail_lines.push(Line::from(match profile.for_task.as_deref() {
+            None => "  for turn by hand only — f to change".to_string(),
+            Some(word) => format!("  for turn {word} — f to change"),
+        }));
         detail_lines.push(Line::from(""));
 
         let temp_line = match profile.temperature {
@@ -3888,9 +3893,28 @@ fn draw_custom_models(f: &mut Frame, app: &App, area: Rect) {
         detail_lines.push(Line::from("  session uses now, then s to keep it."));
     }
 
+    if !app.config.model_routing {
+        // A profile marked for a kind of turn does nothing at all while the
+        // setting is off, and a panel that let that pass in silence would look
+        // like a marking that had been ignored rather than one not yet enabled.
+        detail_lines.push(Line::from(""));
+        detail_lines.push(Line::from(Span::styled(
+            "  model_routing is off: no profile takes a turn",
+            Style::default().fg(app.theme.warning),
+        )));
+        detail_lines.push(Line::from(Span::styled(
+            "  by itself. Turn it on with",
+            Style::default().fg(app.theme.warning),
+        )));
+        detail_lines.push(Line::from(Span::styled(
+            "  xencode config set model_routing true",
+            Style::default().fg(app.theme.warning),
+        )));
+    }
+
     detail_lines.push(Line::from(""));
     for hint in [
-        "  -/+ temp · ←/→ tokens · n new profile",
+        "  -/+ temp · ←/→ tokens · n new · f turn",
         "  Enter apply · s save · t test",
         "  A llama.cpp server gets both numbers;",
         "  Ollama and cloud use their own defaults.",

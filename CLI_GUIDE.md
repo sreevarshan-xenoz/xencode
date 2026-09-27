@@ -304,6 +304,60 @@ shape above is what it is:
 `xencode eval`'s ranking judge asks on the same terms, since it dials the same
 server as the run it is judging.
 
+#### Turn routing
+
+A `model_profiles` entry can carry `for_task`, and `model_routing` decides whether
+anything acts on it. Off — the default, and the value a config written before the
+key existed gets — every profile applies only by hand in the Custom Models panel.
+On, a turn is read for what it says about the code and the first profile marked for
+that reading runs it:
+
+```bash
+xencode config set model_routing true
+xencode config set model_routing false   # back to profiles applying by hand only
+```
+
+The reading has two values, because those are the two this project measured:
+`bugfix` for a prompt carrying words for broken code (`fix`, `fails`, `crash`,
+`broken` and similar, matched on whole words) and `general` for everything else,
+which is genuinely wider than it sounds — a rename, a question and an edit as large
+as any all read as `general`. That is what makes it the right mark for a cheaper
+reading model and what makes it a second default. A mark naming a reading this
+version does not have (`refactor`, `feature`, a misspelling) is kept as written and
+matches nothing, so the file still loads and the profile stays applicable by hand.
+
+Two things are refused rather than done quietly:
+
+- **A llama.cpp swap.** A self-started `llama-server` holds one model at a time, so a
+  profile that names a different one is not applied; the chat prints
+  `profile <name> was not used: … a running llama.cpp server holds one model at a
+  time` and the turn goes to the model already chosen. Moving from one llama.cpp
+  model to another is a panel action, not something a word in a prompt should do to
+  the VRAM budget.
+- **Sampling numbers on a route that has nowhere for them.** `temperature` and
+  `max_tokens` reach only llama.cpp, so a profile moving an Ollama turn says so:
+  `which sets temperature 0.2 and 64 tokens at most — numbers that route has no
+  place for, so the model's own defaults answer`.
+
+`xencode query` follows the same rule, and `-m/--model` outranks it — naming a model
+is an instruction, not a suggestion, so a run with `-m` prints nothing about
+profiles. Otherwise the chosen model appears in the `start` event like any other
+model, and the reason rides on standard error, out of the parseable stream:
+
+```
+profile: reader took this turn on q25local:latest, which sets temperature 0.2 and 64 tokens at most — numbers that route has no place for, so the model's own defaults answer — the prompt says fix, fails
+```
+
+That line came off this machine (Ollama 0.34.4, MX250 with 1,045 MiB of its 2,048
+MiB already used) with the default model `q3local:latest` and a profile named
+`reader` on `q25local:latest`, asked a prompt that says the tests fail. What the
+swap costs here, measured with `num_predict: 1` so the answer itself was
+instant: loading a model that was not resident took 1.7 s, loading a second model
+while the first stayed resident took 3.8 s and `/api/ps` then listed only one of
+them, and bringing the first back afterwards took 8.0 s — against 1.2–1.8 s for the
+same turn once the model was loaded. That is the reason a rule is off by default and
+the reason a llama.cpp move is refused.
+
 #### Which hardware profile the budget spends against
 
 The window says how much room there is. A second setting says how much of it a run
@@ -1093,7 +1147,8 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
-| `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048 }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
+| `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
+| `model_routing` | bool | Whether a profile's `for_task` mark is acted on by itself. Off by default, so a marked profile still only applies by hand. On, the first profile whose mark matches the turn runs that turn on its model: `bugfix` for a prompt that says something is broken (`fix`, `fails`, `crash` and similar words), `general` for every other prompt, and a mark naming a reading this version does not have (or no mark at all) matches nothing. A profile that would move a llama.cpp model is refused instead — a running `llama-server` holds one model at a time — and the chat prints why. See [Turn routing](#turn-routing) |
 | `mcp_servers` | object | MCP stdio servers to offer as tools: `"name" → { "command": "...", "args": [...], "env": {...} }` (credentials go in `env`, never `args`); nothing is started until you run `/mcp` |
 | `agent_hooks` | object | shell hooks around **approved** agent tool calls: `"before"` and `"after"` maps from an exact tool name (or `"*"` for every tool) to a command run via `sh -c` in the workspace root. A failing `before` hook vetoes the call (nothing runs, no rewind point, output shown as `error: pre-hook vetoed this call`); a passing one has its output prepended to the result. The `after` hook always runs and its output is appended. Hook output is capped like `run_command` (stderr merged, tail kept) |
 

@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1227 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1242 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2240,6 +2240,16 @@ requests we already know how to make and don't.**
   exceed consumer VRAM, so routing means unload/reload unless `keep_alive`
   (MI-2) is budgeted. This is the honest version of the "ensemble" wording the
   README already disclaims.
+  *(Done 2026-09-27 — see W2 progress. It is a mapping over the two task shapes the
+  prompt reading can actually tell apart, which is `bugfix` and everything the rule
+  calls `general`; the summarise-versus-edit split this item names needs a reading
+  that has never been measured here, so nothing was invented to stand in for it.
+  A turn may not move a running llama.cpp server from one model to another, and says
+  so when a profile asks it to. The unload/reload the trap predicted was measured on
+  this machine rather than assumed: 3.8–8.0 seconds to bring a second local model
+  back onto a 2,048 MiB GPU, against 1.2–1.8 seconds for the same turn once it is
+  resident — which is why `model_routing` is off until it is turned on, and why
+  `ollama_keep_alive` is the setting to budget with first.)*
 
 **Rejected here:** grammar-patched sampling (not in llama.cpp master — research
 forks); LoRA hot-swap (the endpoint exists, `/lora-adapters`, but good
@@ -6793,6 +6803,72 @@ done-when is met, and the commit that does it names the IDs.
   behaviour back and watching them fail — the window-reading test prints `left: None,
   right: Some(32768)` when the key is looked for under a wrong name, and the clamp
   test fails 1 of 146 when the comparison is removed.
+
+- [x] `MI-7` — 2026-09-27, thirteenth item of W2. A saved profile can be marked for
+  a kind of turn, and one setting lets that profile answer a turn of that kind
+  without anyone pressing a key.
+  **What shipped.** `model_profiles[]` gained `for_task`, and the config gained
+  `model_routing`, off by default and settable with
+  `xencode config set model_routing true`. The Custom Models panel shows the marking
+  on its own line, cycles it with `f`, and says in warning colour that nothing takes
+  a turn while the setting is off, with the command that turns it on — because no key
+  in that panel does. A chat turn and a one-off `xencode query` both go through the
+  same rule, which lives in `task_profiles.rs` in the TUI crate: the config crate
+  cannot see the prompt reading and the CLI already depends on the TUI, so that is
+  the one place both halves are in reach. The turn says who took it — in the
+  transcript for a chat turn, on standard error as a `profile:` line for `query`, so a
+  script's ndjson stays one JSON object per line and its `start` event names the model
+  that will actually answer.
+  **Where it departs from the item's wording, and why.** The item asks for a mapping
+  from *summarise/classify* to a small model and *edit* to a big one. That needs a
+  reading that can tell those two apart, and no such reading has been measured here.
+  What has been measured is the rule `AC-3` shipped: across twelve real prompts it
+  could tell a prompt that says something is broken from one that does not, and could
+  not tell a rename from a rewrite or either from a question. So a profile can be
+  marked for exactly those two shapes — `bugfix`, and the `general` that the rule
+  falls back to — and a profile carrying any other word is kept, matches nothing, and
+  stays applicable by hand. Marking a profile `general` hands it every turn that is
+  not read as a bugfix, which makes it a second default model in all but name; the
+  field's own documentation says that, the panel's message says it when `f` lands
+  there, and the test for it exists to keep it from being quietly widened.
+  **The trap the item names, measured on this machine.** Two local models are
+  installed here, 0.49 GB and 1.11 GB, on a 2,048 MiB MX250. Holding the answer to one
+  token, loading the second model while the first was resident took 3.8 s, and
+  `/api/ps` then reported only one model loaded — the first had been dropped, not
+  parked. Asking for that first model again took 8.0 s. The same turn against an
+  already-resident model took 1.2–1.8 s. At the 8,192-token window this program asks
+  for, `/api/ps` did list both models at once, but the second held 48 MB of the GPU.
+  So a rule that moves a turn between two Ollama models costs seconds per move unless
+  `ollama_keep_alive` budgets for it, which is the setting `MI-2` shipped for exactly
+  this reason, and it is why this whole mechanism is off until it is asked for.
+  A running llama.cpp server is a harder case than a slow one — it answers for one
+  model at a time and changing which is a control call, not a request — so a turn that
+  matches a llama.cpp profile for a model other than the one already chosen is
+  **refused and reported**, and the line says to apply it by hand in the panel if the
+  swap was meant. A profile naming the model already in use is not a swap and still
+  takes the turn for its sampling.
+  **One claim this does not make.** `temperature` and a token cap are llama.cpp's
+  request fields; an Ollama model has nowhere to put either. A profile carrying them
+  and pointing at Ollama therefore changes nothing about sampling, and the note says
+  so in those words instead of announcing numbers the request never carried — seen
+  doing that on a live turn, in the `profile:` line quoted in the test run below.
+  **What was not seen happening.** The panel itself — the `f` key, the for-turn line,
+  the off-setting warning — was verified by rendering the real widget code at 160×44
+  and asserting the strings, not by a person at a terminal. The routing rule, the
+  `--model` precedence, the `profile:` line and the model named in the stream were all
+  run for real against Ollama 0.34.4 on this machine.
+  Verified by 1242 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Fifteen tests are new: nine for the rule (a marking inert until
+  the setting is on, a bugfix turn taken and a plain one not, `general` claiming what
+  is left, the first profile written for a shape winning it, a word with no reading
+  matching nothing, sampling-only profiles keeping the model, a number the route
+  cannot carry being named as such, a llama.cpp swap refused from both directions, an
+  Ollama move allowed), one that a chat turn actually runs on the profile's model and
+  carries the line, one that `f` steps the marking and writes nothing to disk, and four
+  running the real binary end to end on an isolated config — the bugfix prompt
+  answered by the profile's model, a plain prompt left alone, the marking inert with
+  the setting off, and `--model` outranking a rule.
 
 
 #### W2 — The model/inference substrate — 15 items

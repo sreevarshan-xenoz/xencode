@@ -1269,10 +1269,11 @@ fn key_learning(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
 
 /// Custom models are a real form now (J-05): the list is `model_profiles` from
 /// config, `n` starts one from the session's current settings, `←`/`→` and
-/// `-`/`+` move its parameters in memory, `Enter` applies them to the next
-/// turn, `s` is the only key that writes config.json, and `t` asks the provider
-/// itself. Every character is handled here, so no letter — `n` and `s` above
-/// all — can fall through to a global chord and open another panel (E2-06).
+/// `-`/`+` move its parameters in memory, `f` says what kind of turn may take it
+/// without being asked (MI-7), `Enter` applies them to the next turn, `s` is the
+/// only key that writes config.json, and `t` asks the provider itself. Every
+/// character is handled here, so no letter — `n` and `s` above all — can fall
+/// through to a global chord and open another panel (E2-06).
 fn key_custom_models(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
     let count = app.model_profiles.len();
     match key.code {
@@ -1288,6 +1289,7 @@ fn key_custom_models(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         }
         KeyCode::Enter => app.apply_model_profile(tx.clone()),
         KeyCode::Char('n') => app.add_model_profile(),
+        KeyCode::Char('f') => app.cycle_model_profile_task(),
         KeyCode::Char('-') => app.adjust_model_temperature(-0.1),
         KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_model_temperature(0.1),
         KeyCode::Left => app.step_model_max_tokens(false),
@@ -1761,6 +1763,7 @@ mod tests {
             model: "ollama:qwen2.5:7b".to_string(),
             temperature: None,
             max_tokens: None,
+            for_task: None,
         }];
         app.models_dirty = true;
 
@@ -1791,6 +1794,50 @@ mod tests {
             "apply ≠ save"
         );
         assert_eq!(app.config.model_profiles[0].max_tokens, None);
+    }
+
+    /// MI-7: `f` says which kind of turn this profile may take on its own. It
+    /// steps through only the words the prompt reading can produce, so a profile
+    /// cannot end up marked for a kind of turn no turn is ever read as, and the
+    /// key is handled in this panel rather than falling through to a global
+    /// chord (E2-06).
+    #[test]
+    fn custom_models_f_marks_the_profile_for_a_kind_of_turn() {
+        use xencode_config_rs::ModelProfile;
+        let mut app = app_with(FocusArea::CustomModels);
+        app.model_profiles = vec![ModelProfile {
+            name: "fixer".to_string(),
+            model: "ollama:qwen2.5:7b".to_string(),
+            temperature: None,
+            max_tokens: None,
+            for_task: None,
+        }];
+        app.models_dirty = false;
+
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(app.focus, FocusArea::CustomModels, "f is not a chord");
+        assert_eq!(app.model_profiles[0].for_task.as_deref(), Some("bugfix"));
+        assert!(app.models_status.contains("fixer"), "{}", app.models_status);
+
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(
+            app.model_profiles[0].for_task.as_deref(),
+            Some("general"),
+            "the second state is the wide one, and its message has to say so"
+        );
+        assert!(app.models_status.contains("wide net"));
+
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(app.model_profiles[0].for_task, None);
+        assert!(app.models_status.contains("by hand only"));
+        assert!(app.models_dirty, "marking a profile is an unsaved edit");
+        assert!(
+            app.config
+                .model_profiles
+                .iter()
+                .all(|saved| saved.name != "fixer"),
+            "f edits memory; only s writes config"
+        );
     }
 
     /// An empty list is the real state of a fresh config: nothing to apply, and

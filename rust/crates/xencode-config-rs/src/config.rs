@@ -304,6 +304,18 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub model_profiles: Vec<ModelProfile>,
 
+    /// Let a profile take a turn on its own, when the prompt reads as the kind of
+    /// work that profile is marked for — see [`ModelProfile::for_task`]. Off by
+    /// default, because with it off the only thing that decides a turn's model is
+    /// the one the user last chose, which is what every configuration written
+    /// before this setting expects.
+    ///
+    /// This is not a classifier: the reading it acts on is the same whole-word
+    /// rule the retrieval uses — `shape_of` in xencode-context-rs — so what can
+    /// take a turn is only what that rule can tell apart.
+    #[serde(default)]
+    pub model_routing: bool,
+
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -327,6 +339,24 @@ pub struct ModelProfile {
     pub temperature: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// The kind of turn this profile is for, as one word: `bugfix` for a prompt
+    /// that says something is broken, `general` for one that says nothing of the
+    /// kind. Left out, the profile only ever applies by hand.
+    ///
+    /// `general` is wider than it sounds, and deliberately said so here: the rule
+    /// notices words for broken code and is silent about everything else, so a
+    /// profile marked `general` claims every turn that is not read as a bugfix —
+    /// a rename, a question, an edit as large as any. That is what makes it
+    /// suitable for a cheaper reading model and what makes it a second default,
+    /// which is why it is not the value a configuration starts with.
+    ///
+    /// A word the reading does not have — `refactor`, `feature`, a misspelling —
+    /// is kept as written and matches nothing, so the profile stays applicable by
+    /// hand. Nothing is refused at load: a config that carries a word a newer
+    /// version understands must still open this one. The Custom Models panel's
+    /// `f` offers only the words that can match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_task: Option<String>,
 }
 
 /// One declared MCP server: a command we spawn and talk JSON-RPC to over its
@@ -475,6 +505,7 @@ impl Default for XencodeConfig {
             agent_hooks: AgentHooks::default(),
             session_recording: false,
             model_profiles: Vec::new(),
+            model_routing: false,
             colab: ColabConfig::default(),
         }
     }
@@ -625,6 +656,9 @@ mod tests {
         // request instead of the launch flags, and for how long it stays loaded.
         assert!(config.ollama_reasoning.is_none());
         assert!(config.ollama_keep_alive.is_none());
+        // No saved profile takes a turn on its own until the user turns that on.
+        assert!(!config.model_routing);
+        assert!(config.model_profiles.is_empty());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
@@ -916,14 +950,17 @@ mod tests {
                     model: "ollama:qwen2.5:7b".to_string(),
                     temperature: Some(0.2),
                     max_tokens: Some(2048),
+                    for_task: Some("bugfix".to_string()),
                 },
                 ModelProfile {
                     name: "server default".to_string(),
                     model: "llamacpp:gemma".to_string(),
                     temperature: None,
                     max_tokens: None,
+                    for_task: None,
                 },
             ],
+            model_routing: true,
             ..XencodeConfig::default()
         };
         config.save_to(&path).unwrap();
@@ -935,7 +972,9 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let second = &json["model_profiles"][1];
         assert!(
-            second.get("temperature").is_none() && second.get("max_tokens").is_none(),
+            second.get("temperature").is_none()
+                && second.get("max_tokens").is_none()
+                && second.get("for_task").is_none(),
             "{second}"
         );
         fs::remove_dir_all(&dir).unwrap();
@@ -949,6 +988,7 @@ mod tests {
         std::fs::write(&path, r#"{"default_model":"qwen2.5:7b"}"#).unwrap();
         let config = XencodeConfig::load_from(&path).unwrap();
         assert!(config.model_profiles.is_empty());
+        assert!(!config.model_routing);
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -988,6 +1028,9 @@ mod tests {
         // would not — it leaves the model's own default in charge.
         assert!(config.ollama_reasoning.is_none());
         assert!(config.ollama_keep_alive.is_none());
+        // No saved profile takes a turn on its own until the user turns that on.
+        assert!(!config.model_routing);
+        assert!(config.model_profiles.is_empty());
 
         fs::remove_dir_all(&dir).unwrap();
     }
