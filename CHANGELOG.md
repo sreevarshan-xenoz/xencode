@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — model bytes are checked against a checksum, and this machine is told which model it can hold
+
+A downloaded model used to be believed because of its size. Two things replace
+that, and both say what they do not know.
+
+**A file is hashed, against a number that came from outside the transfer.**
+`llama_cpp_model_sha256` takes a digest — 64 hexadecimal characters, an optional
+`sha256-` prefix, any case, empty to turn the check off — and the bytes are hashed
+as they arrive. Bytes from a stopped attempt are inside that hash too, which is
+the part a resumed download normally gets wrong: one fetch interrupted at
+12.7 MiB and finished is recorded as matching the published digest for a
+491,400,032-byte file. A file that disagrees is thrown away rather than moved into
+place, and no server is started on it:
+
+```text
+error: refusing to start: /tmp/lf7e/model.gguf hashes to 74a4da8c, not the 00000000 this configuration expects. The file is not the one that was pinned — delete it and start again to fetch it fresh, or set llama_cpp_model_sha256 to the checksum you now want.
+```
+
+The same check runs wherever the weights are about to be put to work — the
+command-line launch, the TUI's auto-start, and the model panel's own load of a
+file this machine holds — and the panel now reports the conclusion beside the path
+as `verified` or `unsigned`. `unsigned` is the honest answer, not a warning to be
+cleared: a file nobody pinned has proved nothing beyond being readable. A model
+chosen by alias is left alone too, because there are no bytes here to look at and
+calling a name `verified` would be a lie.
+
+**What that does not prove is stated rather than implied.** Matching a digest
+proves the transfer was faithful to a number; it does not prove who wrote the
+bytes, and a checksum taken from the same server that is serving the file is
+circular. So the pin comes from a dated table instead, and the
+`<path>.provenance.json` note left beside a file xencode fetched — size, checksum,
+repository revision, whether an outside digest was matched — is described as
+xencode's own record of what it saw, not as a signature. Even the revision had to
+be chased: Hugging Face names it in the `x-repo-commit` header of its own
+redirect, and the delivery network that answers for the bytes knows nothing about
+repositories, so the redirect is walked deliberately to catch it.
+
+**The check costs what a hash costs, which is worth saying out loud.** Measured
+here on 397 MiB: 0.35 s in a normal build against `sha256sum`'s 0.343 s on the
+same file, 6.9 s in an unoptimised one, and nothing at all when no checksum is
+configured. Against a connection that took this laptop roughly four minutes for
+that file, it is not the slow part.
+
+**`xencode models advice` answers "which model can this machine serve" from data
+rather than from a list of names compiled in.** The sizes, quants, revisions and
+checksums live in `model_advice.json`, matched against the biggest single memory
+pool on the machine — the same reading the launch preflight uses, so the two
+cannot disagree about whether a model fits — and the answer carries the
+`/resolve/<revision>/` address and the digest to fetch it by. The table ages in
+public: the command prints the date it was checked, how many days ago that was,
+and calls anything over six months old out of date. Writing
+`~/.xencode/model_advice.json` replaces it, and says which file answered; a table
+that does not parse is refused out loud and the shipped one answers instead. The
+same file decides which installed Ollama tag `xencode models default` reaches for.
+
+The entries were read from the repository API on 2026-09-27 and re-checked by hand
+against it while this was written — every size and digest matched, which is the
+point of the test over the shipped table that now insists each entry carries a
+40-character revision and a 64-character checksum. What replaces the old list is
+not a maintenance plan: nothing refreshes these numbers, and a table six months
+out of date is a table that names models someone else has since beaten.
+
+
 ### Added — a local model file that is missing is now fetched, resumed, and priced against the disk
 Bringing a llama.cpp model up used to stop at the file: if the `.gguf` named by
 `llama_cpp_model_path` was not on disk, nothing could put it there. Now
@@ -33,10 +96,9 @@ is discarded, the whole file is re-fetched, and that is said out loud.
 
 **Progress is visible in the TUI**, where a model fetch is the longest and,
 until now, least observable step of a bring-up: a `⬇` line over the body shows
-`165.1 MiB of 468.6 MiB (35 %)` and updates as bytes arrive. What the result is
-checked against is its size, and nothing more — the manuals say so plainly,
-because byte-level verification would need a checksum the URL's owner has to be
-trusted to publish.
+`165.1 MiB of 468.6 MiB (35 %)` and updates as bytes arrive. What the result was
+checked against when this landed was its size and nothing more — that limit is
+what the entry above this one replaces.
 
 ### Changed — a local server that cannot run now says so, instead of being waited on
 Starting a local `llama-server` that the machine cannot serve used to end one of

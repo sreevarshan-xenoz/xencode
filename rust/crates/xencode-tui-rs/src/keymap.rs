@@ -377,6 +377,10 @@ fn global_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             app.focus = if app.focus == FocusArea::ModelSelector {
                 FocusArea::ChatInput
             } else {
+                // The panel's footer reports the configured file's checksum
+                // state, and a line from an earlier load would cover it for the
+                // rest of the session.
+                app.llamacpp_action_msg.clear();
                 app.refresh_models(tx.clone());
                 FocusArea::ModelSelector
             };

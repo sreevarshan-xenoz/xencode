@@ -152,6 +152,16 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub llama_cpp_model_url: String,
 
+    /// The SHA256 the file at `llama_cpp_model_path` must hash to. Empty means
+    /// nothing is pinned: the download still reports what it received, but no
+    /// claim is made that the bytes are the bytes anyone intended.
+    ///
+    /// The value has to come from outside the transfer to be worth anything —
+    /// `xencode models advise` prints one from the shipped table, or copy it
+    /// off the page you chose the model from.
+    #[serde(default)]
+    pub llama_cpp_model_sha256: String,
+
     /// Path to the llama-server executable (empty = resolved from PATH).
     #[serde(default)]
     pub llama_cpp_executable: String,
@@ -425,6 +435,7 @@ impl Default for XencodeConfig {
             llama_cpp_model_path: default_llama_cpp_model_path(),
             llama_cpp_executable: String::new(),
             llama_cpp_model_url: String::new(),
+            llama_cpp_model_sha256: String::new(),
             llama_cpp_args: Vec::new(),
             llama_cpp_temperature: None,
             llama_cpp_top_k: None,

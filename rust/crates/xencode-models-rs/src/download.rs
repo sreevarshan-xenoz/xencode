@@ -4,7 +4,7 @@
 //! tens of gigabytes. That makes the download both the slowest step of bringing
 //! a local server up and the one most likely to be interrupted — by a dropped
 //! connection, by a laptop lid, by the person who started it deciding the file
-//! they asked for is the wrong one. An downloader that restarts from zero on
+//! they asked for is the wrong one. A downloader that restarts from zero on
 //! every attempt turns each of those into throwing away the whole transfer.
 //!
 //! So the bytes go to `<target>.part` and are asked for with a `Range`, which
@@ -17,15 +17,28 @@
 //! finding out at 90 % that the disk was never going to hold the file wastes
 //! every minute of transfer that preceded it.
 //!
-//! What this does *not* do is verify the contents. It checks the byte count
-//! against what the server announced and stops there: a file that is the right
-//! size but wrong in some byte is a corrupt model, not a truncated download, and
-//! the only thing that will notice is the loader reading its header.
+//! ## What a checksum does and does not prove
+//!
+//! When the caller supplies an expected SHA256, the bytes are hashed as they
+//! arrive and compared at the end, and a file that does not match is thrown away
+//! rather than renamed into place. That comparison proves the transfer was
+//! faithful to a number that came from *outside* the transfer — the shipped
+//! advice table, or a checksum the person set themselves.
+//!
+//! It does not prove where the bytes came from. A checksum computed after the
+//! fact, from the same server's own answer, is circular: whatever the host
+//! serves would be declared genuine. That is why the pin lives in a table dated
+//! and assembled separately (see [`crate::advice`]) and why the file's
+//! provenance sidecar records `verified: false` when no outside checksum was
+//! given, instead of quietly reporting the digest it just observed as if it
+//! were a certificate.
 
 use std::io::Write;
 use std::path::Path;
 
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// How often progress is reported while the bytes are moving. Every chunk would
 /// mean tens of thousands of updates for one model file, which is noise in a
@@ -66,21 +79,6 @@ impl Progress {
             None => format!("{} so far", human_bytes(self.received)),
         }
     }
-}
-
-/// What a finished download left on disk.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Downloaded {
-    /// The path the file was asked for — not the `.part` it travelled through.
-    pub path: String,
-    pub bytes: u64,
-    /// Bytes this call did not have to fetch because they were already there.
-    /// Zero means either a fresh start or a partial file that had to be thrown
-    /// away; `resume_refused` says which.
-    pub resumed_from: u64,
-    /// The server sent the whole file despite the range request, so the partial
-    /// download was discarded and this transfer cannot be continued later.
-    pub resume_refused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,30 +132,302 @@ pub fn human_bytes(bytes: u64) -> String {
     }
 }
 
+/// What a finished download left on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Downloaded {
+    /// The path the file was asked for — not the `.part` it travelled through.
+    pub path: String,
+    pub bytes: u64,
+    /// Bytes this call did not have to fetch because they were already there.
+    /// Zero means either a fresh start or a partial file that had to be thrown
+    /// away; `resume_refused` says which.
+    pub resumed_from: u64,
+    /// The server sent the whole file despite the range request, so the partial
+    /// download was discarded and this transfer cannot be continued later.
+    pub resume_refused: bool,
+    /// Lowercase hex SHA256 of the bytes that landed, computed here from the
+    /// transfer itself. Always available: hashing a few hundred megabytes costs
+    /// far less than fetching them did.
+    pub sha256: String,
+    /// Whether that digest was compared against a checksum that came from
+    /// somewhere other than this transfer. `false` means the digest above is an
+    /// observation, not a proof.
+    pub verified: bool,
+    /// The repository revision the host said it served, when it says —
+    /// huggingface.co answers with `x-repo-commit`. Recorded, not trusted: the
+    /// server writes its own answer to this header.
+    pub revision: Option<String>,
+}
+
+/// What a model file on disk records about where it came from. Written next to
+/// the file as `<path>.provenance.json` once the transfer is complete, so the
+/// question "where did this come from" is answerable later without asking the
+/// network again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Provenance {
+    /// The URL the bytes were fetched from — the pinned one, when the caller
+    /// asked for a revision rather than a branch.
+    pub url: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub revision: Option<String>,
+    /// `true` only when `sha256` was checked against an expected value supplied
+    /// by the caller. See the module docs: a digest that was not compared with
+    /// anything external proves nothing about its source.
+    pub verified: bool,
+    /// Seconds since the Unix epoch when the file was completed.
+    pub fetched_at: u64,
+}
+
+impl Provenance {
+    /// A one-line description for a panel or a CLI answer.
+    pub fn label(&self) -> String {
+        let mut line = format!(
+            "{} · {}",
+            human_bytes(self.bytes),
+            if self.verified {
+                "checksum verified"
+            } else {
+                "checksum unverified"
+            }
+        );
+        if let Some(revision) = &self.revision {
+            line.push_str(&format!(" · revision {}", short_rev(revision)));
+        }
+        line
+    }
+}
+
+/// The first eight characters of a commit, the way git quotes them.
+pub fn short_rev(revision: &str) -> &str {
+    revision.get(..8).unwrap_or(revision)
+}
+
+/// The verdict on a model file that is already on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileCheck {
+    /// The bytes hash to the checksum they were pinned to.
+    Verified { sha256: String },
+    /// The bytes hash to something else. The file is not the one that was asked
+    /// for, whether the host changed it or the disk did.
+    Mismatch { expected: String, actual: String },
+    /// The file was hashed but no checksum was configured, so nothing was
+    /// proven. Not a failure — an honest absence of information.
+    Unsigned { sha256: String },
+    /// The file could not be read at all.
+    Unreadable { path: String, reason: String },
+}
+
+impl FileCheck {
+    /// Whether a local server should be allowed to open this file.
+    pub fn is_verified(&self) -> bool {
+        matches!(self, FileCheck::Verified { .. })
+    }
+
+    /// Short text for a status line or a launch refusal.
+    pub fn label(&self) -> String {
+        match self {
+            FileCheck::Verified { sha256 } => format!("verified ({})", short_rev(sha256)),
+            FileCheck::Mismatch { expected, actual } => format!(
+                "does not match its checksum: expected {}, got {}",
+                short_rev(expected),
+                short_rev(actual)
+            ),
+            FileCheck::Unsigned { .. } => "unsigned".to_string(),
+            FileCheck::Unreadable { reason, .. } => format!("unreadable: {reason}"),
+        }
+    }
+}
+
+/// Where a finished download's provenance is stored.
+fn provenance_path(path: &str) -> String {
+    format!("{path}.provenance.json")
+}
+
+/// The provenance recorded for this file, `None` if there is none or it cannot
+/// be read — which is the normal state for a model that was placed on disk by
+/// hand or by another tool.
+pub fn read_provenance(path: &str) -> Option<Provenance> {
+    let text = std::fs::read_to_string(provenance_path(path)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Read a file and hash it. Used before a server is started, so a file that
+/// stopped matching its checksum is said so rather than loaded.
+pub fn sha256_file(path: &str) -> Result<String, String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buffer).map_err(|e| format!("{path}: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+    Ok(hex_lower(&hasher.finalize()))
+}
+
+/// Hash `path` and compare it with `expected_sha256` (which may be `None`,
+/// meaning nobody pinned this file). Reading the whole file costs about as much
+/// as the loader opening it will anyway, so this is not a tax on top.
+pub fn check_model_file(path: &str, expected_sha256: Option<&str>) -> FileCheck {
+    let actual = match sha256_file(path) {
+        Ok(digest) => digest,
+        Err(reason) => {
+            return FileCheck::Unreadable {
+                path: path.to_string(),
+                reason,
+            }
+        }
+    };
+    match expected_sha256 {
+        Some(expected) if digest_matches(expected, &actual) => {
+            FileCheck::Verified { sha256: actual }
+        }
+        Some(expected) => FileCheck::Mismatch {
+            expected: expected.trim().to_lowercase(),
+            actual,
+        },
+        None => FileCheck::Unsigned { sha256: actual },
+    }
+}
+
+/// Whether a configured checksum names these bytes. Tolerates the ways a person
+/// copies a digest: upper case, a `sha256-` prefix, surrounding whitespace.
+fn digest_matches(expected: &str, actual: &str) -> bool {
+    let expected = expected
+        .trim()
+        .trim_start_matches("sha256-")
+        .trim_start_matches("SHA256-")
+        .to_lowercase();
+    !expected.is_empty() && expected == actual
+}
+
+/// Render a digest as lowercase hex.
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        s.push(HEX[(byte >> 4) as usize] as char);
+        s.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    s
+}
+
 /// Where the bytes of an unfinished download live.
 fn partial_path(path: &str) -> String {
     format!("{path}.part")
+}
+
+/// What a `HEAD` is worth before a transfer: how big the file is, and which
+/// repository revision the host says it is serving.
+struct Probe {
+    announced: Option<u64>,
+    revision: Option<String>,
+}
+
+/// Ask the server about a file without taking it.
+///
+/// The revision has to be read *while* the redirects are being followed:
+/// Hugging Face names it on the response that points at its content delivery
+/// network, and the response that actually carries the bytes comes from that
+/// network, which knows nothing about repositories. So the redirects are
+/// walked by hand here — a client that followed them itself would only ever
+/// show the last hop, which is the one without the answer.
+async fn probe_file(client: &Client, url: &str) -> Probe {
+    let Ok(start) = reqwest::Url::parse(url) else {
+        return Probe {
+            announced: None,
+            revision: None,
+        };
+    };
+    // The caller's client is only borrowed for its defaults, so a client of
+    // this function's own does the asking: it must not follow redirects, or the
+    // hop that names the commit disappears before it can be read.
+    let prober = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| client.clone());
+    let mut target = start;
+    let mut revision = None;
+    let mut announced = None;
+    for _ in 0..MAX_REDIRECT_HOPS {
+        let Ok(response) = prober.head(target.as_str()).send().await else {
+            break;
+        };
+        if let Some(reported) = reported_revision(&response) {
+            revision = Some(reported);
+        }
+        let status = response.status();
+        if !status.is_redirection() {
+            announced = content_length(&response);
+            break;
+        }
+        let Some(location) = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+        else {
+            break;
+        };
+        let Ok(next) = response.url().join(location.trim()) else {
+            break;
+        };
+        target = next;
+    }
+    Probe {
+        announced,
+        revision,
+    }
+}
+
+/// How many pointers down a chain this will walk before concluding the host is
+/// not going to hand over a file. Ten is the limit `llama-server`'s own fetcher
+/// uses and well past what Hugging Face's two-hop chain needs.
+const MAX_REDIRECT_HOPS: u32 = 10;
+
+/// What the server says the file weighs, from a response that transferred
+/// nothing. `None` when it will not say — a host that rejects `HEAD`, or one
+/// that answers without a length — which is a size the caller cannot price
+/// before the bytes arrive.
+fn content_length(response: &reqwest::Response) -> Option<u64> {
+    if !response.status().is_success() {
+        return None;
+    }
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|bytes| *bytes > 0)
+}
+
+/// The revision a response names, when it names one: a 40-character hex commit,
+/// and nothing else. A host that answers with a branch name or a string of the
+/// wrong shape is not reporting a revision.
+fn reported_revision(response: &reqwest::Response) -> Option<String> {
+    response
+        .headers()
+        .get("x-repo-commit")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| value.len() == 40 && value.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Unix seconds, for the provenance timestamp.
+fn now_unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Said whenever a transfer stops with bytes on disk worth keeping: the whole
 /// point of writing to a `.part` is that the next attempt does not start over.
 const RESUMABLE: &str =
     "the bytes already downloaded stay on disk, so the next attempt continues from there";
-
-/// What the server says the file weighs, from a request that transfers nothing.
-/// `None` when it will not say — a server that rejects `HEAD`, or one that
-/// answers without a length — which is a size the caller cannot price in advance.
-async fn announced_size(client: &Client, url: &str) -> Option<u64> {
-    let head = client.head(url).send().await.ok()?;
-    if !head.status().is_success() {
-        return None;
-    }
-    head.headers()
-        .get(reqwest::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|bytes| *bytes > 0)
-}
 
 /// The whole size of the file a response is part of, read from `Content-Range`
 /// (`bytes 4096-491400031/491400032`) — the header that says it only when the
@@ -181,17 +451,25 @@ fn ranged_total(response: &reqwest::Response) -> Option<u64> {
 ///
 /// `on_progress` is called at least at the start and the end of every 4 MiB of
 /// new bytes.
+///
+/// `expected_sha256`, when given, is a digest the caller obtained somewhere
+/// other than this transfer. The bytes are hashed as they arrive and compared
+/// at the end; a mismatch throws the file away — including the partial, whose
+/// prefix is now known to be wrong — because continuing from bytes that do not
+/// hash correctly can never produce a file that does.
 pub async fn fetch_gguf(
     client: &Client,
     url: &str,
     path: &str,
     free_bytes: Option<u64>,
+    expected_sha256: Option<&str>,
     on_progress: &(dyn Fn(Progress) + Send + Sync),
 ) -> Result<Downloaded, DownloadError> {
     let part = partial_path(path);
     let already = std::fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
 
-    let announced = announced_size(client, url).await;
+    let probe = probe_file(client, url).await;
+    let announced = probe.announced;
     if let Some(total) = announced {
         if let Some(free) = free_bytes {
             // The bytes already on disk are paid for; only the remainder has to
@@ -250,6 +528,20 @@ pub async fn fetch_gguf(
     }
     .map_err(|e| DownloadError::Failed(format!("cannot write {}: {e}", part)))?;
 
+    // Bytes from an earlier attempt are part of the file this one is building,
+    // so they have to be inside the digest too — otherwise the checksum of a
+    // resumed download would describe only its second half.
+    let mut hasher = Sha256::new();
+    if written > 0 {
+        let hashed = hash_file_prefix(&part, &mut hasher).map_err(DownloadError::Failed)?;
+        if hashed != written {
+            return Err(DownloadError::Failed(format!(
+                "the partial file shrank while being read ({hashed} of {written} bytes), so nothing can be trusted about it"
+            )));
+        }
+    }
+    let revision = reported_revision(&response).or_else(|| probe.revision.clone());
+
     on_progress(Progress {
         received: written,
         total,
@@ -266,6 +558,7 @@ pub async fn fetch_gguf(
         let Some(chunk) = chunk else { break };
         file.write_all(&chunk)
             .map_err(|e| DownloadError::Failed(format!("the disk refused {path}: {e}")))?;
+        hasher.update(&chunk);
         written += chunk.len() as u64;
         if written >= next_report {
             on_progress(Progress {
@@ -277,6 +570,7 @@ pub async fn fetch_gguf(
     }
     file.flush()
         .map_err(|e| DownloadError::Failed(format!("cannot finish writing {path}: {e}")))?;
+    drop(file);
 
     if let Some(expected) = total {
         if written != expected {
@@ -289,9 +583,33 @@ pub async fn fetch_gguf(
         }
     }
 
+    let sha256 = hex_lower(&hasher.finalize());
+    if let Some(expected) = expected_sha256 {
+        if !digest_matches(expected, &sha256) {
+            // Unlike a short transfer there is nothing worth keeping: the bytes
+            // on disk are the wrong bytes, so no continuation of them could
+            // ever hash to the expected value. Keeping them would only make the
+            // next attempt fail the same way, faster.
+            let _ = std::fs::remove_file(&part);
+            return Err(DownloadError::Failed(format!(
+                "{url} gave a file that hashes to {sha256} instead of the expected {}; the bad bytes were thrown away",
+                expected.trim().to_lowercase()
+            )));
+        }
+    }
+
     std::fs::rename(&part, path).map_err(|e| {
         DownloadError::Failed(format!("cannot move the finished file into place: {e}"))
     })?;
+    let provenance = Provenance {
+        url: url.to_string(),
+        sha256: sha256.clone(),
+        bytes: written,
+        revision: revision.clone(),
+        verified: expected_sha256.is_some(),
+        fetched_at: now_unix_seconds(),
+    };
+    write_provenance(path, &provenance);
     on_progress(Progress {
         received: written,
         total,
@@ -302,7 +620,38 @@ pub async fn fetch_gguf(
         bytes: written,
         resumed_from: if continued { resume_from } else { 0 },
         resume_refused: already > 0 && !continued,
+        sha256,
+        verified: expected_sha256.is_some(),
+        revision,
     })
+}
+
+/// Hash a file's whole contents into `hasher`, returning how many bytes went
+/// in. Used to fold a resumed download's prefix into the digest of the file
+/// being finished.
+fn hash_file_prefix(path: &str, hasher: &mut Sha256) -> Result<u64, String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut hashed = 0u64;
+    loop {
+        let n = file.read(&mut buffer).map_err(|e| format!("{path}: {e}"))?;
+        if n == 0 {
+            return Ok(hashed);
+        }
+        hasher.update(&buffer[..n]);
+        hashed += n as u64;
+    }
+}
+
+/// Record where a finished file came from. A provenance sidecar that cannot be
+/// written is a loss of metadata, not of the model: the file is complete and
+/// usable, so the download is not failed over it.
+fn write_provenance(model_path: &str, provenance: &Provenance) {
+    let path = provenance_path(model_path);
+    if let Ok(text) = serde_json::to_string_pretty(provenance) {
+        let _ = std::fs::write(&path, text);
+    }
 }
 
 /// [`fetch_gguf`] with a client built here, for callers that have no HTTP
@@ -312,9 +661,18 @@ pub async fn fetch_model_file(
     url: &str,
     path: &str,
     free_bytes: Option<u64>,
+    expected_sha256: Option<&str>,
     on_progress: &(dyn Fn(Progress) + Send + Sync),
 ) -> Result<Downloaded, DownloadError> {
-    fetch_gguf(&Client::default(), url, path, free_bytes, on_progress).await
+    fetch_gguf(
+        &Client::default(),
+        url,
+        path,
+        free_bytes,
+        expected_sha256,
+        on_progress,
+    )
+    .await
 }
 
 async fn ranged_get(
@@ -449,7 +807,8 @@ mod tests {
                     )
                 };
                 let reply = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: application/octet-stream\r\n{extra}\r\n"
+                    "HTTP/1.1 {status}\r\nContent-Type: application/octet-stream\r\n\
+                     Connection: close\r\n{extra}\r\n"
                 );
                 let _ = stream.write_all(reply.as_bytes());
                 if !head_only {
@@ -474,6 +833,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// A host that owns a repository and answers a request for a file by
+    /// pointing somewhere else for the bytes, naming the commit on that pointer.
+    /// The destination says nothing about repositories — which is the shape that
+    /// makes reading the revision out of the final response lose it.
+    fn redirect_to(commit: &'static str, target: &FileServer) -> FileServer {
+        use std::io::Read;
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = stop.clone();
+        let location = format!("{}/model.gguf", target.base_url);
+        std::thread::spawn(move || {
+            while !server_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                };
+                // Read one block of the request so the client is not writing
+                // into a socket nobody is draining, then answer.
+                let mut buffer = [0u8; 1024];
+                let _ = stream.read(&mut buffer);
+                let reply = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {location}\r\n\
+                     x-repo-commit: {commit}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(reply.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        FileServer {
+            base_url: format!("http://127.0.0.1:{port}"),
+            stop,
+        }
     }
 
     /// A client with no timeout on purpose: a whole model file is allowed to
@@ -505,6 +904,7 @@ mod tests {
             &format!("{}/model.gguf", server.base_url),
             &path_str,
             Some(10_000_000_000),
+            None,
             &on_progress,
         )
         .await
@@ -527,6 +927,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_revision_named_on_the_redirect_survives_a_transfer_that_ends_elsewhere() {
+        let payload: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let target = serve_file(payload.clone(), false);
+        let commit = "9217f5db79a29953eb74d5343926648285ec7e67";
+        let redirector = redirect_to(commit, &target);
+        let dir = temp_dir("redirect");
+        let path = dir.join("model.gguf");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let (_, on_progress) = counted_progress();
+        let got = fetch_gguf(
+            &client(),
+            &format!("{}/model.gguf", redirector.base_url),
+            &path_str,
+            None,
+            None,
+            &on_progress,
+        )
+        .await
+        .unwrap();
+
+        // The bytes came from the second host, which never mentioned a
+        // repository; the revision still has to be the one the first host named.
+        assert_eq!(got.revision.as_deref(), Some(commit));
+        assert_eq!(std::fs::read(&path).unwrap(), payload);
+        let record = read_provenance(&path_str).expect("the sidecar the download wrote");
+        assert_eq!(record.revision.as_deref(), Some(commit));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn a_partial_file_is_continued_from_its_last_byte_and_not_restarted() {
         let payload: Vec<u8> = (0..500_000u32).map(|i| (i % 253) as u8).collect();
         let server = serve_file(payload.clone(), false);
@@ -542,6 +973,7 @@ mod tests {
             &format!("{}/model.gguf", server.base_url),
             &path_str,
             Some(10_000_000_000),
+            None,
             &on_progress,
         )
         .await
@@ -574,6 +1006,7 @@ mod tests {
             &format!("{}/model.gguf", server.base_url),
             &path_str,
             Some(10_000_000_000),
+            None,
             &on_progress,
         )
         .await
@@ -601,6 +1034,7 @@ mod tests {
             &path_str,
             // One byte short of the file.
             Some(399_999),
+            None,
             &|_| {},
         )
         .await
@@ -643,6 +1077,7 @@ mod tests {
             &path_str,
             // Enough for the last 100 000 bytes, nowhere near enough for the file.
             Some(100_000),
+            None,
             &|_| {},
         )
         .await
@@ -685,12 +1120,13 @@ mod tests {
                     }
                 }
                 let request = String::from_utf8_lossy(&probe).into_owned();
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {announced}\r\nConnection: close\r\n\r\n"
+                );
                 if request.starts_with("HEAD ") {
-                    let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {announced}\r\n\r\n");
-                    let _ = stream.write_all(reply.as_bytes());
+                    let _ = stream.write_all(header.as_bytes());
                 } else {
-                    let reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {announced}\r\n\r\n");
-                    let _ = stream.write_all(reply.as_bytes());
+                    let _ = stream.write_all(header.as_bytes());
                     let _ = stream.write_all(&body);
                 }
                 let _ = stream.flush();
@@ -706,6 +1142,7 @@ mod tests {
             &format!("http://127.0.0.1:{port}/model.gguf"),
             &path_str,
             Some(10_000_000_000),
+            None,
             &|_| {},
         )
         .await
@@ -734,6 +1171,7 @@ mod tests {
             &format!("{}/model.gguf", whole.base_url),
             &path_str,
             Some(10_000_000_000),
+            None,
             &|_| {},
         )
         .await
@@ -764,6 +1202,7 @@ mod tests {
             &format!("{}/model.gguf", server.base_url),
             &path_str,
             Some(10_000_000_000),
+            None,
             &|_| {},
         )
         .await
@@ -821,6 +1260,279 @@ mod tests {
         assert_eq!(partial_bytes(&path_str), 7);
         discard_partial(&path_str).unwrap();
         assert_eq!(partial_bytes(&path_str), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The digest of some bytes, worked out here rather than copied from the
+    /// code under test, so a bug in the downloader's hashing cannot agree with
+    /// itself.
+    fn digest_of(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        hex_lower(&hasher.finalize())
+    }
+
+    #[tokio::test]
+    async fn a_file_that_hashes_to_the_expected_checksum_is_verified_and_written_down() {
+        let payload: Vec<u8> = (0..150_000u32).map(|i| (i % 251) as u8).collect();
+        let expected = digest_of(&payload);
+        let server = serve_file(payload.clone(), false);
+        let dir = temp_dir("verified");
+        let path = dir.join("model.gguf");
+        let path_str = path.to_str().unwrap().to_string();
+        let url = format!("{}/model.gguf", server.base_url);
+
+        let got = fetch_gguf(
+            &client(),
+            &url,
+            &path_str,
+            Some(10_000_000_000),
+            Some(&expected),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+
+        assert!(got.verified);
+        assert_eq!(got.sha256, expected);
+
+        let sidecar_name = format!("{path_str}.provenance.json");
+        let sidecar = Path::new(&sidecar_name);
+        assert!(sidecar.exists(), "the provenance file was not written");
+        let written: Provenance =
+            serde_json::from_str(&std::fs::read_to_string(sidecar).unwrap()).unwrap();
+        assert_eq!(written.sha256, expected);
+        assert_eq!(written.bytes, payload.len() as u64);
+        assert_eq!(written.url, url);
+        assert!(written.verified);
+        assert!(written.fetched_at > 0);
+        // The same answer through the reader the panels use.
+        assert_eq!(read_provenance(&path_str), Some(written));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_file_that_does_not_hash_to_the_expected_checksum_is_thrown_away() {
+        // The bytes arrive complete and the right length, so nothing else in the
+        // downloader would notice. A host that silently replaced the file, or a
+        // transfer corrupted in a way that preserves the length, has to be
+        // caught by the checksum or not at all.
+        let payload: Vec<u8> = (0..150_000u32).map(|i| (i % 251) as u8).collect();
+        let server = serve_file(payload.clone(), false);
+        let dir = temp_dir("mismatch");
+        let path = dir.join("model.gguf");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let wrong = digest_of(b"the bytes some other file was made of");
+        let error = fetch_gguf(
+            &client(),
+            &format!("{}/model.gguf", server.base_url),
+            &path_str,
+            Some(10_000_000_000),
+            Some(&wrong),
+            &|_| {},
+        )
+        .await
+        .unwrap_err();
+
+        let message = error.to_string();
+        assert!(matches!(error, DownloadError::Failed(_)), "{error:?}");
+        assert!(message.contains("hashes to"), "{message}");
+        assert!(message.contains(&digest_of(&payload)), "{message}");
+        assert!(
+            message.contains("thrown away"),
+            "the message should say the bad bytes are gone: {message}"
+        );
+        assert!(!path.exists(), "the unverified file was left in place");
+        assert_eq!(
+            partial_bytes(&path_str),
+            0,
+            "bytes known to be wrong must not survive for the next attempt"
+        );
+        assert!(read_provenance(&path_str).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_resumed_download_is_hashed_over_the_bytes_it_did_not_refetch() {
+        // Half the file was already on disk, so a checksum that only covered the
+        // second half would reject a perfectly good resume.
+        let payload: Vec<u8> = (0..400_000u32).map(|i| (i % 251) as u8).collect();
+        let server = serve_file(payload.clone(), false);
+        let dir = temp_dir("resume-hash");
+        let path = dir.join("model.gguf");
+        let path_str = path.to_str().unwrap().to_string();
+        std::fs::write(partial_path(&path_str), &payload[..250_000]).unwrap();
+
+        let got = fetch_gguf(
+            &client(),
+            &format!("{}/model.gguf", server.base_url),
+            &path_str,
+            Some(10_000_000_000),
+            Some(&digest_of(&payload)),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(got.resumed_from, 250_000);
+        assert!(got.verified);
+        assert_eq!(got.sha256, digest_of(&payload));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_url_the_server_does_not_have_is_reported_as_the_thing_it_is() {
+        // The pinned revision case: a commit that was garbage-collected, or a
+        // file someone renamed upstream.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_stop = stop.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            use std::io::Write;
+            while !server_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                };
+                let mut probe = Vec::new();
+                let mut buffer = [0u8; 512];
+                loop {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            probe.extend_from_slice(&buffer[..n]);
+                            if probe.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let reply = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(reply.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+
+        let dir = temp_dir("missing");
+        let path = dir.join("model.gguf");
+        let path_str = path.to_str().unwrap().to_string();
+        let url = format!("http://127.0.0.1:{port}/model.gguf");
+        let error = fetch_gguf(
+            &client(),
+            &url,
+            &path_str,
+            Some(10_000_000_000),
+            None,
+            &|_| {},
+        )
+        .await
+        .unwrap_err();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+
+        assert!(matches!(error, DownloadError::Failed(_)), "{error:?}");
+        let message = error.to_string();
+        assert!(message.contains("404"), "{message}");
+        assert!(message.contains(&url), "{message}");
+        assert!(!path.exists());
+        assert_eq!(partial_bytes(&path_str), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_checksum_copied_off_a_web_page_still_matches() {
+        let dir = temp_dir("checksum-forms");
+        let path = dir.join("model.gguf");
+        let payload = b"the bytes of a small model".to_vec();
+        std::fs::write(&path, &payload).unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+        let digest = digest_of(&payload);
+
+        let plain = check_model_file(&path_str, Some(&digest));
+        assert!(plain.is_verified(), "{plain:?}");
+        let upper = check_model_file(&path_str, Some(&digest.to_uppercase()));
+        assert!(upper.is_verified(), "{upper:?}");
+        let spaced = check_model_file(&path_str, Some(&format!("  {digest}  ")));
+        assert!(spaced.is_verified(), "{spaced:?}");
+        let prefixed = check_model_file(&path_str, Some(&format!("sha256-{digest}")));
+        assert!(prefixed.is_verified(), "{prefixed:?}");
+
+        let bad = check_model_file(&path_str, Some(&digest_of(b"something else")));
+        assert_eq!(
+            bad,
+            FileCheck::Mismatch {
+                expected: digest_of(b"something else"),
+                actual: digest.clone()
+            }
+        );
+        assert!(bad.label().contains("does not match its checksum"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_nobody_pinned_reports_what_it_hashes_to_without_claiming_it_is_genuine() {
+        let dir = temp_dir("unsigned");
+        let path = dir.join("model.gguf");
+        std::fs::write(&path, b"bytes from an untracked source").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let check = check_model_file(&path_str, None);
+        match &check {
+            FileCheck::Unsigned { sha256 } => assert_eq!(sha256.len(), 64),
+            other => panic!("an unpinned file must not report itself verified: {other:?}"),
+        }
+        assert!(!check.is_verified());
+        assert_eq!(check.label(), "unsigned");
+
+        // A file that is not there is not "unsigned", it is unreadable.
+        let missing = check_model_file("/nonexistent/xencode-model.gguf", Some("ab12"));
+        assert!(
+            matches!(missing, FileCheck::Unreadable { .. }),
+            "{missing:?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_provenance_line_says_what_was_proved_and_what_was_only_observed() {
+        let checked = Provenance {
+            url: "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/d7f5/q3.gguf".to_string(),
+            sha256: "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897".to_string(),
+            bytes: 1_107_409_472,
+            revision: Some("d7f544eead698dbd1f15126ef60b45a1e1933222".to_string()),
+            verified: true,
+            fetched_at: 1_790_000_000,
+        };
+        let label = checked.label();
+        assert!(label.contains("1.0 GiB"), "{label}");
+        assert!(label.contains("checksum verified"), "{label}");
+        assert!(label.contains("revision d7f544ee"), "{label}");
+
+        let observed = Provenance {
+            verified: false,
+            ..checked.clone()
+        };
+        assert!(observed.label().contains("checksum unverified"));
+        // A file from a host that does not report its commit still describes
+        // itself, with the revision simply absent rather than guessed.
+        let no_revision = Provenance {
+            revision: None,
+            ..checked
+        };
+        assert!(!no_revision.label().contains("revision"));
+    }
+
+    #[test]
+    fn a_sidecar_that_is_not_there_reads_as_no_provenance_rather_than_an_error() {
+        assert!(read_provenance("/nonexistent/xencode-model.gguf").is_none());
+        let dir = temp_dir("bad-sidecar");
+        let path = dir.join("model.gguf");
+        std::fs::write(&path, b"model").unwrap();
+        std::fs::write(format!("{}.provenance.json", path.display()), b"{ broken").unwrap();
+        assert!(read_provenance(path.to_str().unwrap()).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

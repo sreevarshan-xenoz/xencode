@@ -566,6 +566,7 @@ Local model management.
 xencode models list           # Ollama models + models served by llama.cpp
 xencode models health <name>  # Check one model's health
 xencode models default        # Show the smart-selected default
+xencode models advice         # Which GGUF this machine can hold, and where to get it
 ```
 
 ### `xencode llamacpp <action>`
@@ -677,11 +678,90 @@ l10-resume-test.gguf is not there yet, but a stopped download is: 344.3 MiB of i
 ```
 
 A server that ignores range requests gets its partial file discarded and the
-whole file re-fetched, with a note saying so. The only check on the result is
-the byte count — a URL serving something other than what it advertises cannot
-be told apart here, so pick the URL the way you would pick any download source.
-The TUI's auto-start fetches the same way and shows a `⬇` progress line over the
-body while it runs.
+whole file re-fetched, with a note saying so. The TUI's auto-start fetches the
+same way and shows a `⬇` progress line over the body while it runs.
+
+**Pinning the bytes.** `llama_cpp_model_sha256` holds a digest you supply — from
+`xencode models advice` below, or from wherever you chose the URL. The bytes are
+hashed as they arrive and compared at the end, including whatever an interrupted
+attempt had already written, so a resumed download is checked as a whole file. A
+file that does not match is thrown away instead of being moved into place, and a
+server is never started on it:
+
+```text
+error: refusing to start: /tmp/lf7e/model.gguf hashes to 74a4da8c, not the 00000000 this configuration expects. The file is not the one that was pinned — delete it and start again to fetch it fresh, or set llama_cpp_model_sha256 to the checksum you now want.
+```
+
+That check is one read of the file, and it happens on every launch. The TUI's
+model panel does it too, on the `l` load of a file this machine holds (`m` opens
+the panel); a load that names a model alias is left to the server, because there
+are no bytes here to look at and calling a name `verified` would be a lie. A file
+already on disk that nothing is pinned to is not a failure: the panel says
+`unsigned` instead of pretending, and starts anyway.
+
+**What the checksum proves, and what it does not.** It proves the transfer was
+faithful to a number that came from outside the transfer. It does not prove who
+the bytes came from: a digest taken from the same server that is serving the file
+is circular, because whatever that host answers would be declared genuine. The
+pin therefore lives in a dated table assembled separately, and a file xencode
+fetched gets a `<path>.provenance.json` note beside it recording the size, the
+checksum, the repository revision the host named on the way to the bytes, and
+whether an outside digest was matched. That note is xencode's own record of what
+it saw, not a certificate — which is why an unpinned file reads `unsigned` and
+not `verified`.
+
+```bash
+xencode config set llama_cpp_model_sha256 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db
+xencode config set llama_cpp_model_sha256 ""   # stop checking this file
+```
+
+A value is accepted only as 64 hexadecimal characters, with an optional
+`sha256-` prefix and any case; anything else is refused by `config set` with the
+reason.
+
+### `xencode models advice`
+
+Which GGUF this machine can actually serve, taken from a table of sizes,
+checksums and pinned addresses rather than from a list of model names baked into
+the binary.
+
+```bash
+xencode models advice
+```
+
+```text
+room:     10.1 GiB (10323 MiB of system memory free)
+advice:   checked 2026-09-27
+          0 days old
+from:     the table shipped with xencode
+tier:     large
+          Qwen3 14B, 4-bit
+            size     8.4 GiB
+            url      https://huggingface.co/unsloth/Qwen3-14B-GGUF/resolve/a04a82c4739b3ef5fa6da7d10261db2c67dd1985/Qwen3-14B-Q4_K_M.gguf
+            sha256   5eaa0870bd81ed3b58a630a271234cfa604e43ffb3a19cd68e54a80dd9d52a66
+
+to serve one of these:
+  xencode config set llama_cpp_model_url "…"
+  xencode config set llama_cpp_model_sha256 "…"
+  xencode config set llama_cpp_model_path "/tmp/lf7e/.xencode/models/Qwen3-14B-Q4_K_M.gguf"
+  xencode llamacpp start
+```
+
+`room` is the largest single memory pool on this machine — a GPU's own VRAM when
+one can hold it, otherwise system RAM — measured now, not estimated from a model
+of the product line. Every `url` is a `/resolve/<revision>/` address, so the
+bytes behind it cannot be changed underneath by someone pushing to the
+repository's default branch.
+
+The table ages in public: `advice` prints the date it was checked and how many
+days old that is, and answers from a table older than six months say so. Replace
+it by writing your own at `~/.xencode/model_advice.json` (same shape: `as_of`,
+`ollama_preference`, `tiers[]` of `max_file_bytes` and `gguf` entries) — xencode
+then reads yours and the `from:` line says which file it answered from. A user
+file that fails to parse is refused out loud and the shipped table is used
+instead, because a typo in a JSON file should not cost the answer. The same
+preference list decides which installed Ollama tag `xencode models default`
+picks.
 
 **How much the model may think** is a launch setting too. `llama_cpp_reasoning`
 takes `auto` (leave it to the model), `off`, or a token budget as a plain number:
@@ -912,6 +992,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `colab_auto_connect` | bool | Persisted but not acted on yet — nothing reconnects without an explicit `xencode colab up` |
 | `llama_cpp_model_path`, `llama_cpp_executable` | string | llama.cpp paths |
 | `llama_cpp_model_url` | string | HTTPS URL of the GGUF file itself; `llamacpp start` fetches the model into `llama_cpp_model_path` from here when it is missing — disk-priced first, resumable — see [xencode llamacpp](#xencode-llamacpp-action) |
+| `llama_cpp_model_sha256` | string | the digest these bytes are pinned to: 64 hexadecimal characters, an optional `sha256-` prefix, any case; empty turns the check off. Checked as a download arrives and again before any server is started on the file — see [xencode llamacpp](#xencode-llamacpp-action), "Pinning the bytes". `xencode models advice` prints one for every model it suggests |
 | `llama_cpp_args` | string | split on whitespace; passed to a self-started `llama-server` after the hardware profile's own flags, so a repeated flag is decided here |
 | `llama_cpp_reasoning` | string | how much a local model may think before answering: `auto` or empty for no flag, `off` for `--reasoning off`, or a token budget as a number for `--reasoning-budget`. A launch setting — see [How much the model may think](#how-much-the-model-may-think) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |

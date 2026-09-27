@@ -243,53 +243,63 @@ impl OllamaClient {
         }
     }
 
-    /// Select the best available model using a preferred-model priority list.
-    ///
-    /// Mirrors the Python `get_smart_default_model()` logic.
+    /// Select the model to use from the ones installed, in the order the advice
+    /// table in force on this machine prefers.
     pub async fn get_smart_default(&self) -> Result<Option<String>, OllamaError> {
+        self.smart_default(&crate::advice::active_preference())
+            .await
+    }
+
+    /// [`OllamaClient::get_smart_default`] with the preference order supplied by
+    /// the caller — which is how a user's own `model_advice.json` decides,
+    /// instead of the order baked into the binary.
+    pub async fn smart_default(
+        &self,
+        preference: &[String],
+    ) -> Result<Option<String>, OllamaError> {
         let models = self.list_models().await?;
-        if models.is_empty() {
-            return Ok(None);
-        }
-
-        // Filter out embedding models
-        let chat_models: Vec<&ModelInfo> = models
-            .iter()
-            .filter(|m| !m.name.contains("embed"))
-            .collect();
-
-        if chat_models.is_empty() {
-            return Ok(Some(models[0].name.clone()));
-        }
-
-        // Preferred models in priority order
-        let preferred = [
-            "qwen2.5:7b",
-            "qwen2.5:3b",
-            "qwen3:4b",
-            "llama3.1:8b",
-            "llama3.2:3b",
-            "mistral:7b",
-            "phi3:mini",
-            "gemma2:2b",
-        ];
-
-        for pref in &preferred {
-            for model in &chat_models {
-                if model.name.to_lowercase().contains(pref) {
-                    return Ok(Some(model.name.clone()));
-                }
-            }
-        }
-
-        // Fallback to first available chat model
-        Ok(Some(chat_models[0].name.clone()))
+        Ok(pick_chat_model(&models, preference).map(|m| m.name.clone()))
     }
 
     /// Get the base URL this client is configured with.
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
+}
+
+/// Choose from the installed models in the order `preference` lists them.
+///
+/// A preference entry is matched as a substring of the tag, case-insensitively,
+/// which is what lets one row (`"qwen3"`) stand for every size of it that
+/// happens to be installed (`qwen3:4b`, `qwen3:14b`). Embedding models are
+/// skipped: they answer a chat request by producing vectors, which reads as the
+/// agent having nothing to say rather than as the wrong model being loaded.
+pub fn pick_chat_model<'a>(
+    models: &'a [ModelInfo],
+    preference: &[String],
+) -> Option<&'a ModelInfo> {
+    if models.is_empty() {
+        return None;
+    }
+    let chat_models: Vec<&ModelInfo> = models
+        .iter()
+        .filter(|m| !m.name.to_lowercase().contains("embed"))
+        .collect();
+    if chat_models.is_empty() {
+        return Some(&models[0]);
+    }
+    for wanted in preference {
+        let wanted = wanted.to_lowercase();
+        if wanted.is_empty() {
+            continue;
+        }
+        for model in &chat_models {
+            if model.name.to_lowercase().contains(&wanted) {
+                return Some(model);
+            }
+        }
+    }
+    Some(chat_models[0])
 }
 
 #[cfg(test)]
@@ -306,6 +316,88 @@ mod tests {
     fn custom_client_trims_trailing_slash() {
         let client = OllamaClient::new("http://myhost:11434/", 10);
         assert_eq!(client.base_url(), "http://myhost:11434");
+    }
+
+    fn installed(names: &[&str]) -> Vec<ModelInfo> {
+        names
+            .iter()
+            .map(|name| ModelInfo {
+                name: (*name).to_string(),
+                size: 0,
+                digest: String::new(),
+                modified_at: String::new(),
+            })
+            .collect()
+    }
+
+    fn prefs(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    #[test]
+    fn an_installed_family_is_preferred_over_whatever_happens_to_be_first() {
+        let models = installed(&["mistral:7b", "llama3.2:1b", "qwen3:4b"]);
+        let picked = pick_chat_model(&models, &prefs(&["qwen3", "llama3.2"]))
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "qwen3:4b");
+    }
+
+    #[test]
+    fn the_shipped_preference_finds_a_model_its_row_does_not_name_exactly() {
+        // The bug the old list had: it stored full tags like "qwen3:4b" and
+        // matched them as substrings, so a machine holding "qwen3:8b" matched
+        // nothing and the answer fell back to whatever came first from the API.
+        let models = installed(&["nemotron:latest", "qwen3:8b"]);
+        let picked = pick_chat_model(&models, &crate::advice::embedded_preference())
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "qwen3:8b");
+    }
+
+    #[test]
+    fn a_machine_with_nothing_preferred_still_gets_an_answer_and_not_a_shrug() {
+        let models = installed(&["anything:latest", "other:1b"]);
+        let picked = pick_chat_model(&models, &prefs(&["qwen3"]))
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "anything:latest");
+        assert!(pick_chat_model(&[], &prefs(&["qwen3"])).is_none());
+    }
+
+    #[test]
+    fn an_embedding_model_is_not_offered_as_the_chat_default() {
+        let models = installed(&["nomic-embed-text:latest", "phi4-mini:latest"]);
+        let picked = pick_chat_model(&models, &prefs(&["qwen3"]))
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "phi4-mini:latest");
+
+        // A machine with only embeddings still gets the first model rather than
+        // nothing: refusing to answer is not better than the wrong answer here,
+        // because the caller shows what was chosen.
+        let only_embeddings = installed(&["nomic-embed-text:latest"]);
+        let picked = pick_chat_model(&only_embeddings, &prefs(&["qwen3"]))
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "nomic-embed-text:latest");
+    }
+
+    #[test]
+    fn an_empty_preference_row_does_not_swallow_the_choice() {
+        // A hand-written advice file with `"ollama_preference": ["", "qwen3"]`
+        // used to match the empty string against every tag and return the first.
+        let models = installed(&["mistral:7b", "qwen3:4b"]);
+        let picked = pick_chat_model(&models, &prefs(&["", "qwen3"]))
+            .unwrap()
+            .name
+            .clone();
+        assert_eq!(picked, "qwen3:4b");
     }
 
     // Integration tests below require a running Ollama instance.

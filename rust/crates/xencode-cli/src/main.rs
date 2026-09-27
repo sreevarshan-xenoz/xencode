@@ -541,6 +541,9 @@ enum ModelAction {
     },
     /// Show the smart-selected default model
     Default,
+    /// Say which GGUF this machine can serve, from the dated advice table,
+    /// with the pinned address and checksum to fetch it by
+    Advice,
 }
 
 #[derive(Subcommand)]
@@ -878,6 +881,27 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 }
                 "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
                 "llama_cpp_model_url" => config.llama_cpp_model_url = value.clone(),
+                // A SHA256 is accepted in the forms it is usually copied in:
+                // lower or upper case, optionally prefixed with `sha256-`. It is
+                // stored lowercased so a later comparison with a digest has one
+                // spelling to deal with. Blank unsets the pin.
+                "llama_cpp_model_sha256" => {
+                    let trimmed = value
+                        .trim()
+                        .trim_start_matches("sha256-")
+                        .trim_start_matches("SHA256-")
+                        .to_string();
+                    if !trimmed.is_empty()
+                        && (trimmed.len() != 64 || !trimmed.chars().all(|c| c.is_ascii_hexdigit()))
+                    {
+                        return Err(
+                            "llama_cpp_model_sha256 must be 64 hexadecimal characters, or empty \
+                             to stop checking the model file"
+                                .to_string(),
+                        );
+                    }
+                    config.llama_cpp_model_sha256 = trimmed.to_lowercase();
+                }
                 "llama_cpp_executable" => config.llama_cpp_executable = value.clone(),
                 "llama_cpp_args" => {
                     config.llama_cpp_args =
@@ -1114,7 +1138,121 @@ async fn run_models(action: ModelAction) -> Result<(), String> {
             }
             Ok(())
         }
+        ModelAction::Advice => run_models_advice(),
     }
+}
+
+/// Answer "which GGUF should this machine serve" from the advice table, and say
+/// how old that answer is.
+///
+/// The capacity the table is matched against is the biggest single place a
+/// model's bytes could go — one memory pool, not the sum of several, because
+/// `llama-server` puts a model's weights in one place. That is the same reading
+/// the launch preflight uses, so the two commands cannot disagree about whether
+/// a model fits.
+fn run_models_advice() -> Result<(), String> {
+    use xencode_context_rs::hwprobe;
+    use xencode_models_rs::advice;
+
+    let advice = advice::Advice::load(&advice::default_path());
+    if let advice::AdviceSource::EmbeddedAfterRefusingUserFile(reason) = &advice.source {
+        println!("note:     {reason}");
+    }
+
+    let total_kib = xencode_context_rs::budget::total_memory_kib().unwrap_or(0);
+    let available_kib = hwprobe::available_memory_kib().unwrap_or(0);
+    let exe = xencode_models_rs::llamacpp::find_llama_server(None);
+    let devices: Vec<hwprobe::ComputeDevice> = match &exe {
+        Some(exe) => hwprobe::server_devices(exe)
+            .as_deref()
+            .map(hwprobe::parse_llama_devices)
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let pools = hwprobe::memory_pools(&devices, total_kib / 1024, available_kib / 1024);
+    let largest = pools.iter().max_by_key(|pool| pool.usable_mib);
+    let capacity_bytes = largest
+        .map(|pool| pool.usable_mib * 1024 * 1024)
+        .unwrap_or(0);
+    match largest {
+        Some(pool) => println!(
+            "room:     {} ({})",
+            xencode_models_rs::human_bytes(capacity_bytes),
+            pool.label
+        ),
+        None => println!(
+            "room:     nothing measured — this machine reported no memory a model could go in"
+        ),
+    }
+
+    let age = advice.age_days(advice::AdviceFile::today_epoch_days());
+    println!("advice:   checked {}", advice.file.as_of);
+    if let Some(age) = age {
+        if age > advice::ROT_HORIZON_DAYS {
+            println!(
+                "          {age} days old, past the {} days this table is meant to be trusted \
+                 for — the entries may name models that no longer exist or quants that have \
+                 been beaten",
+                advice::ROT_HORIZON_DAYS
+            );
+        } else {
+            println!("          {age} days old");
+        }
+    }
+
+    let source = match &advice.source {
+        advice::AdviceSource::Embedded => "the table shipped with xencode".to_string(),
+        advice::AdviceSource::UserFile(path) => path.clone(),
+        advice::AdviceSource::EmbeddedAfterRefusingUserFile(_) => {
+            "the table shipped with xencode".to_string()
+        }
+    };
+    println!("from:     {source}");
+
+    match advice.tier_for(capacity_bytes) {
+        None => println!(
+            "answer:   nothing in the table fits in {r}",
+            r = xencode_models_rs::human_bytes(capacity_bytes)
+        ),
+        Some(tier) => {
+            println!("tier:     {}", tier.name);
+            for entry in &tier.gguf {
+                println!("          {}", entry.label);
+                println!(
+                    "            size     {}",
+                    xencode_models_rs::human_bytes(entry.size_bytes)
+                );
+                println!("            url      {}", entry.url());
+                println!("            sha256   {}", entry.sha256);
+            }
+            println!(
+                "\nto serve one of these:\n  \
+                 xencode config set llama_cpp_model_url \"{}\"\n  \
+                 xencode config set llama_cpp_model_sha256 \"{}\"\n  \
+                 xencode config set llama_cpp_model_path \"{}\"\n  \
+                 xencode llamacpp start\n\n\
+                 The URL is pinned to a repository revision and the checksum is the one the \
+                 host published for these bytes on {}, so a launch refuses the file rather than \
+                 serving bytes that are not the ones this table described.",
+                tier.gguf[0].url(),
+                tier.gguf[0].sha256,
+                default_gguf_path(&tier.gguf[0].file),
+                advice.file.as_of
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Where a fetched model lands by default, under the cache directory xencode
+/// already uses for its own state.
+fn default_gguf_path(file_name: &str) -> String {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    home.join(".xencode")
+        .join("models")
+        .join(file_name)
+        .display()
+        .to_string()
 }
 
 /// Report this machine as a place a model could be served, and the flags to
@@ -1312,7 +1450,11 @@ fn run_hw(action: HwAction) -> Result<(), String> {
 /// land in a sidecar `.part` file and the next attempt asks the server for the
 /// tail of it, so re-running the command after a Ctrl-C or a closed laptop lid
 /// continues where it stopped.
-async fn fetch_model(url: &str, path: &str) -> Result<(), String> {
+/// `expected_sha256` is the checksum configured for this model, if the person
+/// set one. It comes from outside the transfer, which is the only way comparing
+/// with it proves anything: a digest taken from the server's own answer would
+/// match whatever the server chose to send.
+async fn fetch_model(url: &str, path: &str, expected_sha256: Option<&str>) -> Result<(), String> {
     use std::io::IsTerminal;
     let free = xencode_context_rs::hwprobe::free_disk_bytes(path);
     let left_off = xencode_models_rs::partial_bytes(path);
@@ -1321,6 +1463,12 @@ async fn fetch_model(url: &str, path: &str) -> Result<(), String> {
             "  {path} is not there yet, but a stopped download is: {} of its bytes are on disk.",
             xencode_models_rs::human_bytes(left_off)
         );
+        if expected_sha256.is_some() {
+            println!(
+                "  those bytes will be hashed along with the rest, so a prefix that is not the \
+                 file this checksum describes fails the whole transfer."
+            );
+        }
     } else {
         println!("  {path} is not there yet; fetching it now.");
     }
@@ -1347,7 +1495,8 @@ async fn fetch_model(url: &str, path: &str) -> Result<(), String> {
             println!("  {line}");
         }
     };
-    let result = xencode_models_rs::fetch_model_file(url, path, free, &on_progress).await;
+    let result =
+        xencode_models_rs::fetch_model_file(url, path, free, expected_sha256, &on_progress).await;
     if tty {
         println!();
     }
@@ -1356,6 +1505,20 @@ async fn fetch_model(url: &str, path: &str) -> Result<(), String> {
         "  model ready: {}",
         xencode_models_rs::human_bytes(got.bytes)
     );
+    if got.verified {
+        println!(
+            "  checksum verified: the bytes hash to what was expected ({short}…)",
+            short = xencode_models_rs::short_rev(&got.sha256)
+        );
+    } else {
+        println!(
+            "  unsigned: the bytes hash to {short}…, but nothing was expected, so that number \
+             describes this file and proves nothing about where it came from. Set \
+             llama_cpp_model_sha256 (or run xencode models advice for a pinned checksum) to \
+             make a future launch check it.",
+            short = xencode_models_rs::short_rev(&got.sha256)
+        );
+    }
     if got.resumed_from > 0 {
         println!(
             "  {} of that came from the bytes the earlier attempt had already fetched.",
@@ -1462,6 +1625,15 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
             // Nothing below this line means anything without a model on disk, so
             // the fetch comes first: it is the longest step of a bring-up and the
             // only one that can be interrupted and picked up again.
+            // What the file is supposed to hash to, if anyone said. Empty config
+            // means nothing is pinned, which is reported as such rather than
+            // treated as a check that passed.
+            let expected = config.llama_cpp_model_sha256.trim().to_string();
+            let expected = if expected.is_empty() {
+                None
+            } else {
+                Some(expected.as_str())
+            };
             if !std::path::Path::new(&model_path).exists() {
                 let url = config.llama_cpp_model_url.trim().to_string();
                 if url.is_empty() {
@@ -1469,7 +1641,67 @@ async fn run_llamacpp(action: LlamacppAction) -> Result<(), String> {
                         "no model at {model_path}, and nowhere to get it from (set config llama_cpp_model_url to the HTTPS address of the GGUF)"
                     ));
                 }
-                fetch_model(&url, &model_path).await?;
+                fetch_model(&url, &model_path, expected).await?;
+            } else {
+                // A file that is already here has not been looked at since it
+                // arrived. Checking it costs one read of the file — about what
+                // the loader spends opening it — and turns "the host replaced
+                // this file" into a refusal before a server is started rather
+                // than into wrong answers afterwards.
+                let check = xencode_models_rs::check_model_file(&model_path, expected);
+                match &check {
+                    xencode_models_rs::FileCheck::Mismatch { expected, actual } => {
+                        return Err(format!(
+                            "refusing to start: {model_path} hashes to {}, not the {} this \
+                             configuration expects. The file is not the one that was pinned — \
+                             delete it and start again to fetch it fresh, or set \
+                             llama_cpp_model_sha256 to the checksum you now want.",
+                            xencode_models_rs::short_rev(actual),
+                            xencode_models_rs::short_rev(expected)
+                        ));
+                    }
+                    xencode_models_rs::FileCheck::Unreadable { reason, .. } => {
+                        return Err(format!("refusing to start: {reason}"));
+                    }
+                    other => {
+                        let label = other.label();
+                        println!("  model:   {model_path} ({label})");
+                        // A file with no checksum configured has nothing to be
+                        // checked against, but xencode may have written down
+                        // where its bytes came from when it fetched them. That
+                        // record is this program's own note, so it is printed as
+                        // one and not as a passing test.
+                        if matches!(other, xencode_models_rs::FileCheck::Unsigned { .. }) {
+                            match xencode_models_rs::read_provenance(&model_path) {
+                                Some(record) => {
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|since| since.as_secs())
+                                        .unwrap_or(0);
+                                    let age_days = now.saturating_sub(record.fetched_at) / 86_400;
+                                    let revision = match &record.revision {
+                                        Some(revision) => format!(
+                                            "at revision {}",
+                                            xencode_models_rs::short_rev(revision)
+                                        ),
+                                        None => "from a host that named no revision".to_string(),
+                                    };
+                                    println!(
+                                        "  record:  xencode wrote this file down {} day(s) ago, \
+                                         {revision}, {}",
+                                        age_days,
+                                        xencode_models_rs::human_bytes(record.bytes)
+                                    );
+                                }
+                                None => println!(
+                                    "  record:  no checksum is set for this file and xencode did \
+                                     not download it, so nothing here says what its bytes are \
+                                     supposed to be"
+                                ),
+                            }
+                        }
+                    }
+                }
             }
             let exe = find_llama_server(exec.as_deref().or(
                 if config.llama_cpp_executable.is_empty() {
