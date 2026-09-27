@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gitinfo::{current_git_info, git_file_set, is_git_repo, GitInfo};
 use crate::index::{write_atomic, FileEntry, FilesIndex, Manifest};
-use crate::scanner::{scan_tree, ScanOptions};
+use crate::scanner::{language_for_extension, scan_tree, ScanOptions};
 use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols};
 
 /// Directory name of the context engine inside a project.
@@ -288,7 +288,9 @@ pub fn init_project(
     let rust_files: Vec<String> = scan
         .files
         .iter()
-        .filter(|e| e.ext == "rs" && !e.is_secret && !e.is_binary)
+        .filter(|e| {
+            language_for_extension(&e.ext).has_semantic_tier() && !e.is_secret && !e.is_binary
+        })
         .map(|e| e.path.clone())
         .collect();
     let symbols = extract_repo_symbols(&root, &rust_files)?;

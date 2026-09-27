@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a file in another language is now refused as that language, and the Rust-only scope is one decision
+
+Three surfaces read code rather than text: the symbols `/init` records, the dependency graph
+`what_breaks` walks, and the declaration `edit_symbol` replaces. All three have always worked
+on Rust alone, but that was decided four times over, in four comparisons scattered across the
+index, the refresh path and the repository advice — the kind of arrangement where one of them
+can drift without anyone noticing. It is one predicate now, sitting beside the list of the 25
+languages the scanner can name, and a test pins the fact that exactly one language has code
+reading behind it.
+
+What a user sees is the sharper half. Ask `edit_symbol` to change a function in a Python file
+and the answer used to be that the file does not parse, which is a statement about the grammar
+this build loads rather than about the file — the file parses perfectly well, in Python. The
+language is asked before the parser now: `Symbol-level editing covers Rust only —
+helpers/main.py is a python file. read_file, search_files, edit_file and write_file work on it
+as text.` `what_breaks` answers the same way, because an index that never read a file has no
+consumers of it to list, and reporting an empty list would imply it looked.
+
+Nothing else moved. `/init` still counts every language it can name, so the language panel,
+the file tree and retrieval by path keep covering a mixed repository, and no per-language
+adapter registry was added — the fallback for other languages is the text tools, which is what
+they already are. A rebuilt index of this workspace proved the refactor changed no behaviour:
+200 files indexed across every language, exactly 137 of them with symbols, the same 137 Rust
+files as before.
+
 ### Added — the agent can ask what links to a file before it edits that file
 
 `what_breaks(path, symbol?)` is the thirteenth tool the chat model can call, and it answers a

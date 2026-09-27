@@ -99,7 +99,10 @@ pub use rollup::{
     read_rollup, refresh_rollup, rollup_path, write_rollup, MetricsRollup, Percentiles,
     ProfileSample, SessionTotals, TokenTotals, RATE_SAMPLE_WINDOW, ROLLUP_VERSION,
 };
-pub use scanner::{scan_tree, Language, ScanOptions, ScanOutcome};
+pub use scanner::{
+    detect_language, language_for_extension, language_has_semantic_tier, scan_tree,
+    semantic_tier_refusal, Language, ScanOptions, ScanOutcome,
+};
 pub use seeds::{
     all_seed_cases, seed_case, write_seed, BugShape, GraderRun, SeedCase, SeedEdit, SeedFile,
     SeededTask,

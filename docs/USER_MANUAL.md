@@ -318,6 +318,14 @@ the agent explains or re-plans instead of looping.
 `agent_max_rounds` (default 16) caps how many tool rounds one turn may take;
 after that the model is asked for a prose answer with no tools offered.
 
+Three of these tools read *code* rather than text — the symbols `/init` records,
+the dependency graph `what_breaks` walks, and the declaration `edit_symbol`
+replaces — and they read Rust, by policy. A file of another language is refused
+as the language it is, before anything is parsed, and pointed at `read_file`,
+`search_files`, `edit_file` and `write_file`, which work on any file as text.
+`/init` still counts every language it finds, so the rest of the TUI — the
+language panel, the file tree, retrieval by path — covers a mixed repository.
+
 `run_command` is what closes the edit → test → fix loop: the prompt shows the
 literal command line (never a diff, because there is no proposed file change to
 show) and the answer comes back as `$ <command>`, `exit <code>` and the

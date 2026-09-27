@@ -760,6 +760,15 @@ fn planned_symbol_edit(
         return Err(err("edit_symbol needs a string \"new_body\""));
     };
     let (full, display) = workspace_path(root, raw)?;
+    // Asked before the parser: a valid file in another language is refused as the
+    // language it is, not as code that fails to parse.
+    if let Some(refusal) = xencode_context_rs::semantic_tier_refusal(
+        "Symbol-level editing",
+        &display,
+        xencode_context_rs::detect_language(&full),
+    ) {
+        return Err(err(refusal));
+    }
     let text = read_text(&full, &display)?;
     match xencode_context_rs::replace_symbol_body(&text, symbol, new_body) {
         Err(failure) => Err(err(failure.to_message())),
@@ -1589,6 +1598,15 @@ fn tool_what_breaks(root: &Path, args: &serde_json::Map<String, serde_json::Valu
         return err("what_breaks needs a string \"path\"");
     };
     let symbol = arg_str(args, "symbol").filter(|s| !s.is_empty());
+    // The index only ever read Rust, so a file of another language has no
+    // consumers recorded for it — say that, rather than reporting an empty list.
+    if let Some(refusal) = xencode_context_rs::semantic_tier_refusal(
+        "The dependency index",
+        raw,
+        xencode_context_rs::detect_language(Path::new(raw)),
+    ) {
+        return err(refusal);
+    }
     match xencode_context_rs::impact_from_snapshot(root, raw, symbol) {
         Ok(report) => render_impact(&report),
         Err(e) => err(e.to_string()),
@@ -2689,6 +2707,46 @@ mod tests {
         );
         assert!(absent.contains("no declaration named `tally`"), "{absent}");
         assert!(absent.contains("total"), "{absent}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_file_in_another_language_is_refused_as_that_language_rather_than_as_broken_code() {
+        let root = temp_root("rust-only");
+        std::fs::create_dir_all(root.join("helpers")).unwrap();
+        // Valid Python, and a name it does declare. The refusal has to arrive from
+        // the language policy, before the Rust parser is asked anything, or the
+        // answer blames the file for a grammar this build never loads.
+        let source = "def total(readings):\n    return sum(readings)\n";
+        std::fs::write(root.join("helpers/main.py"), source).unwrap();
+
+        let refused = tool_edit_symbol(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "helpers/main.py",
+                "symbol": "total",
+                "new_body": "{ 0 }",
+            })),
+        );
+        assert!(refused.starts_with("error:"), "{refused}");
+        assert!(refused.contains("covers Rust only"), "{refused}");
+        assert!(refused.contains("a python file"), "{refused}");
+        assert!(refused.contains("edit_file"), "{refused}");
+        assert!(!refused.contains("parse"), "{refused}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("helpers/main.py")).unwrap(),
+            source,
+            "a refused edit leaves every byte as it was"
+        );
+
+        // The same policy on the read side: the index never looked at this file,
+        // so "nothing links to it" would be a claim about the wrong thing.
+        let impact = tool_what_breaks(
+            &root,
+            &args_of(serde_json::json!({"path": "helpers/main.py"})),
+        );
+        assert!(impact.contains("covers Rust only"), "{impact}");
+        assert!(impact.contains("a python file"), "{impact}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 

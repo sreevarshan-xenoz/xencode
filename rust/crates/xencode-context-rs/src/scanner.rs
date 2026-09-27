@@ -181,6 +181,52 @@ impl Language {
             Language::Other => "other",
         }
     }
+
+    /// Whether the semantic tier covers this language: the parse tree behind the
+    /// project index's symbols, the dependency edges resolved from it, and the
+    /// edit that replaces a declaration's body by name.
+    ///
+    /// Exactly one language does, and that is a decision rather than an
+    /// accident of which grammar happens to be linked in. Every consumer of that
+    /// tier reads Rust's module paths — `use`, `mod`, `impl Trait for Type` — so
+    /// a second grammar would bring a second path resolver with nothing to check
+    /// it against, and files outside the tier are named as what they are instead
+    /// of being indexed by a rule that guesses from how a line starts.
+    pub fn has_semantic_tier(self) -> bool {
+        matches!(self, Language::Rust)
+    }
+}
+
+/// Whether a language name as it is stored in `files.json` is one the semantic
+/// tier reads code in. Derived from [`Language::has_semantic_tier`] rather than
+/// from a string compared at each call site, so the scope stays one decision.
+pub fn language_has_semantic_tier(name: &str) -> bool {
+    Language::ALL
+        .iter()
+        .any(|language| language.has_semantic_tier() && language.as_str() == name)
+}
+
+/// The refusal the semantic tier issues on its own grounds, when a file is not
+/// one it reads code: `None` means the caller should go ahead and attempt the
+/// work. Without this, a valid file in another language reaches the Rust parser
+/// and comes back saying it does not parse, which is a statement about the wrong
+/// grammar rather than about the file.
+///
+/// `what` names the surface being asked, so the answer can point at the tools
+/// that do cover the file.
+pub fn semantic_tier_refusal(what: &str, display: &str, language: Language) -> Option<String> {
+    if language.has_semantic_tier() {
+        return None;
+    }
+    let named = if language == Language::Other {
+        "of no language this build names".to_string()
+    } else {
+        format!("a {} file", language.as_str())
+    };
+    Some(format!(
+        "{what} covers Rust only — {display} is {named}. `read_file`, `search_files`, \
+         `edit_file` and `write_file` work on it as text."
+    ))
 }
 
 /// Map a file extension (without the leading dot, lowercased) to a language.
@@ -660,5 +706,54 @@ mod tests {
         let err = scan_tree(&root, &opts).unwrap_err();
         assert_eq!(err.0, "scan cancelled");
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_semantic_tier_covers_one_language_and_says_which() {
+        let covered: Vec<&str> = Language::ALL
+            .iter()
+            .filter(|language| language.has_semantic_tier())
+            .map(|language| language.as_str())
+            .collect();
+        // One, and it is Rust. A second language joining has to be decided here,
+        // in the same place the name of the grammar would be added, rather than
+        // one call site starting to accept files the tier cannot read.
+        assert_eq!(covered, vec!["rust"]);
+        // The form the index stores its language in agrees with the predicate.
+        assert!(language_has_semantic_tier("rust"));
+        assert!(!language_has_semantic_tier("python"));
+        assert!(!language_has_semantic_tier(""));
+    }
+
+    #[test]
+    fn a_file_outside_the_tier_is_named_by_its_language_not_by_its_syntax() {
+        let said = semantic_tier_refusal(
+            "Symbol-level editing",
+            "helpers/main.py",
+            detect_language(Path::new("helpers/main.py")),
+        )
+        .expect("a Python file is outside the tier");
+        assert!(said.contains("Rust only"), "{said}");
+        assert!(said.contains("a python file"), "{said}");
+        assert!(said.contains("edit_file"), "{said}");
+        // The point of asking before parsing: a file that is perfectly good
+        // Python must not be reported as code that fails to parse.
+        assert!(!said.contains("parse"), "{said}");
+        assert!(semantic_tier_refusal(
+            "Symbol-level editing",
+            "src/lib.rs",
+            detect_language(Path::new("src/lib.rs"))
+        )
+        .is_none());
+        let mystery = semantic_tier_refusal(
+            "Symbol-level editing",
+            "notes.zzz",
+            detect_language(Path::new("notes.zzz")),
+        )
+        .unwrap();
+        assert!(
+            mystery.contains("of no language this build names"),
+            "{mystery}"
+        );
     }
 }

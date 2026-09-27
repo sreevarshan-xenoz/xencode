@@ -17,7 +17,7 @@ use crate::index::{
     FilesIndex, Manifest,
 };
 use crate::init::{ContextError, XENCODE_DIR};
-use crate::scanner::count_loc;
+use crate::scanner::{count_loc, language_has_semantic_tier};
 use crate::symbols::{build_graph, extract_rust_symbols, DepEdge, PerFileSymbols};
 
 /// Outcome of [`refresh_rust_file`]: either the snapshot changed and carries
@@ -51,7 +51,7 @@ pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, 
     let indexed = index
         .files
         .iter()
-        .any(|e| e.path == rel && e.language == "rust");
+        .any(|e| e.path == rel && language_has_semantic_tier(&e.language));
     if !indexed {
         return Ok(RefreshOutcome::NoOp);
     }
@@ -88,7 +88,7 @@ pub fn refresh_rust_file(root: &Path, rel_path: &str) -> Result<RefreshOutcome, 
     let rust_files: Vec<String> = index
         .files
         .iter()
-        .filter(|e| e.language == "rust")
+        .filter(|e| language_has_semantic_tier(&e.language))
         .map(|e| e.path.clone())
         .collect();
     let graph = build_graph(&rust_files, &symbols);
