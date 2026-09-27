@@ -298,10 +298,12 @@ back to the model before it continues.
 | `list_dir(path?)` | Directory listing, `/` marks directories | read-only |
 | `search_files(pattern, path?)` | Regex search over the tree (skips `target/`, `node_modules/`, dot-dirs; 100 hits) | read-only |
 | `repo_advise(filter?)` | Findings from the project index | read-only |
+| `what_breaks(path, symbol?)` | The files that link to a file, walked backwards through the project index up to 3 steps; each answer says an edge is a resolved `use`/`mod`/`impl`, not a checked call site. With `symbol`, each line also says whether that file's own `use` writes the name | read-only |
 | `update_plan(items)` | Post or refresh the todo list the user watches | read-only |
 | `background_poll(id)` / `background_stop(id)` | Output / cancel of a background task | read-only |
 | `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |
 | `edit_file(path, old, new, all?)` | Exact string replace; refuses an ambiguous match unless `all` | file change |
+| `edit_symbol(path, symbol, new_body)` | Replace the body of one Rust declaration, found by parsing the file rather than by matching text; refuses an absent or twice-declared name, a declaration with no body here, and anything that would not parse afterwards | file change |
 | `run_command(command)` | `sh -c` in the project root, waits and returns the exit status plus output | shell command |
 | `background_start(command, cwd?, name?)` | Start a shell command in the background (`Ctrl+K` panel) | shell command |
 

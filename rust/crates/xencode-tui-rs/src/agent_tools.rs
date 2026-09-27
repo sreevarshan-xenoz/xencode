@@ -118,8 +118,8 @@ pub fn tool_class(tool: &str) -> ToolClass {
         return ToolClass::External;
     }
     match tool {
-        "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files"
-        | "update_plan" => ToolClass::ReadOnly,
+        "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
+        | "search_files" | "update_plan" => ToolClass::ReadOnly,
         "write_file" | "edit_file" | "edit_symbol" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
@@ -1149,6 +1149,7 @@ async fn execute_tool_call_plan(
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
+        "what_breaks" => tool_what_breaks(root, &args),
         other => format!("error: unknown tool {other}"),
     }
 }
@@ -1510,6 +1511,88 @@ fn render_advise(items: &[xencode_context_rs::Advice]) -> String {
     }
     out.truncate(out.len() - 1);
     out
+}
+
+/// Consumers handed back to the model per `what_breaks` call. The same budget
+/// the advice report uses, because both are read as one tool result.
+const MODEL_IMPACT_CAP: usize = 40;
+
+/// The answer, in the shape a model reads: the target, what it declares, then
+/// the consumers grouped by how far back they are, each with the path the index
+/// resolved. The basis line is not decoration — an edge here is a module path
+/// that resolves, and a list of files that link to the target is a weaker claim
+/// than a list of files that call what is being edited.
+fn render_impact(report: &xencode_context_rs::ImpactReport) -> String {
+    let mut lines: Vec<String> = vec![format!("what links to {}", report.target)];
+    if !report.declared.is_empty() {
+        let surface = if report.declared_more > 0 {
+            format!(
+                "{}, +{} more",
+                report.declared.join(", "),
+                report.declared_more
+            )
+        } else {
+            report.declared.join(", ")
+        };
+        lines.push(String::new());
+        lines.push(format!("It declares: {surface}"));
+    }
+    lines.push(String::new());
+    if report.files.is_empty() {
+        lines.push(
+            "Nothing in the index links to it: no file writes a `use` path to it, declares \
+             it as a module, or implements a trait it defines."
+                .to_string(),
+        );
+    } else {
+        let mut shown_hop = 0;
+        for file in report.files.iter().take(MODEL_IMPACT_CAP) {
+            if file.hops != shown_hop {
+                shown_hop = file.hops;
+                lines.push(if file.hops == 1 {
+                    "Links to it directly:".to_string()
+                } else {
+                    format!("Reached through those, {} hops back:", file.hops)
+                });
+            }
+            let mut line = format!("  {}  via {}", file.file, file.via.join(", "));
+            if report.symbol.is_some() {
+                line.push_str(if file.uses_symbol {
+                    " — its own `use` names it"
+                } else {
+                    " — does not name it"
+                });
+            }
+            lines.push(line);
+        }
+        if report.files.len() > MODEL_IMPACT_CAP {
+            lines.push(format!(
+                "… +{} more, further back",
+                report.files.len() - MODEL_IMPACT_CAP
+            ));
+        }
+    }
+    lines.push(String::new());
+    lines.push(report.basis());
+    if let Some(symbol) = &report.symbol {
+        lines.push(format!(
+            "\"names it\" means `{symbol}` appears as a whole path segment in that file's own \
+             `use` statements. A file that reaches this one through `mod` or `impl` has no `use` \
+             to name it in, so it is reported as not naming it rather than as unrelated."
+        ));
+    }
+    lines.join("\n")
+}
+
+fn tool_what_breaks(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let Some(raw) = arg_str(args, "path") else {
+        return err("what_breaks needs a string \"path\"");
+    };
+    let symbol = arg_str(args, "symbol").filter(|s| !s.is_empty());
+    match xencode_context_rs::impact_from_snapshot(root, raw, symbol) {
+        Ok(report) => render_impact(&report),
+        Err(e) => err(e.to_string()),
+    }
 }
 
 fn arg_id(args: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
@@ -2015,6 +2098,143 @@ mod tests {
             out.ends_with("… +5 more (call again with a path filter)"),
             "{out}"
         );
+    }
+
+    /// One temporary project, indexed for real by `init_project`, so the tool
+    /// reads a snapshot written the way the TUI writes it.
+    fn indexed_temp_project(tag: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "xencode-impact-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod a;\nmod b;\n").unwrap();
+        std::fs::write(
+            root.join("src/a.rs"),
+            "use crate::b::bee;\npub fn ay() {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/b.rs"),
+            "use crate::a::ay;\npub fn bee() {}\n",
+        )
+        .unwrap();
+        std::fs::File::create(root.join("Cargo.toml")).unwrap();
+        xencode_context_rs::init_project(
+            &root,
+            std::sync::Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .expect("init");
+        assert!(root.join(".xencode/index/deps.json").exists(), "{tag}");
+        root
+    }
+
+    #[tokio::test]
+    async fn what_breaks_lists_the_files_that_link_to_the_one_being_edited() {
+        let root = indexed_temp_project("list");
+        let rt = new_task_runtime();
+        let out = execute_tool_call(
+            &rt,
+            &root,
+            &call("what_breaks", serde_json::json!({"path": "src/b.rs"})),
+        )
+        .await;
+        assert!(out.starts_with("what links to src/b.rs"), "{out}");
+        assert!(out.contains("It declares: bee"), "{out}");
+        assert!(out.contains("Links to it directly:"), "{out}");
+        assert!(out.contains("src/a.rs  via crate::b"), "{out}");
+        assert!(out.contains("src/lib.rs  via mod b"), "{out}");
+        // The answer states what an edge is, because "who links here" and "who
+        // calls what I am changing" are different claims.
+        assert!(out.contains("not a type-checked call site"), "{out}");
+        assert!(!out.contains("does not name it"), "{out}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn what_breaks_names_the_consumers_that_write_the_symbol_themselves() {
+        let root = indexed_temp_project("symbol");
+        let rt = new_task_runtime();
+        let out = execute_tool_call(
+            &rt,
+            &root,
+            &call(
+                "what_breaks",
+                serde_json::json!({"path": "b.rs", "symbol": "bee"}),
+            ),
+        )
+        .await;
+        // The tail is the same file the full path named.
+        assert!(out.starts_with("what links to src/b.rs"), "{out}");
+        assert!(
+            out.contains("src/a.rs  via crate::b — its own `use` names it"),
+            "{out}"
+        );
+        assert!(
+            out.contains("src/lib.rs  via mod b — does not name it"),
+            "{out}"
+        );
+        assert!(
+            out.contains("`bee` appears as a whole path segment"),
+            "{out}"
+        );
+
+        // A leaf of the graph is answered as that, with the index size beside it,
+        // rather than as a promise that nothing depends on it.
+        let leaf = execute_tool_call(
+            &rt,
+            &root,
+            &call("what_breaks", serde_json::json!({"path": "src/lib.rs"})),
+        )
+        .await;
+        assert!(leaf.contains("Nothing in the index links to it"), "{leaf}");
+        assert!(leaf.contains("3 Rust files"), "{leaf}");
+
+        let absent = execute_tool_call(
+            &rt,
+            &root,
+            &call("what_breaks", serde_json::json!({"path": "src/nope.rs"})),
+        )
+        .await;
+        assert!(
+            absent.starts_with("error: nothing in the project index"),
+            "{absent}"
+        );
+        assert!(absent.contains("it does hold: src/a.rs"), "{absent}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn what_breaks_without_an_index_or_without_a_path_says_which() {
+        let rt = new_task_runtime();
+        let no_index = execute_tool_call(
+            &rt,
+            Path::new("/definitely-not-a-repo-xencode"),
+            &call("what_breaks", serde_json::json!({"path": "src/a.rs"})),
+        )
+        .await;
+        assert!(
+            no_index.starts_with("error: no project index"),
+            "{no_index}"
+        );
+        assert!(no_index.contains("run /init first"), "{no_index}");
+        let no_path = execute_tool_call(
+            &rt,
+            Path::new("/definitely-not-a-repo-xencode"),
+            &call("what_breaks", serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(no_path, "error: what_breaks needs a string \"path\"");
+    }
+
+    #[test]
+    fn what_breaks_is_read_only_and_shows_in_the_tool_loop() {
+        assert_eq!(tool_class("what_breaks"), ToolClass::ReadOnly);
     }
 
     fn args_of(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {

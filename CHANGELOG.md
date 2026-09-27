@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent can ask what links to a file before it edits that file
+
+`what_breaks(path, symbol?)` is the thirteenth tool the chat model can call, and it answers a
+question asked before an edit rather than after one: which files in this project link to the
+one you are about to change. The answer comes from walking the dependency edges the project
+index already holds, backwards, up to three steps. Nothing new has to be built or configured —
+`/init` already writes those edges, and the reach limit is the same one the repository advice
+uses, so the two surfaces cannot disagree about what "affected" means.
+
+An edge here is made for one of three reasons, and the tool now says which: some file wrote a
+`use` path that resolves to this one, declared it as a module, or implemented a trait this one
+defines. Passing a symbol name does not shorten the list — it marks each entry with whether
+that file's own `use` statements write the name being edited, and says out loud that a file
+reaching the module by `mod` or `impl` has no `use` to name it in, so it is not being called
+unrelated. Names are matched as whole path segments, which is why `rap` is not a hit inside
+`wrap`.
+
+The claim is deliberately the weak one. Each report ends by stating that an edge is a module
+path that resolves rather than a type-checked call site, and by naming how many files and edges
+the index it read contained — so a short list is understood as a fact about that snapshot
+instead of a promise about the code, and the reader who wants certainty still has to open the
+file. Asking for a file the index does not hold returns the indexed paths that share its name,
+and a name matching more than one file is refused with both full paths rather than one picked
+quietly. This is a read: it asks no approval, writes nothing, and leaves nothing to undo.
+
+Measured on this repository's own index, rebuilt by the same code `/init` runs: over 137 Rust
+files and 259 resolved edges, asking for `symbols.rs` by its bare name surfaced 10 consumers —
+9 linking it directly, 1 two steps back — and 5 of those write `build_graph` in their own
+`use`, which was then checked against the source line by line. Those numbers are re-takeable
+rather than remembered: an ignored test prints them on demand.
+
 ### Added — the agent can edit a declaration by name, and the edit is checked before it lands
 
 `edit_symbol(path, symbol, new_body)` is the twelfth tool the chat model can call, and the

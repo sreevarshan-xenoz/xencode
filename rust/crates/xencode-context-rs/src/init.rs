@@ -32,6 +32,20 @@ pub enum ContextError {
     },
     /// A snapshot read found no usable `.xencode` index at `path`.
     NoIndex(PathBuf),
+    /// The index has no file matching what was asked for. `near` are paths it
+    /// does hold that share the name, because a wrong directory is the common
+    /// mistake and `not found` alone would not help.
+    NotIndexed {
+        asked: String,
+        near: Vec<String>,
+        indexed: usize,
+    },
+    /// A path given by its tail matches more than one indexed file, so the
+    /// caller has to say which one.
+    AmbiguousTarget {
+        asked: String,
+        matches: Vec<String>,
+    },
     Scan(String),
     Cancelled,
 }
@@ -46,6 +60,24 @@ impl fmt::Display for ContextError {
                 f,
                 "no project index in {} — start the TUI and run /init first",
                 path.display()
+            ),
+            ContextError::NotIndexed {
+                asked,
+                near,
+                indexed,
+            } => {
+                write!(f, "nothing in the project index is `{asked}`")?;
+                if near.is_empty() {
+                    write!(f, " (the index covers {indexed} files)")
+                } else {
+                    write!(f, " — it does hold: {}", near.join(", "))
+                }
+            }
+            ContextError::AmbiguousTarget { asked, matches } => write!(
+                f,
+                "`{asked}` matches more than one indexed file: {} — name the one you \
+                 mean by its full path",
+                matches.join(", ")
             ),
             ContextError::Scan(msg) => f.write_str(msg),
             ContextError::Cancelled => f.write_str("cancelled"),
