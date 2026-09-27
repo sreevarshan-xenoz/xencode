@@ -922,6 +922,38 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                             Some(trimmed.to_string())
                         };
                 }
+                // The same two questions the request body will answer, checked
+                // with the code that turns the word into the field. Ollama has no
+                // thinking budget, so a number here is refused with the route
+                // that does have one named.
+                "ollama_reasoning" => {
+                    let trimmed = value.trim();
+                    xencode_providers_rs::OllamaRequest::from_settings(Some(trimmed), None)?;
+                    config.ollama_reasoning =
+                        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        };
+                }
+                // The duration itself is Ollama's to read; all that is checked
+                // here is that the value is shaped like a duration at all, since
+                // a wrong one otherwise surfaces as a failed request in the
+                // middle of a turn rather than as a message now.
+                "ollama_keep_alive" => {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty() && !trimmed.chars().any(|c| c.is_ascii_digit()) {
+                        return Err(format!(
+                            "ollama_keep_alive must be a duration like \"10m\" or \"30s\", or \"0\" \
+                             to unload the model after a request, not \"{value}\""
+                        ));
+                    }
+                    config.ollama_keep_alive = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                }
                 "max_cache_size" => {
                     config.max_cache_size = value
                         .parse()
@@ -2521,7 +2553,58 @@ async fn run_query_once(
             config.llama_cpp_url
         );
     }
-    let context_window = xencode_providers_rs::effective_context_window(&model, server_window);
+    // What the model itself says about the window its weights hold and whether
+    // it claims it can think, asked of Ollama when this model goes there (MI-2).
+    // The answer settles two numbers that have to be one number: the window
+    // written into the request and the window the context below is filled for. A
+    // turn budgeted past what the server was told to open is refused part-way
+    // through with `exceed_context_size_error` rather than quietly truncated.
+    let on_ollama = xencode_providers_rs::routes_to_ollama(&model);
+    let ollama_show = if on_ollama {
+        OllamaClient::new(&config.ollama_url, 3)
+            .show_model(&model)
+            .await
+            .ok()
+    } else {
+        None
+    };
+    let mut ollama_request = xencode_providers_rs::OllamaRequest::from_settings(
+        config.ollama_reasoning.as_deref(),
+        config.ollama_keep_alive.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut context_window = xencode_providers_rs::effective_context_window(&model, server_window);
+    if on_ollama {
+        // What to ask for before the model gets a say: what this machine's
+        // profile can serve, never the family table's advertised window.
+        ollama_request.num_ctx = Some(xencode_providers_rs::ollama_window_asked(
+            context_window,
+            hardware.profile.ctx_tokens() as u32,
+        ));
+        let (decided, notes) =
+            xencode_providers_rs::ollama_request_for(ollama_show.as_ref(), ollama_request);
+        ollama_request = decided;
+        context_window = ollama_request.num_ctx;
+        if let Some(tokens) = context_window {
+            eprintln!("context: asking Ollama for a {tokens}-token window");
+        }
+        for note in notes {
+            eprintln!("context: {note}");
+        }
+        // Two controls Ollama's `/api/chat` has nowhere to put. Asking for one and
+        // receiving an ordinary answer would be a silence nobody could find except
+        // in the source, so each is said as it is dropped.
+        if grammar.is_some() {
+            eprintln!(
+                "sampling: --grammar was not sent — Ollama takes a JSON schema in `format`, not a GBNF grammar"
+            );
+        }
+        if mirostat.is_some() {
+            eprintln!(
+                "sampling: --mirostat was not sent — a running Ollama answers it as `invalid option provided`"
+            );
+        }
+    }
     let assembly = xencode_context_rs::assemble_chat(xencode_context_rs::ChatInput {
         profile: hardware.profile,
         context_window,
@@ -2629,6 +2712,7 @@ async fn run_query_once(
         config.api_keys.remote_api_key.clone(),
     )
     .with_request_timeout(config.response_timeout)
+    .with_ollama_request(ollama_request)
     .with_egress_policy(EgressPolicy::new(config.allow_cloud_models));
 
     let mut response_content = String::new();

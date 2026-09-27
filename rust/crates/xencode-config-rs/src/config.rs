@@ -129,6 +129,23 @@ pub struct XencodeConfig {
     #[serde(default = "default_ollama_url")]
     pub ollama_url: String,
 
+    /// How much an Ollama model is allowed to think before it answers: `off`
+    /// for `think: false`, `on` for `think: true`, anything else — including
+    /// `auto` and leaving this out — sends no `think` field at all and the
+    /// model's own default decides.
+    ///
+    /// Unlike `llama_cpp_reasoning`, which is a launch flag because a running
+    /// `llama-server` ignores the same fields in a request body, this one is
+    /// sent per request and Ollama honours it there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_reasoning: Option<String>,
+
+    /// How long Ollama should hold a model loaded in memory after a request
+    /// finishes (`"10m"`, `"30s"`, or `"0"` to unload it right away). Unset
+    /// sends nothing, which leaves the decision to Ollama's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_keep_alive: Option<String>,
+
     /// llama.cpp server URL.
     #[serde(default = "default_llama_cpp_url")]
     pub llama_cpp_url: String,
@@ -430,6 +447,8 @@ impl Default for XencodeConfig {
             agent_command_timeout: default_agent_command_timeout(),
             agent_fallback_models: Vec::new(),
             ollama_url: default_ollama_url(),
+            ollama_reasoning: None,
+            ollama_keep_alive: None,
             llama_cpp_url: default_llama_cpp_url(),
             remote_base_url: String::new(),
             llama_cpp_model_path: default_llama_cpp_model_path(),
@@ -602,6 +621,10 @@ mod tests {
         assert!(config.llama_cpp_max_tokens.is_none());
         // A model that thinks is left alone until the user says otherwise.
         assert!(config.llama_cpp_reasoning.is_none());
+        // The same for a model served by Ollama, where the ask rides in the
+        // request instead of the launch flags, and for how long it stays loaded.
+        assert!(config.ollama_reasoning.is_none());
+        assert!(config.ollama_keep_alive.is_none());
         assert_eq!(config.max_cache_size, 100);
         assert_eq!(config.response_timeout, 30);
         assert!(config.cache_enabled);
@@ -960,6 +983,11 @@ mod tests {
         // A config written before the profile was selectable says nothing about
         // it, which means "let the machine decide" rather than "no profile".
         assert_eq!(config.hardware_profile, "auto");
+        // The same goes for what to ask of Ollama: a file written before these
+        // existed asks nothing, and asks nothing in the same way an empty string
+        // would not — it leaves the model's own default in charge.
+        assert!(config.ollama_reasoning.is_none());
+        assert!(config.ollama_keep_alive.is_none());
 
         fs::remove_dir_all(&dir).unwrap();
     }

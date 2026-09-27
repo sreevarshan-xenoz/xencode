@@ -35,6 +35,45 @@ struct OllamaModel {
     modified_at: String,
 }
 
+/// What a running Ollama reports about one of its own models.
+///
+/// Read from `POST /api/show`, which answers without loading or running the
+/// model. Two things here cannot be known any other way: how large a window the
+/// weights were trained for, and which of `tools`, `thinking` and the rest the
+/// model claims. Both change what is safe to put in a request — see
+/// [`OllamaClient::show_model`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelShow {
+    /// The largest context the model was trained for, in tokens. Ollama reports
+    /// it under a key prefixed by the architecture — `qwen2.context_length` for
+    /// a Qwen file — so the prefix is not part of the lookup. `None` when the
+    /// model says nothing, which is not the same as zero.
+    pub trained_context_tokens: Option<u32>,
+    /// The capabilities as the server words them: `tools`, `thinking`,
+    /// `completion`, `embedding`, and whatever a future release adds.
+    pub capabilities: Vec<String>,
+}
+
+impl ModelShow {
+    /// Whether this model may be asked to reason before answering. Asking one
+    /// that cannot is not ignored: Ollama 0.34.4 answers such a request with
+    /// HTTP 400 and `"<model>" does not support thinking`.
+    pub fn can_think(&self) -> bool {
+        self.has("thinking")
+    }
+
+    /// Whether this model understands a `tools` list in the request.
+    pub fn can_use_tools(&self) -> bool {
+        self.has("tools")
+    }
+
+    fn has(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|found| found.eq_ignore_ascii_case(capability))
+    }
+}
+
 /// Errors from Ollama operations.
 #[derive(Debug)]
 pub enum OllamaError {
@@ -66,7 +105,9 @@ impl std::error::Error for OllamaError {}
 
 /// Client for interacting with the Ollama REST API.
 ///
-/// Mirrors the model management functionality in `xencode/core/models.py`.
+/// Talks to the HTTP routes a running `ollama serve` answers on: `/api/tags`
+/// for what is installed, `/api/show` for what one model can do, `/api/chat`
+/// for the answers themselves.
 pub struct OllamaClient {
     base_url: String,
     pub health_tracker: HealthTracker,
@@ -155,6 +196,52 @@ impl OllamaClient {
                 modified_at: m.modified_at,
             })
             .collect())
+    }
+
+    /// Ask the server what it knows about one model, without loading it.
+    ///
+    /// This is the only way to learn, before a request goes out, how large a
+    /// window the weights can hold and whether the model can be asked to think.
+    /// Both matter because Ollama enforces them at the ends of that range: a
+    /// window larger than the model was trained for is quietly reduced to it,
+    /// and asking a model that cannot think to do so is refused outright.
+    ///
+    /// It is also a new surface that can fail — a model that is not installed,
+    /// an older server that does not answer this route, or a name that does not
+    /// resolve all end here as an error rather than as an empty answer, so a
+    /// caller keeps whatever it already knew instead of learning a wrong zero.
+    pub async fn show_model(&self, name: &str) -> Result<ModelShow, OllamaError> {
+        let url = format!("{}/api/show", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "model": name }))
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    OllamaError::NotRunning(e.to_string())
+                } else if e.is_timeout() {
+                    OllamaError::Timeout(e.to_string())
+                } else {
+                    OllamaError::Api(e.to_string())
+                }
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(if status.as_u16() == 404 {
+                OllamaError::ModelNotFound(name.to_string())
+            } else {
+                OllamaError::Api(format!("HTTP {status}"))
+            });
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| OllamaError::Parse(e.to_string()))?;
+        Ok(parse_show(&body))
     }
 
     /// Check the health of a specific model by sending a tiny prompt, or ping if model is empty.
@@ -267,6 +354,46 @@ impl OllamaClient {
     }
 }
 
+/// Pick out the two things this program acts on from a `/api/show` answer.
+///
+/// Separated from the request so the shapes a server actually returns can be
+/// held against a captured response instead of against a running Ollama. The
+/// context length is looked up by suffix rather than by full key because the
+/// architecture is the prefix — `qwen2.context_length` here, `llama.context_length`
+/// for a Llama file — and a missing one stays `None`: the model not saying is
+/// not the same as the model holding nothing.
+fn parse_show(body: &serde_json::Value) -> ModelShow {
+    let capabilities = body
+        .get("capabilities")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let trained_context_tokens = body
+        .get("model_info")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|info| {
+            info.iter().find_map(|(key, value)| {
+                if key.ends_with(".context_length") {
+                    value.as_u64()
+                } else {
+                    None
+                }
+            })
+        })
+        .and_then(|tokens| u32::try_from(tokens).ok());
+
+    ModelShow {
+        trained_context_tokens,
+        capabilities,
+    }
+}
+
 /// Choose from the installed models in the order `preference` lists them.
 ///
 /// A preference entry is matched as a substring of the tag, case-insensitively,
@@ -316,6 +443,154 @@ mod tests {
     fn custom_client_trims_trailing_slash() {
         let client = OllamaClient::new("http://myhost:11434/", 10);
         assert_eq!(client.base_url(), "http://myhost:11434");
+    }
+
+    /// A `/api/show` answer captured from Ollama 0.34.4 on 2026-09-27 for the
+    /// Qwen3 1.7B GGUF this program's advice table points at. `template` and
+    /// `modelfile` are replaced with a note because they are 4,761 characters of
+    /// chat template nothing here reads; every other key and value is what the
+    /// server sent, including the tokenizer arrays Ollama leaves empty for a
+    /// model it did not convert itself.
+    fn show_qwen3_1_7b() -> serde_json::Value {
+        serde_json::json!({
+            "modelfile": "<elided>",
+            "template": "<the chat template, 4761 characters, elided>",
+            "details": {
+                "parent_model": "qwen3-1.7b.gguf",
+                "format": "gguf",
+                "family": "qwen3",
+                "families": ["qwen3"],
+                "parameter_size": "1.7B",
+                "quantization_level": "Q4_K_M"
+            },
+            "model_info": {
+                "general.architecture": "qwen3",
+                "general.basename": "Qwen3-1.7B",
+                "general.file_type": 15,
+                "general.parameter_count": 1720574976_u64,
+                "general.quantization_version": 2,
+                "general.quantized_by": "Unsloth",
+                "general.repo_url": "https://huggingface.co/unsloth",
+                "general.size_label": "1.7B",
+                "general.type": "model",
+                "quantize.imatrix.chunks_count": 685,
+                "quantize.imatrix.dataset": "unsloth_calibration_Qwen3-1.7B.txt",
+                "quantize.imatrix.entries_count": 196,
+                "quantize.imatrix.file": "Qwen3-1.7B-GGUF/imatrix_unsloth.dat",
+                "qwen3.attention.head_count": 16,
+                "qwen3.attention.head_count_kv": 8,
+                "qwen3.attention.key_length": 128,
+                "qwen3.attention.layer_norm_rms_epsilon": 1e-06,
+                "qwen3.attention.value_length": 128,
+                "qwen3.block_count": 28,
+                "qwen3.context_length": 40960,
+                "qwen3.embedding_length": 2048,
+                "qwen3.feed_forward_length": 6144,
+                "qwen3.rope.freq_base": 1000000,
+                "tokenizer.ggml.add_bos_token": false,
+                "tokenizer.ggml.eos_token_id": 151645,
+                "tokenizer.ggml.merges": [],
+                "tokenizer.ggml.model": "gpt2",
+                "tokenizer.ggml.padding_token_id": 151654,
+                "tokenizer.ggml.pre": "qwen2",
+                "tokenizer.ggml.token_type": [],
+                "tokenizer.ggml.tokens": []
+            },
+            "capabilities": ["tools", "thinking", "completion"],
+            "modified_at": "2026-09-27T13:14:27.619991156+05:30"
+        })
+    }
+
+    /// The same question for the Qwen2.5 0.5B file, captured from the same
+    /// server a few minutes earlier: architecture `qwen2`, so the window arrives
+    /// as `qwen2.context_length`, and no `thinking` among the capabilities —
+    /// which is the pair these two bodies exist to hold the code against.
+    fn show_qwen2_0_5b() -> serde_json::Value {
+        serde_json::json!({
+            "modelfile": "<elided>",
+            "template": "<the chat template, 2509 characters, elided>",
+            "details": {
+                "parent_model": "qwen25-0.5b.gguf",
+                "format": "gguf",
+                "family": "qwen2",
+                "families": ["qwen2"],
+                "parameter_size": "630.17M",
+                "quantization_level": "Q4_K_M"
+            },
+            "model_info": {
+                "general.architecture": "qwen2",
+                "general.file_type": 15,
+                "general.finetune": "qwen2.5-0.5b-instruct",
+                "general.parameter_count": 630167424_u64,
+                "general.quantization_version": 2,
+                "general.size_label": "630M",
+                "general.type": "model",
+                "general.version": "v0.1",
+                "qwen2.attention.head_count": 14,
+                "qwen2.attention.head_count_kv": 2,
+                "qwen2.attention.layer_norm_rms_epsilon": 1e-06,
+                "qwen2.block_count": 24,
+                "qwen2.context_length": 32768,
+                "qwen2.embedding_length": 896,
+                "qwen2.feed_forward_length": 4864,
+                "qwen2.rope.freq_base": 1000000,
+                "tokenizer.ggml.add_bos_token": false,
+                "tokenizer.ggml.bos_token_id": 151643,
+                "tokenizer.ggml.eos_token_id": 151645,
+                "tokenizer.ggml.merges": [],
+                "tokenizer.ggml.model": "gpt2",
+                "tokenizer.ggml.padding_token_id": 151643,
+                "tokenizer.ggml.pre": "qwen2",
+                "tokenizer.ggml.token_type": [],
+                "tokenizer.ggml.tokens": []
+            },
+            "capabilities": ["tools", "completion"],
+            "modified_at": "2026-09-27T13:07:44.710647144+05:30"
+        })
+    }
+
+    #[test]
+    fn a_captured_answer_names_the_window_and_says_the_model_can_think() {
+        let show = parse_show(&show_qwen3_1_7b());
+        assert_eq!(show.trained_context_tokens, Some(40_960));
+        assert!(show.can_think());
+        assert!(show.can_use_tools());
+        assert_eq!(show.capabilities.len(), 3);
+    }
+
+    #[test]
+    fn the_window_is_found_under_whatever_architecture_prefix_the_file_carries() {
+        let show = parse_show(&show_qwen2_0_5b());
+        assert_eq!(show.trained_context_tokens, Some(32_768));
+        assert!(!show.can_think());
+        assert!(show.can_use_tools());
+    }
+
+    #[test]
+    fn a_capability_is_matched_on_the_word_rather_than_on_its_position_or_case() {
+        // Both servers listed `tools` first, so a check that only looked at the
+        // head of the array would pass here and fail on the next model.
+        let show = parse_show(&serde_json::json!({ "capabilities": ["completion", "Thinking"] }));
+        assert!(show.can_think());
+        assert!(!show.can_use_tools());
+    }
+
+    #[test]
+    fn an_answer_saying_nothing_reads_as_unknown_rather_than_as_zero() {
+        let show = parse_show(&serde_json::json!({ "details": { "format": "gguf" } }));
+        assert_eq!(show.trained_context_tokens, None);
+        assert!(show.capabilities.is_empty());
+        assert!(!show.can_think());
+    }
+
+    #[test]
+    fn capabilities_that_are_not_text_are_not_counted() {
+        // A server that answers `[null, 42]` says nothing this program should act
+        // on; a request built on a capability nobody claimed is worse than one
+        // built on nothing.
+        let show = parse_show(&serde_json::json!({ "capabilities": [null, 42, "thinking"] }));
+        assert_eq!(show.capabilities, vec!["thinking".to_string()]);
+        assert!(show.can_think());
     }
 
     fn installed(names: &[&str]) -> Vec<ModelInfo> {

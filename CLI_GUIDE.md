@@ -146,8 +146,11 @@ xencode query "Write a haiku" \
 # than silently degrading to a plain completion.
 xencode query "List three file formats" --json-schema '{"type":"object"}'
 ```
-Sampling flags apply when the resolved model is served by llama.cpp; the
-prompt alone (no flags) goes to the configured default model.
+Sampling flags are read by a model served by llama.cpp, and — except `--grammar`
+and `--mirostat`, which Ollama has no field for — by a model served by Ollama as
+`options` on the request; see
+[What a request to Ollama carries](#what-a-request-to-ollama-carries). The prompt
+alone, with no flags, goes to the configured default model.
 
 #### What `--json-schema` guarantees, and what it does not
 
@@ -216,13 +219,90 @@ model never sees. A number learned from a llama.cpp server is never applied to
 another route — a `qwen2.5:7b` or `anthropic:…` run keeps its own answer, since
 the reported window describes a process that run is not talking to.
 
-Two routes are still unmeasured on this machine and stay as they were: Ollama's
-effective `num_ctx` is not read (`/api/show` was not verified — no Ollama
-installed here), and when a server does not answer, or answers without the
-field, the hardware profile's default governs as before. In the TUI the same
-number is refreshed at startup, after a llama.cpp model load or swap, and at the
-start of each turn — so a server restarted outside xencode takes effect from the
-next turn rather than the one already in flight.
+A run whose model is served by Ollama has no `/props` to read, so its window comes
+from a different question — what the model's own weights hold — and is then asked
+of the server explicitly; see
+[What a request to Ollama carries](#what-a-request-to-ollama-carries). What has not
+changed: when a server does not answer, or answers without the field, the hardware
+profile's default governs as before. In the TUI the number is refreshed at startup,
+after a llama.cpp model load or swap, and at the start of each turn — so a server
+restarted outside xencode takes effect from the next turn rather than the one
+already in flight.
+
+#### What a request to Ollama carries
+
+The sampling flags and `--json-schema` are not llama.cpp-only: a run whose model is
+an Ollama tag sends the same intentions in the words that server reads. `xencode
+query` asks `/api/show` about the model before it asks for an answer, and builds
+`/api/chat` out of what came back.
+
+| Intention | In the Ollama request | Where the number comes from |
+| --- | --- | --- |
+| Context window | `options.num_ctx` | the smaller of what this machine's profile can serve and what the model's weights hold (`<architecture>.context_length` in `/api/show`) |
+| Structured output | `format`, holding the whole JSON schema | `--json-schema` |
+| Whether the model may think first | `think` | `ollama_reasoning`, and only sent as `true` when `/api/show` lists `thinking` |
+| How long the model stays loaded | `keep_alive` | `ollama_keep_alive` |
+
+Two settings choose the last two:
+
+```bash
+xencode config set ollama_reasoning off    # "think": false, even for a thinking model
+xencode config set ollama_reasoning on     # "think": true, for a model that says it can
+xencode config set ollama_reasoning auto   # no "think" field; the model's own default
+xencode config set ollama_keep_alive 10m   # "keep_alive": "10m"
+xencode config set ollama_keep_alive 0     # unload as soon as this answer is done
+xencode config set ollama_keep_alive ""    # back to the server's own five minutes
+```
+
+`ollama_reasoning` takes only `auto`, `on` and `off`. Ollama has no way to ask for a
+thinking *budget*, so a number there is refused with a message pointing at
+`llama_cpp_reasoning`, which does have one. `ollama_keep_alive` has to contain a
+digit, because `10m` and `30s` are the server's words, not ours.
+
+What is said when the server cannot do what was asked is said in the transcript, as
+`ℹ️` system lines in the TUI and `context:` lines from `xencode query`. The first and
+third lines below came off this machine today; the middle one is the same sentence
+with numbers this machine cannot produce, because the profile here asks for less
+than either model's weights hold:
+
+```
+context: asking Ollama for a 8192-token window
+context: asked Ollama for a 40960-token window; this model holds 32768, so that is what it was given
+context: this model was asked to reason first but does not say it can, so nothing was asked of it
+```
+
+Three things about this route were measured on this machine against Ollama 0.34.4,
+serving `qwen3-1.7b` and a `qwen25-0.5b` GGUF at `Q4_K_M`, and they are why the
+shape above is what it is:
+
+- **The window has to be asked for on every request.** A request that leaves
+  `options.num_ctx` out is a different model configuration to Ollama: the server
+  unloads the running model and reloads it at its own default. Starting from a model
+  loaded at `-c 8192` by xencode, one plain `/api/chat` with no options logged
+  `msg="unload completed"` and `starting llama-server … -c 4096`. So the window is
+  decided once per session and carried by every request the session makes — chat
+  turns, a one-off ask from the TUI, `/review`, and the eval judge — rather than
+  being left to the server. That default is sized by free VRAM here
+  (`total_vram="1.9 GiB" default_num_ctx=4096`), not by the model.
+- **`think: true` is a hard failure when the model cannot do it.** Answering 400 with
+  `"…" does not support thinking` is worse than answering without a preamble, so the
+  ask is withdrawn when `/api/show` does not list `thinking`, and said out loud. A
+  `false` is always accepted.
+- **A schema and a tool list together are decided by the schema.** Asking a 1.7B
+  model for JSON *and* offering it tools, it answers with valid JSON matching the
+  schema and `tool_calls` stays null. `grammar` is not sent at all: Ollama's
+  `/api/chat` has no field for a GBNF grammar alongside `format`, and a `mirostat`
+  sampling mode is refused outright (`invalid option provided`), so those two
+  llama.cpp controls stay llama.cpp-only. Asking for either on an Ollama model says
+  so as it is dropped, rather than answering as if it had been honored:
+
+  ```
+  sampling: --grammar was not sent — Ollama takes a JSON schema in `format`, not a GBNF grammar
+  sampling: --mirostat was not sent — a running Ollama answers it as `invalid option provided`
+  ```
+
+`xencode eval`'s ranking judge asks on the same terms, since it dials the same
+server as the run it is judging.
 
 #### Which hardware profile the budget spends against
 
@@ -995,6 +1075,8 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `llama_cpp_model_sha256` | string | the digest these bytes are pinned to: 64 hexadecimal characters, an optional `sha256-` prefix, any case; empty turns the check off. Checked as a download arrives and again before any server is started on the file — see [xencode llamacpp](#xencode-llamacpp-action), "Pinning the bytes". `xencode models advice` prints one for every model it suggests |
 | `llama_cpp_args` | string | split on whitespace; passed to a self-started `llama-server` after the hardware profile's own flags, so a repeated flag is decided here |
 | `llama_cpp_reasoning` | string | how much a local model may think before answering: `auto` or empty for no flag, `off` for `--reasoning off`, or a token budget as a number for `--reasoning-budget`. A launch setting — see [How much the model may think](#how-much-the-model-may-think) |
+| `ollama_reasoning` | string | whether a model served by Ollama may think before answering: `auto` or empty to leave the model's own default in charge, `off` for `"think": false`, `on` for `"think": true` — which is only sent when `/api/show` says the model can think. A number is refused: Ollama has no thinking budget, so use `llama_cpp_reasoning` for that — see [What a request to Ollama carries](#what-a-request-to-ollama-carries) |
+| `ollama_keep_alive` | string | how long the server keeps this model loaded after an answer, in the server's own words (`10m`, `30s`, `0` to unload immediately). Must contain a digit; empty leaves out the field and the server's five minutes rule. Decides whether the next request pays for a reload — see [What a request to Ollama carries](#what-a-request-to-ollama-carries) |
 | `max_cache_size`, `response_timeout`, `max_memory_items` | number | |
 | `cost_budget_usd_micros` | number | Warning threshold for one conversation's spend, in millionths of a dollar ($5.00 = `5000000`). Unset by default; it warns in the status bar and never refuses a request. Spend is priced from `.xencode/pricing.json` in the project — see `/cost`. **Not a `config set` key** — edit it in the JSON. |
 | `llama_cpp_temperature`, `llama_cpp_top_k`, `llama_cpp_min_p`, `llama_cpp_max_tokens`, `llama_cpp_seed` | number | llama.cpp sampling defaults, read from the JSON; `config set` does not accept them, and the TUI's Settings panel covers the same fields. An unset one sends nothing and the server decides — see "Repeatable answers" above. |

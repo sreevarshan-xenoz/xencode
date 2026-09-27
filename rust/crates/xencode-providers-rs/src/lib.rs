@@ -7,6 +7,8 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use xencode_models_rs::{LlamaCppClient, LlamaCppOptions, LlamaCppTimings, OllamaClient};
 
+pub use xencode_models_rs::ModelShow;
+
 pub mod anthropic;
 pub mod capabilities;
 pub mod compatible;
@@ -22,7 +24,9 @@ pub mod traffic;
 
 use retry::RetryConfig;
 
-pub use capabilities::{capabilities_for, effective_context_window, ModelCapabilities};
+pub use capabilities::{
+    capabilities_for, effective_context_window, ollama_window_asked, ModelCapabilities,
+};
 pub use compatible::OpenAICompatibleProvider;
 pub use egress::{chain_for, classify, provider_for, url_host, Egress, EgressPolicy, RoutingFacts};
 pub use tools::{
@@ -334,6 +338,26 @@ pub fn routes_to_llamacpp(model: &str) -> bool {
     matches!(llamacpp_target(model), Some(target) if !target.is_empty())
 }
 
+/// True when `model` is served by the local Ollama, so asking Ollama anything
+/// about it — what it can do, how big a window its weights hold — is worth a
+/// request at all.
+///
+/// Deliberately narrower than the manager's actual routing, which falls through
+/// to Ollama for anything no other provider claims: a model id with a slash in
+/// it goes to OpenRouter when a key is configured and to Ollama when it is not,
+/// and this function cannot see the key. So a slash id answers `false` here and
+/// simply never gets the extra asking, which costs a missing nicety on one odd
+/// shape of id rather than a wrong assumption about a server that was never
+/// involved.
+pub fn routes_to_ollama(model: &str) -> bool {
+    !routes_to_llamacpp(model)
+        && remote_target(model).is_none()
+        && !model.starts_with("anthropic:")
+        && !model.starts_with("qwen:")
+        && !model.starts_with("google_gemini:")
+        && !model.contains('/')
+}
+
 /// ProviderManager abstracts over local and cloud models.
 ///
 /// Supports Ollama (local), llama.cpp (local), OpenRouter (cloud), Qwen (cloud),
@@ -369,6 +393,10 @@ pub struct ProviderManager {
     /// Where to write down what a request asked and what came back, when the
     /// caller asked for a recording (QA-1). `None` records nothing.
     traffic: Option<traffic::TrafficRecorder>,
+    /// What every Ollama request this manager makes should say about the
+    /// server's own behaviour — the window, how long the model stays loaded,
+    /// and whether it may think.
+    ollama_request: OllamaRequest,
 }
 
 impl ProviderManager {
@@ -395,7 +423,56 @@ impl ProviderManager {
             request_timeout_secs: 0,
             llamacpp_timings: Mutex::new(None),
             traffic: None,
+            ollama_request: OllamaRequest::default(),
         }
+    }
+
+    /// Say what every Ollama request should tell the server about itself: the
+    /// window the conversation is budgeted for, how long the model should stay
+    /// loaded, and whether a reasoning model may think first. The default —
+    /// what every caller gets without this — sends none of the three, which
+    /// leaves each of them to Ollama's own answer.
+    pub fn with_ollama_request(mut self, request: OllamaRequest) -> Self {
+        self.ollama_request = request;
+        self
+    }
+
+    /// The Ollama server-behaviour fields this manager puts on a request, after
+    /// whatever `with_ollama_request` was given.
+    pub fn ollama_request(&self) -> &OllamaRequest {
+        &self.ollama_request
+    }
+
+    /// Ask the Ollama server what `model` is: what it can do, and how big a
+    /// window its own weights hold. `None` when the question got no useful
+    /// answer — no server, a model that is not installed, a build old enough not
+    /// to answer — which the caller treats as having learned nothing rather than
+    /// as having learned that the model can do nothing.
+    pub async fn ollama_show(&self, model: &str) -> Option<ModelShow> {
+        if !routes_to_ollama(model) {
+            return None;
+        }
+        self.ollama_client.show_model(model).await.ok()
+    }
+
+    /// Ask Ollama about `model`, then keep whatever survives the asking as what
+    /// every later request for it will say, and hand back the notes about what
+    /// had to be given up. [`ollama_request_for`] holds the rules; this is the
+    /// one place that knows both the server to ask and the manager to remember
+    /// the answer on, so a caller in the CLI or the TUI does not have to
+    /// reproduce the route rules to get them applied.
+    pub async fn prepare_ollama_request(
+        &mut self,
+        model: &str,
+        asked: OllamaRequest,
+    ) -> Vec<String> {
+        if !routes_to_ollama(model) {
+            return Vec::new();
+        }
+        let show = self.ollama_show(model).await;
+        let (decided, notes) = ollama_request_for(show.as_ref(), asked);
+        self.ollama_request = decided;
+        notes
     }
 
     /// Keep the traffic of every OpenAI-compatible request this manager makes,
@@ -663,11 +740,12 @@ impl ProviderManager {
         // Default: local Ollama
         let url = format!("{}/api/chat", self.ollama_client.base_url());
 
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "model": model,
             "messages": messages.iter().map(to_ollama_value).collect::<Vec<_>>(),
             "stream": false
         });
+        merge_ollama_request(&mut payload, options, &self.ollama_request);
 
         let response = self
             .client
@@ -883,7 +961,7 @@ impl ProviderManager {
         }
 
         // Default: local Ollama
-        self.generate_stream_ollama_with_tools(model, messages, history, tools, callback)
+        self.generate_stream_ollama_with_tools(model, messages, history, tools, options, callback)
             .await
     }
 
@@ -959,7 +1037,8 @@ impl ProviderManager {
             self.generate_stream_openrouter(model, messages, callback)
                 .await
         } else {
-            self.generate_stream_ollama(model, messages, callback).await
+            self.generate_stream_ollama(model, messages, options, callback)
+                .await
         }
     }
 
@@ -991,6 +1070,7 @@ impl ProviderManager {
         &self,
         model: &str,
         messages: &[ChatMessage],
+        options: Option<&LlamaCppOptions>,
         mut callback: F,
     ) -> Result<String, ProviderError>
     where
@@ -998,11 +1078,12 @@ impl ProviderManager {
     {
         let url = format!("{}/api/chat", self.ollama_client.base_url());
 
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "model": model,
             "messages": messages.iter().map(to_ollama_value).collect::<Vec<_>>(),
             "stream": true
         });
+        merge_ollama_request(&mut payload, options, &self.ollama_request);
 
         let response = self
             .client
@@ -1057,6 +1138,7 @@ impl ProviderManager {
         messages: &[ChatMessage],
         history: &[AgentTurn],
         tools: &[ToolDefinition],
+        options: Option<&LlamaCppOptions>,
         mut callback: F,
     ) -> Result<AgentStep, ProviderError>
     where
@@ -1072,6 +1154,7 @@ impl ProviderManager {
         if !tools.is_empty() {
             payload["tools"] = tools.iter().map(ToolDefinition::to_api_value).collect();
         }
+        merge_ollama_request(&mut payload, options, &self.ollama_request);
 
         let response = self
             .client
@@ -1553,6 +1636,209 @@ fn merge_llamacpp_options(payload: &mut serde_json::Value, opts: &LlamaCppOption
     }
 }
 
+/// What an Ollama request adds on top of the sampling knobs it shares with
+/// llama.cpp: how big a window to be served, how long the model stays loaded
+/// afterwards, and whether a reasoning model may think before it answers.
+///
+/// These are kept apart from [`LlamaCppOptions`] because they are not properties
+/// of the answer being sampled. `num_ctx` decides how much conversation fits,
+/// `keep_alive` decides how long the weights hold their memory for the next
+/// request, and `think` is honoured in the body of an Ollama request — which is
+/// the opposite of the llama.cpp equivalent, measured to be accepted and ignored
+/// there and reachable only as a launch flag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OllamaRequest {
+    /// `options.num_ctx` — the context window this conversation is budgeted for.
+    pub num_ctx: Option<u32>,
+    /// `keep_alive` — a duration such as `10m`, or `0` to release the model as
+    /// soon as this answer is done.
+    pub keep_alive: Option<String>,
+    /// `think` — `Some(false)` tells a reasoning model not to reason, `Some(true)`
+    /// asks one that can to reason, and `None` leaves the field out altogether and
+    /// lets the model's own default decide.
+    pub think: Option<bool>,
+}
+
+impl OllamaRequest {
+    /// Read the two settings a person can write into the config file.
+    ///
+    /// `reasoning` takes the same words `llama_cpp_reasoning` does — `off`, `on`,
+    /// `auto` — with one difference that comes from the server rather than from
+    /// taste: Ollama has no partial thinking to ask for. A token budget like
+    /// `"256"` is therefore an error here instead of a launch flag, because
+    /// sending it would quietly mean something else. `keep_alive` is passed
+    /// through as the text Ollama itself parses (`"10m"`, `"30s"`, `"0"`); an
+    /// unreadable duration is Ollama's complaint to make, on the request.
+    pub fn from_settings(
+        reasoning: Option<&str>,
+        keep_alive: Option<&str>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            num_ctx: None,
+            keep_alive: keep_alive
+                .map(str::trim)
+                .filter(|raw| !raw.is_empty())
+                .map(|raw| raw.to_string()),
+            think: think_from_setting(reasoning)?,
+        })
+    }
+}
+
+/// Turn the words in `ollama_reasoning` into the `think` field, or explain why
+/// they cannot mean anything. `None` from this function means "send no `think`
+/// at all", which measured behaviour is *not* the same as `Some(false)`: an
+/// omitted field leaves the model's own default in place, and Qwen3 defaults to
+/// thinking.
+fn think_from_setting(raw: Option<&str>) -> Result<Option<bool>, String> {
+    let Some(raw) = raw.map(str::trim) else {
+        return Ok(None);
+    };
+    if raw.is_empty() || raw.eq_ignore_ascii_case("auto") {
+        return Ok(None);
+    }
+    if raw.eq_ignore_ascii_case("off") {
+        return Ok(Some(false));
+    }
+    if raw.eq_ignore_ascii_case("on") {
+        return Ok(Some(true));
+    }
+    Err(format!(
+        "ollama_reasoning must be \"auto\", \"on\" or \"off\", not {raw:?}. Ollama has no way to \
+         ask for a thinking budget; use llama_cpp_reasoning with a llama.cpp server for that"
+    ))
+}
+
+/// Put the sampling knobs and the server-behaviour knobs onto an Ollama
+/// `/api/chat` body, under the names that endpoint uses.
+///
+/// The names differ from the OpenAI-compatible route in three ways that matter:
+/// a JSON schema is the whole value of `format` rather than a `response_format`
+/// object, a generation cap is `options.num_predict` rather than `max_tokens`,
+/// and everything else about how the tokens are chosen lives in one `options`
+/// object. A grammar has no counterpart here — Ollama takes a schema and derives
+/// its own constrained decoding from it — so `grammar` is deliberately not sent
+/// rather than being smuggled into `format`, which would be a different promise.
+///
+/// `mirostat` is not sent either, and that is a measurement rather than an
+/// omission: Ollama 0.34.4 answers a request carrying it with
+/// `invalid option provided option=mirostat` and runs the sampler without it, so
+/// promising Mirostat on this route would be promising something the server
+/// throws away. `temperature`, `top_k`, `min_p`, `seed`, `num_predict` and
+/// `num_ctx` were each checked to arrive, by reading the sampler parameters the
+/// inference engine prints for the request.
+///
+/// One interaction to know before a caller puts a schema beside a tools list: the
+/// schema wins and the tool call vanishes. Measured on a 1.7B model asked to read
+/// a file — with `tools` alone it answered with a `read_file` call, and with
+/// `format` added to the same request it answered `{"answer": "I will read the
+/// file notes.txt for you."}` and called nothing. Both still go out as asked, as
+/// on the llama.cpp route, because a caller choosing silently between them would
+/// be worse than one finding this out.
+fn merge_ollama_request(
+    payload: &mut serde_json::Value,
+    opts: Option<&LlamaCppOptions>,
+    request: &OllamaRequest,
+) {
+    let mut options = serde_json::Map::new();
+    if let Some(opts) = opts {
+        if let Some(ref schema) = opts.json_schema {
+            payload["format"] = schema::flatten(schema);
+        }
+        if let Some(temp) = opts.temperature {
+            options.insert("temperature".to_string(), serde_json::json!(temp));
+        }
+        if let Some(top_k) = opts.top_k {
+            options.insert("top_k".to_string(), serde_json::json!(top_k));
+        }
+        if let Some(min_p) = opts.min_p {
+            options.insert("min_p".to_string(), serde_json::json!(min_p));
+        }
+        if let Some(seed) = opts.seed {
+            options.insert("seed".to_string(), serde_json::json!(seed));
+        }
+        if let Some(max_tokens) = opts.max_tokens {
+            options.insert("num_predict".to_string(), serde_json::json!(max_tokens));
+        }
+    }
+    if let Some(num_ctx) = request.num_ctx {
+        options.insert("num_ctx".to_string(), serde_json::json!(num_ctx));
+    }
+    if !options.is_empty() {
+        payload["options"] = serde_json::Value::Object(options);
+    }
+    if let Some(keep_alive) = request.keep_alive.as_deref() {
+        payload["keep_alive"] = serde_json::Value::String(keep_alive.to_string());
+    }
+    if let Some(think) = request.think {
+        payload["think"] = serde_json::json!(think);
+    }
+}
+
+/// Decide what to actually ask Ollama for, once the model has been asked what it
+/// can do. `show` is `None` when that question failed — no server, a model that
+/// is not installed, a build old enough not to answer it. Having learned nothing
+/// is not the same as having learned that the model can do nothing, so the window
+/// keeps the number it was given; but the two fields differ in what a wrong guess
+/// costs, and only one of them can fail a request outright.
+///
+/// Both rules below were measured on 0.34.4. A window bigger than the weights
+/// were trained for is reduced to it by the server, so a conversation budgeted
+/// for the bigger number is refused mid-turn with `exceed_context_size_error`
+/// rather than truncated — clamping here is what keeps the two numbers the same.
+/// And asking a model that cannot think to think is answered with HTTP 400 and
+/// `"<model>" does not support thinking`, which is why `think: true` is sent only
+/// to a model that has said it can, and not to one whose answer never arrived.
+/// `think: false` needs no such permission: it was accepted by a model with no
+/// thinking at all.
+///
+/// The notes are for whoever reads the transcript: a run that asked for one
+/// window and got a smaller one, or asked for reasoning that the model does not
+/// have, should say so instead of looking like it did what was asked.
+pub fn ollama_request_for(
+    show: Option<&xencode_models_rs::ModelShow>,
+    asked: OllamaRequest,
+) -> (OllamaRequest, Vec<String>) {
+    let mut notes = Vec::new();
+    let mut decided = OllamaRequest {
+        keep_alive: asked.keep_alive.clone(),
+        ..Default::default()
+    };
+
+    if let Some(num_ctx) = asked.num_ctx {
+        match show.and_then(|s| s.trained_context_tokens) {
+            Some(ceiling) if ceiling < num_ctx => {
+                notes.push(format!(
+                    "asked Ollama for a {num_ctx}-token window; this model holds {ceiling}, so that is what it was given"
+                ));
+                decided.num_ctx = Some(ceiling);
+            }
+            Some(_) => decided.num_ctx = Some(num_ctx),
+            None => {
+                // Nothing was learned about the ceiling, so nothing is clamped:
+                // the profile's number is what the context is being filled for,
+                // and asking for less than that is the one way to be refused.
+                decided.num_ctx = Some(num_ctx);
+            }
+        }
+    }
+
+    decided.think = match asked.think {
+        Some(true) => {
+            let can = show.is_some_and(|s| s.can_think());
+            if !can {
+                notes.push(
+                    "this model was asked to reason first but does not say it can, so nothing was asked of it"
+                        .to_string(),
+                );
+            }
+            can.then_some(true)
+        }
+        other => other,
+    };
+
+    (decided, notes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1708,5 +1994,225 @@ mod tests {
     fn llamacpp_target_rejects_slash_and_plain() {
         assert_eq!(llamacpp_target("openai/gpt-4o"), None);
         assert_eq!(llamacpp_target(""), None);
+    }
+
+    fn a_show(trained: Option<u32>, capabilities: &[&str]) -> ModelShow {
+        ModelShow {
+            trained_context_tokens: trained,
+            capabilities: capabilities.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn only_an_id_with_no_provider_prefix_is_asked_of_ollama() {
+        assert!(routes_to_ollama("qwen3:4b"));
+        assert!(routes_to_ollama("llama3.2"));
+        assert!(!routes_to_ollama("llama:qwen3"));
+        assert!(!routes_to_ollama("remote:qwen3"));
+        assert!(!routes_to_ollama("qwen:qwen-plus"));
+        assert!(!routes_to_ollama("google_gemini:gemini-2.5-flash"));
+        assert!(!routes_to_ollama("anthropic:claude-sonnet-4-5"));
+        // A slashed id may end up at Ollama when no OpenRouter key is set, but
+        // this function cannot see the key, so it says no and nothing is asked.
+        assert!(!routes_to_ollama("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn the_reasoning_setting_reads_three_words_and_refuses_a_budget() {
+        assert_eq!(think_from_setting(Some("off")).unwrap(), Some(false));
+        assert_eq!(think_from_setting(Some("ON")).unwrap(), Some(true));
+        assert_eq!(think_from_setting(Some(" auto ")).unwrap(), None);
+        assert_eq!(think_from_setting(Some("")).unwrap(), None);
+        assert_eq!(think_from_setting(None).unwrap(), None);
+        let err = think_from_setting(Some("256")).unwrap_err();
+        assert!(
+            err.contains("ollama_reasoning") && err.contains("llama_cpp_reasoning"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn from_settings_passes_a_keep_alive_through_as_the_text_the_server_parses() {
+        let request = OllamaRequest::from_settings(Some("off"), Some(" 10m ")).unwrap();
+        assert_eq!(request.think, Some(false));
+        assert_eq!(request.keep_alive.as_deref(), Some("10m"));
+        assert_eq!(request.num_ctx, None);
+        // An empty setting is an unset one: sending `keep_alive: ""` would be
+        // asking Ollama to interpret nothing as a duration.
+        let blank = OllamaRequest::from_settings(None, Some("   ")).unwrap();
+        assert_eq!(blank.keep_alive, None);
+        assert_eq!(blank.think, None);
+    }
+
+    #[test]
+    fn merge_puts_every_value_under_the_name_ollama_reads() {
+        let opts = LlamaCppOptions {
+            temperature: Some(0.2),
+            top_k: Some(40),
+            min_p: Some(0.05),
+            seed: Some(7),
+            max_tokens: Some(512),
+            json_schema: Some(serde_json::json!({"type": "object"})),
+            grammar: Some("root ::= \"x\"".to_string()),
+            mirostat: Some(2),
+        };
+        let request = OllamaRequest {
+            num_ctx: Some(8192),
+            keep_alive: Some("0".to_string()),
+            think: Some(false),
+        };
+        let mut payload = serde_json::json!({ "model": "qwen3:4b" });
+        merge_ollama_request(&mut payload, Some(&opts), &request);
+
+        let options = payload["options"].as_object().unwrap();
+        assert_eq!(options["temperature"], 0.2);
+        assert_eq!(options["top_k"], 40);
+        assert_eq!(options["min_p"], 0.05);
+        assert_eq!(options["seed"], 7);
+        // A generation cap is `num_predict` here, not `max_tokens`.
+        assert_eq!(options["num_predict"], 512);
+        assert_eq!(options["num_ctx"], 8192);
+        assert_eq!(payload["keep_alive"], "0");
+        assert_eq!(payload["think"], false);
+        assert_eq!(payload["format"], serde_json::json!({"type": "object"}));
+        // And the two things this server cannot be given: a grammar of our own
+        // (it derives its constrained decoding from the schema) and Mirostat,
+        // which 0.34.4 answers by dropping the option and warning about it.
+        assert!(
+            payload.get("grammar").is_none() && payload.get("mirostat").is_none(),
+            "{payload}"
+        );
+        assert!(!options.contains_key("mirostat"));
+        assert!(!options.contains_key("max_tokens"));
+    }
+
+    #[test]
+    fn merge_adds_nothing_that_nobody_asked_for() {
+        // The whole point of the empty case: without this item every Ollama
+        // request carried no `options`, and adding one that says nothing would
+        // change what the server does with a model's own defaults.
+        let mut payload = serde_json::json!({ "model": "qwen3:4b" });
+        merge_ollama_request(&mut payload, None, &OllamaRequest::default());
+        assert_eq!(payload, serde_json::json!({ "model": "qwen3:4b" }));
+
+        let mut payload = serde_json::json!({ "model": "qwen3:4b" });
+        merge_ollama_request(
+            &mut payload,
+            Some(&LlamaCppOptions::default()),
+            &Default::default(),
+        );
+        assert!(payload.get("options").is_none(), "{payload}");
+        assert!(payload.get("think").is_none());
+    }
+
+    #[test]
+    fn a_window_bigger_than_the_weights_is_brought_down_and_said_out_loud() {
+        let (decided, notes) = ollama_request_for(
+            Some(&a_show(Some(40_960), &["thinking", "tools"])),
+            OllamaRequest {
+                num_ctx: Some(131_072),
+                ..Default::default()
+            },
+        );
+        assert_eq!(decided.num_ctx, Some(40_960));
+        assert_eq!(notes.len(), 1);
+        assert!(
+            notes[0].contains("131072") && notes[0].contains("40960"),
+            "{notes:?}"
+        );
+    }
+
+    #[test]
+    fn a_window_the_model_can_hold_is_sent_as_asked() {
+        let (decided, notes) = ollama_request_for(
+            Some(&a_show(Some(40_960), &["thinking"])),
+            OllamaRequest {
+                num_ctx: Some(8192),
+                ..Default::default()
+            },
+        );
+        assert_eq!(decided.num_ctx, Some(8192));
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn a_model_that_never_said_its_window_leaves_the_number_alone() {
+        // Not the same as a model that said it holds nothing: guessing a smaller
+        // window here would trim context nobody asked to trim.
+        let (decided, notes) = ollama_request_for(
+            Some(&a_show(None, &[])),
+            OllamaRequest {
+                num_ctx: Some(8192),
+                ..Default::default()
+            },
+        );
+        assert_eq!(decided.num_ctx, Some(8192));
+        assert!(notes.is_empty());
+        let (no_probe, _) = ollama_request_for(
+            None,
+            OllamaRequest {
+                num_ctx: Some(8192),
+                ..Default::default()
+            },
+        );
+        assert_eq!(no_probe.num_ctx, Some(8192));
+    }
+
+    #[test]
+    fn asking_a_model_that_cannot_think_to_think_would_fail_the_whole_request() {
+        // Measured: `think: true` on a model without the capability is answered
+        // HTTP 400 `"<model>" does not support thinking`, so it is dropped here
+        // rather than sent and lost. Dropping it is also what a failed question
+        // does — nothing was learned, so nothing is promised.
+        let (decided, notes) = ollama_request_for(
+            Some(&a_show(Some(32_768), &["tools", "completion"])),
+            OllamaRequest {
+                think: Some(true),
+                ..Default::default()
+            },
+        );
+        assert_eq!(decided.think, None);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("does not say it can"), "{notes:?}");
+
+        let (silent, notes) = ollama_request_for(
+            None,
+            OllamaRequest {
+                think: Some(true),
+                ..Default::default()
+            },
+        );
+        assert_eq!(silent.think, None);
+        assert_eq!(notes.len(), 1);
+    }
+
+    #[test]
+    fn turning_thinking_off_needs_no_permission_from_the_model() {
+        // `think: false` was accepted by a model whose capability list has no
+        // thinking in it at all, so it goes through whatever was learned.
+        for show in [
+            Some(a_show(Some(32_768), &["tools", "completion"])),
+            Some(a_show(None, &[])),
+            None,
+        ] {
+            let (decided, notes) = ollama_request_for(
+                show.as_ref(),
+                OllamaRequest {
+                    think: Some(false),
+                    keep_alive: Some("5m".to_string()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(decided.think, Some(false));
+            assert_eq!(decided.keep_alive.as_deref(), Some("5m"));
+            assert!(notes.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_asked_window_is_what_this_machine_can_serve_not_what_the_model_advertises() {
+        assert_eq!(ollama_window_asked(Some(256_000), 8_192), 8_192);
+        assert_eq!(ollama_window_asked(None, 8_192), 8_192);
+        assert_eq!(ollama_window_asked(Some(4_096), 8_192), 4_096);
     }
 }
