@@ -3,8 +3,8 @@
 //! Pass 2 of the context engine, still fully deterministic and zero-LLM.
 //! This is the seed of the Xencode "repository map" (Aider-style):
 //!
-//!   - regex extraction of `structs` / `enums` / `traits` / `impls` / `types` /
-//!     `functions` / `imports` / `exports` / `mods`, plus the file's
+//!   - tree-sitter extraction of `structs` / `enums` / `traits` / `impls` /
+//!     `types` / `functions` / `imports` / `exports` / `mods`, plus the file's
 //!     documentation prose in `docs`, from Rust source files (`symbols.json`)
 //!   - module resolution (`crate::`, `super::`, `self::`, plain-relative)
 //!     against the known Rust file set, producing a file→file
@@ -17,9 +17,10 @@
 //! point at external crates (not resolvable to a file in this workspace) are
 //! simply not turned into edges, and neither is an `impl` of a trait that two
 //! indexed files both define — a name with no single owner is refused, not
-//! guessed. Tree-sitter may replace the extraction layer later; the on-disk
-//! schemas are stable.
+//! guessed. The extraction half moved to a parse tree (`tsymbols`); the on-disk
+//! schemas are unchanged.
 
+#[cfg(test)]
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -93,6 +94,7 @@ pub struct DepEdge {
     pub via: String,
 }
 
+#[cfg(test)]
 struct RegexCache {
     structs: Regex,
     functions: Regex,
@@ -108,8 +110,10 @@ struct RegexCache {
 /// Prefixes that can appear before `fn`, `struct`, `enum`, `trait` or `type` in
 /// any order: visibility, `const`, `async`, `unsafe`, `default`, `auto`, and
 /// `extern` with an optional ABI (`extern "C" fn`).
+#[cfg(test)]
 const ITEM_PREFIX: &str = r#"(?:pub(?:\([^)]*\))?\s+|crate\s+|const\s+|async\s+|unsafe\s+|default\s+|auto\s+|extern(?:\s*"[^"]*")?\s+)*"#;
 
+#[cfg(test)]
 fn regexes() -> &'static RegexCache {
     static CACHE: std::sync::OnceLock<RegexCache> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| RegexCache {
@@ -156,8 +160,21 @@ fn regexes() -> &'static RegexCache {
 }
 
 /// Extract a symbol inventory from a Rust file's text.
-/// All lists are sorted + deduped so output is deterministic.
+///
+/// The file is parsed, not pattern-matched: see the `tsymbols` module. All lists
+/// are sorted and deduped, so the same text always produces the same inventory.
 pub fn extract_rust_symbols(content: &str) -> PerFileSymbols {
+    crate::tsymbols::extract(content)
+}
+
+/// The inventory the nine line matchers produce.
+///
+/// Kept compiled only for tests, for one reason: the claim the parse tier is
+/// held to is that it finds every declaration these patterns found and nothing
+/// they found in a comment or a macro's tokens. That claim cannot be checked
+/// against a tier that no longer exists.
+#[cfg(test)]
+fn regex_symbols(content: &str) -> PerFileSymbols {
     let c = regexes();
 
     let collect = |re: &Regex| -> Vec<String> {
@@ -210,6 +227,7 @@ pub fn extract_rust_symbols(content: &str) -> PerFileSymbols {
 /// declaration is the real shape, and a pattern loose enough to find it in one
 /// sweep would also claim the function that happens to follow a `#[test]`
 /// mentioned inside a doc comment.
+#[cfg(test)]
 fn test_names(content: &str) -> Vec<String> {
     let lines: Vec<&str> = content.lines().collect();
     let mut names: Vec<String> = Vec::new();
@@ -251,18 +269,28 @@ fn test_names(content: &str) -> Vec<String> {
     names
 }
 
-/// The documentation prose of a file: every `//!` and `///` line, in source
-/// order, joined and cut to [`DOC_TEXT_CAP`] bytes on a character boundary.
-/// Fenced code samples inside a doc comment are skipped — they are Rust, not
-/// an explanation of what the file does, and indexing them would put the same
-/// vocabulary in every file that shows an example.
+/// The documentation prose of a file, read line by line the way the tier in
+/// [`regex_symbols`] read it.
+#[cfg(test)]
 fn doc_text(content: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
+    cap_doc_text(
+        content
+            .lines()
+            .filter_map(doc_line)
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+/// Join a file's documentation lines into the prose the index stores. Fenced code
+/// samples inside a doc comment are skipped — they are Rust, not an explanation of
+/// what the file does, and indexing them would put the same vocabulary in every
+/// file that shows an example — and the result is cut to [`DOC_TEXT_CAP`] bytes on
+/// a character boundary.
+pub(crate) fn cap_doc_text(lines: Vec<String>) -> String {
+    let mut parts: Vec<String> = Vec::new();
     let mut in_code = false;
-    for line in content.lines() {
-        let Some(text) = doc_line(line) else {
-            continue;
-        };
+    for text in lines {
         if text.starts_with("```") {
             in_code = !in_code;
             continue;
@@ -288,7 +316,7 @@ fn doc_text(content: &str) -> String {
 /// A line's documentation text with the comment markers removed, or `None` if
 /// the line is not one. `//!` is a module/crate header, `///` documents the item
 /// below it; `//!/// …` nests, so the marker is trimmed twice.
-fn doc_line(line: &str) -> Option<&str> {
+pub(crate) fn doc_line(line: &str) -> Option<&str> {
     let s = line.trim_start();
     let rest = s.strip_prefix("//!").or_else(|| s.strip_prefix("///"))?;
     Some(rest.trim_start_matches(['!', '/']).trim())
@@ -298,7 +326,7 @@ fn doc_line(line: &str) -> Option<&str> {
 /// (`database::Pool` → `Pool`), honouring ` as ` aliases and brace groups
 /// (`foo::{A, B::C}` → `A`, `C`). A glob (`foo::*`) re-exports names this file
 /// does not list, so it contributes none.
-fn export_names(raw: &str) -> Vec<String> {
+pub(crate) fn export_names(raw: &str) -> Vec<String> {
     let s = raw.trim();
     if s.is_empty() {
         return Vec::new();
@@ -344,10 +372,14 @@ fn is_ident(s: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// The trait an `impl Trait for Type` implements, from the trait path's last
-/// segment (`std::fmt::Debug` → `Debug`).
-fn trait_impl_target(path: &str) -> Option<String> {
-    let last = path.rsplit("::").next()?.trim();
+/// The trait an `impl Trait for Type` implements: the path's last segment
+/// (`std::fmt::Debug` → `Debug`) with any generic arguments dropped first
+/// (`From<io::Error>` → `From`). The arguments go first because a path inside them
+/// ends in `::Error>` — reading the last segment of the whole text would report no
+/// trait at all for the commonest impl there is.
+pub(crate) fn trait_impl_target(path: &str) -> Option<String> {
+    let bare = path.split('<').next()?.trim();
+    let last = bare.rsplit("::").next()?.trim();
     is_ident(last).then(|| last.to_string())
 }
 
@@ -820,8 +852,9 @@ fn helper() {}
         assert_eq!(sym.enums, vec!["Choice".to_string()]);
         assert_eq!(sym.traits, vec!["Speak".to_string()]);
         assert_eq!(sym.types, vec!["Handle".to_string()]);
-        // `const fn` and `extern "C" fn` are functions too; the `fn say` inside
-        // the trait's own line is not.
+        // `const fn` and `extern "C" fn` are functions too, and so is the `say`
+        // this trait declares on the same line as the trait itself — the line
+        // matchers saw only a line beginning `pub trait` and reported no method.
         assert_eq!(
             sym.functions,
             vec![
@@ -829,6 +862,7 @@ fn helper() {}
                 "connect".to_string(),
                 "helper".to_string(),
                 "refresh".to_string(),
+                "say".to_string(),
                 "tick".to_string(),
             ]
         );
@@ -1311,5 +1345,258 @@ impl std::fmt::Debug for Dog { fn fmt(&self, _: &mut std::fmt::Formatter) -> std
         );
         assert!(!sym.docs.ends_with(' '));
         assert!(sym.docs.split(' ').all(|w| w == "word"));
+    }
+
+    /// Every `.rs` file of this workspace, as `rel path, text` pairs.
+    fn workspace_rust_files() -> Vec<(String, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap()
+            .to_path_buf();
+        let mut out = Vec::new();
+        collect_rust(&root, &root, &mut out);
+        out.sort();
+        out
+    }
+
+    fn collect_rust(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut Vec<(String, String)>,
+    ) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
+                collect_rust(root, &path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                let rel = path.strip_prefix(root).unwrap().display().to_string();
+                out.push((rel, text));
+            }
+        }
+    }
+
+    /// Every declaration the line matchers claim, with the byte they claimed it at.
+    ///
+    /// The position is what makes the comparison honest: a name picked up inside a
+    /// comment or a macro's tokens is a false positive the parser is required to
+    /// drop, and a name picked up anywhere else is a declaration it is required to
+    /// still find. Without the byte, one assertion could not tell the two apart.
+    #[cfg(test)]
+    fn regex_claims(content: &str) -> Vec<(&'static str, String, usize)> {
+        let c = regexes();
+        let mut out: Vec<(&'static str, String, usize)> = Vec::new();
+        for (field, re) in [
+            ("structs", &c.structs),
+            ("functions", &c.functions),
+            ("imports", &c.imports),
+            ("exports", &c.exports),
+            ("mods", &c.mods),
+            ("enums", &c.enums),
+            ("traits", &c.traits),
+            ("impls", &c.impls),
+            ("types", &c.types),
+        ] {
+            for matched in re.captures_iter(content) {
+                let whole = matched.get(1).unwrap();
+                out.push((field, whole.as_str().trim().to_string(), whole.start()));
+            }
+        }
+        // `#[test]` is read by line rather than by one pattern, so its position is
+        // found by locating the declaration the attribute sits above.
+        let lines: Vec<&str> = content.lines().collect();
+        let mut byte = 0usize;
+        let mut line_bytes: Vec<usize> = Vec::with_capacity(lines.len());
+        for line in &lines {
+            line_bytes.push(byte);
+            byte += line.len() + 1;
+        }
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if !(trimmed.starts_with("#[test]") || trimmed.starts_with("#[test(")) {
+                continue;
+            }
+            for ahead in lines.iter().skip(index + 1).take(4) {
+                let next = ahead.trim();
+                if next.starts_with('#') || next.is_empty() {
+                    continue;
+                }
+                if let Some(rest) = next
+                    .strip_prefix("pub async fn ")
+                    .or_else(|| next.strip_prefix("async fn "))
+                    .or_else(|| next.strip_prefix("unsafe fn "))
+                    .or_else(|| next.strip_prefix("pub fn "))
+                    .or_else(|| next.strip_prefix("fn "))
+                {
+                    let name: String = rest
+                        .chars()
+                        .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+                        .collect();
+                    if !name.is_empty() {
+                        out.push(("tests", name, line_bytes[index]));
+                    }
+                }
+                break;
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    fn parsed_field<'a>(symbols: &'a PerFileSymbols, field: &str) -> &'a Vec<String> {
+        match field {
+            "structs" => &symbols.structs,
+            "functions" => &symbols.functions,
+            "imports" => &symbols.imports,
+            "exports" => &symbols.exports,
+            "mods" => &symbols.mods,
+            "enums" => &symbols.enums,
+            "traits" => &symbols.traits,
+            "impls" => &symbols.impls,
+            "types" => &symbols.types,
+            "tests" => &symbols.tests,
+            _ => unreachable!("comparison uses only the fields it lists"),
+        }
+    }
+
+    #[test]
+    fn the_parse_tier_finds_every_declaration_the_line_matchers_found_across_this_workspace() {
+        let files = workspace_rust_files();
+        assert!(
+            files.len() > 100,
+            "only {} Rust files were read; the comparison is worthless without the workspace",
+            files.len()
+        );
+        let mut lost: Vec<String> = Vec::new();
+        let mut dropped_false_positives = 0usize;
+        for (path, content) in &files {
+            let parsed = extract_rust_symbols(content);
+            let spans = crate::tsymbols::non_code_spans(content);
+            let in_prose = |byte: usize| {
+                spans
+                    .iter()
+                    .any(|(start, end)| *start <= byte && byte < *end)
+            };
+            let claims = regex_claims(content);
+            for claim in &claims {
+                let (field, raw, byte) = (claim.0, claim.1.as_str(), claim.2);
+                // Two of the lists store a name derived from what was captured, so
+                // the same derivation the tier itself applies is used here.
+                let names: Vec<String> = match field {
+                    "exports" => export_names(raw),
+                    "impls" => trait_impl_target(raw).into_iter().collect(),
+                    _ => vec![raw.to_string()],
+                };
+                if in_prose(byte) {
+                    for name in &names {
+                        // Only a name that appears nowhere in real code is safe to
+                        // require absent: the same identifier can be declared for
+                        // real beside a comment that happens to mention it.
+                        let declared_in_code = claims.iter().any(|other| {
+                            !in_prose(other.2)
+                                && other.0 == field
+                                && match other.0 {
+                                    "exports" => export_names(&other.1).iter().any(|n| n == name),
+                                    "impls" => trait_impl_target(&other.1).as_deref() == Some(name),
+                                    _ => other.1 == *name,
+                                }
+                        });
+                        if !declared_in_code
+                            && parsed_field(&parsed, field)
+                                .iter()
+                                .any(|found| found == name)
+                        {
+                            lost.push(format!("{path}: kept the false positive {field} `{name}`"));
+                        }
+                    }
+                    dropped_false_positives += names.len();
+                    continue;
+                }
+                for name in names {
+                    if !parsed_field(&parsed, field)
+                        .iter()
+                        .any(|found| found == &name)
+                    {
+                        lost.push(format!("{path}: lost {field} `{name}`"));
+                    }
+                }
+            }
+        }
+        // Across the 133 Rust files in this workspace this measured: no declaration
+        // the patterns found in real code was lost, and 96 of their claims turned
+        // out to come from a comment, a string literal or a macro body. The two
+        // tests after this one each pin down one of the directions this number
+        // cannot show on real code: a declaration the patterns could not see at
+        // all, and one they should never have reported.
+        assert!(
+            lost.is_empty(),
+            "declarations the parse tier lost: {}",
+            lost.join("\n")
+        );
+        assert!(
+            dropped_false_positives > 0,
+            "the comparison found no line matcher claim out of a comment, string or macro in \
+             {} files, which would mean the class it exists to check does not occur here",
+            files.len()
+        );
+    }
+
+    #[test]
+    fn a_declaration_written_inside_a_comment_or_a_macro_is_not_one() {
+        let content = r#"
+/*
+pub struct CommentedOut;
+*/
+macro_rules! shape {
+    ($n:ident) => {
+        pub struct MacroMade;
+        fn from_macro() {}
+    };
+}
+const PROSE: &str = "
+pub struct InAString;
+/// documents nothing at all
+";
+fn real() {}
+"#;
+        let parsed = extract_rust_symbols(content);
+        assert_eq!(parsed.structs, Vec::<String>::new());
+        assert_eq!(parsed.functions, vec!["real".to_string()]);
+        assert!(parsed.docs.is_empty(), "{}", parsed.docs);
+
+        // What the tier being replaced read from the same bytes, which is the whole
+        // reason this test exists rather than being a comment in the source.
+        let matched = regex_symbols(content);
+        assert_eq!(
+            matched.structs,
+            vec![
+                "CommentedOut".to_string(),
+                "InAString".to_string(),
+                "MacroMade".to_string()
+            ]
+        );
+        assert_eq!(
+            matched.functions,
+            vec!["from_macro".to_string(), "real".to_string()]
+        );
+        assert_eq!(matched.docs, "documents nothing at all");
+    }
+
+    #[test]
+    fn a_trait_method_declared_on_the_traits_own_line_is_a_function() {
+        // The line matchers looked at a line beginning `pub trait` and reported the
+        // trait and nothing else.
+        let sym = extract_rust_symbols("pub trait Speak { fn say(&self) -> String; }\n");
+        assert_eq!(sym.traits, vec!["Speak".to_string()]);
+        assert_eq!(sym.functions, vec!["say".to_string()]);
+        assert!(
+            regex_symbols("pub trait Speak { fn say(&self) -> String; }\n")
+                .functions
+                .is_empty()
+        );
     }
 }

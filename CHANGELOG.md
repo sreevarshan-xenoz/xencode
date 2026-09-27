@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the repository index reads Rust, instead of guessing from how a line starts
+
+The symbol list a file gets in `.xencode/symbols.json` was produced by nine patterns
+over the text, each asking whether a line began with `struct`, `fn`, `use`, `impl` or
+one of the rest. Anything that looked like a declaration was one. Files here were
+carrying symbols they never declared: `seeds.rs` keeps whole example programs inside
+string literals, and `use __CRATE__::may_drive` in one of those examples was recorded
+as an import of `seeds.rs` itself; a `pub use database::Pool` mentioned in a doc
+comment was recorded as both an import and an export of the file that wrote the
+comment. The other direction was lost too: a method written on its trait's own line —
+`pub trait Speak { fn say(&self) -> String; }` — was indexed as a trait and no
+function at all.
+
+The file is parsed now, with `tree-sitter`, so a comment, a string literal and a
+macro's tokens are each their own kind of thing and cannot be mistaken for a
+declaration. Measured over the 133 Rust files in this workspace: no declaration the
+old tier found in real code was lost, 96 of its claims were refused as prose, and a
+trait-name reading that turned `impl From<io::Error> for Convertible` into an
+implementation of `Error>` is fixed.
+
+Two things follow for anyone building from source. `cargo build` now needs a C
+compiler on `PATH`, because the grammar is C — it is listed in the README
+prerequisites. And a file that does not parse contributes no symbols at all rather
+than a guessed set, which is what a buffer mid-edit should produce; the index format
+itself is unchanged, so an existing `.xencode/` directory keeps working and simply
+fills in more accurately at the next `/init`.
+
 ### Added — a saved model profile can take a turn of the kind it was marked for
 
 A profile has always been a model plus two sampling numbers, and it has always

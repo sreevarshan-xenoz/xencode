@@ -38,6 +38,7 @@ pub mod stale;
 pub mod state;
 pub mod symbols;
 pub mod trace;
+pub(crate) mod tsymbols;
 pub mod watcher;
 pub mod worktree;
 
