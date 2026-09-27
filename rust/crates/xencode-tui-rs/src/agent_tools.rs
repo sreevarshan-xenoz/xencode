@@ -940,10 +940,17 @@ fn cap_tail(text: &str, cap: usize) -> (bool, &str) {
 /// `sh -c` in the workspace root, waiting up to `timeout_secs` for it. The
 /// result always states the exit status first, so a capped or empty body can
 /// never be mistaken for success.
+///
+/// A plain `cargo build` or `cargo check` is asked for rustc's machine-readable
+/// output instead of its rendered text, and the answer is rebuilt from that —
+/// error code, position, the fix the compiler offers, and the error-index entry
+/// for the code. See [`xencode_core_rs::rustc_json`].
 async fn run_foreground(root: &Path, command: &str, timeout_secs: u64) -> String {
+    let json_form = xencode_core_rs::cargo_json_command(command);
+    let asked_for = json_form.as_deref().unwrap_or(command);
     let child = match tokio::process::Command::new("sh")
         .arg("-c")
-        .arg(command)
+        .arg(asked_for)
         .current_dir(root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -972,18 +979,24 @@ async fn run_foreground(root: &Path, command: &str, timeout_secs: u64) -> String
             ));
         }
     };
-    let body = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Cargo writes the JSON to stdout and keeps its own progress and summary on
+    // stderr, so the summary stays and the JSON is what gets read.
+    let body = match json_form
+        .as_deref()
+        .and_then(|_| xencode_core_rs::parse_rustc_json(&stdout))
+    {
+        Some(report) => format!("{}\n{}", report.render(), stderr.trim()),
+        None => format!("{stdout}{stderr}"),
+    };
     let body = body.trim();
     let (dropped, tail) = cap_tail(body, COMMAND_OUTPUT_CAP);
     let status = match output.status.code() {
         Some(code) => format!("exit {code}"),
         None => "killed by signal".to_string(),
     };
-    let mut result = format!("$ {command}\n{status}");
+    let mut result = format!("$ {asked_for}\n{status}");
     if dropped {
         result.push_str(&format!(
             "\n(output capped to the last {} bytes of {})",
@@ -3760,6 +3773,59 @@ mod tests {
 
         let empty = timed(&root, cmd_call("true"), 10).await;
         assert_eq!(empty, "$ true\nexit 0");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The known-error channel: a build that fails answers with rustc's own
+    /// diagnosis — code, position, the fix it offers, and the error-index entry
+    /// for that code — instead of the tail of a stderr dump.
+    #[tokio::test]
+    async fn a_failing_build_answers_with_rustcs_own_diagnosis() {
+        let have_cargo = std::process::Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|ran| ran.status.success())
+            .unwrap_or(false);
+        if !have_cargo {
+            eprintln!("no cargo here, so there is nothing to check against");
+            return;
+        }
+        let root = temp_root("cmd-rustc-json");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname=\"probe\"\nversion=\"0.1.0\"\nedition=\"2021\"\n\n[workspace]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn f(x: u32) -> u64 { x }\n").unwrap();
+
+        let result = timed(&root, cmd_call("cargo build"), 180).await;
+        println!("── what the model is handed ──\n{result}");
+        assert!(
+            result.starts_with("$ cargo build --message-format=json\nexit 101"),
+            "the command shown is the command that ran: {result}"
+        );
+        assert!(
+            result.contains("error E0308: mismatched types — src/lib.rs:1:27"),
+            "{result}"
+        );
+        assert!(
+            result.contains("you can convert a `u32` to a `u64`"),
+            "the compiler's own fix: {result}"
+        );
+        assert!(
+            result.contains("What rustc's own error index says about E0308"),
+            "{result}"
+        );
+        assert!(
+            result.contains("could not compile `probe`"),
+            "cargo's summary line is kept: {result}"
+        );
+        assert!(
+            !result.contains("compiler-message"),
+            "no raw JSON reaches the model: {}",
+            tail(&result, 200)
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 

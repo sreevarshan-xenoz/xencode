@@ -169,6 +169,43 @@ yet downloaded names `cargo fetch`. `what_breaks` and `repo_advise` do not read
 dependencies at all: their answers are about this workspace, and reaching
 outside it would let a dependency's code be presented as yours.
 
+#### What a failing build answers with
+
+A `cargo build` or `cargo check` the model asks for is run with
+`--message-format=json`, and the answer is rustc's own account of the failure
+rather than the tail of a text dump (measured below on a scratch crate, with the
+real numbers from `cargo test -p xencode-core-rs --lib a_live_build -- --ignored
+--nocapture`):
+
+```text
+$ cargo build --message-format=json
+exit 101
+1 error(s), 0 warning(s) from rustc:
+  error E0308: mismatched types — src/lib.rs:1:27
+      help: you can convert a `u32` to a `u64` ⇒ .into()
+      rustc can apply this itself (src/lib.rs:1:28): .into()
+
+What rustc's own error index says about E0308:
+Expected type did not match the received type.
+…
+   Compiling probe v0.1.0 (…)
+error: could not compile `probe` (lib) due to 1 previous error
+```
+
+An `E`-code carries the full text of its entry in the error index, which ships
+inside the compiler: once per code, at most three codes, each cut at 1 200
+characters. Twenty diagnostics is the list ceiling and the whole account is kept
+under 6 KiB, so that what is left out is named instead of being cut from the
+front by the 8 KiB tail that applies to every command's output. On the same
+single error that is 1 432 bytes handed over in place of 11 252 bytes of JSON and
+1 271 bytes of rustc's rendered text.
+
+Only a plain, single `cargo build` or `cargo check` is asked this way. A command
+that composes (`cargo build && cargo test`) would take the flag on the wrong
+word, anything after `--` belongs to rustc rather than cargo, and a command that
+already chose a format is left alone — those, `cargo test`, and a build started
+with `background_start` behave exactly as before.
+
 ### `xencode query <prompt>`
 Send a one-shot query to the configured model.
 
