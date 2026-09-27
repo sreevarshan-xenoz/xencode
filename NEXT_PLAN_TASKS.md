@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1281 tests passing, 12 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1284 tests passing, 12 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3689,6 +3689,17 @@ pass found something the whole plan has been quietly assuming.
 - **LSP-5 — Declare the multi-language policy**: semantic tools Rust-only,
   tree-sitter/ast-grep fallback elsewhere, documented as such. *Effort: S.*
   *Trap:* the per-language registry is precisely the thing to refuse.
+  *(Done 2026-09-27. The scope is one predicate — `Language::has_semantic_tier`,
+  beside the list of every language the scanner can name — and the four places that
+  used to decide it separately (the `.rs` comparison in `/init`, two `== "rust"`
+  string comparisons in the refresh path, one in the advice path) read it now, so
+  the extension check and the stored-language check cannot drift into agreeing with
+  different languages. Asking the fallback is what was refused: there is no
+  tree-sitter grammar for anything but Rust here, and no second path resolver to
+  check one against, so "fallback elsewhere" is carried by the text tools, which is
+  what they already do. The refusal at the boundary replaced a wrong answer: a valid
+  Python file reached the Rust parser and was reported as code that does not parse,
+  which is a statement about the grammar this build loads rather than about the file.)*
 
 ### P-10 — Do-not-build register (additions only; the N and O registers still stand)
 
@@ -7089,6 +7100,48 @@ done-when is met, and the commit that does it names the IDs.
   executor against a temporary project indexed by `init_project` rather than a snapshot written
   by hand; and the one ignored measurement probe, which is also why the ignored count moved
   from 11 to 12.
+- [x] `LSP-5` — 2026-09-27, fourth item of W3, and the one the previous three kept
+  pointing at. Every semantic surface in this workspace — the symbols `/init` records,
+  the graph `what_breaks` walks, the declaration `edit_symbol` replaces — reads Rust,
+  and until now that was a side effect: four separate places decided it, an `e.ext ==
+  "rs"` at `init.rs:291`, two `e.language == "rust"` string comparisons in `refresh.rs`
+  and one `f.language == "rust"` in `advise.rs`, none of them able to see the others. It
+  is now one predicate, `Language::has_semantic_tier`, sitting in `scanner.rs` beside the
+  list of all 25 languages the scanner can name, with a companion that takes the language
+  name as `files.json` stores it, so the stored-string comparisons ask the same question
+  rather than a similar one. A test pins the policy as a fact about the enum: exactly one
+  language in `Language::ALL` has the tier, and it is Rust — so adding a grammar is a
+  deliberate edit in one place, in the file where the language list lives.
+  **What the item asked for that is *not* built, and why.** Its second half names a
+  tree-sitter/ast-grep fallback for other languages; there is nothing to fall back to
+  here, because the only grammar linked is `tree-sitter-rust` and the resolver behind the
+  graph understands `use`, `mod` and `impl Trait for Type`. A second grammar would arrive
+  with a second path resolver and no way to check it against anything, which is the hole
+  CI-2 was written to close. The fallback that ships is the one that already exists: the
+  text tools. `/init` still counts every language it can name, so the language panel, the
+  file tree and retrieval by path cover a mixed repository, and only the three
+  code-reading surfaces decline. The trap is honoured as written — no registry was added,
+  and the predicate is a `matches!` over one variant.
+  **The wrong answer this caught, which CI-3 had pinned as correct behaviour.** With no
+  gate, a Python file passed to `edit_symbol` reached the Rust parser and came back as
+  *the file as it stands does not parse* — a sentence about the grammar this build loads
+  rather than about the file, since the file parses fine, in Python. The tool asks the
+  language first now and answers `Symbol-level editing covers Rust only — helpers/main.py
+  is a python file. \`read_file\`, \`search_files\`, \`edit_file\` and \`write_file\` work on
+  it as text.`, with no claim about syntax; `what_breaks` says the same, because an index
+  that never read the file has no consumers of it to list. `replace_symbol_body` keeps its
+  parse-based refusal and its test, which is right at that layer — it is handed text and a
+  name, never a path, so it cannot know what language it was told.
+  **Verified by** 1284 tests, 0 failures, 12 ignored over 46 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`
+  clean. Three tests are new: the one-language predicate over `Language::ALL` with the
+  stored-name form agreeing with it, the refusal naming a language rather than blaming
+  syntax (pointing at the text tools, and never containing the word "parse"), and one
+  through the tool layer that a valid `helpers/main.py` is refused as python and left
+  byte for byte as it was. The other half of the done-when is that nothing else changed,
+  and that was measured rather than assumed: after the four call sites moved, a rebuilt
+  index of this workspace holds 200 files across every language the scanner names and
+  exactly 137 with symbols — the same 137 Rust files, no more, none missing.
 
 
 #### W2 — The model/inference substrate — 15 items

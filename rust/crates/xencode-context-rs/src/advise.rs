@@ -292,7 +292,7 @@ pub fn advise_from_snapshot(root: &Path) -> Result<Vec<Advice>, crate::ContextEr
         .map(|i| {
             i.files
                 .into_iter()
-                .filter(|f| f.language == "rust")
+                .filter(|f| crate::scanner::language_has_semantic_tier(&f.language))
                 .map(|f| f.path)
                 .collect()
         })
