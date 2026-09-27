@@ -2847,6 +2847,7 @@ async fn run_query_once(
         anchor_md: live.anchor_md.as_deref(),
         state_md: live.state_md.as_deref(),
         git_summary: &live.git_summary,
+        repo_map: &live.repo_map,
         retrieved: live.blocks,
         attached_block: "",
         history: &history,

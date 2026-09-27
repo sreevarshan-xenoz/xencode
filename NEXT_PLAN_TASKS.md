@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1306 tests passing, 12 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1315 tests passing, 13 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3467,7 +3467,11 @@ the ledger already.
 - **AC-6 — Symbol-only repo-map tier** for LOW/4k budgets, ranked by existing
   `DepEdge` in-degree from seed files (PageRank-lite). *Effort: M.* *Trap:* a map
   only helps if the model then asks for the right file, and a 4B may just spend
-  tokens on it — prove with the harness.
+  tokens on it — prove with the harness. *(Done 2026-09-27 — see W4 progress.
+  Ranked by dependency distance from the seeds first and in-degree second, since
+  the map's point is nearness to the current work. The gold-set naming measure
+  stands in for the harness, which needs a live model to answer: the tier moves
+  it from 7 of 25 to 9 of 25 at a median 283 tokens of a 2 457-token budget.)*
 
 ### P-6 — Execution modes and capabilities (proposals 9, 10, 16)
 
@@ -7345,6 +7349,48 @@ done-when is met, and the commit that does it names the IDs.
   left standing is the note on `LEXICAL_WEIGHT` that records what was tried. The
   runs for this comparison appended to `.xencode/cache/eval.jsonl` (now 51 rows),
   which is gitignored and kept as the raw record behind this table.
+- [x] `AC-6` — 2026-09-27, fourth item of W4: a symbol-only repo map is a tier of
+  the prompt, admitted only on a small budget. `repo_map.rs` (new) ranks the
+  index's files by dependency distance from the seeds the turn is already about
+  — retrieval hits plus the working-tree changes — and breaks ties by how many
+  files depend on them, then renders at most twelve rows of three declared names
+  each under a 300-token ceiling. Rows are admitted whole or not at all, so the
+  tier never ends on half a path, and a final line reports how many named files
+  went unlisted. `assemble_prompt` gained the tier between the git summary and
+  the retrieved bodies; the chat path gained it as `ChatInput::repo_map`, and
+  both the TUI and the headless `xencode query` now seed and pass it. The
+  offering is a budget rule, not a profile name: `budget_wants_repo_map` admits
+  the tier while the prompt's target is at or below what a 4096-token machine
+  fills (2 457 tokens), so a wide prompt is never charged for orientation it
+  does not need. Test names are excluded from a row, since a file's test
+  functions are the least orienting thing about it.
+  **What the row asked for and what was actually measured.** The row's done-when
+  is "prove with the harness", and its trap is that a map only helps if the
+  model then asks for the right file. The harness needs a live model to answer,
+  so it was not run; what is measured instead is the narrower, checkable claim —
+  whether the files the turn would otherwise never see are at least *named* to it.
+  Over this repository's 25 gold queries at `Low`'s three-file budget, the three
+  bodies named the expected file in **7**, and the bodies together with the map
+  named it in **9**, at a median map cost of **283** tokens (max 291, ceiling
+  300) out of a 2 457-token fill target. Two of the three tuning decisions came
+  out of that number rather than from taste: five names per row filled the
+  ceiling in five rows and reached 8, so the cap went to three names to fit eight
+  rows and reach 9; excluding test names was measured the same way. The gain is
+  two questions out of twenty-five on a retrieval measure, not a demonstrated
+  answer improvement, and is recorded as such. A real `Low`-budget turn assembled
+  from the live index carried the tier at 283 tokens and came in at 296 of 2 457.
+  **Verified by** `cargo test -p xencode-context-rs --test repo_map_live --
+  --ignored --nocapture`, which prints those figures and the map for
+  `where is the login handler?` (eight rows over 134 named files in this index,
+  126 of them left to the "not listed" line); the unit tests in `repo_map.rs` and
+  `context.rs` hold the ceiling, the whole-row rule, and the fact that admitting
+  the tier cannot push a prompt over target — the last one by showing the weakest
+  retrieved body dropped to pay for the map. `xencode-tui-rs` has a test that the
+  `/ctx` line is built from the assembly that admitted the tier and that a
+  Balanced prompt says nothing, which is why the line is absent on this machine.
+  Tree at 1315 tests, 0 failures, 13 ignored over 47 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean.
 
 
 #### W2 — The model/inference substrate — 15 items

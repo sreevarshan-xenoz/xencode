@@ -32,6 +32,7 @@ pub(crate) mod parse;
 pub mod pricing;
 pub mod prompts;
 pub mod refresh;
+pub mod repo_map;
 pub mod retrieve;
 pub mod rollup;
 pub mod scanner;
@@ -99,6 +100,10 @@ pub use pricing::{
     cost_of, format_usd, pricing_path, CostReport, ModelCost, ModelPrice, PriceTable,
 };
 pub use refresh::{refresh_rust_file, RefreshOutcome};
+pub use repo_map::{
+    rank_repo_map, repo_map_text, MapRow, REPO_MAP_CAP_TOKENS, REPO_MAP_MAX_FILES,
+    REPO_MAP_MAX_HOPS, REPO_MAP_MAX_SYMBOLS,
+};
 pub use retrieve::{retrieve, word_tokens, RetrievalIndex, RetrieveOptions, RetrievedFile};
 pub use rollup::{
     read_rollup, refresh_rollup, rollup_path, write_rollup, MetricsRollup, Percentiles,
