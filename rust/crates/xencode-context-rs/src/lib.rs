@@ -22,6 +22,7 @@ pub mod editing;
 pub mod embed;
 pub mod eval;
 pub mod gitinfo;
+pub mod history;
 pub mod hwprobe;
 pub mod impact;
 pub mod index;
@@ -77,6 +78,10 @@ pub use eval::{
 pub use gitinfo::{
     changed_paths_between, current_git_info, dirty_paths, git_diff_file, git_diff_numstat,
     git_file_set, is_git_repo, parse_numstat, DiffFile, GitInfo, MAX_DIFF_CHARS,
+};
+pub use history::{
+    default_blame_target, history_setup, history_status, CommitGraph, HistorySetup, HistoryStatus,
+    PackIndex, QueryTime,
 };
 pub use impact::{
     impact, impact_from_snapshot, ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,

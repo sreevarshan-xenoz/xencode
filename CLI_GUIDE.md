@@ -976,6 +976,64 @@ info, and no device or offload field), and what a build competing for the same
 memory will do to it. The `mmap` line states the relationship and leaves the
 measurement to you.
 
+### `xencode history <action>`
+Ask how fast this repository's history is to query, and speed it up where an
+index is missing.
+
+```bash
+xencode history status                       # current directory's repository
+xencode history status --path ~/Projects/foo --json
+xencode history setup                        # write the two indexes, then re-time
+xencode history status --file src/main.rs    # blame probe on a file you care about
+```
+
+`status` prints four things and starts nothing but `git`: where the repository
+data lives, how many commits are reachable, whether a **commit-graph** and a
+**multi-pack-index** exist (with size, pack count, and whether
+`git commit-graph verify` passed), and a `timed now:` table. Every number in that
+table comes from a `git` process that just ran for this command — the commit
+subjects, the commits with the paths they touched, the reachable-commit count, and
+a blame of one file. Nothing is carried over from an earlier run, and the blame
+probe only appears when a file is known: `--file` if you gave one, otherwise
+`README.md`, otherwise the first tracked path.
+
+`setup` writes `.git/objects/info/commit-graph` (`git commit-graph write
+--reachable`) and `.git/objects/pack/multi-pack-index` (`git multi-pack-index
+write`), then measures again. Both writes are idempotent and touch no commit, so
+running it twice is safe and says `commit-graph rewritten`. Where git refuses, the
+refusal is printed in git's own first error line rather than paraphrased — with
+fewer than two packs, for instance, `git multi-pack-index write` exits 255 with
+`error: no pack files to index.` and there is honestly no index to have.
+
+**The comparison is where it gets blunt.** The two timings of one query on one
+machine differ by a couple of milliseconds, so a claim has to clear both 20% and
+2 ms; anything smaller is reported as no change. On this repository — 813
+commits, 608 MiB of `.git`, 2 packs, git 2.55.0 — the indexes were not both
+present to begin with: the commit-graph was missing, and writing it changed only
+the commit-count query (2.7 ms → 2.0 ms). The other three did not move, and the
+command prints that instead of a speed-up:
+
+```
+no query changed by more than both 20% and 2 ms — on 813 commits the commit chain
+was not the cost, so these indexes are there for the queries built on history
+rather than for the ones timed above
+```
+
+That is the honest reading of what a commit-graph does: it shortens walking the
+commit chain, and on a repository this size the chain was never the expensive
+part. What *is* expensive here, measured from the same shell, is `git log
+--numstat` over the whole history at **11.3 s** and `git log -S <text> --all` at
+**12.9 s** — neither of which these indexes fix. Cheap by comparison: `--follow`
+on one file at 51 ms and `git blame -L 1,120` on one file at 10 ms.
+
+`status` also annotates two repository shapes that change what those numbers mean.
+A **shallow** clone (one started with `--depth`) is marked, because there is no
+history to walk and `git fetch --unshallow` is the way to get one. A **partial
+clone** (`--filter=blob:none`) is marked with a warning that blame and `log -S`
+fetch a blob from the remote for every commit they visit — which is what turns
+those two queries from milliseconds into minutes, and is worth knowing before
+reading a timing as "git is slow".
+
 ### `xencode colab <action>`
 Google Colab bridge: run the inference server on a Colab VM (T4 GPU etc.)
 and reach it from this machine. The only supported transport is the official

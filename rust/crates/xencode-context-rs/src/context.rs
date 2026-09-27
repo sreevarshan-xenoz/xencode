@@ -609,12 +609,12 @@ pub fn collect_live_context(root: &Path, query: &str, caps: ContextCaps) -> Live
 pub fn git_summary_text(root: &Path) -> Option<String> {
     let info = current_git_info(root)?;
     let changed = dirty_paths(root);
-    let head = if info.head.len() > 8 {
-        &info.head[..8]
-    } else {
-        &info.head
-    };
-    let mut s = format!("🎋 {} @ {head} — {} dirty file(s)", info.branch, info.dirty);
+    let mut s = format!(
+        "🎋 {} @ {} — {} dirty file(s)",
+        info.branch,
+        info.revision_label(),
+        info.dirty
+    );
     if !changed.is_empty() {
         s.push_str("\nChanged files:\n");
         for p in changed.iter().take(12) {

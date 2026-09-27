@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode history` says how fast this repository's history is, in milliseconds that were just measured
+
+`xencode history status` prints where the repository data lives, how many commits
+are reachable, whether a commit-graph and a multi-pack-index exist, and a table of
+the history queries that use them: every commit subject, every commit with the
+paths it touched, the reachable-commit count, and a blame of one file. Every number
+comes from a `git` process started by that command, so nothing is quoted from a
+document, and a failed query is shown as failed with git's own error rather than as
+a zero. `xencode history setup` writes the two indexes — `git commit-graph write
+--reachable` and `git multi-pack-index write`, both idempotent, neither touching a
+commit — and then measures again.
+
+The second table is where the command earns its keep, because it usually reports
+**no speed-up**. Two runs of the same query on the same machine differ by a couple
+of milliseconds, so a claim has to clear both 20% and 2 ms. On this repository (813
+commits, 608 MiB of `.git`, 2 packs) the commit-graph was missing, writing it
+improved only the commit count from 2.7 ms to 2.0 ms, and the command says that the
+commit chain was not the cost rather than printing a number that means nothing. It
+also prints its own caveat: the second table ran with the page cache already warmed
+by the first, so read it as an upper bound.
+
+Two repository shapes get an explanation instead of a bare timing: a shallow clone
+is marked as having no history to walk, and a `--filter=blob:none` partial clone is
+marked with the reason blame and `git log -S` are slow there — they fetch a blob
+from the remote for every commit they visit. A missing multi-pack-index is described
+by what it means ("an object lookup asks every pack in turn"), and where git refuses
+to write one, git's own words are printed.
+
+### Fixed — a git checkout could run code from the repository, and a repository with no commits rebuilt its index every run
+
+Two changes to the one place the context builder starts `git`.
+
+A cloned repository can set `core.fsmonitor` in its own config, and git runs that
+program during an ordinary read — so `xencode` querying an unfamiliar repository
+could execute something from it. Every git call now passes `-c core.fsmonitor=false`
+and sets `GIT_CONFIG_NOSYSTEM`, which also stops a machine-wide `/etc/gitconfig`
+from redirecting output, while a repository's own ordinary settings are still
+honoured. This covers the git seam in `xencode-context-rs`; other crates that start
+`git` themselves are not touched by it yet. A test reads that file's own source and
+asserts there is exactly one place a `git` process is started and that it carries
+both settings — it was watched to fail when a second start site was added.
+
+The same seam fixed a quieter fault. `git rev-parse HEAD` in a repository before its
+first commit exits with an error and prints the literal text `HEAD`, and the old
+reader accepted that text as a revision. The index manifest then compared two
+different wrong values that happened to agree, so a repository with no commits was
+treated as changed on every run and rebuilt its index each time. A revision is now
+read as "no revision" in one place and used identically by the writer and the
+resume check, so the no-commit repository is recognised as fresh, and the display
+that was supposed to say `(unborn HEAD)` — in the init progress line and in the git
+summary sent to the model — can finally reach that branch instead of slicing an
+empty string.
+
 ### Changed — a file in another language is now refused as that language, and the Rust-only scope is one decision
 
 Three surfaces read code rather than text: the symbols `/init` records, the dependency graph

@@ -15,6 +15,25 @@ pub struct GitInfo {
     pub dirty: u64,
 }
 
+impl GitInfo {
+    /// The commit this repository is on, or nothing when it has none yet:
+    /// `git rev-parse HEAD` fails on a repository before its first commit. The
+    /// index compares this on both sides of one check, so the empty case has to
+    /// become `None` here rather than at each caller.
+    pub fn revision(&self) -> Option<&str> {
+        (!self.head.is_empty()).then_some(self.head.as_str())
+    }
+
+    /// The same thing for a person: eight characters, or the reason there are
+    /// none.
+    pub fn revision_label(&self) -> String {
+        match self.revision() {
+            Some(head) => head.chars().take(8).collect(),
+            None => "(unborn HEAD)".to_string(),
+        }
+    }
+}
+
 /// Longest diff text kept per file; the rest is cut with a marked trailer.
 pub const MAX_DIFF_CHARS: usize = 100_000;
 
@@ -68,12 +87,25 @@ pub fn parse_numstat(output: &str) -> Vec<DiffFile> {
     files
 }
 
-/// Run git and return stdout, or a short error. Smallest shared helper so
-/// every diff entry point reports failures the same way.
+/// Run git and return stdout, or a short error. The only place in this module
+/// that starts a git process, so every history and diff entry point reports
+/// failures the same way — and so no query can be added that misses the two
+/// settings below.
+///
+/// A cloned repository can name its own `core.fsmonitor` hook, which git then
+/// runs as part of an ordinary read, and a machine-wide `/etc/gitconfig` can
+/// redirect that read's output or hang a filter off it. A repository the user
+/// did not write should not be able to run code just because the agent asked
+/// it a question about history, so the hook is switched off per call and the
+/// system file is left unread. Repository-local config still applies: that is
+/// where the user's own `core.commitGraph` setting lives.
 pub(crate) fn git_stdout(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
+        .arg("-c")
+        .arg("core.fsmonitor=false")
         .args(args)
         .current_dir(root)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .map_err(|e| format!("git failed to start: {e}"))?;
     if !output.status.success() {
@@ -123,16 +155,7 @@ pub fn git_diff_file(root: &Path, base: &str, path: &str) -> Result<String, Stri
 }
 
 pub fn is_git_repo(root: &Path) -> bool {
-    Command::new("git")
-        .args([
-            "-C",
-            root.to_string_lossy().as_ref(),
-            "rev-parse",
-            "--git-dir",
-        ])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    git_stdout(root, &["rev-parse", "--git-dir"]).is_ok()
 }
 
 /// Set of repo-relative paths (`/` separators) git considers part of the
@@ -144,25 +167,9 @@ pub fn git_file_set(root: &Path) -> Option<HashSet<String>> {
     if !is_git_repo(root) {
         return None;
     }
-    let output = Command::new("git")
-        .args([
-            "-C",
-            root.to_string_lossy().as_ref(),
-            "ls-files",
-            "-co",
-            "--exclude-standard",
-            "-z",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    let output = git_stdout(root, &["ls-files", "-co", "--exclude-standard", "-z"]).ok()?;
     let mut set = HashSet::new();
-    for path in String::from_utf8(output.stdout)
-        .unwrap_or_default()
-        .split('\0')
-    {
+    for path in output.split('\0') {
         if !path.is_empty() {
             set.insert(path.to_string());
         }
@@ -174,43 +181,15 @@ pub fn current_git_info(root: &Path) -> Option<GitInfo> {
     if !is_git_repo(root) {
         return None;
     }
-    let branch = Command::new("git")
-        .args([
-            "-C",
-            root.to_string_lossy().as_ref(),
-            "branch",
-            "--show-current",
-        ])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-
-    let head = Command::new("git")
-        .args(["-C", root.to_string_lossy().as_ref(), "rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-
-    let dirty = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .map(|o| {
-            String::from_utf8(o.stdout)
-                .map(|s| s.lines().count() as u64)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
-
+    let read = |args: &[&str]| {
+        git_stdout(root, args)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
     Some(GitInfo {
-        branch,
-        head,
-        dirty,
+        branch: read(&["branch", "--show-current"]),
+        head: read(&["rev-parse", "HEAD"]),
+        dirty: read(&["status", "--porcelain"]).lines().count() as u64,
     })
 }
 
@@ -219,21 +198,18 @@ pub fn changed_paths_between(root: &Path, old_head: &str, new_head: &str) -> Vec
     if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
         return Vec::new();
     }
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["diff", "--name-only", old_head, new_head])
-        .output()
-        .ok()
-        .map(|o| {
-            String::from_utf8(o.stdout)
-                .unwrap_or_default()
-                .lines()
-                .map(|l| l.replace('\\', "/"))
-                .filter(|l| !l.is_empty())
-                .collect()
-        })
+    git_stdout(root, &["diff", "--name-only", old_head, new_head])
+        .map(|out| paths_from(&out))
         .unwrap_or_default()
+}
+
+/// Turn git's newline-separated path output into `/`-separated paths.
+fn paths_from(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .map(|l| l.replace('\\', "/"))
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// Repo-relative paths with uncommitted changes (`/` separators): modified,
@@ -242,19 +218,11 @@ pub fn dirty_paths(root: &Path) -> Vec<String> {
     if !is_git_repo(root) {
         return Vec::new();
     }
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(root)
-        .output()
-        .ok();
-    let Some(output) = output else {
+    let Ok(output) = git_stdout(root, &["status", "--porcelain"]) else {
         return Vec::new();
     };
-    if !output.status.success() {
-        return Vec::new();
-    }
     let mut paths = Vec::new();
-    for line in String::from_utf8(output.stdout).unwrap_or_default().lines() {
+    for line in output.lines() {
         // Porcelain layout: <XY> <path> for normal entries, "XY  old -> new"
         // for renames/copies.
         let entry = if line.len() > 3 { &line[3..] } else { continue };
@@ -367,6 +335,59 @@ mod tests {
         assert!(!set.contains("ignored/out.bin"));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_repository_before_its_first_commit_has_no_revision() {
+        let root = temp_repo();
+        fs::create_dir_all(&root).unwrap();
+        git(&root, &["init", "-q"]);
+        fs::write(root.join("a.rs"), "// a\n").unwrap();
+        git(&root, &["add", "a.rs"]);
+
+        // `git rev-parse HEAD` exits 128 there and prints the argument back as
+        // if it had resolved it, so a reader that ignores the status ends up
+        // calling the string "HEAD" this repository's commit.
+        let info = current_git_info(&root).expect("git repo");
+        assert!(info.head.is_empty(), "head was {:?}", info.head);
+        assert_eq!(info.revision(), None);
+        assert_eq!(info.revision_label(), "(unborn HEAD)");
+
+        git(&root, &["config", "user.email", "test@xencode.local"]);
+        git(&root, &["config", "user.name", "Xencode Test"]);
+        git(&root, &["commit", "-q", "-m", "first"]);
+        let info = current_git_info(&root).unwrap();
+        assert_eq!(info.revision().map(str::len), Some(40));
+        assert_eq!(info.revision_label().len(), 8);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Every git read in this file has to carry the settings that keep a cloned
+    /// repository from running code during a question about its history. They
+    /// are set in one place, so a call added beside that place is the failure
+    /// this test catches.
+    #[test]
+    fn git_is_only_started_from_one_place_in_this_file() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/gitinfo.rs"))
+                .expect("read own source");
+        let code = source.split("#[cfg(test)]").next().unwrap_or(&source);
+
+        assert_eq!(
+            code.matches("Command::new(\"git\")").count(),
+            1,
+            "git should be started from the one hardened helper, not from each caller"
+        );
+        let helper = code.split("Command::new(\"git\")").nth(1).unwrap_or("");
+        assert!(
+            helper.contains("core.fsmonitor=false"),
+            "the place that starts git must switch the repository's fsmonitor hook off"
+        );
+        assert!(
+            helper.contains("GIT_CONFIG_NOSYSTEM"),
+            "the place that starts git must leave the machine-wide config unread"
+        );
     }
 
     #[test]

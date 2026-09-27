@@ -83,6 +83,18 @@ PCI pretends to hold — what the model file's cache costs per token, and the fl
 to start a local server with. It prints the `config set` line that keeps them and
 changes nothing.
 
+### Time this repository's git history
+```bash
+xencode history status
+xencode history setup      # write the commit-graph and multi-pack-index, then re-time
+```
+`status` times the history queries — commit subjects, the paths each commit
+touched, the reachable-commit count, a blame — from `git` processes that just ran,
+and reports whether the two indexes that make them cheap are present. `setup`
+writes them and measures again. Expect it to report no speed-up: on an 813-commit
+repository only the commit count moved (2.7 ms → 2.0 ms), and the command says so
+rather than inventing a win.
+
 ### Analyze a path
 ```bash
 xencode analyze ./src
