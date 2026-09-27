@@ -119,7 +119,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     }
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
-        | "search_files" | "update_plan" => ToolClass::ReadOnly,
+        | "search_files" | "read_docs" | "update_plan" => ToolClass::ReadOnly,
         "write_file" | "edit_file" | "edit_symbol" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
@@ -450,6 +450,174 @@ fn tool_read_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
     }
     out.truncate(out.len() - 1);
     out
+}
+
+/// `read_docs` (RS-4): how another crate documents itself, at a version that
+/// is stated in the answer. Local first, always; the network only where there
+/// is no local copy and the user has opened `allow_online_docs`.
+async fn tool_read_docs(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    online: bool,
+) -> String {
+    let Some(name) = arg_str(args, "crate").map(|s| s.trim()) else {
+        return err("read_docs needs a string \"crate\", as in {\"crate\": \"serde\"}");
+    };
+    let version = arg_str(args, "version")
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let path = arg_str(args, "path")
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    match crate::crate_docs::find_local(root, name, version) {
+        crate::crate_docs::Local::Found(copy) => local_docs(&copy, path),
+        crate::crate_docs::Local::Absent(why) => {
+            if !online {
+                return err(format!("{why}. {OFFLINE_HINT}"));
+            }
+            online_docs(name, version, path, &why).await
+        }
+    }
+}
+
+/// What to tell a model that asked for documentation this machine cannot reach
+/// and is not permitted to fetch: the two ways to get it, both of them real.
+const OFFLINE_HINT: &str = "read_docs reads only what cargo has already unpacked unless the \
+                            user turns on allow_online_docs (`xencode config set \
+                            allow_online_docs true`); a version named in Cargo.lock can also be \
+                            unpacked on this machine with `cargo fetch`.";
+
+/// The local half of `read_docs`: cargo's own unpacked copy, which is the
+/// version this project builds unless the call asked for another one by name.
+fn local_docs(copy: &crate::crate_docs::LocalCopy, path: Option<&str>) -> String {
+    let dir = &copy.source.dir;
+    let (rel, full) = match path {
+        Some(requested) => {
+            if !crate::crate_sources::path_is_contained(requested) {
+                return err(format!(
+                    "read_docs path {requested:?} reaches outside the crate; keep it relative \
+                     and inside it"
+                ));
+            }
+            let full = dir.join(requested);
+            if !full.is_file() {
+                return missing_doc(copy, &format!("{requested:?}"));
+            }
+            (requested.to_string(), full)
+        }
+        None => match crate::crate_docs::pick_doc_file(dir) {
+            Some(found) => (found.rel, found.full),
+            None => return missing_doc(copy, "readme"),
+        },
+    };
+    let display = copy.source.spec_for(&rel);
+    let text = match read_text(&full, &display) {
+        Ok(text) => text,
+        Err(e) => return e,
+    };
+    let body = crate::crate_docs::cap_doc(
+        &text,
+        &format!("read_file with path={display:?} and an offset pages through the rest"),
+    );
+    let others = crate::crate_docs::other_doc_files(dir, &rel);
+    let mut out = format!(
+        "[{} — read from {display}, unpacked by cargo]\n{body}",
+        copy.label()
+    );
+    if !others.is_empty() {
+        out.push_str(&format!(
+            "\nOther documentation in this crate: {} — ask again with one of those paths.\n",
+            others.join(", ")
+        ));
+    }
+    out
+}
+
+/// The answer when the file a crate documents itself with is not there: name
+/// the files that are, rather than send the model back to a search.
+fn missing_doc(copy: &crate::crate_docs::LocalCopy, asked: &str) -> String {
+    let others = crate::crate_docs::other_doc_files(&copy.source.dir, "");
+    let listing = if others.is_empty() {
+        format!(
+            "nothing in {} reads like documentation; list_dir with path={:?} shows what is there",
+            copy.source.name,
+            copy.source.spec_for("")
+        )
+    } else {
+        format!(
+            "documentation it does have: {} — ask again with one of those paths",
+            others.join(", ")
+        )
+    };
+    err(format!(
+        "{} {} has no {asked}; {listing}",
+        copy.source.name, copy.source.version
+    ))
+}
+
+/// The fetched half: the two endpoints that publish by version, each reached
+/// only because the copy on this machine was not readable.
+async fn online_docs(name: &str, version: Option<&str>, path: Option<&str>, why: &str) -> String {
+    // crates.io answers a version-less readme request with HTTP 400, so there
+    // is no "latest" to fall back to; the version has to be in the call.
+    let Some(version) = version else {
+        return err(format!(
+            "{why}, and a fetch needs a version to fetch: neither crates.io nor docs.rs will \
+             answer for {name} without one, so pass version=\"…\" — the version you want, which \
+             is not necessarily one this project builds."
+        ));
+    };
+    let url = match path {
+        Some(path) => crate::crate_docs::source_url(name, version, path),
+        None => crate::crate_docs::readme_url(name, version),
+    };
+    let Ok(url) = url else {
+        return err(url.unwrap_err());
+    };
+    let fetched = match crate::crate_docs::fetch(&url).await {
+        Ok(fetched) => fetched,
+        Err(e) => {
+            return err(format!(
+                "{e} — and the local copy was not readable either: {why}"
+            ));
+        }
+    };
+    let (status, body) = fetched;
+    let what = path.unwrap_or("readme");
+    if status == 404 {
+        return err(format!(
+            "{url} does not exist: {name} {version} is not published, or has no {what} in it."
+        ));
+    }
+    if status != 200 {
+        // A version with no rendered readme still redirects; the object store
+        // it lands on is what refuses. That means "none published", not a
+        // network failure, and the difference matters to what to try next.
+        return err(format!(
+            "{url} answered HTTP {status} after following crates.io's redirect, which is how the \
+             service says {name} {version} has no {what} published."
+        ));
+    }
+    let text = match path {
+        Some(path) => match crate::crate_docs::docs_rs_source(&body) {
+            Some(text) => text,
+            None => {
+                return err(format!(
+                    "{url} is a page with no file on it — {name} {version} has no {path}."
+                ))
+            }
+        },
+        None => crate::crate_docs::html_to_text(&body),
+    };
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return err(format!("{url} carries no text once its markup is removed."));
+    }
+    let body = crate::crate_docs::cap_doc(
+        &text,
+        &format!("the whole of it is at {url}, and `cargo fetch` puts a copy on this machine"),
+    );
+    format!("[{name} {version} {what} — fetched from {url}, because {why}]\n{body}")
 }
 
 fn tool_list_dir(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -1136,13 +1304,17 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
 }
 
 /// [`execute_tool_call`] with the caller's configured foreground timeout.
+///
+/// These two entry points are the ones outside the chat loop, and they read
+/// crate documentation offline only: the setting that permits a fetch arrives
+/// through [`ApprovalCtx`], which the loop is the only caller that has.
 pub async fn execute_tool_call_timed(
     rt: &TaskRuntime,
     root: &Path,
     call: &ToolCall,
     command_timeout: u64,
 ) -> String {
-    execute_tool_call_plan(rt, root, call, command_timeout, None, None).await
+    execute_tool_call_plan(rt, root, call, command_timeout, None, None, false).await
 }
 
 /// The dispatcher. `plan` is the chat's visible todo list: only the loop has
@@ -1154,6 +1326,7 @@ async fn execute_tool_call_plan(
     command_timeout: u64,
     plan: Option<&PlanHandle>,
     mcp: Option<&crate::mcp::McpHub>,
+    online_docs: bool,
 ) -> String {
     let args = call.arguments_object();
     // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
@@ -1271,6 +1444,7 @@ async fn execute_tool_call_plan(
         "read_file" => tool_read_file(root, &args),
         "list_dir" => tool_list_dir(root, &args),
         "search_files" => tool_search_files(root, &args),
+        "read_docs" => tool_read_docs(root, &args, online_docs).await,
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
@@ -1308,6 +1482,11 @@ pub struct ApprovalCtx {
     /// rather than run as if it had asked for nothing. Empty means nothing is
     /// known, which checks the arguments that cannot be read at all and no more.
     pub schemas: std::collections::HashMap<String, serde_json::Value>,
+    /// Whether `read_docs` may fetch when this machine has no copy of the
+    /// version asked for (`allow_online_docs`). Off by default, and off for
+    /// every path that is not the chat loop: a call out of the machine has to
+    /// be something the user decided, not something the agent worked around.
+    pub online_docs: bool,
 }
 
 impl ApprovalCtx {
@@ -1395,8 +1574,16 @@ async fn run_and_checkpoint(
         before_note.push_str(&text);
     }
     let note = ctx.snapshot_before(root, call);
-    let mut result =
-        execute_tool_call_plan(rt, root, call, ctx.command_timeout, Some(&ctx.plan), mcp).await;
+    let mut result = execute_tool_call_plan(
+        rt,
+        root,
+        call,
+        ctx.command_timeout,
+        Some(&ctx.plan),
+        mcp,
+        ctx.online_docs,
+    )
+    .await;
     if let Some(note) = note {
         if !result.starts_with("error:") {
             result.push('\n');
@@ -2687,6 +2874,204 @@ mod tests {
         );
     }
 
+    /// The first locked dependency on this machine whose unpacked copy carries
+    /// a readable document, or `None` where there is no registry to read from.
+    fn locked_crate_with_docs(root: &Path) -> Option<crate::crate_docs::LocalCopy> {
+        crate::crate_sources::locked_packages_for(root)
+            .into_iter()
+            .find_map(|(name, version)| {
+                match crate::crate_docs::find_local(root, &name, Some(&version)) {
+                    crate::crate_docs::Local::Found(copy) => {
+                        crate::crate_docs::pick_doc_file(&copy.source.dir).map(|_| copy)
+                    }
+                    crate::crate_docs::Local::Absent(_) => None,
+                }
+            })
+    }
+
+    fn this_workspace() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the crates directory")
+            .to_path_buf()
+    }
+
+    /// The live check for the documentation tool: it reads a real crate's own
+    /// documentation out of the copy cargo unpacked for this workspace, labels
+    /// it with the version that copy actually is, and refuses a `path` that
+    /// climbs out of the crate. No network involved.
+    #[tokio::test]
+    async fn read_docs_returns_what_cargo_unpacked_and_labels_the_version() {
+        let workspace = this_workspace();
+        let Some(copy) = locked_crate_with_docs(&workspace) else {
+            return;
+        };
+        let (name, version) = (copy.source.name.clone(), copy.source.version.clone());
+
+        let args = args_of(serde_json::json!({"crate": name.clone()}));
+        assert_eq!(
+            classify(&workspace, "read_docs", &args, ApprovalMode::Ask, &[]),
+            Permission::Allow,
+            "reading documentation opens no file the model could not already read"
+        );
+        let out = tool_read_docs(&workspace, &args, false).await;
+        assert!(out.starts_with(&format!("[{name} {version} —")), "{out}");
+        assert!(out.contains("unpacked by cargo"), "{out}");
+        assert!(
+            out.contains(&format!("crate:{name}/")),
+            "the answer has to carry an address the next call can reuse: {out}"
+        );
+        assert!(
+            out.lines().count() > 1,
+            "a header with no document under it is not an answer: {out}"
+        );
+        assert!(copy.pinned, "{name} {version} came from the lock");
+
+        // A file the crate does not have is answered with the files it does.
+        let missing = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": name.clone(), "path": "not-a-document.md"})),
+            false,
+        )
+        .await;
+        assert!(missing.starts_with("error:"), "{missing}");
+        assert!(
+            missing.contains(&format!("{name} {version} has no")),
+            "{missing}"
+        );
+
+        // And a path that leaves the crate is refused before the disk is read.
+        let escape = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": name, "path": "../../etc/passwd"})),
+            false,
+        )
+        .await;
+        assert!(escape.contains("reaches outside the crate"), "{escape}");
+        assert!(
+            !escape.contains("root:"),
+            "the refusal must not echo the file it refused: {escape}"
+        );
+    }
+
+    /// What the tool says when the documentation is not on this machine and the
+    /// user has not opened the online switch: the reason, then both real ways
+    /// to get it. A refusal that only says "not found" sends the model in
+    /// circles.
+    #[tokio::test]
+    async fn read_docs_without_a_local_copy_explains_the_switch_and_the_fetch() {
+        let workspace = this_workspace();
+
+        let unknown = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "not-a-crate-anywhere-here"})),
+            false,
+        )
+        .await;
+        assert!(unknown.starts_with("error:"), "{unknown}");
+        assert!(
+            unknown.contains("Cargo.lock does not name"),
+            "the reason comes first: {unknown}"
+        );
+        assert!(unknown.contains("allow_online_docs"), "{unknown}");
+        assert!(unknown.contains("cargo fetch"), "{unknown}");
+
+        // A version the lock names nothing about, on a crate it does name:
+        // cargo simply has not unpacked it.
+        let Some((name, _)) = crate::crate_sources::locked_packages_for(&workspace)
+            .into_iter()
+            .next()
+        else {
+            return;
+        };
+        let absent_version = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": name, "version": "9.9.9"})),
+            false,
+        )
+        .await;
+        assert!(
+            absent_version.contains("cargo has not unpacked") && absent_version.contains("9.9.9"),
+            "{absent_version}"
+        );
+
+        // With the switch on there is still nothing to fetch without a version:
+        // crates.io answers that request with HTTP 400, so the tool says so
+        // rather than making the call.
+        let no_version = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "not-a-crate-anywhere-here"})),
+            true,
+        )
+        .await;
+        assert!(
+            no_version.contains("a fetch needs a version"),
+            "{no_version}"
+        );
+
+        // The argument itself is required.
+        let bare = tool_read_docs(&workspace, &args_of(serde_json::json!({})), false).await;
+        assert!(bare.contains("needs a string"), "{bare}");
+    }
+
+    /// The only test here that reaches the network, so it is ignored by
+    /// default: `cargo test -p xencode-tui-rs --lib -- --ignored read_docs`.
+    /// It asks for a serde version this workspace does not build, which is how
+    /// the fetched half gets taken at all — both endpoints, and the shape of a
+    /// version that publishes nothing.
+    #[tokio::test]
+    #[ignore]
+    async fn read_docs_fetches_a_version_pinned_readme_when_this_machine_lacks_it() {
+        let workspace = this_workspace();
+        let out = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "serde", "version": "1.0.200"})),
+            true,
+        )
+        .await;
+        assert!(!out.starts_with("error:"), "{out}");
+        assert!(out.contains("fetched from"), "{out}");
+        assert!(out.contains("https://crates.io"), "{out}");
+        assert!(
+            out.contains("cargo has not unpacked serde 1.0.200"),
+            "the answer says why it went out: {out}"
+        );
+        assert!(
+            out.lines().count() > 2,
+            "a header with no document under it is not an answer: {out}"
+        );
+
+        // The other endpoint carries a file's own text, recovered from a page
+        // that draws the line numbers separately.
+        let file = tool_read_docs(
+            &workspace,
+            &args_of(
+                serde_json::json!({"crate": "serde", "version": "1.0.200", "path": "Cargo.toml"}),
+            ),
+            true,
+        )
+        .await;
+        assert!(file.contains("https://docs.rs"), "{file}");
+        assert!(
+            file.contains("name = \"serde\"") && file.contains("version = \"1.0.200\""),
+            "the page has to come back as the file it was: {file}"
+        );
+
+        // A version that was never published is not a network failure, and the
+        // answer must not read like one.
+        let missing = tool_read_docs(
+            &workspace,
+            &args_of(serde_json::json!({"crate": "serde", "version": "9.9.9"})),
+            true,
+        )
+        .await;
+        assert!(missing.starts_with("error:"), "{missing}");
+        assert!(
+            missing.contains("serde 9.9.9") && missing.contains("readme"),
+            "{missing}"
+        );
+    }
+
     #[test]
     fn list_dir_sorts_marks_dirs_and_caps() {
         let root = temp_root("list");
@@ -3172,6 +3557,7 @@ mod tests {
                 mcp: Arc::new(crate::mcp::McpHub::new()),
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
+                online_docs: false,
             },
             prompts: rx,
         }
@@ -3646,6 +4032,7 @@ mod tests {
                 mcp: Arc::new(crate::mcp::McpHub::new()),
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
+                online_docs: false,
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(

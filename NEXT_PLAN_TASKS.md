@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1345 tests passing, 14 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1358 tests passing, 15 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2351,6 +2351,27 @@ The agent edits code it cannot look up. The pieces exist and are disconnected
   the one place where a network call is genuinely better than a search call,
   because the answer is version-pinned and structured. **OFFLINE-OK, with an
   OPT-IN-NETWORK fallback.**
+  *(Built 2026-09-27 as `xencode-tui-rs::crate_docs` plus the `read_docs` tool.
+  Both endpoints were read before being written against, and neither behaves the
+  way the plan assumed: `.../crates/serde/1.0.229/readme` is a **302** onto
+  `static.crates.io/readmes/…html` whose body is a rendered-markdown **fragment**
+  (3 510 bytes for serde) rather than a document, the same request **without a
+  version is an HTTP 400** — there is no "latest", so a version is mandatory — and
+  a published-name-but-unknown-version (`serde/9.9.9`) also redirects, onto an S3
+  **403 AccessDenied**, which means "none published" and not "the network failed".
+  `docs.rs/crate/serde/1.0.229/source/Cargo.toml` is 200 with **49 883 bytes** of
+  HTML for a file whose text is **1 969 bytes**: the file is the one `<pre>` after
+  `id="source-code"`, its newlines literal and its tokens wrapped in span tags, so
+  stripping and unescaping restores it, while the line numbers live in a sibling
+  `<pre id="line-numbers">` that must not be read as code — and a 404 page (6 647
+  bytes) simply has no `id="source-code"` on it, which is how "not found" is told
+  apart from "empty". The offline half carries the value: the readme is chosen by
+  the crate's own manifest `readme` key and then a fixed name order, answers are
+  capped at the front, at 8 192 bytes, and name the other documents in the crate
+  so the next call asks for one by path. Network use sits behind a new
+  `allow_online_docs` setting (default `false`) kept deliberately separate from
+  `allow_cloud_models`, with a test proving neither implies the other. See the W4
+  record.)*
 - **RS-5 `lookup_advisory`** — clone the RustSec advisory DB shallow (6.3 MB,
   1246 crate advisories as of this check) plus OSV's `crates.io/all.zip`
   (3.3 MB) and query locally; refresh is an explicit command. **M**. Trap: do
@@ -7502,6 +7523,64 @@ done-when is met, and the commit that does it names the IDs.
   counts above: `cargo test -p xencode-core-rs --lib a_live_build -- --ignored
   --nocapture`. Tree at 1345 tests, 0 failures, 14 ignored over 47 result lines,
   with `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean.
+
+- [x] `RS-4` — 2026-09-27, seventh item of W4: `read_docs(crate, version, path)`,
+  a new read-only tool over RS-3's addresses, in `xencode-tui-rs::crate_docs`
+  (new). RS-3 made a locked crate's source readable and left the *choosing* to the
+  model — which file is its readme, where its other documentation lives, what to
+  do when the crate is not on the machine at all. This item does that part: the
+  file is decided by the crate's own `Cargo.toml` `readme` key and then a fixed
+  name order, the answer opens with the version the bytes came from, the rest of
+  the document is named so the next call can ask for it by path, and a long
+  document is cut at the front, at 8 192 bytes, with the cut saying where the rest
+  is.
+  **What the row did not know, re-checked against both services today rather than
+  from memory.** `crates.io/api/v1/crates/serde/1.0.229/readme` is a **302** onto
+  `static.crates.io/readmes/serde/serde-1.0.229.html`, and the body there is **3
+  510 bytes** of *fragment* — it opens at `<p>` and has no `<html>` wrapper, so it
+  is rendered markdown rather than a page. The same request with **no version is
+  HTTP 400**: there is no "latest" to fall back to, which is why `version` is
+  required for the fetched half and why the tool says so instead of calling. A
+  version that was never published (`serde/9.9.9`) still answers **302**, and the
+  object store it lands on answers **403 AccessDenied** — "none published", not a
+  network failure, and the difference decides what to try next.
+  `docs.rs/crate/serde/1.0.229/source/Cargo.toml` is 200 with **49 883 bytes** of
+  highlighted HTML for a file whose text is **1 969 bytes**; the file is the one
+  `<pre>` inside `id="source-code"` with literal newlines and span-wrapped tokens,
+  so stripping and unescaping restores it, while the line numbers sit in a sibling
+  `<pre id="line-numbers">` that must not be read as code. A 404 page is **6 647
+  bytes** and carries no `id="source-code"` at all, which is how "not found" is
+  told apart from an empty file.
+  **The decision the endpoints forced.** Fetching is put behind a new
+  `allow_online_docs` setting, default `false`, kept separate from
+  `allow_cloud_models` on purpose: one is a prompt leaving this machine, the other
+  is a text file arriving, and a test asserts that turning on either leaves the
+  other alone. The offline half is what carries the value — the local copy is the
+  version this project builds — and a crate pinned in `Cargo.lock` but not yet
+  downloaded is fixed by `cargo fetch`, which needs no setting at all. So the
+  refusal on a machine that is not allowed out names both ways, and an unpinned
+  local copy can never read as a pinned one: its label says so.
+  **Verified by** 13 new tests: 9 in `crate_docs` over the real shapes of both
+  endpoints' responses (the manifest chooses the file, the name order is fixed and
+  case-sensitive, other documentation is listed, the byte cap cuts at the front and
+  says so, links survive, the two URLs are built only from a stated version — five
+  malformed inputs refused, including `llvm-sys`'s `18.1.0+llvm-18.1.0` — an
+  unpinned copy names what the lock wanted, and a missing copy explains itself in
+  one line); 3 for the tool, of which two run against this workspace's own
+  `Cargo.lock` and cargo's real unpacked copy (`adler2 2.0.1`: readme read, five
+  other documents named, a `path` that climbs out refused before the disk was
+  touched), and the third reaches the network and is `--ignored` — run today in
+  2.33 s, covering all three fetched shapes: the crates.io readme, a docs.rs file
+  recovered as text, and `9.9.9` reported as unpublished rather than as a failure
+  (`cargo test -p xencode-tui-rs --lib -- --ignored read_docs`); and 1 on the tool
+  schema. Both no-network tests were watched to fail before they were trusted:
+  their skip paths were turned into panics, and the bodies ran. The switch was also
+  driven for real — `xencode config set allow_online_docs true` printed
+  `set allow_online_docs = true` and wrote the key into `~/.xencode/config.json`
+  next to `allow_cloud_models`, and the config was restored afterwards. Tree at
+  1358 tests, 0 failures, 15 ignored over 47 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
   -D warnings` clean.
 
 

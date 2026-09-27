@@ -2618,6 +2618,7 @@ impl<'a> App<'a> {
             mcp: self.mcp.clone(),
             hooks: self.session_hooks(),
             schemas: std::collections::HashMap::new(),
+            online_docs: self.config.allow_online_docs,
         }
     }
 
@@ -8482,6 +8483,7 @@ mod tests {
             mcp: app.mcp.clone(),
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
+            online_docs: false,
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -8881,6 +8883,7 @@ mod tests {
             mcp: app.mcp.clone(),
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
+            online_docs: false,
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),

@@ -265,6 +265,19 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub allow_cloud_models: bool,
 
+    /// Whether the agent may fetch a crate's documentation from `crates.io` or
+    /// `docs.rs` when no copy of it is on this machine.
+    ///
+    /// Separate from [`XencodeConfig::allow_cloud_models`] because they guard
+    /// different things: that one is about a *prompt* leaving, this one is
+    /// about a text file arriving. Asking crates.io for the readme of a version
+    /// named in `Cargo.lock` sends no code, no path and no question — but it is
+    /// still a request out, and an agent that made one whenever a model got
+    /// curious would be a program with an unplugged network switch. So the
+    /// documented path stays offline, and this opens the fallback on purpose.
+    #[serde(default)]
+    pub allow_online_docs: bool,
+
     /// API keys for cloud providers.
     #[serde(default)]
     pub api_keys: ApiKeys,
@@ -499,6 +512,7 @@ impl Default for XencodeConfig {
             max_memory_items: default_memory_items(),
             cost_budget_usd_micros: None,
             allow_cloud_models: false,
+            allow_online_docs: false,
             api_keys: ApiKeys::default(),
             mcp_servers: std::collections::BTreeMap::new(),
             mcp_timeout: default_mcp_timeout(),
@@ -726,6 +740,10 @@ mod tests {
             "the example must show the posture the product ships with"
         );
         assert!(
+            !config.allow_online_docs,
+            "the example must show the posture the product ships with"
+        );
+        assert!(
             config.remote_base_url.is_empty(),
             "the example must not point at an invented endpoint"
         );
@@ -787,6 +805,42 @@ mod tests {
         loaded.save_to(&path).unwrap();
         let again = XencodeConfig::load_from(&path).unwrap();
         assert!(again.allow_cloud_models);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Documentation fetches are their own consent, and the two switches do not
+    /// imply each other: a machine that lets prompts to a cloud provider may
+    /// still keep `read_docs` on local files, and one that fetches a readme has
+    /// not thereby agreed to send a conversation off-box.
+    #[test]
+    fn online_docs_are_the_other_switch_and_stay_off_by_themselves() {
+        let config = XencodeConfig::default();
+        assert!(!config.allow_online_docs);
+        assert!(!config.allow_cloud_models);
+
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("docs.json");
+        // A config from before the key existed loads, with it off.
+        fs::write(&path, r#"{"default_model": "qwen2.5:7b"}"#).unwrap();
+        let mut loaded = XencodeConfig::load_from(&path).unwrap();
+        assert!(!loaded.allow_online_docs);
+
+        loaded.allow_online_docs = true;
+        loaded.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert!(again.allow_online_docs);
+        assert!(
+            !again.allow_cloud_models,
+            "one switch must not open the other"
+        );
+
+        loaded.allow_online_docs = false;
+        loaded.allow_cloud_models = true;
+        loaded.save_to(&path).unwrap();
+        let both = XencodeConfig::load_from(&path).unwrap();
+        assert!(both.allow_cloud_models);
+        assert!(!both.allow_online_docs);
         fs::remove_dir_all(&dir).unwrap();
     }
 
