@@ -6870,6 +6870,39 @@ done-when is met, and the commit that does it names the IDs.
   answered by the profile's model, a plain prompt left alone, the marking inert with
   the setting off, and `--model` outranking a rule.
 
+- [x] `LF-7` + `MI-6` — 2026-09-27, the fourteenth and fifteenth records of W2,
+  written now for a change committed earlier the same day as one piece
+  (`570119d`). This entry is late: the change met its done-when and was committed, and
+  the progress list was not written at that moment, which is exactly the drift the
+  wave-tracing rule exists to catch. It belongs between `L-10` and `MI-2`.
+  **What was wrong:** the recommended local models were a hardcoded 2024 list of names
+  and sizes carried in code, and a GGUF brought down from a repository was believed
+  purely because the transfer finished. Neither said where the bytes came from.
+  **What is in place, per the two items' own clauses.** `model_advice.json` maps the
+  largest memory pool measured on this machine onto a concrete file — repository,
+  filename, exact Hugging Face revision, size in bytes, SHA-256 digest — with the date
+  each row was read from the repository, and `~/.xencode/model_advice.json` replaces it
+  for anyone who writes one, the command naming which table it answered from. The
+  rot these items predicted is printed rather than hidden: `xencode models advice`
+  gives the age of the table and calls anything past 180 days out of date, and nothing
+  refreshes it by itself. Downloads address `/resolve/<revision>/` so the pinned
+  revision is the thing fetched, and the same digest is re-checked before a local
+  server is opened on a file — in the CLI, the TUI's auto-start and the panel's own
+  load — with a mismatch refused before the server sees it. The panel's badge says
+  `verified`, `does not match its checksum` or `unsigned`.
+  **The trap, stated as the items asked for it to be stated.** A matching digest proves
+  the bytes still equal a number read from outside the transfer; it never proves the
+  publisher wrote genuine weights. A file nothing was pinned to is called `unsigned`
+  rather than accepted quietly, and the `.provenance.json` note left beside a fetched
+  file is xencode's own record of what it saw, not a signature. The revision is not on
+  the response that carries the bytes: it arrives in the `x-repo-commit` header of the
+  repository's own redirect, and the delivery network answering for the file knows
+  nothing about repositories, so the redirect chain is walked deliberately to catch it.
+  **What this record does not claim.** No test count is quoted for this run, because it
+  was not written down at the time and re-running the suite now would count MI-7's
+  tests as if they were this change's. Every point above is drawn from the two item
+  notes and the commit that made them; nothing here was newly measured for this entry.
+
 
 #### W2 — The model/inference substrate — 15 items
 
