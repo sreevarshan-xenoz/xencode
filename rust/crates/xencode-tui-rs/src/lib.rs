@@ -1,6 +1,7 @@
 pub mod agent_tools;
 pub mod app;
 pub mod collab_client;
+pub mod crate_sources;
 pub mod eval_judge;
 pub mod focus;
 pub mod help;

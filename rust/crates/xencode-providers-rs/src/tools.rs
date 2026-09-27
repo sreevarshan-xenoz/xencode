@@ -521,7 +521,12 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             description: "Read a UTF-8 text file in the workspace and return \
                           its lines with numbers. Returns 200 lines per call; \
                           pass offset (1-based line number) to page through \
-                          longer files."
+                          longer files. To read a dependency's own upstream \
+                          source — the exact version this project's \
+                          Cargo.lock pins — address it as \
+                          crate:<name>[/<path-inside-the-crate>], for example \
+                          crate:serde/src/de.rs. Those reads are read-only and \
+                          the answer names the version it came from."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -529,7 +534,8 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                     "path": {
                         "type": "string",
                         "description": "File path, relative to the workspace \
-                                        root (e.g. src/main.rs)"
+                                        root (e.g. src/main.rs), or a \
+                                        crate:<name>[/<path>] dependency address"
                     },
                     "offset": {
                         "type": "integer",
@@ -549,7 +555,9 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             name: "list_dir".to_string(),
             description: "List the entries of a directory in the workspace. \
                           Directories end with a slash. Returns at most 300 \
-                          entries."
+                          entries. Also lists inside a dependency's pinned \
+                          source when addressed as \
+                          crate:<name>[/<path-inside-the-crate>]."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -558,7 +566,9 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                         "type": "string",
                         "description": "Directory path relative to the \
                                         workspace root; empty or omitted \
-                                        means the root itself"
+                                        means the root itself. A \
+                                        crate:<name>[/<path>] dependency \
+                                        address is read-only."
                     }
                 }
             }),
@@ -568,7 +578,10 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             description: "Search the workspace for a regular expression \
                           (matched line by line) and return \
                           path:line:content matches, at most 100 hits. Skips \
-                          .git, target, node_modules and binary files."
+                          .git, target, node_modules and binary files. Pass a \
+                          crate:<name>[/<path>] address as path to search a \
+                          dependency's pinned upstream source instead; hits \
+                          there are labelled with the same address."
                 .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -580,8 +593,9 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                     "path": {
                         "type": "string",
                         "description": "Restrict to this file or directory \
-                                        (relative); omit for the whole \
-                                        workspace"
+                                        (relative), a crate:<name>[/<path>] \
+                                        dependency address, or omit for the \
+                                        whole workspace"
                     }
                 },
                 "required": ["pattern"]
