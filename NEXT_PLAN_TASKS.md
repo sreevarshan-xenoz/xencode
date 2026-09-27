@@ -8675,3 +8675,109 @@ that way until `OR-16`'s evidence half disagrees.
 Anything marked UNVERIFIED was located through search snippets after the fetch
 quota ran out and has not been read end to end; treat its details as leads, not
 citations.
+
+## Milestone T — Agent fabric research intake (2026-09-27)
+
+> Status: **research planned; no implementation items added.** Source catalog:
+> [Xencode_Next_Research_Pool_3600.md](Xencode_Next_Research_Pool_3600.md).
+> It contains 3,600 unique IDs across 36 waves, but the entries are formed from
+> repeated capability themes crossed with ten generic subsystem labels. Treat
+> them as prompts for investigation, not 3,600 independently specified features.
+> The source does not identify or mark a first 50. The ten investigations below
+> are the sequence supplied with the catalog; the other forty remain unspecified.
+
+- [x] **T-0 — Record the candidate catalog as a research input** — 2026-09-27.
+  Counted 3,600 unique candidate IDs across 36 waves, checked the four external
+  external references against primary sources, recorded the first-ten sequence
+  supplied with the catalog, and added the initial crosswalk to M, S and W0–W17.
+  This intake does not promote any candidate to implementation work.
+
+The research can run alongside Milestone S because it does not change code or
+commit to a new runtime design. Any construction work that would overlap S stays
+gated by `AR-1`'s measurement of what the installed agent CLIs actually expose.
+The 3600-pool is an input to the existing plan, not a replacement for its 284
+dependency-tracked items or its W0–W17 implementation order. Do not import its
+wave numbers as implementation-wave numbers.
+
+### T-1 — Intake and crosswalk the first four research waves
+
+Audit candidates X0001–X0400 in four 100-entry batches. For each distinct
+capability theme, record whether it is already implemented, already planned
+(with the existing ID), a narrower candidate worth researching, or rejected.
+Collapse repeated subsystem-label variants into one finding. Link surviving
+ideas to their existing dependencies and done-when criteria before creating any
+new plan ID.
+
+Initial crosswalk to validate during the research:
+
+| Research wave | Existing plan surfaces to check first | Boundary for the research |
+|---|---|---|
+| W01 — Agent Interoperability Fabric | S `AR-1…AR-9`; M-5/M-6; W15–W16 | Measure vendor contracts and compare protocol options. `AR-1` remains the implementation gate; do not design a universal adapter from assumptions. |
+| W02 — Agent Identity & Authority | S `AR-5`, `OR-3`, `OR-13`; W7 trust items; M's non-interactive permission policy | Separate worker identity, delegated authority, and launch-time policy from live approval control. Reuse existing authority work before proposing another identity layer. |
+| W03 — Agent Observability | W1 `EV-2`, `EV-11`, `WF-1`, `CX-1`; S `AR-6` | Map existing traces, audit records, metrics and event streams to current GenAI conventions; include privacy and content-capture boundaries. Do not add a parallel telemetry store by default. |
+| W04 — Agent Evaluation Lab | W1 `EV-1`, `EV-3`, `EV-8`, `QA-1`, `QA-5`; S `AR-1` | Identify what the existing local eval/replay harness cannot measure about adapters, handoffs, authority and cross-agent outcomes. Keep new evaluation tasks tied to observable evidence. |
+
+**Done-when:** all four batches have a concise disposition table; every kept
+idea links to an existing plan ID or has a proposed scope, dependency and
+measurable done-when; overlaps and rejections have reasons; and the result does
+not claim the catalog itself is verified research. The candidate-by-candidate
+audit is research work, not permission to implement every survivor.
+
+### T-2 — Work the supplied first investigations
+
+Use these ten questions as the initial investigation order across W01–W04:
+
+1. Common event model.
+2. Cross-agent session semantics.
+3. Adapter compatibility and a conformance test suite.
+4. Agent identity.
+5. Authority and delegation.
+6. Trace schema.
+7. Privacy boundaries.
+8. Orchestration scheduling.
+9. Cross-agent evidence.
+10. Evaluation.
+
+For each, write the current Xencode seam, the strongest relevant external
+contract, what the installed agents demonstrably support, and the resulting
+disposition. Mark external facts with dated primary-source links. In particular,
+distinguish the current MCP `2026-07-28` specification from older MCP behavior;
+A2A v1.0 from earlier drafts; OpenTelemetry's evolving GenAI conventions from a
+finished agent standard; and NIST's agent identity paper as a draft concept
+paper, not a finalized control baseline.
+
+**Done-when:** each question has evidence and a disposition, and any new
+implementation work is separately assigned an ID in the dependency plan. The
+catalog's claimed first 50 is not present in the source file; do not infer the
+remaining forty from X0001–X0050, whose entries are generic subsystem variants.
+
+### T-3 — Schedule only validated survivors
+
+After T-1 and T-2, add genuinely new work to the existing dependency waves with
+stable provenance IDs and explicit dependencies. Preserve the vendor-local vs
+Xencode-owned boundary and the Milestone S rule that configured-at-launch
+permissions must never be presented as live control. Keep the remainder of the
+3,600-entry catalog as a candidate register until it has been dispositioned;
+there is no target count such as 1,000, 500 or 200 that the research must fill.
+
+**Done-when:** every candidate promoted to the roadmap has a non-overlapping
+scope, evidence-backed reason to exist, dependency placement and testable
+completion condition; every rejected candidate has a reason; and no existing
+plan item is duplicated or renumbered.
+
+#### Research references checked 2026-09-27
+
+- [MCP 2026-07-28 specification](https://blog.modelcontextprotocol.io/posts/2026-07-28/)
+  and [MCP roadmap](https://blog.modelcontextprotocol.io/posts/mcp-roadmap/):
+  current stateless core, authorization changes, and Tasks as an extension.
+- [A2A v1.0 specification](https://a2a-protocol.org/v1.0.0/): capability
+  discovery, modality negotiation, collaborative tasks and versioned interfaces.
+- [OpenTelemetry GenAI observability overview](https://opentelemetry.io/blog/2026/genai-observability/):
+  GenAI telemetry conventions are active work; prompt and tool content capture
+  carries privacy implications.
+- [NIST agent identity and authorization concept paper](https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent/ipd):
+  initial public draft, not a final NIST standard.
+- [OpenAI Codex App Server article](https://openai.com/index/unlocking-the-codex-harness/):
+  a vendor-native, bidirectional JSON-RPC integration surface; evidence for
+  researching a thin compatibility layer, not a promise that vendors share one
+  contract.
