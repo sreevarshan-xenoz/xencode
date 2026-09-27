@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
-- [x] Workspace gates green — 15 crates, 1315 tests passing, 13 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1333 tests passing, 13 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2453,8 +2453,10 @@ prefix, so these do not pay the tax that taxes N's context ideas.
   pickaxe `git log -S` measured 17.8 s here and scales badly; require path
   scoping and a timeout, or drop pickaxe entirely. **Per-turn (chat only).**
 - **GH-3 Co-change and recency as scoring terms in `retrieve()`**
-  (`retrieve.rs:122`), fed by full-history `--name-only` at 44 ms (fact 20) —
-  files that historically change together get pulled together. **M**. Trap:
+  (`retrieve.rs:122`), fed by full-history `--name-only` — the row claimed
+  44 ms (fact 20); measured here it is 52.5 ms for the log and 93 ms for the
+  whole mine over 782 commits that counted — so files that historically change
+  together can get pulled together. **M**. Trap:
   "quick fix" commit noise corrupts the signal (documented in the mining
   literature); it churns the cache *tail*, which is fine.
   **Per-turn (tier 6).**
@@ -7391,6 +7393,58 @@ done-when is met, and the commit that does it names the IDs.
   Tree at 1315 tests, 0 failures, 13 ignored over 47 result lines, with
   `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
   -D warnings` clean.
+
+- [x] `GH-3` — 2026-09-27, fifth item of W4, **built, measured, and left off**:
+  the mining is shipped, the scoring is not. `cochange.rs` (new) reads the whole
+  history once, in a single `git log --no-merges --name-only` pass through
+  `gitinfo::git_stdout`, and records per file which files it is committed
+  alongside, how often, and when it was last touched. `init.rs` runs it as a new
+  phase between the dependency graph and the index write, so the cost sits at
+  index-build time rather than on a turn, and stores the result in
+  `.xencode/index/history.json` stamped with the rule version that produced it —
+  a rebuild at an unchanged commit reuses it and says so instead of re-reading.
+  Two filters are load-bearing, and both came out of the first measurement
+  without them. A commit touching 25 or more files teaches nothing and is
+  skipped. A file at or above one eighth of the counted commits (floor of four)
+  is edited alongside everything, so it gets no partner list and cannot be pulled
+  in: here that is `CHANGELOG.md`, `NEXT_PLAN_TASKS.md`, `README.md` and
+  `xencode-tui-rs/src/app.rs`, with `README.md` in 163 commits against a median
+  of 1 elsewhere. Partners are capped at 16 per file and a seed list awards a
+  file's bonus once, at its strongest pairing.
+  **What the row asked for and what was actually measured.** The row's premise
+  was a full-history `--name-only` at 44 ms (fact 20). Measured on this
+  repository it is 52.5 ms for the log via `xencode history status` and 93 ms for
+  the whole mine — 782 commits that counted out of 817 reachable, 20 merges and
+  15 mass commits dropped, 983 files left with history, 815 KiB on disk. The
+  terms themselves did not pay: over the 25 gold questions, against the shipped
+  arm's 0.680 recall for the first file, 0.880 for five and 0.751 mean reciprocal
+  rank, both `+ history co-change` and `+ history + recency` moved recall by
+  **0.000** and cost **0.002** of mean reciprocal rank at a weight of 5, strong
+  enough to reorder; at a weight of 2, weak enough to only reorder files
+  retrieval had already found, both were 0.000 on all three. Without the two
+  filters the same arm was not neutral but catastrophic — 0.240 recall@1, because
+  `README.md` scored 575 against the file actually asked for at 157. The
+  explanation is in the arm order: the text the search now reads already reaches
+  every file the history could name, which is what QN-2 bought. So
+  `RetrieveOptions::cochange` and `::recency` exist, are off in `Default` and are
+  not set by `for_live_chat`, and the two arms stay in the harness so a project
+  with a weaker text index can re-run the comparison rather than rebuild it. The
+  `/init` panel shows the new phase (its list is eight entries now, which it was
+  not while `init.rs` was emitting a ninth name it never displayed).
+  **Verified by** the 18 new tests: 7 in `retrieve.rs` holding the one-award
+  rule, the indexed-file rule and the reason text, 10 in `cochange.rs` against a
+  scratch repository including the log git actually prints, and
+  `init::tests::history_is_mined_once_and_reused_until_the_head_moves`, which
+  builds a real two-commit repository and asserts the reuse line at a still
+  commit, the re-mine past a new one, and the pair on disk. Checked as a guard,
+  not as decoration: with the reuse condition forced false the test fails on the
+  reuse assertion, and the failing output is what confirms the phase name and the
+  per-file counts are read from a live `git log`. Tree at 1333 tests, 0 failures,
+  13 ignored over 47 result lines, with `cargo fmt --all --check` and
+  `cargo clippy --workspace --all-targets -- -D warnings` clean. The two
+  history-arm deltas above are from re-running `cargo test -p xencode-context-rs
+  --test gold_baseline -- --ignored --nocapture` on this tree; rows appended to
+  the gitignored `.xencode/cache/eval.jsonl` (now 81) are the raw record.
 
 
 #### W2 — The model/inference substrate — 15 items

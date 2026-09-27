@@ -97,6 +97,11 @@ pub fn deps_json_path(xencode_dir: &Path) -> std::path::PathBuf {
     xencode_dir.join("index").join("deps.json")
 }
 
+/// Which files this repository's history changes together (GH-3).
+pub fn history_json_path(xencode_dir: &Path) -> std::path::PathBuf {
+    xencode_dir.join("index").join("history.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

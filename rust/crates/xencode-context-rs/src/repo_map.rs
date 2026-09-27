@@ -279,6 +279,7 @@ mod tests {
                 })
                 .collect(),
             mtimes: Default::default(),
+            history: Default::default(),
         }
     }
 
@@ -395,6 +396,7 @@ mod tests {
             symbols: files.iter().map(|(p, s)| (p.clone(), symbols(s))).collect(),
             deps: Vec::new(),
             mtimes: Default::default(),
+            history: Default::default(),
         };
         let text = repo_map_text(&index, &[]);
         let tokens = crate::budget::est_tokens(text.len(), false);

@@ -168,6 +168,9 @@ pub fn init_project(
     );
     let prior_deps =
         crate::index::read_json::<Vec<DepEdge>>(&crate::index::deps_json_path(&xencode));
+    // Kept aside because the resume check below consumes the manifest: phase 6b
+    // needs to know which commit the history on disk was mined at.
+    let indexed_head = prior_manifest.as_ref().and_then(|m| m.git_head.clone());
     if let (Some(m), Some(f), Some(s), Some(d)) =
         (prior_manifest, prior_files, prior_symbols, prior_deps)
     {
@@ -323,6 +326,40 @@ pub fn init_project(
     write_atomic(&crate::index::symbols_json_path(&xencode), &symbols)?;
     write_atomic(&crate::index::deps_json_path(&xencode), &graph)?;
     emit(&mut progress, "phase_done:Extract symbols & dependencies");
+    check_abort(&cancel)?;
+
+    // ── Phase 6b: commit history ─────────────────────────────────────────
+    // One `git log` over the whole history, which is the expensive part of
+    // co-change retrieval and therefore happens here rather than per turn. A
+    // rebuild that has not moved HEAD reuses what is already on disk.
+    emit(&mut progress, "phase_start:Mine commit history");
+    let prior_history = crate::cochange::load_history(&xencode);
+    let history = match prior_history {
+        ref prior if !prior.is_empty() && indexed_head == current_head => {
+            emit(
+                &mut progress,
+                "log:🕯 commit history reused — HEAD has not moved.",
+            );
+            prior.clone()
+        }
+        _ => {
+            let started = std::time::Instant::now();
+            let mined = crate::cochange::mine_commit_history(&root).unwrap_or_default();
+            let hubs = mined.values().filter(|h| h.hub).count();
+            emit(
+                &mut progress,
+                &format!(
+                    "log:🕯 {} file(s) with history, {} too often edited to pair, read in {} ms",
+                    mined.len(),
+                    hubs,
+                    started.elapsed().as_millis()
+                ),
+            );
+            mined
+        }
+    };
+    crate::cochange::save_history(&xencode, &history)?;
+    emit(&mut progress, "phase_done:Mine commit history");
     check_abort(&cancel)?;
 
     // ── Phase 7: write files index + manifest ─────────────────────────────
@@ -557,6 +594,7 @@ mod tests {
         assert!(root.join(XENCODE_DIR).join("index/manifest.json").is_file());
         assert!(root.join(XENCODE_DIR).join("index/symbols.json").is_file());
         assert!(root.join(XENCODE_DIR).join("index/deps.json").is_file());
+        assert!(root.join(XENCODE_DIR).join("index/history.json").is_file());
         assert!(root.join(XENCODE_DIR).join("summaries").is_dir());
         assert!(root.join(XENCODE_DIR).join("cache/cmd").is_dir());
 
@@ -573,6 +611,80 @@ mod tests {
         assert!(lines.iter().any(|l| l == "phase_done:Write index files"));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn history_is_mined_once_and_reused_until_the_head_moves() {
+        let root = temp_workspace();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
+        fs::write(root.join("src/b.rs"), "fn b() {}\n").unwrap();
+        let git = |args: &[&str]| {
+            let ran = std::process::Command::new("git")
+                .current_dir(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                ran.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&ran.stderr)
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "both files in one commit"]);
+
+        let xencode = root.join(XENCODE_DIR);
+        let (result, lines) = run(&root);
+        assert!(!result.expect("init should succeed").fresh);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("log:🕯 ") && l.contains("file(s) with history")),
+            "the first run reports what it mined: {lines:?}"
+        );
+        let history = crate::cochange::load_history(&xencode);
+        assert_eq!(
+            history["src/a.rs"].partners[0].0, "src/b.rs",
+            "two files committed together are partners on disk"
+        );
+
+        // An edit forces a rebuild, but HEAD has not moved, so the log is not
+        // re-read.
+        fs::write(root.join("src/a.rs"), "fn a() {}\nfn c() {}\n").unwrap();
+        let (result, lines) = run(&root);
+        assert!(!result.expect("init should succeed").fresh);
+        assert!(
+            lines.iter().any(|l| l.contains("commit history reused")),
+            "a rebuild at the same commit keeps the history it already has: {lines:?}"
+        );
+
+        // A new commit does change what the log holds, so it is re-read.
+        fs::write(root.join("src/b.rs"), "fn b() {}\nfn d() {}\n").unwrap();
+        git(&["commit", "-qam", "second commit"]);
+        fs::write(root.join("src/a.rs"), "fn a() {}\nfn c() {}\nfn e() {}\n").unwrap();
+        let (result, lines) = run(&root);
+        assert!(!result.expect("init should succeed").fresh);
+        assert!(
+            !lines.iter().any(|l| l.contains("commit history reused")),
+            "a rebuild past the commit it was mined at must not reuse it: {lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("log:🕯 ") && l.contains("file(s) with history")),
+            "and it must re-mine: {lines:?}"
+        );
+        let history = crate::cochange::load_history(&xencode);
+        assert_eq!(
+            history["src/b.rs"].commits, 2,
+            "the newer commit is in the history now on disk"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

@@ -3641,13 +3641,14 @@ impl<'a> App<'a> {
         if self.init_running {
             return;
         }
-        const PHASES: [&str; 7] = [
+        const PHASES: [&str; 8] = [
             "Create .xencode directory",
             "Resume check",
             "Git snapshot",
             "Scan repository",
             "Analyze languages & sizes",
             "Extract symbols & dependencies",
+            "Mine commit history",
             "Write index files",
         ];
 
