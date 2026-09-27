@@ -1078,6 +1078,10 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                 // separate from the `*_key` entries on purpose: a key proves who
                 // you are to a provider, it does not authorise the trip.
                 "allow_cloud_models" => config.allow_cloud_models = parse_bool(&value)?,
+                // The other half of the same idea, for a text file rather than a
+                // prompt: `read_docs` stays on cargo's local copies until this is
+                // on, and crates.io/docs.rs are never dialed behind it.
+                "allow_online_docs" => config.allow_online_docs = parse_bool(&value)?,
                 // Keep every model call of every run, in the clear, under
                 // `.xencode/cache/sessions`. Off by default because it is the
                 // most sensitive copy this program can make of a conversation.

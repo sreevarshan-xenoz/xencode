@@ -145,7 +145,7 @@ pub fn cargo_home() -> Option<PathBuf> {
 }
 
 /// Whether a model-supplied relative path stays inside the crate it names.
-fn path_is_contained(path: &str) -> bool {
+pub(crate) fn path_is_contained(path: &str) -> bool {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
         return false;

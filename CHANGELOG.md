@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent can read how another crate documents itself
+
+A dependency's source is one thing and its documentation is another: `read_file`
+with a `crate:<name>` address opens files, while what a crate *says about itself*
+lives in a readme whose name is the author's choice. Until now a model had to
+guess that name, and a wrong guess looked like a missing file.
+
+`read_docs` takes a package name and answers with the document the crate points at
+as its own readme — its `Cargo.toml` `readme = "…"` entry when it has one,
+otherwise the conventional names in a fixed order — and takes a `path` for any
+other document inside it. It reads cargo's own unpacked copy, so by default no
+connection is made, and it names the documents it did not open:
+
+```text
+[adler2 2.0.1 — the version this project's Cargo.lock pins — read from crate:adler2/README.md, unpacked by cargo]
+# Adler-32 checksums for Rust
+…
+Other documentation in this crate: CHANGELOG.md, LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT, RELEASE_PROCESS.md — ask again with one of those paths.
+
+error: adler2 2.0.1 has no "not-a-document.md"; documentation it does have: CHANGELOG.md, LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT, README.md, RELEASE_PROCESS.md — ask again with one of those paths
+error: this project's Cargo.lock does not name not-a-crate-anywhere-here, so there is no version of it to read from here. read_docs reads only what cargo has already unpacked unless the user turns on allow_online_docs (`xencode config set allow_online_docs true`); a version named in Cargo.lock can also be unpacked on this machine with `cargo fetch`.
+```
+
+A long document is cut at the front, at 8 192 bytes, and the cut says where the
+rest is — half a readme is worthless unless the model can tell it is half.
+
+Fetching is a separate decision from letting a prompt leave the machine, so it has
+its own setting: `allow_online_docs`, off by default, and opening one does not open
+the other. With it on, and only where there is no local copy, the tool will take
+the version-pinned readme from crates.io or a file from docs.rs. Both endpoints
+were read on this machine before either was written down, and both have shapes
+worth knowing: crates.io answers a version-less request with HTTP 400, so there is
+no "latest" to fall back to and a version is required; a published version with no
+readme redirects to an object store that refuses, which the tool reports as "none
+published" rather than as a network failure; and a docs.rs page draws its line
+numbers in a separate block, so the file's own text is recovered from the page
+rather than read off it.
+
+```text
+[serde 1.0.200 readme — fetched from https://crates.io/api/v1/crates/serde/1.0.200/readme, because cargo has not unpacked serde 1.0.200 on this machine]
+Serde is a framework for serializing and deserializing Rust data structures efficiently and generically.
+…
+```
+
+Every fetched answer carries the URL and the reason it went out, because "what the
+registry says about version 1.0.200" and "what this project builds" are different
+answers to different questions.
+
+Thirteen tests come with it: nine for choosing the file, converting the two
+endpoints' responses back to text, and labelling a version that is not the pinned
+one; three for the tool itself, two of which read this workspace's real registry
+copy and one of which reaches the network and is kept behind `--ignored`
+(`cargo test -p xencode-tui-rs --lib -- --ignored read_docs`); and one on the tool
+schema. The workspace suite now measures 1 358 passing, 15 ignored.
+
 ### Added — a failing build answers with rustc's own diagnosis
 
 A build that fails used to reach the model as the tail of an output dump, keeping

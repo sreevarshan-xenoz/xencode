@@ -52,6 +52,8 @@ turns add up to in tokens and money, model picker, and more. Ask about a library
 and the agent can read the upstream source of the exact version your
 `Cargo.lock` pins, already on disk — address it as `crate:serde/src/de.rs`.
 Those reads are read-only, and the answer names the version it came from.
+`read_docs` is the same idea for prose: it answers with the readme a crate points
+at itself, plus a list of the other documents it ships.
 
 ### One-shot query
 ```bash

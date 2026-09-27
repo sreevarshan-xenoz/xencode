@@ -169,6 +169,67 @@ yet downloaded names `cargo fetch`. `what_breaks` and `repo_advise` do not read
 dependencies at all: their answers are about this workspace, and reaching
 outside it would let a dependency's code be presented as yours.
 
+#### Reading a dependency's documentation: `read_docs`
+
+Source is one thing; how the author documents the crate is another. `read_docs`
+takes a package name and answers with the file the crate itself points at as its
+readme — its `Cargo.toml` `readme = "…"` entry when it has one, otherwise the
+conventional names in a fixed order — and takes an optional `path` for any other
+document inside it (`CHANGELOG.md`, `docs/guide.md`). It reads the same unpacked
+copy cargo already put on this machine, so no network is involved by default:
+
+```text
+[adler2 2.0.1 — the version this project's Cargo.lock pins — read from crate:adler2/README.md, unpacked by cargo]
+# Adler-32 checksums for Rust
+…
+Other documentation in this crate: CHANGELOG.md, LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT, RELEASE_PROCESS.md — ask again with one of those paths.
+```
+
+That last line is the point of the tool: a model that reads one document is told
+which others exist, in the form it needs to ask for one. A path the crate does
+not have is answered the same way rather than as a missing file, and a `path`
+that climbs out of the crate directory is refused before the disk is touched:
+
+```text
+error: adler2 2.0.1 has no "not-a-document.md"; documentation it does have: CHANGELOG.md, LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT, README.md, RELEASE_PROCESS.md — ask again with one of those paths
+error: read_docs path "../../etc/passwd" reaches outside the crate; keep it relative and inside it
+```
+
+Long documents are cut at the front, at 8 192 bytes, and say so with the
+instruction for getting the rest — the cut half of a readme is useless if the
+model cannot tell it is a half.
+
+When the crate is not on this machine at all, the answer gives the reason and
+both ways to get it, and it does not dial out to find either:
+
+```text
+error: this project's Cargo.lock does not name not-a-crate-anywhere-here, so there is no version of it to read from here. read_docs reads only what cargo has already unpacked unless the user turns on allow_online_docs (`xencode config set allow_online_docs true`); a version named in Cargo.lock can also be unpacked on this machine with `cargo fetch`.
+```
+
+`allow_online_docs` is what opens the fetched half. With it on, and only where
+there is no local copy, `read_docs` will take the version-pinned readme from
+crates.io (`/api/v1/crates/<name>/<version>/readme`, which answers with rendered
+markdown converted back to text, links kept) or a file from docs.rs
+(`/crate/<name>/<version>/source/<path>`, from which the file's own text is
+recovered). A version is mandatory for both — crates.io replies HTTP 400 to a
+version-less readme request, so there is no "latest" to fall back to and the tool
+says so rather than making the call. Each fetched answer says it was fetched and
+why, which is the difference between reading what this project builds and reading
+whatever the registry published:
+
+```text
+[serde 1.0.200 readme — fetched from https://crates.io/api/v1/crates/serde/1.0.200/readme, because cargo has not unpacked serde 1.0.200 on this machine]
+Serde is a framework for serializing and deserializing Rust data structures efficiently and generically.
+…
+```
+
+A version that is published but has no readme is reported as that, not as a
+network failure: crates.io still redirects, and the object store it lands on
+refuses, which the tool reads as "no readme published". `read_docs` is read-only
+in every approval mode, like the three read tools, and it is not a way to write:
+the only files it opens are documentation, and a fetched document is handed to the
+model as text, never saved.
+
 #### What a failing build answers with
 
 A `cargo build` or `cargo check` the model asks for is run with
@@ -1333,6 +1394,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `agent_fallback_models` | list | comma-separated ordered alternates for the agent's turns (I4-01), e.g. `xencode config set agent_fallback_models "qwen2.5:14b,google_gemini:gemini-2.0-flash"`. The configured default model is always tried first, so this list holds only fallbacks (duplicates of it are dropped). A candidate is abandoned — and the chain moves on — only when it failed **before emitting any token** and the error is not our own response-decode failure; a token already on screen, or a `Parse` error, fixes the model in place. Each candidate gets one attempt per step and the transcript records a `[FALLBACK]` line when the chain moves. A candidate that would send the conversation somewhere the primary would not — a cloud API as the alternate for a local model, or the reverse — is never tried, and the transcript names it as skipped instead; a `remote:` endpoint counts as local only when its configured URL points at this machine (`localhost`, `127.x`, `::1`, `.local`). `xencode query` is single-shot and does not use this chain. An empty list (the default) disables fallback. |
 | `session_recording` | bool | Write down every model call of an agent turn — the request, the response bytes as they arrived, and what each tool returned — to `.xencode/cache/sessions/<run-id>.jsonl`, so `xencode replay` can run that turn again. Off by default. Only the routes whose bytes this program reads itself are recordable: Ollama, llama.cpp, a `remote:` endpoint and OpenRouter. Asking for a recording of an Anthropic, Gemini or Qwen model is refused with the reason, because those have their own readers and a "recording" of them would be a paraphrase. |
 | `allow_cloud_models` | bool | Whether a prompt may reach an internet service at all. Off by default — and off for a config written before the key existed — so `qwen:…`, `google_gemini:…`, an OpenRouter-style `vendor/model` when an OpenRouter key is set, and a `remote:` endpoint whose URL is not this machine are refused before a connection is opened, with the refusal naming this key. A key in `api_keys` is not permission for the trip; it identifies you to the provider. The TUI status bar prints the rule in force (`🔒 local only` / `🌐 cloud allowed`) and Settings → Providers has a **Cloud Models** row that toggles it. |
+| `allow_online_docs` | bool | Whether the agent's `read_docs` tool may fetch a crate's documentation when cargo has not unpacked it on this machine. Off by default, and independent of `allow_cloud_models` — turning one on does not turn on the other, because one is a prompt leaving and the other is a text file arriving. With it off, `read_docs` answers from cargo's own copy and says what else would be needed to get more. Open it with `xencode config set allow_online_docs true`. |
 | `mcp_timeout` | integer | seconds a server may take to handshake and answer before it is reported failed (`1`–`300`, default `30`) |
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
 | `model_routing` | bool | Whether a profile's `for_task` mark is acted on by itself. Off by default, so a marked profile still only applies by hand. On, the first profile whose mark matches the turn runs that turn on its model: `bugfix` for a prompt that says something is broken (`fix`, `fails`, `crash` and similar words), `general` for every other prompt, and a mark naming a reading this version does not have (or no mark at all) matches nothing. A profile that would move a llama.cpp model is refused instead — a running `llama-server` holds one model at a time — and the chat prints why. See [Turn routing](#turn-routing) |

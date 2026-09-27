@@ -602,6 +602,43 @@ pub fn file_tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "read_docs".to_string(),
+            description: "Read how another Rust crate documents itself, at a version that is \
+                          stated rather than assumed. With no path it returns the crate's own \
+                          readme — the file its Cargo.toml names, or README.md and the \
+                          conventional names in a fixed order — and lists the other \
+                          documentation files it found, so the next call can ask for one of \
+                          them by path. It reads cargo's local copy first, which is the \
+                          version this project's Cargo.lock pins; it only reaches the network \
+                          when there is no local copy and the user has turned on \
+                          allow_online_docs. Every answer names the crate and version the \
+                          bytes came from. To read the crate's source code instead, use \
+                          read_file with a crate:<name>/<path> address."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "crate": {
+                        "type": "string",
+                        "description": "Package name, exactly as Cargo.lock spells it \
+                                        (e.g. serde)"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "Which version to read. Leave it out to read the \
+                                        one this project's Cargo.lock pins; give it when \
+                                        the crate is not a dependency here"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "A documentation file inside the crate, relative to \
+                                        it (e.g. docs/guide.md); omit for the readme"
+                    }
+                },
+                "required": ["crate"]
+            }),
+        },
+        ToolDefinition {
             name: "write_file".to_string(),
             description: "Create or overwrite a UTF-8 text file in the \
                           workspace with the given content. Parent \
@@ -809,6 +846,7 @@ mod tests {
                 "read_file",
                 "list_dir",
                 "search_files",
+                "read_docs",
                 "write_file",
                 "edit_file",
                 "edit_symbol"
@@ -832,7 +870,27 @@ mod tests {
             }
         }
         assert_eq!(tools[0].parameters["required"][0], "path");
-        assert_eq!(tools[4].parameters["required"][2], "new");
+        assert_eq!(tools[5].parameters["required"][2], "new");
+    }
+
+    /// `read_docs` (RS-4) takes a crate name and, optionally, a version and a
+    /// path inside it — all scalars, and only the name required.
+    #[test]
+    fn read_docs_asks_for_a_crate_and_takes_version_and_path_as_options() {
+        let tools = file_tools();
+        let docs = tools
+            .iter()
+            .find(|t| t.name == "read_docs")
+            .expect("read_docs is offered with the other file tools");
+        let value = docs.to_api_value();
+        let params = &value["function"]["parameters"];
+        assert_eq!(params["required"][0], "crate");
+        assert_eq!(params["required"].as_array().unwrap().len(), 1);
+        let props = params["properties"].as_object().unwrap();
+        assert_eq!(props.len(), 3);
+        for key in ["crate", "version", "path"] {
+            assert_eq!(props[key]["type"], "string", "{key}");
+        }
     }
 
     #[test]
