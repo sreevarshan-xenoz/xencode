@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1245 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1260 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1573,6 +1573,12 @@ never is.
   validated by reparse. M, after CI-2. Trap: tree-sitter error recovery hides
   broken output; must reject a file whose edited region parses with ERROR nodes.
   Done-when: a corrupt-edit test proves the rejection.
+  *(Done 2026-09-27. The rejection is the done-when and it is proven twice, at both
+  layers: `editing.rs` refuses `{ let = 4; }` and returns no text, and the tool itself
+  refuses the same body and leaves every byte of the file as it was. The trap fired in
+  the direction the item did not name — recovery also lets a body swallow its own
+  declaration — so the result is re-checked to still hold exactly one declaration of
+  that name and of the same kind, not merely to parse.)*
 - **CI-4 codemod mode** — the agent emits one ast-grep YAML rule, xencode applies
   it repo-wide behind a preview diff + approval. S-M after CI-1. Trap: repo-wide
   apply on a dirty tree. Done-when: a 20-site rename in one tool call.
@@ -6970,6 +6976,56 @@ done-when is met, and the commit that does it names the IDs.
   trait method on the trait's own line. One existing test changed its expectation: a
   method declared inside a `pub trait` is now counted as a function of the file, which
   is what the patterns could not see.
+
+- [x] `CI-3` — 2026-09-27, second item of W3. `edit_symbol(path, symbol, new_body)` is the
+  agent's twelfth tool and the first edit that finds its target by reading the code: the
+  model names a declaration and sends its new braced body, instead of reproducing the exact
+  bytes it wants removed. Two new files in `xencode-context-rs` carry it. `parse.rs` (161
+  lines) is the tree plumbing the symbol tier and the editor now share — the parse, byte to
+  line, the walk that finds what error recovery invented, and the lookup that returns every
+  declaration of a name with the region of its body — lifted out of `tsymbols.rs`, which
+  calls it with its behavior unchanged. `editing.rs` (353 lines) is the replacement and the
+  reasons it refuses.
+  **The trap, and the half of it the item did not name.** Tree-sitter never reports failure,
+  so nothing here asks whether parsing succeeded; it asks for the nodes recovery invents —
+  `ERROR`, and zero-width `MISSING` placeholders — and holds both the file as it stands and
+  the file as the edit would leave it to that. The named half is proven by the done-when
+  case: `{\n    let = 4;\n}` as the body of `fn total` builds a tree without complaint and
+  is refused as `proposed`, naming line 4 of the file it would have created, with the words
+  *Nothing was changed* in the message. Recovery has a second trick: a body can swallow its
+  own declaration and still hand back a clean tree, so the result is read again and kept only
+  if that name is still declared exactly once in it, as the same kind of thing it was.
+  `{ fn total() -> u32 { 0 } }` is valid Rust and still refused on those grounds.
+  **Every refusal, watched.** A name the file does not declare comes back with the names it
+  does, capped at twelve, so a wrong guess points at a right one; a `fn` that appears only
+  inside a comment or a doc line is not a declaration, which is the CI-2 finding applied to
+  writing instead of reading; a name declared twice is refused with both line numbers
+  (`impl Thing` and `impl Other` each holding `fn total`, measured as lines 2 and 6) and tells
+  the model to use `edit_file` with the exact text instead; `mod helpers;` has no body in this
+  file and says so; a body that is not a braced block is rejected before anything is parsed;
+  and an empty name is treated as no name at all. None of them writes.
+  **What the person approving is shown is what lands.** `planned_symbol_edit` computes the
+  target, the old text and the new text once and is used by both the tool and the approval
+  overlay, so the modal's diff is not a rendering of a different decision, and a call that
+  would be refused is shown as that refusal rather than as a diff of nothing. Paths outside
+  the workspace are refused by the same `workspace_path` check every other file tool passes.
+  The gating path itself is exercised through the real one, not beside it: in `ask` mode a
+  denied symbol edit leaves `code.rs` as `fn total() -> u32 {\n    1\n}\n`, the approved one
+  turns it into `fn total() -> u32 { 2 }`, and one `/rewind` puts the bytes back, because the
+  tool is `ToolClass::Edit` and the checkpoint that wraps every edit wraps this one too.
+  **Rust-only, and said plainly.** There is no language gate in front of this — the only
+  grammar loaded is Rust's, so another language arrives at the same door a damaged Rust file
+  does. Measured on a Python file: refused as the file it is, `the file as it stands does not
+  parse — an unrecognised construct around "def total(readings):\n " at line 1`, rather than
+  being told the name `total` is missing, which would be a lie about the file. That message is
+  pinned by its own test. LSP-5 is the item that makes the scope a stated policy.
+  **Verified by** 1260 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` clean.
+  Fifteen tests are new: twelve in `editing.rs`, one for each refusal above plus the three
+  shapes whose body can be replaced (a function, a `struct`, an `enum`) and a method found
+  wherever it sits inside an `impl`; and three in `agent_tools.rs`, for the tool writing and
+  refusing, for the preview showing the diff and showing the refusal, and for the gated path
+  with its rewind.
 
 
 #### W2 — The model/inference substrate — 15 items

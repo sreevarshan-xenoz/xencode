@@ -18,7 +18,7 @@
 //! build-time C dependency bought for no reader.
 
 use crate::symbols::{cap_doc_text, doc_line, export_names, trait_impl_target, PerFileSymbols};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Parse `content` and collect its symbol inventory.
 ///
@@ -28,14 +28,8 @@ use tree_sitter::{Node, Parser};
 /// yet.
 pub fn extract(content: &str) -> PerFileSymbols {
     let mut collector = Collector::default();
-    let mut parser = Parser::new();
-    if parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .is_ok()
-    {
-        if let Some(tree) = parser.parse(content, None) {
-            collector.walk(content, tree.root_node());
-        }
+    if let Some(tree) = crate::parse::parse(content) {
+        collector.walk(content, tree.root_node());
     }
     collector.finish()
 }
@@ -208,14 +202,8 @@ fn is_test_item(content: &str, node: Node) -> bool {
 #[cfg(test)]
 pub(crate) fn non_code_spans(content: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
-    let mut parser = Parser::new();
-    if parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .is_ok()
-    {
-        if let Some(tree) = parser.parse(content, None) {
-            gather(tree.root_node(), &mut spans);
-        }
+    if let Some(tree) = crate::parse::parse(content) {
+        gather(tree.root_node(), &mut spans);
     }
     spans
 }

@@ -475,8 +475,9 @@ pub fn advise_tools() -> Vec<ToolDefinition> {
     }]
 }
 
-/// The workspace file tools (Milestone I, I1-02): read, list, search,
-/// write and a precise old→new edit. Schemas stay deliberately small —
+/// The workspace file tools (Milestone I, I1-02): read, list, search, write,
+/// a precise old→new edit, and an edit that finds a Rust declaration by name.
+/// Schemas stay deliberately small —
 /// local models call fewer, flatter tools far more reliably. Execution
 /// lives in the TUI's agent tool loop behind the permission policy.
 pub fn file_tools() -> Vec<ToolDefinition> {
@@ -608,6 +609,39 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                 "required": ["path", "old", "new"]
             }),
         },
+        ToolDefinition {
+            name: "edit_symbol".to_string(),
+            description: "Replace the body of one declaration in a Rust file, \
+                          found by name rather than by matching text: no need to \
+                          reproduce the code being removed. The file is parsed, so \
+                          a `fn` or `struct` mentioned only in a comment or a \
+                          string is not a target, and a name declared twice in the \
+                          file is refused rather than guessed. Refused, with \
+                          nothing changed, unless the result still parses as valid \
+                          Rust. Returns a unified diff."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to the workspace \
+                                        root"
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "The declared name whose body is replaced, \
+                                        e.g. total or Point"
+                    },
+                    "new_body": {
+                        "type": "string",
+                        "description": "The whole replacement block, braces \
+                                        included, e.g. { 0 }"
+                    }
+                },
+                "required": ["path", "symbol", "new_body"]
+            }),
+        },
     ]
 }
 
@@ -728,7 +762,8 @@ mod tests {
                 "list_dir",
                 "search_files",
                 "write_file",
-                "edit_file"
+                "edit_file",
+                "edit_symbol"
             ]
         );
         for tool in &tools {

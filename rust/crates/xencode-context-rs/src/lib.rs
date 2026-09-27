@@ -18,6 +18,7 @@ pub mod compact;
 pub mod context;
 pub mod conversation;
 pub mod documents;
+pub mod editing;
 pub mod embed;
 pub mod eval;
 pub mod gitinfo;
@@ -25,6 +26,7 @@ pub mod hwprobe;
 pub mod index;
 pub mod init;
 pub mod metrics;
+pub(crate) mod parse;
 pub mod pricing;
 pub mod prompts;
 pub mod refresh;
@@ -64,6 +66,7 @@ pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
     MAX_DOC_BYTES, MAX_DOC_CHARS,
 };
+pub use editing::{replace_symbol_body, EditFailure};
 pub use embed::{hybrid_select, pseudo_document, tokenize, Bm25, LEXICAL_WEIGHT};
 pub use eval::{
     append_eval_run, comparable_previous_eval_run, compare_shapes, default_gold, eval_log_path,

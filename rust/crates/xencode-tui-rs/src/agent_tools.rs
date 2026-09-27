@@ -120,7 +120,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
         "background_poll" | "repo_advise" | "read_file" | "list_dir" | "search_files"
         | "update_plan" => ToolClass::ReadOnly,
-        "write_file" | "edit_file" => ToolClass::Edit,
+        "write_file" | "edit_file" | "edit_symbol" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
 }
@@ -670,6 +670,15 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
             }
             preview
         }
+        "edit_symbol" => match planned_symbol_edit(root, &args) {
+            Err(reason) => reason,
+            Ok((_, display, current, updated)) => {
+                format!(
+                    "target: {display}\n{}",
+                    unified_diff(&current, &updated).trim_end()
+                )
+            }
+        },
         "background_start" | "run_command" => match arg_str(&args, "command") {
             Some(command) if !command.trim().is_empty() => format!("command: sh -c {command:?}"),
             _ => summarize_call(call),
@@ -728,8 +737,62 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
         .to_string()
 }
 
-pub type TaskRuntime = Arc<tokio::sync::Mutex<TaskManager>>;
+/// The edit an `edit_symbol` call would perform, or the reason it would refuse.
+/// A refusal comes back as the finished error string, so a caller can hand it
+/// straight to the model.
+///
+/// Shared by the tool and the approval overlay on purpose: what a person is shown
+/// before approving has to be the same computation that produces the bytes, or the
+/// approval is for one change and the write is another. Both read the file when
+/// asked, so an edit made while a prompt is open is caught by the re-read the tool
+/// does at execution rather than by a stale preview.
+fn planned_symbol_edit(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(PathBuf, String, String, String), String> {
+    let Some(raw) = arg_str(args, "path") else {
+        return Err(err("edit_symbol needs a string \"path\""));
+    };
+    let Some(symbol) = arg_str(args, "symbol") else {
+        return Err(err("edit_symbol needs a string \"symbol\""));
+    };
+    let Some(new_body) = arg_str(args, "new_body") else {
+        return Err(err("edit_symbol needs a string \"new_body\""));
+    };
+    let (full, display) = workspace_path(root, raw)?;
+    let text = read_text(&full, &display)?;
+    match xencode_context_rs::replace_symbol_body(&text, symbol, new_body) {
+        Err(failure) => Err(err(failure.to_message())),
+        Ok(updated) => Ok((full, display, text, updated)),
+    }
+}
 
+fn tool_edit_symbol(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
+    let (full, display, text, updated) = match planned_symbol_edit(root, args) {
+        Ok(plan) => plan,
+        Err(reason) => return reason,
+    };
+    if let Err(e) = std::fs::write(&full, &updated) {
+        return err(format!("cannot write {display}: {e}"));
+    }
+    let diff = unified_diff(&text, &updated);
+    format!(
+        "edited {display}: replaced the body of {}\n{diff}",
+        quote_symbol(args)
+    )
+    .trim_end()
+    .to_string()
+}
+
+/// The symbol an `edit_symbol` call named, for the line that reports what changed.
+fn quote_symbol(args: &serde_json::Map<String, serde_json::Value>) -> String {
+    match arg_str(args, "symbol") {
+        Some(symbol) => format!("`{symbol}`"),
+        None => "a declaration".to_string(),
+    }
+}
+
+pub type TaskRuntime = Arc<tokio::sync::Mutex<TaskManager>>;
 pub fn new_task_runtime() -> TaskRuntime {
     Arc::new(tokio::sync::Mutex::new(TaskManager::new()))
 }
@@ -1085,6 +1148,7 @@ async fn execute_tool_call_plan(
         "search_files" => tool_search_files(root, &args),
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
+        "edit_symbol" => tool_edit_symbol(root, &args),
         other => format!("error: unknown tool {other}"),
     }
 }
@@ -1972,6 +2036,7 @@ mod tests {
         assert_eq!(tool_class("background_poll"), ToolClass::ReadOnly);
         assert_eq!(tool_class("write_file"), ToolClass::Edit);
         assert_eq!(tool_class("edit_file"), ToolClass::Edit);
+        assert_eq!(tool_class("edit_symbol"), ToolClass::Edit);
         assert_eq!(tool_class("background_start"), ToolClass::Shell);
         assert_eq!(tool_class("run_command"), ToolClass::Shell);
         // The todo list touches no files, so it must never cost an approval.
@@ -2346,6 +2411,153 @@ mod tests {
         ));
         // truncate_one_line keeps `max` chars and appends the ellipsis.
         assert!(long.chars().count() <= 91, "{long}");
+    }
+
+    #[test]
+    fn edit_symbol_finds_a_declaration_by_name_and_leaves_the_file_untouched_when_the_body_is_broken(
+    ) {
+        let root = temp_root("edit-symbol");
+        std::fs::write(
+            root.join("code.rs"),
+            "//! Rewrites `fn total` someday.\n\nfn total(readings: &[u32]) -> u32 {\n    readings.iter().sum()\n}\n",
+        )
+        .unwrap();
+
+        let done = tool_edit_symbol(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "code.rs",
+                "symbol": "total",
+                "new_body": "{\n    readings.len() as u32\n}",
+            })),
+        );
+        assert!(
+            done.starts_with("edited code.rs: replaced the body of `total`"),
+            "{done}"
+        );
+        assert!(done.contains("-    readings.iter().sum()"), "{done}");
+        assert!(done.contains("+    readings.len() as u32"), "{done}");
+
+        // The broken body is refused after the file has been rewritten by the
+        // call above, so compare against what the good edit left behind.
+        let after_good_edit = std::fs::read_to_string(root.join("code.rs")).unwrap();
+        let broken = tool_edit_symbol(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "code.rs",
+                "symbol": "total",
+                "new_body": "{ let = 4; }",
+            })),
+        );
+        assert!(broken.starts_with("error: refused"), "{broken}");
+        assert!(broken.contains("does not leave valid Rust"), "{broken}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            after_good_edit,
+            "a refused edit has to leave every byte as it was"
+        );
+
+        // `fn total` inside the doc comment is not a declaration, and neither is
+        // a name the file does not declare at all.
+        let absent = tool_edit_symbol(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "code.rs",
+                "symbol": "tally",
+                "new_body": "{ 0 }",
+            })),
+        );
+        assert!(absent.contains("no declaration named `tally`"), "{absent}");
+        assert!(absent.contains("total"), "{absent}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_symbol_edit_prompts_at_the_gate_and_rewinds_to_what_the_file_was() {
+        let root = temp_root("gate-symbol");
+        let before = "fn total() -> u32 {\n    1\n}\n";
+        std::fs::write(root.join("code.rs"), before).unwrap();
+        let symbol_edit = || {
+            call(
+                "edit_symbol",
+                serde_json::json!({
+                    "path": "code.rs",
+                    "symbol": "total",
+                    "new_body": "{ 2 }",
+                }),
+            )
+        };
+
+        let h = harness(ApprovalMode::Ask);
+        let mut prompts = h.prompts;
+
+        let refused = gated(
+            new_task_runtime(),
+            root.clone(),
+            symbol_edit(),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Denied,
+        )
+        .await;
+        assert_eq!(refused, DENIED_RESULT);
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            before
+        );
+
+        let accepted = gated(
+            new_task_runtime(),
+            root.clone(),
+            symbol_edit(),
+            h.ctx.clone(),
+            &mut prompts,
+            ApprovalAnswer::Approved,
+        )
+        .await;
+        assert!(accepted.starts_with("edited code.rs:"), "{accepted}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            "fn total() -> u32 { 2 }\n"
+        );
+
+        // An approved symbol edit is an edit like any other, so /rewind undoes it.
+        h.ctx.checkpoints.rewind(1);
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            before
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn approval_preview_shows_a_symbol_edit_and_the_reason_a_symbol_edit_would_refuse() {
+        let root = temp_root("preview-symbol");
+        std::fs::write(root.join("code.rs"), "fn total() -> u32 {\n    1\n}\n").unwrap();
+
+        let shown = approval_preview(
+            &root,
+            &call(
+                "edit_symbol",
+                serde_json::json!({"path": "code.rs", "symbol": "total", "new_body": "{ 2 }"}),
+            ),
+        );
+        assert!(shown.contains("target: code.rs"), "{shown}");
+        assert!(shown.contains("-    1"), "{shown}");
+        assert!(shown.contains("+fn total() -> u32 { 2 }"), "{shown}");
+
+        // A call that cannot be carried out is shown as that, rather than as a
+        // diff of nothing: the person approving sees the refusal.
+        let refused = approval_preview(
+            &root,
+            &call(
+                "edit_symbol",
+                serde_json::json!({"path": "code.rs", "symbol": "total", "new_body": "2"}),
+            ),
+        );
+        assert!(refused.contains("error:"), "{refused}");
+        assert!(refused.contains("braces"), "{refused}");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
