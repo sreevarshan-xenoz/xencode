@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1260 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1281 tests passing, 12 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1579,6 +1579,23 @@ never is.
   the direction the item did not name — recovery also lets a body swallow its own
   declaration — so the result is re-checked to still hold exactly one declaration of
   that name and of the same kind, not merely to parse.)*
+- **CI-6 `what_breaks` impact analysis** — reverse-dependency list for an edit
+  target from the existing dep graph. M. Trap: regex-grade accuracy on call
+  sites, so label the confidence explicitly. Done-when: editing `symbols.rs`
+  surfaces its known consumers.
+  *(Done 2026-09-27, as `what_breaks(path, symbol?)` — a tool the model calls, not
+  a CLI command. The done-when was measured on this repo's own index, rebuilt for
+  the run by the same code `/init` uses: 137 Rust files, 259 resolved edges, and
+  asking for `symbols.rs` by its bare name returned 10 consumers — 9 linking it
+  directly (advise, embed, eval, impact, init, lib, refresh, retrieve, tsymbols,
+  each by the module path it resolved) and 1 two steps back — with 5 of them shown
+  to write `build_graph` in their own `use`. Those 5 were then checked against the
+  source rather than trusted, and each does name it. The trap is answered where the
+  reader sees it: every report ends with what an edge is (a `use` path, a `mod`
+  declaration or an `impl Trait for Type` that resolves) and what it is not (a
+  type-checked call site), and how large the index behind the answer was, so a
+  consumer list of one is not read as a promise about the code. A path matching two
+  indexed files is refused with both named rather than one chosen.)*
 - **CI-4 codemod mode** — the agent emits one ast-grep YAML rule, xencode applies
   it repo-wide behind a preview diff + approval. S-M after CI-1. Trap: repo-wide
   apply on a dirty tree. Done-when: a 20-site rename in one tool call.
@@ -3998,7 +4015,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 45 | Natural-Language Architecture Query | reject | What is missing is verification turns, not semantics. QN-4's candidate-then-confirm loop is the fix |
 | 46 | Software Archaeology Mode | new | QT-3 — one wrapper over shipped parts (analyzer TODO flags, GH-4 hotspots, `cargo-machete` as a subprocess) |
 | 47 | "Why?" Command | planned | GH-2 `/why <file>:<line>`; QT-1 restricts it to git ops measured ≤0.1 s and drops pickaxe (13.5 s) |
-| 48 | "What Breaks?" Command | planned | CI-6 |
+| 48 | "What Breaks?" Command | narrowed | CI-6 shipped the answer as an agent tool (`what_breaks`), which is where the question gets asked — a person typing it into a shell can read `git log` and the diff instead. No `xencode breaks` command |
 | 49 | "Explain This Repo" Command | new | QB-5 — HIGH-profile only, citation-gated: no claim without a `file:line` from the graph |
 | 50 | Developer Onboarding Mode | new | QB-6 — ordered read-out of AC-6's map + QB-4's rows + GH-4 hotspots; only the list is trustworthy, not the narration |
 | 51 | Repository Health Scorecard | narrowed | QB-4 — rows only where local data exists, folded into DB-6, zero LLM calls |
@@ -7026,6 +7043,52 @@ done-when is met, and the commit that does it names the IDs.
   wherever it sits inside an `impl`; and three in `agent_tools.rs`, for the tool writing and
   refusing, for the preview showing the diff and showing the refusal, and for the gated path
   with its rewind.
+- [x] `CI-6` — 2026-09-27, third item of W3. `what_breaks(path, symbol?)` is the agent's
+  thirteenth tool and the second one that reads the project index instead of a file: it
+  answers the question a model asks *before* an edit — who links to the thing I am about to
+  change — by walking the dependency edges that are already on disk backwards. No new index
+  format, no second graph: `impact.rs` (663 lines, 291 of them before its tests) in
+  `xencode-context-rs` reads `deps.json` and `symbols.json` from the same `.xencode/index/`
+  directory `/init` writes, and takes its hop bound from `AFFECTED_MAX_HOPS` (3) so it cannot
+  disagree with `affected_dependents`, the watcher-driven reverse query in `advise.rs` that
+  already uses that bound. The walk is one function and the disk read another, so the graph
+  can be tested without a filesystem.
+  **The trap is answered in the text the model reads, not in a comment.** Every report ends
+  with the sentence the item asked for in different words: an edge means a file wrote a `use`
+  path, a `mod` declaration or an `impl Trait for Type` that resolves to this one — *name
+  resolution through module paths, not a type-checked call site* — over however many files and
+  edges the snapshot holds. That last number is there on purpose: a list of one consumer is a
+  fact about a 137-file index, and the answer says which index it read rather than letting a
+  short list read as a promise about the code. Narrowing to a symbol does not drop rows, it
+  marks them `— its own \`use\` names it` or `— does not name it`, and a following line explains
+  why a file that reaches the module through `mod` or `impl` has no `use` to name it in and so
+  is not being called unrelated. The name is matched as a whole path segment, so `rap` does not
+  match `wrap`, and a brace group and an `as` alias are both read correctly.
+  **The done-when, measured on this repo rather than on a sample.** The probe rebuilt the
+  index with the code `/init` uses, then asked for `symbols.rs` by its bare name: 137 Rust
+  files, 259 resolved edges, 10 consumers — 9 linking it directly (advise, embed, eval, impact,
+  init, lib, refresh, retrieve, tsymbols) and 1 two steps back through `crate::init` — and
+  asked again for `build_graph`: 5 of those 10 write the name in their own `use`. Those 5 were
+  then checked against the source rather than trusted, and each of them does name it, at
+  `advise.rs:306`, `impact.rs:295`, `init.rs:22`, `lib.rs:116`, `refresh.rs:21`. The numbers are
+  re-takeable, not remembered: `tests/impact_baseline.rs` is ignored by default for the same
+  reason the retrieval baseline is — it builds a real index — and prints them
+  (`cargo test -p xencode-context-rs --test impact_baseline -- --ignored --nocapture`). It
+  reports, and never asserts, so a repo whose file set changes does not fail a test.
+  **Refusals, watched at the tool boundary.** A name the index does not hold comes back as
+  *nothing in the project index is `…`* followed by the indexed paths that share the file name,
+  so a wrong directory points at a right one; a tail matching two files is refused with both
+  full paths rather than one chosen quietly (`crates/x/src/model.rs` and `crates/y/src/model.rs`
+  measured together, in one message); a project with no index says which command makes one. The
+  tool is `ToolClass::ReadOnly`, so it asks no approval and checkpoints nothing.
+  **Verified by** 1281 tests, 0 failures, 12 ignored over 46 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` clean.
+  Twenty-two tests are new: seventeen in `impact.rs` covering the three kinds of edge, the hop
+  bound and the cycle that would otherwise be walked for ever, one consumer reached two ways,
+  the segment matching above, and each refusal; four in `agent_tools.rs`, run through the real
+  executor against a temporary project indexed by `init_project` rather than a snapshot written
+  by hand; and the one ignored measurement probe, which is also why the ignored count moved
+  from 11 to 12.
 
 
 #### W2 — The model/inference substrate — 15 items

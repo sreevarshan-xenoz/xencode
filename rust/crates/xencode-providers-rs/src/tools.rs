@@ -454,25 +454,59 @@ pub fn background_tools() -> Vec<ToolDefinition> {
 /// Schema only — execution lives in the TUI's agent tool loop, which owns
 /// the workspace snapshot.
 pub fn advise_tools() -> Vec<ToolDefinition> {
-    vec![ToolDefinition {
-        name: "repo_advise".to_string(),
-        description: "Report deterministic repository insights from the \
-                      project's .xencode symbol snapshot: broken imports, \
-                      import cycles, hub files and orphan files. Read-only; \
-                      requires the project index (/init). Returns at most 40 \
-                      findings; pass a path filter to narrow them."
-            .to_string(),
-        parameters: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "filter": {
-                    "type": "string",
-                    "description": "Only report findings whose file path \
-                                    contains this substring"
+    vec![
+        ToolDefinition {
+            name: "repo_advise".to_string(),
+            description: "Report deterministic repository insights from the \
+                          project's .xencode symbol snapshot: broken imports, \
+                          import cycles, hub files and orphan files. Read-only; \
+                          requires the project index (/init). Returns at most 40 \
+                          findings; pass a path filter to narrow them."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "filter": {
+                        "type": "string",
+                        "description": "Only report findings whose file path \
+                                        contains this substring"
+                    }
                 }
-            }
-        }),
-    }]
+            }),
+        },
+        ToolDefinition {
+            name: "what_breaks".to_string(),
+            description: "List the files that link to one file, before editing \
+                          it, from the project's .xencode symbol snapshot: who \
+                          `use`s its path, declares it as a `mod`, or implements \
+                          a trait it defines — one hop, then reached through \
+                          those, up to three. Read-only; requires /init. Pass a \
+                          symbol to mark which of those files write that name in \
+                          their own `use`. An edge is a module path that \
+                          resolves, not a type-checked call site, and the answer \
+                          says so."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file about to be edited. The stored \
+                                        path, or its tail — `symbols.rs` finds \
+                                        `crates/x/src/symbols.rs`. A tail that \
+                                        matches two files is refused, not guessed."
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Optionally, the declared name being \
+                                        changed, to mark the consumers that name \
+                                        it"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+    ]
 }
 
 /// The workspace file tools (Milestone I, I1-02): read, list, search, write,
@@ -790,7 +824,10 @@ mod tests {
     #[test]
     fn advise_tool_is_a_valid_openai_function_schema() {
         let tools = advise_tools();
-        assert_eq!(tools[0].name, "repo_advise");
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["repo_advise", "what_breaks"]
+        );
         let value = tools[0].to_api_value();
         assert_eq!(value["type"], "function");
         assert_eq!(value["function"]["name"], "repo_advise");
@@ -800,6 +837,16 @@ mod tests {
         // Everything is optional.
         assert!(params.get("required").is_none());
         assert!(!tools[0].description.is_empty());
+
+        let breaks = tools[1].to_api_value();
+        let params = &breaks["function"]["parameters"];
+        assert_eq!(params["required"][0], "path");
+        assert_eq!(params["properties"]["path"]["type"], "string");
+        // The symbol is the only narrowing there is, and it is optional: the
+        // question "who uses this file" is answerable without one.
+        assert_eq!(params["properties"]["symbol"]["type"], "string");
+        assert_eq!(params["required"].as_array().unwrap().len(), 1);
+        assert!(!tools[1].description.is_empty());
     }
 
     #[test]
