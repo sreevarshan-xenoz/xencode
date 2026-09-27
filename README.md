@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (15 crates, 1242 tests,
+At its core is a fast, single-file **Rust** binary (15 crates, 1245 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -149,6 +149,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 | --- | --- | --- |
 | **Ollama** | Local models — the default path, so this is the one to install | [ollama.ai](https://ollama.ai/download) |
 | **Rust stable** | Building the binary — no MSRV is pinned; CI builds on `stable` | [rustup.rs](https://rustup.rs) |
+| **A C compiler** | The Rust symbol index builds its grammar (`tree-sitter` and its Rust grammar) from C at compile time; any `cc` on `PATH` works | ships with the system command-line toolchain |
 
 Ollama is what the binary talks to out of the box, not the only option: a local
 `llama-server` (`llamacpp:…`, managed by `xencode llamacpp`), Gemini, Qwen and
@@ -471,7 +472,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1242 passing, 11 ignored)
+cargo test                          # Full workspace suite (1245 passing, 11 ignored)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

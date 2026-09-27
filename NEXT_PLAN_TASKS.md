@@ -14,7 +14,7 @@
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
 - [x] CLI subcommands — scan, config, models, cache, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, tui
-- [x] Workspace gates green — 15 crates, 1242 tests passing, 11 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1245 tests passing, 11 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1558,6 +1558,17 @@ never is.
   pinning and a C toolchain requirement at build time. Done-when: a strict
   superset of the regex symbols on this repo, zero false positives inside macros
   or comments.
+  *(Done 2026-09-27 — see W3 progress. Rust only, not three grammars: every call
+  site that asks for symbols filters the file set to `.rs` before it asks, so a
+  TypeScript or Python grammar would be a build-time C dependency with no reader —
+  LSP-5 is the item that makes that policy official. The trap fired as written: the
+  runtime and the grammar are pinned as a pair because an ABI mismatch is only
+  visible when `set_language` refuses at run time, and the build now needs a C
+  compiler, which the README prerequisites say. On "strict superset": across the 133
+  Rust files here the new tier lost nothing the old one found in real code and
+  refused 96 names it had taken out of a comment, a string or a macro body. It found
+  nothing the old tier had missed in real code here — the additions are proven on
+  source written to show the gap, not on this repo's own files.)*
 - **CI-3 `edit_symbol(path, symbol, new_body)`** — range-scoped replacement
   validated by reparse. M, after CI-2. Trap: tree-sitter error recovery hides
   broken output; must reject a file whose edited region parses with ERROR nodes.
@@ -6902,6 +6913,63 @@ done-when is met, and the commit that does it names the IDs.
   was not written down at the time and re-running the suite now would count MI-7's
   tests as if they were this change's. Every point above is drawn from the two item
   notes and the commit that made them; nothing here was newly measured for this entry.
+
+- [x] `CI-2` — 2026-09-27, first item of W3. The symbol tier in `xencode-context-rs`
+  reads a parse tree now (`tsymbols.rs`, on `tree-sitter` + `tree-sitter-rust`) where
+  it used to run nine patterns over the text, each asking whether a line began with
+  `struct`, `fn`, `use`, `impl` or one of the rest. The on-disk shape is untouched —
+  same `symbols.json`, same fields, same graph — so nothing outside the extraction
+  step had to change.
+  **What the old tier got wrong, and how it was checked rather than asserted.** The
+  patterns were kept, compiled only for tests, and run against the parse over every
+  Rust file in this workspace: **133 files, 0 declarations lost, 96 claims refused.**
+  Lost means a name the patterns found in real code that the parse does not find, so
+  that half of the number is the done-when's "superset" holding. The 96 are claims the
+  patterns made about text that is not code at all: 62 in `seeds.rs`, which holds whole
+  example programs inside raw string literals for the verification seeds, and 34 in
+  `symbols.rs`, whose own tests quote sample Rust the same way — `pub use
+  database::Pool` written in a doc comment was indexed as both an import and an export
+  of the file that wrote the comment, and `use __CRATE__::may_drive` inside one seed's
+  example program was indexed as something `seeds.rs` imports. All 96 were checked
+  individually: each names a thing that is not declared anywhere in that file's real
+  code, so none of them is the parse being stricter about a symbol the file does own.
+  **The other direction, stated exactly.** This item's done-when says *strict*
+  superset. On this repo's own code the parse found no declaration the patterns had
+  missed — the count of those was measured and it is zero, so the strictness here comes
+  from the removals. Two additions are proven on source written to show the gap:
+  `pub trait Speak { fn say(&self) -> String; }` on one line, where the patterns saw a
+  trait and no function, and a `pub struct` sitting on its own line inside a block
+  comment or a macro's token tree, where they saw a declaration this file does not own
+  — a macro body becomes a declaration wherever the macro is invoked, which the
+  declaring file cannot say. Both are pinned by their own test.
+  **The comparison earned its keep once, on the new code.** `impl From<io::Error> for
+  Convertible` was read as an implementation of a trait called `Error>`, because the
+  shared trait-name reader took the last `::` segment of the whole header and generic
+  arguments end in `>`. Three declarations in this workspace hit it. The reader now
+  drops what comes after `<` before it splits on `::`.
+  **The trap in this item fired as written, both halves.** The runtime and the grammar
+  are pinned as a pair (`0.27` with `0.24`) because a grammar built for an older ABI is
+  refused by `set_language` at run time, which is the worst place to learn it — so the
+  refusal path is handled where it happens: a file that will not parse, or a grammar
+  that will not load, contributes no symbols rather than a guessed set, which is also
+  what a buffer mid-edit wants. The C toolchain is real: the build compiles the
+  grammar's `.o` files, and the README prerequisites now say a `cc` on `PATH` is needed.
+  **Rust only, deliberately.** This item names three grammars. The parser handles one,
+  because every call site that asks for symbols filters the file set to `.rs` first —
+  `init.rs:259` on the extension, `refresh.rs:53` on the indexed language, and the
+  gold-answer check reads Rust files too — and what the symbols feed is a Rust module
+  graph built from `use`, `mod` and `impl Trait for Type`. Adding two grammars would be
+  two more C dependencies with no reader, which is the reason row 16 of the reject table
+  already gives. **LSP-5** is the item that makes that a stated policy rather than a
+  decision made here in passing.
+  **Verified by** 1245 tests, 0 failures, 11 ignored over 45 result lines, with
+  `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
+  -D warnings` clean. Three tests are new: the workspace comparison above, one that a
+  declaration written inside a comment, a string or a macro body is not one (checked in
+  both tiers, so the old behaviour is recorded rather than remembered), and one for the
+  trait method on the trait's own line. One existing test changed its expectation: a
+  method declared inside a `pub trait` is now counted as a function of the file, which
+  is what the patterns could not see.
 
 
 #### W2 — The model/inference substrate — 15 items
