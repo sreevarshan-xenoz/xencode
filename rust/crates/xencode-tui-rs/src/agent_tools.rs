@@ -126,7 +126,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
         | "search_files" | "read_docs" | "lookup_advisory" | "update_plan" => ToolClass::ReadOnly,
-        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" => ToolClass::Edit,
+        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
 }
@@ -1025,12 +1025,29 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                     plan.rewrites.iter().map(|r| r.sites).sum::<usize>(),
                     plan.rewrites.len()
                 );
-                for rewrite in &plan.rewrites {
+                out.push_str(&describe_rewrites(&plan.rewrites));
+                out
+            }
+        },
+        "codemod" => match plan_codemod(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
+            Err(reason) => reason,
+            Ok(plan) if !plan.rewrites_code => format!(
+                "codemod would report {} site(s) and change nothing:\n{}",
+                plan.sites.len(),
+                plan.sites.join("\n")
+            ),
+            Ok(plan) => {
+                let mut out = format!(
+                    "codemod would rewrite {} site(s) across {} file(s):",
+                    plan.rewrites.iter().map(|r| r.sites).sum::<usize>(),
+                    plan.rewrites.len()
+                );
+                out.push_str(&describe_rewrites(&plan.rewrites));
+                if !plan.entangled.is_empty() {
                     out.push_str(&format!(
-                        "\n\ntarget: {} ({} site(s))\n{}",
-                        rewrite.display,
-                        rewrite.sites,
-                        unified_diff(&rewrite.current, &rewrite.updated).trim_end()
+                        "\n(note: {} of those file(s) already have uncommitted changes: {})",
+                        plan.entangled.len(),
+                        plan.entangled.join(", ")
                     ));
                 }
                 out
@@ -1430,7 +1447,27 @@ pub fn plan_ast_edit(
         return Err(err(message));
     }
 
-    let sites = matches
+    let sites = describe_sites(&matches);
+
+    let Some(replacement) = replacement else {
+        return Ok(AstEditPlan {
+            sites,
+            rewrites: Vec::new(),
+            replacement: None,
+        });
+    };
+
+    let rewrites = plan_file_rewrites(root, &matches, ToolName::AstEdit)?;
+    Ok(AstEditPlan {
+        sites,
+        rewrites,
+        replacement: Some(replacement.to_string()),
+    })
+}
+
+/// One `path:line` line per site, for the report and the preview.
+fn describe_sites(matches: &[AstMatch]) -> Vec<String> {
+    matches
         .iter()
         .map(|m| {
             let first_line = m.text.lines().next().unwrap_or("").trim_end();
@@ -1441,20 +1478,38 @@ pub fn plan_ast_edit(
             };
             format!("{}:{}:{} {shown}", m.file, m.line, m.column)
         })
-        .collect();
+        .collect()
+}
 
-    let Some(replacement) = replacement else {
-        return Ok(AstEditPlan {
-            sites,
-            rewrites: Vec::new(),
-            replacement: None,
-        });
-    };
+/// Which tool asked, for the wording of a refusal.
+#[derive(Clone, Copy, PartialEq)]
+enum ToolName {
+    AstEdit,
+    Codemod,
+}
 
-    // Group by file, then splice each file's edits from the back so an earlier
-    // edit's byte offsets stay valid while the later ones are applied.
+impl ToolName {
+    fn label(self) -> &'static str {
+        match self {
+            ToolName::AstEdit => "ast_edit",
+            ToolName::Codemod => "codemod",
+        }
+    }
+}
+
+/// Group matches by file and compute each file's new text, in memory.
+///
+/// Shared by `ast_edit` and `codemod` so both derive their bytes the same way
+/// and the approval preview cannot describe a different edit from the one that
+/// lands. Edits within a file are spliced from the back, so an earlier match's
+/// byte offsets stay valid while a later one is applied.
+fn plan_file_rewrites(
+    root: &Path,
+    matches: &[AstMatch],
+    tool: ToolName,
+) -> Result<Vec<PlannedRewrite>, String> {
     let mut order: Vec<String> = Vec::new();
-    for m in &matches {
+    for m in matches {
         if !order.contains(&m.file) {
             order.push(m.file.clone());
         }
@@ -1464,9 +1519,9 @@ pub fn plan_ast_edit(
         let sites_here: Vec<&AstMatch> = matches.iter().filter(|m| m.file == file).collect();
         let (file_full, file_display) = match workspace_path(root, &file) {
             Ok(ok) => ok,
-            // ast-grep reports the path as it was given it, so a file found
-            // through a directory argument comes back root-relative already.
-            // Anything that does not resolve stays inside the root or is dropped.
+            // ast-grep reports a path as it was given it, so a file found through
+            // a directory argument comes back root-relative already. Anything
+            // that does not resolve stays inside the root, or is dropped.
             Err(_) => continue,
         };
         let current = read_text(&file_full, &file_display)?;
@@ -1474,15 +1529,16 @@ pub fn plan_ast_edit(
         for m in &sites_here {
             let (Some(start), Some(end)) = (m.span.map(|s| s.0), m.span.map(|s| s.1)) else {
                 return Err(err(format!(
-                    "ast-grep reported a match in {file_display} without a byte range, \
-                     so it cannot be rewritten safely. Run the search without a \
-                     \"replacement\" to see the sites."
+                    "{} found a match in {file_display} without a byte range, so it \
+                     cannot be rewritten safely. Run it without a fix to see the sites.",
+                    tool.label()
                 )));
             };
             let Some(replacement) = &m.replacement else {
                 return Err(err(format!(
-                    "ast-grep did not return rewritten text for the match at \
-                     {file_display}:{}, so nothing was changed",
+                    "{} did not return rewritten text for the match at {file_display}:{}, \
+                     so nothing was changed",
+                    tool.label(),
                     m.line
                 )));
             };
@@ -1497,12 +1553,7 @@ pub fn plan_ast_edit(
             sites: sites_here.len(),
         });
     }
-
-    Ok(AstEditPlan {
-        sites,
-        rewrites,
-        replacement: Some(replacement.to_string()),
-    })
+    Ok(rewrites)
 }
 
 /// Splice a rewrite of every match into `current`.
@@ -1537,6 +1588,211 @@ fn splice_replacements(
     Ok(updated)
 }
 
+/// Files git already reports as modified, among the ones asked about.
+///
+/// CI-4's recorded trap is applying a change across the whole repository when
+/// the tree is already dirty, because afterwards nobody can tell which lines the
+/// codemod wrote and which were already there. Refusing is the wrong answer —
+/// an agent's own previous edits are uncommitted by definition, so that would
+/// make the tool unusable exactly when it is wanted. The answer is to make the
+/// separation visible instead: the diff this tool shows is its own change and
+/// nothing else, and it names every file that was already modified so the
+/// entanglement is on the record rather than discovered later.
+fn already_modified(root: &Path, files: &[String]) -> Vec<String> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let mut command = std::process::Command::new("git");
+    command.current_dir(root).arg("status").arg("--porcelain");
+    for file in files {
+        command.arg("--").arg(file);
+    }
+    let Ok(output) = command.output() else {
+        // Not a repository, or git is missing. Not a reason to refuse: the tool's
+        // own diff is still exactly its own change.
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.get(3..).map(|path| path.trim().to_string()))
+        .collect()
+}
+
+/// Run ast-grep in `scan` mode over a rule the caller wrote, and return matches.
+///
+/// A rule ast-grep cannot parse exits 8 with a message on stderr, which is a
+/// fact about the rule and is reported as one. A rule that parses and matches
+/// nothing exits 1 with an empty list, which is *not* a fact about the code and
+/// the caller is told so.
+fn run_ast_grep_rule(
+    root: &Path,
+    rule: &str,
+    target: &str,
+    timeout_secs: u64,
+) -> Result<Vec<AstMatch>, String> {
+    let binary = ast_grep_binary()?;
+    let mut command = std::process::Command::new(&binary);
+    command.current_dir(root);
+    command
+        .arg("scan")
+        .arg("--inline-rules")
+        .arg(rule)
+        .arg("--json")
+        .arg(target);
+    let output = run_with_timeout(&mut command, timeout_secs)
+        .map_err(|e| err(format!("could not run {binary}: {e}")))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.code() == Some(8) || stderr.starts_with("Error: Cannot parse rule") {
+        return Err(err(format!(
+            "ast-grep could not read the rule, so nothing was searched and no file was \
+             touched. A rule needs an `id`, a `language`, a `rule:` block with a `pattern`, \
+             and a `fix:` block to change anything. ast-grep said: {stderr}"
+        )));
+    }
+    if !output.status.success() && !stderr.is_empty() {
+        return Err(err(format!("ast-grep failed: {stderr}")));
+    }
+    parse_ast_matches(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// What a `codemod` call found.
+#[derive(Debug)]
+pub struct CodemodPlan {
+    sites: Vec<String>,
+    rewrites: Vec<PlannedRewrite>,
+    /// False when the rule carries no `fix:`, so it can only report.
+    rewrites_code: bool,
+    /// Of the files to be rewritten, those git already reports as modified.
+    entangled: Vec<String>,
+}
+
+/// Work out what a `codemod` call would do, without touching a file.
+pub fn plan_codemod(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> Result<CodemodPlan, String> {
+    let Some(rule) = arg_str(args, "rule") else {
+        return Err(err("codemod needs a string \"rule\""));
+    };
+    if rule.trim().is_empty() {
+        return Err(err("codemod needs a non-empty \"rule\""));
+    }
+    let target = arg_str(args, "path").unwrap_or(".").trim().to_string();
+    if target.is_empty() {
+        return Err(err("codemod needs a non-empty \"path\""));
+    }
+    let (full, display) = workspace_path(root, &target)?;
+    if !full.exists() {
+        return Err(err(format!("{display} does not exist")));
+    }
+
+    let matches = run_ast_grep_rule(root, rule, &display, timeout_secs)?;
+    if matches.is_empty() {
+        return Err(err(format!(
+            "codemod matched no sites under {display}, and nothing was changed. That \
+             result cannot distinguish a rule whose pattern is wrong from code that does \
+             not contain it. Check the pattern's metavariables are written $NAME, and \
+             that the shape is present, before reading this as \"the code is already \
+             correct\"."
+        )));
+    }
+
+    let sites = describe_sites(&matches);
+    // A rule with no `fix:` is a report, and ast-grep says so by leaving the
+    // replacement out of every match rather than by failing.
+    let rewrites_code = matches.iter().any(|m| m.replacement.is_some());
+    let rewrites = if rewrites_code {
+        plan_file_rewrites(root, &matches, ToolName::Codemod)?
+    } else {
+        Vec::new()
+    };
+    let touched: Vec<String> = rewrites.iter().map(|r| r.display.clone()).collect();
+    let entangled = already_modified(root, &touched);
+
+    Ok(CodemodPlan {
+        sites,
+        rewrites,
+        rewrites_code,
+        entangled,
+    })
+}
+
+/// The per-file section the preview and the result both print.
+///
+/// Reads from the plan, so it is the same diff in both places: the preview and
+/// the outcome cannot describe different edits.
+fn describe_rewrites(rewrites: &[PlannedRewrite]) -> String {
+    let mut out = String::new();
+    for rewrite in rewrites {
+        out.push_str(&format!(
+            "\n\ntarget: {} ({} site(s))\n{}",
+            rewrite.display,
+            rewrite.sites,
+            unified_diff(&rewrite.current, &rewrite.updated).trim_end()
+        ));
+    }
+    out
+}
+
+/// Write a plan's rewrites, one file at a time, atomically.
+///
+/// Each file is whole before and after, so a failure part-way through leaves the
+/// files already written correct and the rest untouched, and the caller is told
+/// which file stopped it rather than being handed a partial success.
+fn write_rewrites(rewrites: &[PlannedRewrite]) -> Result<(), String> {
+    for rewrite in rewrites {
+        xencode_core_rs::write_atomic(&rewrite.full, rewrite.updated.as_bytes())
+            .map_err(|e| err(format!("cannot write {}: {e}", rewrite.display)))?;
+    }
+    Ok(())
+}
+
+/// `codemod`: apply one ast-grep rule across the tree, or report what it hits.
+fn tool_codemod(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> String {
+    let plan = match plan_codemod(root, args, timeout_secs) {
+        Ok(plan) => plan,
+        Err(reason) => return reason,
+    };
+    if !plan.rewrites_code {
+        // Counted from the sites, not the rewrites: there are no rewrites in this
+        // mode, and "0 site(s)" beside a list of two would be its own small lie.
+        return format!(
+            "codemod: the rule has no `fix:`, so it reports and changes nothing — \
+             {} site(s):\n{}",
+            plan.sites.len(),
+            plan.sites.join("\n")
+        );
+    }
+
+    if let Err(reason) = write_rewrites(&plan.rewrites) {
+        return reason;
+    }
+    let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
+    let mut out = format!(
+        "codemod: rewrote {total} site(s) across {} file(s):\n{}",
+        plan.rewrites.len(),
+        describe_rewrites(&plan.rewrites)
+    );
+    if !plan.entangled.is_empty() {
+        out.push_str(&format!(
+            "\n(note: {} of those file(s) already had uncommitted changes before this \
+             ran — {} — so a git revert or /rewind of those files takes the earlier edits \
+             with it. The diff above is this rule's change only.)",
+            plan.entangled.len(),
+            plan.entangled.join(", ")
+        ));
+    }
+    out.trim_end().to_string()
+}
+
 /// `ast_edit`: report the sites, and rewrite them when a replacement was given.
 fn tool_ast_edit(
     root: &Path,
@@ -1562,12 +1818,10 @@ fn tool_ast_edit(
         "ast_edit: rewrote {total} site(s) matching `{pattern}` across {} file(s):\n",
         plan.rewrites.len()
     );
+    if let Err(reason) = write_rewrites(&plan.rewrites) {
+        return reason;
+    }
     for rewrite in &plan.rewrites {
-        // Atomic per file: a crash between two files leaves each one whole, and
-        // the second write cannot tear the first.
-        if let Err(e) = xencode_core_rs::write_atomic(&rewrite.full, rewrite.updated.as_bytes()) {
-            return err(format!("cannot write {}: {e}", rewrite.display));
-        }
         out.push_str(&format!(
             "\n{} ({} site(s))\n{}",
             rewrite.display,
@@ -1956,6 +2210,7 @@ async fn execute_tool_call_plan(
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
         "ast_edit" => tool_ast_edit(root, &args, command_timeout),
+        "codemod" => tool_codemod(root, &args, command_timeout),
         "what_breaks" => tool_what_breaks(root, &args),
         other => format!("error: unknown tool {other}"),
     }
@@ -5636,6 +5891,300 @@ patched = ["{fixed}"]
         assert_eq!(
             std::fs::read_to_string(root.join("code.rs")).unwrap(),
             "let a = compute();\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ---- CI-4: `codemod`, one structural rule across the tree ----
+
+    /// A rule ast-grep can read, written the way the tool's own error message
+    /// tells the caller to write one.
+    const CODEMOD_RULE: &str = "id: rename-compute\nlanguage: Rust\nrule:\n  pattern: let $A = compute();\nfix: let $A = compute(2);\n";
+
+    /// Twenty seeded call sites, the shape CI-4's completion condition calls for.
+    fn twenty_site_file() -> String {
+        let mut text = String::from("fn main() {\n");
+        for i in 0..20 {
+            text.push_str(&format!("    let v{i} = compute();\n"));
+        }
+        text.push_str("}\n");
+        text
+    }
+
+    #[test]
+    fn codemod_is_an_edit_tool_because_it_writes() {
+        assert_eq!(tool_class("codemod"), ToolClass::Edit);
+    }
+
+    #[test]
+    fn codemod_asks_for_a_rule_before_it_looks_for_the_binary() {
+        let root = temp_root("codemod-args");
+        let answer =
+            plan_codemod(&root, serde_json::json!({}).as_object().unwrap(), 5).unwrap_err();
+        assert!(answer.contains("needs a string \"rule\""), "{answer}");
+        let blank = plan_codemod(
+            &root,
+            serde_json::json!({"rule": "  "}).as_object().unwrap(),
+            5,
+        )
+        .unwrap_err();
+        assert!(blank.contains("non-empty"), "{blank}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// CI-4's completion condition: twenty sites of one rename, in one call, and
+    /// the file is what a hand-check says.
+    #[test]
+    fn codemod_rewrites_twenty_seeded_sites_in_one_call() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-twenty");
+        let seeded = twenty_site_file();
+        std::fs::write(root.join("code.rs"), &seeded).unwrap();
+
+        let answer = tool_codemod(
+            &root,
+            serde_json::json!({"rule": CODEMOD_RULE, "path": "code.rs"})
+                .as_object()
+                .unwrap(),
+            30,
+        );
+        assert!(
+            answer.contains("rewrote 20 site(s) across 1 file(s)"),
+            "{answer}"
+        );
+
+        let after = std::fs::read_to_string(root.join("code.rs")).unwrap();
+        let expected: String = (0..20)
+            .map(|i| format!("    let v{i} = compute(2);\n"))
+            .collect();
+        assert_eq!(after, format!("fn main() {{\n{expected}}}\n"));
+        // The declaration and the closing brace are untouched.
+        assert!(after.starts_with("fn main() {\n"), "{after}");
+        assert!(after.ends_with("}\n"), "{after}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn codemod_reaches_a_directory_recursively() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-dir");
+        std::fs::create_dir_all(root.join("src/inner")).unwrap();
+        std::fs::write(root.join("src/one.rs"), "let a = compute();\n").unwrap();
+        std::fs::write(root.join("src/inner/two.rs"), "let b = compute();\n").unwrap();
+
+        let answer = tool_codemod(
+            &root,
+            serde_json::json!({"rule": CODEMOD_RULE, "path": "src"})
+                .as_object()
+                .unwrap(),
+            30,
+        );
+        assert!(
+            answer.contains("rewrote 2 site(s) across 2 file(s)"),
+            "{answer}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/one.rs")).unwrap(),
+            "let a = compute(2);\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/inner/two.rs")).unwrap(),
+            "let b = compute(2);\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A rule with no `fix:` is a report. ast-grep leaves the replacement out of
+    /// every match rather than failing, and this has to read as a report.
+    #[test]
+    fn codemod_reports_and_changes_nothing_without_a_fix_block() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-nofix");
+        let seeded = "let a = compute();\nlet b = compute();\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = tool_codemod(
+            &root,
+            serde_json::json!({
+                "rule": "id: r\nlanguage: Rust\nrule:\n  pattern: let $A = compute();\n",
+                "path": "code.rs"
+            })
+            .as_object()
+            .unwrap(),
+            30,
+        );
+        assert!(answer.contains("no `fix:`"), "{answer}");
+        assert!(answer.contains("2 site(s)"), "{answer}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The good half of the trap: a rule ast-grep cannot read is a fact about
+    /// the *rule*, and ast-grep says so distinctly — exit 8 with a message — so
+    /// this is never confused with a rule that simply found nothing.
+    #[test]
+    fn codemod_reports_a_rule_ast_grep_cannot_read_as_unreadable() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-badrule");
+        let seeded = "let a = compute();\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = plan_codemod(
+            &root,
+            serde_json::json!({"rule": "id: [unclosed", "path": "code.rs"})
+                .as_object()
+                .unwrap(),
+            30,
+        )
+        .unwrap_err();
+        assert!(answer.contains("could not read the rule"), "{answer}");
+        assert!(
+            !answer.contains("matched no sites"),
+            "an unreadable rule is not a fact about the code: {answer}"
+        );
+        assert!(answer.contains("nothing was searched"), "{answer}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn codemod_refuses_a_rule_that_matched_nothing() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-nomatch");
+        let seeded = "let a = compute();\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = plan_codemod(
+            &root,
+            serde_json::json!({
+                "rule": "id: r\nlanguage: Rust\nrule:\n  pattern: struct $N { $$$ }\nfix: struct $N { $$$ }\n",
+                "path": "code.rs"
+            })
+            .as_object()
+            .unwrap(),
+            30,
+        )
+        .unwrap_err();
+        assert!(answer.contains("matched no sites"), "{answer}");
+        assert!(answer.contains("nothing was changed"), "{answer}");
+        assert!(answer.contains("cannot distinguish"), "{answer}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// CI-4's recorded trap: a rule applied across the tree when the tree is
+    /// already dirty. Refusing would make the tool useless for an agent, whose
+    /// own edits are uncommitted by definition — so the entanglement is named
+    /// instead, on the call that creates it and in the preview before it.
+    #[test]
+    fn codemod_names_files_that_already_had_uncommitted_changes() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        // A real repository, so `git status` has something to say.
+        let root = temp_root("codemod-dirty");
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "t"],
+        ] {
+            let _ = std::process::Command::new("git")
+                .current_dir(&root)
+                .args(&args)
+                .output();
+        }
+        std::fs::write(root.join("code.rs"), "let a = compute();\n").unwrap();
+        std::fs::write(root.join("clean.rs"), "let b = compute();\n").unwrap();
+        let _ = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["add", "."])
+            .output();
+        let _ = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["commit", "-qm", "seed"])
+            .output();
+        // One file is left dirty; the other is committed and clean.
+        std::fs::write(
+            root.join("code.rs"),
+            "let a = compute(); // edited already\n",
+        )
+        .unwrap();
+
+        let answer = tool_codemod(
+            &root,
+            serde_json::json!({"rule": CODEMOD_RULE})
+                .as_object()
+                .unwrap(),
+            30,
+        );
+        assert!(answer.contains("rewrote 2 site(s)"), "{answer}");
+        // The dirty file is named; the clean one is not claimed.
+        assert!(
+            answer.contains("already had uncommitted changes"),
+            "{answer}"
+        );
+        assert!(answer.contains("code.rs"), "{answer}");
+        assert!(
+            !answer.contains("clean.rs, "),
+            "a clean file should not be named as entangled: {answer}"
+        );
+        // And the diff shown is the rule's own change, not the pre-existing edit.
+        assert!(answer.contains("+let a = compute(2);"), "{answer}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn codemod_preview_matches_what_the_executor_would_write() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("codemod-preview");
+        let seeded = twenty_site_file();
+        std::fs::write(root.join("code.rs"), &seeded).unwrap();
+
+        let shown = approval_preview(
+            &root,
+            &call(
+                "codemod",
+                serde_json::json!({"rule": CODEMOD_RULE, "path": "code.rs"}),
+            ),
+        );
+        assert!(
+            shown.contains("would rewrite 20 site(s) across 1 file(s)"),
+            "{shown}"
+        );
+        assert!(shown.contains("target: code.rs"), "{shown}");
+        assert!(shown.contains("+    let v0 = compute(2);"), "{shown}");
+        // Planning writes nothing.
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
         );
         std::fs::remove_dir_all(&root).unwrap();
     }

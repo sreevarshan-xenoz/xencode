@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one structural rule across the whole tree, the way a codemod is applied
+
+`codemod(rule, path?)` is the seventeenth tool the chat model can call, and it is `ast_edit`
+run as a rule instead of a pattern. The agent writes one ast-grep YAML rule — an `id`, a
+`language`, a `rule:` pattern and a `fix:` — and every site that matches is rewritten in a
+single change:
+
+```yaml
+id: rename-compute
+language: Rust
+rule:
+  pattern: let $A = compute();
+fix: let $A = compute(2);
+```
+
+That turns a twenty-call rename into one call. `path` narrows the rule below the root when
+the whole tree is too broad, and leaving out the `fix:` turns the call into a report: it
+lists every site the rule would land on and writes nothing.
+
+A rule ast-grep cannot read is reported as unreadable, and that is a fact about the rule
+rather than about your code — `ast-grep` exits 8 with a message, so the two are never
+confused. A rule that parses and matches nothing is refused, with the same wording `ast_edit`
+uses, because that result genuinely cannot distinguish a pattern that is wrong from code that
+does not contain it.
+
+**Applying a rule across a tree that is already dirty** is the case worth being careful
+about, because afterwards nobody can tell which lines the codemod wrote and which were
+already there. Refusing outright would make the tool useless for an agent, whose own previous
+edits are uncommitted by definition — so the separation is made visible instead. The diff the
+approval modal shows is this rule's own change and nothing else, computed in memory from the
+matches before a byte is written, and every touched file that git already reports as modified
+is named in both the preview and the result:
+
+```text
+codemod: rewrote 20 site(s) across 3 file(s):
+…
+(note: 1 of those file(s) already had uncommitted changes before this ran — src/parser.rs —
+so a git revert or /rewind of those files takes the earlier edits with it. The diff above is
+this rule's change only.)
+```
+
+Writes go through the same atomic helper as every other file change, one file at a time, so a
+failure part-way through leaves the files already written correct and the rest untouched.
+
 ### Added — the agent can find code by its shape, and rewrite every site at once
 
 `ast_edit(pattern, path, replacement?, language?)` is the sixteenth tool the chat model can
