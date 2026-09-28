@@ -46,6 +46,7 @@ pub mod state;
 pub mod symbols;
 pub mod trace;
 pub(crate) mod tsymbols;
+pub mod verify;
 pub mod watcher;
 pub mod worktree;
 
@@ -138,6 +139,9 @@ pub use state::{has_decision_marker, ContextState};
 pub use symbols::{
     build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
     DepEdge, PerFileSymbols,
+};
+pub use verify::{
+    nextest_available, run as run_tests, Engine, Options as TestOptions, Outcome as TestOutcome,
 };
 
 pub use trace::{

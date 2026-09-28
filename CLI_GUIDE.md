@@ -1898,6 +1898,56 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode test [--package <name>] [--retries N] [--stress-count N] [--timeout 1800] [--format text|json]`
+
+Run the test suite through `cargo nextest`, and **never call a test that only
+passed on retry a pass**.
+
+```bash
+xencode test                            # whole workspace
+xencode test --package xencode-core-rs  # one crate
+xencode test --retries 3                # allow retries, still refuses to pass a flake
+xencode test --stress-count 5           # surface order dependence
+```
+
+**Why this exists rather than plain `cargo test`.** nextest runs each test in its
+own process. Its default, though, accepts a broken test as a success — measured
+here on a test that fails once and passes on retry:
+
+| `--flaky-result` | exit code | summary |
+|---|---|---|
+| `pass` (default) | **0** | `1 passed (1 flaky)` |
+| `fail` | 100 | `1 failed` |
+
+A green exit code then stops meaning anything. So `xencode test` always passes
+`--retries` and `--flaky-result fail` itself, which means a repository's own
+`nextest.toml` or a `NEXTEST_FLAKY_RESULT` in the environment cannot change the
+result, and it calls a run a pass only when the exit code is zero **and** nothing
+was flaky.
+
+Flaky tests are listed by name, because a quarantine list has to say *which*:
+
+```
+  FLAKY — passed only on a retry, so not a pass:
+
+    mycrate some::module::test
+```
+
+**Two things it will not hide.** With `--flaky-result fail`, nextest cancels at
+the first flake, so one pass does not reach every test — the output says so and
+points at `--retries 0` for the full list. And a non-zero exit that names no test
+is not a test failure; the command reports that the build or workspace failed
+instead of pointing you after tests that are not broken.
+
+The workspace is located, not assumed: this repository's manifest is under
+`rust/`, and `xencode test` from the root finds it. If several subdirectories have
+a `Cargo.toml`, the candidates are named rather than one being guessed.
+
+Without nextest installed, it falls back to the repository's own test command
+(proved at that moment, not borrowed from an earlier verdict) and says so —
+including that a fallback run cannot check for retries, so its result cannot be
+compared to a nextest run.
+
 ### `xencode review [--base main] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image
