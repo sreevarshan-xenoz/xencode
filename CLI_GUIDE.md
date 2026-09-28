@@ -966,6 +966,41 @@ A blocking call inside `tokio::task::spawn_blocking` is **not** reported: that i
 the correct place for one, and a lexical "is this inside an `async fn`" cannot
 tell it apart from sleeping on the reactor.
 
+### `xencode interop [--agent NAME]... [--timeout SECS] [--out PATH] [--format text|json]`
+
+The `AR-1` probe: launch every installed coding-agent CLI headless on a read-only task in a
+scratch git repository, and record what came back. The scratch directory is created in a temp
+location and removed afterwards, so the probe never touches your workspace.
+
+```bash
+xencode interop
+xencode interop --agent codex --agent cline
+xencode interop --out probe.json --format json
+```
+
+The task asks one agent to read one file in the fixture and reply with the word in it. It asks
+for no changes, so an agent that follows it modifies nothing — which also means an agent with
+no account stops at its authentication check, and **that refusal is recorded as an
+observation**, not as a failure of the probe.
+
+What is captured per agent: the binary, its version, the argv executed, the working
+directory, exit code, wall-clock, stdout and stderr, any event lines found on a
+machine-readable stream, a session id if one appeared, and whether the run stopped on an
+authentication check or showed a permission signal.
+
+Three things about how to read the output:
+
+- **A non-zero exit is not a broken probe.** `claude`, `gemini` and `crush` on a machine
+  without accounts exit non-zero having refused to spend anything. That is the answer for
+  those rows, and it is why the report distinguishes it from an agent that ran and failed.
+- **Absence is stated, not left blank.** `kilo` and `agy` are named by the plan and are not
+  installed here, so every claim about them stays unverified and the report says so.
+- **Anything the run could not answer is listed** under "still unanswered", so the gaps are
+  part of the output rather than something you have to notice are missing.
+
+`--out` writes the full JSON report through the same atomic write as every other file, so a
+report half-written is not a thing that can happen.
+
 ### `xencode scan [path] [--hidden] [--max-depth N] [--format text|json]`
 List workspace entries (kind, size, path) as TSV or JSON.
 

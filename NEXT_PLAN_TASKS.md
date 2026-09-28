@@ -16,8 +16,9 @@
 - [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui, advisories
   (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
-  RS-5 shipped it)
-- [x] Workspace gates green — 15 crates, 1413 tests passing, zero warnings (re-verified 2026-09-28)
+  RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
+  lists 25)
+- [x] Workspace gates green — 16 crates, 1428 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -8106,6 +8107,65 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **V-6** | Persist the window arrangement across restarts | capability | from V — `write_atomic`, DB-2's version ladder, SE-1's 0600; JSONL, not a new store |
 | **V-7** | Pane-boundary mouse: drag to resize, click to target | capability | from V — the half UX-9 does not own; UX-9 keeps text selection |
 | **V-10** | Worker-event to window bridge over WF-1's stream | capability | from V — reads state, never moves a pane by itself (V-11 is the parked half) |
+
+#### W15 progress
+
+- [ ] **`AR-1` — harness built and first probe run; the measurement itself is
+  still open.** `xencode interop` launches every installed agent headless on a
+  read-only task in a scratch git repository and records what came back, with
+  each cell marked `observed` or read from a help screen. The crate is
+  `xencode-agents-rs`, which §S-11 designated for `AR-*`. Fifteen unit tests; the
+  captured output is redacted and capped at 64 KiB with the capping reported.
+
+  **The headline, measured rather than assumed: four vendors, four event
+  vocabularies, and no word in common.**
+
+| agent | exit | ms | events | stream | auth | session id | observed event kinds |
+|---|---|---|---|---|---|---|---|
+| `opencode` | 0 | 9668 | 6 | yes | no | no | `step_finish`, `step_start`, `text`, `tool_use` |
+| `cline` | 0 | 6914 | 19 | yes | no | no | `agent_event`, `hook_event`, `run_result` |
+| `codex` | 0 | 11624 | 7 | yes | no | yes | `item.completed`, `item.started`, `thread.started`, `turn.completed`, `turn.started` |
+| `claude` | 1 | 4512 | 7 | yes | yes | yes | `assistant`, `result`, `system` |
+| `gemini` | 41 | 2454 | 0 | no | yes | no | — |
+| `crush` | 1 | 2154 | 0 | no | yes | no | — |
+
+  `AR-1` is **not** closed by this. Three of six stopped on an authentication
+  check, so their event vocabularies are still unknown; no cell has been compared
+  against a second run for stability; there is no five-worker fan-out cost
+  figure; and every row here is one run of one task. What exists is the
+  instrument, and the first honest reading from it.
+
+  **Five things only running them revealed**, each of which a help screen or the
+  S-0 table would have got wrong:
+
+  - **A child process needs `PWD` set, not just its working directory.**
+    `Command::current_dir` calls `chdir` and leaves the variable alone. opencode
+    launched into the scratch fixture reported the *xencode repository* as its
+    project and globbed there, finding nothing. The first version of this probe
+    therefore pointed a live model at the operator's own tree. Both are now set,
+    and the comment says why.
+  - **`codex exec` refuses to run outside a git repository** — "Not inside a
+    trusted directory and --skip-git-repo-check was not specified", exit in
+    100 ms. The fixture is a repository now, which is more faithful than a
+    per-vendor escape hatch.
+  - **`claude -p --output-format stream-json` requires `--verbose`**, and nothing
+    in `--help` relates the two. Without it claude prints usage and exits 1,
+    which reads as "claude has no machine-readable output" and was wrong.
+  - **A flag with a value is two argv entries.** `--format json` passed as one
+    made opencode, claude and gemini all print usage and exit 1. The roster's
+    values were right; the hand-off was not.
+  - **Auth failures are worded per vendor**, and the first marker list recognised
+    none of the three actually seen: "Not logged in · Please run /login",
+    "Please set an Auth method in …", "No providers configured". All three are
+    now markers, all three are tests, and a refusal to spend is reported as a
+    refusal rather than as a crash.
+
+  **A fifth observation, which is the reason to care:** the three vocabularies
+  that were captured share nothing — not one event name. `AR-9`'s common protocol
+  is therefore not a naming exercise over a shared vocabulary, and the plan's
+  refusal to derive it from a wish list is what the evidence supports. Codex is
+  also the only agent whose stream carried a correlation id (`thread_id`), which
+  is the one field a normalised model cannot invent after the fact.
 
 #### W15 — Measure the other agents before planning on them — 3 items
 
