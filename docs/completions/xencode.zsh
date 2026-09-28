@@ -782,6 +782,13 @@ _arguments "${_arguments_options[@]}" : \
 ':action -- What to run\: lint, fix, fmt, or shear:_default' \
 && ret=0
 ;;
+(envcheck)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (generate)
 _arguments "${_arguments_options[@]}" : \
 '--shell=[Shell for completions (ignored for man)]:SHELL:(bash fish zsh powershell elvish)' \
@@ -1520,6 +1527,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(envcheck)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (generate)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -1722,6 +1733,7 @@ _xencode_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
@@ -2021,6 +2033,11 @@ _xencode__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode cov commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__envcheck_commands] )) ||
+_xencode__subcmd__envcheck_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode envcheck commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__eval_commands] )) ||
 _xencode__subcmd__eval_commands() {
     local commands; commands=(
@@ -2095,6 +2112,7 @@ _xencode__subcmd__help_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
 'cov:Report which lines this diff added were never executed' \
@@ -2244,6 +2262,11 @@ _xencode__subcmd__help__subcmd__config__subcmd__show_commands() {
 _xencode__subcmd__help__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help cov commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__envcheck_commands] )) ||
+_xencode__subcmd__help__subcmd__envcheck_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help envcheck commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__eval_commands] )) ||
 _xencode__subcmd__help__subcmd__eval_commands() {

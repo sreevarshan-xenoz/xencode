@@ -1,6 +1,7 @@
 pub mod advisories;
 pub mod analyzer;
 pub mod covdiff;
+pub mod envdrift;
 pub mod images;
 pub mod issues;
 pub mod mutation;

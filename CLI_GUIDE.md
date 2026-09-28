@@ -1898,6 +1898,15 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode envcheck [--format text|json]`
+
+Report environment keys read in code against the templates that document them.
+Read-but-undocumented comes with file:line references and the sources searched;
+documented-but-unreferenced is never called unnecessary; OS-provided keys
+(`HOME`, `PATH`, `USERPROFILE`, …) are listed separately, never reported; and
+`.unwrap()`/`.expect()` reads outside tests are flagged. No template found is
+stated outright rather than implied.
+
 ### `xencode generate <completions|man> [--shell <bash|fish|zsh|powershell|elvish>]`
 
 Print shell completions or the `xencode(1)` man page, generated from the clap

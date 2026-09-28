@@ -420,6 +420,13 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Report environment keys read in code against the templates that document them
+    Envcheck {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Print shell completions or the man page; both are generated from the
     /// clap definition, never written by hand
     Generate {
@@ -1028,6 +1035,7 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
+        Commands::Envcheck { format } => run_envcheck(format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
             diff,
@@ -4038,6 +4046,74 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
+fn run_envcheck(format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::envdrift;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let refs = envdrift::extract_env_refs(&root);
+    let templates = envdrift::read_templates(&root);
+    let report = envdrift::compare(&refs, &templates);
+
+    if matches!(format, OutputFormat::Json) {
+        let out = serde_json::json!({
+            "sources_searched": report.sources_searched,
+            "undocumented": report.undocumented.iter().map(|r| serde_json::json!({
+                "key": r.key, "file": r.file, "line": r.line,
+                "panics_when_absent": r.panics_when_absent,
+            })).collect::<Vec<_>>(),
+            "unreferenced": report.unreferenced,
+            "os_provided": report.os_provided.iter().map(|r| serde_json::json!({
+                "key": r.key, "file": r.file, "line": r.line,
+            })).collect::<Vec<_>>(),
+            "panicking": report.panicking.iter().map(|r| serde_json::json!({
+                "key": r.key, "file": r.file, "line": r.line,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+        );
+    } else {
+        if report.sources_searched.is_empty() {
+            println!(
+                "\n  no template found (.env.example, .env.template) — nothing documents the configuration"
+            );
+        } else {
+            println!("\n  templates read: {}", report.sources_searched.join(", "));
+        }
+        if report.undocumented.is_empty() {
+            println!("  no read-but-undocumented keys");
+        } else {
+            println!("\n  read-but-undocumented:");
+            for (key, refs) in envdrift::by_key(&report.undocumented) {
+                let at = refs
+                    .iter()
+                    .map(|r| format!("{}:{}", r.file, r.line))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("    {key}  (read at {at})");
+            }
+        }
+        if !report.unreferenced.is_empty() {
+            println!("\n  documented-but-unreferenced (not unnecessary):");
+            for key in &report.unreferenced {
+                println!("    {key}");
+            }
+        }
+        if !report.panicking.is_empty() {
+            println!("\n  panics-when-absent outside tests:");
+            for r in &report.panicking {
+                println!("    {}  ({}:{})", r.key, r.file, r.line);
+            }
+        }
+        println!(
+            "\n  {} os-provided key(s) listed separately, not reported",
+            report.os_provided.len()
+        );
+    }
+    Ok(())
+}
+
 fn run_generate(artifact: GenerateArtifact, shell: GenerateShell) -> Result<(), String> {
     use clap::CommandFactory;
     let mut cmd = Cli::command();
@@ -5302,6 +5378,14 @@ mod tests {
         for subcommand in ["toolchain", "test", "cov", "mutants", "anchor", "generate"] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn envcheck_parses_with_optional_format() {
+        let cli = Cli::try_parse_from(["xencode", "envcheck"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Envcheck { .. })));
+        let cli = Cli::try_parse_from(["xencode", "envcheck", "--format", "json"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Envcheck { .. })));
     }
 
     #[test]
