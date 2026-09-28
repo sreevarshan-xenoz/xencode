@@ -24,6 +24,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+/// Where generated reports live, relative to the repository root.
+pub const COV_STATE_DIR: &str = ".xencode";
+
 /// The target directory coverage uses, kept apart from the normal build so an
 /// instrumented build never invalidates a developer build or vice versa.
 pub const COV_TARGET_DIR: &str = "target/llvm-cov-target";
@@ -210,7 +213,7 @@ pub fn run(root: &Path, base: Option<&str>, test_command: Option<&str>) -> Resul
     // and the anchor write. It has to be created: on a fresh clone nothing has
     // made it, and llvm-cov fails at the very end of a long run because a
     // directory was missing.
-    let state = root.join(xencode_context_rs::XENCODE_DIR);
+    let state = root.join(COV_STATE_DIR);
     std::fs::create_dir_all(&state)
         .map_err(|e| format!("could not create {}: {e}", state.display()))?;
     let lcov_path = state.join("coverage.lcov");

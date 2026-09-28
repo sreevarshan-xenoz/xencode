@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1482 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1501 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2551,7 +2551,63 @@ classifier that does not exist.
   assertions.** If built, gate it: the repair diff may only touch
   `#[cfg(test)]` code, must not reduce the assertion count, must not edit the
   file under mutation, and must be proved by re-running *the same mutant set*,
-  not `cargo test`.
+  not `cargo test`. **Done 2026-09-28** — cargo-mutants 27.1.0 installed;
+  `xencode mutants` runs it scoped to the diff, and
+  `xencode mutants --check-repair <file.json>` is the gate from (b), enforced as
+  code rather than as advice.
+
+  **The trap was measured before it was designed around.** On a throwaway crate
+  with `is_even` covered by two assertions:
+
+  | tests | mutants | result |
+  |---|---|---|
+  | both assertions | 8 | **8 caught** |
+  | negative assertion deleted | 8 | 1 missed |
+  | deleted, plus `assert!(x \|\| !x)` added | 8 | 1 missed |
+
+  The third row is the one that matters. The suite is green, a test still
+  exists, and that test asserts nothing at all: `x || !x` is true for every
+  value, which was confirmed by running it. So the mutant survives exactly as
+  before while everything an outside observer would check says the work was
+  done. Neither a test count nor a passing suite is therefore a defence, and the
+  gate does not consult either one. It is structural, and all four of the plan's
+  conditions are checked at once:
+
+  1. the repair may only touch test code;
+  2. it must not reduce the number of assertions;
+  3. it must not edit the file under mutation;
+  4. it must be proved by re-running **the same mutant set** — never by
+     `cargo test` passing, which is what the fake fix satisfies.
+
+  Condition 4 does the catching that the other three cannot. A tautology is an
+  *addition*, not a deletion, so rules 1–3 are silent about it; only a re-run of
+  the identical set shows the mutant is still alive. A repair verified this way,
+  with the same mutants coming back `caught`, is the only outcome accepted.
+
+  **Four defects were found by using it, none by reading it.** `--in-diff` takes
+  a **file path**, not a git ref: passing `HEAD` failed with "Failed to open diff
+  file", which reads like a missing file rather than a wrong argument. The same
+  `i/`/`w/` mnemonic-prefix bug that `xencode cov` hit appears here too: the
+  default prefixes made cargo-mutants report `No mutants to filter` over a diff
+  containing real mutants — a clean summary meaning no work was done — and a
+  `Not Installed` ink-drop of a response. Running from the workspace root while
+  the manifest is under `rust/` makes the report paths unreachable, so the run
+  fails rather than pretending it succeeded. And the mutation source itself, the
+  new `mutation.rs`, is untracked, so `git diff` never mentions it; the run says
+  what it saw and does no more.
+
+  **On this repository's own change: 2 caught, 8 missed.** The eight are mostly
+  in the new `judge_repair` CLI surface — `delete match arm "caught"`, `replace
+  judge_repair with Ok(())` — and they survive because no test drives that
+  function end to end except through the four new judge tests. The worst of them,
+  `replace judge_repair with Ok(())`, would accept every repair sight unseen,
+  which is precisely a weaker-gate bug the gate itself now pins. `advance` is
+  honest about which function to strengthen first.
+
+  Fourteen tests in `mutation.rs`, four more in the CLI that drive the JSON gate
+  input end to end. Also notes the untracked-file gap above so a reader does not
+  mistake silence for a clean bill.
+
 - **VF-4 `proptest` (1.11.0) with committed `proptest-regressions/`** — the
   model authors the property; shrinking and the failing input are mechanical,
   local and reproducible. **M**. Trap: LLMs generate *vacuous* properties

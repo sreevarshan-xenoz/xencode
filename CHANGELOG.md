@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode cov`, which reports which lines this diff added were never executed
+### Added — `xencode mutants`, which finds the code no test can tell from correct
+
+Mutation testing answers the question coverage cannot: not "did this line run"
+but "did running it catch anything". `cargo mutants` changes an operator or a
+return value and re-runs the suite; a mutant the suite still passes is a **missed
+mutant**, a piece of code whose wrongness no test would notice.
+
+**`xencode mutants` runs it scoped to the diff.** `--in-diff` takes a diff file
+the command writes itself, with the `a/`/`b/` prefixes pinned so the paths match
+what cargo-mutants expects, because the plan's trap is real on both ends: without
+scoping every mutant in the workspace is generated and the whole suite runs once
+per survivor — minutes to hours on 16 crates — and with the wrong prefixes the
+same diff yields `No mutants to filter`, a clean summary that means no work was
+done.
+
+**`xencode mutants --check-repair <file.json>` is the gate the plan asks for, as
+code rather than advice.** An agent told "this mutant survived" can always make
+it die by weakening the test, and the obvious version is measured here: deleting
+the assertion that caught it turns 8 caught into 1 missed, and adding a tautology
+`assert!(x || !x)` on top keeps the suite green while changing nothing — it is
+true for every value, confirmed by running it. Neither a test count nor a passing
+suite is a defence. The gate is structural and checks all four conditions at
+once:
+
+1. the repair may only touch test code;
+2. it must not reduce the number of assertions;
+3. it must not edit the file under mutation;
+4. it must be proved by re-running the **same mutant set** — never by
+   `cargo test` passing, which is what the fake fix satisfies.
+
+Condition 4 is the load-bearing one, because a tautology is an addition and
+rules 1–3 are silent about it; only a re-run shows the mutant is still alive.
+
+**`--in-diff` takes a file path, not a git ref.** Passing `HEAD` fails with
+"Failed to open diff file", which reads like a missing file. The command writes
+the diff itself. It also says plainly when the report never arrives rather than
+inferring "all caught" from a file that was never written.
+
+**On this repository's own change it reports 2 caught, 8 missed** — mostly in the
+new `judge_repair` CLI surface, which survives because nothing drives it except
+the four new judge tests. Each one names the function to strengthen first, which
+is the advancing part: a missed mutant is a work list, not a score.
+
+Eighteen tests. Full workspace 1501 passing, clippy clean, fmt clean.
+
+
 
 A green test suite answers "did nothing break". It does not answer "did the lines
 I just wrote run at all" — a new error-handling branch can be entirely

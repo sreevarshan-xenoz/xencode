@@ -1898,6 +1898,45 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode mutants [--diff <ref>] [--timeout 60] [--check-repair <file.json>] [--format text|json]`
+
+Find the code whose wrongness no test would notice.
+
+```bash
+xencode mutants                       # mutants in the working-tree diff
+xencode mutants --diff main           # mutants in the diff against main
+xencode mutants --check-repair fix.json  # judge a proposed repair
+```
+
+Needs `cargo install cargo-mutants`.
+
+A mutant is a small sabotage — an operator flipped, `true` returned instead of a
+computation. The suite runs against it; one that still passes is **missed**, and
+a missed mutant is a test that cannot tell right from wrong. The run is scoped
+to the diff, because without that the whole suite runs once per mutant in the
+workspace, which is minutes to hours here. A missing report is an error, never
+an empty success: "all caught" inferred from a file that was never written is a
+false green.
+
+**Repairing a missed mutant is gated, because the obvious repair is to weaken
+the test.** Measured here: deleting the assertion that caught a mutant turns
+8 caught into 1 missed, and adding a tautology `assert!(x || !x)` on top keeps
+the suite green while the mutant still survives. Neither a test count nor a
+passing suite is therefore a defence. `--check-repair` judges a JSON file with
+the patch, the assertion counts before and after, the mutants targeted, and the
+re-run of the *same* mutant set. All four conditions must hold: only test code,
+no fewer assertions, never the file under mutation, and the same set re-run and
+now caught.
+
+Two behaviours worth knowing. `--in-diff` takes a file the command writes
+itself, because cargo-mutants does not accept a ref and reports the wrong
+argument as a missing file. And with pinned `a/`/`b/` prefixes: git's default
+mnemonic prefixes (`i/` for the index, `w/` for the worktree) make the same
+diff yield "No mutants to filter" — a clean summary meaning no work was done.
+
+On this repository's own change it reports 2 caught, 8 missed, each one naming
+the function to strengthen first.
+
 ### `xencode cov [--base <ref>] [--test <cmd>] [--show-missing-lines] [--format text|json]`
 
 Report which lines **this diff** added were never executed.

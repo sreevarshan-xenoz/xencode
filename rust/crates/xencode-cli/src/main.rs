@@ -387,6 +387,25 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Find code whose tests cannot tell right from wrong
+    Mutants {
+        /// Only mutants in the diff against this ref
+        #[arg(long)]
+        diff: Option<String>,
+
+        /// Wall-clock limit per mutant, in seconds
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
+
+        /// Judge a proposed repair instead of running anything
+        #[arg(long)]
+        check_repair: Option<std::path::PathBuf>,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Report which lines this diff added were never executed
     Cov {
         /// Compare against this ref instead of the working tree
@@ -959,6 +978,12 @@ async fn main() {
             dry_run,
             format,
         } => run_anchor(path, timeout, dry_run, format),
+        Commands::Mutants {
+            diff,
+            timeout,
+            check_repair,
+            format,
+        } => run_mutants(diff, timeout, check_repair, format),
         Commands::Cov {
             base,
             test,
@@ -3839,6 +3864,200 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 /// The scratch fixture is built in a temporary directory and removed afterwards,
 /// so running the probe never leaves anything in the workspace and never touches
 /// a file the operator cares about.
+fn run_mutants(
+    diff: Option<String>,
+    timeout: u64,
+    check_repair: Option<std::path::PathBuf>,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_analysis_rs::mutation as mtest;
+
+    if let Some(patch) = check_repair {
+        return judge_repair(patch, format);
+    }
+    if !mtest::available() {
+        return Err(
+            "cargo mutants is not installed. Install it with `cargo install cargo-mutants`"
+                .to_string(),
+        );
+    }
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let manifest = xencode_context_rs::verify::manifest_dir(&root)?;
+
+    // The diff is written first, with pinned prefixes, because cargo-mutants
+    // takes a file rather than a ref and silently filters nothing when the paths
+    // carry git's mnemonic `i/`/`w/` prefixes.
+    let patch = mtest::write_diff(&manifest, diff.as_deref())?;
+    let argv = mtest::mutants_argv(Some(&patch), Some(timeout));
+    let rendered = format!("cargo {}", argv.join(" "));
+    let mut command = std::process::Command::new("cargo");
+    command.current_dir(&manifest).args(&argv);
+    eprintln!("  running: {rendered}");
+    eprintln!("  this runs the whole suite once per surviving mutant, so it is not quick");
+    let status = command
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map_err(|e| format!("could not start cargo mutants: {e}"))?;
+    // A non-zero exit means mutants were missed, which is a result rather than
+    // a failure to run, so the report is read either way.
+    let _ = status;
+
+    let run = mtest::parse_report(&manifest.join(mtest::REPORT_DIR))?;
+    let missed = run.missed();
+
+    if matches!(format, OutputFormat::Json) {
+        let report = serde_json::json!({
+            "command": rendered,
+            "total": run.mutants.len(),
+            "counts": run.counts(),
+            "usable": run.is_usable(),
+            "missed": missed.iter().map(|m| serde_json::json!({
+                "file": m.file, "name": m.name, "key": m.key(),
+            })).collect::<Vec<_>>(),
+            "notes": run.notes,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+    } else {
+        println!("\n  {}\n", run.counts());
+        for note in &run.notes {
+            println!("  note:  {note}");
+        }
+        if missed.is_empty() {
+            println!("\n  no missed mutants — every mutation was caught by a test");
+        } else {
+            println!("\n  MISSED — code no test can tell from correct:");
+            for m in &missed {
+                println!("\n    {}", m.file);
+                println!("      {}", m.name);
+            }
+            println!(
+                "\n  Repair these by making the tests stronger. A repair is only real if \
+                 the same mutants are re-run and come back caught."
+            );
+        }
+    }
+    if run.is_usable() && missed.is_empty() {
+        Ok(())
+    } else {
+        Err("mutants survived".to_string())
+    }
+}
+
+/// Judge a proposed repair against the four gate conditions.
+///
+/// Reads the patch, the missed-mutant list and both assertion counts from a JSON
+/// file, so the judgement itself is a pure function that can be tested without a
+/// mutation run. Re-running the same mutant set is the caller's job and is
+/// reported as missing when its result is absent — never assumed.
+fn judge_repair(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::mutation as mtest;
+
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
+
+    let counts_of = |key: &str| -> std::collections::BTreeMap<String, usize> {
+        value
+            .get(key)
+            .and_then(|v| v.as_object())
+            .map(|o| {
+                o.iter()
+                    .filter_map(|(f, n)| n.as_u64().map(|n| (f.clone(), n as usize)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let targeted: Vec<mtest::Mutant> = value
+        .get("targeted")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|m| {
+                    Some(mtest::Mutant {
+                        file: m.get("file")?.as_str()?.to_string(),
+                        name: m.get("name")?.as_str()?.to_string(),
+                        verdict: mtest::Verdict::Missed,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // The re-run, when one is recorded. Its absence is the rejection.
+    let rerun = value.get("rerun").and_then(|r| {
+        let mutants: Vec<mtest::Mutant> = r
+            .get("mutants")?
+            .as_array()?
+            .iter()
+            .filter_map(|m| {
+                Some(mtest::Mutant {
+                    file: m.get("file")?.as_str()?.to_string(),
+                    name: m.get("name")?.as_str()?.to_string(),
+                    verdict: match m.get("verdict").and_then(|v| v.as_str()).unwrap_or("") {
+                        "caught" => mtest::Verdict::Caught,
+                        "unviable" => mtest::Verdict::Unviable,
+                        "timeout" => mtest::Verdict::Timeout,
+                        _ => mtest::Verdict::Missed,
+                    },
+                })
+            })
+            .collect();
+        Some(mtest::Run {
+            mutants,
+            ..mtest::Run::default()
+        })
+    });
+
+    let patch = value
+        .get("patch")
+        .and_then(|p| p.as_str())
+        .unwrap_or_default();
+    let before = counts_of("assertions_before");
+    let after = counts_of("assertions_after");
+    let verdict = mtest::check_repair(&mtest::Repair {
+        patch,
+        targeted: &targeted,
+        assertions_before: &before,
+        assertions_after: &after,
+        same_set_rerun: rerun.as_ref(),
+    });
+
+    if matches!(format, OutputFormat::Json) {
+        let report = serde_json::json!({
+            "accepted": verdict.accepted,
+            "targeted": verdict.targeted,
+            "edited": verdict.edited,
+            "violations": verdict.violations.iter().map(|v| serde_json::json!({
+                "rule": v.rule, "detail": v.detail,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+    } else if verdict.accepted {
+        println!("\n  repair accepted — it only strengthened tests, and the same mutants now fail");
+    } else {
+        println!("\n  repair REJECTED:");
+        for v in &verdict.violations {
+            println!("\n  [{}]", v.rule);
+            for line in v.detail.split(". ") {
+                println!("    {line}");
+            }
+        }
+    }
+    if verdict.accepted {
+        Ok(())
+    } else {
+        Err("repair rejected".to_string())
+    }
+}
+
 fn run_cov(
     base: Option<String>,
     test: Option<String>,
@@ -4738,6 +4957,94 @@ mod tests {
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+
+    /// The three repair shapes the mutation run found survive, decided by the
+    /// pure gate so each one is pinned by a test rather than by a re-run.
+    fn repair_input(
+        patch: &str,
+        before: usize,
+        after: usize,
+        rerun_verdict: Option<&str>,
+    ) -> String {
+        let mutants = serde_json::json!([{
+            "file": "src/lib.rs",
+            "name": "src/lib.rs:2:5: replace is_even -> bool with true",
+        }]);
+        let mut value = serde_json::json!({
+            "patch": patch,
+            "assertions_before": { "tests/lib.rs": before },
+            "assertions_after": { "tests/lib.rs": after },
+            "targeted": mutants,
+        });
+        if let Some(verdict) = rerun_verdict {
+            value["rerun"] = serde_json::json!({
+                "mutants": [{
+                    "file": "src/lib.rs",
+                    "name": "src/lib.rs:2:5: replace is_even -> bool with true",
+                    "verdict": verdict,
+                }],
+            });
+        }
+        serde_json::to_string_pretty(&value).unwrap()
+    }
+
+    fn judge(text: &str) -> Result<(), String> {
+        let path = std::env::temp_dir().join(format!(
+            "xe-repair-{}-{:?}.json",
+            std::process::id(),
+            text.len()
+        ));
+        std::fs::write(&path, text).unwrap();
+        let out = super::judge_repair(path.clone(), super::OutputFormat::Text);
+        let _ = std::fs::remove_file(&path);
+        out
+    }
+
+    #[test]
+    fn a_tautological_repair_is_rejected() {
+        // The measured fake fix: the negative assertion is replaced by
+        // `x || !x`, which is true for every value, and the count goes *up*.
+        let text = repair_input(
+            "--- a/tests/lib.rs\n+++ b/tests/lib.rs\n@@ -4,1 +4,2 @@\n-    assert!(!is_even(3));\n+    assert!(x || !x);\n",
+            2, 3,
+            Some("missed"),
+        );
+        let err = judge(&text).unwrap_err();
+        assert!(err.contains("rejected"), "{err}");
+    }
+
+    #[test]
+    fn a_repair_that_edits_the_code_under_mutation_is_rejected() {
+        let text = repair_input(
+            "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -2,1 +2,1 @@\n-    n % 2 == 0\n+    true\n",
+            1,
+            4,
+            Some("caught"),
+        );
+        assert!(judge(&text).is_err());
+    }
+
+    #[test]
+    fn a_repair_with_no_rerun_is_rejected() {
+        let text = repair_input(
+            "--- a/tests/lib.rs\n+++ b/tests/lib.rs\n@@ -4,0 +5 @@\n+    assert!(!is_even(3));\n",
+            1,
+            2,
+            None,
+        );
+        assert!(judge(&text).is_err());
+    }
+
+    #[test]
+    fn a_real_repair_is_accepted() {
+        let text = repair_input(
+            "--- a/tests/lib.rs\n+++ b/tests/lib.rs\n@@ -4,0 +5 @@\n+    assert!(!is_even(3));\n",
+            1,
+            2,
+            Some("caught"),
+        );
+        assert!(judge(&text).is_ok());
+    }
 
     #[test]
     fn line_ranges_read_as_ranges() {
