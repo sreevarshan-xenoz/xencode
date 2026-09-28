@@ -387,6 +387,25 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Report which lines this diff added were never executed
+    Cov {
+        /// Compare against this ref instead of the working tree
+        #[arg(long)]
+        base: Option<String>,
+
+        /// Run this test command instead of the repository's own verified one
+        #[arg(long)]
+        test: Option<String>,
+
+        /// List only the file and line numbers
+        #[arg(long)]
+        show_missing_lines: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Run the tests, and never call a test that only passed on retry a pass
     Test {
         /// Only these packages (repeatable)
@@ -940,6 +959,12 @@ async fn main() {
             dry_run,
             format,
         } => run_anchor(path, timeout, dry_run, format),
+        Commands::Cov {
+            base,
+            test,
+            show_missing_lines,
+            format,
+        } => run_cov(base, test, show_missing_lines, format),
         Commands::Test {
             packages,
             retries,
@@ -3814,6 +3839,141 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 /// The scratch fixture is built in a temporary directory and removed afterwards,
 /// so running the probe never leaves anything in the workspace and never touches
 /// a file the operator cares about.
+fn run_cov(
+    base: Option<String>,
+    test: Option<String>,
+    show_missing_lines: bool,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_analysis_rs::covdiff;
+
+    if !covdiff::available() {
+        return Err(
+            "cargo llvm-cov is not installed. Install it with `cargo install cargo-llvm-cov` \
+             and rustup component add llvm-tools-preview"
+                .to_string(),
+        );
+    }
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+
+    // The repository's own verified test command, so the numbers describe the
+    // suite that exists rather than one invented here.
+    let test_command = test.or_else(|| {
+        let discovery = xencode_context_rs::anchor::discover(&root);
+        discovery
+            .verified(xencode_context_rs::anchor::Kind::Test)
+            .map(|r| r.command.clone())
+    });
+
+    let run = covdiff::run(&root, base.as_deref(), test_command.as_deref())?;
+    let c = &run.coverage;
+
+    if matches!(format, OutputFormat::Json) {
+        let report = serde_json::json!({
+            "command": run.command,
+            "cold_build": run.build == covdiff::ColdReport::Cold,
+            "seconds": run.took.as_secs_f64(),
+            "covered": c.total_covered(),
+            "uncovered": c.total_uncovered(),
+            "unknown": c.total_unknown(),
+            "ratio": c.ratio(),
+            "complete": c.is_complete(),
+            "unmeasured_files": c.unmeasured,
+            "summary": c.summary(),
+            "notes": run.notes,
+            "files": c.files.iter().map(|f| serde_json::json!({
+                "file": f.file,
+                "covered": f.covered,
+                "uncovered": f.uncovered,
+                "unknown": f.unknown,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+    } else if show_missing_lines {
+        // The read-only shape `VF-2` asks for: file to line numbers, nothing else.
+        for file in &c.files {
+            if file.uncovered.is_empty() && file.unknown.is_empty() {
+                continue;
+            }
+            println!("{}", file.file);
+            if !file.uncovered.is_empty() {
+                println!("  never run:  {}", join(&file.uncovered));
+            }
+            if !file.unknown.is_empty() {
+                println!("  no data:    {}", join(&file.unknown));
+            }
+        }
+    } else {
+        println!("\n  {}", c.summary());
+        println!(
+            "  build: {} ({}s)",
+            match run.build {
+                covdiff::ColdReport::Cold => "cold — every crate was rebuilt instrumented",
+                covdiff::ColdReport::Warm => "warm — reused the instrumented target directory",
+            },
+            run.took.as_secs()
+        );
+        for note in &run.notes {
+            println!("  note:  {note}");
+        }
+        for file in &c.files {
+            if file.uncovered.is_empty() && file.unknown.is_empty() {
+                continue;
+            }
+            println!("\n  {}", file.file);
+            if let Some(ratio) = file.ratio() {
+                println!("    {:.0}% of measurable added lines ran", ratio * 100.0);
+            } else {
+                println!("    no measurable line in this file");
+            }
+            if !file.uncovered.is_empty() {
+                println!("    never run: {}", join(&file.uncovered));
+            }
+            if !file.unknown.is_empty() {
+                println!("    no data:   {}", join(&file.unknown));
+            }
+        }
+    }
+    if c.is_complete() {
+        Ok(())
+    } else {
+        Err("some added lines were not exercised".to_string())
+    }
+}
+
+/// Line numbers as compact ranges, so `1,2,3,7,9,10` reads as `1-3, 7, 9-10`.
+fn join(lines: &[u32]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut start: Option<u32> = None;
+    let mut prev: u32 = 0;
+    for &line in lines {
+        match start {
+            None => start = Some(line),
+            Some(_) if line == prev + 1 => {}
+            Some(s) => {
+                out.push(if s == prev {
+                    s.to_string()
+                } else {
+                    format!("{s}-{prev}")
+                });
+                start = Some(line);
+            }
+        }
+        prev = line;
+    }
+    if let Some(s) = start {
+        out.push(if s == prev {
+            s.to_string()
+        } else {
+            format!("{s}-{prev}")
+        });
+    }
+    out.join(", ")
+}
+
 fn run_test(
     packages: Vec<String>,
     retries: u32,
@@ -4573,9 +4733,93 @@ async fn run_tui() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_advise, format_image_text, parse_comma_list, resolve_audit_path, resolve_bind,
+        compute_advise, format_image_text, join, parse_comma_list, resolve_audit_path,
+        resolve_bind, Cli, Commands,
     };
+    use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+
+    #[test]
+    fn line_ranges_read_as_ranges() {
+        assert_eq!(join(&[1, 2, 3, 7, 9, 10]), "1-3, 7, 9-10");
+        assert_eq!(join(&[5]), "5");
+        assert_eq!(join(&[]), "");
+    }
+
+    #[test]
+    fn the_new_verification_subcommands_parse() {
+        // These are the arms `xencode cov` coverage found unexercised, so
+        // parsing them is the cheapest honest check that the wiring is right.
+        let cli = Cli::try_parse_from(["xencode", "cov", "--base", "main"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Cov { base: Some(_), .. })
+        ));
+
+        let cli = Cli::try_parse_from(["xencode", "cov", "--show-missing-lines"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Cov {
+                show_missing_lines: true,
+                ..
+            })
+        ));
+
+        // Retries default to 0, and a retry-pass is not a pass.
+        let cli = Cli::try_parse_from(["xencode", "test"]).unwrap();
+        match cli.command {
+            Some(Commands::Test {
+                retries,
+                stress_count,
+                packages,
+                ..
+            }) => {
+                assert_eq!(retries, 0, "a retry must be asked for, not assumed");
+                assert_eq!(stress_count, 0);
+                assert!(packages.is_empty());
+            }
+            _ => panic!("expected the test subcommand"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "test",
+            "--retries",
+            "3",
+            "--package",
+            "a",
+            "--package",
+            "b",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Test {
+                retries, packages, ..
+            }) => {
+                assert_eq!(retries, 3);
+                assert_eq!(packages, vec!["a".to_string(), "b".to_string()]);
+            }
+            _ => panic!("expected the test subcommand"),
+        }
+    }
+
+    #[test]
+    fn cov_takes_a_test_command_and_the_anchor_command_is_the_default() {
+        let cli = Cli::try_parse_from(["xencode", "cov", "--test", "cargo test"]).unwrap();
+        match cli.command {
+            Some(Commands::Cov { test, .. }) => assert_eq!(test.as_deref(), Some("cargo test")),
+            _ => panic!("expected cov"),
+        }
+        let cli = Cli::try_parse_from(["xencode", "cov"]).unwrap();
+        match cli.command {
+            // None means "use the repository's own verified test command".
+            Some(Commands::Cov { test, base, .. }) => {
+                assert!(test.is_none());
+                assert!(base.is_none());
+            }
+            _ => panic!("expected cov"),
+        }
+    }
 
     fn path(p: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(p)

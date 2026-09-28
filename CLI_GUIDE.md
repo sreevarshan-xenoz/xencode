@@ -1898,6 +1898,41 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode cov [--base <ref>] [--test <cmd>] [--show-missing-lines] [--format text|json]`
+
+Report which lines **this diff** added were never executed.
+
+```bash
+xencode cov                      # working tree against HEAD
+xencode cov --base main          # against a ref
+xencode cov --show-missing-lines # just file → line numbers
+```
+
+Needs `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`.
+
+A green suite answers "did nothing break", not "did the lines I just write run at
+all". This answers the second one. Output is line numbers, not a percentage,
+because a percentage is a number nobody can act on and a line number is a place
+to go and read.
+
+**A line with no coverage data is reported as `no data`, never as uncovered.**
+A diff touching `Cargo.lock` would otherwise look catastrophically untested,
+which blames your code for the tool's blind spot.
+
+```
+  0 of 160 measurable added line(s) executed; 3 added line(s) had no coverage data
+  build: warm — reused the instrumented target directory (212s)
+
+  crates/xencode-cli/src/main.rs
+    0% of measurable added lines ran
+    never run: 390-408, 962-967, 3842-3976
+```
+
+**The first run is slow and the output says so.** Coverage rebuilds every crate
+with instrumentation in its own target directory — 272 s cold and 7.2 GB here —
+then reuses it, so later runs are much cheaper. The `build:` line always reports
+which kind of run happened.
+
 ### `xencode test [--package <name>] [--retries N] [--stress-count N] [--timeout 1800] [--format text|json]`
 
 Run the test suite through `cargo nextest`, and **never call a test that only

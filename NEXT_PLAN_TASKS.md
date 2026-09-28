@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1466 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1482 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2474,11 +2474,75 @@ classifier that does not exist.
   line numbers from `git diff`. **S**. Answers the only question that matters
   after a green run: *did this change's lines get exercised*. Trap: coverage
   needs a second instrumented build in a separate `CARGO_LLVM_COV_TARGET_DIR`
-  — a measured real case cost 377 s, nearly all recompilation.
+  — a measured real case cost 377 s, nearly all recompilation. **Done
+  2026-09-28, with VF-2** — `xencode cov` runs the suite under `cargo llvm-cov`
+  0.9.1 and reports, per file, the added lines that never executed.
+
+  **Lines, not percentages.** `VF-2`'s done-when asks the agent for
+  `file → [uncovered line numbers]`, and that is what comes out. `--show-
+  missing-lines` prints only that. A percentage is a number nobody can act on;
+  a line number is a place to go and read.
+
+  **The cold-run cost was measured, not assumed, and is stated rather than
+  hidden.** On this repository: **cold 272 s, warm 212 s**, and the instrumented
+  target directory is **7.2 GB** on its own. The plan's 377 s case was if
+  anything optimistic for 16 crates. The command reports which kind of run
+  happened, because a reader who waits four minutes deserves to know the second
+  run is the cheap one, and the target directory is reused so only the first pays.
+
+  **Three defects, all found by running it, none of which a unit test would
+  have shown:**
+
+  - **Git's mnemonic prefixes corrupted every path.** `git diff --relative`
+    reports `w/Cargo.lock`, not `b/Cargo.lock` — `w/` is git's worktree prefix.
+    Taken as a path, every file missed to match and the command reported a
+    confident, completely wrong *"0 of 0 measurable added lines executed"* with
+    "4 files have no coverage data". The prefixes are now pinned with
+    `--src-prefix`/`--dst-prefix`, and a `+++` line with no recognised prefix is
+    declined rather than turned into a path that cannot match.
+  - **The two sides were on different bases.** The diff is taken from the
+    workspace (`rust/`) and lcov reports absolute paths, so the diff said
+    `rust/crates/x/src/lib.rs` and lcov said `crates/x/src/lib.rs`. Same
+    symptom, different cause; fixed with `--relative` plus resolving the manifest
+    directory, which is also what stops coverage failing on a missing
+    `Cargo.toml` when invoked from the repository root.
+  - **A missing `.xencode/` killed a 272-second run at the last step.** The
+    directory is created before the run rather than discovered missing after four
+    minutes of work.
+
+  **The distinction that makes the number trustworthy: a line with no data is
+  not an uncovered line.** `Cargo.lock` and `Cargo.toml` are in the diff and
+  have no executable lines at all; they are reported as *no data* and excluded
+  from the denominator, never as "uncovered". Collapsing the two would blame the
+  code for the tool's blind spot, and would make a diff that touches a lockfile
+  look catastrophically untested. Verified against the raw lcov: `main.rs` is
+  instrumented, 828 of its 3130 executable lines do run, so "0% of my added
+  lines" is a real finding rather than a blind spot.
+
+  **And it immediately found a real gap in its own change**: the new `Commands::Cov`
+  arm and the `run_cov` body in `xencode-cli/src/main.rs` were reported as
+  unexercised, which they were. Argument-parsing tests now cover the new
+  subcommands, so the next run has something to measure.
+
+  A file with no measurable added line reports *no ratio* rather than 100% or
+  0%. `--base <ref>` diffs against a ref instead of the working tree. 13 tests
+  here, 3 more in the CLI.
+
 - **VF-2 `--show-missing-lines` / `--json` as a read-only tool** — hand the
   agent `file → [uncovered line numbers]`, not a percentage. **S**. Trap:
   macro/derive/generated lines are misattributed; needs
-  `--ignore-filename-regex` and `cfg(coverage)` skims.
+  `--ignore-filename-regex` and `cfg(coverage)` skims. **Done 2026-09-28, with
+  VF-1** — `xencode cov --show-missing-lines` prints only `file` and line
+  numbers, and `--format json` emits the same data as a machine-readable
+  document, so the report can be consumed without scraping prose.
+
+  The planned `--ignore-filename-regex` is **deliberately not implemented**, and
+  the reason is the finding above: a line the tool has no data for is now
+  reported as *no data* and excluded from the ratio, rather than being silently
+  filtered by a filename pattern. Ignoring generated files by name hides them;
+  labelling them keeps them visible while declining to judge them. Regex
+  filtering remains available for anyone who wants it, but the default is to
+  tell the truth about what was not measured.
 - **VF-3 `cargo mutants --in-diff <git diff>`** — actively maintained (v27.1.0,
   2026-06), emits `mutants.json`/`outcomes.json`, supports nextest and
   sharding. **M**. Two traps, and the second is the one that matters: (a) it

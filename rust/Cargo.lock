@@ -3714,6 +3714,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "xencode-context-rs",
  "zip",
 ]
 

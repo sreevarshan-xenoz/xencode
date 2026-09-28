@@ -1,5 +1,6 @@
 pub mod advisories;
 pub mod analyzer;
+pub mod covdiff;
 pub mod images;
 pub mod issues;
 pub mod runtime_hazards;
