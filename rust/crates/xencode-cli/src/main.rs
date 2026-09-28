@@ -329,6 +329,32 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Measure what the coding-agent CLIs on this machine actually do
+    ///
+    /// The `AR-1` interop probe. Every agent is launched headless on a
+    /// read-only task and what came back is recorded, with each cell marked as
+    /// observed or read from a help screen. A run that failed is recorded as a
+    /// failure, never as an empty success. Costs nothing: the task asks one
+    /// question about one file and asks for no changes, so an agent with no
+    /// account stops at its auth check — which is itself an observation.
+    Interop {
+        /// Probe only these agents (repeatable); default is the whole roster
+        #[arg(long = "agent")]
+        agents: Vec<String>,
+
+        /// Per-agent wall-clock limit in seconds
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
+
+        /// Where to write the JSON report; omit to print it
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+
+        /// Output format for the printed summary
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Review the diff between a base branch and HEAD, file by file
     Review {
         /// Base branch, tag, commit — or HEAD for uncommitted changes
@@ -844,6 +870,12 @@ async fn main() {
             runtime,
         } => run_analyze(path, format, runtime),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
+        Commands::Interop {
+            agents,
+            timeout,
+            out,
+            format,
+        } => run_interop(agents, timeout, out, format),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -3704,6 +3736,73 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
     toplevel
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+/// The `AR-1` interop probe.
+///
+/// The scratch fixture is built in a temporary directory and removed afterwards,
+/// so running the probe never leaves anything in the workspace and never touches
+/// a file the operator cares about.
+fn run_interop(
+    agents: Vec<String>,
+    timeout: u64,
+    out: Option<std::path::PathBuf>,
+    format: OutputFormat,
+) -> Result<(), String> {
+    let scratch = tempfile::tempdir().map_err(|e| format!("cannot make a scratch dir: {e}"))?;
+    let workdir = scratch.path().join("task");
+    xencode_agents_rs::probe::seed_task_dir(&workdir)
+        .map_err(|e| format!("cannot seed the task fixture: {e}"))?;
+
+    let options = xencode_agents_rs::ProbeOptions {
+        only: agents,
+        timeout: std::time::Duration::from_secs(timeout.max(1)),
+        workdir,
+        task: xencode_agents_rs::probe::default_task().to_string(),
+    };
+    let report = xencode_agents_rs::probe::run_probe(&options);
+
+    if let Some(path) = &out {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
+        let json = serde_json::to_string_pretty(&report)
+            .map_err(|e| format!("cannot render the report: {e}"))?;
+        // Atomic, like every other write in the product: a report half-written
+        // is worse than no report.
+        xencode_core_rs::write_atomic(path, json.as_bytes())
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    }
+
+    match format {
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|e| format!("cannot render the report: {e}"))?
+        ),
+        _ => {
+            println!("interop probe — {}", report.run_on);
+            println!();
+            for capture in &report.captures {
+                println!("  {}", capture.summary());
+            }
+            if !report.absent.is_empty() {
+                println!("\n  not installed here:");
+                for absent in &report.absent {
+                    println!("    {} — {}", absent.name, absent.why);
+                }
+            }
+            println!("\n  still unanswered:");
+            for item in &report.unanswered {
+                println!("    - {item}");
+            }
+            if let Some(path) = &out {
+                println!("\n  report written to {}", path.display());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn run_review(base: String, format: OutputFormat) -> Result<(), String> {

@@ -3690,6 +3690,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
+name = "xencode-agents-rs"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "xencode-analysis-rs"
 version = "0.1.0"
 dependencies = [
@@ -3731,6 +3742,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "walkdir",
+ "xencode-agents-rs",
  "xencode-analysis-rs",
  "xencode-cache-rs",
  "xencode-colab-rs",

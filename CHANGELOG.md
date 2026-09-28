@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a probe that measures what the coding agents on this machine actually do
+
+`xencode interop` launches every installed coding-agent CLI headless on a read-only task in
+a scratch git repository, and records what came back. It exists because the plan's `AR-1`
+item says *nothing may be inferred from documentation*, and the transcripts disagree with the
+help text.
+
+```text
+$ xencode interop
+interop probe — 2026-09-28
+
+  opencode: exit Some(0) after 9668 ms, 6 event(s)
+  cline:    exit Some(0) after 6915 ms, 19 event(s)
+  codex:    exit Some(0) after 11624 ms, 7 event(s)
+  claude:   exit Some(1) after 4512 ms — stopped on an authentication check
+  gemini:   exit Some(41) after 2454 ms — stopped on an authentication check
+  crush:    exit Some(1) after 2154 ms — stopped on an authentication check
+```
+
+**Every cell carries how it was learned** — `observed`, or read from a help screen — and a
+run that failed is recorded as a failure rather than as an empty success. A probe that
+cannot tell "the agent refused" from "the agent is broken" reports the wrong thing, and
+three of six here refused for want of an account, which is an observation rather than a gap.
+
+The first run's headline: **four vendors, four event vocabularies, and not one event name in
+common.**
+
+| agent | observed event kinds |
+|---|---|
+| `opencode` | `step_start` `step_finish` `tool_use` `text` |
+| `cline` | `hook_event` `agent_event` `run_result` |
+| `codex` | `thread.started` `turn.started` `item.started` `item.completed` `turn.completed` |
+| `claude` | `system` `assistant` `result` |
+
+Only `codex` put a correlation id in its stream (`thread_id`) — the one field a normalised
+event model cannot invent after the fact.
+
+**Five things only running them revealed**, each of which a help screen would have got wrong:
+
+- **A child process needs `PWD` set, not only its working directory.** `Command::current_dir`
+  calls `chdir` and leaves the variable alone. opencode launched into the scratch fixture
+  reported the *xencode repository* as its project and globbed there, finding nothing — so
+  the first version of this probe pointed a live model at the operator's own tree. Both are
+  set now.
+- **`codex exec` refuses to run outside a git repository** — "Not inside a trusted directory
+  and --skip-git-repo-check was not specified", exit in 100 ms. The fixture is a repository,
+  which is more faithful than a per-vendor escape hatch.
+- **`claude -p --output-format stream-json` requires `--verbose`**, and nothing in `--help`
+  relates the two. Without it claude prints usage and exits 1, which reads as "claude has no
+  machine-readable output" and is wrong.
+- **A flag with a value is two argv entries.** `--format json` passed as one made opencode,
+  claude and gemini all print usage and exit 1. The recorded values were right; the hand-off
+  was not.
+- **Auth failures are worded per vendor**, and the first marker list recognised none of the
+  three actually seen: "Not logged in · Please run /login", "Please set an Auth method in
+  …", "No providers configured". All three are markers and all three are tests.
+
+The task is read-only by construction, output is redacted for credential shapes before
+anything is written down, and each stream is capped at 64 KiB with the capping reported — so a
+truncated capture is never mistaken for a complete one. This is the instrument, not the
+measurement: three agents still owe their event vocabulary, no cell has been checked against
+a second run, and there is no fan-out cost figure.
+
 ### Added — the async and concurrency mistakes that no compiler or linter mentions
 
 `xencode analyze <path> --runtime` reports four things that compile cleanly, produce no

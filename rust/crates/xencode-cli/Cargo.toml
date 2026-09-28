@@ -9,6 +9,7 @@ name = "xencode"
 path = "src/main.rs"
 
 [dependencies]
+xencode-agents-rs = { path = "../xencode-agents-rs" }
 xencode-core-rs = { path = "../xencode-core-rs" }
 xencode-config-rs = { path = "../xencode-config-rs" }
 xencode-cache-rs = { path = "../xencode-cache-rs" }
@@ -23,6 +24,7 @@ xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
 xencode-colab-rs = { path = "../xencode-colab-rs" }
 clap = { version = "4", features = ["derive"] }
+tempfile = "3"
 serde_json = "1"
 tokio = { version = "1", features = ["full", "rt-multi-thread"] }
 crossterm = "0.28"
