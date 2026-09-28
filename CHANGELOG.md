@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — repeat the interop probe, and check credentials without signing in
+
+Two flags on `xencode interop`, both answering questions the first run could not.
+
+`--repeat N` runs each agent N times and compares, because **one run is a reading and two is
+a check** — and until now a single observation had been standing in for a fact. A fact that
+differs is reported with both values shown, never averaged, and repeated under "still
+unanswered" so it cannot scroll past.
+
+Running it on 2026-09-28 partly closed the `AR-1` gap. All four captured event vocabularies
+came back **identical** across two runs — `step_finish`/`step_start`/`text`/`tool_use` for
+opencode, `agent_event`/`hook_event`/`run_result` for cline, the `thread.*`/`turn.*`/`item.*`
+set for codex, and `system`/`assistant`/`result` for claude.
+
+One real difference survived, and it is the kind a single transcript could never have shown:
+**cline's event count is not fixed.** 18 then 20, and 16 then 19 on a second pair, while its
+vocabulary stayed identical. A normalised model can rely on the names and not on the sequence
+or the length — which is the whole difference between a model derived from observation and
+one derived from a wish list, and it is precisely what `AR-9` is for.
+
+Two defects in the check itself came out of using it, and both are fixed with tests: a session
+id's *value* was being compared, so two runs correctly minting two ids reported claude as
+inconsistent — presence is the fact, the value is not; and the report printed its stability
+section twice while still claiming nothing had been compared with a second run.
+
+`--check-auth` reports which agents have a config directory and, for those that do not, the
+command that would fix it. It launches nothing, starts no login, and reads no credential —
+and its limit is stated in its own output, because **a config directory is not a runnable
+agent**: all six agents on this machine have one, and three still refuse to run.
+
 ### Added — a probe that measures what the coding agents on this machine actually do
 
 `xencode interop` launches every installed coding-agent CLI headless on a read-only task in
