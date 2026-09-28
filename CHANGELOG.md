@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode test`, which never calls a test that only passed on retry a pass
+### Added — `xencode cov`, which reports which lines this diff added were never executed
+
+A green test suite answers "did nothing break". It does not answer "did the lines
+I just wrote run at all" — a new error-handling branch can be entirely
+unexercised and every test still passes. `xencode cov` runs the suite under
+`cargo llvm-cov`, intersects the result with the lines `git diff` added, and
+reports the ones that never ran.
+
+**Line numbers, not percentages.** `--show-missing-lines` prints only
+`file` and line numbers, and `--format json` emits the same as a document a
+program can read. A percentage is a number nobody can act on; a line number is a
+place to go and read.
+
+**The cost is measured and stated rather than hidden.** On this repository a cold
+run took 272 s and a warm one 212 s, and the instrumented target directory is
+7.2 GB by itself. The command says which kind of run happened, because a reader
+who waits four minutes deserves to know the next one is cheap, and the directory
+is reused so only the first run pays.
+
+**A line with no coverage data is not an uncovered line.** A diff that touches
+`Cargo.lock` reports those lines as *no data* and leaves them out of the
+denominator, rather than reporting them as untested. Collapsing the two would
+blame the code for the tool's blind spot and make a lockfile change look
+catastrophically untested. Verified against the raw lcov: `main.rs` is
+instrumented, 828 of its 3130 executable lines run, so a reported 0% is a real
+finding and not a blind spot. A file with no measurable line reports no ratio at
+all, rather than 100% or 0%.
+
+**Three defects were found by running it, none of which a unit test would have
+shown.** Git's prefixes are mnemonic — `git diff --relative` reports
+`w/Cargo.lock` — and taken as a path every file missed, producing a confident and
+entirely wrong "0 of 0 measurable added lines executed". The prefixes are now
+pinned, and a `+++` line with no recognised prefix is declined instead of being
+turned into a path that cannot match. The diff and the lcov report were also on
+different bases (`rust/crates/…` against `crates/…`); `--relative` plus resolving
+the manifest directory fixes it and stops coverage failing on a missing
+`Cargo.toml` when run from the repository root. And a missing `.xencode/`
+directory killed a 272-second run at the final step, so it is now created first.
+
+Then it found a real gap in its own change: the new `Cov` subcommand arm and the
+`run_cov` body were reported as unexercised, which they were. Argument-parsing
+tests now cover them, so the next run has something to measure.
+
+Sixteen tests. Full workspace 1482 passing, clippy clean, fmt clean.
+
+
 
 `cargo nextest` runs each test in its own process, which is what makes its
 selection and retry worth having. The default, though, accepts a broken test as

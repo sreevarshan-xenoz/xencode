@@ -9,6 +9,7 @@ name = "xencode_analysis_rs"
 path = "src/lib.rs"
 
 [dependencies]
+xencode-context-rs = { path = "../xencode-context-rs" }
 serde = { version = "1", features = ["derive"] }
 regex = "1"
 thiserror = "2"
