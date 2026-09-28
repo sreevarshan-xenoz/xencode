@@ -2,6 +2,7 @@ pub mod advisories;
 pub mod analyzer;
 pub mod images;
 pub mod issues;
+pub mod runtime_hazards;
 pub mod security;
 pub mod web;
 

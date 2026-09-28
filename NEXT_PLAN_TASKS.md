@@ -17,7 +17,7 @@
   (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it)
-- [x] Workspace gates green — 15 crates, 1399 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 15 crates, 1413 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -7783,6 +7783,45 @@ LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstre
   distinction — `run` exits 1 with `[]` for both — so `ast_edit` still has to
   report the ambiguity rather than resolve it, while `codemod` can name the cause.
   Both refusals are tested to never contain the other's wording.
+
+- [x] `U-2` — 2026-09-28. `xencode analyze <path> --runtime` reports blocking calls on
+  the runtime thread, unbounded channels, and dropped task handles. Nine unit tests and
+  five integration tests against the real binary; the full workspace is 1413 passing.
+
+  **The division of labour with clippy was measured, not assumed, and it decided the
+  scope.** `await_holding_lock` already reports a guard held across an `.await`
+  correctly and stays silent on the same guard scoped into a block, so that class is
+  **not** reimplemented — re-deriving it structurally would be a worse version of a lint
+  that exists. Against the same file clippy is silent on all four classes U-2 reports.
+  Recording the measurement is what kept this item from becoming a second clippy.
+
+  **Three ast-grep limits were found by probing, and each one would have made a rule
+  silently inert or wrong:**
+
+  - `inside: { kind: function_item }` without `stopBy: end` searches only the immediate
+    parent and matches **nothing**. The async rules are worthless without it.
+  - "Inside a function that is async" has to be the positive form
+    (`inside: { …, regex: "^async " }`). The equivalent-sounding negative — inside a
+    function and not inside a sync one — **silently loses** a blocking call inside an
+    `async fn` nested in a sync one. Verified on a nested case: positive 1, negative 0.
+  - Two metavariables cannot share a path (`$M::$N()` parses to an error node), but one
+    metavariable absorbs a whole path prefix, which is why the unbounded-channel rule is
+    written `$A::unbounded_channel::<$T>()` and not a generic form.
+
+  **Two false positives were caught by running it against this repository's own source,
+  and both are now regression-tested.** `run_profiler` sleeps with `std::thread::sleep`
+  correctly inside `tokio::task::spawn_blocking`, and a lexical "inside an `async fn`"
+  cannot tell that from sleeping on the reactor — so a blocking call inside
+  `spawn_blocking` is not reported. And `$A::spawn($$$A)` matched `std::thread::spawn`,
+  whose dropped handle is normal and harmless; the rule is now named to `tokio` and says
+  so rather than claiming every executor. A check that flags correct code on its own
+  repository gets switched off, and a switched-off check still reports green.
+
+  The `#[cfg(test)]` case is **labelled, not filtered**: the structural form
+  (`not: { inside: { kind: mod_item, regex: "cfg\(test\)" } }`) was measured and does
+  not exclude a match inside a test module, so a filter would have reported filtering
+  while passing everything through. Test findings sort last, so a report about shipped
+  code leads with shipped code — 21 findings become 3 that matter and 18 labelled.
 
 #### W4 — Retrieval on top of a real structure — 12 items
 

@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the async and concurrency mistakes that no compiler or linter mentions
+
+`xencode analyze <path> --runtime` reports four things that compile cleanly, produce no
+warning, and cost a production freeze or a silent task death:
+
+```text
+$ xencode analyze rust/crates --runtime
+runtime hazards: 21 finding(s), 21 high, from 21 match(es) across 8 file(s)
+
+xencode-tui-rs/src/app.rs:7561:24 [high] mpsc::unbounded_channel::<String>()
+  Nothing bounds how much can be queued. A producer faster than its consumer grows the
+  queue until the process is killed, and the pressure shows up as memory exhaustion
+  somewhere else.
+  - Use a bounded channel (mpsc::channel) and pick a capacity, so a slow consumer applies
+    backpressure instead of memory.
+  - If the queue really must be unbounded, bound it a different way and record why — a
+    drop policy, or a length check that refuses more.
+```
+
+A blocking call on the thread the runtime is running other work on, an unbounded channel,
+and a spawned task whose handle was dropped so its death stays invisible. Each finding
+carries what actually goes wrong and several ways out — including saying it is deliberate,
+because a check you cannot answer "I meant that" with gets switched off on first sight.
+
+**It does not duplicate clippy, and that was measured rather than assumed.** Clippy's
+`await_holding_lock` already reports a lock guard held across an `.await`, correctly and
+with a suggestion, and stays silent on the same guard scoped into a block. That class is
+therefore *not* reimplemented; re-deriving it structurally would produce a worse version
+of a lint that already exists. Against the same file, clippy is silent on all four classes
+this reports — verified on 2026-09-28:
+
+| in the source | clippy |
+|---|---|
+| `std::fs::read_to_string` inside an `async fn` | silent |
+| `std::thread::sleep` inside an `async fn` | silent |
+| `tokio::sync::mpsc::unbounded_channel()` | silent |
+| `tokio::spawn(…)` as a bare statement | silent |
+
+**It needs the `ast-grep` binary, and says so rather than reporting nothing.** A missing
+engine prints that nothing is known about the code and exits non-zero. "None found" and
+"did not run" must never read alike, because only one of them is a fact about your code.
+
+Two false positives were caught by running it against this repository's own source and
+fixed, because a check that flags correct code gets switched off:
+
+- `run_profiler` sleeps with `std::thread::sleep` — correctly, deliberately, inside
+  `tokio::task::spawn_blocking`. A lexical "is this inside an `async fn`" cannot tell that
+  from sleeping on the reactor, so a blocking call inside `spawn_blocking` is not reported.
+- `std::thread::spawn(|| …)` was caught by the dropped-task rule, because the pattern
+  matched any `::spawn`. Dropping a std thread handle is normal and harmless; dropping
+  tokio's is the hazard. The rule is now named to tokio and says so, rather than claiming
+  every executor.
+
+A finding inside a `#[cfg(test)]` module is reported and **labelled**, not hidden, and
+sorts after the shipped ones so a report about your code leads with your code.
+
 ### Added — one structural rule across the whole tree, the way a codemod is applied
 
 `codemod(rule, path?)` is the seventeenth tool the chat model can call, and it is `ast_edit`
