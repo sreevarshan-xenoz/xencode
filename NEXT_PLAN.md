@@ -233,6 +233,43 @@
   declined. Also settled: the word "workspace" is taken four times over, so this
   is `ViewState` and named **views**. Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone V.
+- 🛰️ **Milestone W recorded** (2026-09-28): the "Xencode as an agent-agnostic
+  control plane" direction — the same proposal as Milestone S with a different
+  diagram, and the plan already owns it. The proposal's `I0`–`I7` map onto
+  **S-0**, **AR-2**…**AR-9**, **OR-1**…**OR-17** and Milestone V one to one, "XAR"
+  is declined for the third time (§S-11), and S-8 already rejects an agent
+  marketplace as "a supply-chain liability with no product pull". So rather than
+  write a fourth orchestrator plan, this pass **ran the measurement** the plan has
+  been gated on since 2026-09-23 — `--version`/`--help` on every installed agent,
+  no launches, no credentials, no spend — and three findings came back.
+  **Seven agents, not six:** `cline 3.0.62` is installed and was never in S-0's
+  table, with `--acp`, `--json` NDJSON, a `cline hub` daemon, MCP, hooks and a
+  doctor; `gemini` gained `--acp`; `crush` now reports a version. **ACP is in 3 of
+  7**, against 1 of 6 five days ago, while T-1's careful "streams, not a shared
+  schema" wording still stands. And **Codex publishes its protocol**:
+  `codex app-server generate-json-schema` produced **314 machine-readable JSON
+  Schema files offline, with no account and no spend** — carrying the
+  `{threadId, turnId, itemId}` correlation triple AR-9 would otherwise have had to
+  invent, a queryable `PermissionProfileList` (values `read-only`,
+  `workspace-write`, `danger-full-access`, `untrusted`/`on-request`/`never`/`auto`
+  — CAP-1's vocabulary, published by a vendor), plus `ModelRerouted`,
+  `ThreadGoalSet` and `ExternalAgentConfigImport`. Four items move and **no ID is
+  added**: `AR-9` gets an anchor instead of a wish list; `AR-1` gains an agent and
+  a schema to diff against; **`AR-2`'s done-when is stale on arrival** (it
+  hardcodes six names, one of which — `agy` — is not installed); and S-13's
+  "per-request approval: Unconfirmed" row gains a second, cheaper target in
+  Cline's `CLINE_TOOL_APPROVAL_MODE=desktop` file-IPC route. Three safety findings
+  are new: **a backgrounded worker is an auto-approved worker** (Cline's `--zen`
+  runs with full tool approval because no human is in the loop), a vendor now ships
+  the exact chat-platform control path the N-6 register rejects (`cline connect` →
+  Telegram/WhatsApp/Slack/Google Chat/Linear), and `ModelRerouted` bounds
+  xencode's locality promise to xencode's own routing. The proposal's "delete the
+  inference layer" is corrected to the real line — **model client versus agent
+  runtime** — because the model client has two live call sites (`app.rs:6720`,
+  `app.rs:6629`) and the local-first promise is a promise about it. Every Kilo
+  claim is marked UNVERIFIED: no Kilo CLI on this machine. `AR-1` remains undone —
+  it needs live captures and the user's own accounts. Appendix:
+  [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md) § Milestone W.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
