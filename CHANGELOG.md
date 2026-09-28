@@ -27,6 +27,20 @@ and partial properties — checks that look real and miss half the defects — a
 the more likely failure mode than pure tautologies. Nothing generalises beyond
 `touched_files` without a second target.
 
+Four new tests in `xencode-analysis-rs/src/property_eval_intersect.rs`
+(test-only, not shipped) repeat the discipline on `covdiff::intersect`: four
+seeded defects (unknown-as-uncovered, unknown-as-covered, dropped unmeasured
+files, cross-file misattribution), same four property classes. Measured:
+vacuous 0 of 4, weak 1 of 4, candidate LLM-style **3 of 4**, exact 4 of 4;
+existing example tests 3 of 4.
+
+The candidate misses a different defect than on `touched_files` — cross-file
+misattribution, the subtlest of the four and the shape of the macro-trap the
+plan names. So a generic "LLM properties are weak" claim would be wrong in both
+directions. What survives both targets: candidate properties miss the defect
+that requires target semantics to see. The VF-4-A conclusion is not upgraded;
+two targets do not generalise, but the evaluation method now does.
+
 Four tests in `xencode-analysis-rs/src/property_eval.rs` (test-only module, not
 shipped), plus `proptest 1.11` as a dev-dependency.
 
