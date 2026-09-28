@@ -798,6 +798,38 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                 "required": ["pattern", "path"]
             }),
         },
+        ToolDefinition {
+            name: "codemod".to_string(),
+            description: "Apply one structural rule across the whole tree, the way a \
+                          codemod does. The rule is an ast-grep YAML document with an id, \
+                          a language, a `rule:` pattern and a `fix:`; give it one rename \
+                          or one fix applied at every site it matches, in a single \
+                          change. Narrow it with \"path\" when the whole tree is too \
+                          broad. A rule with no `fix:` reports the sites and changes \
+                          nothing. The diff shown is this rule's own change, and any \
+                          touched file that already had uncommitted edits is named. \
+                          Needs the ast-grep binary; a rule it cannot read is reported \
+                          as unreadable, and a rule that matches nothing is reported as \
+                          matching nothing."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "rule": {
+                        "type": "string",
+                        "description": "An ast-grep YAML rule: id, language, a rule: \
+                                        block with a pattern, and a fix: block to rewrite \
+                                        matches"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "File or directory to apply it under, relative to \
+                                        the workspace root. Defaults to the whole root"
+                    }
+                },
+                "required": ["rule"]
+            }),
+        },
     ]
 }
 
@@ -922,7 +954,8 @@ mod tests {
                 "write_file",
                 "edit_file",
                 "edit_symbol",
-                "ast_edit"
+                "ast_edit",
+                "codemod"
             ]
         );
         for tool in &tools {

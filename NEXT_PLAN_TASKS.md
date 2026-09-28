@@ -17,7 +17,7 @@
   (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it)
-- [x] Workspace gates green — 15 crates, 1390 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 15 crates, 1399 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -7757,6 +7757,32 @@ LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstre
   Scoped to what the item asked. It does not bring in a parser — the queries
   that U-2 and U-3 want are a separate piece of work, and CI-1 is the substrate
   they ride, not the whole of them.
+
+- [x] `CI-4` — 2026-09-28. `codemod(rule, path?)` is the seventeenth tool: the
+  agent writes one ast-grep YAML rule and every site it matches across the tree is
+  rewritten in one change. Nine tests; the full workspace is 1399 passing.
+
+  The done-when is met literally: twenty seeded sites of one rename, one call, and
+  the file is what a hand-check says. `path` narrows the rule below the root, and
+  omitting `fix:` makes the call a report that writes nothing.
+
+  **The recorded trap, and why refusing is the wrong answer to it.** "Repo-wide
+  apply on a dirty tree" is real: afterwards nobody can tell which lines the codemod
+  wrote. But refusing would make the tool useless for an agent, whose own previous
+  edits are uncommitted by definition — the trap would fire on every legitimate
+  call. So the separation is made visible instead. The diff is computed in memory
+  from the matches before a byte is written, which makes it the rule's own change
+  and never the working tree against `HEAD`, and every touched file that git
+  already reports as modified is named in the preview and in the result. A test
+  seeds a real repository with one dirty and one clean file and asserts only the
+  dirty one is named.
+
+  One thing `scan` mode gives that `run` mode does not, and it is worth having: a
+  rule ast-grep cannot parse exits **8** with a message, so "the rule is unreadable"
+  is distinguishable from "the rule matched nothing". CI-1 cannot make that
+  distinction — `run` exits 1 with `[]` for both — so `ast_edit` still has to
+  report the ambiguity rather than resolve it, while `codemod` can name the cause.
+  Both refusals are tested to never contain the other's wording.
 
 #### W4 — Retrieval on top of a real structure — 12 items
 
