@@ -5029,7 +5029,7 @@ one live conflict (§R-3). The one exception is the re-arguing Milestone S force
 cloud workers are not bound by the hardware that made multi-agent pipelines the honest
 answer, so two parked graph items are scoped back in (§R-2 item 8).
 
-**Inventory.** The universe is **292 IDs** across **294 rows**: N 55 + O 73 + P 48 +
+**Inventory.** The universe is **303 IDs** across **305 rows**: N 55 + O 73 + P 48 +
 Q 63 + S 26 + L-1…L-12 + M-1…M-7 + U-1…U-8. The L/M/N/O/P/Q/S sum is 284 rather
 than the original headline **208** because that number counts Q at its **32
 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
@@ -5042,8 +5042,8 @@ one builds the thing, one enforces or surfaces it. Every other ID holds exactly
 one row. So the two numbers differ by two and both are stated everywhere they
 appear rather than reconciled by quietly dropping a row.
 
-Checked by script against the file rather than by eye: **285 rows** in W0…W17
-(**283 unique IDs**), **9 not scheduled** (8 register rejections carried forward,
+Checked by script against the file rather than by eye: **295 rows** in W0…W17
+(**293 unique IDs**), **10 not scheduled** (8 register rejections carried forward,
 plus MI-5, which is contested, plus U-8 which is deferred behind CI-6's change
 graph, plus V-11 which §V-3 declines on the adaptive-UI evidence), and QN-5
 sitting inside W10 as conditional. The two tables share no ID,
@@ -5060,7 +5060,7 @@ and the two sums must agree.
 | wave | what it is | items |
 |---|---|---|
 | W0 | Fix what makes current output untrustworthy | 15 |
-| W1 | Make the agent observable | 15 |
+| W1 | Make the agent observable | 16 |
 | W2 | The model/inference substrate | 15 |
 | W3 | Code intelligence: replace the regex tier | 15 |
 | W4 | Retrieval on top of a real structure | 12 |
@@ -5070,21 +5070,21 @@ and the two sums must agree.
 | W8 | Outward research capability | 6 |
 | W9 | Project DNA and architecture intelligence | 21 |
 | W10 | Durable project knowledge | 21 |
-| W11 | Self-diagnosis, cost and operations | 19 |
+| W11 | Self-diagnosis, cost and operations | 20 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 58 |
+| W14 | Product surface and ecosystem | 66 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
 | W16 | One worker at a time, then brokered (new, from S) | 12 |
 | W17 | Many workers at once (new, from S) | 12 |
-| — | declined / contested | 9 |
+| — | declined / contested | 10 |
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 77 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 146 | makes the agent better at the work; nearly all of it waits on the substrate |
+| core substrate | 78 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 155 | makes the agent better at the work; nearly all of it waits on the substrate |
 | ecology | 61 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
-| park | 10 | declined, conditional, or contested (§R-3) |
+| park | 11 | declined, conditional, or contested (§R-3) |
 
 ### R-1 The waves
 
@@ -5357,7 +5357,7 @@ IDs in the commit that does it (`SE-1`, `DB-1`, `QTR-6` and `QX-4` are one commi
    off the buffer), zero failures, `cargo fmt --all --check` and
    `cargo clippy --workspace --all-targets -- -D warnings` clean.
 
-#### W1 — Make the agent observable — 15 items
+#### W1 — Make the agent observable — 16 items
 
 Needs W0, which is complete. A trace of a run whose config could leak, and whose scanner reported the word `input` as High severity, was not evidence — both are fixed in W0.
 
@@ -5378,6 +5378,7 @@ Needs W0, which is complete. A trace of a run whose config could leak, and whose
 | **QA-5** | EV-1's fixture generator, schema-driven, no LLM in the loop | core | EV-1 fixture generator, schema-driven |
 | **QO-3** | Metrics schema extension | core | fold into CX-2 |
 | **WF-1** | NDJSON event stream mode (`query --stream --format ndjson`): token | core | NDJSON event stream |
+| **V-9** | Workspace transition inspector: why the window arrangement changed | capability | from V — inspection over EV-2's markers, never re-execution, by GL-3's rule |
 
 **Progress.** Same rule as W0: an item is recorded here only when its own
 done-when is met, and the commit that does it names the IDs.
@@ -7870,7 +7871,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 19 items
+#### W11 — Self-diagnosis, cost and operations — 20 items
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -7895,6 +7896,7 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice |
 | **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe |
 | **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks |
+| **V-8** | Event-driven render: stop the unconditional 30 fps redraw | capability | from V — `app.rs:8111` polls at 33 ms and draws every frame; no dependencies, so it can be pulled forward |
 
 #### W12 — Long-running autonomy — 15 items
 
@@ -7928,7 +7930,7 @@ Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores 
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
 | **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
 
-#### W14 — Product surface and ecosystem — 58 items
+#### W14 — Product surface and ecosystem — 66 items
 
 No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
 
@@ -7992,6 +7994,14 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **WF-9** | signed-commit passthrough | ecology | signed-commit passthrough |
 | **WF-10** | stacked-diff assist over worktrees | ecology | stacked-diff assist over worktrees |
 | **U-7** | Structural three-way merge resolution over GH-6's detection | ecology | from U — proposes and compiles, never auto-applies and never silent, by OR-5's rule |
+| **V-1** | Layout tree and window model, replacing the three-preset match | core | from V — `compute_layout()` -> `LayoutNode`; the substrate every other V item needs |
+| **V-2** | Tabbed and stacked windows over V-1's tree | capability | from V — `Tab` is focus-ring/completion today, so this is genuinely new |
+| **V-3** | Split and resize on a tree | capability | from V — after UX-1's keymap; the helix-grade engine clause still binds |
+| **V-4** | Named views, saved and recalled | capability | from V — NOT called workspaces: Milestone G owns that word |
+| **V-5** | Layout templates as data, refining the shipped presets | capability | from V — H1-01's `layout` key and H1-05's `Ctrl+U` cycle become the template loader |
+| **V-6** | Persist the window arrangement across restarts | capability | from V — `write_atomic`, DB-2's version ladder, SE-1's 0600; JSONL, not a new store |
+| **V-7** | Pane-boundary mouse: drag to resize, click to target | capability | from V — the half UX-9 does not own; UX-9 keeps text selection |
+| **V-10** | Worker-event to window bridge over WF-1's stream | capability | from V — reads state, never moves a pane by itself (V-11 is the parked half) |
 
 #### W15 — Measure the other agents before planning on them — 3 items
 
@@ -8068,6 +8078,7 @@ Declined once already, or genuinely contested. Recorded here so nobody re-propos
 | **MEM-5** | SQLite/vector-indexed memory | park | rejected: SQLite/vector-indexed memory, unjustified at this corpus size |
 | **MI-5** | Speculative decoding on the Colab bridge | park | SPECULATIVE-DECODING CONFLICT: declined in the register at :1769 ("~25-30% tok/s for a fragile launch surface on hardware that is already the bottleneck"). MI-5's Colab-bridge form assumes rented VRAM. Needs the owner’s call before it can sit in any wave |
 | **U-8** | Atomic commit slicing of a dirty tree | park | from U — deferred, not rejected: needs CI-6's/QD-1's change graph first, and its worst failure mode is silently wrong history |
+| **V-11** | Layout that rearranges itself on engineering events | park | from V — declined on the evidence already in Q-0 item 72 and the Q-12 register; the user-triggered half is V-10, which is scheduled |
 
 ### R-2 Corrections to the order as proposed
 
@@ -9432,3 +9443,602 @@ U-6 are the two this plan would fund first, and both are gated on substrate that
 does not exist yet — W3 for U-2, CU-1 for U-6. The separation-of-concerns argument
 the proposal makes is recorded in full and adopted; the dependency on an unbuilt
 orchestrator is not.
+
+---
+
+## Milestone V — the window-manager question: a dynamic layout tree, audited (research appendix, drafted 2026-09-28)
+
+### V-0 What arrived, and what the research actually found
+
+A second external proposal arrived on 2026-09-28, this one about the interface. It
+argues that Xencode's three hardcoded layout presets are a bottleneck, and that
+the right answer is a window-manager model: a `LayoutNode` tree, resizable panes,
+named workspaces, an agent-aware session rail, a command palette, event-driven
+layout, and sessions that survive the terminal closing. It credits
+[TUIOS](https://github.com/Gaurav-Gosain/tuios) as the model and explicitly warns
+against copying TUIOS's terminal-multiplexer architecture, recommending instead
+that Xencode's windows represent *engineering state* rather than arbitrary
+terminals. That framing is right, and it is the most valuable sentence in the
+proposal.
+
+**The subject is real and was verified, not taken on report.** TUIOS exists:
+4.0k stars, 155 forks, 2,808 commits, MIT, written in Go on Charm's Bubble Tea v2
+and Lipgloss v2, with a WASM build for a hosted guided tour. Every capability the
+proposal attributes to it is in its own README: BSP tiling with spiral and
+smart-split schemes, master-stack and niri-style scrolling layouts, 9 workspaces,
+a `Ctrl+P` fuzzy command palette, daemon-backed sessions with detach/reattach and
+"session resurrection" after a daemon restart, a right-hand session rail showing
+"sessions, terminals, files, git state and agents", full mouse support including
+window drag and resize, saved layout templates, and event-driven rendering
+described as "Zero CPU at idle. Renders only when PTY data arrives or interaction
+occurs." Checked 2026-09-28.
+
+Four findings from the research change what should be done, and one of them is not
+in the proposal at all.
+
+#### Finding 1 — the proposal's own warning is correct and understates the gap
+
+The proposal says do not copy TUIOS's architecture because its abstraction is
+`PTY → terminal window → layout` while Xencode's should be
+`Engineering State → workspace window → layout`. Correct — and the distance is
+larger than a matter of taste. TUIOS's core components are a **Window Manager**
+(`internal/app/os.go`), a **terminal emulator** (`internal/vt/`: ANSI parser,
+scrollback, kitty and sixel graphics, the kitty keyboard protocol, OSC 133), a
+**renderer** (`render.go`: layer composition, viewport culling, graphics
+batching), and an **input** layer (`internal/input/`: modal routing, 100+
+keybindings, mouse). The emulator is not a detail of that project; it is most of
+the reason it is 2,808 commits, and Xencode has no analogue of it and no plan to
+build one.
+
+**But this cuts in the proposal's favour on the one thing it wants most.** Because
+Xencode's panes are ratatui widgets drawing into one shared buffer — not emulated
+terminals each owning a grid and a scrollback — a layout tree is *cheaper* here
+than the equivalent in TUIOS. There is no per-pane viewport to cull and no
+emulator state to park when a pane is off-screen. TUIOS needs viewport culling and
+fast-unfocused render paths; a Xencode tree needs a function from tree to `Rect`,
+and hit-testing falls out of the same walk. **The tree is the cheap part.** The
+expensive parts are the modal keymap surface and the automatic-layout policy, and
+those are exactly where the existing plan has already said no (Findings 3 and 4).
+
+The corollary is a scope warning. TUIOS also ships SSH server mode, a browser
+terminal, tape scripting, a tmux compatibility shim, 18 agent-harness
+integrations, kitty and sixel graphics, and a Ghostty-VT backend. Xencode is 15
+crates and about 1,375 tests. "Adopt the TUIOS UX" is tractable; "become TUIOS" is
+a different product, and Milestone S already drew the line that matters most:
+xencode's TUI is **one ratatui surface and cannot host a rival TUI in-process**.
+
+#### Finding 2 — three of the fifteen are already this plan's work
+
+The proposal lists a command palette (its U7), agent-aware panes (U8) and a
+keymap-driven split/resize surface (U4). All three are scheduled items:
+
+- **U7 is UX-6** — "A fuzzy command palette over slash commands, panels and
+  settings with one-line descriptions, replacing Ctrl+F (fact 19) as the
+  discoverable entry point", W14, bucket ecology. Its recorded trap is the right
+  one for a dynamic UI too: the wall-of-shortcuts anti-pattern.
+- **U8 is OR-12** — "the worker panel. Agents, tasks, graph, costs, logs and
+  pending approvals as `FocusArea` panels over `AR-6`/`EVd-1` state", W17, with
+  the done-when "every number shown traces to a real row, and a worker xencode
+  cannot observe renders as unknown rather than as idle." The proposal's agent
+  rail is this item, already written, already placed in the wave that gates
+  everything else.
+- **U4's keymap half is UX-1, UX-2 and UX-3**, W14. UX-1's own text carries a
+  constraint that binds any window manager: **"do not build a helix-grade keymap
+  engine"**, and it will not allow rebinding quit or Escape. UX-2 adds "a vim
+  preset means undertaking to maintain a modal editor, which is a different
+  product."
+
+No new IDs are minted for any of the three. Recording that is the point: the
+proposal's most immediately appealing features are the ones already scheduled.
+
+#### Finding 3 — automatic layout collides with a register row that cites evidence
+
+The proposal's most distinctive idea is U9: the workspace reacts to engineering
+events, so `AgentStarted` opens a window, `VerificationFailed` expands
+verification, `PermissionRequested` steals focus. It is also the one idea this
+plan has already rejected, twice, with published research behind it.
+
+Q-0 item 72 rejects "Developer Workflow Learning" on exactly this ground: **"n =
+1, and the adaptive-UI literature is negative: frequency-reordered menus slow
+users and destroy feature awareness (Gajos & Weld); act autonomously only where
+information is asymmetric (Horvitz)."** The Q-12 do-not-build register carries the
+same decision as a standing row — "Autonomous preference / workflow / review-style
+adaptation" — and the register's governing rule is that **"the argument is not
+re-run."**
+
+The distinction that survives the evidence is worth stating precisely, because
+the proposal's version and the rejected version are close neighbours. The
+rejected thing is the UI reordering *itself* to anticipate what the user probably
+wants — reordering menus, promoting frequent items, rearranging by learned
+preference. The defensible thing is the UI *surfacing a fact the user did not ask
+about* — a tool call blocked on a permission, a verification that failed, an agent
+that stopped. Horvitz's own condition is "act autonomously only where information
+is asymmetric", and a failure the user cannot see is exactly that. Opening a
+window that shows a blocked tool call is not rearranging anything; it is
+**surfacing**, and the user still decides what to do with it.
+
+So the split is: **V-10 (schedule) is the bridge that reports state and opens a
+window the user can dismiss, and V-11 (parked) is anything that moves, resizes,
+reorders or re-focuses a pane on its own.** The parked half is recorded as
+**V-11** so nobody re-proposes it inside a wave, which is what §R-3 requires of
+anything in a register. It is parked on the evidence already in the file, not on
+this appendix's opinion, and overturning it would mean overturning Q-0 item 72.
+
+#### Finding 4 — "sessions that survive the terminal" is already answered, and the answer is not a TUI
+
+The proposal's U10 wants `xencode` to start, be closed, and be reattached to
+later with agents and worktrees intact. The plan has already written the
+objection to that exact feature, for a neighbouring one, in GL-4's trap note:
+**"goal UX before LF-4 exists is an in-TUI toy that dies with the terminal. Do not
+build a second queue."** And Q-1 fact 15 names the load-bearing prerequisite
+before any of it: the agent turn loop **has no headless entry point whatsoever**,
+which makes **L-7 + WF-1** the single prerequisite for every detached or
+long-running idea in P and Q.
+
+**LF-4 is the answer and it is already scheduled** — `xencode run --detach`, a
+durable queue with resume-after-crash, and stop conditions on wall-clock, cost and
+rounds. Its trap note is the precise failure this proposal would walk into:
+"keep status *derived* (exit file + `/proc`, as `tasks.json` already does) rather
+than stored, or it lies after a crash; lid-close suspend is the silent killer
+here." WF-3 and UX-10 already own `--resume <name>` and the "where you were"
+footer.
+
+The proposal's `xencode attach` is therefore **LF-4 wearing a different name**, and
+the workspace state it would restore is a strict subset of what LF-4 already has
+to persist to survive a crash at all. No new ID.
+
+#### Finding 5 — "workspace" is the wrong word here, four times over
+
+The proposal names its central type `WorkspaceState` and calls the saved views
+"workspaces". In this codebase that word is already taken:
+
+- **`WorkspaceManager`** in `xencode-collaboration-rs/workspace.rs` is the
+  Milestone G team/collaboration workspace, with membership, roles and an audit
+  trail. Reusing the word for a pane arrangement next to a permission-bearing
+  shared workspace is the kind of collision that produces a security bug, not
+  just a confusing one.
+- **the Cargo workspace**, which is what "workspace" means in most of this file.
+- **OR-15's per-worker lease**, which the plan already calls a workspace: "the
+  lease and its workspace, the allowed file set, the forbidden paths".
+- **LF-9 "Google Workspace"**, unrelated but a third collision in search results.
+
+This appendix uses **view** for a named arrangement of windows, and the type is
+`ViewState` rather than `WorkspaceState`. The owner may prefer another word; what
+is not negotiable is not reusing `WorkspaceManager`'s.
+
+#### Finding 6 — the one item worth doing first is not in the proposal
+
+TUIOS's headline performance claim is that it renders on events, not on a timer.
+Xencode does not. `app.rs:8111` is `if event::poll(Duration::from_millis(33))?`
+under the comment `// Poll events (~30fps)`, and the frame is drawn whether or not
+anything changed. The only thing on screen that varies is the spinner, and
+`app.spinner_tick` advances only when one of eight named conditions holds
+(`app.rs:8276-8285`: `is_generating`, `is_reviewing`, `health_check_in_progress`,
+`bytebot_running`, `voice_busy`, a collaboration sync still `connecting`,
+`sec_scan_active`, `profiler_running`). So an idle Xencode redraws thirty times a
+second to redraw an unchanged screen. Grepping this file for `30fps`, `fps`,
+`redraw`, `render loop`, `idle CPU` and `frame rate` returns **no plan item at
+all**.
+
+That is the cheapest item in this entire appendix, it has **zero dependencies**,
+it touches no layout code, and it is the one TUIOS idea that ports with no
+architectural consequence whatsoever. It is **V-8**, and it is the only V item
+that could defensibly be pulled forward ahead of its wave. The honest form of the
+claim is a measurement, not an assertion: record idle CPU before and after on this
+machine, and if the number is not worth it, say so and drop the item.
+
+### V-1 The layout tree and window model — the one thing everything else needs
+
+**Proposed.** Replace the `&str` preset match with a `LayoutNode` tree (`Leaf`,
+`Horizontal`, `Vertical`, `Tabbed`, `Stack`) plus a `Window` abstraction and a
+state struct holding windows, layout, views, active view and focused window.
+
+**Checked.** `compute_layout()` (`layout.rs:81`) is a `match` over
+`effective_layout(preset)` returning `BodyLayout` (`layout.rs:43-49`) — five
+`Option<Rect>` fields (`explorer`, `editor`, `chat`, `input`, `terminal`) and
+nothing else. `LAYOUT_NAMES` is `["classic", "chat-first", "zen"]`
+(`layout.rs:14`). There is no window, no pane, no tree and no arrangement
+anywhere in the tree. **Nothing covers this.** It is the genuine gap.
+
+**Disposition: promote as V-1, and it is the substrate for V-2 through V-7.**
+
+**Three constraints, all of them load-bearing.**
+
+*The existing invariant must survive.* E4-02 and H1-03 established that one
+geometry function feeds drawing, mouse hit-testing and resize clamping, so render
+and hit-test cannot drift, and a unit test tiles every column at nine widths
+asserting each hit lands on the pane drawn under it. The tree must keep that
+property. A tree makes it *harder* to keep, not easier, because hit-testing now
+has to walk the tree and resolve `Tabbed`/`Stack` to the active child — so the
+test has to be extended to cover those node kinds, not just widths.
+
+*`FocusArea` is the focus model and the tree is not a replacement for it.* All 24
+variants live in `focus.rs:12-37`, every panel is one, and the Feature Navigator,
+the Tab ring, the help tables and the mouse all key off it. A `Window` should
+therefore carry a `FocusArea`, and focus should remain a property of the focus
+area. A second, parallel focus concept is how a "which pane has focus" bug gets
+shipped.
+
+*This is a rewrite, and the owner has a recorded preference about that.* P-0
+records it: the "Xencode 2.0" crate restructure is "a rewrite of a working
+15-crate, 903-test tree into a different crate boundary, and **the owner's stated
+preference is optional modes over rewrites**"; the P-10 register adds "The
+'Xencode 2.0' crate restructure as written — a rewrite of a working tree to satisfy
+a diagram; every primitive in it fits the existing crates." The same argument
+applies to deleting a shipped, tested, documented 336-line module that Milestone
+H closed with 591 green tests.
+
+**So V-1 is additive, in this order.** `LayoutNode` and `ViewState` are introduced
+**alongside** `compute_layout`, and the three presets are re-expressed as V-5's
+templates that the tree renders — which is the proposal's own best idea ("presets
+stop being cages, they're starting points") and it happens to be the
+non-rewrite path to the same place. `compute_layout` is deleted only when the tree
+renders all three presets pixel-identically, proven by **H1-10's existing
+layout × panel × size render sweep** extended to the tree. Until then both paths
+exist and the flag chooses.
+
+**Done-when.** A seeded four-leaf tree with one nested split renders correct
+gap-free rects at 9 widths and 3 heights; hit-testing at every one of those
+geometries returns the `FocusArea` of the pane actually drawn there, including
+through a `Tabbed` node; and all three existing presets render byte-identically
+through the tree and the old function, which is the gate for deleting the old one.
+
+**Trap.** `Tabbed` and `Stack` nodes make hit-testing ambiguous — a click on a
+hidden tab is either "select this tab" or "focus nothing", and picking wrong makes
+tabs feel broken. Decide it before writing the render, not after.
+
+### V-2 Tabbed and stacked windows
+
+**Proposed.** `Tabbed { windows, active }` and `Stack { windows, active }` nodes
+so several views of the same subject share one region.
+
+**Checked.** Nothing covers this. `Tab` today is focus-ring advance, indent and
+completion (E6-01, H1-05) — H1-05's note that "zen deliberately keeps the full
+ring — Tab flips its panes" is the only sense in which `Tab` touches panes, and it
+is a *focus* behaviour, not a *stacking* one. The nearest existing thing is
+**QD-2**'s blast-radius fan-out, which is a single panel rendering a graph rather
+than a container holding several.
+
+**Disposition: promote as V-2, after V-1.**
+
+**Why stacked-over-tabbed is the honest first cut.** The proposal lists both.
+Tabs hide content behind a label, which is a discoverability cost every time;
+stacking shows one and keeps the rest reachable by a chord, which costs nothing
+when unused. And the agent case argues for stacking: three running agents want to
+be *seen* to be three, not summarised as a tab strip saying "agents (3)". Ship
+`Stack` first, `Tabbed` only when a real need for it appears — a file open in the
+editor and also in the review panel is the case that earns it.
+
+**Done-when.** A `Stack` of three agent panes shows all three state rows without
+input, switching is one chord, and every chord is in UX-1's rebindable table and
+UX-3's which-key popup so it is discoverable rather than remembered.
+
+### V-3 Split and resize on a tree
+
+**Proposed.** Split panes, drag boundaries, resize ratios.
+
+**Checked — the plumbing is done and the keymap surface is already restricted.**
+E6-02 clamps scroll offsets on `Event::Resize` through shared line builders "so
+clamp and render can no longer disagree"; H1-05 shipped `Ctrl+U` preset cycling
+and the Tab ring. UX-1, UX-2 and UX-3 own the binding surface, and UX-1's text
+says **"do not build a helix-grade keymap engine"** and forbids rebinding quit or
+Escape. The O register separately rejects vim modal emulation and terminfo probing
+beyond the colour env vars.
+
+**Disposition: promote as V-3, strictly after V-1 and riding UX-1.** No new
+keymap engine, no modal editing mode, no new terminal capability probe.
+
+**The honest split is geometry versus modality.** Resizing a pane boundary is
+cheap and safe: a ratio on a tree node, clamped so no pane falls below a minimum,
+persisted by V-6. A `Ctrl+B`-style prefix key with a modal window-management layer
+is a different undertaking — TUIOS routes **100+ configurable keybindings** through
+a modal layer, and that is the part this plan has twice declined. Ship the former,
+do not begin the latter.
+
+**Done-when.** A boundary drag or chord-resize changes a node's ratio, clamps at
+the documented minimum, survives a terminal resize without panes collapsing, and
+is undone by the same path that undoes a file edit (Q-12 rejects universal undo
+over non-git state, so this stays out of that argument deliberately).
+
+### V-4 Named views
+
+**Proposed.** `Ctrl+1`…`Ctrl+9` switching between semantic arrangements — Code,
+Agents, Review, Verify, Git.
+
+**Checked.** The only existing "named mode" is **OR-14**, `/orchestrator` as a
+mode with its own command surface, and its done-when already constrains what
+"attach" may mean. Nothing else. **New**, subject to Finding 5's naming.
+
+**Disposition: promote as V-4 — called views, not workspaces.**
+
+**The value is real and modest, and the honest framing matters.** A view is a
+saved `ViewState`; switching is a key that restores one. The gain is that a user
+can set up "I want to see the diff and the verification together" once instead of
+resizing four panes every session. The cost is a layer of indirection between the
+user and a layout they can also just arrange by hand — which is why views must be
+**optional, additive, and never the only way to reach a panel**. The Feature
+Navigator (`Ctrl+F`) and UX-6's palette remain the discovery path; a view is a
+shortcut, not a gate.
+
+**Done-when.** Six seeded views switch in one chord, each restores its exact
+geometry and focused pane, a view survives a restart via V-6, and every panel
+inside a view is still reachable without naming the view at all.
+
+### V-5 Layout templates as data
+
+**Proposed.** Keep presets but make them initial layout templates, so the user can
+change the layout afterwards.
+
+**Checked.** The surface exists and is the oldest part of this. H1-01 shipped the
+`layout` config key; H1-05 shipped `Ctrl+U` live cycling with a toast; H1-08
+renders the current layout name in the header; E4-04 established the
+`cycle_*`-over-one-list pattern this should follow. **PARTIAL overlap — this is a
+refinement of shipped work, not new work.**
+
+**Disposition: promote as V-5, as the mechanism that makes V-1 additive.** This
+is the item that resolves V-1's rewrite problem: the three presets become
+templates, the tree renders templates, and the old `match` disappears as
+*duplication* rather than as a *replacement*.
+
+**One boundary to hold.** The N register rejects user **theme** files and M's fact
+list notes "no downloadable themes or statusline" — user-supplied *appearance*
+files are out. A user-supplied *layout* template directory is the same shape of
+thing and needs the same answer. Ship templates as **built-in plus
+user-authored-in-config** (inside the existing `XencodeConfig`, so it inherits
+DB-2's version ladder for free) and not as a `~/.xencode/layouts/*.toml`
+ecosystem. A file format for layouts is a compatibility promise this project has
+no reason to make yet.
+
+**Done-when.** The three shipped presets are templates, a new one is added by
+config with no code change, `Ctrl+U` still cycles and the header still names the
+current one, and an unknown template name falls back to `classic` exactly as
+`effective_layout` does today.
+
+### V-6 Persist the window arrangement
+
+**Proposed.** Serialize `WorkspaceState` so the arrangement comes back.
+
+**Checked.** No UI state is serialized anywhere. But four existing decisions bind
+it completely, and all four are cheap to obey: **DB-1**'s `write_atomic` is the
+writer (already behind config, cache, transcript and Colab state); **DB-2**'s
+`config_version` ladder is the compatibility story, and DB-2 is already "on the
+critical path for UX-1, UX-10 and MI-3"; **SE-1**'s `0600` applies because this
+records what you were working on; and the O register's **"SQLite/redb for session
+state — JSONL suffices; SQLite drags a C dep"** rules out a new store.
+
+**Disposition: promote as V-6, after V-1 and DB-2.**
+
+**Scope it to the arrangement, not the work.** What persists is: the tree, the
+ratios, the named views, which pane was focused, and the active view. What does
+**not** persist: agent transcripts, model state, tool state, anything a worker
+owns. That is LF-4's and the memory crate's business, and duplicating it here is
+how two sources of truth appear for the same session. A pane that pointed at a
+file which no longer exists reopens empty and says so.
+
+**Done-when.** A saved arrangement round-trips through a restart with geometry and
+focus intact, a layout file written by a newer `config_version` is rejected with an
+explanation rather than parsed, and the file is `0600`.
+
+### V-7 Pane-boundary mouse
+
+**Proposed.** Drag to resize, click to target, in the dynamic layout.
+
+**Checked — this is the half UX-9 does not own.** UX-9 is "Mouse ergonomics —
+click-to-cursor in inputs, double-click word select, drag-select", and its trap is
+one every pane-aware mouse feature inherits: **"enabling mouse capture steals the
+terminal's own shift-select copy path, so it needs a documented escape hatch or a
+per-session toggle."** E2-05 shipped wheel scrolling, E4-02 shipped click-to-focus
+through the shared geometry, and DB-7's panic hook restores mouse capture on the
+way out.
+
+**Disposition: promote as V-7, split from UX-9, after V-1.** UX-9 keeps text
+selection; V-7 owns the boundary.
+
+**Boundary resize is the honest first slice.** Dragging a divider is a
+hit-test-against-the-tree question the tree already answers. Click-to-target is
+already E4-02's job and needs nothing. What is genuinely new and genuinely
+delicate is **dragging a pane's edge to resize while the terminal's own selection
+is still live** — which means a grab threshold, a visible grab cursor, and
+UX-9's escape hatch, or users will discover that they can no longer select text
+by dragging. Ship the threshold.
+
+**Done-when.** Dragging a boundary resizes the correct node by at least two cells
+before committing, the terminal's own drag-select still works outside a boundary,
+and the escape hatch is documented in the same place UX-9 documents it.
+
+### V-8 Event-driven render
+
+**Proposed.** Not in the proposal. Taken from TUIOS's own headline claim.
+
+**Checked.** `app.rs:8111` polls crossterm at 33 ms under the comment "Poll events
+(~30fps)" and the loop draws a frame per iteration. Nothing in this plan addresses
+it — no item mentions frame rate, redraw, the render loop or idle CPU.
+
+**Disposition: promote as V-8, and this is the one to do first.** Zero
+dependencies, no layout code, no architectural consequence, and it is the only
+TUIOS idea that transfers without an argument.
+
+**The mechanism is already half-built.** That `else if` arm is a ready-made
+predicate for "something on screen is animating", already written and already
+correct. A dirty flag fed by the same set, plus a
+tick that only runs while a spinner is live, converts "redraw 30× a second" into
+"redraw when something changed, or 10× a second while a spinner is turning". The
+spinner is the one thing that genuinely needs a timer; nothing else does.
+
+**The trap is a frozen screen, and it is worse than a hot one.** Anything that
+updates state off the event path — a watcher batch, a health check, a background
+task, the collaboration sync — must set the dirty flag, or the UI will sit there
+lying about being current. `WorkspaceWatcher::next_batch` already returns on a
+250 ms timeout and `report_when_ready` on a timer, so there are at least two such
+paths today and probably more. The safe order is: add the dirty flag, keep the
+timer as a fallback heartbeat at a much lower rate, and only then drop the
+heartbeat once the test suite can prove a full session with no missed redraw.
+
+**Honesty requirement.** V-8's claim is "less CPU when idle", not a number. Measure
+idle CPU on this machine before and after and record both figures. If the
+difference is not worth the risk of a stale frame, say so in the commit and drop
+the item — this plan has dropped items for smaller reasons.
+
+**Done-when.** A recorded session with no input and no background work shows a
+materially lower idle CPU figure than the same session before the change, a
+spinner still animates, and no panel is ever observed stale — with the fallback
+heartbeat still in place at the moment the item closes.
+
+### V-9 Workspace transition inspector
+
+**Proposed.** U14, "workspace replay/debugging".
+
+**Checked.** QA-1 and EV-8 are **model-call** cassettes below the HTTP boundary —
+a different thing entirely, and QA-1's own close-out note warns against counting
+it twice. What exists on the UI side is **EV-2** (turn trace + TUI inspector) and
+**QA-3** ("EV-2's turn trace with decision markers is the flight recorder"). So
+the substrate is there and the UI-facing item is not.
+
+**But the framing must change, and the plan has already ruled on it.** GL-3 is
+"**Resume by re-verifying, never by replaying**", and the P-10 register rejects
+"Temporal-style deterministic replay for goals — no LLM-agent product has adopted
+it; re-verification is the cheaper honest equivalent". A layout that
+rearranges itself would be the least replayable thing in the product.
+
+**Disposition: promote as V-9, reframed from replay to inspection.** The question
+worth answering is not "reproduce last Tuesday's layout" but "**why is this pane
+here**" — which is a question about a decision, and QA-3's decision markers are
+already the right shape. Each layout change records what triggered it, so a view
+that rearranged itself can say so.
+
+**Done-when.** Every layout change since the session began is listed with its
+trigger, and a pane opened by a state change names that state — with the wording
+rule from S-13 applied: a permission-related change says which kind of control it
+is, because a UI that overstates its own authority gives false assurance.
+
+### V-10 Worker-event to window bridge
+
+**Proposed.** U15, the bridge from the agent orchestrator into the workspace.
+
+**Checked.** The event stream already ships — **WF-1** is done (W1, 2026-09-24),
+`xencode query --format ndjson` — and **EVd-1**'s run ledger plus **AR-6**'s
+session/task state are the sources. So this is a consumer, not a new pipeline.
+
+**Two hard limits, both already written.** S-6 #29: "xencode's TUI is one ratatui
+surface and cannot host a rival TUI in-process" — so the bridge **reads state and
+renders it**; it never embeds, proxies or takes over a worker's interface.
+OR-14's done-when: "'attach' only ever means handing the real terminal to a process
+that has one." And Milestone J's standing rule governs what a pane may show: a
+panel may only show data that came from the machine, the provider or the repo, and
+when it cannot get that data it says so in its own words — which is OR-12's
+"renders as unknown rather than as idle" restated for this surface.
+
+**Disposition: promote as V-10, after V-1, reading WF-1 and EVd-1.** It is the
+item that makes the proposal's best screenshot real — and it is bounded to
+*opening a window and reporting state*, with V-11's rearrange-or-refocus behaviour
+explicitly excluded.
+
+**Done-when.** A worker that stops on a permission request causes a pane naming
+the request to open, without moving focus; a worker xencode cannot observe renders
+as `unknown`, never as `idle` or `working`; and no code path in the bridge can
+move, resize or reorder an existing pane — asserted by a test, because that is the
+line V-11 draws and the easiest line to cross by accident.
+
+### V-11 Layout that rearranges itself — parked on existing evidence
+
+**Proposed.** U9, the full event-driven automatic layout.
+
+**Disposition: park.** Q-0 item 72 rejects it with the Gajos & Weld and Horvitz
+findings quoted in Finding 3, the Q-12 register carries the same row as standing,
+and §R-3 forbids re-proposing a register decision inside a wave. The defensible
+half — surfacing a fact the user did not ask about — is V-10 and is scheduled.
+
+Overturning this is a legitimate act and it needs an owner's decision plus a
+measurement, not an argument restated: a session recording of how often a
+user-dismissed auto-arrangement happened, and what the user did instead. Until
+that exists, the register stands.
+
+### V-12 Wave placement
+
+Ten items are scheduled and one is parked. Nothing renumbers an existing item.
+
+| wave | what it is | after V | before V |
+|---|---|---|---|
+| W1 | Make the agent observable | 16 | 15 |
+| W11 | Self-diagnosis, cost and operations | 20 | 19 |
+| W14 | Product surface and ecosystem | 66 | 58 |
+
+| ID | item | wave | bucket | depends on |
+|---|---|---|---|---|
+| **V-1** | Layout tree and window model, additive to `compute_layout` | W14 | core | nothing; gates V-2…V-7 |
+| **V-2** | Tabbed and stacked windows (`Stack` first) | W14 | capability | V-1 |
+| **V-3** | Split and resize on a tree | W14 | capability | V-1, UX-1 |
+| **V-4** | Named views, saved and recalled | W14 | capability | V-1, V-6 |
+| **V-5** | Layout templates as data, refining the shipped presets | W14 | capability | V-1, H1-01, H1-05, DB-2 |
+| **V-6** | Persist the arrangement, not the work | W14 | capability | V-1, DB-1, DB-2, SE-1 |
+| **V-7** | Pane-boundary mouse, split from UX-9 | W14 | capability | V-1, UX-9 |
+| **V-8** | Event-driven render, no 30 fps unconditional redraw | W11 | capability | nothing — pull forward |
+| **V-9** | Layout transition inspector, not replay | W1 | capability | V-1, EV-2, QA-3 |
+| **V-10** | Worker-event to window bridge | W14 | capability | V-1, WF-1 (done), EVd-1, AR-6 |
+| **V-11** | Layout that rearranges itself | — | park | declined in §V-3 |
+
+**Order.** **V-8 first**, because it has no dependencies and is not an argument
+about layout. Then **V-1**, which is the substrate and the only `core` item here.
+Then **V-5**, because making the presets templates is what lets V-1 stay additive
+and is the gate for deleting `compute_layout`. Then **V-6** and **V-4** together,
+since a view is only worth having if it survives a restart. **V-2** and **V-3**
+after that, and **V-7** last among the layout items because it is the one that can
+quietly break text selection. **V-9** and **V-10** are consumers and wait for
+V-1's tree to exist.
+
+### V-13 Additions to the do-not-build register
+
+Consolidated with the register at `:1879` and §S-8. Each follows from a decision
+above.
+
+- **A second focus concept.** `FocusArea` is the focus model; a `Window` carries
+  one. A parallel "which pane has focus" state is how focus bugs ship.
+- **A modal window-management keymap layer, or a prefix key with a chord tree.**
+  UX-1's "do not build a helix-grade keymap engine" and UX-2's "a vim preset means
+  undertaking to maintain a modal editor, which is a different product" already
+  decide this; V-3 ships geometry, not modality.
+- **A pane that moves, resizes or reorders itself.** V-10 opens and reports; V-11
+  is parked. The line is asserted by a test, not by convention.
+- **A terminal emulator or a PTY layer.** TUIOS's `internal/vt/` is the reason that
+  project is 2,808 commits. Xencode's panes are widgets drawing into one buffer and
+  have no need of it.
+- **A layout file format or a template directory.** Templates live in
+  `XencodeConfig` and inherit DB-2's ladder. A `~/.xencode/layouts/` ecosystem is
+  the same commitment the N register declined for themes.
+- **A workspace store.** The arrangement is JSON via DB-1's `write_atomic`. SQLite
+  and redb are already declined for session state.
+- **A second place agent state is rendered.** OR-12 is the worker panel. A
+  window-manager-shaped second surface over the same rows is the duplication S-6
+  #16 and Q-0 item 52 already closed.
+
+### V-14 Where to re-check this appendix
+
+**TUIOS facts** were read from the project's own repository and README on
+2026-09-28, not from the proposal: [github.com/Gaurav-Gosain/tuios](https://github.com/Gaurav-Gosain/tuios)
+— 4.0k stars, 155 forks, 2,808 commits, MIT, Go with Bubble Tea v2 / Lipgloss v2.
+The specific claims checked and confirmed there: BSP tiling with spiral and
+smart-split schemes; master-stack and scrolling layouts; 9 workspaces; a `Ctrl+P`
+fuzzy command palette; daemon mode with detach/reattach and session resurrection
+after a daemon restart; the right-hand session rail covering sessions, terminals,
+files, git state and agents; mouse support including window drag and resize; saved
+layout templates; and the "event-driven rendering / zero CPU at idle" claim with
+its stated mechanism (PTY reader goroutines signalling the UI over a buffered
+channel, no fixed-rate ticking). Its component list — `internal/app/os.go`,
+`internal/vt/`, `internal/app/render.go`, `internal/input/` — is quoted in Finding
+1. Depth beyond the README was **not** read: the architecture guide, `AGENT_STATE.md`,
+`SESSIONS.md` and `LAYOUT_MODES.md` were not fetched, so anything this appendix
+says about TUIOS's *internals* is at README depth and marked as such.
+
+**Xencode facts** are verifiable by file:line in this repository and were re-read on
+2026-09-28 — `layout.rs` (336 lines, `LAYOUT_NAMES` at `:14`, `BodyLayout` at
+`:43-49`, `compute_layout` at `:81`), `focus.rs:12-37` (24 variants), and
+`app.rs:8111` (the 33 ms poll).
+
+**No external claim is load-bearing for any disposition.** Every V item's
+disposition rests on a file:line in this repository or on text already recorded in
+this file, which is the standard the earlier appendices set.
+
+**Standing caveat.** Nothing here is permission to build, and this is the second
+appendix in two days that says so. The honest summary of this one: **V-8 is worth
+doing now, V-1 is worth designing carefully, and nine of the fifteen proposed
+features are already this plan's items or already declined by it.**
