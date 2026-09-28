@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1505 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1509 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2641,6 +2641,44 @@ classifier that does not exist.
   without a second target, and the plan's UNVERIFIED warning stands unchanged:
   this is one data point, not a finding about LLM-authored properties in
   general.
+
+  **VF-4-B experiment, done 2026-09-28 — the second target, `covdiff::intersect`.**
+  Same discipline: four seeded defects, each breaking one rule (unknown reported
+  as uncovered, unknown reported as covered, files with no data dropped
+  silently, a line counted as covered when it ran in *any* file rather than its
+  own). Same four property classes, same metric, asserted in code:
+
+  | property | `touched_files` (A) | `intersect` (B) |
+  |---|---|---|
+  | vacuous | 0 of 4 | **0 of 4** |
+  | weak | 1 of 4 | **1 of 4** |
+  | candidate LLM-style | 2 of 4 | **3 of 4** |
+  | hand-written exact | 4 of 4 | **4 of 4** |
+  | existing example tests | 2 of 4 | **3 of 4** |
+
+  **This is the B outcome: a different failure shape, which is the more valuable
+  one.** The candidate performs *better* here (3 of 4) than on `touched_files`
+  (2 of 4) — and what it misses is different each time. On `touched_files` it
+  missed duplicates and dropped new files; on `intersect` it misses exactly one
+  defect, cross-file misattribution, which is the subtlest of the four and the
+  shape of the macro/derive trap the plan names for VF-2. A generic "LLM
+  properties are weak" claim would be wrong in both directions: too harsh here,
+  too kind there. What survives both targets is narrower and more useful:
+  **candidate properties miss the defect that requires target semantics to see**
+  — duplicates and new-file handling in a diff parser, file attribution in a
+  coverage join.
+
+  The example tests tell the same story from the other side: 3 of 4 here, and
+  the one they miss is *also* cross-file misattribution, because neither of the
+  two existing fixtures puts the same line number in two files. The blind spot
+  is in the fixtures, not in the property class — which is why the seeded-defect
+  score matters more than the count of tests.
+
+  **The VF-4-A conclusion is not upgraded.** Two targets do not make a finding
+  about LLM-authored properties in general, and the warning stands. What two
+  targets do establish is the evaluation method: same defects-per-rule, same
+  four classes, same metric, asserted in code. That method is what any future
+  third target would reuse, and it is the only thing here that generalises.
 - **VF-5 `cargo nextest` as the runner** — filtersets give real build-graph
   selection (`rdeps(<crate>)`), `--stress-count` is flake detection,
   `--flaky-result fail` and JUnit `<flakyFailure>` are the quarantine hook, and

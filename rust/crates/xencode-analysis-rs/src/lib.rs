@@ -6,6 +6,8 @@ pub mod issues;
 pub mod mutation;
 #[cfg(test)]
 pub mod property_eval;
+#[cfg(test)]
+pub mod property_eval_intersect;
 pub mod runtime_hazards;
 pub mod security;
 pub mod web;
