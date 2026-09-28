@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode toolchain`, the Rust toolchain kit as gated tools
+### Added — `xencode generate`, shell completions and a man page from the clap definition
+
+`xencode generate completions --shell <bash|fish|zsh>` and `xencode generate
+man` emit both from the command definition via `clap_complete` and
+`clap_mangen`. Committed under `docs/completions/` and `docs/man/xencode.1`.
+
+Drift — the trap — is enforced twice: a unit test regenerates all four
+artifacts in memory and asserts byte-equality with the committed files, so
+drift fails `cargo test` before reaching CI; and a CI job regenerates them and
+fails on `git diff`. The files are never edited. The fish completions name
+every subcommand including the five added this session.
+
+Two tests.
+
+
 
 Four commands an agent repair loop needs, each reporting structured evidence:
 `toolchain lint` runs `cargo clippy --message-format=json` and summarizes by
