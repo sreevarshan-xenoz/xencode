@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1501 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1505 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2613,6 +2613,34 @@ classifier that does not exist.
   local and reproducible. **M**. Trap: LLMs generate *vacuous* properties
   (round-tripping already-canonical data passes forever). UNVERIFIED how far
   that generalises; it is an eval question, not a tooling one.
+
+  **VF-4-A experiment, done 2026-09-28 — the eval question asked first, on one
+  target.** `touched_files` (the diff parser the repair gate depends on) against
+  four seeded defects, each breaking exactly one rule (keep `/dev/null`, allow
+  duplicates, keep the `b/` prefix, drop new files). Property effectiveness =
+  seeded defects caught / seeded defects introduced, asserted in code rather
+  than reported in prose:
+
+  | property | caught / 4 | what it is |
+  |---|---|---|
+  | vacuous (`len(output) <= len(patch)`) | **0** | runs, passes, proves nothing |
+  | weak (non-empty when `+++ b/` present) | **1** | passes while missing almost everything |
+  | candidate LLM property (no `/dev/null`, no `b/` prefix) | **2** | partial — meaningful but incomplete |
+  | hand-written exact (output equals the expected file list) | **4** | the only one that constrains behaviour |
+
+  The existing example-based unit test on the same fixture catches **2 of 4**
+  (no deletion or duplicate in its fixture, so those two defects are invisible
+  to it). A 256-case proptest over generated patches checks the strong
+  invariants on the correct implementation and passes.
+
+  **Result: partially confirmed, on this one target.** Vacuity is real and
+  measurable — the vacuous property passes on the correct code *and* on all four
+  defects — and partial properties are the more likely failure mode than pure
+  tautologies: the candidate LLM property looks like a real check and still
+  misses half the defects. Nothing here generalises beyond `touched_files`
+  without a second target, and the plan's UNVERIFIED warning stands unchanged:
+  this is one data point, not a finding about LLM-authored properties in
+  general.
 - **VF-5 `cargo nextest` as the runner** — filtersets give real build-graph
   selection (`rdeps(<crate>)`), `--stress-count` is flake detection,
   `--flaky-result fail` and JUnit `<flakyFailure>` are the quarantine hook, and

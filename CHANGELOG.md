@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode mutants`, which finds the code no test can tell from correct
+### Experiment — VF-4-A: do properties constrain behaviour, or only run?
+
+Before building any property-testing architecture, one target
+(`mutation::touched_files`, the diff parser the repair gate depends on) against
+four seeded defects, each breaking exactly one rule. Effectiveness = seeded
+defects caught / seeded defects introduced, asserted in code:
+
+- vacuous property: **0 of 4** — runs, passes, proves nothing;
+- weak property: **1 of 4** — passes while missing almost everything;
+- candidate LLM-authored property: **2 of 4** — meaningful but incomplete;
+- hand-written exact property: **4 of 4** — the only one that constrains behaviour.
+
+The existing example-based test catches 2 of 4 on the same fixture. A 256-case
+proptest checks the strong invariants on the correct implementation and passes.
+
+**Partially confirmed, on this one target only.** Vacuity is real and measurable,
+and partial properties — checks that look real and miss half the defects — are
+the more likely failure mode than pure tautologies. Nothing generalises beyond
+`touched_files` without a second target.
+
+Four tests in `xencode-analysis-rs/src/property_eval.rs` (test-only module, not
+shipped), plus `proptest 1.11` as a dev-dependency.
+
+
 
 Mutation testing answers the question coverage cannot: not "did this line run"
 but "did running it catch anything". `cargo mutants` changes an operator or a
