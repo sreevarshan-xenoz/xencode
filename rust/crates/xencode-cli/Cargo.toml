@@ -20,7 +20,6 @@ xencode-tui-rs = { path = "../xencode-tui-rs" }
 xencode-server-rs = { path = "../xencode-server-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
-xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
 xencode-colab-rs = { path = "../xencode-colab-rs" }
 clap = { version = "4", features = ["derive"] }
@@ -36,3 +35,4 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 
 [dev-dependencies]
 tempfile = "3"
+xencode-collaboration-rs = { path = "../xencode-collaboration-rs" }

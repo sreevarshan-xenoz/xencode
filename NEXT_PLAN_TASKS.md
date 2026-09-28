@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1509 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1512 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1607,7 +1607,40 @@ never is.
   --clippy`, `clippy --message-format=json` summarized, `cargo fmt`,
   `cargo-shear`. S each. Trap: `cargo fix` overwrites edits made since the last
   build — sequence after build-green, before commit. Done-when: the L-7 loop
-  drives a clippy count to 0 with JSON evidence before/after.
+  drives a clippy count to 0 with JSON evidence before/after. **Done 2026-09-28**
+  — `xencode toolchain <lint|fix|fmt|shear>` in `xencode-analysis-rs/src/
+  toolchain.rs`, each reporting structured evidence rather than terminal prose.
+
+  **The plan's fix command does not exist.** `cargo fix` takes no `--clippy`
+  flag; the working command is `cargo clippy --fix`, confirmed by running it on
+  a scratch crate and watching it apply the fix. A kit recording a command
+  nobody can run would be the false confidence this project keeps refusing, so
+  the module runs the real one and the rendered command line says so.
+
+  **The done-when was proved on a scratch crate with a seeded `needless_return`,
+  JSON evidence on both sides:** `toolchain lint --format json` reported count 2
+  (`clippy::needless_return` twice), `toolchain fix` applied the fix with a
+  `src/lib.rs | 2 +-` diffstat, and `toolchain lint` again reported count 0 with
+  the `return` gone.
+
+  **The trap fired during the proof, twice.** First the fix was refused: the
+  scratch repo had committed its own `target/` directory, so the gate saw 11
+  deleted build artifacts and declined rather than risk overwriting work — which
+  is exactly what it is for. Then, after the seed was committed cleanly, the fix
+  ran and reported precisely what it changed.
+
+  **The kit then audited its own repository.** `toolchain shear` (cargo-shear
+  1.14.0, installed for this) reported four findings, all verified by reading
+  the code and all fixed: unused `tempfile` and `thiserror` in
+  `xencode-agents-rs`, unused `serde` (derive) in `xencode-mcp-rs`, and
+  `xencode-collaboration-rs` used only by an integration test in `xencode-cli`
+  and therefore moved to `[dev-dependencies]`. Shear now reports clean.
+
+  Three tests, including one that builds a temp git repo, dirties a file, and
+  asserts the refusal names it and leaves it untouched — the gate test the VF-4
+  experiments would demand, since a hardcoded-string assertion would prove
+  nothing. (The first version of that test *was* a hardcoded string, and it was
+  replaced for exactly that reason.)
 - **CI-6 `what_breaks` impact analysis** — reverse-dependency list for an edit
   target from the existing dep graph. M. Trap: regex-grade accuracy on call
   sites, so label the confidence explicitly. Done-when: editing `symbols.rs`

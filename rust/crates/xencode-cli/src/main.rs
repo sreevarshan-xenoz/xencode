@@ -387,6 +387,20 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Run the project's own toolchain checks, and report structured evidence
+    Toolchain {
+        /// What to run: lint, fix, fmt, or shear
+        action: String,
+
+        /// Allow `fix` on a tree with uncommitted edits
+        #[arg(long)]
+        allow_dirty: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Find code whose tests cannot tell right from wrong
     Mutants {
         /// Only mutants in the diff against this ref
@@ -978,6 +992,11 @@ async fn main() {
             dry_run,
             format,
         } => run_anchor(path, timeout, dry_run, format),
+        Commands::Toolchain {
+            action,
+            allow_dirty,
+            format,
+        } => run_toolchain(&action, allow_dirty, format),
         Commands::Mutants {
             diff,
             timeout,
@@ -3864,6 +3883,129 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 /// The scratch fixture is built in a temporary directory and removed afterwards,
 /// so running the probe never leaves anything in the workspace and never touches
 /// a file the operator cares about.
+fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::toolchain as kit;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let manifest = kit::manifest_dir(&root)?;
+    let as_json = matches!(format, OutputFormat::Json);
+
+    match action {
+        "lint" => {
+            let report = kit::clippy_report(&manifest)?;
+            if as_json {
+                let out = serde_json::json!({
+                    "command": report.command,
+                    "count": report.count(),
+                    "by_lint": report.by_lint().iter().map(|(l, n)| serde_json::json!({
+                        "lint": l, "count": n,
+                    })).collect::<Vec<_>>(),
+                    "diagnostics": report.diagnostics.iter().map(|d| serde_json::json!({
+                        "lint": d.lint, "level": d.level, "message": d.message,
+                        "file": d.file, "line": d.line, "suggestion": d.suggestion,
+                    })).collect::<Vec<_>>(),
+                    "notes": report.notes,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!("\n  {}", report.summary());
+                for d in &report.diagnostics {
+                    let at = match (&d.file, d.line) {
+                        (Some(f), Some(l)) => format!("{f}:{l}"),
+                        (Some(f), None) => f.clone(),
+                        _ => "(no location)".to_string(),
+                    };
+                    let fixable = if d.suggestion {
+                        " [machine-fixable]"
+                    } else {
+                        ""
+                    };
+                    println!("\n    {}{} — {} ({})", d.lint, fixable, d.message, at);
+                }
+                for note in &report.notes {
+                    println!("\n  note: {note}");
+                }
+            }
+            if report.count() == 0 {
+                Ok(())
+            } else {
+                Err(format!("{} clippy diagnostic(s)", report.count()))
+            }
+        }
+        "fix" => {
+            let outcome = kit::cargo_fix(&manifest, &root, allow_dirty)?;
+            if as_json {
+                let out = serde_json::json!({
+                    "command": outcome.command,
+                    "changed": outcome.changed,
+                    "diffstat": outcome.diffstat,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?
+                );
+            } else if outcome.changed {
+                println!("\n  fix changed files:\n\n{}", outcome.diffstat);
+            } else {
+                println!("\n  fix changed nothing");
+            }
+            Ok(())
+        }
+        "fmt" => {
+            let clean = kit::fmt_check(&manifest)?;
+            if as_json {
+                println!("{}", serde_json::json!({ "clean": clean }));
+            } else {
+                println!(
+                    "{}",
+                    if clean {
+                        "\n  formatting is clean"
+                    } else {
+                        "\n  formatting differs — run `cargo fmt`"
+                    }
+                );
+            }
+            if clean {
+                Ok(())
+            } else {
+                Err("formatting differs".to_string())
+            }
+        }
+        "shear" => {
+            let report = kit::shear(&manifest);
+            if as_json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "clean": report.clean, "lines": report.lines })
+                );
+            } else if report.clean {
+                println!("\n  no unused dependencies reported");
+            } else {
+                println!("\n  shear says:");
+                for line in &report.lines {
+                    println!("    {line}");
+                }
+            }
+            for line in &report.lines {
+                if line.contains("not installed") {
+                    return Err("cargo-shear is not installed".to_string());
+                }
+            }
+            if report.clean {
+                Ok(())
+            } else {
+                Err("unused dependencies reported".to_string())
+            }
+        }
+        other => Err(format!(
+            "unknown toolchain action {other:?} — want lint, fix, fmt, or shear"
+        )),
+    }
+}
+
 fn run_mutants(
     diff: Option<String>,
     timeout: u64,

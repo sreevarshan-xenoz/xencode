@@ -3772,8 +3772,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -3902,7 +3900,6 @@ dependencies = [
 name = "xencode-mcp-rs"
 version = "0.1.0"
 dependencies = [
- "serde",
  "serde_json",
  "tempfile",
  "thiserror",
