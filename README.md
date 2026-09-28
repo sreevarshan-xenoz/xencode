@@ -14,7 +14,7 @@ approval-gated agentic tool loop, and has deep terminal ergonomics.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/sreevarshan-xenoz/xencode/ci.yml?label=CI&logo=github&style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/actions)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust&style=flat-square)](#option-a-rust-binary-recommended)
-[![Version](https://img.shields.io/badge/version-0.1.0-8A2BE2?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0?style=flat-square)](https://github.com/sreevarshan-xenoz/xencode/releases)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 

@@ -13,7 +13,10 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui
+- [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui, advisories
+  (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
+  `help`, are the 24 the binary lists; `advisories` was missing from this line when
+  RS-5 shipped it)
 - [x] Workspace gates green — 15 crates, 1375 tests passing, 17 ignored, zero warnings
 
 ## Real-Time Intelligence (Phase 3+)
