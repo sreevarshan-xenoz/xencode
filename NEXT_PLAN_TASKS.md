@@ -10042,3 +10042,335 @@ this file, which is the standard the earlier appendices set.
 appendix in two days that says so. The honest summary of this one: **V-8 is worth
 doing now, V-1 is worth designing carefully, and nine of the fifteen proposed
 features are already this plan's items or already declined by it.**
+
+---
+
+## Milestone W — the control-plane direction, measured on this machine (research appendix, drafted 2026-09-28)
+
+### W-0 The short version
+
+A fourth external proposal in this family arrived on 2026-09-28, and it is the
+same proposal as Milestone S with a different diagram. The direction — *Xencode is
+agent-agnostic infrastructure above other coding agents, not another agent, and not
+a model provider* — is **already this plan's stated direction**, recorded in S's
+header as the owner's own unprompted sentence: *"Xencode should not become another
+coding agent that happens to launch Claude/Codex. Xencode becomes the orchestration
+layer above coding agents."*
+
+So the honest first finding is that most of it needs no new IDs. The proposal's
+`I0`–`I7` map onto existing items almost one to one:
+
+| proposed | already planned as |
+|---|---|
+| I0 agent archaeology | **S-0** (done 2026-09-23) — needs the refresh in §W-1 |
+| I1 generic agent registry | **AR-2** (inventory, no install) + **AR-3** (capability probe) |
+| I2 protocol layer, protocols over scraping | **AR-3**, plus M-5/M-6/M-7 |
+| I3 normalized event bus | **AR-4** (into `WF-1`'s shape) + **AR-9** (`AgentEvent`) |
+| I4 Xencode session manager | **AR-5** — "task record, not session mirror" |
+| I5 context bridge between agents | **AR-7** — the worker package |
+| I6 workspace runtime | **Milestone V** — `V-1`…`V-10` |
+| I7 orchestration | **OR-1`…OR-17`**, W16/W17 |
+| "do not build an agent marketplace/installer" | **AR-2** and **S-8** already say so |
+
+S-8's wording is worth quoting because it answers the proposal's own argument
+better than the proposal does: *"a xencode-curated list of other companies'
+autonomous binaries is a supply-chain liability with no product pull"*, and
+*"Installing or authenticating anything on the user's behalf. Not a budget
+question: this box's agents are `mise`-managed by the user's own hand, and account
+auth is a browser flow that belongs to a human."* That second sentence is also why
+§W-6 is blocked on the owner rather than on research.
+
+Three further things in the proposal are already decisions rather than gaps: the
+name **XAR** is declined at §S-11 for the third time in this file; S-13 already
+carries the three-mode control table the proposal rediscovers as "Xencode policy →
+agent-native policy"; and AR-2's text already says the inventory is recorded
+"without installing, upgrading or touching any of them", which is the proposal's
+own argument against a marketplace.
+
+**What the proposal does add is one architectural distinction worth keeping**, and
+§W-4 takes it. What it does not add is any reason to re-plan. The plan's gate has
+been `AR-1` since 2026-09-23, and `AR-1` needs live captures this appendix does not
+have. So rather than write a fourth plan of the orchestrator, this one went and
+ran the part that could be run: `AR-1`'s precondition, refreshed `S-0`, plus a
+free, zero-credential protocol probe. Three findings came back and two of them
+change the shape of the work.
+
+### W-1 S-0 refreshed: seven agents, not six, and the table had drifted in five days
+
+Probed on this machine on 2026-09-28 with `--version` and `--help` only. No agent
+was launched, no credentials were used, nothing was spent. `kilo` is **not
+installed**, so every claim about it below is UNVERIFIED and is not recorded as
+fact.
+
+| | codex | claude | gemini | **cline** | opencode | crush |
+|---|---|---|---|---|---|---|
+| version | 0.157.1 | 2.1.283 | 0.61.0 | **3.0.62** | 1.18.31 | **v0.96.1** |
+| was (2026-09-23) | 0.156.1 | 2.1.280 | 0.60.0 | *absent* | 1.18.31 | *printed none* |
+| headless one-shot | `codex exec` | `-p/--print` | `-p/--prompt` | `cline "…"` | `opencode run` | `crush run` |
+| machine-readable stream | `--json` (JSONL) | stream-json | stream-json | **`--json` (NDJSON)** | `--format json` | not seen |
+| **ACP** | not seen | not seen | **`--acp`** | **`--acp`** | `opencode acp` | not seen |
+| vendor daemon | `app-server daemon`, `agents`, `remote-control` | `--bg`, `claude attach/logs/stop/rm/agents` | not seen | **`cline hub`, `-z/--zen`** | `opencode serve` + `attach <url>` | not seen |
+| MCP client | `codex mcp` | `claude mcp` | `gemini mcp` | `cline mcp`, `cline config mcp` | `opencode mcp` | not seen |
+| **per-request tool approval** | not seen | not seen | not seen | **`CLINE_TOOL_APPROVAL_MODE=desktop` + `CLINE_TOOL_APPROVAL_DIR`** (file IPC) | not seen | not seen |
+| worktree isolation | not seen | not seen | **`--worktree`** | `--data-dir` (implicit sandbox) | per-session project | `--cwd` |
+| approval ladder | `--sandbox`, `--ask-for-approval` | `--permission-mode`, `--allowed-tools` | **`--approval-mode default\|auto_edit\|yolo\|plan`** | `--auto-approve [true\|false]`, `--yolo`, `-p/--plan` | not in `run --help` | `--yolo` |
+| policy files | `-c key=value` | `--settings` | **`--policy`, `--admin-policy`** (Policy Engine; `--allowed-tools` deprecated) | `--config`, `--hooks-dir` | `opencode.json` | `--data-dir` |
+| hooks | `HooksList` in schema | hooks | `gemini hooks` | **`--hooks-dir`, `cline hook`** | plugins | not seen |
+| vendor session store + resume | `resume`, `fork`, `queue`, `archive` | `--resume`, `--fork-session` | `--resume`, `--session-id`, `--session-file` | **`--id <session-id>`, `cline history`** | `session list/delete`, `export`/`import` | `--session`, `--continue` |
+| vendor own review | `codex review` | `--from-pr` | not seen | not seen | not seen | not seen |
+| vendor doctor | `codex doctor` | `claude doctor` | not seen | **`cline doctor`, `doctor fix`, `doctor log`** | `opencode debug` | `--debug` |
+| protocol schema on disk | **`app-server generate-json-schema` (§W-2)** | not seen | not seen | not seen | SDK | not seen |
+
+Three drifts, all checkable. **`cline` was never in S-0's table** and is a
+seventh agent with an ACP mode, an NDJSON stream, a hub daemon, MCP, hooks and a
+doctor. **`gemini` gained `--acp`** — S-0 recorded "not seen" and the T-1 audit
+already corrected it from documentation, and today it is in `--help`. And
+**`crush` now prints a version**, where S-0 recorded that it printed none.
+
+### W-2 The protocol schema exists, offline, for free — this is the useful finding
+
+`AR-9` is blocked on "the minimum common event protocol these CLIs can actually be
+normalised into", and its rule is that the protocol must be derived from observed
+behaviour rather than a wish list. One vendor publishes its protocol as
+machine-readable JSON Schema, and it can be generated from the installed binary
+with no account, no network and no spend:
+
+```text
+$ codex app-server generate-json-schema --out cxs
+$ find cxs -type f | wc -l
+314
+```
+
+314 schema files under `cxs/v2/`, covering roughly 190 distinct request, response
+and notification types. This is a help-adjacent artefact, so it is still not
+AR-1's live capture, and the subcommand is labelled `[experimental]`. But it is
+the first protocol definition available on this machine, and it is worth reading
+closely for three reasons.
+
+**It has the correlation identity an event bus needs.** `FileChangePatchUpdated`
+carries `{changes, itemId, threadId, turnId}`; `TurnDiffUpdated` is documented as
+"the turn-level unified diff has changed. Contains the latest aggregated diff
+across all file…". So a vendor has already settled the `(thread, turn, item)`
+triple that AR-9 would otherwise have to invent, and has an aggregated turn-level
+diff — which is the same object the plan's own `git diff` derivation is trying to
+reconstruct from the outside.
+
+**It has a permission vocabulary that is almost the plan's.** `PermissionProfileList`
+is a queryable request, and it appears in `ThreadStartResponse`,
+`ThreadResumeResponse`, `ThreadForkResponse` and `ThreadSettingsUpdatedNotification`
+— so a thread carries a permission profile and the profile can change while the
+thread runs. Observed values across the schema are `read-only`/`readOnly`,
+`workspace-write`, `danger-full-access`, and approval policies `untrusted`,
+`on-request`, `never`, `auto`. That is CAP-1's "capabilities as the vocabulary of
+the gate" and MD-1/MD-2's approval modes, already published by a vendor as
+enumerations. It does not settle xencode's gate, but it is a concrete target to
+disagree with, which is more than the plan had.
+
+**It contains four events that bear directly on items this file has already
+decided.** `ModelRerouted` — the model changed mid-turn, which is exactly the
+condition QTR-2's locality filter and xencode's promise that a turn never moves
+somewhere the primary would not have sent it exist to prevent, and it means that
+promise is only ever about *xencode's own* routing. `ThreadGoalSet`/`Get`/`Clear`/
+`Updated` — first-class goal state on a thread, which is GL-4's `xencode goal`.
+`SkillsList`, `PluginList`, `HooksList`, `McpServerStatusUpdated` — a plugin, skill,
+hook and MCP surface, which is M-3 and M-4's territory. And
+`ExternalAgentConfigImport` with `…HistoriesRead` and `…Progress` — importing
+configuration from *another* AI coding agent, which extends S-0's "import from a
+rival" row from one vendor to two and is a supply-chain surface §W-5 notes.
+
+`ItemGuardianApprovalReviewStarted` is marked `[UNSTABLE]` in its own description —
+"Temporary notification payload for approval auto-review. This shape is expected to
+change soon" — which is the right thing for the record to say about any schema
+taken from an experimental subcommand.
+
+**What this does not do.** It does not show that any of the other six agents can be
+normalised toward it, and it does not establish that a single shared event schema
+exists across vendors. T-1's careful wording — that the CLIs "expose event streams,
+not that those streams share an event schema" — still stands. What changed is that
+one end of the problem now has a published definition to be measured against,
+which is what AR-9's done-when asks for.
+
+### W-3 What the measurement changes in the plan
+
+Four items move, and no ID is added or removed.
+
+**`AR-1`'s capture list gains an agent and a schema source.** Six CLIs become
+seven. `cline` needs a row, and because its approval route is file-based IPC
+rather than a stream event, AR-1's capture list should read a decision file as well
+as a stream. And the protocol column has a reference implementation to diff
+against instead of a blank cell.
+
+**`AR-9` gets an anchor instead of a wish list.** Its draft event list —
+`SessionStarted`, `Message`, `ToolRequested`, `ToolStarted`, `ToolOutput`,
+`FileChanged`, `PermissionRequested`, `Error`, `Completed`, `SessionEnded` — maps
+onto the Codex schema without invention: threads for sessions, `AgentMessageDelta`
+and `ItemStarted`/`ItemCompleted` for messages and tools, `FileChangePatchUpdated`
+and `TurnDiffUpdated` for file changes, `PermissionProfileList` plus
+`StrictReviewRequiredNotification` for permissions, `TurnCompleted` for
+completion, `ThreadClosed` and `ProcessExited` for the end. **AR-9 should adopt
+the correlation triple and treat the rest as a naming question**, and it should
+record the `[experimental]` and `[UNSTABLE]` markers next to anything it copies.
+
+**`AR-2`'s done-when is stale on arrival and should be rewritten before it is
+built.** It reads: "on this box it lists codex/claude/gemini/opencode/agy/crush
+with the six versions from S-0 and says nothing about the rest of the filesystem."
+Two problems. It hardcodes six agent names, and one of them — `agy` — is **not
+installed on this machine now** (probed 2026-09-28: absent), so the item would
+fail its own done-when on day one. More importantly, a done-when that names the
+agents is a done-when that goes stale: S-0's table drifted in five days. The
+durable form is "every executable matching a known agent name on `PATH`, each
+reported with the version and the probe date", which is a discovery loop rather
+than a list. AR-3's rule already points the right way — "the router cannot see a
+capability that no probe recorded" — and that is **stricter and better than the
+proposal's hand-written checkmark matrix**, because a matrix someone maintains by
+hand is the same artifact that just went stale.
+
+**S-13's first row may no longer be "Unconfirmed".** The table says per-request
+approval is "Unconfirmed", with a 2026-09-23 Claude route noted as needing a
+round-trip probe. Cline documents a third mechanism: set
+`CLINE_TOOL_APPROVAL_MODE=desktop` and `CLINE_TOOL_APPROVAL_DIR`, and "in desktop
+mode, CLI writes a request JSON file and waits for a matching decision JSON file."
+That is a genuine per-request approval round trip with a file-based transport,
+which is the easiest of the three modes to broker and the easiest to test. It
+does not close the row — S-13's rule is that the control mode is a **field on each
+agent row, rendered, not inferred**, and nothing has been observed at runtime yet
+— but it gives AR-1 a second, cheaper target besides Claude's
+`--permission-prompt-tool`.
+
+### W-4 The one architectural distinction the proposal adds, and where it stops
+
+The proposal argues that Xencode should provide "zero proprietary models" and
+should not build a model catalog, a model router or provider SDKs, and that the
+agents are replaceable while Xencode is the control plane. **The first half is
+already true and was never in doubt.** This project has never shipped a model;
+the register rejects managed GPU clouds (L) and auto-updating dependencies (N-4);
+and `PR-2` makes cloud deny-by-default with an explicit opt-in. Nothing needs
+un-building.
+
+The second half deserves a sharper line than the proposal draws, because the
+proposal's version would delete work that is load-bearing. The distinction is
+**model client versus agent runtime**:
+
+- The **model client** (`xencode-providers-rs`) is how xencode asks *a model* for a
+  completion. It has two live call sites in the TUI today: the agent turn at
+  `app.rs:6720` and `/review` at `app.rs:6629`. Its panels need it, and the
+  local-first promise is a promise about it.
+- The **agent runtime** is how xencode *acts* — reads, edits, runs commands, loops
+  until done. That is what Cline, OpenCode, Codex, Claude Code and Kilo already
+  are. The plan already refuses to compete here: M-7/M-6 own the interop surface,
+  S's §S-2 boundary puts "sessions, subagents, model fallback, sandboxing and
+  health" in the **vendor-local** column, and the register rejects multi-agent A/B
+  swarms (N-3).
+
+So the correct reading of the proposal is not "delete the inference layer" but
+**"stop growing the agent loop, keep the model client, and spend the freed effort
+on interop"** — which is what §S-2 already says and what `AR-*`/`OR-*` already
+spend their effort on.
+
+One sub-claim deserves recording because it is the opposite of what the plan
+assumed. The proposal says xencode "doesn't need to know which model generated the
+response unless that metadata is voluntarily exposed". True as a rule — and at
+least one vendor does expose it, per §W-2: `ModelRerouted`,
+`ThreadTokenUsageUpdated`, `AccountRateLimitsUpdated`, `ModelList`,
+`ModelProviderCapabilitiesRead`. CX-3's honest local cost and CX-4's price lookup
+need exactly that, so "voluntarily exposed" is a real and reachable case rather
+than a hypothetical.
+
+And the proposal's "no hardcoded intelligence hierarchy" is already the plan's
+position, not a change to it: **AC-3** is a rule-based task-shape router,
+**QTR-2** is a locality filter, and the register rejects learned or A/B model
+preference (N-3). There is no vendor-preference table anywhere in this file, and
+W-4 does not add one.
+
+### W-5 Safety findings this measurement adds
+
+These are constraints on any orchestration work, and two of them are new.
+
+**A backgrounded worker is an auto-approved worker.** Cline's `--zen` "fires the
+task to the background hub daemon and exits the CLI immediately", and the README
+is explicit about the consequence: "Because there is no human in the loop once the
+CLI exits, zen sessions run with full tool auto-approval (same semantics as
+`--yolo`)". Any plan that fires a task and walks away is therefore running a
+worker with no approval gate, and the approval gate xencode draws around it
+(SE-4, CAP-1, OR-3) does not reach inside the worker. This is the concrete shape
+of Q-12's register row "An always-on daemon, autonomous commit/push, or a second
+scheduler/approval channel", and it applies to `AR-6` and `OR-*` as much as to
+Cline. **An orchestrator must treat a detached worker as an unapproved worker and
+say so in the panel.**
+
+**A vendor now ships the control path this plan's register rejects.** `cline
+connect` bridges Telegram, Slack, Google Chat, WhatsApp and Linear, mapping "each
+conversation thread to a session with full context". The N-6 register rejects
+"Telegram/Discord as a primary control path — an inbound-capable agent is RCE for
+anyone who can message it". Nothing changes for xencode, which will not expose
+this, and the risk calculus is *worse* not better because a user who has it
+installed has the capability sitting next to the tool. Two practical consequences:
+`--data-dir` "enables sandbox mode automatically" and is the documented way to
+isolate a run, so AR-1's captures should use it; and no xencode surface may ever
+accept a chat-platform webhook.
+
+**Importing a rival agent's configuration is a supply-chain surface.**
+`ExternalAgentConfigImport` means one agent will read and apply another agent's
+config. QX-1's cross-repo read context and M-4's `plugin install <git-url>` are
+adjacent, and neither is currently modelled as untrusted input. It belongs in SE-2's
+untrusted-content marking.
+
+**`ModelRerouted` bounds xencode's own guarantee.** The README promises a turn
+never moves somewhere the chosen model would not have sent it. That promise is
+about xencode's fallback chain. If a vendor reroutes mid-turn, xencode's locality
+filter never saw it, and the honest report has to say which of the two happened.
+
+### W-6 What AR-1 needs now, concretely
+
+AR-1 is unchanged as an item and still undone — it needs observed cells, and this
+appendix has help text and a schema, not runs. But it is cheaper and better
+specified than it was on 2026-09-23:
+
+1. **Seven CLIs, not six**, with `agy` recorded as absent rather than assumed.
+2. **A schema to diff against** for the protocol column, regenerable with
+   `codex app-server generate-json-schema`, and to be re-generated per run so a
+   drift is visible.
+3. **Two permission round trips to try** instead of one: Claude's
+   `--permission-prompt-tool`, and Cline's `CLINE_TOOL_APPROVAL_MODE=desktop` file
+   IPC, which is the cheaper of the two to observe.
+4. **`--data-dir` on every capture**, per §W-5.
+5. **A measured cost figure for a five-worker fan-out**, still the one cell
+   nothing in this file can supply.
+
+The blocker is unchanged and it is the owner's: AR-1 needs the user's own
+logged-in accounts and a real, tiny, read-only spend. That is a decision, not a
+research task, and it is the single thing standing between this file and any
+`OR-*` work.
+
+### W-7 Where to re-check this appendix
+
+**Local probes, 2026-09-28.** `opencode 1.18.31`, `cline 3.0.62`,
+`codex-cli 0.157.1`, `claude 2.1.283 (Claude Code)`, `gemini 0.61.0`,
+`crush v0.96.1` — each from `--version`, and each capability row from `--help`
+plus the named subcommand's `--help`. `codex app-server generate-json-schema
+--out <dir>` produced 314 files under `v2/`, quoted by name in §W-2. `kilo` is not
+installed and is not characterised. `agy`, listed in AR-2's done-when, is **not
+installed** and is reported absent.
+
+**Cline's row is the one place this appendix goes beyond `--help`**, because
+`cline mcp`, `cline hub`, `cline connect`, `cline schedule` and `cline doctor` are
+subcommands of subcommands that do not appear in top-level help. Those cells come
+from [Cline's CLI README](https://github.com/cline/cline/blob/main/apps/cli/README.md)
+read on 2026-09-28, and are marked as documentation rather than observation. The
+`--acp`, `--json`, `--zen`, `--auto-approve`, `--id` and `--hooks-dir` cells are
+confirmed by both the local `--help` and that README.
+
+**Every Kilo claim in the proposal is UNVERIFIED** — no Kilo CLI on this machine,
+and no primary source was read for it in this pass. The proposal's specific claims
+about Kilo (`run`, `serve`, `acp`, remote mode, MCP, and an `allow`/`ask`/`deny`
+MCP permission system) are plausible and consistent with the pattern the other six
+show, but they are not evidence and must not be written into S-0 as cells.
+
+**The proposal's other sources** — OpenCode's SDK docs, Kilo's CLI and MCP
+overview, and its provider list — were not fetched. The OpenCode row in §W-1 is
+from local `--help` only, and it is consistent with the proposal's claim of a
+server plus SDK without confirming the SDK's surface.
+
+**No external claim is load-bearing for any disposition in this appendix.** Every
+disposition rests on a local probe, a file:line in this repository, or text already
+recorded in this file.
