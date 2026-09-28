@@ -17,7 +17,7 @@
   (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it)
-- [x] Workspace gates green — 15 crates, 1375 tests passing, 17 ignored, zero warnings
+- [x] Workspace gates green — 15 crates, 1390 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -7721,6 +7721,42 @@ LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstre
 | **QI-2** | `/rename <symbol> <new>` as an explicit agent tool over ast-grep + | capability | fold into LSP-3 |
 | **U-2** | Runtime hazard analysis: blocking-in-async, guard-across-await, unbounded channels, detached task handles | capability | from U — a CI-1 query emitting `RuntimeHazard { class, span, consequence, remedies }`; the analyzer is line-based today (`analyzer.rs:52-200`) |
 | **U-3** | Configuration intelligence: code ↔ template ↔ deployment drift, plus fragile `env::var(..).unwrap()` | capability | from U — deterministic comparisons only, on QT-5's rule; the `unwrap` slice needs no substrate and can go first |
+
+#### W3 progress
+
+- [x] `CI-1` — 2026-09-28. `ast_edit(pattern, path, replacement?, language?)` is
+  the sixteenth agent tool: a shape with metavariables (`let $A = $B;`,
+  `fn $A($B) { $$$ }`) handed to the `ast-grep` binary, listing the sites when
+  given no replacement and rewriting every site in one change when given one.
+  Fifteen tests; the full workspace is 1390 passing, zero warnings.
+
+  Four things the item's own text did not know, all found by running the binary
+  rather than reading about it:
+
+  - **The recorded trap is worse than recorded.** `ast-grep` prints `[]` and
+    exits 1 both for a pattern that finds nothing *and* for one it cannot parse,
+    with no stderr either way. The two are indistinguishable from its output, so
+    the tool cannot resolve the ambiguity and says so in the refusal instead:
+    *"That result cannot distinguish a pattern that is wrong from code that does
+    not contain it."* A zero-match result is a refusal, never a clean sweep.
+  - **The JSON is a bare array**, not `{"matches":[…]}`, and a rewrite run adds
+    `replacement` per entry while still writing nothing to disk — which is what
+    makes the two-phase shape work: the new bytes are computed in memory, shown
+    in the approval preview, and written once per file through `DB-1`'s
+    `write_atomic`.
+  - **A child process needs its working directory set.** Handed a root-relative
+    path so the transcript reads `src/lib.rs`, the child must also run *in* the
+    root; without that the relative path resolves against xencode's own working
+    directory and the search silently finds nothing. The test caught this, and it
+    is the exact failure the zero-match rule then had to explain away.
+  - **`ast-grep` is not bundled**, so the missing-engine path is the normal case
+    on a fresh machine and is tested as one: it names both binaries tried and
+    says the pattern was not run and nothing is known about the code, which is
+    the opposite of a claim about the code.
+
+  Scoped to what the item asked. It does not bring in a parser — the queries
+  that U-2 and U-3 want are a separate piece of work, and CI-1 is the substrate
+  they ride, not the whole of them.
 
 #### W4 — Retrieval on top of a real structure — 12 items
 

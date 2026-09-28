@@ -756,6 +756,48 @@ pub fn file_tools() -> Vec<ToolDefinition> {
                 "required": ["path", "symbol", "new_body"]
             }),
         },
+        ToolDefinition {
+            name: "ast_edit".to_string(),
+            description: "Find code by its shape instead of its text, and optionally \
+                          rewrite every site. The pattern is matched against the parse \
+                          tree, so a call in a comment or a string is not a match and a \
+                          renamed argument does not break it. Omit \"replacement\" to see \
+                          the sites; supply it to rewrite them all in one change. \
+                          Nothing is written unless sites matched, and a pattern that \
+                          matches nothing is reported as a refusal rather than as \
+                          success. Returns the sites found, and a unified diff when it \
+                          rewrote."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Shape to match, with $NAME for one metavariable \
+                                        and $$$ for a run of statements, e.g. \
+                                        'let $A = $B;' or 'foo($A, $B)'"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "File or directory to search, relative to the \
+                                        workspace root; a directory is searched \
+                                        recursively"
+                    },
+                    "replacement": {
+                        "type": "string",
+                        "description": "Text each matched site becomes, reusing the same \
+                                        $NAME metavariables. Omit to search without \
+                                        changing anything"
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Language hint for the pattern, e.g. rust. \
+                                        Omit to let each file's own language decide"
+                    }
+                },
+                "required": ["pattern", "path"]
+            }),
+        },
     ]
 }
 
@@ -879,7 +921,8 @@ mod tests {
                 "lookup_advisory",
                 "write_file",
                 "edit_file",
-                "edit_symbol"
+                "edit_symbol",
+                "ast_edit"
             ]
         );
         for tool in &tools {

@@ -110,6 +110,12 @@ impl ApprovalRequest {
     }
 }
 
+/// How long the approval preview waits for ast-grep. Shorter than the
+/// executor's budget on purpose: a preview that blocks the prompt is worse than
+/// one that says the check timed out, and the executor re-runs the same planner
+/// with the full allowance before anything is written.
+const AST_PREVIEW_TIMEOUT_SECS: u64 = 10;
+
 /// What a tool call touches. Unknown tools count as Shell — the executor
 /// errors on them anyway, but they are never silently treated as read-only.
 pub fn tool_class(tool: &str) -> ToolClass {
@@ -120,7 +126,7 @@ pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
         | "search_files" | "read_docs" | "lookup_advisory" | "update_plan" => ToolClass::ReadOnly,
-        "write_file" | "edit_file" | "edit_symbol" => ToolClass::Edit,
+        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" => ToolClass::Edit,
         _ => ToolClass::Shell,
     }
 }
@@ -1004,6 +1010,32 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                 )
             }
         },
+        "ast_edit" => match plan_ast_edit(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
+            // The same planner the executor uses, so the preview cannot describe
+            // a different edit from the one that lands.
+            Err(reason) => reason,
+            Ok(plan) if plan.replacement.is_none() => format!(
+                "ast_edit would report {} site(s) and change nothing:\n{}",
+                plan.sites.len(),
+                plan.sites.join("\n")
+            ),
+            Ok(plan) => {
+                let mut out = format!(
+                    "ast_edit would rewrite {} site(s) across {} file(s):",
+                    plan.rewrites.iter().map(|r| r.sites).sum::<usize>(),
+                    plan.rewrites.len()
+                );
+                for rewrite in &plan.rewrites {
+                    out.push_str(&format!(
+                        "\n\ntarget: {} ({} site(s))\n{}",
+                        rewrite.display,
+                        rewrite.sites,
+                        unified_diff(&rewrite.current, &rewrite.updated).trim_end()
+                    ));
+                }
+                out
+            }
+        },
         "background_start" | "run_command" => match arg_str(&args, "command") {
             Some(command) if !command.trim().is_empty() => format!("command: sh -c {command:?}"),
             _ => summarize_call(call),
@@ -1124,6 +1156,426 @@ fn quote_symbol(args: &serde_json::Map<String, serde_json::Value>) -> String {
         Some(symbol) => format!("`{symbol}`"),
         None => "a declaration".to_string(),
     }
+}
+
+/// One file an `ast_edit` call would rewrite, with the text it currently holds.
+#[derive(Debug)]
+struct PlannedRewrite {
+    full: PathBuf,
+    display: String,
+    current: String,
+    updated: String,
+    sites: usize,
+}
+
+/// What an `ast_edit` call found, whether or not it is going to write.
+#[derive(Debug)]
+pub struct AstEditPlan {
+    /// Human-readable line per match: `path:line: matched text`.
+    sites: Vec<String>,
+    /// Files to rewrite. Empty in search-only mode.
+    rewrites: Vec<PlannedRewrite>,
+    replacement: Option<String>,
+}
+
+/// The ast-grep executable, or the reason there isn't one.
+///
+/// A missing binary is reported, never treated as "no sites matched": those two
+/// look identical from the outside and only one of them is a fact about the code.
+fn ast_grep_binary() -> Result<String, String> {
+    for candidate in ["ast-grep", "sg"] {
+        if let Ok(path) = which(candidate) {
+            return Ok(path);
+        }
+    }
+    Err(err(missing_ast_grep_message()))
+}
+
+/// What a caller is told when the pattern engine is not on this machine.
+///
+/// Split out so the wording is assertable without emptying `PATH` in a test:
+/// these tests run in parallel, and a process-global environment variable is
+/// not something one of them gets to own.
+fn missing_ast_grep_message() -> String {
+    "ast_edit needs the `ast-grep` binary and neither `ast-grep` nor `sg` is on PATH, \
+     so the pattern was not run and nothing is known about the code. Install it with \
+     `npm i -g @ast-grep/cli` or `cargo install ast-grep`, or use edit_symbol / \
+     search_files, which need no external binary."
+        .to_string()
+}
+
+/// `which`-style lookup, without shelling out.
+fn which(binary: &str) -> Result<String, String> {
+    let path_var = std::env::var_os("PATH").ok_or_else(|| err("PATH is not set"))?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(binary);
+        if candidate.is_file() {
+            return Ok(candidate.to_string_lossy().into_owned());
+        }
+    }
+    Err(err(format!("{binary} not found on PATH")))
+}
+
+/// One site ast-grep matched, as far as this tool needs it.
+#[derive(Debug)]
+struct AstMatch {
+    file: String,
+    line: usize,
+    column: usize,
+    text: String,
+    /// Byte span of the match inside `file`. Absent when ast-grep reported no
+    /// `range`, which makes the site searchable but not rewritable.
+    span: Option<(usize, usize)>,
+    /// What the match becomes, present only in a rewrite run.
+    replacement: Option<String>,
+}
+
+/// Read `--json` output. The top level is a bare array of matches, and an empty
+/// result is `[]` — including for a pattern ast-grep could not parse, which it
+/// reports no differently from a pattern that simply found nothing.
+fn parse_ast_matches(stdout: &str) -> Result<Vec<AstMatch>, String> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let value: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|e| err(format!("ast-grep printed output that is not JSON: {e}")))?;
+    let array = value
+        .as_array()
+        .ok_or_else(|| err("ast-grep printed JSON that is not a list of matches"))?;
+    let mut out = Vec::with_capacity(array.len());
+    for item in array {
+        let Some(obj) = item.as_object() else {
+            return Err(err("ast-grep printed a match that is not an object"));
+        };
+        let file = obj
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let range = obj.get("range");
+        let start = range.and_then(|r| r.get("start"));
+        let line = start
+            .and_then(|s| s.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+        let column = start
+            .and_then(|s| s.get("column"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0) as usize
+            + 1;
+        let offsets = range
+            .and_then(|r| r.get("byteOffset"))
+            .and_then(|b| b.as_object());
+        let span = match (
+            offsets
+                .and_then(|b| b.get("start"))
+                .and_then(|v| v.as_u64()),
+            offsets.and_then(|b| b.get("end")).and_then(|v| v.as_u64()),
+        ) {
+            (Some(start), Some(end)) if end >= start => Some((start as usize, end as usize)),
+            _ => None,
+        };
+        out.push(AstMatch {
+            file,
+            line,
+            column,
+            text: obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            span,
+            replacement: obj
+                .get("replacement")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+        });
+    }
+    Ok(out)
+}
+
+/// Run ast-grep over `target` and return what it matched.
+fn run_ast_grep(
+    root: &Path,
+    pattern: &str,
+    target: &str,
+    replacement: Option<&str>,
+    language: Option<&str>,
+    timeout_secs: u64,
+) -> Result<Vec<AstMatch>, String> {
+    let binary = ast_grep_binary()?;
+    let mut command = std::process::Command::new(&binary);
+    // The child runs in the workspace root, because `target` is relative to it.
+    // Without this, a relative path resolves against xencode's own working
+    // directory and the search silently finds nothing.
+    command.current_dir(root);
+    command
+        .arg("run")
+        .arg("--pattern")
+        .arg(pattern)
+        .arg("--json");
+    if let Some(replacement) = replacement {
+        command.arg("--rewrite").arg(replacement);
+    }
+    if let Some(language) = language {
+        command.arg("--lang").arg(language);
+    }
+    command.arg(target);
+
+    let output = run_with_timeout(&mut command, timeout_secs)
+        .map_err(|e| err(format!("could not run {binary}: {e}")))?;
+
+    // ast-grep exits 1 for "nothing matched" and for a bad pattern alike, and
+    // prints `[]` for both, so the exit code carries no information here. Only
+    // a crash is distinguishable, and only by whether stdout parsed.
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        if !stderr.is_empty() && !stderr.starts_with("ERROR: ") {
+            return Err(err(format!("ast-grep failed: {stderr}")));
+        }
+    }
+    parse_ast_matches(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Run a command, killing it after `timeout_secs`. Returns what it produced.
+fn run_with_timeout(
+    command: &mut std::process::Command,
+    timeout_secs: u64,
+) -> std::io::Result<std::process::Output> {
+    use std::process::Stdio;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs.max(1));
+    loop {
+        match child.try_wait()? {
+            Some(_) => return child.wait_with_output(),
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "ast-grep did not finish in time",
+                ));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(25)),
+        }
+    }
+}
+
+/// Work out what an `ast_edit` call would do, without touching a file.
+///
+/// Split from the write so the approval preview can show the real diff, and so a
+/// rewrite is computed in memory and written once, atomically, per file.
+pub fn plan_ast_edit(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> Result<AstEditPlan, String> {
+    let Some(pattern) = arg_str(args, "pattern") else {
+        return Err(err("ast_edit needs a string \"pattern\""));
+    };
+    if pattern.trim().is_empty() {
+        return Err(err("ast_edit needs a non-empty \"pattern\""));
+    }
+    let Some(raw) = arg_str(args, "path") else {
+        return Err(err("ast_edit needs a string \"path\""));
+    };
+    let replacement = arg_str(args, "replacement");
+    let language = arg_str(args, "language");
+
+    let (full, display) = workspace_path(root, raw)?;
+    if !full.exists() {
+        return Err(err(format!("{display} does not exist")));
+    }
+    // Asked before the parser, for the same reason `edit_symbol` asks: a valid
+    // file in another language is refused as the language it is.
+    if full.is_file() {
+        if let Some(refusal) = xencode_context_rs::semantic_tier_refusal(
+            "Structural search and rewrite",
+            &display,
+            xencode_context_rs::detect_language(&full),
+        ) {
+            return Err(err(refusal));
+        }
+    }
+
+    // Handed the root-relative path, not the absolute one, so the paths ast-grep
+    // reports — and therefore the paths in the transcript and the diff — read
+    // `src/lib.rs` rather than whatever this machine happens to call it. The
+    // child is run in `root` so that relative path means what it says.
+    let matches = run_ast_grep(root, pattern, &display, replacement, language, timeout_secs)?;
+
+    if matches.is_empty() {
+        // The recorded trap: a pattern that matches nothing is indistinguishable
+        // from a pattern that does not parse, and both look like success from
+        // the outside. Say so rather than reporting a clean sweep.
+        let mut message = format!(
+            "ast_edit matched no sites in {display} for pattern `{pattern}`, and \
+             nothing was changed. That result cannot distinguish a pattern that is \
+             wrong from code that does not contain it"
+        );
+        if let Some(language) = &language {
+            message.push_str(&format!(" (language hint `{language}`)"));
+        }
+        message.push_str(
+            ". Check the metavariables are written $NAME, and that the shape is \
+             present, before reading this as \"the code is already correct\".",
+        );
+        return Err(err(message));
+    }
+
+    let sites = matches
+        .iter()
+        .map(|m| {
+            let first_line = m.text.lines().next().unwrap_or("").trim_end();
+            let shown = if m.text.contains('\n') {
+                format!("{first_line} …")
+            } else {
+                first_line.to_string()
+            };
+            format!("{}:{}:{} {shown}", m.file, m.line, m.column)
+        })
+        .collect();
+
+    let Some(replacement) = replacement else {
+        return Ok(AstEditPlan {
+            sites,
+            rewrites: Vec::new(),
+            replacement: None,
+        });
+    };
+
+    // Group by file, then splice each file's edits from the back so an earlier
+    // edit's byte offsets stay valid while the later ones are applied.
+    let mut order: Vec<String> = Vec::new();
+    for m in &matches {
+        if !order.contains(&m.file) {
+            order.push(m.file.clone());
+        }
+    }
+    let mut rewrites = Vec::new();
+    for file in order {
+        let sites_here: Vec<&AstMatch> = matches.iter().filter(|m| m.file == file).collect();
+        let (file_full, file_display) = match workspace_path(root, &file) {
+            Ok(ok) => ok,
+            // ast-grep reports the path as it was given it, so a file found
+            // through a directory argument comes back root-relative already.
+            // Anything that does not resolve stays inside the root or is dropped.
+            Err(_) => continue,
+        };
+        let current = read_text(&file_full, &file_display)?;
+        let mut spans: Vec<(usize, usize, &str)> = Vec::with_capacity(sites_here.len());
+        for m in &sites_here {
+            let (Some(start), Some(end)) = (m.span.map(|s| s.0), m.span.map(|s| s.1)) else {
+                return Err(err(format!(
+                    "ast-grep reported a match in {file_display} without a byte range, \
+                     so it cannot be rewritten safely. Run the search without a \
+                     \"replacement\" to see the sites."
+                )));
+            };
+            let Some(replacement) = &m.replacement else {
+                return Err(err(format!(
+                    "ast-grep did not return rewritten text for the match at \
+                     {file_display}:{}, so nothing was changed",
+                    m.line
+                )));
+            };
+            spans.push((start, end, replacement));
+        }
+        let updated = splice_replacements(&current, &spans, &file_display)?;
+        rewrites.push(PlannedRewrite {
+            full: file_full,
+            display: file_display,
+            current,
+            updated,
+            sites: sites_here.len(),
+        });
+    }
+
+    Ok(AstEditPlan {
+        sites,
+        rewrites,
+        replacement: Some(replacement.to_string()),
+    })
+}
+
+/// Splice a rewrite of every match into `current`.
+///
+/// Applied from the back, so an edit near the end of the file cannot move the
+/// byte offsets of one still to be applied. Every span is checked against the
+/// text first, and one bad span refuses the whole file rather than producing a
+/// half-rewritten file that still parses.
+fn splice_replacements(
+    current: &str,
+    spans: &[(usize, usize, &str)],
+    display: &str,
+) -> Result<String, String> {
+    for (start, end, _) in spans {
+        if *end > current.len()
+            || start > end
+            || !current.is_char_boundary(*start)
+            || !current.is_char_boundary(*end)
+        {
+            return Err(err(format!(
+                "a match ast-grep reported in {display} does not line up with the file \
+                 on disk, so nothing was changed"
+            )));
+        }
+    }
+    let mut ordered: Vec<&(usize, usize, &str)> = spans.iter().collect();
+    ordered.sort_by_key(|span| std::cmp::Reverse(span.0));
+    let mut updated = current.to_string();
+    for (start, end, text) in ordered {
+        updated.replace_range(*start..*end, text);
+    }
+    Ok(updated)
+}
+
+/// `ast_edit`: report the sites, and rewrite them when a replacement was given.
+fn tool_ast_edit(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> String {
+    let plan = match plan_ast_edit(root, args, timeout_secs) {
+        Ok(plan) => plan,
+        Err(reason) => return reason,
+    };
+    let pattern = arg_str(args, "pattern").unwrap_or_default();
+
+    if plan.replacement.is_none() {
+        return format!(
+            "ast_edit: {} site(s) match `{pattern}`, nothing changed:\n{}",
+            plan.sites.len(),
+            plan.sites.join("\n")
+        );
+    }
+
+    let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
+    let mut out = format!(
+        "ast_edit: rewrote {total} site(s) matching `{pattern}` across {} file(s):\n",
+        plan.rewrites.len()
+    );
+    for rewrite in &plan.rewrites {
+        // Atomic per file: a crash between two files leaves each one whole, and
+        // the second write cannot tear the first.
+        if let Err(e) = xencode_core_rs::write_atomic(&rewrite.full, rewrite.updated.as_bytes()) {
+            return err(format!("cannot write {}: {e}", rewrite.display));
+        }
+        out.push_str(&format!(
+            "\n{} ({} site(s))\n{}",
+            rewrite.display,
+            rewrite.sites,
+            unified_diff(&rewrite.current, &rewrite.updated).trim_end()
+        ));
+    }
+    out.trim_end().to_string()
 }
 
 pub type TaskRuntime = Arc<tokio::sync::Mutex<TaskManager>>;
@@ -1503,6 +1955,7 @@ async fn execute_tool_call_plan(
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
+        "ast_edit" => tool_ast_edit(root, &args, command_timeout),
         "what_breaks" => tool_what_breaks(root, &args),
         other => format!("error: unknown tool {other}"),
     }
@@ -3351,7 +3804,11 @@ patched = ["{fixed}"]
         let (name, _) = locked
             .iter()
             .find(|(candidate, _)| {
-                locked.iter().filter(|(other, _)| other == candidate).count() == 1
+                locked
+                    .iter()
+                    .filter(|(other, _)| other == candidate)
+                    .count()
+                    == 1
             })
             .cloned()
             .unwrap();
@@ -4877,5 +5334,309 @@ patched = ["{fixed}"]
         assert_eq!(CallOutcome::Denied.label(), "denied");
         assert_eq!(CallOutcome::Refused.label(), "refused");
         assert_eq!(CallOutcome::Failed.label(), "failed");
+    }
+
+    // ---- CI-1: `ast_edit`, structural search and rewrite via ast-grep ----
+
+    /// The shape ast-grep 0.45 actually prints, captured from
+    /// `ast-grep run --pattern 'let $A = $B;' --json`. The top level is a bare
+    /// array, not an object with a `matches` key, and a rewrite run adds
+    /// `replacement` to each entry while still writing nothing to disk.
+    const AST_GREP_JSON: &str = r#"[{"text":"let x = total();","range":{"byteOffset":{"start":80,"end":96},"start":{"line":3,"column":4},"end":{"line":3,"column":20}},"file":"code.rs","lines":"    let x = total();","charCount":{"leading":4,"trailing":0},"language":"Rust","metaVariables":{"single":{"x":{"text":"x"}},"multi":{}}}]"#;
+
+    #[test]
+    fn ast_grep_json_parses_into_sites_with_one_based_positions() {
+        let matches = parse_ast_matches(AST_GREP_JSON).unwrap();
+        assert_eq!(matches.len(), 1);
+        let m = &matches[0];
+        assert_eq!(m.file, "code.rs");
+        // ast-grep counts lines and columns from zero; a report to a person
+        // counts from one.
+        assert_eq!(m.line, 4);
+        assert_eq!(m.column, 5);
+        assert_eq!(m.text, "let x = total();");
+        assert_eq!(m.span, Some((80, 96)));
+        assert!(m.replacement.is_none());
+    }
+
+    #[test]
+    fn ast_grep_json_reads_the_rewritten_text_when_a_replacement_was_asked_for() {
+        let with_rewrite = AST_GREP_JSON.replace(
+            r#""metaVariables""#,
+            r#""replacement":"let x = total() + 0;","metaVariables""#,
+        );
+        let matches = parse_ast_matches(&with_rewrite).unwrap();
+        assert_eq!(
+            matches[0].replacement.as_deref(),
+            Some("let x = total() + 0;")
+        );
+    }
+
+    #[test]
+    fn ast_grep_output_that_is_not_a_list_of_matches_is_refused() {
+        // An empty result is `[]`, which is the shape a wrong pattern produces.
+        assert!(parse_ast_matches("[]").unwrap().is_empty());
+        assert!(parse_ast_matches("  \n ").unwrap().is_empty());
+        // Anything else is a version we do not understand, and guessing at it
+        // would be worse than saying so.
+        for bad in [r#"{"matches":[]}"#, "not json at all", "[1, 2, 3]"] {
+            let refused = parse_ast_matches(bad).unwrap_err();
+            assert!(
+                refused.contains("ast-grep"),
+                "unhelpful refusal for {bad:?}: {refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn ast_grep_splicing_applies_every_site_and_leaves_the_rest_alone() {
+        let current = "let a = one();\nlet b = two();\nlet c = three();\n";
+        // Byte offsets as ast-grep reports them: three disjoint `let` lines.
+        let spans = [
+            (0usize, 14usize, "let a = 1;"),
+            (15, 29, "let b = 2;"),
+            (30, 46, "let c = 3;"),
+        ];
+        let updated = splice_replacements(current, &spans, "code.rs").unwrap();
+        assert_eq!(updated, "let a = 1;\nlet b = 2;\nlet c = 3;\n");
+    }
+
+    #[test]
+    fn ast_grep_splicing_works_regardless_of_the_order_sites_arrive_in() {
+        let current = "let a = one();\nlet b = two();\n";
+        let forwards = [(0usize, 14usize, "X"), (15, 29, "Y")];
+        let backwards = [(15usize, 29usize, "Y"), (0, 14, "X")];
+        // Applied from the back precisely so the order ast-grep lists sites in
+        // cannot change the result.
+        assert_eq!(
+            splice_replacements(current, &forwards, "code.rs").unwrap(),
+            splice_replacements(current, &backwards, "code.rs").unwrap()
+        );
+    }
+
+    #[test]
+    fn ast_grep_splicing_refuses_a_span_that_does_not_fit_the_file() {
+        let current = "let a = one();\n";
+        // Past the end.
+        assert!(splice_replacements(current, &[(0, 900, "X")], "code.rs").is_err());
+        // Backwards.
+        assert!(splice_replacements(current, &[(9, 2, "X")], "code.rs").is_err());
+        // In range but not on a character boundary: this file has a multi-byte
+        // `é`, so byte 8 lands inside it and a rewrite there would panic.
+        let multibyte = "let é = one();\n";
+        assert!(splice_replacements(multibyte, &[(5, 6, "X")], "code.rs").is_err());
+        // A good span alongside a bad one refuses the whole file, so a
+        // half-rewritten file is never written.
+        assert!(splice_replacements(current, &[(0, 14, "X"), (0, 900, "Y")], "code.rs").is_err());
+    }
+
+    #[test]
+    fn ast_edit_is_an_edit_tool_even_when_it_only_searches() {
+        // Over-asking for a search costs a keystroke; under-asking for a rewrite
+        // is a hole. The class cannot depend on the arguments, so it does not.
+        assert_eq!(tool_class("ast_edit"), ToolClass::Edit);
+    }
+
+    #[test]
+    fn ast_edit_asks_for_its_arguments_before_it_looks_for_the_binary() {
+        let root = temp_root("ast-args");
+        for (args, expected) in [
+            (serde_json::json!({"path": "code.rs"}), "pattern"),
+            (serde_json::json!({"pattern": "x"}), "path"),
+            (
+                serde_json::json!({"pattern": "  ", "path": "code.rs"}),
+                "non-empty",
+            ),
+        ] {
+            let answer = plan_ast_edit(&root, args.as_object().unwrap(), 5).unwrap_err();
+            assert!(answer.contains(expected), "for {args}: {answer}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn ast_edit_says_a_missing_path_is_a_missing_path() {
+        let root = temp_root("ast-nopath");
+        let answer = plan_ast_edit(
+            &root,
+            serde_json::json!({"pattern": "let $A = $B;", "path": "nope.rs"})
+                .as_object()
+                .unwrap(),
+            5,
+        )
+        .unwrap_err();
+        assert!(answer.contains("does not exist"), "{answer}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// CI-1's completion condition, against the real binary: one call rewrites
+    /// three seeded sites and the file is exactly what a hand-check says.
+    ///
+    /// Skipped when ast-grep is not installed, which is the state this tool has
+    /// to survive anyway — the refusal below covers that path.
+    #[test]
+    fn ast_edit_rewrites_three_seeded_sites_and_the_diff_matches_a_hand_check() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("ast-rewrite");
+        let seeded = "fn main() {\n    let a = compute();\n    let b = compute();\n    let c = compute();\n    println!(\"{a} {b} {c}\");\n}\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = tool_ast_edit(
+            &root,
+            serde_json::json!({
+                "pattern": "let $NAME = compute();",
+                "replacement": "let $NAME = compute(2);",
+                "path": "code.rs",
+                "language": "rust"
+            })
+            .as_object()
+            .unwrap(),
+            30,
+        );
+        assert!(answer.contains("rewrote 3 site(s)"), "{answer}");
+
+        // The hand-check: every `compute()` call now takes an argument, the
+        // declaration and the print are untouched.
+        let after = std::fs::read_to_string(root.join("code.rs")).unwrap();
+        assert_eq!(
+            after,
+            "fn main() {\n    let a = compute(2);\n    let b = compute(2);\n    let c = compute(2);\n    println!(\"{a} {b} {c}\");\n}\n"
+        );
+        assert!(answer.contains("-    let a = compute();"), "{answer}");
+        assert!(answer.contains("+    let a = compute(2);"), "{answer}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn ast_edit_searching_changes_nothing_and_names_the_sites() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("ast-search");
+        let seeded = "let a = compute();\nlet b = compute();\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = tool_ast_edit(
+            &root,
+            serde_json::json!({
+                "pattern": "let $A = $B;",
+                "path": "code.rs",
+                "language": "rust"
+            })
+            .as_object()
+            .unwrap(),
+            30,
+        );
+        assert!(answer.contains("2 site(s)"), "{answer}");
+        assert!(answer.contains("nothing changed"), "{answer}");
+        // A search is a search: the bytes on disk are the bytes that were there.
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The trap this tool exists partly to avoid: a pattern that matches nothing
+    /// is indistinguishable from one that does not parse, and both look like a
+    /// clean sweep. It has to be reported as a refusal, and the file untouched.
+    #[test]
+    fn ast_edit_refuses_a_pattern_that_matched_nothing() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("ast-nomatch");
+        let seeded = "let a = compute();\n";
+        std::fs::write(root.join("code.rs"), seeded).unwrap();
+
+        let answer = plan_ast_edit(
+            &root,
+            serde_json::json!({
+                "pattern": "struct $Name { $$$ }",
+                "replacement": "struct $Name { $$$ }",
+                "path": "code.rs",
+                "language": "rust"
+            })
+            .as_object()
+            .unwrap(),
+            30,
+        )
+        .unwrap_err();
+        assert!(answer.contains("matched no sites"), "{answer}");
+        assert!(answer.contains("nothing was changed"), "{answer}");
+        // The refusal says why the result is not a fact about the code.
+        assert!(
+            answer.contains("cannot distinguish a pattern that is wrong"),
+            "{answer}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            seeded
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn ast_edit_says_the_engine_is_missing_rather_than_reporting_no_matches() {
+        // A missing engine is a fact about the machine; no sites matched is a
+        // fact about the code. They must never read alike, because a caller who
+        // believes the second when it is the first will conclude the code is
+        // already correct.
+        let message = missing_ast_grep_message();
+        assert!(message.contains("`ast-grep`"), "{message}");
+        assert!(message.contains("`sg`"), "{message}");
+        assert!(
+            message.contains("nothing is known about the code"),
+            "{message}"
+        );
+        assert!(!message.contains("matched no sites"), "{message}");
+    }
+
+    #[test]
+    fn ast_edit_reports_a_binary_that_will_not_start() {
+        // A path that exists in the plan and not on disk: the lookup succeeds
+        // and the spawn fails. That has to read as a failure to run, not as an
+        // absence of matches.
+        let missing = std::env::temp_dir().join("xencode-no-such-ast-grep-binary");
+        let mut command = std::process::Command::new(&missing);
+        let failed = run_with_timeout(&mut command, 1);
+        assert!(failed.is_err(), "spawning a missing binary should fail");
+    }
+
+    #[test]
+    fn ast_edit_preview_shows_the_same_edit_the_executor_would_make() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = temp_root("ast-preview");
+        std::fs::write(root.join("code.rs"), "let a = compute();\n").unwrap();
+
+        let shown = approval_preview(
+            &root,
+            &call(
+                "ast_edit",
+                serde_json::json!({
+                    "pattern": "let $NAME = compute();",
+                    "replacement": "let $NAME = compute(2);",
+                    "path": "code.rs",
+                    "language": "rust"
+                }),
+            ),
+        );
+        assert!(shown.contains("would rewrite 1 site(s)"), "{shown}");
+        assert!(shown.contains("target: code.rs"), "{shown}");
+        assert!(shown.contains("+let a = compute(2);"), "{shown}");
+        // The preview plans; it does not write.
+        assert_eq!(
+            std::fs::read_to_string(root.join("code.rs")).unwrap(),
+            "let a = compute();\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
