@@ -8228,8 +8228,11 @@ drawn as if five vendors had five incompatible shapes. Measured, the opposite is
 all six converge on *one-shot headless prompt + JSONL event stream + an approval ladder
 whose rungs are the same three places (read-only → edit-allowed → everything-allowed) +
 resumable sessions*, and three of them share the literal vocabulary (`stream-json` in
-Claude, Gemini and Agy). The adapter that has to be written is a **normaliser over about
-six flag vocabularies and one event schema**, not a per-vendor protocol. Two of the
+Claude, Gemini and Agy). This was too strong: the 2026-09-27 probe found structured
+output flags in five CLIs, but did not establish that they share event meanings or a
+schema; the sixth (`crush run --help`) showed no structured output option. The adapter
+should normalize captured behavior, not an assumed common schema. The full refresh and
+its version drift are in [the T-1 audit](docs/AGENT_FABRIC_RESEARCH_W01_W04.md). Two of the
 proposal's twelve methods are dropped outright, because no vendor has them: `pause()`
 and `resume()` at process level (their `resume` means *continue the conversation*, not
 *unfreeze the process*), and `install()` (see S-8). That shrinks the runtime surface to
@@ -8251,27 +8254,34 @@ hold state that is not theirs, decide with knowledge of all of them, and veto an
 them. So the differentiation claim in the proposal survives, but only for the items
 where xencode is the third party — see S-5.
 
-### S-3 Permission brokering is real, single-vendor, and currently unverifiable
+### S-3 Permission brokering is real, narrow, and currently unverifiable
 
 The proposal's most load-bearing promise (items 14, 15, 35: "Xencode becomes the
 permission broker") was the one most likely to be fiction, because xencode has no OS
 sandbox — the tree's `Milestone M` table says so and it is true: enforcement is lexical
 path checks in `agent_tools.rs` and a worktree root for spawns, and a child process is
-not confined by it. Measured today there is exactly **one** real interception seam:
-Claude Code's `--permission-prompt-tool`, which routes its permission requests to an MCP
-tool. Which means:
+not confined by it. The 2026-09-23 probe found one possible per-request interception
+seam in Claude Code: `--permission-prompt-tool`, routing prompts to an MCP tool. The
+2026-09-27 probe found newer interfaces: Claude Code 2.1.283 help lists
+`--permission-prompts host|none` (and mentions a permission-prompt tool in the help
+text), while Gemini CLI 0.61.0's ACP documentation describes `setSessionMode` to change
+approval level during a session. Neither interface was exercised end to end, and the
+Gemini session-mode operation is not the same claim as answering an individual prompt.
+So the current worker's permission-control surface remains unverified. In particular,
+the older table in S-13 is a dated baseline, not a current vendor inventory; see the
+[T-1 audit](docs/AGENT_FABRIC_RESEARCH_W01_W04.md). The architectural consequences are:
 
 - `M-5 — xencode mcp serve` stops being a nice interop item and becomes **the seam the
   entire orchestrator hangs on**. Without it, xencode cannot answer a worker's approval
   request; with it, one approval really can control everything (item 15) for at least
   one vendor. That inverts Milestone M's ordering claim that ACP and MCP-server are the
   two big new surfaces — under S, M-5 is upstream of a product category.
-- For every other vendor there is no interception, only **pre-grant**: a launch flag
-  that fixes a policy before the process starts. Item 35's diagram (xencode's sandbox
-  layer beneath Codex/Claude/Gemini) is therefore false as drawn, and stays false until
-  `SE-7` (Landlock/bubblewrap) ships. Two sandboxes can still nest honestly — launch the
-  vendor under `--sandbox read-only` *and* wrap the process in SE-7's wrapper — and that
-  is the only version of item 35 worth planning.
+- The current control mode must be measured per adapter. A startup flag, a session-mode
+  change, and an individual approval request are different capabilities. Item 35's
+  diagram (xencode's sandbox layer beneath Codex/Claude/Gemini) is false as drawn and
+  stays false until `SE-7` (Landlock/bubblewrap) ships. Two sandboxes can still nest
+  honestly — launch the vendor under `--sandbox read-only` *and* wrap the process in
+  SE-7's wrapper — and that is the only version of item 35 worth planning.
 - Hard rule, because it is the failure mode of this whole feature: **xencode never
   inherits or escalates a vendor's approval mode.** Each vendor's default is that
   vendor's business; the broker sets the *lowest* mode that completes the task, and any
@@ -8650,26 +8660,30 @@ confident lie:
 > configured Claude's startup permission policy." That would eventually become a nasty
 > trust bug.
 
-Measured, there are exactly two modes and they are not interchangeable:
+Do not collapse three different controls into one “permission” field:
 
 | mode | what it is | who has it here |
 |---|---|---|
-| **live control** | a request arrives from the worker mid-run and xencode answers it, so a refusal really happens | Claude Code alone, via `--permission-prompt-tool` over `M-5` — and unconfirmed until `AR-1` runs it |
-| **launch-time policy** | xencode chose the flags before the process started and cannot revisit them | every other vendor, and every vendor's sandbox flag |
+| **per-request approval** | a request arrives from the worker mid-run and xencode answers it, so a refusal really happens | Unconfirmed. The 2026-09-23 probe found a Claude permission-prompt route; current Claude help and runtime need the `AR-1` round-trip probe. |
+| **session-mode control** | the client changes the approval level while a session is active, without answering one named request | Gemini ACP documents `setSessionMode`; runtime behavior with xencode is untested. |
+| **launch-time policy** | xencode chooses flags before the process starts and cannot revisit them | Codex, Claude, Gemini, Agy and other vendor startup modes; the exact set must be refreshed by `AR-1`. |
 
 So the control mode is a **field on each agent row, rendered, not inferred** — the panel
-shows *live* or *configured at launch* beside each worker, and the launch line that proves
-which one it was is one keystroke away. The word "controls" does not appear next to a
-pre-granted vendor. This is the standing rule of Milestone J ("every panel tells the
-truth") applied to a feature whose entire pitch is authority over other people's processes:
-a permission UI that overstates itself is worse than no permission UI, because it is the
-one thing that makes running five autonomous programs in a repository feel safe.
+shows which of these was observed for each worker, and the command or protocol evidence
+is available beside it. Do not label session-mode changes as per-request approvals, or
+launch-time policy as live control. This is the standing rule of Milestone J ("every panel
+tells the truth") applied to a feature whose entire pitch is authority over other
+people's processes: a permission UI that overstates itself gives false assurance.
 
 The same rule extends past permissions. A cost figure that was estimated rather than
 looked up says estimated (`CX-4`). A file change derived from a diff rather than reported
 by the worker says derived (`AR-9`). A `Completed` event that arrived because the process
 exited zero, with nothing behind it, is the envelope's most suspicious row and must read
 that way until `OR-16`'s evidence half disagrees.
+
+The 2026-09-27 inventory is in the [T-1 audit](docs/AGENT_FABRIC_RESEARCH_W01_W04.md).
+Until `AR-1` demonstrates what each client can change and when, do not classify either
+current surface as a verified xencode-controlled approval path.
 
 
 Anything marked UNVERIFIED was located through search snippets after the fetch
@@ -8687,8 +8701,8 @@ citations.
 > are the sequence supplied with the catalog; the other forty remain unspecified.
 
 - [x] **T-0 — Record the candidate catalog as a research input** — 2026-09-27.
-  Counted 3,600 unique candidate IDs across 36 waves, checked the four external
-  external references against primary sources, recorded the first-ten sequence
+  Counted 3,600 unique candidate IDs across 36 waves, checked the cited external
+  references against primary sources, recorded the first-ten sequence
   supplied with the catalog, and added the initial crosswalk to M, S and W0–W17.
   This intake does not promote any candidate to implementation work.
 
@@ -8722,6 +8736,16 @@ idea links to an existing plan ID or has a proposed scope, dependency and
 measurable done-when; overlaps and rejections have reasons; and the result does
 not claim the catalog itself is verified research. The candidate-by-candidate
 audit is research work, not permission to implement every survivor.
+
+- [x] **T-1 — Audit the first four agent-fabric waves** — 2026-09-27. The 400
+  catalog IDs reduce to 40 themes repeated across ten generic subsystem labels.
+  The fielded audit is [AGENT_FABRIC_RESEARCH_W01_W04.md](docs/AGENT_FABRIC_RESEARCH_W01_W04.md):
+  19 fold, 15 refine, 4 research more, 2 reject, and no new implementation IDs.
+  The refreshed CLI probe also corrected two stale claims from the S snapshot:
+  no shared event schema has been demonstrated, and current Gemini/Claude
+  permission surfaces need a new end-to-end measurement. The audit records evidence,
+  vendor overlap, dependencies, ownership, effort, value, risk and disposition for
+  every theme group.
 
 ### T-2 — Work the supplied first investigations
 

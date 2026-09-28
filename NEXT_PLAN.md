@@ -173,10 +173,13 @@
   [3,600-candidate catalog](Xencode_Next_Research_Pool_3600.md), not 3,600 new
   implementation commitments. The source has 36 ordered waves and 3,600 unique
   IDs, but repeats capability themes across generic subsystem labels; its first
-  50 investigations are not actually marked. T starts with the supplied first
-  ten questions and audits its first four waves against existing M, S and W0–W17
-  work before proposing any new IDs. Research can proceed alongside S; overlapping
-  construction stays gated on `AR-1` measuring the installed worker CLIs. The
+  50 investigations are not actually marked. **T-1 is complete:** 400 entries
+  were audited as 40 distinct themes, with 19 folded into existing work, 15
+  narrowed, 4 held for more research and 2 rejected; no new implementation IDs
+  were added. The refresh also found that a common vendor event schema has not
+  been demonstrated and current permission-control interfaces need remeasurement.
+  T-2 now starts with the supplied ten questions. Research can proceed alongside
+  S; overlapping construction stays gated on `AR-1` measuring the installed worker CLIs. The
   external standards are dated and qualified in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone T.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
