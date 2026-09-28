@@ -1898,6 +1898,14 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode generate <completions|man> [--shell <bash|fish|zsh|powershell|elvish>]`
+
+Print shell completions or the `xencode(1)` man page, generated from the clap
+definition — never written by hand. The committed copies under
+`docs/completions/` and `docs/man/` are drift-checked twice: a unit test
+asserts byte-equality with fresh output, and a CI job regenerates them and
+fails on `git diff`. If they drift, regenerate them; do not edit them.
+
 ### `xencode toolchain <lint|fix|fmt|shear> [--allow-dirty] [--format text|json]`
 
 The Rust toolchain kit as gated tools — structured evidence for an agent repair

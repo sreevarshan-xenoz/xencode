@@ -1,0 +1,112 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH xencode 1  "xencode 0.1.0" 
+.SH NAME
+xencode \- Xencode — AI development assistant (Rust core)
+.SH SYNOPSIS
+\fBxencode\fR [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Xencode — AI development assistant (Rust core)
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+xencode\-scan(1)
+Scan a workspace and list all entries
+.TP
+xencode\-config(1)
+Configuration management
+.TP
+xencode\-models(1)
+Local model management (Ollama & llama.cpp)
+.TP
+xencode\-cache(1)
+Response cache management
+.TP
+xencode\-audit(1)
+The session server\*(Aqs audit log
+.TP
+xencode\-advisories(1)
+Known security advisories for the crates this project depends on
+.TP
+xencode\-query(1)
+Send a query to a model
+.TP
+xencode\-memory(1)
+Manage conversation memory
+.TP
+xencode\-tasks(1)
+Manage background tasks (file\-backed, survives this process)
+.TP
+xencode\-worktree(1)
+Manage git worktrees of the current repository
+.TP
+xencode\-colab(1)
+Google Colab bridge: preflight, then up / status / down for a model server running on a Colab VM
+.TP
+xencode\-advise(1)
+Repository insights from the .xencode snapshot: broken imports, import cycles, hub files and orphans
+.TP
+xencode\-server(1)
+Start the collaboration server
+.TP
+xencode\-analyze(1)
+Analyze code for issues and vulnerabilities
+.TP
+xencode\-fetch(1)
+Fetch a web page and extract research\-ready text
+.TP
+xencode\-interop(1)
+Measure what the coding\-agent CLIs on this machine actually do
+.TP
+xencode\-anchor(1)
+Find this repository\*(Aqs build and test commands, run them, and record only the ones that actually worked
+.TP
+xencode\-toolchain(1)
+Run the project\*(Aqs own toolchain checks, and report structured evidence
+.TP
+xencode\-generate(1)
+Print shell completions or the man page; both are generated from the clap definition, never written by hand
+.TP
+xencode\-mutants(1)
+Find code whose tests cannot tell right from wrong
+.TP
+xencode\-cov(1)
+Report which lines this diff added were never executed
+.TP
+xencode\-test(1)
+Run the tests, and never call a test that only passed on retry a pass
+.TP
+xencode\-review(1)
+Review the diff between a base branch and HEAD, file by file
+.TP
+xencode\-replay(1)
+Run a recorded session again from the bytes it was made of
+.TP
+xencode\-eval(1)
+Score the agent on defects that were seeded on purpose
+.TP
+xencode\-plugin(1)
+Manage plugins
+.TP
+xencode\-llamacpp(1)
+llama.cpp server management (status/start/stop/load/unload)
+.TP
+xencode\-hw(1)
+What this machine can serve, read from the machine
+.TP
+xencode\-history(1)
+How fast this repository\*(Aqs history is to ask about, and how to speed it up
+.TP
+xencode\-tui(1)
+Launch the Terminal User Interface
+.TP
+xencode\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0

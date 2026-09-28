@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1512 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1514 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1724,6 +1724,21 @@ never is.
   in CI. Done-when: a tag produces `cargo binstall xencode`.
 - **WF-6 shell completions + man page generated from clap.** S. Trap: drift —
   generate them in CI, never by hand. Done-when: tab completion works in fish/zsh.
+  **Done 2026-09-28** — `xencode generate <completions|man> [--shell]` emits both
+  from the clap definition via `clap_complete 4` and `clap_mangen`; committed
+  under `docs/completions/` (bash, fish, zsh) and `docs/man/xencode.1`.
+
+  The trap is enforced twice, because one check is a wish. A unit test
+  regenerates all four artifacts in memory and asserts byte-equality with the
+  committed files, so drift fails `cargo test` before it ever reaches CI; and a
+  CI job regenerates them and fails on `git diff`. The files are never edited —
+  the test message says to regenerate, not to edit.
+
+  Proved by running the real artifacts: the fish completions name every
+  subcommand including the five added this session (`toolchain`, `test`, `cov`,
+  `mutants`, `anchor`), asserted by a test that would fail on the next added
+  subcommand only if someone forgets to grow its list — and the man page
+  renders 112 lines of roff. Two tests.
 - **WF-7 CI watchdog** (`xencode ci watch` over Actions REST feeding failed logs
   into the agent). M. Trap: polling and pagination cost. Done-when: after a push
   the terminal reports pass/fail plus one failed-test summary unaided.

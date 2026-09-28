@@ -18,6 +18,25 @@ use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
 use xencode_providers_rs::{ChatMessage, EgressPolicy, ProviderManager};
 use xencode_server_rs::ws::AppState as ServerState;
 
+/// What `xencode generate` emits.
+#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug)]
+enum GenerateArtifact {
+    /// Shell completion script for `--shell`.
+    Completions,
+    /// Roff man page for `xencode(1)`.
+    Man,
+}
+
+/// Shells `xencode generate completions` supports.
+#[derive(clap::ValueEnum, Clone, Copy, PartialEq, Eq, Debug)]
+enum GenerateShell {
+    Bash,
+    Fish,
+    Zsh,
+    Powershell,
+    Elvish,
+}
+
 /// Output format for analysis results
 #[derive(clap::ValueEnum, Clone)]
 enum OutputFormat {
@@ -399,6 +418,18 @@ enum Commands {
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
+    },
+
+    /// Print shell completions or the man page; both are generated from the
+    /// clap definition, never written by hand
+    Generate {
+        /// What to emit: completions or man
+        #[arg(value_enum)]
+        artifact: GenerateArtifact,
+
+        /// Shell for completions (ignored for man)
+        #[arg(long, value_enum, default_value = "bash")]
+        shell: GenerateShell,
     },
 
     /// Find code whose tests cannot tell right from wrong
@@ -997,6 +1028,7 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
+        Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
             diff,
             timeout,
@@ -4006,6 +4038,30 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
+fn run_generate(artifact: GenerateArtifact, shell: GenerateShell) -> Result<(), String> {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    match artifact {
+        GenerateArtifact::Completions => {
+            let shell = match shell {
+                GenerateShell::Bash => clap_complete::Shell::Bash,
+                GenerateShell::Fish => clap_complete::Shell::Fish,
+                GenerateShell::Zsh => clap_complete::Shell::Zsh,
+                GenerateShell::Powershell => clap_complete::Shell::PowerShell,
+                GenerateShell::Elvish => clap_complete::Shell::Elvish,
+            };
+            clap_complete::generate(shell, &mut cmd, "xencode", &mut std::io::stdout());
+            Ok(())
+        }
+        GenerateArtifact::Man => {
+            let man = clap_mangen::Man::new(cmd);
+            man.render(&mut std::io::stdout())
+                .map_err(|e| format!("could not render the man page: {e}"))?;
+            Ok(())
+        }
+    }
+}
+
 fn run_mutants(
     diff: Option<String>,
     timeout: u64,
@@ -5095,7 +5151,7 @@ async fn run_tui() -> Result<(), String> {
 mod tests {
     use super::{
         compute_advise, format_image_text, join, parse_comma_list, resolve_audit_path,
-        resolve_bind, Cli, Commands,
+        resolve_bind, Cli, Commands, GenerateShell,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -5186,6 +5242,66 @@ mod tests {
             Some("caught"),
         );
         assert!(judge(&text).is_ok());
+    }
+
+    fn generated_artifact(kind: &str, shell: Option<GenerateShell>) -> String {
+        use clap::CommandFactory;
+        let mut cmd = super::Cli::command();
+        let mut out = Vec::new();
+        match kind {
+            "man" => {
+                clap_mangen::Man::new(cmd).render(&mut out).unwrap();
+            }
+            _ => {
+                let shell = match shell {
+                    Some(GenerateShell::Fish) => clap_complete::Shell::Fish,
+                    Some(GenerateShell::Zsh) => clap_complete::Shell::Zsh,
+                    _ => clap_complete::Shell::Bash,
+                };
+                clap_complete::generate(shell, &mut cmd, "xencode", &mut out);
+            }
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn the_committed_completions_are_generated_never_hand_written() {
+        // The WF-6 trap is drift: these files must equal what clap emits now.
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../docs");
+        for (file, kind, shell) in [
+            (
+                "completions/xencode.fish",
+                "completions",
+                Some(GenerateShell::Fish),
+            ),
+            (
+                "completions/xencode.zsh",
+                "completions",
+                Some(GenerateShell::Zsh),
+            ),
+            (
+                "completions/xencode.bash",
+                "completions",
+                Some(GenerateShell::Bash),
+            ),
+            ("man/xencode.1", "man", None),
+        ] {
+            let committed = std::fs::read_to_string(root.join(file))
+                .unwrap_or_else(|_| panic!("missing {file}"));
+            assert_eq!(
+                generated_artifact(kind, shell),
+                committed,
+                "{file} drifted from what clap generates — regenerate it, do not edit it"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_name_real_subcommands() {
+        let fish = generated_artifact("completions", Some(GenerateShell::Fish));
+        for subcommand in ["toolchain", "test", "cov", "mutants", "anchor", "generate"] {
+            assert!(fish.contains(subcommand), "completions omit {subcommand}");
+        }
     }
 
     #[test]
