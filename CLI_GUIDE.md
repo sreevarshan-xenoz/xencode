@@ -931,6 +931,41 @@ xencode analyze ./assets/logo.png --format json
 xencode analyze ./src --format json | jq '{issues: (.issues|length), images: (.images|length), skipped}'
 ```
 
+#### `--runtime`
+
+A different question with a different engine, so it short-circuits the rest of
+`analyze`. Reports the async and concurrency mistakes that compile cleanly,
+produce no warning, and cost a production freeze or a silent task death:
+
+| finding | why it matters |
+|---|---|
+| `std::fs::*`, `std::thread::sleep` inside an `async fn` | blocks the thread the runtime is running other work on, so every other task on that worker stops until it returns |
+| `mpsc::unbounded_channel()` | nothing bounds the queue, so a producer faster than its consumer grows it until the process is killed |
+| `tokio::spawn(…)` as a bare statement | the handle is dropped, so a panic or cancellation inside the task stops silently |
+
+```bash
+xencode analyze ./rust/crates --runtime
+xencode analyze ./rust/crates --runtime --format json | jq '.findings[] | select(.test_only == false)'
+```
+
+Three things worth knowing before you trust it:
+
+- **It needs the `ast-grep` binary**, and says so when it is missing — including
+  that nothing is known about the code, and a non-zero exit. A missing engine
+  never prints "none found", because "none found" and "did not run" must not
+  read alike.
+- **It deliberately does not duplicate clippy.** `await_holding_lock` already
+  reports a lock guard held across an `.await`, correctly and with a suggestion,
+  so that class is not reimplemented here. What this adds is the four classes
+  clippy is silent about, all verified against the same file.
+- **A finding in a `#[cfg(test)]` module is reported and labelled, not hidden.**
+  Test findings sort after shipped ones, so a report about your code leads with
+  your code. A test that blocks a reactor is still worth knowing about.
+
+A blocking call inside `tokio::task::spawn_blocking` is **not** reported: that is
+the correct place for one, and a lexical "is this inside an `async fn`" cannot
+tell it apart from sleeping on the reactor.
+
 ### `xencode scan [path] [--hidden] [--max-depth N] [--format text|json]`
 List workspace entries (kind, size, path) as TSV or JSON.
 

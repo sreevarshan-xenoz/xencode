@@ -310,6 +310,13 @@ enum Commands {
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
+
+        /// Report async and concurrency hazards: blocking calls on the reactor
+        /// thread, unbounded channels, and dropped task handles. Needs the
+        /// `ast-grep` binary; without it the report says the check did not run
+        /// rather than reporting nothing found.
+        #[arg(long)]
+        runtime: bool,
     },
 
     /// Fetch a web page and extract research-ready text
@@ -831,7 +838,11 @@ async fn main() {
             audit_path,
             allow_insecure_public,
         } => run_server(port, host, cert, key, audit_path, allow_insecure_public).await,
-        Commands::Analyze { path, format } => run_analyze(path, format),
+        Commands::Analyze {
+            path,
+            format,
+            runtime,
+        } => run_analyze(path, format, runtime),
         Commands::Fetch { url, format } => run_fetch(url, format).await,
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
@@ -3875,7 +3886,46 @@ async fn run_replay(
     }
 }
 
-fn run_analyze(path: std::path::PathBuf, format: OutputFormat) -> Result<(), String> {
+/// How long each structural query may take. Per rule, not per scan, so a slow
+/// tree is bounded by rules × this rather than not at all.
+const TIMED_OUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `--runtime` short-circuits the rest of `analyze`: it is a different question
+/// with a different engine, and folding it into the image/security inventory
+/// would make one flag mean two reports.
+fn run_runtime_analyze(path: &std::path::Path, format: OutputFormat) -> Result<(), String> {
+    let scan = xencode_analysis_rs::runtime_hazards::analyze_runtime(path, TIMED_OUT);
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&scan)
+                    .map_err(|e| format!("cannot render JSON: {e}"))?
+            );
+        }
+        _ => {
+            println!("{}", scan.summary());
+            for finding in &scan.findings {
+                println!("\n{}", finding.to_report());
+            }
+        }
+    }
+    match scan.engine {
+        xencode_analysis_rs::runtime_hazards::EngineStatus::Ran { .. } => Ok(()),
+        xencode_analysis_rs::runtime_hazards::EngineStatus::Unavailable { .. } => {
+            Err("the runtime hazard check did not run, so this is not a clean result".to_string())
+        }
+    }
+}
+
+fn run_analyze(
+    path: std::path::PathBuf,
+    format: OutputFormat,
+    runtime: bool,
+) -> Result<(), String> {
+    if runtime {
+        return run_runtime_analyze(&path, format);
+    }
     if path.is_dir() {
         // Full-tree walk: no depth cap (an explicit user action), junk dirs
         // (target/, node_modules/, .git/…) skipped like `scan`, and every
