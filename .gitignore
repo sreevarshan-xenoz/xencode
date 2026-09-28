@@ -118,3 +118,6 @@ brag-output/
 
 # Throwaway awk helper — on-disk only, never committed
 rust/sum.awk
+coverage.lcov
+mutants.out/
+mutants-diff.patch

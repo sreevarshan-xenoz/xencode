@@ -3,6 +3,7 @@ pub mod analyzer;
 pub mod covdiff;
 pub mod images;
 pub mod issues;
+pub mod mutation;
 pub mod runtime_hazards;
 pub mod security;
 pub mod web;
