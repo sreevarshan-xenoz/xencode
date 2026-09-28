@@ -5029,44 +5029,62 @@ one live conflict (§R-3). The one exception is the re-arguing Milestone S force
 cloud workers are not bound by the hardware that made multi-agent pipelines the honest
 answer, so two parked graph items are scoped back in (§R-2 item 8).
 
-**Inventory.** The universe is **280 IDs**: N 55 + O 73 + P 48 + Q 63 + S 26 +
-L-1…L-12 + M-1…M-7. It is 280 rather than the headline **208** because that number counts Q at
-its **32 net-new candidates** — 29 of Q's 63 are folds or refinements of items already
-counted and 2 are deterministic bug fixes — leaves out the 19 L/M items, which
-were committed tasks before any appendix existed, and predates Milestone S's 26.
-Every ID is placed **exactly once**
-below, checked by script against the file rather than by eye: **276 scheduled** into W0…W17, **8 not scheduled** (7 register rejections
-carried forward, plus MI-5, which is contested), and QN-5 sitting inside W10 as
-conditional.
+**Inventory.** The universe is **292 IDs** across **294 rows**: N 55 + O 73 + P 48 +
+Q 63 + S 26 + L-1…L-12 + M-1…M-7 + U-1…U-8. The L/M/N/O/P/Q/S sum is 284 rather
+than the original headline **208** because that number counts Q at its **32
+net-new candidates** — 29 of Q's 63 are folds or refinements of items already
+counted and 2 are deterministic bug fixes — leaves out the 19 L/M items, which were
+committed tasks before any appendix existed, and predates Milestone S's 26.
+
+Milestone U added 10 rows on 2026-09-28 for 8 IDs: **U-3** holds a row in W3 and
+W11, and **U-6** a row in W5 and W7, because each is genuinely two placements —
+one builds the thing, one enforces or surfaces it. Every other ID holds exactly
+one row. So the two numbers differ by two and both are stated everywhere they
+appear rather than reconciled by quietly dropping a row.
+
+Checked by script against the file rather than by eye: **285 rows** in W0…W17
+(**283 unique IDs**), **9 not scheduled** (8 register rejections carried forward,
+plus MI-5, which is contested, plus U-8 which is deferred behind CI-6's change
+graph, plus V-11 which §V-3 declines on the adaptive-UI evidence), and QN-5
+sitting inside W10 as conditional. The two tables share no ID,
+verified.
+
+**Reconciled 2026-09-28.** The headline total used to read 280 while the tables
+held 276 rows and 8 declined — 284. The per-wave counts were all correct; only the
+total was not, so nothing in the ordering depended on it. Corrected here as U-11
+records, and the check is now stated so the next append does not have to
+rediscover it: count `| **` rows in each `#### W` table, count the `bucket` column
+**from the right** (`parts[-3]`, because L-2's item text contains an escaped `\|`),
+and the two sums must agree.
 
 | wave | what it is | items |
 |---|---|---|
 | W0 | Fix what makes current output untrustworthy | 15 |
 | W1 | Make the agent observable | 15 |
 | W2 | The model/inference substrate | 15 |
-| W3 | Code intelligence: replace the regex tier | 13 |
+| W3 | Code intelligence: replace the regex tier | 15 |
 | W4 | Retrieval on top of a real structure | 12 |
-| W5 | The verification engine | 12 |
+| W5 | The verification engine | 15 |
 | W6 | Evidence and task state | 9 |
-| W7 | Trust architecture | 18 |
+| W7 | Trust architecture | 19 |
 | W8 | Outward research capability | 6 |
 | W9 | Project DNA and architecture intelligence | 21 |
 | W10 | Durable project knowledge | 21 |
-| W11 | Self-diagnosis, cost and operations | 17 |
+| W11 | Self-diagnosis, cost and operations | 19 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 57 |
+| W14 | Product surface and ecosystem | 58 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
 | W16 | One worker at a time, then brokered (new, from S) | 12 |
 | W17 | Many workers at once (new, from S) | 12 |
-| — | declined / contested | 8 |
+| — | declined / contested | 9 |
 
 | bucket | count | what it means |
 |---|---|---|
-| core substrate | 75 | other items depend on it; skipping one is a deferral, not a speed-up |
-| capability | 140 | makes the agent better at the work; nearly all of it waits on the substrate |
-| ecology | 60 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
-| park | 9 | declined, conditional, or contested (§R-3) |
+| core substrate | 77 | other items depend on it; skipping one is a deferral, not a speed-up |
+| capability | 146 | makes the agent better at the work; nearly all of it waits on the substrate |
+| ecology | 61 | surface, packaging, editors, multimodal, ambient — valuable, and interrupting |
+| park | 10 | declined, conditional, or contested (§R-3) |
 
 ### R-1 The waves
 
@@ -7678,7 +7696,7 @@ Independent of W1. MI-1 gates every later tool-call; the O appendix calls MI-1�
 | **MI-6** | Model advisor + pinning | core | fold into LF-7 |
 | **MI-7** | Task-shaped model profiles | core | task-shaped model profiles (profiles, not a router) |
 
-#### W3 — Code intelligence: replace the regex tier — 13 items
+#### W3 — Code intelligence: replace the regex tier — 15 items
 
 LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstream of every “understands my project” feature.
 
@@ -7697,6 +7715,8 @@ LSP-4 (W0) is the stopgap, CI-2 is the fix. W9 reads this graph, so W3 is upstre
 | **LSP-3** | Semantic Rust rename through the `ssr` CLI behind CI-4's | capability | semantic rename via ssr (QI-2 is the same tool) |
 | **LSP-5** | Declare the multi-language policy: semantic tools Rust-only | capability | declare the multi-language policy (Rust-only semantics) |
 | **QI-2** | `/rename <symbol> <new>` as an explicit agent tool over ast-grep + | capability | fold into LSP-3 |
+| **U-2** | Runtime hazard analysis: blocking-in-async, guard-across-await, unbounded channels, detached task handles | capability | from U — a CI-1 query emitting `RuntimeHazard { class, span, consequence, remedies }`; the analyzer is line-based today (`analyzer.rs:52-200`) |
+| **U-3** | Configuration intelligence: code ↔ template ↔ deployment drift, plus fragile `env::var(..).unwrap()` | capability | from U — deterministic comparisons only, on QT-5's rule; the `unwrap` slice needs no substrate and can go first |
 
 #### W4 — Retrieval on top of a real structure — 12 items
 
@@ -7717,7 +7737,7 @@ CI-2/CI-6 (W3) supply the structural terms. The git-history terms (GH-1, GH-3, G
 | **RS-6** | Known-error channel from rustc's own JSON | capability | rustc JSON known-error channel — the other offline gain |
 | **RS-8** | A local documentation corpus in the Dash/Zeal docset shape | capability | local Dash/Zeal docset corpus |
 
-#### W5 — The verification engine — 12 items
+#### W5 — The verification engine — 15 items
 
 WF-4 first, always — deciding what “run the tests” means is the decision VF-1/VF-3/VF-5 all depend on. No mutation testing before autodiscovery.
 
@@ -7735,6 +7755,9 @@ WF-4 first, always — deciding what “run the tests” means is the decision V
 | **VF-6** | clippy `--message-format=json` | capability | clippy --message-format=json (the owner’s Wave 5 "CI-5 structured clippy" — this is VF-6) |
 | **VF-7** | `cargo-semver-checks` / `cargo-public-api --baseline-rev` | capability | semver/public-api checking |
 | **WF-4** | build/test autodiscovery | core | build/test autodiscovery — decides what "run the tests" means |
+| **U-1** | Cargo feature matrix: static `cfg` coverage first, compile matrix second | capability | from U — the `cfg`-coverage half is a CI-1 query and runs before any build; the matrix reuses RS-6's rustc JSON |
+| **U-4** | Flaky test isolation by differential base-tree run, riding VF-5 | capability | from U — the stress loop and quarantine hook are VF-5's; only the base-tree classification is new |
+| **U-6** | Red-to-green reproduction gate: no production edit before a witnessed RED | core | from U — phase 1 is MD-2's tool-stripping narrowed to the reproduction file; the gate itself is W7 |
 
 #### W6 — Evidence and task state — 9 items
 
@@ -7752,7 +7775,7 @@ EVd-2 needs CX-2’s session key (W1); EVd-7 reuses EV-11’s hash chain (W1); E
 | **QA-4** | Sequential A/B/C variants recorded on EVd-1's ledger | capability | sequential A/B/C variants on EVd-1 |
 | **QI-3** | Machine-checkable slots only | capability | machine-checkable slots only |
 
-#### W7 — Trust architecture — 18 items
+#### W7 — Trust architecture — 19 items
 
 Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). This is the gate in front of all of W8.
 
@@ -7776,6 +7799,7 @@ Needs W1 (a trail to attach findings to) and W5 (a verdict worth gating on). Thi
 | **SE-5** | secret *content* scanning | capability | secret content scanning |
 | **SE-6** | `xencode deps` supply-chain report | capability | deps/supply-chain report (shares work with QO-1, RS-5) |
 | **SE-7** | Landlock/bubblewrap wrapper for `run_command` | capability | Landlock/bubblewrap isolation (QTR-3 is the same wrapper) |
+| **U-6** | The reproduction gate itself, as a capability gate | core | from U — the W5 entry is the protocol; CAP-1's vocabulary and MD-2's tool-stripping are the enforcement |
 
 #### W8 — Outward research capability — 6 items
 
@@ -7846,7 +7870,7 @@ Needs SE-2 (W7), and QK-3 before QM-1 — the file’s own hard gate. Deliberate
 | **QM-6** | rejection drafting under EV-7's human gate | capability | rejection drafting under EV-7's gate |
 | **QN-5** | A dense arm, conditionally | park | conditional dense arm; register declines embeddings/vector index unless QN-4 proves the need |
 
-#### W11 — Self-diagnosis, cost and operations — 17 items
+#### W11 — Self-diagnosis, cost and operations — 19 items
 
 Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after the things it checks exist.
 
@@ -7869,6 +7893,8 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **QO-5** | `xencode doctor --env` | capability | doctor --env probe and display |
 | **QO-6** | Release notes as a draft generator | capability | release-notes draft generator |
 | **QO-7** | `doctor` as the self-debug slice | capability | doctor as the self-debug slice |
+| **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe |
+| **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks |
 
 #### W12 — Long-running autonomy — 15 items
 
@@ -7902,7 +7928,7 @@ Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores 
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
 | **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
 
-#### W14 — Product surface and ecosystem — 57 items
+#### W14 — Product surface and ecosystem — 58 items
 
 No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
 
@@ -7965,6 +7991,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **WF-8** | `xencode-action` — the review command as a GitHub Action commenting | ecology | xencode-action |
 | **WF-9** | signed-commit passthrough | ecology | signed-commit passthrough |
 | **WF-10** | stacked-diff assist over worktrees | ecology | stacked-diff assist over worktrees |
+| **U-7** | Structural three-way merge resolution over GH-6's detection | ecology | from U — proposes and compiles, never auto-applies and never silent, by OR-5's rule |
 
 #### W15 — Measure the other agents before planning on them — 3 items
 
@@ -8040,6 +8067,7 @@ Declined once already, or genuinely contested. Recorded here so nobody re-propos
 | **MEM-4** | Unrestricted write on "exit code 0 = verified" | park | REJECT-tier: unrestricted write on "exit code 0 = verified" |
 | **MEM-5** | SQLite/vector-indexed memory | park | rejected: SQLite/vector-indexed memory, unjustified at this corpus size |
 | **MI-5** | Speculative decoding on the Colab bridge | park | SPECULATIVE-DECODING CONFLICT: declined in the register at :1769 ("~25-30% tok/s for a fragile launch surface on hardware that is already the bottleneck"). MI-5's Colab-bridge form assumes rented VRAM. Needs the owner’s call before it can sit in any wave |
+| **U-8** | Atomic commit slicing of a dirty tree | park | from U — deferred, not rejected: needs CI-6's/QD-1's change graph first, and its worst failure mode is silently wrong history |
 
 ### R-2 Corrections to the order as proposed
 
@@ -8805,3 +8833,602 @@ plan item is duplicated or renumbered.
   a vendor-native, bidirectional JSON-RPC integration surface; evidence for
   researching a thin compatibility layer, not a promise that vendors share one
   contract.
+
+---
+
+## Milestone U — change intelligence and verification intelligence (research appendix, drafted 2026-09-28)
+
+### U-0 What arrived, and what changed about it
+
+An external proposal of eight features for this workspace arrived on 2026-09-28,
+each with a problem statement, a mechanism, a done-when and a claim of **zero
+architectural overlap** with the crates, the W0–W17 waves and the do-not-build
+register. That claim was re-checked here against the tree and this file rather
+than accepted, and it does not hold in three places. All eight ideas are worth
+having. The framing needs three corrections before any of them becomes an item,
+and the corrections are the reason this appendix exists rather than eight rows.
+
+The theme underneath the eight is the durable part, and it is a good one:
+
+> **A change should be knowable as safe, reproducible, attributable and
+> structurally valid before an agent is allowed to call it finished.**
+
+That is a real gap, it is adjacent to W5 and W6 rather than competing with them,
+and it is the same instinct as EVd-3's `{ran, skipped, failed, evidence-ref}` and
+EVd-6's false-verified calibration. Nothing here re-argues a disposition already
+recorded in N, O, P, Q or S.
+
+#### Correction 1 — the layer the proposal builds on has no name here, because the name was declined
+
+The proposal routes four of its eight features through a component it calls
+**XAR** ("Xencode Agent Runtime") and argues that separating structural facts from
+workflows "will matter a lot once XAR becomes real." That component was already
+dispositioned at §S-11 (`:8639`): "Xencode Agent Runtime" cannot be used because
+the TUI already has an `AgentRun` type and an `arm_spawn` entry point
+(`xencode-tui-rs/src/app.rs`), so the phrase is occupied by xencode's *own* loop —
+which is the one distinction this work must not blur — and "XAR" collides with a
+well-known archive format. The adopted names are **worker** for an external agent
+process, **`xencode-agents-rs`** for `AR-*`, and **`xencode-orchestrator-rs`** for
+`OR-*`, with `/orchestrator` as the user-facing word.
+
+This is not a naming quibble. A proposal whose four features all terminate in one
+unbuilt layer, and whose value argument is "this matters once that layer exists",
+is a bet on a component this plan has already scoped to a different name, a
+different crate and a deliberately late wave (W16–W17). The separation-of-concerns
+argument is sound and is recorded below as **U-0's substrate rule**; the dependency
+on an unbuilt orchestrator is not adopted.
+
+#### Correction 2 — five of the eight need a parser this workspace does not have, and the proposal would have built five of them
+
+This is the most consequential finding. The proposal places a Tree-Sitter query in
+`xencode-analysis-rs` for features 1, 2 and 3, and cites Tree-Sitter AST inspection
+for 1, 7 and 8. Taken literally that is up to five independent parsing stacks.
+
+What exists today:
+
+- `xencode-analysis-rs/src/analyzer.rs` is **297 lines of line-based `.contains()`
+  checks** — `print(` at `:52`, `=[]`/`={}` at `:66`, `TODO` at `:94`, `console.log`
+  at `:146`, `.unwrap()` at `:200` — plus exactly one compiled `Regex` (`:109`,
+  `def \w+\(.*\):`). Verified 2026-09-28. It cannot see a `cfg` attribute, an
+  `async` body, a call's receiver, or whether a guard crosses an `.await`. This is
+  the same tier LSP-4 already called "four regexes that cannot see a `trait`, an
+  `impl`, an `enum` or a private `struct`" (`:3837`), and the reason CI-2 exists.
+- The declared structural substrate is **CI-1** (ast-grep as a subprocess, W3,
+  `:1550`) and **CI-2** (tree-sitter symbol extraction replacing `symbols.rs`, W3,
+  `:1556`). W3's own header states it plainly: "LSP-4 (W0) is the stopgap, CI-2 is
+  the fix. W9 reads this graph, so W3 is upstream of every 'understands my
+  project' feature" (`:7694`).
+- CI-2 extracts **symbols**. It does not answer "is this import reachable without a
+  `cfg(feature)`", "is this call inside an `async fn`", "what does this `env::var`
+  name look like", or "which AST nodes did the other branch add". Those are
+  *query* questions, and **CI-1 is the surface built for them** — metavar patterns
+  with `--json` results, already scheduled, already the answer to "structural
+  search".
+
+**Substrate rule.** Features 1, 2, 3, 7 and 8 are specified as **queries over
+CI-1's pattern language against CI-2's graph**, not as a new parser in
+`xencode-analysis-rs`. Two things follow. First, all five are **gated on W3** and
+cannot start before it. Second, the analysis crate's job is to emit typed facts —
+`FeatureReference`, `AsyncHazard`, `ConfigReference`, `AstChange` — that
+verification and agent code consume; it does not own the workflows. That is the
+one part of the proposal's architecture diagram worth keeping verbatim, and it
+survives independently of XAR.
+
+CI-1's own trap applies to all five and is worth stating once: ast-grep is a
+**subprocess that may not be installed** (the same "reports itself unpowered"
+pattern already recorded for `colab` and `ssh`), and a wrong pattern matches zero
+sites and **looks like success**. Every one of these five features must report
+"the pattern engine is not available" rather than "no findings".
+
+#### Correction 3 — three of the eight overlap work this plan already scheduled
+
+The proposal's non-overlap audit checked that the roadmap IDs it named were
+"untouched". That is true and not sufficient: two of its features collide with
+items it did not name, and one collides with an item that names the exact
+mechanism. Details per feature below. In summary: **U-4 is roughly half
+already owned by VF-5**, **U-3 is adjacent to QT-5 and QB-1**, and **U-5 is
+adjacent to SE-6, QO-1 and CX-8**. None of the three is dead on arrival; each is
+narrower than proposed and rides an existing ID.
+
+### U-1 — Cargo feature matrix
+
+**Proposed.** `xencode verify --features` plus an agent tool. Run
+`--no-default-features`, `--all-features` and each declared feature in isolation
+over touched members, and flag imports of an `optional = true` dependency that no
+enclosing `#[cfg(feature = "...")]` guards.
+
+**Checked and true.** Nothing in this file or the tree mentions
+`--all-features`, `--no-default-features` or a feature *combination* — grepped
+2026-09-28, zero hits. **RS-6** (now shipped, `xencode-core-rs/src/rustc_json.rs`)
+parses rustc's JSON for the *active* command and knows nothing about the matrix.
+**WF-4** decides what "run the tests" means. **VF-7** compares public API across
+git revisions, not feature configurations. The gap is real and Rust-specific.
+
+**Disposition: promote, as U-1.** Genuinely new.
+
+**Refinements.** The proposal's own note that "each feature independently" is not
+enough is right, and the fix is not to enumerate the full power set — a crate with
+12 features has 4096 combinations and most are meaningless. The honest scope is
+the four configurations every CI matrix runs anyway (`default`,
+`--no-default-features`, `--all-features`, and each feature that is *not* implied
+by another), plus the pairs that `Cargo.toml` itself declares conflicting or
+additive relationships for. Anything beyond that is a combinatorial trap with no
+consumer.
+
+The `cfg`-coverage half is the more valuable half and is the part that must not
+wait for the compiler matrix: it is a **CI-1 query** and finds a missing gate
+without running a single build. Do that half first, against W3, and treat the
+compile matrix as a separate stage that reuses **RS-6's** existing rustc JSON
+plumbing rather than a second diagnostic path.
+
+**Done-when.** A seeded crate declares `serde` as `optional = true`; an edit adds
+`use serde::Serialize;` outside any `#[cfg(feature = "serde")]`; the static query
+names `path:line` and the missing feature, and the agent is told before any build
+runs. Separately, `--all-features` is observed failing on a seeded
+feature-exclusive compile error and the failure is reported with the rustc
+diagnostic attached, not as a bare exit code.
+
+**Trap.** `--all-features` is where mutually-exclusive features (`native-tls` vs
+`rustls`) break, and that breakage is often *correct upstream behaviour* this
+workspace has no stake in. Reporting it as a defect of the user's code would be
+the analyzer's own version of the fiction this plan keeps refusing. Label it
+`matrix` and name the feature pair.
+
+### U-2 — Runtime hazard analysis
+
+**Proposed.** Flag `std::fs::*`, `std::thread::sleep` and `std::process::Command`
+inside `async fn`; flag `std::sync::MutexGuard` held across `.await`; flag
+`unbounded_channel()`; flag `tokio::spawn` whose handle is discarded.
+
+**Checked and true.** The analyzer is line-based (U-0, correction 2), so it cannot
+see any of this. `grep` over this file finds no existing item for blocking-in-async,
+unbounded channels or detached task handles. The claim that clippy misses the first
+and last is correct — clippy has no lint for a detached `JoinHandle` being
+intentional or accidental, which is exactly the ambiguity that makes it a false
+positive generator if built naively.
+
+**Disposition: promote, as U-2, renamed.** Not "async linter". The proposed list
+is a seed, not a taxonomy: lock-across-await, unbounded channels and detached
+handles are three different failure modes with three different fixes, and the next
+three (cancellation safety, `block_in_place` misuse, blocking in a `Drop`) will
+arrive the same way. The finding type should be `RuntimeHazard { class, span,
+consequence, remedies }` so the class list can grow without changing the shape.
+
+**The honesty requirement.** `tokio::spawn(...)` as a statement is not a defect.
+It is a deliberate detached task, and plenty of correct code does it. The
+diagnostic must therefore distinguish the four cases the proposal's own analysis
+identifies — discarded, bound to `_`, bound to a name, awaited — and for the
+discarded case offer **four** remedies including *"this is intentional; annotate
+it"*. A linter that cannot be told "I meant that" will be suppressed on first
+sight, and a suppressed linter is worse than none because it still reports green.
+
+**Done-when.** `std::fs::read_to_string` inside an `async fn` is reported at
+`high` with `tokio::fs::read_to_string` named as the replacement; a `tokio::spawn`
+whose handle is bound to a named variable is **not** reported; a discarded one
+reports with the intentional-detach remedy available; and an `async fn` reached
+only under `#[cfg(test)]` is either excluded or labelled as such.
+
+**Placement.** W3, gated on CI-1.
+
+### U-3 — Configuration intelligence
+
+**Proposed.** Extract every `env::var` / `os.getenv` / `process.env` key from
+code, parse `.env.example` / `.env.template` / `.xencode.example.json`, and report
+keys read but undocumented, keys documented but unreferenced, and
+`env::var(...).unwrap()` in startup code. Broaden to a graph across code,
+templates and deployment manifests.
+
+**Checked, and the proposal's boundary is right but incomplete.** QO-5
+(`xencode doctor --env`, W11) probes the *developer's machine* — terminal, OS, PATH
+— which is a different question, and the proposal correctly separates them. SE-5
+and PR-3 scan for secret *content*. But two items it did not name sit close:
+
+- **QT-5** (W9) is "documentation drift as a deterministic check", narrowed at
+  `:4099` to "deterministic clap-enum-vs-manual diff inside DB-6. **Prose-level
+  drift checking is FP soup**". Config-template drift is the *deterministic* half
+  of that idea — a key that is read and a key that is listed are both machine
+  facts — so U-3 belongs in QT-5's family and inherits its rule: deterministic
+  comparisons only, never "this text implies this setting is missing".
+- **QB-1** (W9) is declared-layer conformance over `.xencode/architecture.toml`,
+  and its trap is the same shape as U-3's worst failure mode: auto-inferring the
+  rule is circular (`:4375`). A config key's *requiredness* cannot be inferred
+  from code that reads it.
+
+**Disposition: promote, as U-3, folded into QT-5's shape and DB-6's surface.**
+
+**The evidence line, which is the whole feature.** Static analysis can say
+*"referenced by production code at `file:line`, absent from every known
+configuration source"*. It cannot say *"required"*. The proposal's own draft
+already draws this line correctly; it is the difference between a finding and a
+guess, and this plan has rejected whole options for the guess version (`:4099`,
+`:4102`, `:4466`). Keep the line.
+
+The third check — `env::var(...).unwrap()` in non-test startup code — is
+genuinely valuable and is the one most likely to be a real crash on a rented
+machine, which is a theme this project already owns (K, CX-6). It is also the
+easiest: it is a syntactic property, not a semantic one, and it works as a
+regex-grade check today without waiting for W3. That makes it the natural first
+slice of U-3 and the one piece that need not be gated.
+
+**Done-when.** A new `std::env::var("NEW_KEY")` added in a branch and absent from
+`.env.example` is reported with the code reference and the list of sources
+searched; a key present in `.env.example` and read nowhere is reported as
+*unreferenced*, never as *unnecessary*; and a `doctor --json` row carries the
+result so DB-6 has one shape.
+
+**Placement.** W3 for the graph, W11 for the `doctor` surface — the same
+split QB-4 and QO-1 already use.
+
+### U-4 — Flaky test isolation
+
+**Proposed.** Stress a test N times, and when a test fails after an agent edit,
+re-run **that same test** against the clean base tree in a temporary worktree; if
+it fails there too, classify it `PRE_EXISTING_FAILURE` and instruct the agent not
+to fix it.
+
+**Checked — this is the feature with the most existing ownership.** **VF-5**
+(`:2451`, W5) already names every mechanism the proposal's first half describes:
+"`cargo nextest` as the runner — filtersets give real build-graph selection
+(`rdeps(<crate>)`), **`--stress-count` is flake detection**, **`--flaky-result
+fail`** and JUnit `<flakyFailure>` are **the quarantine hook**". The proposal's
+Step 1 is VF-5, written earlier. Its two recorded traps are also the ones a naive
+build would hit: retries default to flaky-**pass**-exit-0, which silently masks
+breakage, and `rdeps(xencode-tui-rs)` collapses to "run all" because that crate
+depends on nearly everything. **GH-7** (`:2518`, W4) already owns "k-repeat voting
+for flaky ones" and names the identical trap: "flakiness gives false positives;
+k-repeat multiplies wall-clock".
+
+**Disposition: promote the second half only, as U-4, riding VF-5.** The stress
+loop and the quarantine hook are not new work and must not be re-specified. What
+is genuinely new and genuinely valuable is the **differential base-tree
+comparison**: running the failing test against the unmodified base in a worktree
+and returning a classification. The seam exists —
+`xencode-context-rs/src/worktree.rs` and the background-task machinery — and it is
+the piece that changes agent behaviour rather than test infrastructure.
+
+**Why it is the highest-value item in this appendix.** The failure it prevents is
+specific and expensive: the agent sees a red test, assumes its own edit caused it,
+and spends 5–10 rounds rewriting correct application code around a pre-existing
+race. Every round costs the developer's tokens and makes the repository worse.
+This is the *cause* of the loop that EVd-6 measures the *symptom* of
+("how often the agent's verdict claimed success"), and the fix is cheap: one
+worktree, one filtered test run.
+
+**The reporting rule, which is the difference between this and the proposal.**
+The output is **evidence, not a probability**. The proposal's own draft drops the
+"87% flaky" figure and that is correct — nothing here is calibrated, and this
+plan's standing rule is that no gauge renders a number for a measurement that did
+not happen. The finding is a classification plus the counts that produced it:
+
+```text
+Test:        parser_handles_empty_input
+Candidate:   FAIL  (5/20 runs)
+Base:        FAIL  (4/20 runs, commit abc123)
+Class:       PRE_EXISTING_FAILURE
+Evidence:    base abc123 · candidate def456 · same filter, same runner
+```
+
+**Done-when.** A seeded timing-race test failing roughly 1 run in 5 is classified
+`PRE_EXISTING_FAILURE` on both sides, and the agent turn is told not to modify
+production code for it; the same test failing **only** on the candidate is *not*
+quarantined; and when no clean base exists (no prior commit, or a dirty index) the
+tool says so instead of guessing.
+
+**Trap.** The eval loophole GH-7 already names applies here too and is worse: if
+the base tree is reachable, an agent can **read the fix out of the base and
+"apply" it**, turning a classification tool into an answer key. The base run must
+happen in a worktree the agent cannot read, and the result must be a verdict
+rather than a transcript.
+
+**Placement.** W5, immediately after VF-5 and WF-4.
+
+### U-5 — Dependency impact
+
+**Proposed.** Compute the transitive dependency delta across a `Cargo.toml` edit,
+flag duplicate crate versions in `Cargo.lock`, recommend an existing in-tree crate
+over a new one, and refuse heavy native dependencies without approval.
+
+**Checked.** Three items own parts of this and the proposal named only one:
+
+- **SE-6** (W7, `:1753`) is `xencode deps`: shell to `cargo deny` + `cargo-shear`,
+  parse JSON, stream findings, lockfile diffing on a PR — with the trap recorded
+  as "report only — auto-fixing dependencies is how the supply chain becomes the
+  attack."
+- **QO-1** (W11, `:4063`) is explicitly *not* a new engine: "SE-6 `deps` + RS-5
+  `lookup_advisory` + DB-6 `doctor`; QO-1 is their composition".
+- **CX-8** (W11, `:7877`) is the GPU-free performance gate in CI, and `cargo bloat`
+  text size against a checked-in baseline is already specced at `:2819`.
+
+None of the three computes a **transitive delta** or a **duplicate-version** set.
+`grep` for "duplicate version", "transitive" and "bloat" finds no item doing so.
+The gap is real.
+
+**Disposition: promote, as U-5, as a report that rides QO-1's composition.**
+
+**The refusal must not ship in the first version.** The proposal's own draft
+reverses this and the draft is right: an agent adding 30 dependencies is not
+necessarily wrong — `reqwest` plus its transitive tree can be entirely justified
+in a network-facing crate, and a tool that hard-refuses it will be overridden
+every time, which teaches the developer to disable the tool. First version is an
+**impact report**: direct count, transitive count, new versions, duplicate
+versions, native/system dependencies, and `estimated compilation impact: UNKNOWN`
+until something measures it. An approval *prompt* on a stated reason (native
+dependency, or a duplicate version introduced) is the honest second step. A silent
+refusal is not.
+
+**The measurement gap is the real prize, and it is later.** "Estimated
+compilation impact" cannot be filled in honestly without timing actual clean
+builds before and after, which is CX-8's job on this workspace. Until that number
+exists, printing `UNKNOWN` is the correct output and a fabricated seconds figure is
+exactly the kind of claim this plan keeps refusing.
+
+**Done-when.** Adding a dependency that pulls a second `syn` major version into
+`Cargo.lock` produces an advisory line naming both versions and both paths, the
+report distinguishes "new" from "already present", and the agent is asked rather
+than blocked.
+
+**Placement.** W11, after SE-6 (W7) and into QO-1's `doctor` composition.
+
+### U-6 — Red-to-green reproduction gate
+
+**Proposed.** For a bug fix, phase 1 restricts the agent to read tools plus writing
+a reproduction test, runs it against the **unmodified** codebase, and rejects the
+turn if the test passes; phase 2 unlocks production edits and requires the
+reproduction to pass with the suite still green.
+
+**Checked.** The proposal's boundary is accurate: **L-7** (`:1265`, W5) is a
+test/lint auto-repair loop that runs until exit code 0 — no RED state, no
+causal evidence. **EVd-3** (`:3402`) records `{ran, skipped, failed, evidence-ref}`
+and is the honest vocabulary this feature should speak. Neither requires observing
+a failure before permitting a fix.
+
+**Disposition: promote, as U-6 — and this is the strongest item in the
+appendix.** It is the only proposal here that changes what the agent is *allowed to
+do* rather than what it can see, and it is the only one that produces causal
+evidence rather than a green checkmark.
+
+**Why it outranks its effort.** The distinction it draws is the one that separates
+a fix from a coincidence. Without a witnessed RED state, "the test passes now" is
+consistent with three different worlds: the fix worked; the test was always
+passing; the test passes for an unrelated reason. With it, the claim is a
+two-point measurement on the same test:
+
+```text
+same test · unmodified tree · FAILED
+same test · this change  · PASSED
+suite                   · PASSED
+```
+
+That is a causal chain an agent can be held to, and it is the input EVd-6 needs to
+calibrate false-verified claims at all.
+
+**Shape it as a capability gate, not a prompt.** The plan already has the
+vocabulary: **CAP-1** is "capabilities as the *vocabulary* of the gate"
+(`filesystem.read` and so on, W7), and **MD-2** is tool-stripping in PLAN mode.
+Phase 1 is `MD-2` with the write set narrowed to the reproduction file, and phase 2
+is the normal write set. A prompt asking the agent to behave is worth far less
+than a tool set that cannot express the violation.
+
+**The trap is the one that makes this item dangerous if built casually.** The
+agent will write a reproduction test that *cannot fail* — asserting something
+trivially true, or catching the panic, or testing a function the bug never
+touched. That test passes on the unmodified tree, phase 1 rejects it, and a
+sufficiently motivated agent will then write a *deliberately broken* test, watch it
+fail, and "fix" it. The gate must therefore also record **what the reproduction
+asserts** — the failing assertion's message and location — in the evidence, and
+**EVd-6** should be extended to measure how often a reproduction test was
+manufactured rather than discovered. Without that measurement the gate is
+decorative.
+
+**Done-when.** Given a seeded panic, the agent cannot reach a production edit
+before a reproduction test has been run and observed failing on the unmodified
+tree; a reproduction that passes unmodified is rejected with the reason; and a
+reproduction whose recorded failure location lies outside the reported bug's
+neighbourhood is flagged as suspect rather than accepted.
+
+**Placement.** W5, on **CU-1**'s verifier seam, with the gate itself in W7.
+
+### U-7 — Structural three-way merge resolution
+
+**Proposed.** Read `git show :1:`, `:2:`, `:3:` for BASE/OURS/THEIRS, decompose
+each into AST nodes, auto-reconcile disjoint additions at AST boundaries, show the
+agent both deltas relative to BASE for same-node conflicts, and compile-gate the
+result.
+
+**Checked.** **GH-6** (W14, `:7935` and `:2512`) is the conflict assistant over
+`git merge-tree --write-tree --messages`, and it **detects**; the proposal's layer
+**resolves**. The boundary the proposal draws is correct and should be kept as a
+hard rule: GH-6 says *that* there is a conflict, U-7 decides *what* the resolution
+is. **OR-5** (W17, `:8037`) is the merge decision with a human gate, and its
+placement note is binding on this item: "**never silent, never auto-resolved by a
+worker**".
+
+**Disposition: promote, as U-7, subordinate to GH-6 and bounded by OR-5's rule.**
+
+**OR-5's rule resolves the auto-reconcile question.** "Disjoint additions are
+reconciled automatically" is a machine decision about a file two humans own. It
+may be proposed as a *candidate resolution* and it may be applied without a model
+call, but it must be shown and accepted. Automatic here means *mechanical and
+reviewable*, not *silent* — and OR-5 already forbids the silent version for the
+multi-worker case, where the stakes are higher. Consistency argues for the same
+rule with one pair of eyes on it.
+
+**Start with the node kinds that are decidable.** Imports, top-level functions,
+structs, enums, traits, `impl` blocks, module declarations. Conflicts *inside* one
+function body are where semantic judgement is required and where a structural
+merge has nothing to offer but a diff — attempt those only as a presented
+candidate with both deltas against BASE, never as a merge.
+
+**The compile gate is the part that makes this worth having** and the part that
+must not be skippable: a resolution is not a resolution until `cargo check` has
+run on it, reusing **RS-6**'s rustc JSON for the diagnostics. Text merge tools
+cannot see that dropping one branch's import compiles fine and breaks the build
+three files later.
+
+**Done-when.** Two branches that each add a different top-level function to the
+same file are reconciled to both functions, compile clean, and the resolution was
+displayed before being written; a same-body conflict is never auto-applied; and a
+resolution that compiles but drops an import fails the gate.
+
+**Placement.** W14, after GH-6, consuming CI-1's node boundaries.
+
+### U-8 — Atomic commit slicing
+
+**Proposed.** Partition a dirty tree into ordered bundles (manifests, refactor,
+implementation, tests, docs), compile-check each intermediate state, and emit a
+sequence of commits.
+
+**Checked — and this is the one to push down the queue.** The diagnosis of the
+hidden complexity is the strongest part of the proposal and is the author's own:
+**a diff is not the same thing as a logically independent commit.** The
+`Cargo.toml` + `src/a.rs` + `tests/a.rs` case is the ordinary one — all three files
+are one feature, and slicing them produces a commit that does not build and a test
+that tests nothing. "Run `cargo check` per bundle" catches the build half and
+establishes nothing about the other half.
+
+Against the plan: **GH-5** (W14, `:7934`) is `xencode commit` — a message from the
+**staged** diff, rejecting messages that do not explain the change. That is a
+different job (message) but the same input problem, and slicing has to solve
+grouping before GH-5 can be reused on the result. **WF-10** (`:1656`) is
+stacked-diff assist over worktrees. And this repository's own `AGENTS.md` already
+imposes the rule the feature would automate — one commit per logical change, each
+naming its plan IDs in plain English — which is a useful signal about how much
+discipline the maintainer already applies by hand.
+
+**Disposition: defer, recorded as U-8 with no wave.** Not rejected: the need is
+real, GH-5 is a natural host, and the group-boundary problem is the same
+change-graph problem **CI-6** (`what_breaks`) and **QD-1** (`xencode impact`) are
+already being built to answer. It is sequenced last because it needs that graph
+first, and because it is the one item here whose failure mode is *silently wrong
+history* — the hardest class of defect to notice and the one `AGENTS.md` exists to
+prevent.
+
+When it is picked up, three constraints are already decided: never create commits
+without explicit approval per bundle; a bundle boundary must be justified by the
+**change graph** (which symbols changed together), not by file extension or
+directory; and each intermediate state must pass more than `cargo check` — the
+tests that cover the touched symbols, which is **CI-6**'s `rdeps` filter doing a
+second job.
+
+### U-9 Wave placement
+
+Seven items are scheduled and one is deferred. Nothing here renumbers an existing
+item; provenance stays with the appendix letter, per §R-0's rule.
+
+| wave | what it is | after U | before U |
+|---|---|---|---|
+| W3 | Code intelligence: replace the regex tier | 15 | 13 |
+| W5 | The verification engine | 15 | 12 |
+| W7 | Trust architecture | 19 | 18 |
+| W11 | Self-diagnosis, cost and operations | 19 | 17 |
+| W14 | Product surface and ecosystem | 58 | 57 |
+
+These are U's own deltas, not the live totals — Milestone V added rows to W1,
+W11 and W14 the next day, and §R-0 carries the current figures. W6 is
+**unchanged by U**: none of the seven needs a new item there, though U-4 and U-6
+both write into it. U-4's `PRE_EXISTING_FAILURE` class and U-6's witnessed
+RED-then-GREEN pair are both records against **EVd-1**'s run ledger and both belong
+in **EVd-3**'s `{ran, skipped, failed, evidence-ref}`, which is a shape change to
+an existing W6 item rather than a ninth thing to build. Doing that before either
+lands is the reason to read W6 first.
+
+| ID | item | wave | bucket | depends on |
+|---|---|---|---|---|
+| **U-1** | Cargo feature matrix: static `cfg` coverage first, compile matrix second | W5 | capability | CI-1, CI-2, RS-6, WF-4 |
+| **U-2** | Runtime hazard analysis (`RuntimeHazard { class, span, consequence, remedies }`) | W3 | capability | CI-1 |
+| **U-3** | Configuration intelligence: code ↔ template ↔ deployment drift | W3 + W11 | capability | CI-1 (graph half only; the `unwrap` check needs nothing) |
+| **U-4** | Flaky test isolation by differential base-tree run | W5 | capability | VF-5, WF-4, GH-7, `worktree.rs` |
+| **U-5** | Dependency impact report (transitive delta, duplicate versions) | W11 | capability | SE-6, QO-1, CX-8 |
+| **U-6** | Red-to-green reproduction gate as a capability gate | W5 + W7 | core | CU-1, EVd-3, CAP-1, MD-2 |
+| **U-7** | Structural three-way merge resolution | W14 | ecology | GH-6, CI-1, RS-6, OR-5's rule |
+| **U-8** | Atomic commit slicing | — | park | deferred behind CI-6/QD-1 |
+
+Ordering inside the appendix: **U-2 and U-3's graph half first** (they are W3 and
+they unblock nothing but cost nothing), then **U-6** (highest behavioural value,
+smallest surface, rides CU-1), then **U-4** (highest saved-token value, needs
+VF-5), then **U-1**, **U-5**, **U-7**. The author's Wave A/B/C/D grouping is
+sound in spirit and inverted in one respect worth naming: it places the AST
+foundation first, which is right, but its Wave B pairs the two agent-behaviour
+items last, and U-6 is the item that most changes what the agent does per turn
+costing the least.
+
+### U-10 Additions to the do-not-build register
+
+Consolidated with the register at `:1879` and Milestone S's seven additions
+(`:8138`). Each is a consequence of a decision above, not a new opinion.
+
+- **A new parser in `xencode-analysis-rs`.** Structural facts come from CI-1's
+  pattern language over CI-2's graph (U-0, correction 2). Five features needing
+  syntax is five parsers otherwise; the register's existing "libcst/jscodeshift
+  integration" rejection (N-1) is the same instinct.
+- **A second rustc diagnostic path.** U-1, U-6 and U-7 all consume **RS-6**'
+  `rustc_json.rs`. Three features that each shell out and parse stderr
+  independently is how the "pattern-scan vs verified" labelling discipline at
+  `:3404` gets lost.
+- **An uncalibrated flake or failure probability.** U-4 reports run counts and a
+  class. A percentage implies a distribution this workspace has never measured;
+  EVd-6 is how a number would eventually be earned.
+- **A hard dependency refusal in the agent loop.** U-5 reports and asks. A tool
+  that blocks work gets disabled, and a disabled tool reports green.
+- **A new orchestrator layer to host these four features.** They terminate in
+  CU-1's verifier seam and EVd-3's evidence, which exist. §S-11 declined the name
+  and the late wave for good reasons.
+- **Auto-resolving a merge without showing the resolution.** OR-5's rule
+  (`:8037`), applied to the single-developer case for consistency.
+
+### U-11 The §R-0 inventory arithmetic, found while adding these items and now fixed
+
+Adding these rows forced a recount of the tables they sit in, and the summary at
+`:5032` did not reconcile with its own rows. Counted from the file on 2026-09-28
+**before** this appendix: the eighteen wave tables held **276** item rows, the
+not-scheduled table held **8**, and the bucket table summed to 284 — but the prose
+said the universe was **280 IDs**. Every per-wave count in the summary table
+matched its table exactly (all eighteen checked), so the defect was in the headline
+total and the bucket column, not in the ordering. Nothing in the dependency
+sequence depended on it, and no scheduled item was misplaced.
+
+A naive column split is what hid the second half of this: the `bucket` column is
+`parts[-3]` when a row is split on `|`, **not** `parts[-2]`, because L-2's item text
+contains an escaped `\|` and shifts every field after it. Counted correctly, the
+pre-existing buckets were core 75, capability 141, ecology 59, park 9.
+
+- [x] **Reconcile the §R-0 inventory arithmetic** — 2026-09-28. The headline is now
+  **292 IDs across 294 rows**, the counts are **285 rows scheduled (283 unique)
+  plus 9 not scheduled**, and the bucket table reads 77 / 146 / 61 / 10, which sums
+  to the 294 rows. Both numbers are now stated side by side in §R-0 rather than one
+  being chosen to make the arithmetic look tidy. The check itself is written into
+  §R-0 so the next append does not have to rediscover the `parts[-3]` trap, and it
+  also verifies that the wave tables and the not-scheduled table share no ID — they
+  do not. Ten rows were added for eight IDs because U-3 (W3 and W11) and U-6 (W5
+  and W7) are each two placements, and that is a design fact rather than a
+  miscount.
+
+
+### U-12 Where to re-check this appendix
+
+Repo facts are verifiable by the file:line given above and were re-read on
+2026-09-28. The external claims in the proposal were checked as follows.
+
+- **The failure modes are real and standard, not vendor-specific.** Blocking calls
+  in async contexts, lock guards held across `.await`, unbounded channels and
+  detached task handles are the four hazards the Tokio documentation and the
+  broader Rust async ecosystem treat as canonical. No measurement is claimed here.
+- **Feature-matrix compilation is standard CI practice**, and the combinatorial
+  blow-up that makes naive "each feature independently" insufficient is a
+  well-known property of the feature space rather than a claim needing a source.
+- **`--stress-count` and `--flaky-result fail` are `cargo nextest` options**, and
+  their default-to-flaky-pass behaviour is recorded in this file at `:2453` from
+  the earlier VF-5 pass.
+- **`cargo bloat`, `cargo deny`, `cargo-shear` and `cargo-semver-checks`** are
+  already recorded at `:1753`, `:2461` and `:2819`; this appendix adds no new
+  external tooling claim.
+- **No external source is load-bearing for any disposition above.** Every
+  disposition rests on a file:line in this repository or on the proposal's own
+  text, which is the standard the earlier appendices set and the reason no
+  UNVERIFIED marker is needed here.
+
+**Standing caveat.** Nothing in this appendix is permission to build. U-2 and
+U-6 are the two this plan would fund first, and both are gated on substrate that
+does not exist yet — W3 for U-2, CU-1 for U-6. The separation-of-concerns argument
+the proposal makes is recorded in full and adopted; the dependency on an unbuilt
+orchestrator is not.

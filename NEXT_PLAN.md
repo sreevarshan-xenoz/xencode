@@ -182,13 +182,37 @@
   S; overlapping construction stays gated on `AR-1` measuring the installed worker CLIs. The
   external standards are dated and qualified in [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone T.
+- 🔬 **Milestone U recorded** (2026-09-28): eight externally proposed features for
+  this workspace, audited rather than accepted. The proposal arrived claiming
+  **zero architectural overlap**; that claim does not hold in three places, and the
+  corrections matter more than the features. (1) Four of the eight terminate in a
+  component it calls **XAR**, a name and a layer this plan already declined at
+  §S-11 — "agent runtime" is occupied by xencode's *own* loop, and the layer
+  belongs to W16–W17, not to this work. (2) Five of the eight need syntax
+  `xencode-analysis-rs` does not have: its `analyzer.rs` is 297 lines of
+  line-based `.contains()` checks, so taken literally the proposal builds up to
+  five parsers. They are re-specified as queries over **CI-1**'s pattern language
+  against **CI-2**'s graph, which gates all five on W3. (3) Three overlap scheduled
+  work the audit did not name: **VF-5** already owns the stress loop *and* names
+  the quarantine hook, **QT-5**/**QB-1** are the drift family, and **SE-6**/**QO-1**
+  are the dependency family. Seven items are placed (**U-1…U-7** across W3, W5, W7,
+  W11 and W14) and one is deferred (**U-8**, atomic commit slicing, behind CI-6's
+  change graph — its worst failure mode is silently wrong history). The strongest
+  two are **U-6** (no production edit before a witnessed failing reproduction) and
+  **U-4** (a failing test re-run against the clean base tree, which stops the
+  agent burning rounds "fixing" a pre-existing race) — U-6 because it is the only
+  item here that changes what the agent may *do*, U-4 because it reports evidence
+  and a class rather than an uncalibrated probability. The count reconciliation this
+  forced is in § Milestone U's U-11. Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+  § Milestone U.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
   fifteen dependency waves at the time — **eighteen now, W0…W17**, after Milestone S
-  below — over **284 recorded plan items** (258 then, 26 added by S): the
+  below — over **292 recorded plan items** (258 then, 26 added by S, 8 added by U,
+  which hold 10 rows between them): the
   208 research candidates, the 31 further Q IDs that fold into them, the 19
-  committed L/M tasks, and S's 26 — with every ID placed exactly once (verified by script) and
+  committed L/M tasks, S's 26 and U's 8 — with every ID placed exactly once (verified by script) and
   **no renumbering**, so each item keeps the appendix that produced it as its
   provenance. The sequence: correctness → observability → model substrate → code
   intelligence → retrieval → verification → evidence → trust → outward research →
