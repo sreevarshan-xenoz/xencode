@@ -205,12 +205,40 @@
   and a class rather than an uncalibrated probability. The count reconciliation this
   forced is in § Milestone U's U-11. Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone U.
+- 🪟 **Milestone V recorded** (2026-09-28): the window-manager question, audited
+  against [TUIOS](https://github.com/Gaurav-Gosain/tuios) (4.0k stars, 2,808
+  commits, Go/Bubble Tea, MIT) and against this tree. The premise is real —
+  `compute_layout()` is a `&str` match returning five `Option<Rect>` fields
+  (`layout.rs:43-49`), and TUIOS genuinely has BSP tiling, 9 workspaces, a `Ctrl+P`
+  palette, daemon-backed sessions, an agent rail and mouse-driven panes. But the
+  research changed the answer in four ways. **TUIOS's abstraction is
+  `PTY → terminal emulator → window`**, and its `internal/vt/` is most of why it
+  is 2,808 commits — Xencode has no analogue and needs none, which also means a
+  layout tree is *cheaper* here than there, because ratatui panes draw into one
+  shared buffer with no per-pane viewport to cull. **Three of the fifteen proposed
+  features are already this plan's items**: the command palette is UX-6, the
+  agent rail is OR-12, and the split/resize keymap is UX-1/2/3 — whose own text
+  says "do not build a helix-grade keymap engine". **Automatic layout is already
+  declined**, by Q-0 item 72 and the Q-12 register, on the Gajos & Weld and Horvitz
+  adaptive-UI evidence, so the defensible half — *surfacing* a blocked tool call,
+  not *rearranging* — is scheduled and the rearranging half is parked as V-11.
+  **"Sessions that survive the terminal" is LF-4**, and GL-4's own trap note ("an
+  in-TUI toy that dies with the terminal") already answered it. So: **V-8 is worth
+  doing now** — Xencode polls crossterm at 33 ms and redraws an unchanged screen
+  30 times a second (`app.rs:8111`), which no plan item has ever addressed, needs
+  no dependencies and carries no architectural risk; **V-1 (the tree) is worth
+  designing carefully** and additively, with the three presets re-expressed as
+  templates so `compute_layout` is deleted as duplication rather than as a
+  rewrite; and nine of the fifteen proposals are already planned or already
+  declined. Also settled: the word "workspace" is taken four times over, so this
+  is `ViewState` and named **views**. Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
+  § Milestone V.
 - 🗺️ **Milestone R recorded** (2026-09-23): the axis the pool was missing. N, O, P
   and Q each refused to rank their candidates, and that refusal was correct about
   *value* but left no way to start. The owner supplied an **ordering** instead:
   fifteen dependency waves at the time — **eighteen now, W0…W17**, after Milestone S
-  below — over **292 recorded plan items** (258 then, 26 added by S, 8 added by U,
-  which hold 10 rows between them): the
+  below — over **303 recorded plan items** (258 then, 26 added by S, 8 added by U and
+  11 by V, which hold 21 rows between them): the
   208 research candidates, the 31 further Q IDs that fold into them, the 19
   committed L/M tasks, S's 26 and U's 8 — with every ID placed exactly once (verified by script) and
   **no renumbering**, so each item keeps the appendix that produced it as its
