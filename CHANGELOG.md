@@ -7,7 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode anchor`, which finds the build and test commands and then runs them
+### Added — `xencode test`, which never calls a test that only passed on retry a pass
+
+`cargo nextest` runs each test in its own process, which is what makes its
+selection and retry worth having. The default, though, accepts a broken test as
+a success. Measured on a throwaway crate with a test that fails once and passes
+on retry:
+
+| `--flaky-result` | exit code | summary line |
+|---|---|---|
+| `pass` | **0** | `1 passed (1 flaky)` |
+| `fail` | 100 | `1 failed` |
+
+So the one signal a test run can give — the exit code — stops meaning anything,
+and the flake is announced in the same breath as a clean run. `xencode test`
+therefore passes `--retries` and `--flaky-result fail` explicitly on every
+invocation, so a repository's own `nextest.toml` or a `NEXTEST_FLAKY_RESULT` in
+the environment cannot change what the result means, and it calls a run a pass
+only when the exit code is zero *and* nothing was flaky.
+
+Flaky tests are named, not merely counted, because a quarantine list has to say
+which. Three of the plan's assumptions about nextest turned out to be wrong and
+changed how that is done: this version has **no JUnit message format** at all,
+its `libtest-json-plus` output **carries no flaky event** (a retried test is
+reported as an ordinary `ok`), and nextest **writes its human report to stderr**,
+so capturing only stdout finds no test names whatsoever. Flakiness is instead read
+from a direct signal — a test seen failing on one attempt and passing on the next
+is a flake, whatever the summary claims — and a summary that counts flakes it
+then names nowhere is reported as unaccounted for rather than assumed clean.
+
+Two behaviours are reported rather than smoothed over. With
+`--flaky-result fail` nextest cancels the run at the first flake, so one pass does
+not enumerate every broken test, and the output says so. And a non-zero exit that
+names no test at all is not a test failure: an early run in this repository failed
+because the manifest is under `rust/`, and reported a bare "not a pass" with no
+reason. The manifest is now located, an ambiguous layout is named instead of
+guessed, and a run that fails without naming a test says the build or workspace
+failed rather than sending a reader after tests that are not broken.
+
+When nextest is not installed, `xencode test` falls back to the repository's own
+test command, proved at that moment rather than borrowed from an earlier verdict,
+and names the substitution — including that a fallback run cannot check for
+retries and so cannot be compared to a nextest run.
+
+Fourteen tests. Full workspace green, clippy clean, fmt clean.
+
+
 
 There was a hole in the prompt assembly: `.xencode/anchor.md` was read in four
 places and written in none, so the stable head reserved up to 2000 tokens for a

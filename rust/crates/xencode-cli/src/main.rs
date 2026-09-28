@@ -387,6 +387,30 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Run the tests, and never call a test that only passed on retry a pass
+    Test {
+        /// Only these packages (repeatable)
+        #[arg(long = "package")]
+        packages: Vec<String>,
+
+        /// Retries allowed per failing test. Kept at 0 by default: a retry-pass
+        /// is not a pass.
+        #[arg(long, default_value_t = 0)]
+        retries: u32,
+
+        /// Run each test this many times, to surface flakes and order dependence
+        #[arg(long, default_value_t = 0)]
+        stress_count: u32,
+
+        /// Wall-clock ceiling in seconds
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Review the diff between a base branch and HEAD, file by file
     Review {
         /// Base branch, tag, commit — or HEAD for uncommitted changes
@@ -916,6 +940,13 @@ async fn main() {
             dry_run,
             format,
         } => run_anchor(path, timeout, dry_run, format),
+        Commands::Test {
+            packages,
+            retries,
+            stress_count,
+            timeout,
+            format,
+        } => run_test(packages, retries, stress_count, timeout, format),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -3783,6 +3814,76 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 /// The scratch fixture is built in a temporary directory and removed afterwards,
 /// so running the probe never leaves anything in the workspace and never touches
 /// a file the operator cares about.
+fn run_test(
+    packages: Vec<String>,
+    retries: u32,
+    stress_count: u32,
+    timeout: u64,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_context_rs::verify;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let opts = verify::Options {
+        retries,
+        stress: stress_count,
+        packages,
+        budget: std::time::Duration::from_secs(timeout),
+    };
+    let outcome = verify::run(&root, &opts);
+
+    if matches!(format, OutputFormat::Json) {
+        let report = serde_json::json!({
+            "ok": outcome.ok,
+            "engine": outcome.engine.map(|e| e.label()),
+            "command": outcome.command,
+            "exit": outcome.exit,
+            "flaky": outcome.flaky,
+            "failed": outcome.failed,
+            "notes": outcome.notes,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+    } else {
+        if let Some(engine) = outcome.engine {
+            println!("\n  engine: {}", engine.label());
+        }
+        if !outcome.command.is_empty() {
+            println!("  ran:    {}", outcome.command);
+        }
+        for note in &outcome.notes {
+            println!("  note:   {note}");
+        }
+        if !outcome.flaky.is_empty() {
+            println!("\n  FLAKY — passed only on a retry, so not a pass:\n");
+            for name in &outcome.flaky {
+                println!("    {name}");
+            }
+        }
+        if !outcome.failed.is_empty() {
+            println!("\n  FAILED:\n");
+            for name in &outcome.failed {
+                println!("    {name}");
+            }
+        }
+        println!(
+            "\n  {}",
+            if outcome.ok {
+                "pass"
+            } else {
+                "not a pass — see above"
+            }
+        );
+    }
+    if outcome.ok {
+        Ok(())
+    } else {
+        Err("tests did not pass".to_string())
+    }
+}
+
 fn run_anchor(
     path: PathBuf,
     timeout: u64,

@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1452 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1466 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2499,7 +2499,66 @@ classifier that does not exist.
   `cargo miri nextest run` beats `cargo miri test` on throughput. **S/M**. Two
   traps: retries default to flaky-**pass**-exit-0, which silently masks
   breakage; and with `xencode-tui-rs` depending on nearly everything,
-  `rdeps(xencode-tui-rs)` collapses to "run all".
+  `rdeps(xencode-tui-rs)` collapses to "run all". **Done 2026-09-28** — nextest
+  0.9.146 installed; `xencode test` runs the suite through it.
+
+  **The first trap was measured before it was designed around, on a throwaway
+  crate with a test that fails once and passes on retry:**
+
+  | `--flaky-result` | exit code | summary line |
+  |---|---|---|
+  | `pass` | **0** | `1 passed (1 flaky)` |
+  | `fail` | 100 | `1 failed` |
+
+  So the default accepts a genuinely broken test as a success, and reports it in
+  the same breath as a clean run. The one signal a test run can give becomes
+  untrustworthy. Two rules follow, and both are enforced in code:
+
+  - **The flake policy can never be inherited.** `--retries` and
+    `--flaky-result fail` are always passed explicitly, so a repository's own
+    `nextest.toml` or a `NEXTEST_FLAKY_RESULT` in the environment cannot change
+    what our exit code means. Tested by asserting the argv.
+  - **A pass requires exit 0 *and* an empty flake list.** Trusting the exit code
+    alone is the trap.
+
+  **Three of the plan's claims about nextest turned out to be wrong, and finding
+  that out changed the design:**
+
+  - **There is no JUnit message format.** `--message-format` accepts only
+    `human`, `libtest-json` and `libtest-json-plus`, so the planned
+    `<flakyFailure>` hook does not exist in this version.
+  - **`libtest-json-plus` carries no flaky event** — a retried test is reported
+    as an ordinary `ok`. It also needs `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`.
+  - **nextest writes its human report to stderr, not stdout.** Capturing only
+    stdout finds no test names at all, which is how a flake ends up counted but
+    never named — and a name is the entire point of a quarantine list.
+
+  So flakiness is read from the human output, and from the most direct evidence
+  available rather than a summary count: a test seen failing on `TRY 1` and
+  passing on `TRY 2` is a flake, whatever the summary says. When a summary counts
+  flaky tests that were then named nowhere, that is reported as unaccounted for
+  rather than assumed absent.
+
+  **An honest limitation, reported rather than smoothed over:** with
+  `--flaky-result fail` nextest **cancels the run at the first flake**
+  ("Cancelling due to test failure"), so one pass does not enumerate every broken
+  test. The command says so and points at `--retries 0` for the full list.
+
+  **The `rdeps` collapse is avoided rather than inherited**: selection is by
+  explicit `--package`, and a workspace whose `Cargo.toml` is not at the top
+  (`rust/`) is located instead of assumed — an early run failed on a missing
+  `Cargo.toml` and reported a bare "not a pass" with no reason, which was a
+  second defect. A non-zero exit that names no test now says the build or
+  workspace failed, not the tests.
+
+  When nextest is absent, `xencode test` falls back to the repository's own test
+  command — proved *now*, not borrowed from an earlier verdict — and names the
+  substitution, including that the fallback run cannot check for retries and so
+  cannot be compared to a nextest run. 14 tests.
+
+  `rdeps` selection, `cargo miri nextest run`, and `--flaky-result`'s JUnit
+  equivalent remain open; they need tooling this machine does not have.
+
 - **VF-6 clippy `--message-format=json`** — the cheapest structured feedback
   channel that exists. **Already claimed as CI-5** (`:1535`); recorded so nobody
   double-counts it.
