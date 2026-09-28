@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the agent can find code by its shape, and rewrite every site at once
+
+`ast_edit(pattern, path, replacement?, language?)` is the sixteenth tool the chat model can
+call, and the other edit that reads the code instead of matching it. `edit_symbol` names one
+declaration; this one describes a shape — `let $A = $B;`, `foo($A, $B)`, `fn $A($B) { $$$ }` —
+and matches it against the parse tree, so a call that only appears in a comment or a string is
+not a match, and renaming an argument does not break the search the way it breaks a text
+search. Give it a replacement and every site is rewritten in one change; give it none and it
+lists the sites and writes nothing.
+
+The refusal that matters most is the one about silence. A pattern that matches no sites is
+refused, and the refusal says why it is a refusal:
+
+```text
+ast_edit matched no sites in src/lib.rs for pattern `struct $Name { $$$ }`, and nothing was
+changed. That result cannot distinguish a pattern that is wrong from code that does not
+contain it. Check the metavariables are written $NAME, and that the shape is present, before
+reading this as "the code is already correct".
+```
+
+That ambiguity is not a guess. `ast-grep` prints an empty list and exits 1 both for a pattern
+that finds nothing and for one it cannot parse, so no amount of reading its output can tell the
+two apart — which is why the tool says so instead of reporting a clean sweep. The same rule
+governs a missing binary: if `ast-grep` is not on `PATH`, the call says the pattern was not
+run and nothing is known about the code, naming both names tried and how to install it. A
+missing engine and an empty result must never read alike, because a caller who believes the
+second when it is the first concludes the code is already correct.
+
+The rewrite is computed in memory and written once per file, atomically, through the same
+helper every other writer uses, so a crash between two files leaves each one whole. A byte
+range that does not line up with the file on disk, or that lands inside a multi-byte
+character, refuses the whole file rather than producing a half-rewritten one that still
+compiles. What the approval modal shows is the same computation that produces the bytes, so
+the diff a person approves is the diff that lands.
+
+`ast-grep` is an external binary and is not bundled. Without it the tool is inert, which is the
+state this tool is built to survive: it says so, and `edit_symbol` and `search_files` — which
+need no external binary — carry on unchanged.
+
 ### Added — what is known to be wrong with a dependency, answered offline
 
 Asked whether a crate version is affected by something, a model answers from

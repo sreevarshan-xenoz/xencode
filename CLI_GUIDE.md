@@ -160,7 +160,7 @@ crate:adler2/Cargo.toml.orig:3:version = "2.0.1"
 ```
 
 What it does not do: it is not a second filesystem root for writes. A `crate:`
-address in `write_file`, `edit_file`, `edit_symbol` or a shell command's working
+address in `write_file`, `edit_file`, `edit_symbol`, `ast_edit` or a shell command's working
 directory is refused by the permission policy and again by the executor, in every
 approval mode, even after edits have been granted for the session. A crate the
 lock does not name is refused by name, an ambiguous one (pinned in two versions,

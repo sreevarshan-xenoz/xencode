@@ -304,6 +304,7 @@ back to the model before it continues.
 | `write_file(path, content)` | Create or replace a file (answers with the unified diff) | file change |
 | `edit_file(path, old, new, all?)` | Exact string replace; refuses an ambiguous match unless `all` | file change |
 | `edit_symbol(path, symbol, new_body)` | Replace the body of one Rust declaration, found by parsing the file rather than by matching text; refuses an absent or twice-declared name, a declaration with no body here, and anything that would not parse afterwards | file change |
+| `ast_edit(pattern, path, replacement?, language?)` | Find code by its shape rather than its text and rewrite every site in one change. Omit `replacement` to list the sites and change nothing. Needs the `ast-grep` binary; without it the call says so rather than reporting no matches. A pattern that matches nothing is refused, because that is indistinguishable from a pattern that is wrong | file change |
 | `run_command(command)` | `sh -c` in the project root, waits and returns the exit status plus output | shell command |
 | `background_start(command, cwd?, name?)` | Start a shell command in the background (`Ctrl+K` panel) | shell command |
 
