@@ -353,6 +353,17 @@ enum Commands {
         /// Output format for the printed summary
         #[arg(long, default_value = "text")]
         format: OutputFormat,
+
+        /// Run each agent this many times and compare. One run is a reading;
+        /// two is a check, and a fact that differs between runs is reported
+        /// rather than smoothed over.
+        #[arg(long, default_value_t = 1)]
+        repeat: u32,
+
+        /// Report, read-only, which agents look configured on this machine, and
+        /// what to run if one is not. Starts no login and reads no credential.
+        #[arg(long)]
+        check_auth: bool,
     },
 
     /// Review the diff between a base branch and HEAD, file by file
@@ -875,7 +886,9 @@ async fn main() {
             timeout,
             out,
             format,
-        } => run_interop(agents, timeout, out, format),
+            repeat,
+            check_auth,
+        } => run_interop(agents, timeout, out, format, repeat, check_auth),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -3748,7 +3761,29 @@ fn run_interop(
     timeout: u64,
     out: Option<std::path::PathBuf>,
     format: OutputFormat,
+    repeat: u32,
+    check_auth: bool,
 ) -> Result<(), String> {
+    // Checked first and on its own: it launches nothing and spends nothing, so
+    // it is the cheap way to find out what a real run would do.
+    if check_auth {
+        let selected: Vec<&xencode_agents_rs::AgentSpec> = if agents.is_empty() {
+            xencode_agents_rs::ROSTER.iter().collect()
+        } else {
+            xencode_agents_rs::ROSTER
+                .iter()
+                .filter(|a| agents.iter().any(|n| n == a.name))
+                .collect()
+        };
+        println!("credential status — read-only, nothing launched, nothing signed in\n");
+        for spec in selected {
+            println!(
+                "  {}",
+                xencode_agents_rs::probe::credential_status(spec).summary()
+            );
+        }
+        return Ok(());
+    }
     let scratch = tempfile::tempdir().map_err(|e| format!("cannot make a scratch dir: {e}"))?;
     let workdir = scratch.path().join("task");
     xencode_agents_rs::probe::seed_task_dir(&workdir)
@@ -3759,6 +3794,7 @@ fn run_interop(
         timeout: std::time::Duration::from_secs(timeout.max(1)),
         workdir,
         task: xencode_agents_rs::probe::default_task().to_string(),
+        repeat,
     };
     let report = xencode_agents_rs::probe::run_probe(&options);
 
@@ -3791,6 +3827,12 @@ fn run_interop(
                 println!("\n  not installed here:");
                 for absent in &report.absent {
                     println!("    {} — {}", absent.name, absent.why);
+                }
+            }
+            if let Some(first) = report.stability.first() {
+                println!("\n  across {} run(s) each:", first.runs);
+                for verdict in &report.stability {
+                    println!("    {}", verdict.summary());
                 }
             }
             println!("\n  still unanswered:");

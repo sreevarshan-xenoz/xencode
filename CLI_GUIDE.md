@@ -1001,6 +1001,44 @@ Three things about how to read the output:
 `--out` writes the full JSON report through the same atomic write as every other file, so a
 report half-written is not a thing that can happen.
 
+#### `--repeat N`
+
+Runs each agent `N` times and compares. **One run is a reading; two is a check** — and a
+single run has been standing in for a fact it cannot support.
+
+```bash
+xencode interop --agent cline --repeat 2
+```
+
+What is compared per agent: the event vocabulary, the outcome, whether a session id was
+issued at all, whether the stream was machine-readable, and the event count. A fact that
+differs is reported with **both values shown**, never averaged, and every varying fact is
+repeated under "still unanswered" so a difference cannot scroll past.
+
+A session id's *value* is deliberately not compared: two runs issuing two ids is correct
+behaviour, and treating it as a difference would report a working agent as inconsistent.
+
+This is what closed part of the `AR-1` gap. On 2026-09-28 all four captured vocabularies
+came back identical across two runs, while **cline's event count did not** — 18 then 20, and
+16 then 19 on a second pair. So its vocabulary is reliable and its sequence length is not,
+which is exactly the distinction one transcript cannot show.
+
+#### `--check-auth`
+
+Read-only. Reports which agents have a config directory on this machine and, for those that
+do not, the command that would fix it. It launches nothing, starts no login, and reads no
+credential.
+
+Its limit is worth stating plainly: **a config directory is not a runnable agent.** On the
+machine this was written on, all six agents have a config directory and three still refuse to
+run. So this answers "is there a config directory", and the refusal itself remains the only
+trustworthy signal that an agent can spend.
+
+```bash
+xencode interop --check-auth
+xencode interop --check-auth --agent gemini --agent crush
+```
+
 ### `xencode scan [path] [--hidden] [--max-depth N] [--format text|json]`
 List workspace entries (kind, size, path) as TSV or JSON.
 

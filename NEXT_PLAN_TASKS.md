@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1428 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1430 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -8166,6 +8166,34 @@ No hard dependencies, which is exactly why it is last: real value that should ne
   refusal to derive it from a wish list is what the evidence supports. Codex is
   also the only agent whose stream carried a correlation id (`thread_id`), which
   is the one field a normalised model cannot invent after the fact.
+
+  **Second run of the same task, `--repeat 2`, on 2026-09-28 — the repeatability
+  gap partly closed.** All four captured vocabularies came back **identical**:
+
+  | agent | runs | vocabulary | verdict |
+  |---|---|---|---|
+  | `opencode` | 2 | `step_finish`, `step_start`, `text`, `tool_use` | stable |
+  | `cline` | 2 | `agent_event`, `hook_event`, `run_result` | stable |
+  | `codex` | 2 | `item.completed`, `item.started`, `thread.started`, `turn.completed`, `turn.started` | stable |
+  | `claude` | 2 | `assistant`, `result`, `system` | stable |
+
+  One real difference survived, and it is the kind a single run could never have
+  shown: **cline's event *count* is not fixed** — 18 then 20, and 16 then 19 on a
+  second pair. Its *vocabulary* is stable, so a normalised model can rely on the
+  names and not on the sequence or the length. A model built from one transcript
+  would have assumed a fixed event count per turn and been wrong.
+
+  Two defects in the stability check itself, found by using it:
+
+  - **A session id's value must not be compared.** Two runs issue two ids, which
+    is correct behaviour, and comparing the values reported claude as `VARIED`
+    while saying nothing except that it mints a fresh id. Presence is the fact;
+    the value is not. Both are now tests.
+  - **A credential-configured agent is not a runnable agent.** All six agents have
+    a config directory on this machine, and three of them still refuse to run.
+    So `--check-auth` can only ever answer "is there a config directory", and its
+    own output says the rest is not knowable from out here. It launches nothing
+    and signs in to nothing, which is the only honest way to offer it.
 
 #### W15 — Measure the other agents before planning on them — 3 items
 

@@ -59,6 +59,13 @@ pub struct ProbeOptions {
     pub workdir: std::path::PathBuf,
     /// The read-only task to hand each agent.
     pub task: String,
+    /// How many times to run each agent.
+    ///
+    /// One is a reading; two is a check. `AR-1`'s done-when asks for cells that
+    /// came from a help screen to be marked as such, and the gap this closes is
+    /// the one next to it: nothing has been compared against a *second* run, so
+    /// a single observation has been standing in for a fact.
+    pub repeat: u32,
 }
 
 impl ProbeOptions {
@@ -70,6 +77,7 @@ impl ProbeOptions {
             timeout: Duration::from_secs(60),
             workdir: workdir.into(),
             task: default_task().to_string(),
+            repeat: 1,
         }
     }
 }
@@ -162,12 +170,140 @@ impl RunCapture {
     }
 }
 
+/// One fact about an agent, compared across its runs.
+///
+/// The comparison is deliberately blunt: a fact is `stable` when every run agreed
+/// and `varied` when they did not, and a varying fact is *reported* with the
+/// values seen rather than averaged into something comfortable. A vocabulary that
+/// comes back different twice is a finding about the agent, not noise to smooth
+/// over.
+#[derive(Debug, Clone, Serialize)]
+pub struct FactCheck {
+    pub fact: &'static str,
+    pub stable: bool,
+    /// The distinct values seen, in first-seen order.
+    pub values: Vec<String>,
+}
+
+impl FactCheck {
+    fn new(fact: &'static str, values: Vec<String>) -> Self {
+        // First-seen order, so two runs of the same thing print the same line.
+        let mut distinct: Vec<String> = Vec::new();
+        for value in values {
+            if !distinct.contains(&value) {
+                distinct.push(value);
+            }
+        }
+        FactCheck {
+            fact,
+            stable: distinct.len() <= 1,
+            values: distinct,
+        }
+    }
+}
+
+/// What repeated runs of one agent showed.
+#[derive(Debug, Clone, Serialize)]
+pub struct Stability {
+    pub agent: String,
+    pub runs: usize,
+    /// The fact only runs can answer, and the one that costs the most to be
+    /// wrong about: the event vocabulary.
+    pub checks: Vec<FactCheck>,
+}
+
+impl Stability {
+    /// The vocabulary line, phrased for a report.
+    pub fn summary(&self) -> String {
+        let vocabulary = self.checks.iter().find(|c| c.fact == "event vocabulary");
+        let Some(vocabulary) = vocabulary else {
+            return format!("{}: {} run(s), no comparison made", self.agent, self.runs);
+        };
+        let verdict = if vocabulary.stable {
+            "stable"
+        } else {
+            "VARIED between runs"
+        };
+        format!(
+            "{}: {} run(s), vocabulary {verdict}: {}",
+            self.agent,
+            self.runs,
+            vocabulary.values.join(" | ")
+        )
+    }
+}
+
+/// Compare repeated runs of one agent.
+pub fn check_stability(agent: &str, runs: &[RunCapture]) -> Stability {
+    let vocabulary = runs
+        .iter()
+        .map(|c| {
+            let mut kinds: Vec<&str> = c.events.iter().map(|e| e.kind.as_str()).collect();
+            kinds.sort_unstable();
+            kinds.dedup();
+            if kinds.is_empty() {
+                "(none)".to_string()
+            } else {
+                kinds.join(", ")
+            }
+        })
+        .collect();
+    let outcome = runs
+        .iter()
+        .map(|c| match c.provenance {
+            Provenance::Observed => "ran".to_string(),
+            Provenance::RunFailed => c
+                .failure
+                .clone()
+                .unwrap_or_else(|| "failed".into())
+                .to_lowercase(),
+            other => other.as_str().to_string(),
+        })
+        .collect();
+    // Presence, not value. A session id is *supposed* to differ between two runs
+    // — comparing the values reported "VARIED" for claude, which said nothing
+    // except that it issues a fresh id each time. Whether one is issued at all is
+    // the fact worth checking; the specific id is not.
+    let session = runs
+        .iter()
+        .map(|c| {
+            if c.session_id.is_some() {
+                "present".to_string()
+            } else {
+                "absent".to_string()
+            }
+        })
+        .collect();
+    let stream = runs
+        .iter()
+        .map(|c| if c.stream_recognised { "yes" } else { "no" }.to_string())
+        .collect();
+    let count = runs.iter().map(|c| c.events.len().to_string()).collect();
+    Stability {
+        agent: agent.to_string(),
+        runs: runs.len(),
+        checks: vec![
+            FactCheck::new("event vocabulary", vocabulary),
+            FactCheck::new("outcome", outcome),
+            FactCheck::new("session id", session),
+            FactCheck::new("machine-readable stream", stream),
+            FactCheck::new("event count", count),
+        ],
+    }
+}
+
 /// A whole probe: one [`RunCapture`] per agent, plus the absent ones.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProbeReport {
     /// ISO-ish date the probe ran, so a stale report is obvious.
     pub run_on: String,
+    /// One entry per agent: the first run in full, then any repeats behind it.
     pub captures: Vec<RunCapture>,
+    /// Every run, when more than one was made. Empty at `repeat = 1`.
+    pub all_runs: Vec<RunCapture>,
+    /// What the repeats showed. Empty at `repeat = 1`, because one run is a
+    /// reading and not a check.
+    pub stability: Vec<Stability>,
     /// Agents named by the proposal that are not installed here, with the reason.
     pub absent: Vec<AbsentAgent>,
     /// Anything the run could not answer, stated rather than left blank.
@@ -539,10 +675,34 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
             .filter(|a| options.only.iter().any(|n| n == a.name))
             .collect()
     };
-    let captures: Vec<RunCapture> = selected
-        .iter()
-        .map(|spec| probe_one(spec, options))
-        .collect();
+    let repeat = options.repeat.max(1);
+    let mut all_runs: Vec<RunCapture> = Vec::new();
+    let mut captures: Vec<RunCapture> = Vec::new();
+    for spec in &selected {
+        let mut runs: Vec<RunCapture> = Vec::with_capacity(repeat as usize);
+        for _ in 0..repeat {
+            runs.push(probe_one(spec, options));
+        }
+        // The first run is the one the table shows; the rest exist to be
+        // compared against it, and are all kept so a report can be re-read.
+        all_runs.extend(runs.iter().cloned());
+        captures.push(runs[0].clone());
+    }
+    let stability: Vec<Stability> = if repeat > 1 {
+        selected
+            .iter()
+            .map(|spec| {
+                let runs: Vec<RunCapture> = all_runs
+                    .iter()
+                    .filter(|c| c.agent == spec.name)
+                    .cloned()
+                    .collect();
+                check_stability(spec.name, &runs)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     // What the run could not answer, said out loud rather than left blank.
     let mut unanswered = Vec::new();
@@ -572,14 +732,33 @@ pub fn run_probe(options: &ProbeOptions) -> ProbeReport {
             Provenance::ReadFromHelp => {}
         }
     }
-    unanswered.push(
-        "No cell has been compared against a second run of the same agent for stability."
-            .to_string(),
-    );
+    if options.repeat.max(1) <= 1 {
+        unanswered.push(
+            "Only one run per agent: no cell has been compared against a second run for \
+             stability."
+                .to_string(),
+        );
+    }
+
+    for verdict in &stability {
+        for check in &verdict.checks {
+            if !check.stable {
+                unanswered.push(format!(
+                    "{}: {} VARIED across {} run(s) — {}",
+                    verdict.agent,
+                    check.fact,
+                    verdict.runs,
+                    check.values.join(" vs ")
+                ));
+            }
+        }
+    }
 
     ProbeReport {
         run_on: chrono_today(),
         captures,
+        all_runs,
+        stability,
         absent: crate::roster::NOT_INSTALLED
             .iter()
             .map(|(name, why)| AbsentAgent {
@@ -611,6 +790,94 @@ fn chrono_today() -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Read-only check for whether an agent looks usable on this machine.
+///
+/// Answers "would a run here spend anything?", never "log in". No agent's
+/// credentials are read, printed or guessed at: the check is for the *config
+/// files and directories an agent is known to keep*, and it says plainly when it
+/// finds nothing, because "no config directory" and "configured but not logged in"
+/// are different answers and only the first is visible from out here.
+pub fn credential_status(spec: &AgentSpec) -> CredentialStatus {
+    // A missing HOME is not a reason to fail: it just means nothing is found, and
+    // that is reported as "not configured" rather than as an error.
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    let (paths, hint): (Vec<std::path::PathBuf>, &str) = match spec.name {
+        "opencode" => (
+            vec![data.join("opencode"), home.join(".config/opencode")],
+            "no sign-in step needed if `opencode providers` lists one",
+        ),
+        "cline" => (vec![home.join(".cline")], "run `cline auth` in a terminal"),
+        "codex" => (vec![home.join(".codex")], "run `codex login` in a terminal"),
+        "claude" => (
+            vec![
+                std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join(".claude"),
+            ],
+            "run `claude` once and use `/login`, or `claude setup-token`",
+        ),
+        "gemini" => (
+            vec![
+                std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join(".gemini"),
+            ],
+            "run `gemini` once and choose an auth method, or set GEMINI_API_KEY",
+        ),
+        "crush" => (
+            vec![home.join(".local/share/crush")],
+            "run `crush login` in a terminal",
+        ),
+        _ => (Vec::new(), "no known check for this agent"),
+    };
+    let present: Vec<String> = paths
+        .iter()
+        .filter(|p| p.exists())
+        .map(|p| p.display().to_string())
+        .collect();
+    CredentialStatus {
+        agent: spec.name.to_string(),
+        looks_configured: !present.is_empty(),
+        found: present,
+        note: hint.to_string(),
+    }
+}
+
+/// What a read-only look could and could not see.
+#[derive(Debug, Clone, Serialize)]
+pub struct CredentialStatus {
+    pub agent: String,
+    /// Whether a config directory exists. **Not** a claim that a session works.
+    pub looks_configured: bool,
+    pub found: Vec<String>,
+    /// What the operator would run to fix it, if the answer was no.
+    pub note: String,
+}
+
+impl CredentialStatus {
+    pub fn summary(&self) -> String {
+        if self.looks_configured {
+            format!(
+                "{:<9} config present ({}) — whether a run spends is not knowable from out here",
+                self.agent,
+                self.found
+                    .iter()
+                    .map(|p| {
+                        let home = std::env::var("HOME").unwrap_or_default();
+                        p.strip_prefix(&format!("{home}/"))
+                            .map(|r| r.to_string())
+                            .unwrap_or_else(|| p.clone())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            format!("{:<9} no config found — {}", self.agent, self.note)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -756,6 +1023,103 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVP\n";
         let small = "short".repeat(10);
         let (_, truncated) = finish(small.as_bytes());
         assert!(!truncated);
+    }
+
+    #[test]
+    fn a_session_ids_value_is_not_compared_because_it_is_meant_to_differ() {
+        // A fresh id each run is correct behaviour, so checking the value would
+        // report "VARIED" for an agent doing exactly the right thing.
+        let capture = |id: Option<&str>| RunCapture {
+            agent: "x".to_string(),
+            binary: Some("b".to_string()),
+            version: None,
+            argv: vec![],
+            workdir: "/tmp".to_string(),
+            exit_code: Some(0),
+            duration_ms: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            events: vec![],
+            stream_recognised: false,
+            session_id: id.map(|s| s.to_string()),
+            stopped_on_auth: false,
+            permission_signal: None,
+            provenance: Provenance::Observed,
+            failure: None,
+        };
+        let differing_ids = check_stability("x", &[capture(Some("aaa")), capture(Some("bbb"))]);
+        let id_check = differing_ids
+            .checks
+            .iter()
+            .find(|c| c.fact == "session id")
+            .expect("the session-id check exists");
+        assert!(id_check.stable, "two fresh ids is not a difference in fact");
+        assert_eq!(id_check.values, ["present"]);
+
+        // Presence *is* a fact, and its absence is a real difference.
+        let appearing = check_stability("x", &[capture(None), capture(Some("aaa"))]);
+        let id_check = appearing
+            .checks
+            .iter()
+            .find(|c| c.fact == "session id")
+            .unwrap();
+        assert!(!id_check.stable, "absent then present is a real difference");
+    }
+
+    #[test]
+    fn a_varying_fact_is_reported_with_both_values_not_averaged() {
+        let capture = |n: usize| RunCapture {
+            agent: "x".to_string(),
+            binary: Some("b".to_string()),
+            version: None,
+            argv: vec![],
+            workdir: "/tmp".to_string(),
+            exit_code: Some(0),
+            duration_ms: 1,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            events: (0..n)
+                .map(|i| ObservedEvent {
+                    kind: format!("e{i}"),
+                    excerpt: String::new(),
+                })
+                .collect(),
+            stream_recognised: n > 0,
+            session_id: None,
+            stopped_on_auth: false,
+            permission_signal: None,
+            provenance: Provenance::Observed,
+            failure: None,
+        };
+        let verdict = check_stability("x", &[capture(18), capture(20)]);
+        let vocabulary = verdict
+            .checks
+            .iter()
+            .find(|c| c.fact == "event vocabulary")
+            .unwrap();
+        assert!(!vocabulary.stable, "18 kinds then 20 kinds is a difference");
+        // Both values kept, so the report shows the two and not a mean of 19.
+        assert_eq!(vocabulary.values.len(), 2);
+        assert!(
+            verdict.summary().contains("VARIED"),
+            "{}",
+            verdict.summary()
+        );
+        let count = verdict
+            .checks
+            .iter()
+            .find(|c| c.fact == "event count")
+            .unwrap();
+        assert!(!count.stable);
+        assert!(
+            verdict.summary().contains("|"),
+            "both values shown: {}",
+            verdict.summary()
+        );
     }
 
     #[test]
