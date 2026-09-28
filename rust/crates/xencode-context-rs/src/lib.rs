@@ -13,6 +13,7 @@
 //! The single entry point is [`init_project`].
 
 pub mod advise;
+pub mod anchor;
 pub mod budget;
 pub mod cochange;
 pub mod compact;
@@ -51,6 +52,9 @@ pub mod worktree;
 pub use advise::{
     advise, advise_from_snapshot, affected_dependents, broken_imports, find_cycles, hub_files,
     orphan_files, Advice, AdviceKind, AFFECTED_MAX_HOPS, HUB_MIN_OUT,
+};
+pub use anchor::{
+    discover, is_current, prove, render, write_anchor, Discovery, Kind, Provenance, Recipe, Verdict,
 };
 pub use budget::{
     est_tokens, fill_target, truncate_tail_to_tokens, truncate_to_tokens, ContextCaps,
