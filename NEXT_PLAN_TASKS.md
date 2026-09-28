@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1514 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1522 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -9592,6 +9592,21 @@ slice of U-3 and the one piece that need not be gated.
 searched; a key present in `.env.example` and read nowhere is reported as
 *unreferenced*, never as *unnecessary*; and a `doctor --json` row carries the
 result so DB-6 has one shape.
+
+**W3 row done 2026-09-28; W11 doctor row stays open.** `xencode envcheck`
+(`xencode-analysis-rs/src/envdrift.rs`) extracts every `env::var`/`env::var_os`
+key from non-test Rust sources, reads `.env.example`/`.env.template`, and
+reports read-but-undocumented with file:line references plus the sources
+searched, documented-but-unreferenced (never unnecessary), OS-provided keys
+listed separately, and `.unwrap()`/`.expect()` reads outside tests. On this
+repository it reports 9 real app keys with precise references, 20 OS keys
+separately, no template found — stated, not implied — and zero panicking reads.
+
+Two defects found by running it on this repo: the module's own doc comment
+(`env::var("KEY")` in prose) parsed as a read, so comment lines are now
+skipped; and Windows home vars (`USERPROFILE`/`HOMEDRIVE`/`HOMEPATH`) were
+misreported as app config, so the OS list covers both platforms. Seven tests
+plus a CLI parse test.
 
 **Placement.** W3 for the graph, W11 for the `doctor` surface — the same
 split QB-4 and QO-1 already use.

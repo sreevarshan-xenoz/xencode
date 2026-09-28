@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode generate`, shell completions and a man page from the clap definition
+### Added — `xencode envcheck`, configuration drift as a deterministic check
+
+Extracts every `env::var`/`env::var_os` key from non-test Rust sources, reads
+`.env.example`/`.env.template`, and reports read-but-undocumented keys with
+file:line references and the sources searched, documented-but-unreferenced keys
+(never "unnecessary"), OS-provided keys listed separately, and
+`.unwrap()`/`.expect()` reads outside tests. On this repository: 9 real app
+keys with precise references, 20 OS keys separated, no template found — stated,
+not implied — and zero panicking reads.
+
+Running it here found two defects in itself: its own doc comment parsed as a
+read (comment lines now skipped), and Windows home vars misreported as app
+config (the OS list now covers both platforms). This is the W3 graph row of
+U-3; the W11 `doctor --json` surface stays open.
+
+Eight tests.
+
+
 
 `xencode generate completions --shell <bash|fish|zsh>` and `xencode generate
 man` emit both from the command definition via `clap_complete` and
