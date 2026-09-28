@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1430 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1452 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1645,7 +1645,48 @@ never is.
 - **WF-4 build/test autodiscovery** — probe README/CI files/`justfile`/`mise`,
   write the recipe into `anchor.md`, and *prove* it by running it. M. Trap: false
   confidence; require exit 0. Done-when: a fresh clone yields a working
-  test command from one command.
+  test command from one command. **Done 2026-09-28** — `xencode anchor` probes
+  CI workflows, `justfile`/`Makefile`/`mise.toml`, manifests and the README,
+  then *runs* every candidate and records only the ones that exited zero. On this
+  repository it found 4 candidates and verified all 4:
+
+  | kind | command | source |
+  |---|---|---|
+  | format | `cd rust && cargo fmt --check` | `.github/workflows/ci-cd.yml` |
+  | lint | `cd rust && cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args` | `.github/workflows/ci-cd.yml` |
+  | build | `cd rust && cargo build --release -p xencode-cli` | `.github/workflows/release.yml` |
+  | test | `cd rust && cargo test --workspace --verbose` | `.github/workflows/ci-cd.yml` |
+
+  **The trap fired on the first run, which is the point of having named it.** The
+  lint command came back **exit 101** — and the cause was a `type_complexity`
+  lint in the 300 lines of new code that had just been written. A tool that
+  records "the project's own lint command works" would have shipped a broken
+  gate; one that runs it caught the defect in the same pass. Fixed, re-run, and
+  the anchor now reads 4 verified.
+
+  Three parsing bugs were found the same way, by running against this repository
+  rather than a fixture:
+
+  - **`working-directory` was being dropped.** CI runs `cargo test` from `rust/`,
+    so the honest command is `cd rust && cargo test --workspace`. Without the
+    `cd` the anchor records a command that passes in CI and fails from the
+    repository root — a green tick on a broken recipe. The key is also written
+    *after* the `run:` it applies to, so it cannot be read in one pass; a step
+    is now resolved as a unit.
+  - **A `name:` key was being swallowed into the command**, producing entries
+    like `` name: Run cargo test ``. A block scalar now ends at any deeper
+    -indented line that reads as a YAML key.
+  - **A README fence with several commands was joined into one string**, giving
+    `cd rust cargo test # Full workspace suite (1430 passing) cargo test -p …` —
+    a command nobody would type. A fence is only a candidate when it holds
+    exactly one command.
+
+  Before those three, the same run produced **9 noisy candidates; now 4.** The
+  `anchor.md` output is deterministic by construction — no clock, no absolute
+  path, no duration, sorted input — because it sits inside the byte-stable head
+  and a timestamp there would silently destroy the KV prefix reuse the head
+  exists to provide. Both properties are tests. 22 new tests; full workspace
+  **1452 passing**, clippy clean, fmt clean.
 - **WF-5 `cargo-dist` release pipeline + binstall + AUR.** S. Trap: signing keys
   in CI. Done-when: a tag produces `cargo binstall xencode`.
 - **WF-6 shell completions + man page generated from clap.** S. Trap: drift —

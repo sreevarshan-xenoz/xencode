@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — repeat the interop probe, and check credentials without signing in
+### Added — `xencode anchor`, which finds the build and test commands and then runs them
+
+There was a hole in the prompt assembly: `.xencode/anchor.md` was read in four
+places and written in none, so the stable head reserved up to 2000 tokens for a
+document nothing produced. `xencode anchor` fills it. It probes CI workflows,
+`justfile`/`Makefile`/`mise.toml`, project manifests and the README, runs every
+candidate it found, and records only the ones that exited zero.
+
+**A command that was not run is never called working.** Every entry states either
+`verified — ran it, it exited 0` or the failure with its exit code. A command that
+runs out of time is recorded as unverified rather than as a pass, because one
+nobody saw finish has proved nothing, and when nothing is verified the file says
+so at the top. `--dry-run` lists what was found without executing anything.
+
+The output is deterministic by construction — no timestamp, no absolute path, no
+duration, sorted input — because it sits inside the byte-stable prompt head, and
+a clock in there would silently destroy the KV prefix reuse that head exists to
+provide. Two runs over one repository produce identical bytes; both halves are
+tests.
+
+**Running it on this repository immediately caught three defects that reading the
+code would not have.** The lint command came back exit 101, caused by a lint in
+the new code written minutes earlier: a tool that merely recorded "the project's
+own lint command works" would have shipped a broken gate. And the CI parser was
+dropping each step's `working-directory`, so it recorded `cargo test
+--workspace` where the working command is `cd rust && cargo test --workspace` — a
+recipe that passes in CI and fails from the repository root. The key is also
+written *after* the `run:` it applies to, so a step is now resolved as a unit. A
+`name:` key was being swallowed into a command, and a README code fence holding
+several commands was being joined into one unspeakable string. Before those four
+fixes the same run produced 9 noisy candidates; it now produces 4, all verified.
+
+Twenty-two tests. Full workspace 1452 passing, clippy clean, fmt clean.
+
+
 
 Two flags on `xencode interop`, both answering questions the first run could not.
 

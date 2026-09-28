@@ -1860,6 +1860,44 @@ Text output caps at 30k chars with a truncation trailer; `--format json`
 returns the full body. Invalid `--json-schema` values are rejected up
 front instead of degrading silently.
 
+### `xencode anchor [path] [--timeout 900] [--dry-run] [--format text|json]`
+
+Find this repository's build and test commands, **run them**, and record only the
+ones that actually worked.
+
+Reads CI workflows, `justfile`/`Makefile`/`mise.toml`, `package.json`/`Cargo.toml`
+and the README, then records each command with where it came from and whether it
+exited zero. Output lands in `.xencode/anchor.md`, which is read into the stable
+prompt head — so every model request already knows how to build and test this
+project instead of guessing.
+
+**A command that was not run is never called working.** Each entry states
+`verified — ran it, it exited 0` or admits the failure with its exit code, and a
+timeout is recorded as *unverified* rather than as a pass, because a command
+nobody saw finish has proved nothing. When nothing is verified, the file says so
+at the top. `--dry-run` lists what was found without executing anything.
+
+The render is **deterministic**: no timestamp, no absolute path, no duration,
+sorted input. Two runs over the same repository produce identical bytes, so the
+stable head keeps its cache instead of churning every session. Both halves are
+enforced by tests.
+
+Real output on this repository:
+
+```
+  4 candidate(s), 4 verified
+
+    build     verified   cd rust && cargo build --release -p xencode-cli
+    lint      verified   cd rust && cargo clippy --workspace --all-targets -- -D warnings -A clippy::format-in-format-args
+    format    verified   cd rust && cargo fmt --check
+    test      verified   cd rust && cargo test --workspace --verbose
+```
+
+The `cd rust &&` prefix is the interesting part. CI runs these from `rust/`, and
+that key is written *after* the `run:` it applies to. Dropping it would produce a
+command that passes in CI and fails from the repository root — a green tick on a
+broken recipe, which is the one outcome this command exists to prevent.
+
 ### `xencode review [--base main] [--format text|json]`
 PR-level diff triage: files changed between the base and HEAD with line
 counts, plus working-tree analysis per file (code issues, image

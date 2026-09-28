@@ -366,6 +366,27 @@ enum Commands {
         check_auth: bool,
     },
 
+    /// Find this repository's build and test commands, run them, and record
+    /// only the ones that actually worked
+    Anchor {
+        /// Path to the repository (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        /// Per-command wall-clock limit in seconds. A command that runs out of
+        /// time is recorded as unverified, never as a pass.
+        #[arg(long, default_value_t = 900)]
+        timeout: u64,
+
+        /// List what was found without running anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Review the diff between a base branch and HEAD, file by file
     Review {
         /// Base branch, tag, commit — or HEAD for uncommitted changes
@@ -889,6 +910,12 @@ async fn main() {
             repeat,
             check_auth,
         } => run_interop(agents, timeout, out, format, repeat, check_auth),
+        Commands::Anchor {
+            path,
+            timeout,
+            dry_run,
+            format,
+        } => run_anchor(path, timeout, dry_run, format),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -3756,6 +3783,93 @@ fn resolve_review_root(cwd: &std::path::Path) -> std::path::PathBuf {
 /// The scratch fixture is built in a temporary directory and removed afterwards,
 /// so running the probe never leaves anything in the workspace and never touches
 /// a file the operator cares about.
+fn run_anchor(
+    path: PathBuf,
+    timeout: u64,
+    dry_run: bool,
+    format: OutputFormat,
+) -> Result<(), String> {
+    use xencode_context_rs::anchor;
+
+    let root = path.canonicalize().unwrap_or(path);
+    let mut discovery = anchor::discover(&root);
+
+    if !dry_run {
+        let budget = std::time::Duration::from_secs(timeout);
+        for recipe in &mut discovery.recipes {
+            eprintln!("  running: {}", recipe.command);
+            anchor::prove(&root, recipe, budget);
+        }
+    }
+
+    let text = anchor::render(&discovery);
+    let verified = discovery.recipes.iter().filter(|r| r.is_verified()).count();
+    let found = discovery.recipes.len();
+
+    let written = if dry_run {
+        None
+    } else if anchor::is_current(&root, &text) {
+        eprintln!("  anchor.md already current — left untouched");
+        Some(root.join(xencode_context_rs::XENCODE_DIR).join("anchor.md"))
+    } else {
+        match anchor::write_anchor(&root, &text) {
+            Ok(p) => Some(p),
+            Err(e) => return Err(format!("could not write the anchor: {e}")),
+        }
+    };
+
+    if matches!(format, OutputFormat::Json) {
+        let report = serde_json::json!({
+            "probed": discovery.probed,
+            "candidates": found,
+            "verified": verified,
+            "dry_run": dry_run,
+            "written": written.as_ref().map(|p| p.display().to_string()),
+            "recipes": discovery.recipes.iter().map(|r| serde_json::json!({
+                "kind": r.kind.label(),
+                "command": r.command,
+                "source": r.source,
+                "provenance": format!("{:?}", r.provenance).to_lowercase(),
+                "verdict": r.verdict.as_ref().map(|v| v.describe()),
+                "verified": r.is_verified(),
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        );
+    } else {
+        println!("\n  anchor — {}", root.display());
+        if discovery.probed.is_empty() {
+            println!("\n  read no CI file, task runner, manifest or README to learn from");
+        } else {
+            println!("  read: {}", discovery.probed.join(", "));
+        }
+        println!("\n  {} candidate(s), {} verified\n", found, verified);
+        for recipe in &discovery.recipes {
+            let mark = if recipe.is_verified() {
+                "verified"
+            } else {
+                "unverified"
+            };
+            println!(
+                "    {:<9} {:<10} {}  [{}]",
+                recipe.kind.label(),
+                mark,
+                recipe.command,
+                recipe.source
+            );
+        }
+        if verified == 0 && !dry_run {
+            println!("\n  nothing was proven — anchor.md says so rather than implying otherwise");
+        }
+        if let Some(p) = written {
+            println!("\n  {}", p.display());
+        }
+    }
+    Ok(())
+}
+
 fn run_interop(
     agents: Vec<String>,
     timeout: u64,
