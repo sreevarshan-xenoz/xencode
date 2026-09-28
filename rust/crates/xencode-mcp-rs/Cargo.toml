@@ -9,7 +9,6 @@ name = "xencode_mcp_rs"
 path = "src/lib.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "macros", "process", "io-util", "time", "sync"] }

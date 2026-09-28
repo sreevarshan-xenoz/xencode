@@ -10,6 +10,7 @@ pub mod property_eval;
 pub mod property_eval_intersect;
 pub mod runtime_hazards;
 pub mod security;
+pub mod toolchain;
 pub mod web;
 
 pub use analyzer::CodeAnalyzer;

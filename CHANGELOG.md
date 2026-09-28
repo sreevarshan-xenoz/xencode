@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Experiment — VF-4-A: do properties constrain behaviour, or only run?
+### Added — `xencode toolchain`, the Rust toolchain kit as gated tools
+
+Four commands an agent repair loop needs, each reporting structured evidence:
+`toolchain lint` runs `cargo clippy --message-format=json` and summarizes by
+lint with file, line, and whether a machine fix exists; `toolchain fix` runs
+`cargo clippy --fix`; `toolchain fmt` checks formatting; `toolchain shear`
+reports unused or misplaced dependencies. Text and `--format json` both.
+
+**`cargo fix --clippy`, as the plan phrases it, does not exist.** The working
+command is `cargo clippy --fix`, confirmed by running it. The module runs the
+real command and records the real command line.
+
+**The gate is the point.** `fix` refuses a dirty tree unless `--allow-dirty`
+is passed explicitly, because fix rewrites files and an overwrite of
+uncommitted work looks exactly like the agent's own edit afterwards. The
+refusal names the dirty files, and every run reports the before/after diffstat
+so what changed is visible even when requested.
+
+**Proved with JSON evidence before and after on a seeded lint:** count 2
+(`clippy::needless_return`), fix applied with a one-file diffstat, count 0.
+During the proof the gate refused a scratch repo whose `target/` directory had
+been committed — 11 deleted build artifacts — which is precisely its job.
+
+**It then found four real unused dependencies in this repository** (unused
+`tempfile` and `thiserror` in `xencode-agents-rs`, unused `serde` in
+`xencode-mcp-rs`, `xencode-collaboration-rs` used only by an integration test
+and moved to dev-dependencies), all verified and removed. Shear now clean.
+
+Three tests. Full workspace 1512 passing, clippy clean, fmt clean.
+
+
 
 Before building any property-testing architecture, one target
 (`mutation::touched_files`, the diff parser the repair gate depends on) against

@@ -1898,6 +1898,39 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode toolchain <lint|fix|fmt|shear> [--allow-dirty] [--format text|json]`
+
+The Rust toolchain kit as gated tools — structured evidence for an agent repair
+loop instead of terminal prose.
+
+```bash
+xencode toolchain lint               # clippy diagnostics, grouped by lint
+xencode toolchain lint --format json # the same as a machine-readable document
+xencode toolchain fix                # apply clippy fixes (refuses a dirty tree)
+xencode toolchain fix --allow-dirty  # accept the overwrite risk explicitly
+xencode toolchain fmt                # fail unless formatting is clean
+xencode toolchain shear              # unused or misplaced dependencies
+```
+
+**`fix` refuses a dirty tree.** `cargo clippy --fix` rewrites files, and an
+overwrite of uncommitted work looks exactly like your own edit afterwards. The
+refusal names the dirty files so you know what to commit or stash; `--allow-dirty`
+accepts the risk out loud. Every run reports the diffstat of what changed.
+
+Real session on a seeded lint:
+
+```
+  BEFORE: 2 clippy::needless_return
+  fix changed files:
+
+  src/lib.rs | 2 +-
+  AFTER: no clippy diagnostics
+```
+
+`lint` JSON carries the count, the per-lint groups, and every diagnostic with
+file, line, and whether rustc offered a machine-applicable suggestion — the
+shape a loop needs to pick the next fix and to prove the count reached zero.
+
 ### `xencode mutants [--diff <ref>] [--timeout 60] [--check-repair <file.json>] [--format text|json]`
 
 Find the code whose wrongness no test would notice.
