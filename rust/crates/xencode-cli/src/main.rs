@@ -467,6 +467,13 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// List installed agents with versions and install provenance
+    Agents {
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Rank files by churn times size with bus factor and owners
     Hotspots {
         /// How many files to list
@@ -1149,6 +1156,7 @@ async fn main() {
             format,
         } => run_verify(skip, timeout, format),
         Commands::Envcheck { format } => run_envcheck(format),
+        Commands::Agents { format } => run_agents(format),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
@@ -4649,6 +4657,40 @@ fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
+fn run_agents(format: OutputFormat) -> Result<(), String> {
+    let found = xencode_agents_rs::inventory();
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "agents": found.iter().map(|a| serde_json::json!({
+                    "name": a.name,
+                    "binary": a.binary.display().to_string(),
+                    "version": a.version,
+                    "source": a.source.label(),
+                })).collect::<Vec<_>>(),
+            })
+        );
+    } else if found.is_empty() {
+        println!("\n  no roster agents found on PATH");
+    } else {
+        for agent in &found {
+            println!(
+                "\n  {:<8} {}",
+                agent.name,
+                agent.version.as_deref().unwrap_or("(no --version answer)")
+            );
+            println!(
+                "           {} [{}]",
+                agent.binary.display(),
+                agent.source.label()
+            );
+        }
+        println!("\n  discovery only: nothing was installed, upgraded, or written");
+    }
+    Ok(())
+}
+
 fn run_hotspots(limit: usize, format: OutputFormat) -> Result<(), String> {
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let rows = xencode_context_rs::hotspots(&root, limit);
@@ -6090,6 +6132,12 @@ mod tests {
         ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn agents_parses() {
+        let cli = Cli::try_parse_from(["xencode", "agents"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Agents { .. })));
     }
 
     #[test]

@@ -188,6 +188,160 @@ pub fn provenance_of_help_cell(spec: &AgentSpec) -> Provenance {
     }
 }
 
+/// How an installed agent got onto this machine, as far as its path says.
+///
+/// Only what the path shows is claimed. A binary under `~/.local/bin` could
+/// be pipx, a manual download, or anything else — so that reads `UserLocal`,
+/// not a guessed manager. The resolved path is always reported alongside, so
+/// a human can check the classification rather than trust it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallSource {
+    /// Under `mise/installs/<tool>/`: managed by mise as `<tool>`.
+    Mise(String),
+    /// Under `~/.cargo/bin`.
+    Cargo,
+    /// Inside `node_modules`, or beside a `lib/node_modules/<pkg>` dir.
+    Npm,
+    /// `/usr/local/bin`, `/usr/bin`, `/bin`: system scope, manager unknown.
+    System,
+    /// `~/.local/bin` and friends: user scope, manager unknown.
+    UserLocal,
+    /// Present on PATH, origin not inferable from the path.
+    Unknown,
+}
+
+impl InstallSource {
+    /// The word in reports.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Mise(tool) => format!("mise:{tool}"),
+            Self::Cargo => "cargo".to_string(),
+            Self::Npm => "npm".to_string(),
+            Self::System => "system".to_string(),
+            Self::UserLocal => "user-local".to_string(),
+            Self::Unknown => "unknown".to_string(),
+        }
+    }
+
+    /// Classify a resolved binary path. Pure, so the table is testable without
+    /// touching any machine.
+    pub fn classify(path: &std::path::Path) -> Self {
+        let text = path.to_string_lossy().replace('\\', "/");
+        if let Some(index) = text.find("/mise/installs/") {
+            let tool = text[index + "/mise/installs/".len()..]
+                .split('/')
+                .next()
+                .unwrap_or("?");
+            return Self::Mise(tool.to_string());
+        }
+        if text.contains("node_modules") {
+            return Self::Npm;
+        }
+        if let Some(home) = std::env::var_os("HOME").map(|h| h.to_string_lossy().into_owned()) {
+            let home = home.replace('\\', "/");
+            if text.starts_with(&format!("{home}/.cargo/bin/")) {
+                return Self::Cargo;
+            }
+            if text.starts_with(&format!("{home}/.local/bin/")) {
+                // An npm global under a mise-managed node keeps its package
+                // dir beside the bin dir; that layout names npm confidently.
+                if let Some(bin_dir) = std::path::Path::new(&text)
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join("lib").join("node_modules"))
+                {
+                    if bin_dir.is_dir() {
+                        return Self::Npm;
+                    }
+                }
+                return Self::UserLocal;
+            }
+        }
+        if ["/usr/local/bin/", "/usr/bin/", "/bin/"]
+            .iter()
+            .any(|dir| text.starts_with(dir))
+        {
+            return Self::System;
+        }
+        Self::Unknown
+    }
+}
+
+/// One installed agent: what it is, where it lives, what it reports.
+#[derive(Debug, Clone)]
+pub struct InstalledAgent {
+    /// Roster name.
+    pub name: &'static str,
+    /// Resolved executable path.
+    pub binary: std::path::PathBuf,
+    /// First line of `--version`, when it answered in time.
+    pub version: Option<String>,
+    /// How it got here, as far as the path says.
+    pub source: InstallSource,
+}
+
+/// The installed subset of the roster, with versions and provenance.
+///
+/// Read-only by construction: PATH scans plus one `--version` run each. This
+/// function never installs, never upgrades, and never writes — discovery is
+/// the whole item, and anything that mutates the machine would be a different
+/// one.
+pub fn inventory() -> Vec<InstalledAgent> {
+    let mut out = Vec::new();
+    for spec in ROSTER {
+        let Some(path) = spec.binaries.iter().find_map(|b| which(b)) else {
+            continue;
+        };
+        out.push(InstalledAgent {
+            name: spec.name,
+            source: InstallSource::classify(&path),
+            version: run_version(&path),
+            binary: path,
+        });
+    }
+    out
+}
+
+/// First line of `<binary> --version`, bounded. A version probe that hangs is
+/// not a version; it is `None` with no error, because absence of an answer is
+/// itself the observation.
+fn run_version(binary: &std::path::Path) -> Option<String> {
+    let mut child = std::process::Command::new(binary)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => {
+                let _ = child.kill();
+                return None;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +374,42 @@ mod tests {
                 assert_eq!(provenance, Provenance::NotInstalled, "{}", spec.name);
             }
         }
+    }
+
+    #[test]
+    fn install_sources_classify_by_path_alone() {
+        use std::path::Path;
+        // mise tool dirs name their manager.
+        assert_eq!(
+            InstallSource::classify(Path::new(
+                "/home/u/.local/share/mise/installs/codex/latest/bin/codex"
+            )),
+            InstallSource::Mise("codex".to_string())
+        );
+        // An npm package installed by mise is mise's: the manager of record wins
+        // over the packaging format inside it.
+        assert_eq!(
+            InstallSource::classify(Path::new(
+                "/home/u/.local/share/mise/installs/gemini/latest/node_modules/.bin/gemini"
+            )),
+            InstallSource::Mise("gemini".to_string())
+        );
+        // Outside mise, node_modules names npm.
+        assert_eq!(
+            InstallSource::classify(Path::new("/usr/lib/node_modules/.bin/tool")),
+            InstallSource::Npm
+        );
+        assert_eq!(
+            InstallSource::classify(Path::new("/usr/local/bin/tool")),
+            InstallSource::System
+        );
+        assert_eq!(
+            InstallSource::classify(Path::new("/opt/vendor/tool")),
+            InstallSource::Unknown
+        );
+        // Labels never imply more than the path showed.
+        assert_eq!(InstallSource::UserLocal.label(), "user-local");
+        assert_eq!(InstallSource::Unknown.label(), "unknown");
     }
 
     #[test]
