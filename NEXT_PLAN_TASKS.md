@@ -2692,6 +2692,25 @@ classifier that does not exist.
   (round-tripping already-canonical data passes forever). UNVERIFIED how far
   that generalises; it is an eval question, not a tooling one.
 
+  **Verdict 2026-09-28, after VF-4-A and VF-4-B: VF-4 remains an evaluation
+  capability; no shipped gate.** Two targets, same method, different failure
+  shapes: candidates miss whatever requires target semantics to see
+  (duplicates and new-file handling in a diff parser, file attribution in a
+  coverage join). That is evidence *against* a single generic property gate —
+  a gate tuned to one target's weakness would pass the other's. What
+  generalises is the method (defects-per-rule, four classes, asserted scores),
+  and that is what stays: two test-only harnesses, proptest 1.11 as a
+  dev-dependency, and this record.
+
+  On the literal done-when: no `proptest-regressions/` directory exists because
+  no property has ever failed — every seeded defect was caught by the exact
+  property and the strong proptest suites pass on correct code. A regressions
+  directory with nothing in it would be a claim without a failure behind it.
+
+  Reopen if: a third target shows a failure shape neither of the first two
+  predicts, or a mechanical check is demonstrated to catch a whole defect class
+  (not one defect) across both existing targets.
+
   **VF-4-A experiment, done 2026-09-28 — the eval question asked first, on one
   target.** `touched_files` (the diff parser the repair gate depends on) against
   four seeded defects, each breaking exactly one rule (keep `/dev/null`, allow

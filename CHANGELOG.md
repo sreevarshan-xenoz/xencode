@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode history digest`: the why-does-this-exist signal at tier-5 scale
+### Decision — VF-4 stays an evaluation capability, no shipped gate
+
+After the A and B experiments: candidates miss whatever requires target
+semantics to see, differently per target — which is evidence *against* a
+single generic property gate. What stays is the method (defects-per-rule, four
+classes, asserted scores), two test-only harnesses, and proptest as a
+dev-dependency. No `proptest-regressions/` directory exists because no property
+has ever failed. Reopen on a third unpredicted failure shape, or a mechanical
+check demonstrated across both targets.
+
+
 
 Last-touch subject per changed hunk plus the five most recent subjects touching
 the path, capped at ~250 tokens with the cut marked — because raw blame/log
