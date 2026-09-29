@@ -1900,6 +1900,13 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode doctor --selfcheck [--format text|json]`
+
+Self-debug: index, git, providers, MCP servers, metrics, cache — each pass,
+fail, or absent with a named string. Absent is not failed. Exit code stays
+zero; the FAIL rows are the signal, because a machine without local servers
+is normal, not broken.
+
 ### `xencode doctor --deps [--format text|json]`
 
 Dependency health, composed: direct deps with locked versions, pending updates

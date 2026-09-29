@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1584 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1588 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -5321,6 +5321,16 @@ coordination is not.
   ☑" is worse than no checklist — the mechanism behind the WHO surgical checklist's
   measured effect (complications 11.0%→7.0%, mortality 1.5%→0.8%, NEJM 2009) is a
   hard stop where **the machine verifies**, not a list the operator grades.
+  **Done 2026-09-28 as `xencode doctor --selfcheck`** — index open, git found,
+  providers reachable, MCP servers resolvable, metrics parseable, cache
+  writable, each with a named state of pass, fail, or absent. Absent is not
+  failed: a machine that never recorded metrics is not broken. Providers are
+  real TCP connects (locals always, cloud only when a key is configured), MCP
+  servers resolve through PATH without spawning anything with side effects.
+  Live on this machine: index absent (true, never built here), git pass,
+  metrics absent (true), cache pass, both local providers refused (true,
+  nothing serving). Three unit tests with real syscalls on both outcomes plus
+  a CLI parse test.
   **Done 2026-09-28** — `xencode verify [--skip test|lint|fmt]` runs the three
   slots every release-facing change needs: the full nextest suite (retries 0,
   flaky-result fail), clippy with zero tolerance, `cargo fmt --check`. Each

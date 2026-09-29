@@ -249,6 +249,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand doctor" -l format -d 'Ou
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand doctor" -l env -d 'Machine environment facts'
 complete -c xencode -n "__fish_xencode_using_subcommand doctor" -l deps -d 'Dependency health: outdated list plus advisory state'
+complete -c xencode -n "__fish_xencode_using_subcommand doctor" -l selfcheck -d 'Self-debug slice: index, git, providers, MCP servers, metrics, cache'
 complete -c xencode -n "__fish_xencode_using_subcommand doctor" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand session; and not __fish_seen_subcommand_from name resolve export help" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand session; and not __fish_seen_subcommand_from name resolve export help" -f -a "name" -d 'Name a run so it can be resumed without its id'
