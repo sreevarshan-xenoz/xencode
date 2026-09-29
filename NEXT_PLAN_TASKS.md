@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1554 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1556 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1736,7 +1736,23 @@ never is.
   exists to provide. Both properties are tests. 22 new tests; full workspace
   **1452 passing**, clippy clean, fmt clean.
 - **WF-5 `cargo-dist` release pipeline + binstall + AUR.** S. Trap: signing keys
-  in CI. Done-when: a tag produces `cargo binstall xencode`.
+  in CI. Done-when: a tag produces `cargo binstall xencode`. **Done 2026-09-28
+  except the tag itself** — `dist init` configured the workspace
+  (`rust/dist-workspace.toml`: five targets, shell + PowerShell installers,
+  GitHub hosting, pinned dist 0.32.0), `dist generate` replaced the hand-rolled
+  release workflow, and `dist plan` announces a coherent v0.1.0: five archives
+  with binaries and checksums, both installers, source tarball.
+
+  The trap holds: the generated workflow references only `secrets.GITHUB_TOKEN`
+  — no signing keys, no GPG, no tokens committed — asserted by a test that
+  fails on any other `secrets.` reference. A second test pins the config keys,
+  the installers, and the `repository` URL dist refuses to guess.
+
+  Two honest limits. No tag was pushed, so no release exists yet and the
+  done-when's live half is unproven by design — cutting a public release to
+  prove tooling would be backwards. And dist ships no AUR installer, so AUR
+  consumes the release tarballs like every other downstream: the install paths
+  are documented conditionally in QUICK_START rather than as fact.
 - **WF-6 shell completions + man page generated from clap.** S. Trap: drift —
   generate them in CI, never by hand. Done-when: tab completion works in fish/zsh.
   **Done 2026-09-28** — `xencode generate <completions|man> [--shell]` emits both

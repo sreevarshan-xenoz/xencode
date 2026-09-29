@@ -22,3 +22,8 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
