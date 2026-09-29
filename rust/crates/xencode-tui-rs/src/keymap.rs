@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use xencode_config_rs::XencodeConfig;
 
-use crate::app::{first_output_line, llama_model_target, App};
+use crate::app::{llama_model_target, App};
 use crate::focus::{navigate_feature, FocusArea, InputMode, FEATURE_LIST};
 use crate::theme::ThemeColors;
 
@@ -910,17 +910,22 @@ fn key_git_commit(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
                 app.commit_cursor = 0;
                 app.focus = FocusArea::ChatInput;
                 let ctx = tx.clone();
+                // Same directory the old bare call inherited: only the signing
+                // environment is new, not where the commit lands.
+                let repo = std::env::current_dir().unwrap_or(std::path::PathBuf::from("."));
                 tokio::spawn(async move {
-                    let out = tokio::process::Command::new("git")
-                        .args(["commit", "-am", &msg])
-                        .output()
-                        .await;
+                    // Signing-capable and repo-rooted: the commit runs where the
+                    // repository is, with the signing environment passed through,
+                    // so a configured signature works and a missing key fails
+                    // with words instead of hanging on pinentry.
+                    let out = tokio::task::spawn_blocking(move || {
+                        crate::gitsign::commit_signed(&repo, &msg, 120)
+                    })
+                    .await
+                    .map_err(|e| format!("commit task failed: {e}"));
                     let (tag, body) = match out {
-                        Ok(o) if o.status.success() => {
-                            ("[GIT_COMMIT_OK]", first_output_line(&o.stdout))
-                        }
-                        Ok(o) => ("[GIT_COMMIT_ERR]", first_output_line(&o.stderr)),
-                        Err(e) => ("[GIT_COMMIT_ERR]", e.to_string()),
+                        Ok(Ok(line)) => ("[GIT_COMMIT_OK]", line),
+                        Ok(Err(reason)) | Err(reason) => ("[GIT_COMMIT_ERR]", reason),
                     };
                     let _ = ctx.send(format!("{tag}{body}"));
                 });

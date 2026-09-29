@@ -5,6 +5,7 @@ pub mod crate_docs;
 pub mod crate_sources;
 pub mod eval_judge;
 pub mod focus;
+pub mod gitsign;
 pub mod help;
 pub mod keymap;
 pub mod layout;
