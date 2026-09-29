@@ -16,7 +16,16 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Added — `xencode agents`: versions and install provenance, discovery only
+### Added — `xencode agents --contract`: roster claims re-read from live help
+
+Every capability cell re-verified against the agent's actual `--help` on each
+run: 35 confirmed, 0 contradicted here — after overturning two stale cells
+(opencode approval, crush server). A firewall test fails the build on any
+future contradiction. Only `--help` output is consulted, top-level plus the
+one-shot subcommand's; absence asserted only where tokens are unambiguous.
+Four unit tests plus a CLI parse test.
+
+
 
 PATH resolution, bounded `--version` runs, and an install source read from the
 path alone. All six agents here report versions with `mise:*` provenance. The

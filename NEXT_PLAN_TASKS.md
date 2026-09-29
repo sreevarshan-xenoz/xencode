@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1590 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1595 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -8728,6 +8728,18 @@ prove nothing about a remote connection).
   `mise:*` provenance. The manager of record wins over the packaging format: an
   npm package installed by mise reads `mise:gemini`, not npm. Two unit tests.
 | **AR-3** | Contract probe: the flags each agent actually advertises | core | replaces "capability detection by name"; feeds `OR-6`'s routing |
+  **Done 2026-09-29** — `xencode agents --contract` over
+  `agents-rs/src/contract.rs`: every roster claim re-read from the agent's live
+  `--help` (top-level plus the one-shot subcommand's, which is exactly the path
+  the probe uses), confirmed or contradicted per claim with evidence. 35 claims
+  confirmed, 0 contradicted on this machine — after the probe overturned two
+  roster cells first: opencode does advertise approval (`--auto`) and crush
+  does run a server subcommand, both previously `false`. A firewall test fails
+  the build on any contradiction, so the roster cannot rot silently again.
+  Absence asserted only for `acp`/`mcp`; daemon/approval absence stays
+  unchecked because no single token means "daemon" (`serve` also matches "MCP
+  server names"). Three unit tests plus the firewall test plus a CLI parse
+  test.
 
 #### W16 — One worker at a time, then brokered — 12 items
 
