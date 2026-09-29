@@ -4544,24 +4544,47 @@ fn run_test(
     let outcome = verify::run(&root, &opts);
 
     // EVd-1's first producer: every run leaves a row — session, class, exit
-    // code, what it ran against — whether or not anyone reads it back. The log
-    // reference stays empty until EVd-4 owns artifacts; an empty ref says no
-    // log was kept rather than pointing at one that does not exist.
+    // code, what it ran against — whether or not anyone reads it back. The run
+    // log goes to the session artifacts, tail-capped, and the ledger row points
+    // at it; then old passing sessions are pruned, because a test loop that
+    // never prunes fills a disk.
     {
-        use xencode_context_rs::ledger;
+        use xencode_context_rs::{artifacts, ledger};
+        let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let mut log = format!(
+            "command: {}\nexit: {}\nflaky: {}\nfailed: {}\n",
+            outcome.command,
+            outcome.exit.unwrap_or(-1),
+            outcome.flaky.join(", "),
+            outcome.failed.join(", "),
+        );
+        for note in &outcome.notes {
+            log.push_str(&format!("note: {note}\n"));
+        }
+        let log_ref =
+            artifacts::write_artifact(&xencode_dir, "cli", &format!("test-{now_ms}.log"), &log)
+                .ok()
+                .map(|p| {
+                    p.strip_prefix(&root)
+                        .map(|r| r.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| p.display().to_string())
+                })
+                .unwrap_or_default();
+        let _ = artifacts::prune_artifacts(&xencode_dir, artifacts::KEEP_LAST_PASSING);
         let entry = ledger::LedgerEntry {
-            ts_unix_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
-            session: None,
+            ts_unix_ms: now_ms,
+            session: Some("cli".to_string()),
             run_class: ledger::RunClass::Test,
             exit_code: outcome.exit.unwrap_or(-1),
             subjects: vec![ledger::digest_hex(&outcome.command)],
-            log_ref: String::new(),
+            log_ref,
             note: String::new(),
         };
-        let _ = ledger::append_ledger(&root.join(xencode_context_rs::XENCODE_DIR), &entry);
+        let _ = ledger::append_ledger(&xencode_dir, &entry);
     }
 
     if matches!(format, OutputFormat::Json) {

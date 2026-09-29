@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1546 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1550 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3790,7 +3790,18 @@ even though the design is not.
 - **EVd-4 — `.xencode/artifacts/<session>/`.** Per-session dirs, log tails
   reusing `agent_tools.rs:778-830`'s caps, keep last N plus every failing
   session, git-ignored by default. *Effort: S.* *Trap:* a `cargo test` loop
-  fills a disk.
+  fills a disk. **Done 2026-09-28** — `artifacts.rs` in `xencode-context-rs`:
+  `.xencode/artifacts/<session>/` with tail-capped writes (last 8 KiB on a
+  character boundary — the end is where the failure is), path-safe names that
+  cannot escape the session dir, and `prune_artifacts` keeping the newest 5
+  plus every session with a failing ledger row. The cap matches the tool loop's
+  `COMMAND_OUTPUT_CAP`, so one number governs the tail everywhere; the plan's
+  line reference for those caps has drifted, the constant has not. `xencode
+  test` writes a compact run log per run, fills the ledger's `log_ref` (the gap
+  EVd-1 left open), and prunes afterwards. Four tests, with mtimes pinned via
+  libc rather than sleeps so the ordering under test is asserted, not hoped
+  for. Proved live: artifact written, ledger row pointing at it, content
+  verified.
 - **EVd-5 — Ledger-fed compaction.** Merge into **EV-6**/**SE-2** rather than
   forking a third memory of what happened.
 - **EVd-6 — False-verified calibration.** Seed broken changes, then measure how
