@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1603 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1608 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10505,6 +10505,18 @@ editor and also in the review panel is the case that earns it.
 **Done-when.** A `Stack` of three agent panes shows all three state rows without
 input, switching is one chord, and every chord is in UX-1's rebindable table and
 UX-3's which-key popup so it is discoverable rather than remembered.
+  **Done 2026-09-29, minus the two substrates that do not exist** — `PaneKind`
+  vocabulary (Code through Monitor, each with title and hint), `agent_panes()`
+  built from live App state (spawns, ByteBot steps, approval queue — always
+  three panes, idle ones saying so), `cycle_active()` over tree stacks plus a
+  `stack_active()` reader so nothing tracks a parallel index, `Ctrl+N` opening
+  and advancing an overlay that renders the active pane's rows, `Esc` closing,
+  and the chord in the help table. Six tests: kinds distinct, three-always,
+  depth-first cycling with wrap, overlay marking, chord open/advance/Esc.
+  The index wraps at the chord rather than growing unboundedly. Pending and
+  named: UX-1 takes the chord arm over for rebindability, UX-3 surfaces it in
+  which-key, and the agent event feed (V-11's descendant) addresses panes by
+  kind — none of which exist yet, so no architecture was locked around them.
 
 ### V-3 Split and resize on a tree
 

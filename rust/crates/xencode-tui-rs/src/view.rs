@@ -274,6 +274,180 @@ pub fn preset_tree(
     }
 }
 
+/// Semantic engineering surfaces. Names for what a pane *is for*, not where
+/// it sits: the tree decides geometry, this decides meaning. The agent event
+/// flow (V-11's descendant) will address panes by these kinds — an
+/// `AgentStarted` finds `Agents`, a `VerificationFailed` finds `Verify` — so
+/// the vocabulary lands before the wiring that will use it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PaneKind {
+    Code,
+    Agents,
+    Review,
+    Verify,
+    Git,
+    Debug,
+    Research,
+    Terminal,
+    Monitor,
+}
+
+impl PaneKind {
+    /// Short human name for tab strips and overlay headers.
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Code => "Code",
+            Self::Agents => "Agents",
+            Self::Review => "Review",
+            Self::Verify => "Verify",
+            Self::Git => "Git",
+            Self::Debug => "Debug",
+            Self::Research => "Research",
+            Self::Terminal => "Terminal",
+            Self::Monitor => "Monitor",
+        }
+    }
+
+    /// What the pane is for, in one line. The overlay shows it so a kind is
+    /// never a mystery abbreviation.
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Code => "editor and explorer",
+            Self::Agents => "spawned subagents and their state",
+            Self::Review => "diffs awaiting a decision",
+            Self::Verify => "checks, evidence, and verdicts",
+            Self::Git => "branches, worktrees, and commits",
+            Self::Debug => "failing tests and their output",
+            Self::Research => "retrieved context and sources",
+            Self::Terminal => "the embedded shell",
+            Self::Monitor => "cost, health, and background tasks",
+        }
+    }
+}
+
+/// One agent-stack pane: a kind, a title, and its state rows. Built from App
+/// state the loop already holds — no new event flow, no new subscription.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentPane {
+    /// What this pane is.
+    pub kind: PaneKind,
+    /// Header line, e.g. `Subagents (2)`.
+    pub title: String,
+    /// State rows, visible without input. Never empty: an idle pane says so.
+    pub rows: Vec<String>,
+}
+
+/// The three agent panes, always three, from state the app already has.
+///
+/// `spawns` are `(branch, state line)` per subagent, `bytebot` are
+/// `(step, status)` pairs, `approvals` are one line per queued request. Empty
+/// sources yield idle rows rather than missing panes, so the stack shape is
+/// stable and switching never lands on nothing.
+pub fn agent_panes(
+    spawns: &[(String, String)],
+    bytebot: &[(String, String)],
+    approvals: &[String],
+) -> Vec<AgentPane> {
+    let mut subagents: Vec<String> = spawns
+        .iter()
+        .map(|(branch, state)| format!("{branch} — {state}"))
+        .collect();
+    if subagents.is_empty() {
+        subagents.push("idle — try `/spawn <task>`".to_string());
+    }
+    let mut steps: Vec<String> = bytebot
+        .iter()
+        .map(|(step, status)| format!("{step}: {status}"))
+        .collect();
+    if steps.is_empty() {
+        steps.push("idle — no ByteBot run".to_string());
+    }
+    let mut pending: Vec<String> = approvals.to_vec();
+    if pending.is_empty() {
+        pending.push("none pending".to_string());
+    }
+    vec![
+        AgentPane {
+            kind: PaneKind::Agents,
+            title: format!("Subagents ({})", spawns.len()),
+            rows: subagents,
+        },
+        AgentPane {
+            kind: PaneKind::Agents,
+            title: format!("ByteBot ({})", bytebot.len()),
+            rows: steps,
+        },
+        AgentPane {
+            kind: PaneKind::Agents,
+            title: format!("Approvals ({})", approvals.len()),
+            rows: pending,
+        },
+    ]
+}
+
+/// Advance the first `Stack` or `Tabbed` node found depth-first. Returns
+/// whether anything moved: no stack means no-op, never an error.
+pub fn cycle_active(node: &mut LayoutNode) -> bool {
+    match node {
+        LayoutNode::Leaf(_) => false,
+        LayoutNode::Split { parts, .. } => parts.iter_mut().any(|(child, _)| cycle_active(child)),
+        LayoutNode::Tabbed { panes, active } | LayoutNode::Stack { panes, active } => {
+            if panes.is_empty() {
+                false
+            } else {
+                *active = (*active + 1) % panes.len();
+                true
+            }
+        }
+    }
+}
+
+/// The active index of the first `Stack` or `Tabbed` node, depth-first.
+/// `None` when the tree holds no stack — readers use this rather than tracking
+/// a parallel index that could disagree with the tree.
+pub fn stack_active(node: &LayoutNode) -> Option<usize> {
+    match node {
+        LayoutNode::Leaf(_) => None,
+        LayoutNode::Split { parts, .. } => parts.iter().find_map(|(child, _)| stack_active(child)),
+        LayoutNode::Tabbed { panes, active } | LayoutNode::Stack { panes, active } => {
+            if panes.is_empty() {
+                None
+            } else {
+                Some((*active).min(panes.len() - 1))
+            }
+        }
+    }
+}
+
+/// Text for the stack overlay: tab strip plus the active pane's rows. Pure so
+/// the content is testable without a terminal; the draw code only lays it out.
+pub fn stack_overlay_text(panes: &[AgentPane], active: usize) -> Vec<String> {
+    if panes.is_empty() {
+        return vec!["no agent panes".to_string()];
+    }
+    let active = active.min(panes.len() - 1);
+    let mut out = Vec::new();
+    let strip: Vec<String> = panes
+        .iter()
+        .enumerate()
+        .map(|(i, pane)| {
+            if i == active {
+                format!("[{}]", pane.title)
+            } else {
+                pane.title.clone()
+            }
+        })
+        .collect();
+    out.push(strip.join("  "));
+    out.push(format!(
+        "{} — {}",
+        panes[active].kind.title(),
+        panes[active].kind.hint()
+    ));
+    out.extend(panes[active].rows.iter().cloned());
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,6 +578,90 @@ mod tests {
         assert_eq!(view.render(area).len(), 4);
         view.set_root(zen_tree(area, false, FocusArea::CodeEditor));
         assert_eq!(view.render(area).len(), 1);
+    }
+
+    #[test]
+    fn pane_kinds_name_themselves() {
+        assert_eq!(PaneKind::Agents.title(), "Agents");
+        assert!(PaneKind::Verify.hint().contains("verdict"));
+        // Nine kinds, each distinct, so a kind is never an alias by accident.
+        let mut titles = std::collections::BTreeSet::new();
+        for kind in [
+            PaneKind::Code,
+            PaneKind::Agents,
+            PaneKind::Review,
+            PaneKind::Verify,
+            PaneKind::Git,
+            PaneKind::Debug,
+            PaneKind::Research,
+            PaneKind::Terminal,
+            PaneKind::Monitor,
+        ] {
+            assert!(titles.insert(kind.title()), "duplicate title");
+        }
+    }
+
+    #[test]
+    fn three_agent_panes_always_three() {
+        let panes = agent_panes(&[], &[], &[]);
+        assert_eq!(panes.len(), 3);
+        for pane in &panes {
+            assert!(!pane.rows.is_empty(), "an idle pane says so");
+        }
+        let panes = agent_panes(
+            &[("feat".to_string(), "1/2 call(s) completed".to_string())],
+            &[("fetch".to_string(), "done".to_string())],
+            &["edit_file: main.rs".to_string()],
+        );
+        assert_eq!(panes[0].title, "Subagents (1)");
+        assert!(panes[0].rows[0].contains("feat"));
+        assert!(panes[1].rows[0].contains("fetch: done"));
+        assert!(panes[2].rows[0].contains("edit_file"));
+    }
+
+    #[test]
+    fn cycling_moves_the_first_stack_depth_first() {
+        let mut tree = LayoutNode::Split {
+            horizontal: true,
+            parts: vec![
+                (
+                    leaf(BodySlot::Editor, FocusArea::CodeEditor),
+                    Constraint::Percentage(50),
+                ),
+                (
+                    LayoutNode::Stack {
+                        panes: vec![
+                            Pane {
+                                slot: BodySlot::Chat,
+                                focus: FocusArea::ChatInput,
+                            },
+                            Pane {
+                                slot: BodySlot::Terminal,
+                                focus: FocusArea::ChatInput,
+                            },
+                        ],
+                        active: 0,
+                    },
+                    Constraint::Percentage(50),
+                ),
+            ],
+        };
+        assert!(cycle_active(&mut tree));
+        assert_eq!(stack_active(&tree), Some(1));
+        assert!(cycle_active(&mut tree));
+        assert_eq!(stack_active(&tree), Some(0));
+        // No stack anywhere: no-op, never an error.
+        let mut plain = leaf(BodySlot::Editor, FocusArea::CodeEditor);
+        assert!(!cycle_active(&mut plain));
+    }
+
+    #[test]
+    fn the_overlay_marks_the_active_pane() {
+        let panes = agent_panes(&[], &[("fetch".to_string(), "done".to_string())], &[]);
+        let text = stack_overlay_text(&panes, 1);
+        assert!(text[0].contains("[ByteBot (1)]"), "{text:?}");
+        assert!(text.iter().any(|l| l.contains("fetch: done")), "{text:?}");
+        assert!(stack_overlay_text(&[], 0) == vec!["no agent panes".to_string()]);
     }
 
     #[test]

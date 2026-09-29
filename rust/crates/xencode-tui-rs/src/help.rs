@@ -28,6 +28,7 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+B", "ByteBot agent panel"),
     ("Ctrl+,", "settings"),
     ("Ctrl+W", "close panel → chat"),
+    ("Ctrl+N", "agent stack overlay (Esc closes)"),
     ("Ctrl+T", "toggle terminal strip"),
     ("Ctrl+U", "cycle layout preset"),
     ("Ctrl+H", "run provider health check"),

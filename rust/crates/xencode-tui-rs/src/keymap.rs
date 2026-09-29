@@ -38,6 +38,24 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
     if app.help_visible {
         return help_modal_key(app, key);
     }
+    // The agent stack overlay is modal the same way: Esc closes, Ctrl+N
+    // advances while it is open, everything else is swallowed so typing never
+    // lands in chat behind a panel the user is reading.
+    if app.agent_stack_visible {
+        match key.code {
+            KeyCode::Esc => {
+                app.agent_stack_visible = false;
+            }
+            _ => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if let KeyCode::Char('n') | KeyCode::Char('N') = key.code {
+                        advance_agent_stack(app);
+                    }
+                }
+            }
+        }
+        return done();
+    }
     // Global Ctrl chords work in ALL input modes.
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         if let Some(flow) = global_ctrl_chord(app, key, tx) {
@@ -103,8 +121,28 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// The global Ctrl chord table. `Some` = consumed, `None` = fall through to
 /// the input-mode handlers (e.g. Ctrl+J reaches the chat textarea as a
 /// newline).
+/// Advance the agent stack overlay, wrapping over the live pane count.
+/// Wrapping here rather than clamping at render keeps the state bounded: an
+/// index that grows forever is a leak wearing a counter's clothes.
+fn advance_agent_stack(app: &mut App) {
+    let count = app.agent_stack_panes().len().max(1);
+    app.agent_stack_index = (app.agent_stack_index + 1) % count;
+}
+
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     match key.code {
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            // Agent stack overlay: opens on the first pane, advances after.
+            // One chord, discoverable in the help table; rebindable when UX-1
+            // lands, which takes this arm over unchanged.
+            if !app.agent_stack_visible {
+                app.agent_stack_visible = true;
+                app.agent_stack_index = 0;
+            } else {
+                advance_agent_stack(app);
+            }
+            return Some(done());
+        }
         KeyCode::Char('c') => return Some(quit()),
         KeyCode::Char('g') => {
             app.refresh_git();
@@ -1525,6 +1563,23 @@ mod tests {
     fn press_with_mods(app: &mut App, code: KeyCode, mods: KeyModifiers) -> KeyFlow {
         let (tx, _rx) = mpsc::unbounded_channel();
         handle_key(app, KeyEvent::new(code, mods), &tx)
+    }
+
+    #[test]
+    fn ctrl_n_opens_advances_and_esc_closes_the_agent_stack() {
+        let mut app = app_with(FocusArea::ChatInput);
+        assert!(!app.agent_stack_visible);
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert!(app.agent_stack_visible);
+        assert_eq!(app.agent_stack_index, 0);
+        // Three panes: the fourth advance wraps to the front.
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert_eq!(app.agent_stack_index, 1);
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert_eq!(app.agent_stack_index, 0, "wraps instead of growing");
+        press_with_mods(&mut app, KeyCode::Esc, KeyModifiers::empty());
+        assert!(!app.agent_stack_visible);
     }
 
     fn app_with(focus: FocusArea) -> App<'static> {
