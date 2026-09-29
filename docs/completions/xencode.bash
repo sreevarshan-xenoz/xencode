@@ -1508,7 +1508,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__doctor)
-            opts="-h --env --format --help"
+            opts="-h --env --deps --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

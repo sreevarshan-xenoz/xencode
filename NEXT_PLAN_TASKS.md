@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1576 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1581 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -4928,7 +4928,18 @@ context.
   (fact Q-1.22): `cargo tree -i` + `cargo update --dry-run` + per-crate OSV
   queries cached in the existing cache crate, plus the outdated-but-constrained
   list. Offline answers **"advisory state unknown"**, never "clean". This is
-  SE-6 + RS-5 + DB-6 composed, not a fourth thing.
+  SE-6 + RS-5 + DB-6 composed, not a fourth thing. **Done 2026-09-28** —
+  `xencode doctor --deps [--format]` over `analysis-rs/src/deps.rs`: direct
+  deps across workspace members, locked versions from `Cargo.lock`, pending
+  updates from `cargo update --dry-run`, advisory state from the local corpus
+  via `advisories_for`. Four tests (dry-run parsing, first-pin-wins, unknown
+  corpus, fixture corpus distinguishing vulnerable from clean) plus a CLI parse
+  test. On this repository: 49 rows, 0 vulnerable, 0 unknown against the
+  synced local corpus.
+
+  Offline — no usable corpus — the answer is "advisory state unknown", never
+  "clean", asserted by test. An empty update list is likewise split: the
+  report carries whether the dry-run ran, so absence cannot pose as currency.
 - **QO-2 — Fix the two broken regexes first.** `security.rs:196,:220` — group
   the alternation under `\([^)]*(?:…)`. *Effort: S.* Provable today: any
   `fn parse_input(` line fires High/CWE-22. Every health proposal in the list is

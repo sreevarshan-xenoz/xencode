@@ -1900,6 +1900,13 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode doctor --deps [--format text|json]`
+
+Dependency health, composed: direct deps with locked versions, pending updates
+from a dry run, advisory state from the local corpus. Offline reads as
+"unknown", never "clean"; a dry run that never ran says so. Exits non-zero on
+any vulnerable dependency.
+
 ### `xencode hotspots [--limit 10] [--format text|json]`
 
 Rank files by commits × bytes with bus factor and CODEOWNERS owners, as

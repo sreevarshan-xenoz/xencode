@@ -786,6 +786,7 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
 '--env[Machine environment facts]' \
+'--deps[Dependency health\: outdated list plus advisory state]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

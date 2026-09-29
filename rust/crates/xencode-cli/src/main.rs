@@ -426,6 +426,10 @@ enum Commands {
         #[arg(long)]
         env: bool,
 
+        /// Dependency health: outdated list plus advisory state
+        #[arg(long)]
+        deps: bool,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1128,7 +1132,7 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
-        Commands::Doctor { env, format } => run_doctor(env, format),
+        Commands::Doctor { env, deps, format } => run_doctor(env, deps, format),
         Commands::Session { action } => run_session(action),
         Commands::Verify {
             skip,
@@ -4178,11 +4182,16 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
-fn run_doctor(env: bool, format: OutputFormat) -> Result<(), String> {
+fn run_doctor(env: bool, deps: bool, format: OutputFormat) -> Result<(), String> {
     use xencode_context_rs::doctor;
 
-    if !env {
-        return Err("nothing to probe: `xencode doctor` needs `--env`".to_string());
+    if !env && !deps {
+        return Err(
+            "nothing to probe: `xencode doctor` needs `--env`, `--deps`, or both".to_string(),
+        );
+    }
+    if deps {
+        return run_doctor_deps(format);
     }
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
     let facts = doctor::probe_env();
@@ -4266,6 +4275,83 @@ fn run_doctor(env: bool, format: OutputFormat) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::deps;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let manifest = xencode_context_rs::verify::manifest_dir(&root)?;
+    let corpus = xencode_config_rs::XencodeConfig::config_dir()
+        .map(|dir| xencode_analysis_rs::advisories::corpus_dir(&dir))
+        .ok();
+    let report = deps::doctor_deps(&manifest, corpus.as_deref())?;
+    let rows = &report.rows;
+
+    let state_word = |row: &deps::DepRow| match &row.state {
+        deps::DepState::Clean => "clean",
+        deps::DepState::Vulnerable(_) => "VULNERABLE",
+        deps::DepState::Unknown(_) => "unknown",
+    };
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "dependencies": rows.iter().map(|r| serde_json::json!({
+                    "crate": r.krate,
+                    "locked": r.locked,
+                    "update_to": r.update_to,
+                    "state": state_word(r),
+                    "detail": match &r.state {
+                        deps::DepState::Vulnerable(ids) => ids.join(","),
+                        deps::DepState::Unknown(why) => why.clone(),
+                        deps::DepState::Clean => String::new(),
+                    },
+                })).collect::<Vec<_>>(),
+            })
+        );
+    } else {
+        let (mut vuln, mut unknown) = (0, 0);
+        for row in rows {
+            match &row.state {
+                deps::DepState::Vulnerable(ids) => {
+                    vuln += 1;
+                    println!(
+                        "\n  VULNERABLE {} {}: {}",
+                        row.krate,
+                        row.locked.as_deref().unwrap_or("?"),
+                        ids.join(", ")
+                    );
+                }
+                deps::DepState::Unknown(why) => {
+                    unknown += 1;
+                    println!("\n  unknown {}: {}", row.krate, why);
+                }
+                deps::DepState::Clean => {}
+            }
+            if let Some(to) = &row.update_to {
+                println!(
+                    "    update available: {} -> {to}",
+                    row.locked.as_deref().unwrap_or("?")
+                );
+            }
+        }
+        println!(
+            "\n  {} checked, {vuln} vulnerable, {unknown} unknown",
+            rows.len()
+        );
+        if !report.updates_checked {
+            println!("  update check did not run — the update column is unknown, not clean");
+        }
+    }
+    if rows
+        .iter()
+        .any(|r| matches!(r.state, deps::DepState::Vulnerable(_)))
+    {
+        Err("vulnerable dependencies found".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn run_session(action: SessionAction) -> Result<(), String> {
@@ -5864,6 +5950,15 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Hotspots { limit: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn doctor_deps_parses() {
+        let cli = Cli::try_parse_from(["xencode", "doctor", "--deps"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Doctor { deps: true, .. })
         ));
     }
 
