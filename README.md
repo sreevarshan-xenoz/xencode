@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 1614 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 1631 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -44,7 +44,7 @@ and fix your code — driven entirely from your terminal.
 - **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Colab GPU you rent, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (three selectable layouts via `Ctrl+U`, 17 of them reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates` — with 17 panels reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold.
@@ -402,6 +402,22 @@ flowchart TD
 - Manage it with `xencode config show | set <KEY> <VALUE> | reset`, or the
   TUI Settings panel. Only the keys in the struct are read; unknown keys are
   ignored.
+- **The body layout is a tree you can write yourself.** `layout` names the
+  arrangement: the shipped `classic`, `chat-first` or `zen`, or a name declared
+  in `layout_templates`, which holds the shape as data — a leaf naming a slot
+  (`explorer`, `editor`, `chat`, `input`, `terminal`) and the focus it carries,
+  or a split naming each child's share as `{"percent": 70}`, `{"min": 6}` or
+  `{"length": 8}`. Adding one takes no code: an `editor-first` arrangement is a
+  handful of lines of JSON under `layout_templates`, then `"layout":
+  "editor-first"`. `Ctrl+U` and the Settings Layout row cycle the shipped
+  presets and your names together, the header chip names whichever is in force,
+  and a name that is neither — or a template that cannot be built, such as one
+  naming a mistyped slot or giving a child a zero share — renders `classic` and
+  says why in a toast rather than quietly behaving like a preference that was
+  ignored. `xencode config set layout <name>` prints the same sentence instead
+  of leaving you to wonder. Templates live in the config file and inherit its
+  versioning; a `~/.xencode/layouts/` directory would be a file format, and
+  this project has no reason to promise one yet.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
@@ -535,7 +551,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1614 passing)
+cargo test                          # Full workspace suite (1631 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

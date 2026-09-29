@@ -74,8 +74,9 @@ pub struct XencodeConfig {
     #[serde(default = "default_theme")]
     pub active_theme: String,
 
-    /// Body layout preset: "classic", "chat-first" or "zen".
-    /// Unknown values fall back to "classic" at render time.
+    /// Body layout: "classic", "chat-first", "zen", or the name of a template
+    /// in [`XencodeConfig::layout_templates`]. Unknown values fall back to
+    /// "classic" at render time.
     #[serde(default = "default_layout")]
     pub layout: String,
 
@@ -329,6 +330,25 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub model_routing: bool,
 
+    /// Body layouts the user authored, keyed by the name they are chosen by
+    /// (V-5), alongside the three shipped presets `classic`, `chat-first` and
+    /// `zen`. Each value is a layout tree: a `{"leaf": {"slot": …, "focus": …}}`
+    /// or a `{"split": {"horizontal": …, "parts": [[child, share], …]}}` with
+    /// shares `{"percent": n}`, `{"min": n}` or `{"length": n}`. Slots are
+    /// `explorer`, `editor`, `chat`, `input` and `terminal`; foci are
+    /// `explorer`, `editor` and `chat`.
+    ///
+    /// The value is left as raw JSON on purpose. This file is hand-edited, and
+    /// a template that does not parse has to be refused *by name at the moment
+    /// it is chosen* — not by failing the whole config, which would silently
+    /// reset every other setting to its default. It also means a config
+    /// written for a newer xencode (a node kind this build has never heard of)
+    /// still opens here, the same promise `model_profiles` makes about an
+    /// unknown task word. The tree is parsed and validated where it is used:
+    /// `xencode_tui_rs::templates`.
+    #[serde(default)]
+    pub layout_templates: std::collections::BTreeMap<String, serde_json::Value>,
+
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -520,6 +540,7 @@ impl Default for XencodeConfig {
             session_recording: false,
             model_profiles: Vec::new(),
             model_routing: false,
+            layout_templates: std::collections::BTreeMap::new(),
             colab: ColabConfig::default(),
         }
     }
@@ -1086,6 +1107,61 @@ mod tests {
         assert!(!config.model_routing);
         assert!(config.model_profiles.is_empty());
 
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_config_can_declare_layout_templates_and_a_broken_one_still_loads() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+                "layout": "side",
+                "model": "unused",
+                "layout_templates": {
+                    "side": {"split": {"horizontal": true, "parts": [
+                        [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
+                        [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
+                    ]}},
+                    "future": {"zones": [{"kind": "editor"}]}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(config.layout, "side");
+        assert_eq!(config.layout_templates.len(), 2);
+        // A template this build cannot read stays exactly as written, and costs
+        // nothing else in the file: every other setting is still loaded. That is
+        // the whole reason these are raw JSON rather than a typed map.
+        assert_eq!(
+            config.layout_templates["future"]["zones"][0]["kind"],
+            "editor"
+        );
+        assert_eq!(config.ollama_url, "http://localhost:11434");
+
+        // And it round-trips: saving keeps both templates, future shape and all.
+        config.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(again, config);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_config_written_before_templates_existed_has_none() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, r#"{"default_model": "mistral:7b"}"#).unwrap();
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert!(config.layout_templates.is_empty());
+        // An empty map is not written out as an empty block on the way back
+        // either: nothing is invented for a config that declared nothing.
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"layout_templates\": {}"), "{json}");
         fs::remove_dir_all(&dir).unwrap();
     }
 

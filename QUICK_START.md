@@ -196,8 +196,9 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
 keybinding help overlay. `Ctrl+U` cycles the body layout (classic →
-chat-first → zen); the same choice lives on the Settings panel (`s`),
-alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
+chat-first → zen, then any layouts you declared in `layout_templates`);
+the same choice lives on the Settings panel (`s`) and the same list drives
+both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
 everything persists to `~/.xencode/config.json`.
 
 ## Examples

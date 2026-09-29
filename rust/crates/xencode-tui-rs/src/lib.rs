@@ -16,6 +16,7 @@ pub mod replay;
 pub mod review;
 pub mod task_eval;
 pub mod task_profiles;
+pub mod templates;
 pub mod theme;
 pub mod toast;
 pub mod ui;

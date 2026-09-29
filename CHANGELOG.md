@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — layouts named in config, and one list of layout names
+
+The body layout is now chosen from one registry: the shipped `classic`,
+`chat-first` and `zen` presets, plus any template declared under the new
+`layout_templates` config key. A template is data — a leaf naming a slot and
+the focus it carries, or a split naming each child's share as a percentage, a
+minimum, or a fixed number of cells — so a new arrangement costs no code.
+`Ctrl+U` and the Settings Layout row walk the same list and cannot disagree
+about it, and the header chip names whichever is in force. A name that is
+neither a preset nor a declared template renders `classic`, exactly as
+`effective_layout` always has; a template that cannot be built is refused with
+its reason — a toast at startup or at the keystroke, and a note printed by
+`xencode config set layout <name>` — rather than failing to load the config,
+which would have silently reset every other setting to its default. Every
+layout, presets included, now renders through the tree, and `compute_layout`
+remains as the independent reference the pixel-identity sweep compares against
+rather than as a second shipped path. The mouse picks a pane by cell instead of
+by column, so a template that stacks one pane above another focuses what was
+actually clicked, and the scroll clamp after a terminal resize reads the same
+body layout the draw just used instead of re-deriving it from the preset match —
+for a config-authored arrangement the old derivation named a chat rectangle the
+user was not looking at. Sixteen tests, including one that proves the data shape of
+`classic` and of `chat-first` renders exactly what their builders render. `zen`
+is the stated exception: its one pane follows the focused area, which is a
+session fact and not a shape a config file can carry.
+
 ### Added — `xencode doctor --env`: probe and display this machine
 
 Cores, available memory, PSI readability, cgroup limit, `nvidia-smi` GPUs,
@@ -26,6 +52,8 @@ layer — each exclusion documented where it would have lived. Six tests.
 
 
 
+### Added — agent stack overlay: three panes, one chord
+
 `PaneKind` vocabulary (Code through Monitor), agent panes built from live
 state (subagents, ByteBot steps, approvals — always three, idle ones saying
 so), `Ctrl+N` opening and advancing an overlay of the active pane's rows,
@@ -34,6 +62,8 @@ so), `Ctrl+N` opening and advancing an overlay of the active pane's rows,
 rebindability, UX-3 which-key, and the agent event feed stay pending by name.
 
 
+
+### Added — the layout tree, beside the shipped presets
 
 `LayoutNode` (leaf, split, tabbed, stack), `Pane` carrying `FocusArea`, and
 `ViewState` — introduced beside `compute_layout`, which is untouched and still
@@ -44,6 +74,8 @@ nothing deleted: the proof covers geometry, and deletion waits for every
 consumer.
 
 
+
+### Added — event-driven TUI frames instead of an unconditional 30 fps redraw
 
 Each loop iteration reports what it observed and draws only on change,
 animation, drained messages, or a visible toast. Idle iterations draw nothing;
