@@ -2910,7 +2910,13 @@ prefix, so these do not pay the tax that taxes N's context ideas.
   together can get pulled together. **M**. Trap:
   "quick fix" commit noise corrupts the signal (documented in the mining
   literature); it churns the cache *tail*, which is fine.
-  **Per-turn (tier 6).**
+  **Per-turn (tier 6).** **Done 2026-09-28** — verified, not built: the whole
+  item predates this session (`cochange.rs` mining via full-history
+  `--name-only` into `history.json`, `COCHANGE_BONUS`/`RECENCY_BONUS` applied
+  in `retrieve()` with reasons, opt-in behind options that default off because
+  history alone must not admit a file). Ten cochange tests pass, and a retrieve
+  test proves partner pull-through with the exact bonus and reason string. The
+  trap needs no action — noise churns the cache tail, as the item says.
 - **GH-4 `xencode hotspots --json`** — churn × size and bus-factor by author
   email, cross-checked against `CODEOWNERS`, surfaced as `Advise` rows. **M**.
   Trap: `--numstat` costs 15.2 s, so use name-only counts plus file size; and

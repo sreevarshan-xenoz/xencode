@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode verify`: the checklist where the machine verifies
+### Recorded — GH-3 co-change and recency scoring already exist
+
+Verified, not built: `cochange.rs` mines full-history `--name-only` into
+`history.json`, and `retrieve()` applies both bonus terms with reasons behind
+opt-in options. Ten tests pass including partner pull-through. No code
+changed.
+
+
 
 Runs three slots — full nextest suite, clippy with zero tolerance, `cargo fmt
 --check` — each a command whose exit code is the verdict, each leaving a
