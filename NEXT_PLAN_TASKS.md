@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1569 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1576 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2921,7 +2921,20 @@ prefix, so these do not pay the tax that taxes N's context ideas.
   email, cross-checked against `CODEOWNERS`, surfaced as `Advise` rows. **M**.
   Trap: `--numstat` costs 15.2 s, so use name-only counts plus file size; and
   every row must carry an action or the whole panel is decorative.
-  **Per-turn one-liner.**
+  **Per-turn one-liner.** **Done 2026-09-28** — `hotspots.rs` in
+  `xencode-context-rs`, surfaced as `xencode hotspots [--limit 10] [--format]`.
+  One `git log --pretty=format:%ae --name-only --no-merges` mine, working-tree
+  sizes, CODEOWNERS parsed with last-match-wins, rows as `Advice` (`Hotspot`
+  and `SingleOwner` kinds added, panel counters and icons extended) with an
+  action in every message. Measured 0.1 s on this repository against the
+  trap's 15.2 s for `--numstat` — two orders of magnitude for information the
+  score does not use.
+
+  Running it here first ranked a 137 MB build artifact above every source
+  file, which is exactly the decorative panel the action rule exists to
+  prevent. Generated dirs (`target`, `.xencode`, …) are now skipped by path
+  segment — prefix matching missed `rust/target/…` while the artifact kept
+  leading. Six unit tests plus a CLI parse test.
 - **GH-5 `xencode commit`** — message from the staged diff, rejecting any
   entity name that does not appear in the diff, plus `interpret-trailers` for
   `Co-authored-by` / `Assisted-by` attribution. **S/M**. Trap: the evaluated

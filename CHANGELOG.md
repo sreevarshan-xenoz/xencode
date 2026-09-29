@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode doctor --env`: probe and display this machine
+### Added — `xencode hotspots`: churn times size with bus factor and owners
+
+One name-only mine plus working-tree sizes: top files by commits × bytes,
+bus factor by author email, CODEOWNERS cross-checked with last-match-wins —
+as `Advice` rows with an action in every message. Measured 0.1 s here against
+15.2 s for `--numstat`. Running it first ranked a 137 MB build artifact above
+everything, so generated dirs are skipped by path segment. Six unit tests plus
+a CLI parse test.
+
+
 
 Cores, available memory, PSI readability, cgroup limit, `nvidia-smi` GPUs,
 journalctl readability, dmesg denial, and colab route presence (state file

@@ -28,6 +28,7 @@ pub mod eval;
 pub mod gitinfo;
 pub mod histdigest;
 pub mod history;
+pub mod hotspots;
 pub mod hwprobe;
 pub mod impact;
 pub mod index;
@@ -100,6 +101,9 @@ pub use histdigest::{history_digest, recent_subjects, DIGEST_CHAR_CAP};
 pub use history::{
     default_blame_target, history_setup, history_status, CommitGraph, HistorySetup, HistoryStatus,
     PackIndex, QueryTime,
+};
+pub use hotspots::{
+    hotspots, owners_for, parse_churn, parse_codeowners, pattern_matches, FileHistory, OwnerRule,
 };
 pub use impact::{
     impact, impact_from_snapshot, ImpactReport, ImpactedFile, DECLARED_CAP, IMPACT_MAX_HOPS,

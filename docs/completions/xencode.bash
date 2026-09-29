@@ -64,6 +64,9 @@ _xencode() {
             xencode,history)
                 cmd="xencode__subcmd__history"
                 ;;
+            xencode,hotspots)
+                cmd="xencode__subcmd__hotspots"
+                ;;
             xencode,hw)
                 cmd="xencode__subcmd__hw"
                 ;;
@@ -300,6 +303,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,history)
                 cmd="xencode__subcmd__help__subcmd__history"
+                ;;
+            xencode__subcmd__help,hotspots)
+                cmd="xencode__subcmd__help__subcmd__hotspots"
                 ;;
             xencode__subcmd__help,hw)
                 cmd="xencode__subcmd__help__subcmd__hw"
@@ -746,7 +752,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck hotspots generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1720,7 +1726,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck hotspots generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2212,6 +2218,20 @@ _xencode() {
         xencode__subcmd__help__subcmd__history__subcmd__status)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__hotspots)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -3018,6 +3038,28 @@ _xencode() {
                     ;;
                 --file)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__hotspots)
+            opts="-h --limit --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
                     return 0
                     ;;
                 *)
