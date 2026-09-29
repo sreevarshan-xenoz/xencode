@@ -43,6 +43,9 @@ _xencode() {
             xencode,cov)
                 cmd="xencode__subcmd__cov"
                 ;;
+            xencode,doctor)
+                cmd="xencode__subcmd__doctor"
+                ;;
             xencode,envcheck)
                 cmd="xencode__subcmd__envcheck"
                 ;;
@@ -276,6 +279,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,cov)
                 cmd="xencode__subcmd__help__subcmd__cov"
+                ;;
+            xencode__subcmd__help,doctor)
+                cmd="xencode__subcmd__help__subcmd__doctor"
                 ;;
             xencode__subcmd__help,envcheck)
                 cmd="xencode__subcmd__help__subcmd__envcheck"
@@ -740,7 +746,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1495,6 +1501,24 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__doctor)
+            opts="-h --env --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__envcheck)
             opts="-h --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
@@ -1696,7 +1720,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain doctor session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2018,6 +2042,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__cov)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__doctor)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )

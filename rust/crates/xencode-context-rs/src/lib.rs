@@ -20,6 +20,7 @@ pub mod cochange;
 pub mod compact;
 pub mod context;
 pub mod conversation;
+pub mod doctor;
 pub mod documents;
 pub mod editing;
 pub mod embed;
@@ -79,6 +80,7 @@ pub use context::{
     HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
+pub use doctor::{probe_env, EnvFacts};
 pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
     MAX_DOC_BYTES, MAX_DOC_CHARS,

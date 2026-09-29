@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1564 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1569 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -4936,7 +4936,13 @@ context.
   PSI, cgroup-limit presence, `nvidia-smi -L` (works here — fact Q-1.1),
   `lspci` GPU classes, `journalctl --user` readability, `dmesg` EPERM, colab
   route presence. *Effort: S.* No "adaptive execution strategy" until QO-4 can
-  measure something.
+  measure something. **Done 2026-09-28** — `xencode doctor --env [--json]`
+  over `context-rs/src/doctor.rs`: cores, memory, PSI readability, cgroup
+  limit, `nvidia-smi -L` lines, journalctl readability, dmesg denial, and
+  colab route (state file plus live forward pid). On this machine: 8 cores,
+  11 GB, PSI readable, MX250 visible, journalctl readable, dmesg denied — the
+  locked-down case reported, never errored. Every fact best-effort. Three unit
+  tests plus a CLI parse test. No strategy adaptation, as specified.
 - **QO-6 — Release notes as a draft generator.** `git log <prev>..HEAD` +
   CHANGELOG, categorized, human-edited-after. *Effort: M.* Conventional-commit
   machinery buys nothing on 760 prose messages; WF-5/WF-6 own the real path.
@@ -9732,7 +9738,10 @@ searched; a key present in `.env.example` and read nowhere is reported as
 *unreferenced*, never as *unnecessary*; and a `doctor --json` row carries the
 result so DB-6 has one shape.
 
-**W3 row done 2026-09-28; W11 doctor row stays open.** `xencode envcheck`
+**W3 row done 2026-09-28; W11 row done 2026-09-28 with QO-5, U-3 complete.**
+  `doctor --json` carries the drift result as one `config_drift` row (sources
+  searched, undocumented and unreferenced counts, os-provided and panicking
+  counts) — the single shape DB-6 reads. `xencode envcheck`
 (`xencode-analysis-rs/src/envdrift.rs`) extracts every `env::var`/`env::var_os`
 key from non-test Rust sources, reads `.env.example`/`.env.template`, and
 reports read-but-undocumented with file:line references plus the sources
