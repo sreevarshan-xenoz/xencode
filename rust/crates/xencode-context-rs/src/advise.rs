@@ -34,6 +34,8 @@ pub enum AdviceKind {
     AffectedDependent,
     Hub,
     Orphan,
+    Hotspot,
+    SingleOwner,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -917,6 +917,8 @@ pub fn format_advise_report(
     let mut hubs = 0usize;
     let mut orphans = 0usize;
     let mut affected = 0usize;
+    let mut hotspots = 0usize;
+    let mut owners = 0usize;
     for a in &shown {
         match a.kind {
             xencode_context_rs::AdviceKind::BrokenImport => broken += 1,
@@ -924,6 +926,8 @@ pub fn format_advise_report(
             xencode_context_rs::AdviceKind::AffectedDependent => affected += 1,
             xencode_context_rs::AdviceKind::Hub => hubs += 1,
             xencode_context_rs::AdviceKind::Orphan => orphans += 1,
+            xencode_context_rs::AdviceKind::Hotspot => hotspots += 1,
+            xencode_context_rs::AdviceKind::SingleOwner => owners += 1,
         }
     }
     let pl = |n: usize| if n == 1 { "" } else { "s" };
@@ -933,7 +937,7 @@ pub fn format_advise_report(
         format!(" ({} total — drop the filter to see all)", all.len())
     };
     let mut out = vec![format!(
-        "🔍 {} finding{} — {} broken import{}, {} cycle{}, {} hub{}, {} orphan{}, {} affected dependent{}{}:",
+        "🔍 {} finding{} — {} broken import{}, {} cycle{}, {} hub{}, {} orphan{}, {} affected dependent{}, {} hotspot{}, {} single-owner{}{}:",
         shown.len(),
         pl(shown.len()),
         broken,
@@ -946,6 +950,10 @@ pub fn format_advise_report(
         pl(orphans),
         affected,
         pl(affected),
+        hotspots,
+        pl(hotspots),
+        owners,
+        pl(owners),
         scope,
     )];
     for a in shown.iter().take(ADVISE_LINE_CAP) {

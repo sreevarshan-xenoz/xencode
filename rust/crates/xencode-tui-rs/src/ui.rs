@@ -1782,6 +1782,8 @@ fn advise_kind_style(
         AdviceKind::Hub => ("🧶", app.theme.info),
         AdviceKind::Orphan => ("🕸", app.theme.border),
         AdviceKind::AffectedDependent => ("↳", app.theme.success),
+        AdviceKind::Hotspot => ("🔥", app.theme.warning),
+        AdviceKind::SingleOwner => ("👤", app.theme.info),
     }
 }
 

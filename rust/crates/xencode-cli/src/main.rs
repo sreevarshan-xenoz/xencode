@@ -459,6 +459,17 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Rank files by churn times size with bus factor and owners
+    Hotspots {
+        /// How many files to list
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Print shell completions or the man page; both are generated from the
     /// clap definition, never written by hand
     Generate {
@@ -1125,6 +1136,7 @@ async fn main() {
             format,
         } => run_verify(skip, timeout, format),
         Commands::Envcheck { format } => run_envcheck(format),
+        Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
             diff,
@@ -4398,6 +4410,30 @@ fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
+fn run_hotspots(limit: usize, format: OutputFormat) -> Result<(), String> {
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let rows = xencode_context_rs::hotspots(&root, limit);
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "hotspots": rows.iter().map(|r| serde_json::json!({
+                    "file": r.file,
+                    "kind": format!("{:?}", r.kind),
+                    "message": r.message,
+                })).collect::<Vec<_>>(),
+            })
+        );
+    } else if rows.is_empty() {
+        println!("\n  no history to rank — untracked files or outside a repository");
+    } else {
+        for row in &rows {
+            println!("\n  {}", row.message);
+        }
+    }
+    Ok(())
+}
+
 fn run_generate(artifact: GenerateArtifact, shell: GenerateShell) -> Result<(), String> {
     use clap::CommandFactory;
     let mut cmd = Cli::command();
@@ -5815,6 +5851,20 @@ mod tests {
         ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn hotspots_parses_with_limit() {
+        let cli = Cli::try_parse_from(["xencode", "hotspots"]).unwrap();
+        match cli.command {
+            Some(Commands::Hotspots { limit, .. }) => assert_eq!(limit, 10),
+            _ => panic!("expected hotspots"),
+        }
+        let cli = Cli::try_parse_from(["xencode", "hotspots", "--limit", "3"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Hotspots { limit: 3, .. })
+        ));
     }
 
     #[test]

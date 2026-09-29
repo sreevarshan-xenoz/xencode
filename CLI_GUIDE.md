@@ -1900,6 +1900,12 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode hotspots [--limit 10] [--format text|json]`
+
+Rank files by commits × bytes with bus factor and CODEOWNERS owners, as
+advice rows that each carry an action. Build outputs and other generated dirs
+are skipped — a panel led by a `.rlib` is decorative.
+
 ### `xencode doctor --env [--json]`
 
 Probe and display this machine: cores, memory, PSI, cgroup limit, GPUs,
