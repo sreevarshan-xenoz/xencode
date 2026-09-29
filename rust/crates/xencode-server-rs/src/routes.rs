@@ -128,7 +128,6 @@ async fn get_config() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "max_session_size": xencode_collaboration_rs::MAX_SESSION_MEMBERS,
-        "supported_models": ["qwen2.5:7b", "llama3.1:8b", "gpt-4o", "claude-3.5-sonnet"],
         "features": ["collaboration", "code_analysis", "rag", "plugins", "llamacpp"],
         "llamacpp": {
             "url": cfg.llama_cpp_url,
@@ -143,7 +142,7 @@ async fn get_config() -> Json<serde_json::Value> {
     }))
 }
 
-/// List available models dynamically from Ollama and llama.cpp.
+/// List models reported by the configured local model servers.
 async fn list_models() -> Json<serde_json::Value> {
     let client = xencode_models_rs::OllamaClient::default_client();
     let mut models_json = Vec::new();
@@ -174,20 +173,6 @@ async fn list_models() -> Json<serde_json::Value> {
             }));
         }
     }
-
-    if models_json.is_empty() {
-        // Fallback models when Ollama/llama.cpp are offline
-        models_json
-            .push(serde_json::json!({"name": "qwen2.5:7b", "provider": "ollama", "type": "local"}));
-        models_json.push(
-            serde_json::json!({"name": "llama3.1:8b", "provider": "ollama", "type": "local"}),
-        );
-    }
-
-    models_json.push(serde_json::json!({"name": "gpt-4o", "provider": "openai", "type": "remote"}));
-    models_json.push(
-        serde_json::json!({"name": "claude-3.5-sonnet", "provider": "anthropic", "type": "remote"}),
-    );
 
     Json(serde_json::json!({
         "models": models_json
@@ -323,6 +308,7 @@ mod tests {
     #[tokio::test]
     async fn get_config_does_not_leak_host_paths() {
         let config = get_config().await;
+        assert!(config.0["supported_models"].is_null());
         let ll = &config.0["llamacpp"];
         assert!(ll["model_path"].is_null());
         assert!(ll["executable"].is_null());
@@ -334,21 +320,15 @@ mod tests {
         let _iso = crate::testenv::isolated_config("list-models-count");
         let models = list_models().await;
         let model_list = models.0["models"].as_array().unwrap();
-        // What the local servers report depends on the machine, so the
-        // invariant is the two always-appended remote providers.
-        assert!(model_list.len() >= 2, "remotes always listed");
         // Every entry must carry a name + provider + type.
         for m in model_list {
             assert!(m["name"].is_string());
             assert!(m["provider"].is_string());
             assert!(m["type"].is_string());
         }
-        let names: Vec<&str> = model_list
+        assert!(model_list
             .iter()
-            .map(|m| m["name"].as_str().unwrap())
-            .collect();
-        assert!(names.contains(&"gpt-4o"));
-        assert!(names.contains(&"claude-3.5-sonnet"));
+            .all(|m| { m["provider"] == "ollama" || m["provider"] == "llamacpp" }));
     }
 
     #[tokio::test]

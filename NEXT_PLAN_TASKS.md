@@ -2,7 +2,7 @@
 
 > Working task list for the active backlog. See [NEXT_PLAN.md](NEXT_PLAN.md) for
 > the milestone overview and [docs/ROADMAP.md](docs/ROADMAP.md) for the long-term roadmap.
-> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Verified 2026-09-23.
+> All items target the Rust workspace (`rust/crates/*`) per `AGENTS.md`. Workspace gates were last verified 2026-09-29.
 
 ## Rust Migration — Complete ✅
 
@@ -19,6 +19,15 @@
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
 - [x] Workspace gates green — 16 crates, 1694 tests passing, zero warnings (re-verified 2026-09-29)
+
+## Model Catalog Honesty
+
+- [x] **DOC-1 — Report observed models only.** Removed sample local and cloud
+  entries from the collaboration API and removed cloud model guesses from TUI
+  discovery; preserve only the user's explicitly configured model alongside
+  observed local models. Updated the API contract, user/install/quick-start
+  manuals, roadmap summaries, and changelog. Verified with the workspace test
+  suite and server crate tests on 2026-09-29.
 
 ## Real-Time Intelligence (Phase 3+)
 

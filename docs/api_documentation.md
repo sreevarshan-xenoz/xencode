@@ -41,6 +41,16 @@ Session lifecycle is in-memory only (a restart drops peers); every create,
 join, relay, denial and removal is appended as one JSONL line to
 `~/.xencode/audit.jsonl` by default.
 
+## Model discovery
+
+`GET /api/models` returns `{"models":[...]}`. Each row is sourced from a
+successful Ollama `/api/tags` or configured llama.cpp `/v1/models` response and
+has `name`, `provider` (`ollama` or `llamacpp`) and `type: "local"`. Ollama
+rows also include `size` and `modified_at`. Embedding-only Ollama entries are
+excluded. Failed or unreachable sources contribute no rows; an empty array
+means no chat models were reported. This endpoint does not enumerate cloud
+providers. `GET /api/config` intentionally has no `supported_models` field.
+
 ## Elsewhere
 
 - CLI verbs, flags and every `config.json` key (`model_profiles`,

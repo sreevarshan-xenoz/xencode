@@ -8,8 +8,9 @@ single `xencode` binary. There is no Python stack to install.
 ## Install the Rust Binary
 
 Quickest path: `./install.sh` (Linux/macOS) or `.\install.ps1` — it checks the
-toolchain, builds the release binary, sets Ollama up, pulls `qwen3:4b`,
-smoke-tests and installs `xencode` into `~/.local/bin`. To do it by hand:
+toolchain, builds the release binary, checks Ollama and attempts to pull
+`qwen3:4b`, then smoke-tests and installs `xencode` into `~/.local/bin`. To do
+it by hand:
 
 ### Prerequisites
 - **Rust** (stable) toolchain — install from https://rustup.rs
