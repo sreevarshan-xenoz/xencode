@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1550 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1554 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -2855,7 +2855,16 @@ prefix, so these do not pay the tax that taxes N's context ideas.
 - **GH-1 A ~250-token history digest per edited file** (last-touch subject per
   hunk + the five most recent subjects touching the path) — the "why does this
   exist" signal at tier-5 scale. **S**. Trap: raw `blame`/`log` is 10–80× the
-  tier (fact 20); summarize, never paste `-p`. **Per-turn (tier 5/5.5).**
+  tier (fact 20); summarize, never paste `-p`. **Per-turn (tier 5/5.5).** **Done
+  2026-09-28** — `history_digest` in `xencode-context-rs/src/histdigest.rs`
+  (kept out of the existing `history.rs`, which owns GH-9's commit graph, after
+  nearly overwriting it), surfaced as `xencode history digest <file> [--json]`.
+  Last-touch subject per changed hunk plus the five most recent subjects, capped
+  at ~250 tokens with the cut marked. Identical subjects dedup rather than
+  repeat; no history is a fact, not an error. On this repo a README digest runs
+  403 chars with real subjects. Four tests, including the cap proved with thirty
+  separately-committed lines — a whole-file rewrite blames everything on one
+  commit, which the test does instead of assuming.
 - **GH-2 `/why <file>:<line>`** as an explicit, opt-in-cost query. **M**. Trap:
   pickaxe `git log -S` measured 17.8 s here and scales badly; require path
   scoping and a timeout, or drop pickaxe entirely. **Per-turn (chat only).**

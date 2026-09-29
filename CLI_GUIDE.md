@@ -1339,6 +1339,8 @@ xencode history status                       # current directory's repository
 xencode history status --path ~/Projects/foo --json
 xencode history setup                        # write the two indexes, then re-time
 xencode history status --file src/main.rs    # blame probe on a file you care about
+xencode history digest src/main.rs         # last-touch per hunk + 5 recent subjects, ~250 tokens
+xencode history digest src/main.rs --json  # the same with char count and cap
 ```
 
 `status` prints four things and starts nothing but `git`: where the repository

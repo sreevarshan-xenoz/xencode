@@ -833,6 +833,19 @@ enum HistoryAction {
         #[arg(long)]
         json: bool,
     },
+    /// Print the ~250-token history digest for one file
+    Digest {
+        /// Repository to read (default: the current directory)
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+
+        /// File to digest, repository-relative
+        file: String,
+
+        /// Emit JSON instead of text
+        #[arg(long)]
+        json: bool,
+    },
     /// Write the commit-graph and the multi-pack-index, then time them
     Setup {
         /// Repository to write into (default: the current directory)
@@ -1711,9 +1724,28 @@ fn print_history_status(status: &xencode_context_rs::HistoryStatus) {
 fn run_history(action: HistoryAction) -> Result<(), String> {
     use xencode_context_rs::{default_blame_target, history_setup, history_status};
 
+    if let HistoryAction::Digest { path, file, json } = action {
+        let digest = xencode_context_rs::history_digest(&path, &file);
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "file": file,
+                    "digest": digest,
+                    "chars": digest.len(),
+                    "cap": xencode_context_rs::DIGEST_CHAR_CAP,
+                }))
+                .unwrap_or_default()
+            );
+        } else {
+            println!("{digest}");
+        }
+        return Ok(());
+    }
     let (command, path, file, json) = match action {
         HistoryAction::Status { path, file, json } => ("status", path, file, json),
         HistoryAction::Setup { path, file, json } => ("setup", path, file, json),
+        HistoryAction::Digest { .. } => unreachable!("handled above"),
     };
     let blame = match file {
         Some(file) => Some(file),

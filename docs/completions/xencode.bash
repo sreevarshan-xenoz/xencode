@@ -394,6 +394,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__eval,run)
                 cmd="xencode__subcmd__help__subcmd__eval__subcmd__run"
                 ;;
+            xencode__subcmd__help__subcmd__history,digest)
+                cmd="xencode__subcmd__help__subcmd__history__subcmd__digest"
+                ;;
             xencode__subcmd__help__subcmd__history,setup)
                 cmd="xencode__subcmd__help__subcmd__history__subcmd__setup"
                 ;;
@@ -484,6 +487,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__worktree,remove)
                 cmd="xencode__subcmd__help__subcmd__worktree__subcmd__remove"
                 ;;
+            xencode__subcmd__history,digest)
+                cmd="xencode__subcmd__history__subcmd__digest"
+                ;;
             xencode__subcmd__history,help)
                 cmd="xencode__subcmd__history__subcmd__help"
                 ;;
@@ -492,6 +498,9 @@ _xencode() {
                 ;;
             xencode__subcmd__history,status)
                 cmd="xencode__subcmd__history__subcmd__status"
+                ;;
+            xencode__subcmd__history__subcmd__help,digest)
+                cmd="xencode__subcmd__history__subcmd__help__subcmd__digest"
                 ;;
             xencode__subcmd__history__subcmd__help,help)
                 cmd="xencode__subcmd__history__subcmd__help__subcmd__help"
@@ -2115,8 +2124,22 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__history)
-            opts="status setup"
+            opts="status digest setup"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__history__subcmd__digest)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -2801,7 +2824,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__history)
-            opts="-h --help status setup help"
+            opts="-h --help status digest setup help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2814,9 +2837,41 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        xencode__subcmd__history__subcmd__help)
-            opts="status setup help"
+        xencode__subcmd__history__subcmd__digest)
+            opts="-h --path --json --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__history__subcmd__help)
+            opts="status digest setup help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__history__subcmd__help__subcmd__digest)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi

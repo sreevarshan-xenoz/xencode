@@ -1249,6 +1249,15 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(digest)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Repository to read (default\: the current directory)]:PATH:_files' \
+'--json[Emit JSON instead of text]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':file -- File to digest, repository-relative:_default' \
+&& ret=0
+;;
 (setup)
 _arguments "${_arguments_options[@]}" : \
 '--path=[Repository to write into (default\: the current directory)]:PATH:_files' \
@@ -1271,6 +1280,10 @@ _arguments "${_arguments_options[@]}" : \
         curcontext="${curcontext%:*:*}:xencode-history-help-command-$line[1]:"
         case $line[1] in
             (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(digest)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -1785,6 +1798,10 @@ _arguments "${_arguments_options[@]}" : \
         curcontext="${curcontext%:*:*}:xencode-help-history-command-$line[1]:"
         case $line[1] in
             (status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(digest)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2408,9 +2425,15 @@ _xencode__subcmd__help__subcmd__help_commands() {
 _xencode__subcmd__help__subcmd__history_commands() {
     local commands; commands=(
 'status:Show which history indexes exist here and time the queries that use them' \
+'digest:Print the ~250-token history digest for one file' \
 'setup:Write the commit-graph and the multi-pack-index, then time them' \
     )
     _describe -t commands 'xencode help history commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__history__subcmd__digest_commands] )) ||
+_xencode__subcmd__help__subcmd__history__subcmd__digest_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help history digest commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__history__subcmd__setup_commands] )) ||
 _xencode__subcmd__help__subcmd__history__subcmd__setup_commands() {
@@ -2692,19 +2715,31 @@ _xencode__subcmd__help__subcmd__worktree__subcmd__remove_commands() {
 _xencode__subcmd__history_commands() {
     local commands; commands=(
 'status:Show which history indexes exist here and time the queries that use them' \
+'digest:Print the ~250-token history digest for one file' \
 'setup:Write the commit-graph and the multi-pack-index, then time them' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode history commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__history__subcmd__digest_commands] )) ||
+_xencode__subcmd__history__subcmd__digest_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode history digest commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__history__subcmd__help_commands] )) ||
 _xencode__subcmd__history__subcmd__help_commands() {
     local commands; commands=(
 'status:Show which history indexes exist here and time the queries that use them' \
+'digest:Print the ~250-token history digest for one file' \
 'setup:Write the commit-graph and the multi-pack-index, then time them' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'xencode history help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__history__subcmd__help__subcmd__digest_commands] )) ||
+_xencode__subcmd__history__subcmd__help__subcmd__digest_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode history help digest commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__history__subcmd__help__subcmd__help_commands] )) ||
 _xencode__subcmd__history__subcmd__help__subcmd__help_commands() {
