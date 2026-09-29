@@ -29,6 +29,12 @@
   manuals, roadmap summaries, and changelog. Verified with the workspace test
   suite and server crate tests on 2026-09-29.
 
+## TUIOS Adaptation Gap
+
+- [x] **DOC-2 — Record the visible TUIOS adaptation gap.** Add the current
+  shipped-versus-missing boundary and a concrete starting point for the next
+  implementation session to Milestone V below.
+
 ## Real-Time Intelligence (Phase 3+)
 
 - [x] Real-time file watcher with proactive warnings (`rust/crates/xencode-context-rs/`, new watcher module) — `WorkspaceWatcher` on `notify`, debounced; TUI surfaces warnings for tracked/attached/open files
@@ -10244,6 +10250,41 @@ orchestrator is not.
 ---
 
 ## Milestone V — the window-manager question: a dynamic layout tree, audited (research appendix, drafted 2026-09-28)
+
+### Current implementation boundary — checked 2026-09-29
+
+The TUIOS adaptation is **partial**. Xencode now renders its body through a
+layout tree and supports three built-in layouts, config-authored templates,
+resizing, saved views, and layout history. That gives the explorer, editor,
+chat, input, and optional terminal strip adjustable regions in one application
+screen. It does not make Xencode a terminal multiplexer or give every feature
+panel its own tiled window.
+
+Visible gaps to resume from:
+
+- Most feature areas (Provider Health, Insights, PR Review, Settings, and
+  others) still open as modal overlays from the Feature Navigator or direct
+  chords. Only the small body layout family is tile-arranged.
+- V-2's agent stack is currently a modal status overlay, not three independent
+  tiled agent windows integrated with the layout tree. Its live rows are
+  limited to state Xencode already owns.
+- The `Ctrl+T` terminal region is still a placeholder; it says terminal
+  emulation is coming soon and does not host a shell or PTY.
+- V-10's worker pane is not wired because normalized worker identity, state and
+  permission-request events are not available yet (AR-1/4/5/9). V-11's
+  automatic rearrangement remains parked.
+- `Ctrl+1`…`Ctrl+9` and `Ctrl+0` depend on terminal keyboard-protocol support;
+  on terminals that do not send those chords, use `Ctrl+U`, divider dragging
+  and `Alt+Left/Right` for the layout controls they can report.
+
+**Next implementation session:** start by deciding and implementing the
+user-visible body-window composition gap: make the agent status stack a real
+tree-backed pane (or explicitly narrow V-2's claim if that is not the desired
+scope). Keep the existing body geometry, hit-testing and resize path as the
+source of truth. Treat a real terminal emulator/PTY as a separate scope
+decision, and do not mark the TUIOS adaptation complete until V-10 and the
+agreed pane integration are done. The full reasoning and dependency gates for
+each V item remain below.
 
 ### V-0 What arrived, and what the research actually found
 
