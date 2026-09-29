@@ -4222,7 +4222,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__test)
-            opts="-h --package --retries --stress-count --timeout --format --help"
+            opts="-h --package --retries --stress-count --timeout --isolate --base --repeat --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4241,6 +4241,18 @@ _xencode() {
                     return 0
                     ;;
                 --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --isolate)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --base)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --repeat)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

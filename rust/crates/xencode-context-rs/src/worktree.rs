@@ -121,6 +121,19 @@ pub fn worktree_add(
     worktree_list(root)
 }
 
+/// `git worktree add --detach <path> <commit>`: the base tree for a
+/// differential run. Detached because the worktree is thrown away afterwards —
+/// a branch would be a name for something nobody will ever check out again.
+pub fn worktree_add_detached(
+    root: &Path,
+    path: &Path,
+    commit: &str,
+) -> Result<Vec<WorktreeInfo>, String> {
+    let path = path.display().to_string();
+    git_stdout(root, &["worktree", "add", "--detach", &path, commit])?;
+    worktree_list(root)
+}
+
 /// `git worktree remove <path>` (fails on a dirty worktree unless forced —
 /// that is git's own safety net, we do not paper over it).
 pub fn worktree_remove(root: &Path, path: &Path, force: bool) -> Result<Vec<WorktreeInfo>, String> {

@@ -502,6 +502,19 @@ enum Commands {
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
 
+        /// Classify one failing test against the clean base tree instead of
+        /// running the suite: PRE_EXISTING_FAILURE, INTRODUCED, or FLAKY
+        #[arg(long)]
+        isolate: Option<String>,
+
+        /// The ref the base tree is taken at for --isolate
+        #[arg(long, default_value = "HEAD")]
+        base: String,
+
+        /// Runs per side for --isolate; a pass on any run means flaky
+        #[arg(long, default_value_t = 3)]
+        repeat: u32,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1098,8 +1111,20 @@ async fn main() {
             retries,
             stress_count,
             timeout,
+            isolate,
+            base,
+            repeat,
             format,
-        } => run_test(packages, retries, stress_count, timeout, format),
+        } => run_test(
+            packages,
+            retries,
+            stress_count,
+            timeout,
+            isolate,
+            base,
+            repeat,
+            format,
+        ),
         Commands::Review { base, format } => run_review(base, format),
         Commands::Replay {
             run_id,
@@ -4557,17 +4582,74 @@ fn join(lines: &[u32]) -> String {
     out.join(", ")
 }
 
+/// Eight args because the  subcommand grew a second mode ()
+/// beside the suite mode, and splitting the function would separate the ledger
+/// write the two modes share. The ban stays on everywhere else.
+#[allow(clippy::too_many_arguments)]
 fn run_test(
     packages: Vec<String>,
     retries: u32,
     stress_count: u32,
     timeout: u64,
+    isolate: Option<String>,
+    base: String,
+    repeat: u32,
     format: OutputFormat,
 ) -> Result<(), String> {
     use xencode_context_rs::verify;
 
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    if let Some(test) = isolate {
+        let isolation = verify::isolate(
+            &root,
+            &test,
+            &base,
+            repeat,
+            std::time::Duration::from_secs(timeout),
+        );
+        if matches!(format, OutputFormat::Json) {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "test": isolation.test,
+                    "base": isolation.base,
+                    "work_fails": isolation.work_fails,
+                    "work_runs": isolation.work_runs,
+                    "base_fails": isolation.base_fails,
+                    "base_runs": isolation.base_runs,
+                    "class": isolation.class.label(),
+                    "notes": isolation.notes,
+                })
+            );
+        } else {
+            println!("\n  {} — {}", isolation.class.label(), isolation.test);
+            println!(
+                "  base ({}): {}",
+                isolation.base,
+                match isolation.base_fails {
+                    Some(f) => format!("{f}/{} failed", isolation.base_runs),
+                    None => "could not run".to_string(),
+                }
+            );
+            println!(
+                "  worktree: {}/{} failed",
+                isolation.work_fails, isolation.work_runs
+            );
+            for note in &isolation.notes {
+                println!("  note: {note}");
+            }
+            if isolation.class == verify::FailureClass::PreExisting {
+                println!("\n  not yours — do not fix it here");
+            }
+        }
+        return if isolation.class == verify::FailureClass::Introduced {
+            Err("the failure was introduced in the working tree".to_string())
+        } else {
+            Ok(())
+        };
+    }
     let opts = verify::Options {
+        filter: None,
         retries,
         stress: stress_count,
         packages,
@@ -5633,11 +5715,38 @@ mod tests {
                 retries,
                 stress_count,
                 packages,
+                isolate,
+                base,
                 ..
             }) => {
                 assert_eq!(retries, 0, "a retry must be asked for, not assumed");
                 assert_eq!(stress_count, 0);
                 assert!(packages.is_empty());
+                assert!(isolate.is_none());
+                assert_eq!(base, "HEAD");
+            }
+            _ => panic!("expected the test subcommand"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "xencode",
+            "test",
+            "--isolate",
+            "old_broken",
+            "--base",
+            "main",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Test {
+                isolate,
+                base,
+                repeat,
+                ..
+            }) => {
+                assert_eq!(isolate.as_deref(), Some("old_broken"));
+                assert_eq!(base, "main");
+                assert_eq!(repeat, 3);
             }
             _ => panic!("expected the test subcommand"),
         }

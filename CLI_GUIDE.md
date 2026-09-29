@@ -1998,6 +1998,15 @@ diff yield "No mutants to filter" — a clean summary meaning no work was done.
 On this repository's own change it reports 2 caught, 8 missed, each one naming
 the function to strengthen first.
 
+### `xencode test --isolate <substring> [--base HEAD] [--repeat 3]`
+
+Classify one failing test instead of running the suite: the same filtered
+test runs against the clean base tree in a throwaway worktree and against
+your tree, and the verdict is one word — `PRE_EXISTING_FAILURE` (fails on
+base too, so do not fix it here), `INTRODUCED`, `FLAKY`, or `INCONCLUSIVE`
+(the base could not run, so nothing is claimed). The worktree is removed
+afterwards; your tree is never touched.
+
 ### `xencode cov [--base <ref>] [--test <cmd>] [--show-missing-lines] [--format text|json]`
 
 Report which lines **this diff** added were never executed.

@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1556 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1560 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -9789,6 +9789,24 @@ the base tree is reachable, an agent can **read the fix out of the base and
 "apply" it**, turning a classification tool into an answer key. The base run must
 happen in a worktree the agent cannot read, and the result must be a verdict
 rather than a transcript.
+
+**Built 2026-09-28, second half only, as specified** — `verify::isolate` in
+  `xencode-context-rs/src/verify.rs`, surfaced as `xencode test --isolate
+  <substring> [--base HEAD] [--repeat 3]`.
+
+  **Single runs cannot do this, so each side repeats.** A test failing 1 run in
+  5 fails a lone work re-run four times out of five and would read as
+  INTRODUCED. Each side therefore runs up to `--repeat` times, stopping at the
+  first pass: a pass observed after a failure is flaky by observation, and the
+  work tree runs first so a flake never pays for a worktree it does not need.
+  The verdict ships with the counts that produced it (`work 2/3, base 1/3 at
+  HEAD`), never a rate, and never a transcript — the base tree may hold
+  answers, and a classification tool that hands them over is an answer key, so
+  the worktree is verdict-only and removed afterwards.
+
+  Proved live on scratch repos: broken-on-base classifies pre-existing, broken-
+  only-in-worktree classifies introduced, fail-once-then-pass classifies flaky
+  with no worktree made. The classification matrix is pure and pinned.
 
 **Placement.** W5, immediately after VF-5 and WF-4.
 
