@@ -16,7 +16,17 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Changed — event-driven TUI frames instead of a 30 fps redraw
+### Added — layout tree alongside presets, pixel-identical by proof
+
+`LayoutNode` (leaf, split, tabbed, stack), `Pane` carrying `FocusArea`, and
+`ViewState` — introduced beside `compute_layout`, which is untouched and still
+shipped. The three presets re-expressed as builders; a sweep proves identical
+rects and hit-testing across sizes, presets, foci, and terminal state, with
+Tabbed/Stack resolving the active child. Five tests. No consumer switched and
+nothing deleted: the proof covers geometry, and deletion waits for every
+consumer.
+
+
 
 Each loop iteration reports what it observed and draws only on change,
 animation, drained messages, or a visible toast. Idle iterations draw nothing;

@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1598 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1603 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10457,6 +10457,17 @@ stop being cages, they're starting points") and it happens to be the
 non-rewrite path to the same place. `compute_layout` is deleted only when the tree
 renders all three presets pixel-identically, proven by **H1-10's existing
 layout × panel × size render sweep** extended to the tree. Until then both paths
+  exist and the flag chooses. **Done 2026-09-29, additive as specified** —
+  `LayoutNode` (`Leaf`, `Split`, `Tabbed`, `Stack`), `Pane`, and `ViewState`
+  in `tui-rs/src/view.rs`, alongside `compute_layout`, which is untouched and
+  still the shipped path. The three presets are re-expressed as builder
+  functions using the same ratatui primitives, and the sweep proves
+  pixel-identity across 6 sizes × 3 presets × 3 foci × terminal on/off, plus
+  hit-test parity per column and Tabbed/Stack active-child resolution with
+  clamping. Panes carry `FocusArea`; no second focus concept. `Tabbed` and
+  `Stack` resolve the active child to the whole area — the tab chrome is V-5's,
+  not geometry's. Five tests. `compute_layout` is not deleted and no consumer
+  switched: the proof covers geometry, and deletion waits for every consumer.
 exist and the flag chooses.
 
 **Done-when.** A seeded four-leaf tree with one nested split renders correct
