@@ -4343,6 +4343,44 @@ fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
         if !report.updates_checked {
             println!("  update check did not run — the update column is unknown, not clean");
         }
+        let lock_text = std::fs::read_to_string(manifest.join("Cargo.lock")).unwrap_or_default();
+        let dups = deps::duplicate_versions(&lock_text);
+        if !dups.is_empty() {
+            println!("\n  duplicate majors (ask, never block):");
+            let rev = deps::reverse_deps(&lock_text);
+            for dup in dups.iter().take(10) {
+                println!("    {}: {}", dup.krate, dup.versions.join(", "));
+                for version in &dup.versions {
+                    if let Some(owners) = rev.get(&(dup.krate.clone(), version.clone())) {
+                        let shown: Vec<&str> = owners.iter().take(3).map(String::as_str).collect();
+                        let more = if owners.len() > 3 {
+                            format!(" +{} more", owners.len() - 3)
+                        } else {
+                            String::new()
+                        };
+                        println!("      {version} via {}{more}", shown.join(", "));
+                    }
+                }
+            }
+            if dups.len() > 10 {
+                println!("    +{} more", dups.len() - 10);
+            }
+        }
+        match deps::head_lock_text(&manifest) {
+            Some((_, old)) => {
+                let delta = deps::lock_delta(&old, &lock_text);
+                if !delta.added.is_empty() || !delta.upgraded.is_empty() {
+                    println!("\n  since HEAD (new vs already present):");
+                    for (name, from, to) in &delta.upgraded {
+                        println!("    {name}: {from} -> {to}");
+                    }
+                    for (name, version) in &delta.added {
+                        println!("    + {name} {version}");
+                    }
+                }
+            }
+            None => println!("\n  no HEAD lock to compare: new-vs-present unknown"),
+        }
     }
     if rows
         .iter()

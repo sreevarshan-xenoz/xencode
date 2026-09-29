@@ -160,6 +160,35 @@ pub struct DepRow {
     pub state: DepState,
 }
 
+/// The `Cargo.lock` committed at HEAD, when this is a git repository with
+/// one. `None` anywhere the past is unavailable — a report without history
+/// still reports the present rather than failing.
+pub fn head_lock_text(manifest: &Path) -> Option<(String, String)> {
+    let toplevel = std::process::Command::new("git")
+        .current_dir(manifest)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())?;
+    let rel = Path::new(&manifest)
+        .strip_prefix(&toplevel)
+        .ok()?
+        .join("Cargo.lock")
+        .to_string_lossy()
+        .into_owned();
+    let output = std::process::Command::new("git")
+        .current_dir(&toplevel)
+        .args(["show", &format!("HEAD:{rel}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some((
+        toplevel,
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    ))
+}
+
 /// The whole report: rows plus whether the update check ran.
 ///
 /// An empty update list means two different things — fully updated, or the
@@ -223,6 +252,179 @@ fn run_update_dry_run(workspace: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// One crate pinned at two or more versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Duplicate {
+    /// Crate name.
+    pub krate: String,
+    /// Distinct locked versions, ascending.
+    pub versions: Vec<String>,
+}
+
+/// Every `(name, version)` in the lock with more than one distinct version.
+pub fn duplicate_versions(lock_text: &str) -> Vec<Duplicate> {
+    let mut by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (name, version) in lock_packages(lock_text) {
+        by_name.entry(name).or_default().insert(version);
+    }
+    by_name
+        .into_iter()
+        .filter(|(_, versions)| versions.len() > 1)
+        .map(|(krate, versions)| Duplicate {
+            krate,
+            versions: versions.into_iter().collect(),
+        })
+        .collect()
+}
+
+/// All `(name, version)` pairs in a lock file, in order. Unlike
+/// [`locked_versions`], which keeps the first pin per name, every pin counts
+/// here — duplicates are the subject, not a parsing edge.
+fn lock_packages(lock_text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut name: Option<&str> = None;
+    for line in lock_text.lines() {
+        let line = line.trim();
+        if line == "[[package]]" {
+            name = None;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("name = ") {
+            name = Some(rest.trim().trim_matches('"'));
+        } else if let Some(rest) = line.strip_prefix("version = ") {
+            if let Some(name) = name.take() {
+                out.push((name.to_string(), rest.trim().trim_matches('"').to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Who depends on each `(name, version)`: `"depname depversion"` entries in
+/// `dependencies` lists, bare names resolving to the lock's only pin of that
+/// name. A dependent the lock cannot resolve is still named, with its version
+/// left blank, rather than dropped.
+pub fn reverse_deps(lock_text: &str) -> BTreeMap<(String, String), Vec<String>> {
+    let mut pins: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, version) in lock_packages(lock_text) {
+        pins.entry(name).or_default().push(version);
+    }
+    let mut out: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    let mut current: Option<(String, String)> = None;
+    let mut in_deps = false;
+    for line in lock_text.lines() {
+        let line = line.trim();
+        if line == "[[package]]" {
+            current = None;
+            in_deps = false;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("name = ") {
+            let name = rest.trim().trim_matches('"').to_string();
+            current = Some((name, String::new()));
+        } else if let Some(rest) = line.strip_prefix("version = ") {
+            if let Some((name, _)) = current.take() {
+                current = Some((name, rest.trim().trim_matches('"').to_string()));
+            }
+        } else if line == "dependencies = [" {
+            in_deps = true;
+        } else if line == "]" {
+            in_deps = false;
+        } else if in_deps {
+            // Comma before quotes: `"syn 2.0.0",` ends in a comma, not a
+            // quote, and stripping in the other order keeps a stray `"` that
+            // then matches nothing downstream.
+            let entry = line.trim().trim_end_matches(',').trim_matches('"');
+            let mut parts = entry.split_whitespace();
+            let (Some(dep), version) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let version = version
+                .map(str::to_string)
+                .or_else(|| {
+                    pins.get(dep).and_then(|pins| {
+                        if pins.len() == 1 {
+                            Some(pins[0].clone())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_default();
+            if let Some(owner) = &current {
+                let owner_label = format!("{} {}", owner.0, owner.1);
+                out.entry((dep.to_string(), version))
+                    .or_default()
+                    .push(owner_label);
+            }
+        }
+    }
+    for dependents in out.values_mut() {
+        dependents.sort();
+        dependents.dedup();
+    }
+    out
+}
+
+/// What changed between two lock files: added and removed pins, and upgrades
+/// of the same crate. "New" versus "already present" is a diff of machine
+/// facts, never a judgement about whether the addition was justified.
+#[derive(Debug, Clone, Default)]
+pub struct LockDelta {
+    /// `(crate, version)` pins only in the new lock.
+    pub added: Vec<(String, String)>,
+    /// `(crate, version)` pins only in the old lock.
+    pub removed: Vec<(String, String)>,
+    /// `(crate, from, to)` version moves.
+    pub upgraded: Vec<(String, String, String)>,
+}
+
+pub fn lock_delta(old_text: &str, new_text: &str) -> LockDelta {
+    let old_pins: BTreeSet<(String, String)> = lock_packages(old_text).into_iter().collect();
+    let new_pins: BTreeSet<(String, String)> = lock_packages(new_text).into_iter().collect();
+    let mut delta = LockDelta::default();
+    for pin in new_pins.difference(&old_pins) {
+        delta.added.push(pin.clone());
+    }
+    for pin in old_pins.difference(&new_pins) {
+        delta.removed.push(pin.clone());
+    }
+    let old_versions: BTreeMap<&str, &str> = old_pins
+        .iter()
+        .map(|(n, v)| (n.as_str(), v.as_str()))
+        .collect();
+    let new_versions: BTreeMap<&str, &str> = new_pins
+        .iter()
+        .map(|(n, v)| (n.as_str(), v.as_str()))
+        .collect();
+    for (name, from) in &old_versions {
+        if let Some(to) = new_versions.get(name) {
+            if from != to {
+                delta
+                    .upgraded
+                    .push((name.to_string(), from.to_string(), to.to_string()));
+            }
+        }
+    }
+    // A crate pinned twice complicates "upgraded": report the simple case only
+    // when each side pins the name once, and move those pins out of added and
+    // removed so one version move is not reported three times.
+    delta.upgraded.retain(|(name, _, _)| {
+        old_pins.iter().filter(|(n, _)| n == name).count() == 1
+            && new_pins.iter().filter(|(n, _)| n == name).count() == 1
+    });
+    for (name, from, to) in &delta.upgraded {
+        delta.added.retain(|pin| pin != &(name.clone(), to.clone()));
+        delta
+            .removed
+            .retain(|pin| pin != &(name.clone(), from.clone()));
+    }
+    delta.added.sort();
+    delta.removed.sort();
+    delta.upgraded.sort();
+    delta
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +458,46 @@ mod tests {
             locked_versions(lock).get("serde").map(String::as_str),
             Some("1.0.229")
         );
+    }
+
+    const DUP_LOCK: &str = "[[package]]\nname = \"app\"\nversion = \"0.1.0\"\ndependencies = [\n \"syn 2.0.0\",\n \"helper\",\n]\n\n[[package]]\nname = \"syn\"\nversion = \"2.0.0\"\n\n[[package]]\nname = \"syn\"\nversion = \"3.0.0\"\n\n[[package]]\nname = \"helper\"\nversion = \"0.2.0\"\ndependencies = [\n \"syn\",\n]\n";
+
+    #[test]
+    fn a_second_major_version_is_named_with_both_versions() {
+        let dups = duplicate_versions(DUP_LOCK);
+        assert_eq!(dups.len(), 1);
+        assert_eq!(dups[0].krate, "syn");
+        assert_eq!(dups[0].versions, vec!["2.0.0", "3.0.0"]);
+    }
+
+    #[test]
+    fn reverse_deps_name_both_paths() {
+        let rev = reverse_deps(DUP_LOCK);
+        // Pinned entries resolve exactly; the bare `syn` in helper resolves
+        // only when the lock pins it once — here it pins twice, so the version
+        // stays blank rather than guessed.
+        let two = rev
+            .get(&("syn".to_string(), "2.0.0".to_string()))
+            .cloned()
+            .unwrap_or_default();
+        assert!(two.iter().any(|d| d.starts_with("app ")), "{rev:?}");
+        assert!(
+            rev.contains_key(&("syn".to_string(), String::new())),
+            "{rev:?}"
+        );
+    }
+
+    #[test]
+    fn a_delta_distinguishes_new_from_moved() {
+        let old = "[[package]]\nname = \"a\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"b\"\nversion = \"1.0.0\"\n";
+        let new = "[[package]]\nname = \"a\"\nversion = \"1.1.0\"\n\n[[package]]\nname = \"c\"\nversion = \"2.0.0\"\n";
+        let delta = lock_delta(old, new);
+        assert_eq!(
+            delta.upgraded,
+            vec![("a".to_string(), "1.0.0".to_string(), "1.1.0".to_string())]
+        );
+        assert_eq!(delta.added, vec![("c".to_string(), "2.0.0".to_string())]);
+        assert_eq!(delta.removed, vec![("b".to_string(), "1.0.0".to_string())]);
     }
 
     #[test]
