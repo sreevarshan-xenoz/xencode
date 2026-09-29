@@ -782,6 +782,14 @@ _arguments "${_arguments_options[@]}" : \
 ':action -- What to run\: lint, fix, fmt, or shear:_default' \
 && ret=0
 ;;
+(doctor)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'--env[Machine environment facts]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (session)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -1625,6 +1633,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(doctor)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (session)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__session_commands" \
@@ -1867,6 +1879,7 @@ _xencode_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'doctor:Probe and display this machine\: cores, memory, GPUs, logs, colab route' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
@@ -2169,6 +2182,11 @@ _xencode__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode cov commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__doctor_commands] )) ||
+_xencode__subcmd__doctor_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode doctor commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__envcheck_commands] )) ||
 _xencode__subcmd__envcheck_commands() {
     local commands; commands=()
@@ -2248,6 +2266,7 @@ _xencode__subcmd__help_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'doctor:Probe and display this machine\: cores, memory, GPUs, logs, colab route' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
@@ -2400,6 +2419,11 @@ _xencode__subcmd__help__subcmd__config__subcmd__show_commands() {
 _xencode__subcmd__help__subcmd__cov_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help cov commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__doctor_commands] )) ||
+_xencode__subcmd__help__subcmd__doctor_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help doctor commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__envcheck_commands] )) ||
 _xencode__subcmd__help__subcmd__envcheck_commands() {

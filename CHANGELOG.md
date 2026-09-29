@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode doctor --env`: probe and display this machine
+
+Cores, available memory, PSI readability, cgroup limit, `nvidia-smi` GPUs,
+journalctl readability, dmesg denial, and colab route presence (state file
+plus live forward pid) — in text or `--json`. Every fact best-effort: absent
+tools and denied syscalls yield absence, never errors. The JSON also carries
+the U-3 configuration-drift result as one row, completing U-3's W11 surface.
+Three unit tests plus a CLI parse test. Running it here reclassified GPG/SSH
+session plumbing (GPG_TTY, GNUPGHOME, SSH_AUTH_SOCK) from app config to
+environment-provided.
+
 ### Recorded — GH-3 co-change and recency scoring already exist
 
 Verified, not built: `cochange.rs` mines full-history `--name-only` into
@@ -15,6 +26,8 @@ opt-in options. Ten tests pass including partner pull-through. No code
 changed.
 
 
+
+### Added — `xencode verify`: the checklist where the machine verifies
 
 Runs three slots — full nextest suite, clippy with zero tolerance, `cargo fmt
 --check` — each a command whose exit code is the verdict, each leaving a
@@ -26,6 +39,8 @@ denied CI build never sees, and the completions drift test catching the new
 subcommand itself.
 
 
+
+### Added — `xencode test --isolate`: is this red test yours?
 
 Runs one failing test against the clean base tree in a throwaway detached
 worktree and classifies: PRE_EXISTING_FAILURE (fails there too — do not fix
@@ -41,6 +56,8 @@ is the agent rewriting correct code around a pre-existing race for five rounds.
 
 
 
+### Added — cargo-dist release pipeline (tag still required)
+
 `dist init` configured five release targets with shell and PowerShell
 installers, checksums, and a source tarball; `dist generate` replaced the
 hand-rolled release workflow; `dist plan` announces a coherent v0.1.0. The
@@ -49,6 +66,8 @@ test. No tag pushed, so no release exists yet; install paths in QUICK_START
 are conditional on the first tag. Two tests.
 
 
+
+### Decision — VF-4 stays an evaluation capability, no shipped gate
 
 After the A and B experiments: candidates miss whatever requires target
 semantics to see, differently per target — which is evidence *against* a
@@ -60,12 +79,16 @@ check demonstrated across both targets.
 
 
 
+### Added — `xencode history digest`: the why-does-this-exist signal
+
 Last-touch subject per changed hunk plus the five most recent subjects touching
 the path, capped at ~250 tokens with the cut marked — because raw blame/log
 runs 10–80× that budget. Identical subjects dedup; no history is a fact, not
 an error. On this repository a README digest runs 403 chars. Four tests.
 
 
+
+### Added — per-session artifact directories with pruning
 
 `.xencode/artifacts/<session>/` holds the evidence ledger rows point at.
 Writes keep the last 8 KiB on a character boundary — the failure is at the
@@ -75,6 +98,8 @@ log per run, fills the ledger `log_ref`, and prunes afterwards, so the disk
 trap is handled by running the prune rather than by asking. Four tests.
 
 
+
+### Added — session run-ledger: every verification run leaves a row
 
 `.xencode/ledger.jsonl` records session, run class, exit code, subject
 digests, and a log reference per run — OTel-shaped rows, in-toto-flavoured
@@ -118,6 +143,8 @@ verify-commit`, and a missing key fails fast with words. Three tests.
 
 
 
+### Added — `rename` agent tool: one symbol across the tree, zero model tokens
+
 `rename(symbol, new_name)` resolves through the tree-sitter symbol index and
 refuses on ambiguity — no definition, or two-or-more with every site named —
 then rewrites the definition and every reference together through ast-grep
@@ -147,6 +174,8 @@ U-3; the W11 `doctor --json` surface stays open.
 Eight tests.
 
 
+
+### Added — `xencode generate`, shell completions and a man page from the clap definition
 
 `xencode generate completions --shell <bash|fish|zsh>` and `xencode generate
 man` emit both from the command definition via `clap_complete` and

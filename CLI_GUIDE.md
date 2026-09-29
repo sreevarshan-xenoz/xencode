@@ -1900,6 +1900,13 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode doctor --env [--json]`
+
+Probe and display this machine: cores, memory, PSI, cgroup limit, GPUs,
+journalctl and dmesg readability, colab route presence — plus the
+configuration-drift row. Best-effort throughout: what cannot be read is
+reported absent, never an error.
+
 ### `xencode session <name|resolve|export>`
 
 Name a run so it survives without its id (`session name <run> <name>`; existing

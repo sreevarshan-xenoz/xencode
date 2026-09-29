@@ -420,6 +420,17 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Probe and display this machine: cores, memory, GPUs, logs, colab route
+    Doctor {
+        /// Machine environment facts
+        #[arg(long)]
+        env: bool,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Name sessions, resolve them, and export redacted transcripts
     Session {
         #[command(subcommand)]
@@ -1106,6 +1117,7 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
+        Commands::Doctor { env, format } => run_doctor(env, format),
         Commands::Session { action } => run_session(action),
         Commands::Verify {
             skip,
@@ -4154,6 +4166,96 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
+fn run_doctor(env: bool, format: OutputFormat) -> Result<(), String> {
+    use xencode_context_rs::doctor;
+
+    if !env {
+        return Err("nothing to probe: `xencode doctor` needs `--env`".to_string());
+    }
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let facts = doctor::probe_env();
+
+    // Colab route presence: a state file with a live forward pid. Absent
+    // state is not an error — most machines have never run `colab up`.
+    let (colab_state, colab_alive) = match xencode_colab_rs::ColabState::load() {
+        Ok(Some(state)) => {
+            let alive = state.forward_pid.is_some_and(xencode_colab_rs::pid_alive);
+            (true, alive)
+        }
+        _ => (false, false),
+    };
+
+    // U-3's W11 row: the configuration drift result rides along as one row,
+    // so `doctor --json` is the single shape DB-6 reads.
+    let refs = xencode_analysis_rs::envdrift::extract_env_refs(&root);
+    let templates = xencode_analysis_rs::envdrift::read_templates(&root);
+    let drift = xencode_analysis_rs::envdrift::compare(&refs, &templates);
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "machine": facts,
+                "colab": {"state": colab_state, "forward_alive": colab_alive},
+                "config_drift": {
+                    "sources_searched": drift.sources_searched,
+                    "undocumented": drift.undocumented.len(),
+                    "unreferenced": drift.unreferenced,
+                    "os_provided": drift.os_provided.len(),
+                    "panicking": drift.panicking.len(),
+                },
+            })
+        );
+    } else {
+        println!("\n  machine:");
+        println!(
+            "    cores: {}  mem_available: {}  psi: {}  cgroup_limit: {}",
+            facts.nproc.map_or("?".to_string(), |n| n.to_string()),
+            facts
+                .mem_available_kib
+                .map_or("?".to_string(), |k| format!("{k} KiB")),
+            if facts.psi_readable {
+                "readable"
+            } else {
+                "absent"
+            },
+            facts.cgroup_memory_limit.as_deref().unwrap_or("none"),
+        );
+        if facts.nvidia_gpus.is_empty() {
+            println!("    gpus: none visible");
+        } else {
+            for gpu in &facts.nvidia_gpus {
+                println!("    gpu: {gpu}");
+            }
+        }
+        println!(
+            "    journalctl: {}  dmesg_denied: {}",
+            if facts.journalctl_readable {
+                "readable"
+            } else {
+                "unreadable"
+            },
+            facts.dmesg_denied
+        );
+        println!(
+            "\n  colab route: {}",
+            match (colab_state, colab_alive) {
+                (true, true) => "live forward".to_string(),
+                (true, false) => "state file, no live forward".to_string(),
+                _ => "none".to_string(),
+            }
+        );
+        println!(
+            "\n  config drift: {} undocumented, {} unreferenced, {} os-provided, {} panicking",
+            drift.undocumented.len(),
+            drift.unreferenced.len(),
+            drift.os_provided.len(),
+            drift.panicking.len(),
+        );
+    }
+    Ok(())
+}
+
 fn run_session(action: SessionAction) -> Result<(), String> {
     use xencode_context_rs::session as sess;
 
@@ -5713,6 +5815,20 @@ mod tests {
         ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn doctor_env_parses() {
+        let cli = Cli::try_parse_from(["xencode", "doctor", "--env"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Doctor { env: true, .. })
+        ));
+        let cli = Cli::try_parse_from(["xencode", "doctor"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Doctor { env: false, .. })
+        ));
     }
 
     #[test]

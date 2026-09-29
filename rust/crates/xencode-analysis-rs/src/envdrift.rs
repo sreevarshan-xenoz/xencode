@@ -64,6 +64,12 @@ pub fn is_os_provided(key: &str) -> bool {
             | "CARGO_HOME"
             | "RUSTUP_HOME"
             | "CI"
+            // Signing and agent plumbing provided by the session, not the app.
+            | "GPG_TTY"
+            | "GNUPGHOME"
+            | "GPG_AGENT_INFO"
+            | "SSH_AUTH_SOCK"
+            | "SSH_AGENT_PID"
             // Windows provides these the same way Unix provides HOME.
             | "USERPROFILE"
             | "HOMEDRIVE"
@@ -392,6 +398,17 @@ mod tests {
             "/// Reads `env::var(\"COMMENT_KEY\")` when set.\nfn f() {}\n",
         );
         assert!(extract_env_refs(tree.path()).is_empty());
+    }
+
+    #[test]
+    fn session_plumbing_is_os_provided() {
+        let tree = Tree::new("plumb").file(
+            "src/a.rs",
+            "fn f() {\n    let _ = std::env::var(\"GPG_TTY\");\n    let _ = std::env::var(\"GNUPGHOME\");\n}\n",
+        );
+        let report = compare(&extract_env_refs(tree.path()), &read_templates(tree.path()));
+        assert!(report.undocumented.is_empty());
+        assert_eq!(report.os_provided.len(), 2);
     }
 
     #[test]
