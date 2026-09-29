@@ -355,25 +355,9 @@ fn render_inner(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
     match node {
         LayoutNode::Leaf(pane) => vec![(*pane, area)],
         LayoutNode::Split { horizontal, parts } => {
-            let shown: Vec<&(LayoutNode, Constraint)> = parts
-                .iter()
-                .filter(|(child, _)| {
-                    *horizontal || area.height >= TERMINAL_MIN_HEIGHT || !is_terminal_leaf(child)
-                })
-                .collect();
-            let direction = if *horizontal {
-                Direction::Horizontal
-            } else {
-                Direction::Vertical
-            };
-            let constraints: Vec<Constraint> = shown.iter().map(|(_, c)| *c).collect();
-            let areas = Layout::default()
-                .direction(direction)
-                .constraints(constraints)
-                .split(area);
             let mut out = Vec::new();
-            for (child, rect) in shown.iter().zip(areas.iter()) {
-                out.extend(render_inner(&child.0, *rect));
+            for (child, rect) in shown_children(*horizontal, parts, area) {
+                out.extend(render_inner(child, rect));
             }
             out
         }
@@ -780,19 +764,6 @@ pub fn nudge_focused(node: &mut LayoutNode, focus: FocusArea, delta: i16) -> boo
         }
     }
 
-    fn child_at<'a>(node: &'a mut LayoutNode, path: &[usize]) -> Option<&'a mut LayoutNode> {
-        let mut current = node;
-        for index in path {
-            match current {
-                LayoutNode::Split { parts, .. } => {
-                    current = &mut parts.get_mut(*index)?.0;
-                }
-                _ => return None,
-            }
-        }
-        Some(current)
-    }
-
     let mut path = Vec::new();
     if !path_to(node, focus, &mut path) {
         return false;
@@ -813,23 +784,259 @@ pub fn nudge_focused(node: &mut LayoutNode, focus: FocusArea, delta: i16) -> boo
         } else {
             index.saturating_sub(1)
         };
-        if donor == index || parts.len() < 2 {
+        if donor == index {
             return false;
         }
-        let (grow_pct, give_pct) = match (&parts[index].1, &parts[donor].1) {
-            (Constraint::Percentage(grow), Constraint::Percentage(give)) => (*grow, *give),
-            _ => return false,
-        };
-        let room = give_pct.saturating_sub(MIN_PANE_PERCENT) as i16;
-        let moved = delta.clamp(-(grow_pct as i16 - MIN_PANE_PERCENT as i16), room);
-        if moved == 0 {
-            return false;
-        }
-        parts[index].1 = Constraint::Percentage((grow_pct as i16 + moved) as u16);
-        parts[donor].1 = Constraint::Percentage((give_pct as i16 - moved) as u16);
-        return true;
+        return move_between(parts, index, donor, delta) != 0;
     }
     false
+}
+
+/// The sibling pair of one split, addressed by the index path that `nudge_focused`
+/// and the boundary walk both build.
+fn child_at<'a>(node: &'a mut LayoutNode, path: &[usize]) -> Option<&'a mut LayoutNode> {
+    let mut current = node;
+    for index in path {
+        match current {
+            LayoutNode::Split { parts, .. } => {
+                current = &mut parts.get_mut(*index)?.0;
+            }
+            _ => return None,
+        }
+    }
+    Some(current)
+}
+
+/// Move `delta` percentage points from `give` to `grow` in one split's parts,
+/// and return how many the clamp actually took.
+///
+/// The single clamp every resize goes through — the `Alt` chord (`V-3`) and a
+/// boundary drag (`V-7`) differ in how they pick the pair, not in what the pair
+/// may become: both sides stay `Percentage` and both stay at or above
+/// [`MIN_PANE_PERCENT`]. A move that cannot be made at all is refused whole and
+/// returns `0`, meaning nothing was written; a partial one returns the amount
+/// taken, which is how a drag knows the rest of its travel went nowhere.
+fn move_between(
+    parts: &mut [(LayoutNode, Constraint)],
+    grow: usize,
+    give: usize,
+    delta: i16,
+) -> i16 {
+    let (Some((_, grow_at)), Some((_, give_at))) = (parts.get(grow), parts.get(give)) else {
+        return 0;
+    };
+    let (Constraint::Percentage(grow_pct), Constraint::Percentage(give_pct)) = (*grow_at, *give_at)
+    else {
+        return 0;
+    };
+    let room = give_pct.saturating_sub(MIN_PANE_PERCENT) as i16;
+    let moved = delta.clamp(-(grow_pct as i16 - MIN_PANE_PERCENT as i16), room);
+    if moved == 0 {
+        return 0;
+    }
+    parts[grow].1 = Constraint::Percentage((grow_pct as i16 + moved) as u16);
+    parts[give].1 = Constraint::Percentage((give_pct as i16 - moved) as u16);
+    moved
+}
+
+/// A draggable divider between two side-by-side panes (`V-7`).
+///
+/// It is addressed by the split it belongs to and the part on its left, not by
+/// a screen column: a drag moves the pointer across cells that are themselves
+/// moving, so the column the button went down on is useless as an identity
+/// while the pair of panes is not. The column is recomputed from the tree, in
+/// the same geometry the frame draws, every time it is needed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Boundary {
+    /// Steps from the root to the split this divider belongs to.
+    pub path: Vec<usize>,
+    /// Index of the part on the left of the divider; its right neighbour is on
+    /// the other side.
+    pub low: usize,
+}
+
+/// How far the pointer must travel from where the button went down before a
+/// drag commits a resize (`V-7`).
+///
+/// A divider is two cells wide — one pane's right border and its neighbour's
+/// left — so a press that merely juddered would otherwise resize the layout.
+/// Refusing the first two cells is what keeps grabbing a divider from being
+/// the same gesture as trying to select the text beside it, and it is the
+/// difference between aiming at a boundary and hitting one.
+pub const DRAG_THRESHOLD_CELLS: i16 = 2;
+
+/// The one split a [`Boundary`] addresses, as the frame drew it: its own rect
+/// and the children it shows, with their rects.
+///
+/// Cells convert to percentage points against the split's own width, and a
+/// highlight has to land on the line that split drew, so both come through
+/// here rather than walking the path their own way.
+fn split_geometry<'a>(
+    node: &'a LayoutNode,
+    area: Rect,
+    path: &[usize],
+) -> Option<(Rect, Vec<(&'a LayoutNode, Rect)>)> {
+    let mut current = node;
+    let mut current_area = area;
+    for index in path {
+        let LayoutNode::Split { horizontal, parts } = current else {
+            return None;
+        };
+        let kids = shown_children(*horizontal, parts, current_area);
+        let (next, rect) = kids.get(*index)?;
+        current = *next;
+        current_area = *rect;
+    }
+    let LayoutNode::Split { horizontal, parts } = current else {
+        return None;
+    };
+    Some((
+        current_area,
+        shown_children(*horizontal, parts, current_area),
+    ))
+}
+
+/// The children a split actually draws, with their rects.
+///
+/// `render` and the boundary hit-test both come through here, so the divider
+/// the mouse grabs is the line the frame drew — the one-geometry rule `E4-02`
+/// and `H1-03` set for drawing, hit-testing and resize clamping.
+fn shown_children<'a>(
+    horizontal: bool,
+    parts: &'a [(LayoutNode, Constraint)],
+    area: Rect,
+) -> Vec<(&'a LayoutNode, Rect)> {
+    let shown: Vec<&'a (LayoutNode, Constraint)> = parts
+        .iter()
+        .filter(|(child, _)| {
+            horizontal || area.height >= TERMINAL_MIN_HEIGHT || !is_terminal_leaf(child)
+        })
+        .collect();
+    let areas = Layout::default()
+        .direction(if horizontal {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        })
+        .constraints(shown.iter().map(|(_, c)| *c).collect::<Vec<_>>())
+        .split(area);
+    shown
+        .iter()
+        .map(|pair| &pair.0)
+        .zip(areas.iter().copied())
+        .collect()
+}
+
+/// The divider at (`row`, `column`), if that cell is one.
+///
+/// Only a side-by-side pair has a draggable divider in this slice: a stacked
+/// pair's line moves a pane's *height*, and heights hold the input strip and
+/// the terminal row, which no resize is allowed to squeeze (`V-3` refuses them
+/// for the same reason, and the cells that report it are the same ones). The
+/// innermost match wins — a nested split whose divider shares a column with an
+/// outer one is the pair the pointer is really between.
+pub fn boundary_at(node: &LayoutNode, area: Rect, row: u16, column: u16) -> Option<Boundary> {
+    fn walk(
+        node: &LayoutNode,
+        area: Rect,
+        row: u16,
+        column: u16,
+        path: &mut Vec<usize>,
+    ) -> Option<Boundary> {
+        let LayoutNode::Split { horizontal, parts } = node else {
+            return None;
+        };
+        let kids = shown_children(*horizontal, parts, area);
+        for (index, (child, rect)) in kids.iter().enumerate() {
+            if matches!(child, LayoutNode::Split { .. }) {
+                path.push(index);
+                let found = walk(child, *rect, row, column, path);
+                path.pop();
+                if found.is_some() {
+                    return found;
+                }
+            }
+        }
+        if !*horizontal || kids.len() < 2 {
+            return None;
+        }
+        for index in 0..kids.len() - 1 {
+            let divider = kids[index + 1].1.left();
+            let on_line = column == divider || column == divider.saturating_sub(1);
+            if on_line && row >= area.top() && row < area.bottom() {
+                return Some(Boundary {
+                    path: path.clone(),
+                    low: index,
+                });
+            }
+        }
+        None
+    }
+
+    walk(node, area, row, column, &mut Vec::new())
+}
+
+/// Drag a divider `delta_cells` terminal columns and return whether anything
+/// moved (`V-7`).
+///
+/// Cells become percentage points against the split's own width, because
+/// `Percentage` is what the tree stores and the tree is what survives a
+/// restart (`V-6`) and a window resize. A move of one cell on a wide screen is
+/// therefore a fraction of a point, which rounds to no move at all — that is
+/// the honest resolution of a percentage layout, not a bug to hide: the drag
+/// commits whole points and the pane follows the pointer in steps. Both sides
+/// clamp at [`MIN_PANE_PERCENT`] through the same [`move_between`] the keyboard
+/// chord uses, so a drag cannot make a sliver the chord would have refused.
+/// The percentage points `cells` of pointer travel are worth against the width
+/// the divider was drawn across (`V-7`).
+///
+/// Truncated, and truncated against the *total* travel from where the button
+/// went down rather than against each motion event: a column that is worth a
+/// third of a point carries into the next one instead of being thrown away, so
+/// the line lags the hand by less than a step. Counted the other way, a drag on
+/// a wide screen would move nothing at all — every event a fraction, every
+/// fraction discarded.
+pub fn drag_points(node: &LayoutNode, boundary: &Boundary, cells: i16, area: Rect) -> i16 {
+    let Some((split, _)) = split_geometry(node, area, &boundary.path) else {
+        return 0;
+    };
+    if split.width == 0 {
+        return 0;
+    }
+    (cells * 100) / split.width as i16
+}
+
+/// Move a grabbed divider by up to `points` percentage points, and return how
+/// many it took (`V-7`).
+///
+/// The points come from [`drag_points`], so this is the keyboard chord's own
+/// clamp with a different way of picking the pair: both sides stay `Percentage`
+/// and both stay at or above [`MIN_PANE_PERCENT`]. A shortfall is the clamp and
+/// not a failure — the caller credits the tree with what it actually got, so a
+/// divider pinned at its floor comes back under the pointer as soon as the
+/// pointer returns inside the range, instead of owing a trip it never made.
+pub fn move_boundary(node: &mut LayoutNode, boundary: &Boundary, points: i16) -> i16 {
+    let Some(LayoutNode::Split { parts, .. }) = child_at(node, &boundary.path) else {
+        return 0;
+    };
+    move_between(parts, boundary.low, boundary.low + 1, points)
+}
+
+/// The cells one boundary's divider occupies: its two columns, over the rows
+/// its split was drawn across (`V-7`).
+///
+/// This is the range [`boundary_at`] answers a press on, so the highlight that
+/// says "this line can be grabbed" is drawn on the line that would be grabbed
+/// — the same single geometry the frame, the hit-test and the clamp share.
+pub fn divider_rect(node: &LayoutNode, boundary: &Boundary, area: Rect) -> Option<Rect> {
+    let (area_of_split, kids) = split_geometry(node, area, &boundary.path)?;
+    let right = kids.get(boundary.low + 1)?.1;
+    Some(Rect::new(
+        right.left().saturating_sub(1),
+        area_of_split.top(),
+        2,
+        area_of_split.height,
+    ))
 }
 
 #[cfg(test)]
@@ -1226,5 +1433,213 @@ mod tests {
         // The same column at 22 rows keeps the terminal.
         let tall = to_body_layout(&render(&tree, rect(80, 22)));
         assert_eq!(tall.terminal.map(|r| r.height), Some(8));
+    }
+
+    /// A side-by-side pair at fixed shares, for the questions a drag asks.
+    fn pair(left: u16, right: u16) -> LayoutNode {
+        LayoutNode::Split {
+            horizontal: true,
+            parts: vec![
+                (
+                    leaf(BodySlot::Editor, FocusArea::CodeEditor),
+                    Constraint::Percentage(left),
+                ),
+                (
+                    leaf(BodySlot::Chat, FocusArea::ChatInput),
+                    Constraint::Percentage(right),
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn a_press_finds_the_divider_and_only_the_divider() {
+        let area = rect(100, 20);
+        let tree = pair(50, 50);
+        // The right pane begins at column 50, so the line is cells 49 and 50:
+        // one pane's border and the other's.
+        for column in [49u16, 50] {
+            let found = boundary_at(&tree, area, 5, column).expect("a divider cell");
+            assert!(
+                found.path.is_empty(),
+                "the root split owns this line: {:?}",
+                found.path
+            );
+            assert_eq!(found.low, 0);
+        }
+        for column in [48u16, 51] {
+            assert_eq!(
+                boundary_at(&tree, area, 5, column),
+                None,
+                "cell {column} is content, not a line"
+            );
+        }
+        assert_eq!(
+            boundary_at(&tree, area, area.bottom(), 49),
+            None,
+            "below the split there is no line to grab"
+        );
+    }
+
+    #[test]
+    fn a_nested_line_belongs_to_the_inner_pair() {
+        // Outer: editor | inner pair. The inner split takes the right half, so
+        // its own line sits inside it — and the pair the pointer is between is
+        // the inner one, which is the pair a resize must move.
+        let area = rect(100, 20);
+        let tree = LayoutNode::Split {
+            horizontal: true,
+            parts: vec![
+                (
+                    leaf(BodySlot::Editor, FocusArea::CodeEditor),
+                    Constraint::Percentage(50),
+                ),
+                (pair(50, 50), Constraint::Percentage(50)),
+            ],
+        };
+        let inner = boundary_at(&tree, area, 5, 75).expect("the inner line");
+        assert_eq!(inner.path, vec![1usize]);
+        assert_eq!(inner.low, 0);
+        let outer = boundary_at(&tree, area, 5, 50).expect("the outer line");
+        assert!(
+            outer.path.is_empty(),
+            "the root split owns it: {:?}",
+            outer.path
+        );
+    }
+
+    #[test]
+    fn a_stacked_line_is_not_a_handle() {
+        // The line between two stacked panes moves a pane's *height*, and
+        // heights hold the input strip and the terminal row — the moves `V-3`
+        // refuses from the keyboard are refused here too, by never offering the
+        // line at all.
+        //
+        // The probe column is 0 on purpose. Both stacked panes begin at column
+        // 0, so a hit-test that only compared columns would call this a
+        // divider, and the drag that followed would resize a height.
+        let area = rect(80, 22);
+        let tree = LayoutNode::Split {
+            horizontal: false,
+            parts: vec![
+                (
+                    leaf(BodySlot::Editor, FocusArea::CodeEditor),
+                    Constraint::Percentage(50),
+                ),
+                (
+                    leaf(BodySlot::Chat, FocusArea::ChatInput),
+                    Constraint::Percentage(50),
+                ),
+            ],
+        };
+        let seam = area.y + area.height / 2;
+        for row in [seam - 1, seam, seam + 1] {
+            for column in [0u16, 10, 40] {
+                assert_eq!(
+                    boundary_at(&tree, area, row, column),
+                    None,
+                    "row {row}, column {column} is a stacked border, not a handle"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_marked_line_is_the_line_a_press_grabs() {
+        // The highlight and the hit-test must agree cell for cell (`E4-02`),
+        // across every preset and every size the suite knows: a painted column
+        // is exactly a grabbable one, and a grabbable one is exactly painted.
+        for area in areas() {
+            for preset in LAYOUT_NAMES {
+                for focus in focuses() {
+                    for show_terminal in [false, true] {
+                        let tree = preset_tree(area, preset, show_terminal, focus);
+                        for row in area.y..area.bottom() {
+                            for column in 0..area.width {
+                                let Some(boundary) = boundary_at(&tree, area, row, column) else {
+                                    continue;
+                                };
+                                let marked = divider_rect(&tree, &boundary, area)
+                                    .expect("a grabbable line has cells to mark");
+                                assert!(
+                                    (marked.left()..marked.right()).contains(&column)
+                                        && (marked.top()..marked.bottom()).contains(&row),
+                                    "{preset} press at ({row},{column}) is not inside {marked:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dragging_moves_the_pair_the_line_belongs_to() {
+        let area = rect(100, 20);
+        let tree = pair(50, 50);
+        let boundary = boundary_at(&tree, area, 5, 49).unwrap();
+        // Ten columns on a hundred-column split is ten points, one for one.
+        assert_eq!(drag_points(&tree, &boundary, 10, area), 10);
+        let mut tree = tree;
+        let points = drag_points(&tree, &boundary, 10, area);
+        assert_eq!(move_boundary(&mut tree, &boundary, points), 10);
+        let LayoutNode::Split { parts, .. } = &tree else {
+            panic!("the root is a split");
+        };
+        assert_eq!(parts[0].1, Constraint::Percentage(60));
+        assert_eq!(parts[1].1, Constraint::Percentage(40));
+    }
+
+    #[test]
+    fn a_drag_cannot_make_the_sliver_the_chord_refuses() {
+        let area = rect(100, 20);
+        let tree = pair(50, 50);
+        let boundary = boundary_at(&tree, area, 5, 49).unwrap();
+        let mut tree = tree;
+        assert_eq!(move_boundary(&mut tree, &boundary, 40), 40);
+        let LayoutNode::Split { parts, .. } = &tree else {
+            panic!("the root is a split");
+        };
+        assert_eq!(parts[0].1, Constraint::Percentage(90));
+        assert_eq!(parts[1].1, Constraint::Percentage(MIN_PANE_PERCENT));
+        // The other side is at the floor now, so the same drag is refused
+        // whole rather than taken half and left as a partial one.
+        assert_eq!(move_boundary(&mut tree, &boundary, 40), 0);
+        let LayoutNode::Split { parts, .. } = &tree else {
+            panic!("the root is a split");
+        };
+        assert_eq!(parts[0].1, Constraint::Percentage(90));
+    }
+
+    #[test]
+    fn travel_counts_from_the_press_so_a_thin_column_is_carried_not_lost() {
+        // The tree stores shares, so one column out of three hundred is worth
+        // a third of a point. What a drag may not do is throw the fraction
+        // away: measured a motion event at a time, every event on a wide
+        // screen is a third of a point and the line never moves at all.
+        let area = rect(300, 20);
+        let tree = pair(50, 50);
+        let boundary = boundary_at(&tree, area, 5, 149).unwrap();
+        assert_eq!(drag_points(&tree, &boundary, 1, area), 0);
+        assert_eq!(drag_points(&tree, &boundary, 2, area), 0);
+        assert_eq!(drag_points(&tree, &boundary, 3, area), 1);
+        assert_eq!(drag_points(&tree, &boundary, -3, area), -1);
+    }
+
+    #[test]
+    fn a_pinned_divider_reports_only_the_points_it_took() {
+        // The caller credits the tree with the return value, which is what lets
+        // a divider pinned at its floor come straight back under the pointer
+        // instead of owing the travel the clamp refused.
+        let area = rect(100, 20);
+        let tree = pair(50, 50);
+        let boundary = boundary_at(&tree, area, 5, 49).unwrap();
+        let mut tree = tree;
+        assert_eq!(move_boundary(&mut tree, &boundary, 45), 40);
+        let LayoutNode::Split { parts, .. } = &tree else {
+            panic!("the root is a split");
+        };
+        assert_eq!(parts[1].1, Constraint::Percentage(MIN_PANE_PERCENT));
     }
 }

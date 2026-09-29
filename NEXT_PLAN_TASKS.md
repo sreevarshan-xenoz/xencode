@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1653 tests passing, zero warnings (re-verified 2026-09-29)
+- [x] Workspace gates green — 16 crates, 1669 tests passing, zero warnings (re-verified 2026-09-29)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10768,6 +10768,57 @@ by dragging. Ship the threshold.
 **Done-when.** Dragging a boundary resizes the correct node by at least two cells
 before committing, the terminal's own drag-select still works outside a boundary,
 and the escape hatch is documented in the same place UX-9 documents it.
+  **Done 2026-09-29, on side-by-side dividers only.** Pressing a vertical
+  divider takes it — the press is not a click-to-focus, and the two panes
+  beside the line keep their focus — and the line lights while it is held
+  (`view::divider_rect` paints the same two cells the press hit-tests, proved
+  equal for every preset at every size and focus). Nothing is committed until
+  the pointer has left the divider's own two cells, so a press that juddered
+  resizes nothing and writes nothing; after that, travel counts from the column
+  the button went down on rather than from the last event, which is what keeps a
+  drag on a wide screen from losing every step under one percentage point, and
+  what lets a line pinned by the `V-3` clamp come back under the pointer instead
+  of short of it. The resize goes through the same `move_between` the chord uses
+  and the same `MIN_PANE_PERCENT` floor, and a preset promotes to a custom tree
+  on the first committed step, exactly as `V-3`'s chord does. **Stacked
+  (horizontal) seams are deliberately not handles**: the row under a stacked
+  border is the chat input strip or the terminal, and squeezing those is not a
+  drag's business — a test presses every row and column of a stacked seam and
+  requires that none of them is a handle. `layout.json` is written on the button
+  release, the one moment a drag is certainly over.
+
+  The escape hatch is real rather than a claim about other people's emulators: a
+  `mouse_capture` config key (Settings row `Mouse Capture`, default on) is
+  applied from the frame loop, so toggling it takes effect on the next frame and
+  the CLI no longer asks for the mouse at startup on the setting's behalf.
+  Turning it off hands text selection back to the terminal for the rest of the
+  session; the row says what it costs as it is toggled, and the same sentence is
+  in `docs/USER_MANUAL.md` where `UX-9` documents it.
+
+  Live on a raw PTY at 110×30, twenty-one checks: a plain start emits
+  `?1000h`; hovering the Code/Chat line repaints all 28 body rows of it and a
+  press touches no other cell, while a press inside a pane changes 280 cells off
+  the line; a one-cell drag moves nothing and writes no `layout.json`; a
+  six-column drag takes the line from column 77 to 82 and leaves the Files/Code
+  seam at 22; the released file records shares `[20, 55, 25]` against classic's
+  `[20, 50, 30]` — the five columns the pointer moved, taken from chat and given
+  to code — where an untouched quit writes `"view": null`; the restart restores
+  borders at `[0, 21, 22, 82, 83, 108]`; `Mouse Capture` off emits `?1000l`, on
+  emits `?1000h` again, and the kept `mouse_capture: false` means a restarted
+  session never asks. **Not verified, because a PTY cannot verify it:** whether a
+  given emulator restores shift-drag selection once capture is off is that
+  emulator's behaviour and needs a hand on a real mouse.
+
+  What the run caught: the highlight wrote the buffer as `(row, column)` where
+  ratatui indexes `(x, y)`, so the first press on a divider panicked the app —
+  every unit test passed and the program was dead on contact. Fixed, and
+  `small_terminal_render.rs` now sweeps every grabbable divider at every size,
+  held and hovered: 600 panics with the index transposed, 28 with the clip to the
+  body area removed, none as shipped. Fifteen tests in `view.rs`, `app.rs` and
+  `config.rs` (one older drag test went with the helper it called), plus the size
+  sweep; **1669 passed, 0 failed, 17 ignored, zero clippy warnings**.
+  Left for `V-9`/`V-10`: the layout history list and the worker pane; `V-11`
+  stays parked.
 
 ### V-8 Event-driven render
 

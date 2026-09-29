@@ -1457,6 +1457,9 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                         .parse()
                         .map_err(|_| format!("invalid boolean: {value}"))?;
                 }
+                // The mouse is a trade and the Settings row is the way out of it,
+                // so the trade has to be settlable from the shell as well.
+                "mouse_capture" => config.mouse_capture = parse_bool(&value)?,
                 "agent_approval" => config.agent_approval = value.clone(),
                 "agent_max_rounds" => {
                     let rounds: usize = value
@@ -5963,12 +5966,12 @@ async fn run_tui() -> Result<(), String> {
     }
     crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
     let mut stdout = io::stdout();
-    crossterm::execute!(
-        stdout,
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
-    )
-    .map_err(|e| e.to_string())?;
+    // Mouse capture is deliberately absent here: the app turns it on from the
+    // `mouse_capture` setting on its first frame, so a user who handed the
+    // mouse back to the terminal never gets it taken (`V-7`). The cleanup below
+    // still disables it, which is correct whether or not it was ever enabled.
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)
+        .map_err(|e| e.to_string())?;
 
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend).map_err(|e| e.to_string())?;

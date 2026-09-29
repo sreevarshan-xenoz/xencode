@@ -103,6 +103,18 @@ pub struct XencodeConfig {
     #[serde(default = "default_true")]
     pub show_line_numbers: bool,
 
+    /// Read the mouse at all: the wheel scrolls the pane under it, a click
+    /// focuses one, and a drag of a pane's edge resizes it.
+    ///
+    /// This is the escape hatch for what those three cost. A terminal that
+    /// reports mouse events to the program stops doing its own click-and-drag
+    /// text selection, so with this on, selecting transcript text with the
+    /// mouse means holding whatever key your terminal reserves for that
+    /// (usually `Shift`) — and turning this off hands the mouse back whole,
+    /// taking the wheel and the click away with it.
+    #[serde(default = "default_true")]
+    pub mouse_capture: bool,
+
     /// Agent tool-approval mode: "ask", "edit-allow" or "all-allow".
     /// Unknown values fall back to "ask" at decision time.
     #[serde(default = "default_agent_approval")]
@@ -520,6 +532,7 @@ impl Default for XencodeConfig {
             rounded_borders: false,
             show_scrollbars: true,
             show_line_numbers: true,
+            mouse_capture: true,
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
             agent_command_timeout: default_agent_command_timeout(),
@@ -1080,6 +1093,25 @@ mod tests {
         let config = XencodeConfig::load_from(&path).unwrap();
         assert!(config.model_profiles.is_empty());
         assert!(!config.model_routing);
+        // A file written before the mouse had a setting keeps the mouse: the
+        // default is the behavior every existing install already has.
+        assert!(config.mouse_capture);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refusal_to_read_the_mouse_is_remembered() {
+        // The setting exists so the terminal can be given its own text
+        // selection back; that is only worth something if saying no once keeps
+        // saying no across a save.
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, r#"{"mouse_capture":false}"#).unwrap();
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert!(!config.mouse_capture);
+        config.save_to(&path).unwrap();
+        assert!(!XencodeConfig::load_from(&path).unwrap().mouse_capture);
         fs::remove_dir_all(&dir).unwrap();
     }
 

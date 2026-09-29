@@ -33,6 +33,10 @@ pub(crate) const GLOBAL: &[Binding] = &[
         "Alt+Left/Right",
         "resize focused pane (Ctrl+U clears the resize)",
     ),
+    (
+        "Drag a divider",
+        "resize the panes it splits (off with Settings → Mouse Capture)",
+    ),
     ("Ctrl+T", "toggle terminal strip"),
     (
         "Ctrl+U",

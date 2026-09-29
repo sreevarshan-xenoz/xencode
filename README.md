@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 1653 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 1669 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -442,6 +442,20 @@ flowchart TD
   shortcut, never a gate: `Ctrl+T`, `Ctrl+U` and `Alt+Left`/`Alt+Right` keep
   working on top of one, and every panel a view shows is reachable without
   naming the view at all.
+- **A divider you can see is a divider you can drag.** Pressing the line between
+  two side-by-side panes takes it — the line lights under the pointer, and the
+  press does not steal focus from either pane — and dragging it resizes that
+  pair by the same ratios and the same minimum-pane clamp the `Alt+Left` and
+  `Alt+Right` chords use. Nothing moves until the pointer has left the line's
+  own two cells, so a click that juddered resizes nothing, and a line already at
+  its minimum stops while the pointer keeps going rather than running away from
+  it. Stacked panes are not handles: the row under a horizontal border is the
+  chat input or the terminal, and a drag has no business squeezing those.
+  Reading the mouse is a trade — while xencode asks for it, the terminal stops
+  selecting text on a plain drag — so **Settings → `Mouse Capture`**
+  (`mouse_capture`, on by default) hands it back on the next frame and keeps the
+  refusal for next time; `xencode config set mouse_capture off` says the same
+  thing from the shell.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
@@ -575,7 +589,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1653 passing)
+cargo test                          # Full workspace suite (1669 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth
