@@ -5590,9 +5590,9 @@ and the two sums must agree.
 | W11 | Self-diagnosis, cost and operations | 20 |
 | W12 | Long-running autonomy | 15 |
 | W13 | Agent pipelines, not graphs | 3 |
-| W14 | Product surface and ecosystem | 66 |
+| W14 | Product surface and ecosystem | 65 |
 | W15 | Measure the other agents before planning on them (new, from S) | 3 |
-| W16 | One worker at a time, then brokered (new, from S) | 12 |
+| W16 | One worker at a time, then brokered (new, from S) | 13 |
 | W17 | Many workers at once (new, from S) | 12 |
 | — | declined / contested | 10 |
 
@@ -8557,7 +8557,7 @@ Needs W12. The general AgentGraph stays declined, and `--parallel 1` on 8 cores 
 | **MA-2** | `xencode workflow` as a fixed serial pipeline | capability | serial pipeline (research -> plan -> implement -> verify) — not the AgentGraph |
 | **MA-3** | Read-only explorer as a tool call | capability | read-only explorer as a tool call |
 
-#### W14 — Product surface and ecosystem — 66 items
+#### W14 — Product surface and ecosystem — 65 items
 
 No hard dependencies, which is exactly why it is last: real value that should never be allowed to interrupt the loop above.
 
@@ -8628,7 +8628,7 @@ No hard dependencies, which is exactly why it is last: real value that should ne
 | **V-5** | Layout templates as data, refining the shipped presets | capability | from V — H1-01's `layout` key and H1-05's `Ctrl+U` cycle become the template loader |
 | **V-6** | Persist the window arrangement across restarts | capability | from V — `write_atomic`, DB-2's version ladder, SE-1's 0600; JSONL, not a new store |
 | **V-7** | Pane-boundary mouse: drag to resize, click to target | capability | from V — the half UX-9 does not own; UX-9 keeps text selection |
-| **V-10** | Worker-event to window bridge over WF-1's stream | capability | from V — reads state, never moves a pane by itself (V-11 is the parked half) |
+| **V-10** | Worker-event to window bridge over normalized worker events | capability | from V — waits for AR-1/AR-4/AR-5/AR-9; reads state, never moves a pane by itself (V-11 is the parked half) |
 
 #### W15 progress
 
@@ -8750,7 +8750,7 @@ prove nothing about a remote connection).
   server names"). Three unit tests plus the firewall test plus a CLI parse
   test.
 
-#### W16 — One worker at a time, then brokered — 12 items
+#### W16 — One worker at a time, then brokered — 13 items
 
 From Milestone S. Needs W1 (`WF-1` events, `EVd-1` ledger, `CX-2` schema), W5 (a verdict
 worth collecting) and W7 (`CAP-1`'s vocabulary, `SE-4`'s trifecta gate). `M-5` moved here
@@ -8772,6 +8772,7 @@ approval request instead of pre-granting one.
 | **OR-15** | The task contract: done means what xencode said it means | core | `QI-3`'s machine-checkable slots in a real launch path; enforced by the lease and `SE-4`, not by asking |
 | **OR-16** | The result envelope, claims separated from evidence | core | `EVd-3`'s verdict extended, not a second ledger; the only thing a reviewer agent reads |
 | **M-5** | `xencode mcp serve` | ecology | moved up from W14: the broker's only seam (§S-3) |
+| **V-10** | Worker-event to window bridge | capability | after V-1 and AR-1/AR-4/AR-5/AR-6/AR-9; consumes observed state without controlling layout |
 
 #### W17 — Many workers at once — 12 items
 
@@ -10971,9 +10972,17 @@ is, because a UI that overstates its own authority gives false assurance.
 
 **Proposed.** U15, the bridge from the agent orchestrator into the workspace.
 
-**Checked.** The event stream already ships — **WF-1** is done (W1, 2026-09-24),
-`xencode query --format ndjson` — and **EVd-1**'s run ledger plus **AR-6**'s
-session/task state are the sources. So this is a consumer, not a new pipeline.
+**Dependency audit, 2026-09-29.** The earlier check misidentified its inputs.
+WF-1's `xencode query --format ndjson` emits model `start`/`token`/`done`/`error`
+events, not worker events. EVd-1 records completed build/test runs, and AR-6
+owns generic in-process task records; neither provides a worker identity, a
+normalized event stream, or a permission request. The agent work that produces
+those facts is still open: **AR-1** measures real vendor behavior, **AR-4**
+normalizes worker events, **AR-5** assigns worker identity/state, and **AR-9**
+defines the protocol from AR-1's observations. A bridge built before those
+sources exist would display guessed state. V-10 therefore moves from W14 to
+W16 and depends on AR-1, AR-4, AR-5, AR-6 and AR-9, as well as V-1, WF-1 and
+EVd-1.
 
 **Two hard limits, both already written.** S-6 #29: "xencode's TUI is one ratatui
 surface and cannot host a rival TUI in-process" — so the bridge **reads state and
@@ -10984,8 +10993,8 @@ panel may only show data that came from the machine, the provider or the repo, a
 when it cannot get that data it says so in its own words — which is OR-12's
 "renders as unknown rather than as idle" restated for this surface.
 
-**Disposition: promote as V-10, after V-1, reading WF-1 and EVd-1.** It is the
-item that makes the proposal's best screenshot real — and it is bounded to
+**Disposition: promote as V-10, after V-1 and the measured worker event source.**
+It is the item that makes the proposal's best screenshot real — and it is bounded to
 *opening a window and reporting state*, with V-11's rearrange-or-refocus behaviour
 explicitly excluded.
 
@@ -11017,7 +11026,8 @@ Ten items are scheduled and one is parked. Nothing renumbers an existing item.
 |---|---|---|---|
 | W1 | Make the agent observable | 16 | 15 |
 | W11 | Self-diagnosis, cost and operations | 20 | 19 |
-| W14 | Product surface and ecosystem | 66 | 58 |
+| W14 | Product surface and ecosystem | 65 | 58 |
+| W16 | One worker at a time, then brokered | 13 | 12 |
 
 | ID | item | wave | bucket | depends on |
 |---|---|---|---|---|
@@ -11030,7 +11040,7 @@ Ten items are scheduled and one is parked. Nothing renumbers an existing item.
 | **V-7** | Pane-boundary mouse, split from UX-9 | W14 | capability | V-1, UX-9 |
 | **V-8** | Event-driven render, no 30 fps unconditional redraw | W11 | capability | nothing — pull forward |
 | **V-9** | Layout transition inspector, not replay | W1 | capability | V-1, EV-2, QA-3 |
-| **V-10** | Worker-event to window bridge | W14 | capability | V-1, WF-1 (done), EVd-1, AR-6 |
+| **V-10** | Worker-event to window bridge | W16 | capability | V-1, WF-1 (done), EVd-1, AR-1, AR-4, AR-5, AR-6, AR-9 |
 | **V-11** | Layout that rearranges itself | — | park | declined in §V-3 |
 
 **Order.** **V-8 first**, because it has no dependencies and is not an argument
@@ -11039,8 +11049,8 @@ Then **V-5**, because making the presets templates is what lets V-1 stay additiv
 and is the gate for deleting `compute_layout`. Then **V-6** and **V-4** together,
 since a view is only worth having if it survives a restart. **V-2** and **V-3**
 after that, and **V-7** last among the layout items because it is the one that can
-quietly break text selection. **V-9** and **V-10** are consumers and wait for
-V-1's tree to exist.
+quietly break text selection. **V-9** waits for V-1's tree. **V-10** waits for
+that tree and W16's measured worker identity and normalized event source.
 
 ### V-13 Additions to the do-not-build register
 
