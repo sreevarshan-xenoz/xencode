@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1522 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1530 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -5161,6 +5161,24 @@ coordination is not.
   No shipped coding agent classifies a request as "deterministic op" and routes
   around the model; in IDEs the human *is* the classifier, which is the signal
   that the routing problem is unsolved.
+  **Done 2026-09-28** — `rename` as an explicit agent tool (`symbol`, `new_name`),
+  over the tree-sitter index plus ast-grep plus `cargo check`, with zero model
+  tokens for the edit itself. Resolution first, rewriting second: the definition
+  is found through tree-sitter symbol extraction, and only a uniquely-defined
+  symbol proceeds — zero definitions and two-or-more both refuse, the latter
+  naming every definition site. References (definition included) move together
+  through ast-grep identifier matches, so `foo` never becomes `foobar`; the
+  executor then runs `cargo check` and reports the verdict instead of assuming
+  it, including when no manifest exists. A keyword or non-identifier target is
+  refused before anything runs.
+
+  Proved on a seeded tree: one definition plus two call sites across two files
+  renamed together (3 sites, 2 files), preview showing the same diff the
+  executor writes, `cargo check` status reported. Eight tests, three needing no
+  binary at all because resolution precedes the subprocess. One visibility
+  change rides along: `tsymbols::extract` is now exported as
+  `extract_tree_symbols`, since a private symbol tier the agent cannot query is
+  not a tier at all.
 - **QI-3 — Machine-checkable slots only.** *Effort: M.* EVd-3's
   `{ran, skipped, failed, evidence-ref}` verdicts fed by commands (test exit
   code, `cargo clippy -D`, `grep CHANGELOG`). *Trap:* a model-graded "telemetry

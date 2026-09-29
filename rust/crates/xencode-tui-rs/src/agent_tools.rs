@@ -126,7 +126,9 @@ pub fn tool_class(tool: &str) -> ToolClass {
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
         | "search_files" | "read_docs" | "lookup_advisory" | "update_plan" => ToolClass::ReadOnly,
-        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" => ToolClass::Edit,
+        "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
+            ToolClass::Edit
+        }
         _ => ToolClass::Shell,
     }
 }
@@ -1029,6 +1031,20 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
                 out
             }
         },
+        "rename" => match plan_rename(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
+            Err(reason) => reason,
+            Ok(plan) => {
+                let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
+                format!(
+                    "rename would turn `{}` ({}) into `{}` at {total} site(s) across {} file(s):{}",
+                    plan.symbol,
+                    plan.kind,
+                    plan.new_name,
+                    plan.rewrites.len(),
+                    describe_rewrites(&plan.rewrites)
+                )
+            }
+        },
         "codemod" => match plan_codemod(root, &args, AST_PREVIEW_TIMEOUT_SECS) {
             Err(reason) => reason,
             Ok(plan) if !plan.rewrites_code => format!(
@@ -1486,6 +1502,7 @@ fn describe_sites(matches: &[AstMatch]) -> Vec<String> {
 enum ToolName {
     AstEdit,
     Codemod,
+    Rename,
 }
 
 impl ToolName {
@@ -1493,6 +1510,7 @@ impl ToolName {
         match self {
             ToolName::AstEdit => "ast_edit",
             ToolName::Codemod => "codemod",
+            ToolName::Rename => "rename",
         }
     }
 }
@@ -1791,6 +1809,270 @@ fn tool_codemod(
         ));
     }
     out.trim_end().to_string()
+}
+
+/// What a `rename` call resolved, before anything is written.
+#[derive(Debug)]
+pub struct RenamePlan {
+    /// The symbol being renamed.
+    pub symbol: String,
+    /// Its replacement.
+    pub new_name: String,
+    /// Root-relative file holding the single definition.
+    pub definition: String,
+    /// What kind of item it is (`function`, `struct`, `enum`, `trait`).
+    pub kind: String,
+    /// Per-file rewrites, definition site included.
+    pub rewrites: Vec<PlannedRewrite>,
+}
+
+/// Whether a name can be a Rust identifier. Shape only — `cargo check` after
+/// the rewrite is what judges the rest.
+fn is_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Rust's strict keywords: renaming onto one of these always breaks the build,
+/// so it is refused with the list rather than discovered via `cargo check`.
+fn is_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "as" | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            | "try"
+    )
+}
+
+/// Definitions of `symbol` across the workspace's Rust files, as
+/// (root-relative file, item kind). Uses the tree-sitter tier, not text
+/// search, so a mention in a comment is never mistaken for a declaration.
+fn definition_sites(root: &Path, symbol: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if name == "target" || name.starts_with('.') {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            if path.extension().map(|e| e != "rs").unwrap_or(true) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let symbols = xencode_context_rs::extract_tree_symbols(&text);
+            let kind = if symbols.functions.iter().any(|f| f == symbol) {
+                Some("function")
+            } else if symbols.structs.iter().any(|f| f == symbol) {
+                Some("struct")
+            } else if symbols.enums.iter().any(|f| f == symbol) {
+                Some("enum")
+            } else if symbols.traits.iter().any(|f| f == symbol) {
+                Some("trait")
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
+                let display = path
+                    .strip_prefix(root)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                out.push((display, kind.to_string()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Work out what a `rename` call would do, without touching a file.
+///
+/// Resolution first, rewriting second: the definition is found through the
+/// symbol index, and only a uniquely-defined symbol proceeds. References are
+/// then rewritten through ast-grep's identifier matches, definition site
+/// included, so the declaration and every use move together.
+pub fn plan_rename(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> Result<RenamePlan, String> {
+    let Some(symbol) = arg_str(args, "symbol") else {
+        return Err(err("rename needs a string \"symbol\""));
+    };
+    if symbol.trim().is_empty() {
+        return Err(err("rename needs a non-empty \"symbol\""));
+    }
+    let Some(new_name) = arg_str(args, "new_name") else {
+        return Err(err("rename needs a string \"new_name\""));
+    };
+    if !is_ident(new_name) {
+        return Err(err(format!(
+            "{new_name:?} is not a Rust identifier, so nothing was renamed"
+        )));
+    }
+    if is_keyword(new_name) {
+        return Err(err(format!(
+            "{new_name:?} is a Rust keyword, so renaming onto it would break the build"
+        )));
+    }
+
+    let definitions = definition_sites(root, symbol);
+    let (definition, kind) = match definitions.as_slice() {
+        [] => {
+            return Err(err(format!(
+                "no definition of `{symbol}` in the workspace's Rust files, so there is                  nothing to rename. A use without a declaration is not renamed, because                  the tool cannot know which item the name belongs to"
+            )));
+        }
+        [(file, kind)] => (file.clone(), kind.clone()),
+        several => {
+            let list = several
+                .iter()
+                .map(|(f, k)| format!("{f} ({k})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(err(format!(
+                "`{symbol}` is defined in more than one place — {list} — so rename                  refuses rather than guess which one was meant. Narrow it with an                  `edit_symbol` call on the right file instead"
+            )));
+        }
+    };
+
+    // A bare identifier pattern matches identifier nodes, not substrings, so
+    // `foo` renames `foo` and never `foobar`. The rewrite text is the new name
+    // at every site, including the definition found above.
+    let matches = run_ast_grep(
+        root,
+        symbol,
+        ".",
+        Some(new_name),
+        Some("rust"),
+        timeout_secs,
+    )?;
+    if matches.is_empty() {
+        return Err(err(format!(
+            "the index declares `{symbol}` in {definition} but ast-grep finds no              identifier sites for it, so nothing was renamed. The declaration may              use a form the pattern cannot see"
+        )));
+    }
+    let rewrites = plan_file_rewrites(root, &matches, ToolName::Rename)?;
+    Ok(RenamePlan {
+        symbol: symbol.to_string(),
+        new_name: new_name.to_string(),
+        definition,
+        kind,
+        rewrites,
+    })
+}
+
+fn tool_rename(
+    root: &Path,
+    args: &serde_json::Map<String, serde_json::Value>,
+    timeout_secs: u64,
+) -> String {
+    let plan = match plan_rename(root, args, timeout_secs) {
+        Ok(plan) => plan,
+        Err(reason) => return reason,
+    };
+    if let Err(reason) = write_rewrites(&plan.rewrites) {
+        return reason;
+    }
+    let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
+    let mut out = format!(
+        "rename: `{}` ({}) became `{}` at {total} site(s) across {} file(s):\n{}",
+        plan.symbol,
+        plan.kind,
+        plan.new_name,
+        plan.rewrites.len(),
+        describe_rewrites(&plan.rewrites)
+    );
+    // The second half of QI-2's substrate: the rewrite is checked, not assumed.
+    // A failure is reported with the errors, not reverted — the preview gate
+    // approved the diff, and silent reverts destroy the evidence of what broke.
+    match cargo_check_status(root, timeout_secs) {
+        Ok(()) => out.push_str("\n`cargo check` passes on the renamed tree."),
+        Err(errors) => out.push_str(&format!(
+            "\n`cargo check` FAILS on the renamed tree, so the rename is incomplete:\n{errors}"
+        )),
+    }
+    out.trim_end().to_string()
+}
+
+/// Whether `cargo check` passes in the workspace holding `root`.
+fn cargo_check_status(root: &Path, timeout_secs: u64) -> Result<(), String> {
+    let manifest = xencode_context_rs::verify::manifest_dir(root)
+        .map_err(|e| format!("could not locate the manifest: {e}"))?;
+    let mut command = std::process::Command::new("cargo");
+    command
+        .current_dir(&manifest)
+        .arg("check")
+        .arg("--all-targets");
+    match run_with_timeout(&mut command, timeout_secs.max(60)) {
+        Err(e) => Err(format!("could not run cargo check: {e}")),
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let errors: Vec<&str> = stderr
+                .lines()
+                .filter(|l| l.starts_with("error"))
+                .take(8)
+                .collect();
+            Err(if errors.is_empty() {
+                format!("exit {}", output.status.code().unwrap_or(-1))
+            } else {
+                errors.join("\n")
+            })
+        }
+    }
 }
 
 /// `ast_edit`: report the sites, and rewrite them when a replacement was given.
@@ -2211,6 +2493,7 @@ async fn execute_tool_call_plan(
         "edit_symbol" => tool_edit_symbol(root, &args),
         "ast_edit" => tool_ast_edit(root, &args, command_timeout),
         "codemod" => tool_codemod(root, &args, command_timeout),
+        "rename" => tool_rename(root, &args, command_timeout),
         "what_breaks" => tool_what_breaks(root, &args),
         other => format!("error: unknown tool {other}"),
     }
@@ -5891,6 +6174,139 @@ patched = ["{fixed}"]
         assert_eq!(
             std::fs::read_to_string(root.join("code.rs")).unwrap(),
             "let a = compute();\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ---- QI-2: `rename`, one symbol across the tree ----
+
+    fn rename_args(symbol: &str, new_name: &str) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::json!({"symbol": symbol, "new_name": new_name})
+            .as_object()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn rename_is_an_edit_tool_because_it_writes() {
+        assert_eq!(tool_class("rename"), ToolClass::Edit);
+    }
+
+    #[test]
+    fn rename_asks_for_its_arguments_before_anything_else() {
+        let root = temp_root("rename-args");
+        let missing = plan_rename(&root, &rename_args("", ""), 5).unwrap_err();
+        assert!(missing.contains("non-empty"), "{missing}");
+        let missing =
+            plan_rename(&root, serde_json::json!({}).as_object().unwrap(), 5).unwrap_err();
+        assert!(missing.contains("needs a string"), "{missing}");
+    }
+
+    #[test]
+    fn rename_refuses_a_name_that_is_not_an_identifier() {
+        let root = temp_root("rename-ident");
+        let err = plan_rename(&root, &rename_args("foo", "not a name"), 5).unwrap_err();
+        assert!(err.contains("not a Rust identifier"), "{err}");
+    }
+
+    #[test]
+    fn rename_refuses_a_keyword_before_cargo_check_could() {
+        let root = temp_root("rename-kw");
+        let err = plan_rename(&root, &rename_args("foo", "match"), 5).unwrap_err();
+        assert!(err.contains("keyword"), "{err}");
+    }
+
+    #[test]
+    fn rename_refuses_an_unknown_symbol_without_running_ast_grep() {
+        // Resolution happens before any subprocess: no definition, no search.
+        let root = temp_root("rename-unknown");
+        std::fs::write(root.join("a.rs"), "fn real() {}\n").unwrap();
+        let err = plan_rename(&root, &rename_args("ghost", "spooky"), 5).unwrap_err();
+        assert!(err.contains("no definition"), "{err}");
+    }
+
+    #[test]
+    fn rename_refuses_ambiguity_with_both_definitions_named() {
+        let root = temp_root("rename-ambig");
+        std::fs::write(root.join("a.rs"), "fn dup() {}\n").unwrap();
+        std::fs::write(root.join("b.rs"), "fn dup() {}\n").unwrap();
+        let err = plan_rename(&root, &rename_args("dup", "solo"), 5).unwrap_err();
+        assert!(err.contains("more than one place"), "{err}");
+        assert!(err.contains("a.rs") && err.contains("b.rs"), "{err}");
+    }
+
+    fn seeded_rename_tree(label: &str) -> PathBuf {
+        let root = temp_root(label);
+        std::fs::write(
+            root.join("lib.rs"),
+            "pub fn compute(x: i32) -> i32 {\n    x * 2\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("main.rs"),
+            "mod lib;\nfn main() {\n    let a = lib::compute(1);\n    let b = lib::compute(2);\n}\n",
+        )
+        .unwrap();
+        root
+    }
+
+    #[test]
+    fn rename_moves_the_definition_and_every_use_together() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        let root = seeded_rename_tree("rename-live");
+        let plan = plan_rename(&root, &rename_args("compute", "doubled"), 30).unwrap();
+        assert_eq!(plan.definition, "lib.rs");
+        assert_eq!(plan.kind, "function");
+        let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
+        assert_eq!(total, 3, "definition plus two call sites");
+        assert_eq!(plan.rewrites.len(), 2);
+
+        let shown = approval_preview(
+            &root,
+            &call(
+                "rename",
+                serde_json::json!({
+                    "symbol": "compute", "new_name": "doubled"
+                }),
+            ),
+        );
+        assert!(shown.contains("would turn `compute`"), "{shown}");
+        assert!(shown.contains("2 file(s)"), "{shown}");
+        // The preview plans; it does not write.
+        assert!(std::fs::read_to_string(root.join("lib.rs"))
+            .unwrap()
+            .contains("fn compute"));
+
+        let out = tool_rename(&root, &rename_args("compute", "doubled"), 30);
+        assert!(out.contains("became `doubled`"), "{out}");
+        assert!(std::fs::read_to_string(root.join("lib.rs"))
+            .unwrap()
+            .contains("fn doubled"));
+        let main = std::fs::read_to_string(root.join("main.rs")).unwrap();
+        assert!(
+            main.contains("lib::doubled(1)") && main.contains("lib::doubled(2)"),
+            "{main}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn rename_reports_cargo_check_not_just_the_rewrite() {
+        if which("ast-grep").is_err() && which("sg").is_err() {
+            eprintln!("skipping: ast-grep is not installed");
+            return;
+        }
+        // No Cargo.toml here, so the check cannot run — and the tool must say
+        // that instead of implying the tree is green.
+        let root = seeded_rename_tree("rename-nocheck");
+        let out = tool_rename(&root, &rename_args("compute", "doubled"), 30);
+        assert!(out.contains("became `doubled`"), "{out}");
+        assert!(
+            out.contains("cargo check") || out.contains("manifest"),
+            "a missing manifest must be reported, not hidden: {out}"
         );
         std::fs::remove_dir_all(&root).unwrap();
     }
