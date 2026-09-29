@@ -45,7 +45,7 @@ pub mod stale;
 pub mod state;
 pub mod symbols;
 pub mod trace;
-pub(crate) mod tsymbols;
+pub mod tsymbols;
 pub mod verify;
 pub mod watcher;
 pub mod worktree;
@@ -140,6 +140,7 @@ pub use symbols::{
     build_graph, dependency_map, dependent_map, extract_rust_symbols, rank_files, resolve_import,
     DepEdge, PerFileSymbols,
 };
+pub use tsymbols::extract as extract_tree_symbols;
 pub use verify::{
     nextest_available, run as run_tests, Engine, Options as TestOptions, Outcome as TestOutcome,
 };

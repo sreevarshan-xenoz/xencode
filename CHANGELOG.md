@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode envcheck`, configuration drift as a deterministic check
+### Added — `rename` agent tool: one symbol across the tree, zero model tokens
+
+`rename(symbol, new_name)` resolves through the tree-sitter symbol index and
+refuses on ambiguity — no definition, or two-or-more with every site named —
+then rewrites the definition and every reference together through ast-grep
+identifier matches, and finally reports `cargo check` rather than assuming it.
+A keyword or non-identifier target is refused before anything runs. The
+approval preview shows the same diff the executor writes, because both come
+from one planner.
+
+Proved on a seeded tree: 3 sites across 2 files moved together. Eight tests.
+`tsymbols::extract` is now exported as `extract_tree_symbols`.
+
+
 
 Extracts every `env::var`/`env::var_os` key from non-test Rust sources, reads
 `.env.example`/`.env.template`, and reports read-but-undocumented keys with
