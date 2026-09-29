@@ -16,7 +16,14 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Added — `xencode agents --contract`: roster claims re-read from live help
+### Changed — event-driven TUI frames instead of a 30 fps redraw
+
+Each loop iteration reports what it observed and draws only on change,
+animation, drained messages, or a visible toast. Idle iterations draw nothing;
+the 33 ms input poll is unchanged. "Ns ago" labels refresh on draws rather
+than continuously. Three tests.
+
+
 
 Every capability cell re-verified against the agent's actual `--help` on each
 run: 35 confirmed, 0 contradicted here — after overturning two stale cells

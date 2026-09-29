@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1595 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1598 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -8515,6 +8515,15 @@ Needs W1’s metrics schema and W0’s atomic writes. `doctor` is built after th
 | **U-3** | The `doctor` surface for configuration drift | capability | from U — the W3 entry builds the graph; this is where its result is shown, alongside QO-5's machine probe |
 | **U-5** | Dependency impact report: transitive delta and duplicate versions | capability | from U — a report into QO-1's composition, after SE-6; asks, never blocks |
 | **V-8** | Event-driven render: stop the unconditional 30 fps redraw | capability | from V — `app.rs:8111` polls at 33 ms and draws every frame; no dependencies, so it can be pulled forward |
+  **Done 2026-09-29** — the loop draws only when a `FrameSignals` report says
+  so: event handled, messages or approvals drained, toast count changed, toast
+  on screen (TTL expiry has no other signal), or a spinner-showing operation
+  running. Idle iterations draw nothing. The 33 ms poll stays, so input latency
+  is unchanged; only redundant draws go away. The spinner condition moved
+  unchanged into `App::activity_animating`, covered per flag. Three tests: the
+  idle loop draws nothing, every signal draws, animation covers all eight
+  spinner sources. The "Ns ago" labels now refresh on draws rather than
+  continuously — informational, and documented where the policy lives.
 
 #### W12 — Long-running autonomy — 15 items
 
