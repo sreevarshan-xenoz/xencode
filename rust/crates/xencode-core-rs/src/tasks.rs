@@ -7,20 +7,24 @@
 //! blocks on a chatty command.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
 /// Lines kept per task; the oldest lines are dropped first.
 pub const MAX_OUTPUT_LINES: usize = 500;
+/// Default wall-clock limit for a background command.
+pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskStatus {
     Running,
     Exited(i32),
     Killed,
+    TimedOut,
 }
 
 impl TaskStatus {
@@ -29,6 +33,7 @@ impl TaskStatus {
             TaskStatus::Running => "running".to_string(),
             TaskStatus::Exited(code) => format!("exited({code})"),
             TaskStatus::Killed => "killed".to_string(),
+            TaskStatus::TimedOut => "timed out".to_string(),
         }
     }
 }
@@ -162,6 +167,9 @@ pub enum TaskError {
 pub struct TaskManager {
     store: TaskStore,
     children: HashMap<u64, Child>,
+    deadlines: HashMap<u64, tokio::time::Instant>,
+    watchdogs: HashMap<u64, tokio::task::JoinHandle<()>>,
+    timed_out: HashMap<u64, Arc<AtomicBool>>,
     outputs: HashMap<u64, Arc<Mutex<Vec<String>>>>,
 }
 
@@ -176,6 +184,9 @@ impl TaskManager {
         Self {
             store: TaskStore::new(),
             children: HashMap::new(),
+            deadlines: HashMap::new(),
+            watchdogs: HashMap::new(),
+            timed_out: HashMap::new(),
             outputs: HashMap::new(),
         }
     }
@@ -186,7 +197,19 @@ impl TaskManager {
 
     /// Spawn `command` through `sh -c` and start draining its output.
     pub async fn start(&mut self, name: &str, command: &str) -> Result<u64, TaskError> {
-        self.start_with_cwd(name, command, None).await
+        self.start_with_timeout(name, command, DEFAULT_TASK_TIMEOUT)
+            .await
+    }
+
+    /// Spawn a command with a caller-selected wall-clock limit.
+    pub async fn start_with_timeout(
+        &mut self,
+        name: &str,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<u64, TaskError> {
+        self.start_with_cwd_and_timeout(name, command, None, timeout)
+            .await
     }
 
     /// Like [`start`](Self::start) but runs the command in `cwd` (D3-03:
@@ -198,12 +221,26 @@ impl TaskManager {
         command: &str,
         cwd: Option<&std::path::Path>,
     ) -> Result<u64, TaskError> {
+        self.start_with_cwd_and_timeout(name, command, cwd, DEFAULT_TASK_TIMEOUT)
+            .await
+    }
+
+    /// Spawn a command in a directory with a caller-selected wall-clock limit.
+    pub async fn start_with_cwd_and_timeout(
+        &mut self,
+        name: &str,
+        command: &str,
+        cwd: Option<&std::path::Path>,
+        timeout: Duration,
+    ) -> Result<u64, TaskError> {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
             .arg(command)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);
         }
@@ -225,6 +262,22 @@ impl TaskManager {
 
         self.store.insert(record);
         self.children.insert(id, child);
+        let deadline = tokio::time::Instant::now() + timeout;
+        self.deadlines.insert(id, deadline);
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let watchdog_flag = Arc::clone(&timed_out);
+        #[cfg(unix)]
+        if let Some(pid) = self.store.get(id).and_then(|task| task.pid) {
+            self.watchdogs.insert(
+                id,
+                tokio::spawn(async move {
+                    tokio::time::sleep_until(deadline).await;
+                    watchdog_flag.store(true, Ordering::Release);
+                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                }),
+            );
+        }
+        self.timed_out.insert(id, timed_out);
         self.outputs.insert(id, buffer);
         Ok(id)
     }
@@ -232,6 +285,17 @@ impl TaskManager {
     /// Reap the child if it exited and return an up-to-date snapshot.
     pub async fn poll(&mut self, id: u64) -> Result<TaskRecord, TaskError> {
         self.reap(id)?;
+        if self
+            .timed_out
+            .get(&id)
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+            || self
+                .deadlines
+                .get(&id)
+                .is_some_and(|deadline| tokio::time::Instant::now() >= *deadline)
+        {
+            self.kill_task(id, TaskStatus::TimedOut).await?;
+        }
         self.drain_output(id);
         self.snapshot(id)
     }
@@ -239,24 +303,42 @@ impl TaskManager {
     /// Kill a running task. `AlreadyFinished` for anything already reaped —
     /// callers treat that as idempotent success.
     pub async fn stop(&mut self, id: u64) -> Result<(), TaskError> {
+        self.reap(id)?;
+        self.kill_task(id, TaskStatus::Killed).await
+    }
+
+    async fn kill_task(&mut self, id: u64, reason: TaskStatus) -> Result<(), TaskError> {
+        if let Some(watchdog) = self.watchdogs.remove(&id) {
+            watchdog.abort();
+        }
         let Some(child) = self.children.get_mut(&id) else {
             return match self.store.get(id) {
                 Some(_) => Err(TaskError::AlreadyFinished(id)),
                 None => Err(TaskError::NotFound(id)),
             };
         };
+        #[cfg(unix)]
+        if let Some(pid) = child.id() {
+            // The command starts in a fresh process group; signal the group so
+            // shell-spawned commands and vendor descendants are included.
+            unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+        }
+        #[cfg(not(unix))]
         let _ = child.start_kill();
-        self.reap(id)?;
-        // If it exited before the kill landed, keep the real exit status;
-        // otherwise label it Killed.
-        if let Some(task) = self.store.get_mut(id) {
+        let status = child.wait().await.ok();
+        if let (Some(status), Some(task)) = (status, self.store.get_mut(id)) {
             if matches!(task.status, TaskStatus::Running) {
-                task.status = TaskStatus::Killed;
-                task.finished_at = Some(unix_now());
+                if status.success() {
+                    task.finish(TaskStatus::Exited(status.code().unwrap_or(0)));
+                } else {
+                    task.finish(reason);
+                }
             }
         }
         self.drain_output(id);
         self.children.remove(&id);
+        self.deadlines.remove(&id);
+        self.timed_out.remove(&id);
         Ok(())
     }
 
@@ -278,6 +360,11 @@ impl TaskManager {
             }
         }
         self.children.remove(&id);
+        self.deadlines.remove(&id);
+        self.timed_out.remove(&id);
+        if let Some(watchdog) = self.watchdogs.remove(&id) {
+            watchdog.abort();
+        }
         self.outputs.remove(&id);
         self.store.remove(id)
     }
@@ -292,10 +379,23 @@ impl TaskManager {
         };
         if let Ok(Some(status)) = child.try_wait() {
             let code = status.code().unwrap_or(-1);
+            let timed_out = self
+                .timed_out
+                .get(&id)
+                .is_some_and(|flag| flag.load(Ordering::Acquire));
             if let Some(task) = self.store.get_mut(id) {
-                task.finish(TaskStatus::Exited(code));
+                task.finish(if timed_out {
+                    TaskStatus::TimedOut
+                } else {
+                    TaskStatus::Exited(code)
+                });
             }
             self.children.remove(&id);
+            self.deadlines.remove(&id);
+            self.timed_out.remove(&id);
+            if let Some(watchdog) = self.watchdogs.remove(&id) {
+                watchdog.abort();
+            }
         }
         Ok(())
     }
@@ -310,6 +410,22 @@ impl TaskManager {
         };
         for line in pending {
             self.store.append_output(id, line);
+        }
+    }
+}
+
+impl Drop for TaskManager {
+    fn drop(&mut self) {
+        for watchdog in self.watchdogs.values() {
+            watchdog.abort();
+        }
+        #[cfg(unix)]
+        for child in self.children.values() {
+            if let Some(pid) = child.id() {
+                // `kill_on_drop` handles the shell itself; signal the group
+                // here as well so its descendants cannot outlive the manager.
+                unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+            }
         }
     }
 }
@@ -482,6 +598,71 @@ mod tests {
         ));
         m.remove(id).unwrap();
         assert!(m.list().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wall_clock_limit_kills_task_and_marks_timeout() {
+        let mut m = TaskManager::new();
+        let id = m
+            .start_with_timeout(
+                "bounded",
+                "sleep 30 & echo $!; wait",
+                Duration::from_millis(100),
+            )
+            .await
+            .unwrap();
+        let child_pid = loop {
+            let rec = m.poll(id).await.unwrap();
+            if let Some(line) = rec.output().last() {
+                if let Ok(pid) = line.trim().parse::<i32>() {
+                    break pid;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        tokio::time::sleep(Duration::from_millis(140)).await;
+        // The watchdog must enforce the limit without depending on another
+        // poll call to notice that the deadline has passed.
+        if let Ok(contents) = std::fs::read_to_string(format!("/proc/{child_pid}/stat")) {
+            assert_eq!(contents.split_whitespace().nth(2), Some("Z"));
+        }
+        let rec = m.poll(id).await.unwrap();
+        assert_eq!(rec.status, TaskStatus::TimedOut);
+        assert!(rec.finished_at.is_some());
+        m.remove(id).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_kills_shell_descendants_in_its_process_group() {
+        let mut m = TaskManager::new();
+        let id = m
+            .start("parent and child", "sleep 30 & echo $!; wait")
+            .await
+            .unwrap();
+        let child_pid = loop {
+            let rec = m.poll(id).await.unwrap();
+            if let Some(line) = rec.output().last() {
+                if let Ok(pid) = line.trim().parse::<i32>() {
+                    break pid;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        m.stop(id).await.unwrap();
+        // A killed child can briefly remain as a zombie until its reaper
+        // collects it; it must never remain executable.
+        for _ in 0..100 {
+            let stat = std::fs::read_to_string(format!("/proc/{child_pid}/stat"));
+            match stat {
+                Err(_) => break,
+                Ok(contents) if contents.split_whitespace().nth(2) == Some("Z") => break,
+                Ok(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            }
+        }
+        if let Ok(contents) = std::fs::read_to_string(format!("/proc/{child_pid}/stat")) {
+            assert_eq!(contents.split_whitespace().nth(2), Some("Z"));
+        }
     }
 
     #[tokio::test]

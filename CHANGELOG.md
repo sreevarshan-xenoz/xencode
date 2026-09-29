@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — bounded background tasks (AR-6)
+
+The TUI's in-process background task manager now gives commands a 30-minute
+wall-clock limit by default, with an API for shorter per-task limits. On Unix,
+manual stop, timeout, and dropping the manager terminate the command's process
+group so ordinary child processes cannot keep running after the task ends.
+Timed-out tasks have their own status in the Tasks panel. The file-backed
+`xencode tasks` registry has separate process management and is unchanged.
+
 ### Added — why the screen is arranged this way
 
 `Ctrl+0` opens a list of every change the window arrangement has been through

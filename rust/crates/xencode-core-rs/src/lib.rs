@@ -11,6 +11,9 @@ pub use rustc_json::{
     cargo_json_command, parse as parse_rustc_json, BuildReport, Diagnostic, Suggestion,
     CARGO_JSON_FLAG, EXPLANATION_CAP, MAX_DIAGNOSTICS, MAX_EXPLANATIONS, MAX_HELPS,
 };
-pub use tasks::{TaskError, TaskManager, TaskRecord, TaskStatus, TaskStore, MAX_OUTPUT_LINES};
+pub use tasks::{
+    TaskError, TaskManager, TaskRecord, TaskStatus, TaskStore, DEFAULT_TASK_TIMEOUT,
+    MAX_OUTPUT_LINES,
+};
 pub use tasks_file::{FileTask, FileTaskRegistry};
 pub use workspace::{scan_workspace, EntryKind, ScanOptions, WorkspaceEntry, WorkspaceScanError};
