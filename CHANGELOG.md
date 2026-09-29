@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode session`: name runs, resolve them, export redacted transcripts
+### Added — session run-ledger: every verification run leaves a row
+
+`.xencode/ledger.jsonl` records session, run class, exit code, subject
+digests, and a log reference per run — OTel-shaped rows, in-toto-flavoured
+subjects, no signatures. Subjects are digests and logs are references, so the
+schema cannot hold a secret; the one free-text field is scrubbed through the
+trace module's secret patterns *before* it reaches disk, because read-time
+redaction would depend on every future reader remembering. `passed()` reads
+the exit code and nothing else. `xencode test` is the first producer.
+
+Five tests. (Also recorded: EVd-2's session key on `RequestMetrics` predates
+this session — fields, production stamping on both write paths, and a
+persist-and-read-back test — so the plan's "has none" was stale.)
+
+
 
 `session name <run> <name>` pins a human name to a recording without ever
 repointing an existing one; `session resolve <name|prefix|latest>` returns the

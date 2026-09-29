@@ -29,6 +29,7 @@ pub mod hwprobe;
 pub mod impact;
 pub mod index;
 pub mod init;
+pub mod ledger;
 pub mod metrics;
 pub(crate) mod parse;
 pub mod pricing;
@@ -103,6 +104,9 @@ pub use index::{
     write_str_atomic, FileEntry, FilesIndex, Manifest, VERSION,
 };
 pub use init::{init_project, ContextError, InitSummary, XENCODE_DIR};
+pub use ledger::{
+    append_ledger, digest_hex, ledger_for_session, ledger_path, read_ledger, LedgerEntry, RunClass,
+};
 pub use metrics::{
     append_metrics, metrics_path, read_metrics, read_metrics_since, read_metrics_tail,
     CompactAction, MetricSource, MetricsIdentity, RequestMetrics,
