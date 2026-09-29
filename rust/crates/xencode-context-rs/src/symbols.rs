@@ -303,10 +303,14 @@ pub(crate) fn cap_doc_text(lines: Vec<String>) -> String {
     if joined.len() <= DOC_TEXT_CAP {
         return joined;
     }
-    let mut cut = joined[..DOC_TEXT_CAP].to_string();
-    while !cut.is_char_boundary(cut.len()) {
-        cut.pop();
+    // Walk back to a character boundary before slicing: the cap is a byte
+    // count, and a multi-byte character can straddle it — a doc comment as
+    // ordinary as one containing `→` used to panic the index here.
+    let mut end = DOC_TEXT_CAP;
+    while end > 0 && !joined.is_char_boundary(end) {
+        end -= 1;
     }
+    let mut cut = joined[..end].to_string();
     if let Some(at) = cut.rfind(' ') {
         cut.truncate(at);
     }
@@ -1345,6 +1349,26 @@ impl std::fmt::Debug for Dog { fn fmt(&self, _: &mut std::fmt::Formatter) -> std
         );
         assert!(!sym.docs.ends_with(' '));
         assert!(sym.docs.split(' ').all(|w| w == "word"));
+    }
+
+    #[test]
+    fn a_doc_cut_that_lands_inside_a_character_stays_on_the_boundary() {
+        // `→` is three bytes. Placing one so that byte `DOC_TEXT_CAP` falls
+        // inside it is the case the cap's own sentence — "cut to
+        // `DOC_TEXT_CAP` bytes on a character boundary" — has to survive: a
+        // file whose documentation says something in words must not take the
+        // index down with a slicing panic. The suffix after the padding is
+        // what puts the arrow at 1198, so the cap lands inside it.
+        let filler = format!("{}xyz", "word ".repeat(239));
+        let content = format!("//! {filler} → and more prose\n");
+        let sym = extract_rust_symbols(&content);
+        assert!(
+            !sym.docs.is_empty() && sym.docs.len() <= DOC_TEXT_CAP,
+            "{} bytes is not a capped-but-non-empty result",
+            sym.docs.len()
+        );
+        assert!(!sym.docs.ends_with(' '), "{:?}", sym.docs);
+        assert!(sym.docs.starts_with("word "));
     }
 
     /// Every `.rs` file of this workspace, as `rel path, text` pairs.
