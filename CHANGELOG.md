@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Decision — VF-4 stays an evaluation capability, no shipped gate
+### Added — cargo-dist release pipeline (tag still required)
+
+`dist init` configured five release targets with shell and PowerShell
+installers, checksums, and a source tarball; `dist generate` replaced the
+hand-rolled release workflow; `dist plan` announces a coherent v0.1.0. The
+generated CI references only the automatic `GITHUB_TOKEN` — asserted by a
+test. No tag pushed, so no release exists yet; install paths in QUICK_START
+are conditional on the first tag. Two tests.
+
+
 
 After the A and B experiments: candidates miss whatever requires target
 semantics to see, differently per target — which is evidence *against* a

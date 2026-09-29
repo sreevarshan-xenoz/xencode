@@ -13,6 +13,16 @@ cd xencode
 
 Windows (PowerShell): `.\install.ps1`
 
+### Prebuilt binaries (from the first tagged release on)
+
+Releases are built by cargo-dist for five targets with checksums, plus shell
+and PowerShell installers — nothing here exists until a `v*` tag is pushed:
+
+```bash
+cargo binstall xencode-cli
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/sreevarshan-xenoz/xencode/releases/latest/download/xencode-cli-installer.sh | sh
+```
+
 **What happens:**
 1. ✅ Checks Rust toolchain, curl, git
 2. ✅ Builds the release binary (`cargo build --release -p xencode-cli`)
