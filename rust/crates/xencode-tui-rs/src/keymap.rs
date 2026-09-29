@@ -143,11 +143,26 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// promotes the same way, from its own shape.
 fn resize_focused_pane(app: &mut App, delta: i16) {
     app.promote_layout_tree();
-    if let Some(view) = app.custom_view.as_mut() {
-        crate::view::nudge_focused(&mut view.root, app.focus, delta);
-        // V-6: the arrangement on screen is now worth restoring. The frame
-        // loop writes it once, through the same choke point every save uses.
-        app.arrangement_dirty = true;
+    let Some(view) = app.custom_view.as_mut() else {
+        return;
+    };
+    let focus = app.focus;
+    let moved = crate::view::nudge_focused(&mut view.root, focus, delta);
+    // V-6: the arrangement on screen is now worth restoring. The frame
+    // loop writes it once, through the same choke point every save uses.
+    app.arrangement_dirty = true;
+    // V-9: the same change, written down with the chord that asked for it.
+    // Only a move that landed is a row — a resize the clamps refused changed
+    // nothing on screen, and a log of changes should not claim one.
+    if moved {
+        app.note_layout_change(crate::transitions::Trigger::ResizeChord {
+            words: if delta > 0 {
+                "Alt+Right".to_string()
+            } else {
+                "Alt+Left".to_string()
+            },
+            grew: delta > 0,
+        });
     }
 }
 
@@ -169,6 +184,7 @@ fn cycle_layout(app: &mut App, dir: i32) {
     // The stored arrangement must change with the name, or next start would
     // resurrect the tree this keystroke threw away (`V-6`).
     app.arrangement_dirty = true;
+    app.note_layout_change(crate::transitions::Trigger::LayoutCycle { name: next.clone() });
     app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
     if let Some(problem) = crate::templates::problem(&app.config.layout_templates, &next) {
         app.push_toast(crate::toast::ToastKind::Warning, problem);
@@ -214,6 +230,13 @@ fn switch_view(app: &mut App, slot: usize) {
     }
     // V-6: the view on screen is now the arrangement worth restoring.
     app.arrangement_dirty = true;
+    // V-9: and the reason this screen looks like it does is now on record —
+    // the slot and its name, since a view is the one arrangement a user asks
+    // for by number.
+    app.note_layout_change(crate::transitions::Trigger::ViewRecalled {
+        name: name.clone(),
+        slot,
+    });
     app.push_toast(crate::toast::ToastKind::Info, format!("View: {name}"));
 }
 
@@ -250,6 +273,10 @@ fn store_view(app: &mut App, slot: usize) {
     app.config.layout_views.insert(name.clone(), encoded);
     app.save_config();
     app.arrangement_dirty = true;
+    app.note_layout_change(crate::transitions::Trigger::ViewStored {
+        name: name.clone(),
+        slot,
+    });
     app.push_toast(
         crate::toast::ToastKind::Info,
         format!("Stored view {name} — Ctrl+{slot} recalls it"),
@@ -270,10 +297,25 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             }
             return Some(done());
         }
+        KeyCode::Char('0') => {
+            // The layout history panel (`V-9`), on the digit no view occupies:
+            // `Ctrl+1`…`Ctrl+9` are the arrangements a user keeps, and `0` is
+            // the record of why the screen is what it is. Opening it moves no
+            // pane and touches no arrangement — reading the log costs nothing.
+            if app.focus == FocusArea::LayoutPanel {
+                app.focus = FocusArea::ChatInput;
+            } else {
+                app.layout_selected = app.layout_log.len().saturating_sub(1);
+                app.layout_detail = false;
+                app.layout_scroll = 0;
+                app.focus = FocusArea::LayoutPanel;
+            }
+        }
         KeyCode::Char(digit) if digit.is_ascii_digit() => {
             // Named views (`V-4`): one chord recalls one arrangement, with the
             // pane it was focused on; Shift stores what is on screen. `0` is
-            // not a slot, so it falls through to whatever the pane makes of it.
+            // not a slot and is claimed above, by the layout history panel, so
+            // nothing here ever sees it.
             let shift = key.modifiers.contains(KeyModifiers::SHIFT);
             match crate::views::chord(digit, shift) {
                 None => return None,
@@ -353,6 +395,7 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 | FocusArea::TaskManager
                 | FocusArea::WorktreePanel
                 | FocusArea::AdvisePanel
+                | FocusArea::LayoutPanel
                 | FocusArea::FeatureNavigator
                 | FocusArea::ModelSelector
                 | FocusArea::Settings => {
@@ -418,6 +461,11 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         }
         KeyCode::Char('t') => {
             app.show_terminal = !app.show_terminal;
+            // V-9: the strip is a pane the screen gains or loses, asked for by
+            // one chord, so it is a change worth the same kind of row.
+            app.note_layout_change(crate::transitions::Trigger::TerminalStrip {
+                shown: app.show_terminal,
+            });
         }
         KeyCode::Char('u') => {
             // Live layout cycling (H1-05, V-5): every name on offer, presets and
@@ -533,6 +581,7 @@ fn focus_key(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         FocusArea::TaskManager => key_task_manager(app, key, tx),
         FocusArea::WorktreePanel => key_worktree_panel(app, key),
         FocusArea::AdvisePanel => key_advise_panel(app, key),
+        FocusArea::LayoutPanel => key_layout_panel(app, key),
         FocusArea::ProviderHealth => key_provider_health(app, key),
         FocusArea::LearningMode => key_learning(app, key, tx),
         FocusArea::CustomModels => key_custom_models(app, key, tx),
@@ -612,6 +661,16 @@ fn on_esc(app: &mut App) {
             if app.advise_detail {
                 app.advise_detail = false;
                 app.advise_scroll = 0;
+            } else {
+                app.focus = FocusArea::ChatInput;
+            }
+        }
+        FocusArea::LayoutPanel => {
+            // Esc unwinds the same two stages, and leaves every arrangement
+            // exactly where it was: reading the log moves nothing (`V-9`).
+            if app.layout_detail {
+                app.layout_detail = false;
+                app.layout_scroll = 0;
             } else {
                 app.focus = FocusArea::ChatInput;
             }
@@ -1421,6 +1480,37 @@ fn key_advise_panel(app: &mut App, key: KeyEvent) -> bool {
     true
 }
 
+/// LayoutPanel (`V-9`): the session's arrangement changes, newest at the
+/// bottom, each with the ask behind it. `Enter` opens one row to read what it
+/// moved from and to; the list itself stays a list because the question it
+/// answers is "what happened in order", and a row that expands inline would
+/// push the ones below it off the screen.
+fn key_layout_panel(app: &mut App, key: KeyEvent) -> bool {
+    let count = app.layout_log.len();
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if app.layout_detail => {
+            app.layout_scroll = app.layout_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') if app.layout_detail => {
+            app.layout_scroll += 1;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.layout_selected = app.layout_selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.layout_selected + 1 < count {
+                app.layout_selected += 1;
+            }
+        }
+        KeyCode::Enter if count > 0 => {
+            app.layout_detail = !app.layout_detail;
+            app.layout_scroll = 0;
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn key_provider_health(app: &mut App, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
@@ -1864,6 +1954,9 @@ mod tests {
     fn app_with_body(focus: FocusArea) -> App<'static> {
         let mut app = app_with(focus);
         app.last_body_area = ratatui::layout::Rect::new(0, 1, 120, 40);
+        // A drawn session has an opening row; a test that never paints the
+        // screen writes it here, after giving the app a body area to describe.
+        app.note_session_opened();
         app
     }
 
@@ -2963,5 +3056,207 @@ mod tests {
         assert_eq!(app.opened_file.as_deref(), Some("src/app.rs"));
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    /// V-9: the arrangement log. A row per change, naming the ask, and nothing
+    /// else — the list is the answer to "why is this pane here", so a row for a
+    /// keystroke that changed no arrangement, or a panel that changed one on
+    /// being read, would both be lies.
+    #[test]
+    fn a_resize_chord_is_written_down_with_the_chord_that_asked_for_it() {
+        let mut app = app_with_body(FocusArea::CodeEditor);
+        let rows = app.layout_log.len();
+        press_with_mods(&mut app, KeyCode::Right, KeyModifiers::ALT);
+        assert_eq!(app.layout_log.len(), rows + 1, "one change, one row");
+        let newest = app.layout_log.last().unwrap();
+        assert!(
+            newest.trigger.words().contains("Alt+Right"),
+            "the row names the chord: {}",
+            newest.trigger.words()
+        );
+        assert!(
+            newest.trigger.words().contains("grew"),
+            "and which way the pane went: {}",
+            newest.trigger.words()
+        );
+        assert_eq!(
+            newest.after,
+            app.arrangement_line(),
+            "and ends where the screen is"
+        );
+    }
+
+    #[test]
+    fn a_chord_the_clamps_refuse_adds_no_row() {
+        let mut app = app_with_body(FocusArea::CodeEditor);
+        // Shrink the editor past every minimum it will accept, then ask again.
+        for _ in 0..24 {
+            press_with_mods(&mut app, KeyCode::Left, KeyModifiers::ALT);
+        }
+        let rows = app.layout_log.len();
+        let line = app.arrangement_line();
+        press_with_mods(&mut app, KeyCode::Left, KeyModifiers::ALT);
+        assert_eq!(
+            app.layout_log.len(),
+            rows,
+            "a keystroke that moved nothing is not a change"
+        );
+        assert_eq!(app.arrangement_line(), line, "and nothing moved");
+    }
+
+    #[test]
+    fn cycling_a_layout_names_the_layout_it_landed_on() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        let newest = app.layout_log.last().unwrap();
+        assert_eq!(newest.after, app.arrangement_line());
+        assert!(
+            newest.trigger.words().contains(&app.config.layout),
+            "the row names what is on screen now: {} vs {}",
+            newest.trigger.words(),
+            app.config.layout
+        );
+    }
+
+    /// `Ctrl+T` asks for the terminal strip. On a screen too short to hold it
+    /// the ask changes nothing on screen, and the log says nothing — which is
+    /// the honest answer, not a missing one. `app_with_body` draws 40 rows, so
+    /// here the strip really does arrive.
+    #[test]
+    fn the_terminal_strip_is_recorded_when_it_arrives() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let rows = app.layout_log.len();
+        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
+        assert!(app.show_terminal);
+        assert_eq!(app.layout_log.len(), rows + 1);
+        assert!(app.layout_log.last().unwrap().after.contains("Terminal"));
+        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
+        assert!(!app.show_terminal);
+        assert_eq!(app.layout_log.len(), rows + 2);
+        assert!(!app.layout_log.last().unwrap().after.contains("Terminal"));
+    }
+
+    #[test]
+    fn a_strip_the_screen_cannot_hold_is_not_written_down_as_a_change() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        app.last_body_area = ratatui::layout::Rect::new(0, 1, 120, 6);
+        let rows = app.layout_log.len();
+        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
+        assert!(app.show_terminal, "the ask is remembered");
+        assert_eq!(
+            app.layout_log.len(),
+            rows,
+            "and the screen, which gained no pane, has no row"
+        );
+    }
+
+    #[test]
+    fn an_overlay_opened_over_the_body_is_not_a_row() {
+        // The agent stack covers the screen for a moment and leaves it. It is
+        // not the arrangement, so it never appears in the log of arrangements.
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let before = app.arrangement_line();
+        let rows = app.layout_log.len();
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert!(app.agent_stack_visible);
+        press_with_mods(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        assert_eq!(app.layout_log.len(), rows, "no row for the overlay");
+        assert_eq!(app.arrangement_line(), before, "the body never moved");
+    }
+
+    #[test]
+    fn recalling_a_view_is_recorded_by_its_name_and_slot() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
+        let newest = app.layout_log.last().unwrap();
+        assert!(
+            newest.trigger.words().contains("Ctrl+1") && newest.trigger.words().contains("Code"),
+            "{}",
+            newest.trigger.words()
+        );
+        assert!(newest.after.starts_with("Code ·"), "{}", newest.after);
+    }
+
+    #[test]
+    fn storing_a_view_is_recorded_as_the_storing_it_is() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(
+            &mut app,
+            KeyCode::Char('7'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        let newest = app.layout_log.last().unwrap();
+        assert!(
+            newest.trigger.words().contains("stored")
+                && newest.trigger.words().contains("Ctrl+Shift+7"),
+            "{}",
+            newest.trigger.words()
+        );
+    }
+
+    /// The panel is a reader. Opening it, walking it and closing it must leave
+    /// the screen exactly where it was — otherwise the tool built to explain
+    /// changes would be one of them.
+    #[test]
+    fn reading_the_log_changes_nothing() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        let line = app.arrangement_line();
+        let rows = app.layout_log.len();
+        press_with_mods(&mut app, KeyCode::Char('0'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::LayoutPanel);
+        assert_eq!(
+            app.layout_selected,
+            rows - 1,
+            "and it opens on the newest row, which is the one describing the screen"
+        );
+        press(&mut app, KeyCode::Up);
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+        assert_eq!(app.arrangement_line(), line, "nothing moved");
+        assert_eq!(app.layout_log.len(), rows, "and nothing was written");
+    }
+
+    #[test]
+    fn ctrl_w_closes_the_layout_panel_too() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('0'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::LayoutPanel);
+        press_with_mods(&mut app, KeyCode::Char('w'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::ChatInput);
+    }
+
+    #[test]
+    fn the_log_starts_with_the_screen_the_session_found() {
+        let app = app_with_body(FocusArea::ChatInput);
+        assert_eq!(app.layout_log.len(), 1, "one row before any keystroke");
+        let first = &app.layout_log[0];
+        assert!(
+            first.trigger.words().starts_with("session opened on"),
+            "{}",
+            first.trigger.words()
+        );
+        assert_eq!(first.before, first.after, "nothing preceded it");
+        assert_eq!(first.after, app.arrangement_line());
+    }
+
+    /// The session's list is the only copy. `V-6`'s file records where the
+    /// panes were and refuses to record anything else, and a log of why would
+    /// be a fourth file describing the user's screen — so a test that the
+    /// arrangement a session saves carries no log keeps the two apart.
+    #[test]
+    fn the_saved_arrangement_carries_no_log() {
+        let mut app = app_with_body(FocusArea::CodeEditor);
+        press_with_mods(&mut app, KeyCode::Right, KeyModifiers::ALT);
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(app.layout_log.len(), 3, "the session has rows to save");
+        let saved = serde_json::to_value(crate::arrangement::capture(&app)).unwrap();
+        let text = saved.to_string();
+        assert!(
+            !text.contains("session opened") && !text.contains("Alt+Right"),
+            "the arrangement file holds geometry and focus only: {text}"
+        );
     }
 }

@@ -46,6 +46,10 @@ pub(crate) const GLOBAL: &[Binding] = &[
         "Ctrl+1…9",
         "recall a named view (Ctrl+Shift+N stores this screen as one)",
     ),
+    (
+        "Ctrl+0",
+        "why the screen is arranged this way (layout history)",
+    ),
     ("Ctrl+H", "run provider health check"),
 ];
 
@@ -233,6 +237,11 @@ pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {
             ("r", "recompute insights from the live snapshot"),
             ("Esc", "back to list · close panel"),
         ],
+        LayoutPanel => &[
+            ("↑ ↓ / j k", "select a change · scroll its detail"),
+            ("Enter", "open/close what the change moved from and to"),
+            ("Esc", "back to list · close panel"),
+        ],
     }
 }
 
@@ -299,6 +308,7 @@ mod tests {
             TaskManager,
             WorktreePanel,
             AdvisePanel,
+            LayoutPanel,
         ] {
             assert!(!panel_bindings(f).is_empty(), "{f:?} has no help rows");
         }

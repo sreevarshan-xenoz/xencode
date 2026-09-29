@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 1669 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 1692 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -44,7 +44,7 @@ and fix your code — driven entirely from your terminal.
 - **🧠 Local-first, your model** — Ollama and llama.cpp serve from your own machine with your code never leaving it; cloud providers, a Colab GPU you rent, or any OpenAI-compatible endpoint are opt-in choices, not a service you depend on. The opt-in is a switch, not a promise: `allow_cloud_models` starts off, and a request that would reach an internet service is refused before it is dialled. A llama.cpp model that is not on disk yet can be brought down by one command: point `llama_cpp_model_url` at the GGUF and `llamacpp start` fetches it — after checking the disk can hold it, resuming across interruptions, and showing progress in the TUI. `xencode models advice` says which model this machine's memory can hold and hands over the address and checksum to fetch it by; with a checksum pinned, a file whose bytes disagree is refused out loud instead of being served as if it were the model.
 - **🤖 Agentic coding loop** — the model reads, edits and runs your workspace through approval-gated tools, bounded by `agent_max_rounds`, with per-turn checkpoints you can `/rewind`. A call whose arguments do not match the description that tool was offered with is answered back to the model instead of being run — including one whose arguments arrived as text that stopped halfway, which used to look like a call that asked for nothing.
 - **🔀 Provider fallback chain** — when the primary model fails before streaming a token, the turn walks your ordered `agent_fallback_models` list. Sequential, not fused: no multi-model ensemble exists. A candidate that would send the conversation somewhere the primary would not — a cloud API standing in for a local model, or the other way round — is skipped by design and named in the transcript.
-- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 24 focus areas (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates` — with 17 panels reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
+- **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 25 focus areas (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates` — with 17 panels reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
 - **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold.
@@ -114,7 +114,7 @@ Interactive TUI panels and workflows live in the [`images/`](images/) directory:
 - Canonical transcript persisted under `.xencode/cache/transcript/`, with a raw snapshot copied before any rewrite.
 
 ### Developer Experience
-- **Rust ratatui TUI** (primary) — 24 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more.
+- **Rust ratatui TUI** (primary) — 25 focus areas: chat, explorer, editor, model selector, settings, code review, PR review, git commit, ByteBot agent, collaboration hub, background tasks, worktrees, insights, provider health, performance dashboard, project analyzer, feature navigator and more.
 - **The seven panels that used to play recordings are real** (Milestone J):
   - *Security auditor* — `Enter` walks the workspace with the same file list `xencode analyze` uses and runs the pattern scanner per file, streaming findings and finishing with real totals; unreadable files and a failed walk surface as their own log lines.
   - *Performance profiler* — this process's CPU (two `/proc/self/stat` reads 250 ms apart) and resident memory, the session's own average turn latency and tokens/s, per-provider health latency, and the last rows of `.xencode/cache/metrics.jsonl` (a row cut off by a crash is skipped, the rows before it still count). A gauge with no data renders `n/a`.
@@ -456,6 +456,17 @@ flowchart TD
   (`mouse_capture`, on by default) hands it back on the next frame and keeps the
   refusal for next time; `xencode config set mouse_capture off` says the same
   thing from the shell.
+- **Why the screen is arranged this way, on one chord.** `Ctrl+0` lists every
+  change the arrangement has been through since this session opened, oldest
+  first, each named by the ask behind it — `Ctrl+U cycled to chat-first`,
+  `dragged the Code / Chat divider 6 cells, took 5`, `Ctrl+T put the terminal
+  strip on the screen`. `Enter` opens a row into the pane widths before and
+  after it, and the newest row is the screen in front of you. Two things are
+  not on it: a keystroke that moved nothing (`Alt+Left` past a pane's minimum
+  adds no row), and an overlay — the agent stack, a permission prompt — which
+  covers the arrangement instead of changing it. The list is session memory;
+  nothing of it reaches the disk, because `layout.json` records geometry and
+  focus only.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
@@ -589,7 +600,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1669 passing)
+cargo test                          # Full workspace suite (1692 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

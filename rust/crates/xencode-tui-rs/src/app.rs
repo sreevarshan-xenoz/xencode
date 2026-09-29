@@ -277,8 +277,18 @@ pub struct Drag {
     pub boundary: crate::view::Boundary,
     /// Column the button went down on.
     pub anchor: i16,
-    /// Points the tree has already been moved by, for this drag.
+    /// Points the arrangement has actually accepted, for this drag.
     pub paid: i16,
+    /// How far the pointer travelled from `anchor`, whether or not the
+    /// arrangement took it. Kept beside `paid` because the difference between
+    /// the two is the pull the user felt the line refuse, and `V-9` records
+    /// both rather than only the half that moved.
+    pub cells: i16,
+    /// The two panes the line separates, named when the button went down —
+    /// the arrangement has moved by the time the hand lets go, and the row
+    /// should say what the hand was between. `None` when the pair has no name
+    /// a reader would use, which the row says rather than invents.
+    pub divider: Option<String>,
 }
 
 pub struct App<'a> {
@@ -369,6 +379,24 @@ pub struct App<'a> {
     /// The divider under the pointer with no button held, which is what makes
     /// the line worth looking at before it is grabbed (`V-7`).
     pub boundary_hover: Option<crate::view::Boundary>,
+    /// Every arrangement change this session, oldest first, each with the ask
+    /// that caused it (`V-9`). Session memory: it answers "why is this pane
+    /// here" about the screen in front of the user, and a list about a screen
+    /// that no longer exists is not worth a file. See
+    /// [`crate::transitions`] for why this is not a fourth thing on disk.
+    pub layout_log: Vec<crate::transitions::Transition>,
+    /// When the session opened, so the log is stamped in elapsed time rather
+    /// than wall-clock time — two runs of the same keystrokes then produce the
+    /// same rows, which a clock would prevent.
+    pub session_opened_at: f64,
+    /// Whether the arrangement on screen came back from last session's file
+    /// (`V-6`). The opening row of the log says so, and the app knows it from
+    /// the restore it performed rather than from guessing off the disk.
+    pub layout_restored: bool,
+    /// The row and the scroll of the layout history panel.
+    pub layout_selected: usize,
+    pub layout_detail: bool,
+    pub layout_scroll: usize,
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
@@ -1830,19 +1858,30 @@ impl<'a> App<'a> {
         // build cannot read is said out loud — a toast on the first frame —
         // rather than silently leaving the user on the preset they did not
         // ask for.
-        match crate::arrangement::load_into(&mut app) {
+        let restored = match crate::arrangement::load_into(&mut app) {
             crate::arrangement::Restored::Skipped(why) => {
-                app.push_toast(crate::toast::ToastKind::Warning, why)
+                app.push_toast(crate::toast::ToastKind::Warning, why);
+                false
             }
-            crate::arrangement::Restored::Stale => app.push_toast(
-                crate::toast::ToastKind::Info,
-                format!(
-                    "saved layout dropped: {} is not the configured layout",
-                    crate::arrangement::ARRANGEMENT_FILE
-                ),
-            ),
-            _ => {}
-        }
+            crate::arrangement::Restored::Stale => {
+                app.push_toast(
+                    crate::toast::ToastKind::Info,
+                    format!(
+                        "saved layout dropped: {} is not the configured layout",
+                        crate::arrangement::ARRANGEMENT_FILE
+                    ),
+                );
+                false
+            }
+            crate::arrangement::Restored::Applied => true,
+            crate::arrangement::Restored::Nothing => false,
+        };
+        // V-9: the list of changes will start with the arrangement the session
+        // found, so "why is this pane here" has an answer that predates the
+        // user's own keystrokes — a restored tree says so, and a configured
+        // preset says that instead. The row itself waits for the first frame,
+        // which is the first moment the screen has a size to describe.
+        app.layout_restored = restored;
         app
     }
 
@@ -1916,11 +1955,17 @@ impl<'a> App<'a> {
         let Some(boundary) = crate::view::boundary_at(&tree, area, row, column) else {
             return false;
         };
+        // Named now, at the press, because the panes either side of the line
+        // are what the hand is between at that moment — by the release the
+        // arrangement has moved (`V-9`).
+        let divider = crate::view::divider_pair(&tree, &boundary, area);
         self.boundary_hover = Some(boundary.clone());
         self.drag = Some(Drag {
             boundary,
             anchor: column as i16,
             paid: 0,
+            cells: 0,
+            divider,
         });
         true
     }
@@ -1939,6 +1984,13 @@ impl<'a> App<'a> {
         let total = column as i16 - grab.anchor;
         if total.abs() < crate::view::DRAG_THRESHOLD_CELLS {
             return false;
+        }
+        // The furthest the hand has gone, kept whether or not this event moved
+        // anything: a divider pinned at its minimum travels under a pointer
+        // that is still moving, and `V-9` reports both numbers because the gap
+        // between them is what the user felt.
+        if let Some(drag) = self.drag.as_mut() {
+            drag.cells = total;
         }
         self.promote_layout_tree();
         let area = self.last_body_area;
@@ -1966,7 +2018,30 @@ impl<'a> App<'a> {
     /// because that is the last event of a drag and the only sane moment to
     /// spend a disk write on one.
     pub(crate) fn release_drag(&mut self) -> bool {
-        self.drag.take().is_some()
+        self.end_drag()
+    }
+
+    /// End the held divider, by whatever route, and write down what it did
+    /// (`V-9`).
+    ///
+    /// Both endings come through here: the release the terminal reported, and
+    /// the motion with no button held that stands in for one when an emulator
+    /// never sent the release (`V-7`). Either way a change that happened and
+    /// was not recorded is the one failure a list of changes exists to avoid.
+    /// A drag the clamps refused outright wrote nothing down, because it
+    /// changed nothing.
+    pub(crate) fn end_drag(&mut self) -> bool {
+        let Some(grab) = self.drag.take() else {
+            return false;
+        };
+        if grab.paid != 0 {
+            self.note_layout_change(crate::transitions::Trigger::DividerDrag {
+                divider: grab.divider,
+                cells: grab.cells,
+                points: grab.paid,
+            });
+        }
+        true
     }
 
     /// Move the hover marker to the divider under the pointer, if any (`V-7`).
@@ -1975,7 +2050,7 @@ impl<'a> App<'a> {
     /// never reported would otherwise leave a line highlighted on a screen
     /// nobody is holding.
     pub(crate) fn hover_boundary(&mut self, row: u16, column: u16) {
-        self.drag = None;
+        self.end_drag();
         let area = self.last_body_area;
         let tree = self.body_tree(area);
         self.boundary_hover = crate::view::boundary_at(&tree, area, row, column);
@@ -1989,6 +2064,102 @@ impl<'a> App<'a> {
             (None, Some(hover)) => Some((hover, false)),
             (None, None) => None,
         }
+    }
+
+    /// The arrangement on screen, in one line — what [`crate::transitions`]
+    /// records as the result of an ask, and the answer to "why is this pane
+    /// here".
+    ///
+    /// Name, then every pane the tree actually shows with the box it was drawn
+    /// into, then the focused one. The tree is the one the frame draws, read at
+    /// the last body area, so a terminal strip the screen is too short to hold
+    /// is missing from the line for the same reason it is missing from the
+    /// screen: one geometry, the `E4-02` rule, read here rather than described
+    /// separately. The sizes are in it because the line is what the detail view
+    /// shows a change against. The focused pane is the body's (`last_body_focus`),
+    /// not `focus`: opening this very panel moves `focus` to the overlay, and an
+    /// inspection that changed what it inspects would be a joke. An overlay open
+    /// on top of the body is otherwise not in the line either — it is not the
+    /// arrangement, and it leaves when it is closed.
+    pub fn arrangement_line(&self) -> String {
+        let area = self.last_body_area;
+        let tree = self.body_tree(area);
+        let panes: Vec<String> = crate::view::render(&tree, area)
+            .iter()
+            .map(|(pane, rect)| format!("{} {}x{}", pane.slot.word(), rect.width, rect.height))
+            .collect();
+        let name = self
+            .active_view
+            .clone()
+            .unwrap_or_else(|| self.config.layout.clone());
+        format!(
+            "{name} · {} → {}",
+            panes.join(", "),
+            self.last_body_focus.display_name()
+        )
+    }
+
+    /// The same arrangement in a form for comparing rather than reading
+    /// (`V-9`): the name, the tree's own encoding, the focused pane. See
+    /// [`crate::transitions::Transition::signature`] for why the drawn boxes
+    /// are the wrong thing to compare.
+    pub fn arrangement_signature(&self) -> String {
+        let tree = self.body_tree(self.last_body_area);
+        let name = self
+            .active_view
+            .clone()
+            .unwrap_or_else(|| self.config.layout.clone());
+        format!(
+            "{name} {} → {}",
+            serde_json::to_string(&tree).unwrap_or_default(),
+            self.last_body_focus.display_name()
+        )
+    }
+
+    /// Write down that the arrangement changed and what asked for it (`V-9`).
+    ///
+    /// Every layout mutation calls this after it has finished, so the row
+    /// describes the screen as it now is rather than the intention that
+    /// preceded it. A change that left the arrangement exactly as the previous
+    /// row described it is dropped: a resize the clamps refused, or a strip the
+    /// window is too short to hold, is not a thing that happened to the
+    /// arrangement, and a list full of those would hide the ones that were.
+    pub fn note_layout_change(&mut self, trigger: crate::transitions::Trigger) {
+        let after = self.arrangement_line();
+        let signature = self.arrangement_signature();
+        let previous = self
+            .layout_log
+            .last()
+            .map(|row| (row.after.clone(), row.signature.clone()));
+        crate::transitions::record(
+            &mut self.layout_log,
+            crate::transitions::Transition {
+                at: current_timestamp() - self.session_opened_at,
+                trigger,
+                before: match &previous {
+                    Some((line, _)) => line.clone(),
+                    None => after.clone(),
+                },
+                after,
+                signature,
+            },
+            previous.as_ref().map(|(_, key)| key.as_str()),
+        );
+    }
+
+    /// The log's opening row: the arrangement the session found (`V-9`).
+    ///
+    /// Written by the first frame, because that is the first moment the body
+    /// has a size to describe — a first row recorded at construction would say
+    /// the screen held no panes in no space, which is the one row in the list a
+    /// reader most wants to be true. Once only: the log is appended to and
+    /// never emptied, so an empty list means nothing has been drawn yet.
+    pub fn note_session_opened(&mut self) {
+        if !self.layout_log.is_empty() {
+            return;
+        }
+        let restored = self.layout_restored;
+        self.note_layout_change(crate::transitions::Trigger::SessionOpened { restored });
     }
 
     /// The agent stack's panes, rebuilt from live state on every draw: one
@@ -2030,6 +2201,11 @@ impl<'a> App<'a> {
             std::path::PathBuf::new(),
         );
         app.persist_config = false;
+        // The opening row of the layout log is deliberately not written here:
+        // a real session writes it on its first frame, once the body has a
+        // size. A test that wants it gives the app a body area and calls
+        // [`App::note_session_opened`], which is the same order events happen
+        // in on a real terminal.
         app
     }
 
@@ -2162,6 +2338,12 @@ impl<'a> App<'a> {
             last_body_area: ratatui::layout::Rect::default(),
             drag: None,
             boundary_hover: None,
+            layout_log: Vec::new(),
+            session_opened_at: now,
+            layout_restored: false,
+            layout_selected: 0,
+            layout_detail: false,
+            layout_scroll: 0,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
@@ -12519,6 +12701,7 @@ mod tests {
         let mut app = App::for_tests();
         app.focus = focus;
         app.last_body_area = ratatui::layout::Rect::new(0, 1, 100, 22);
+        app.note_session_opened();
         app
     }
 
@@ -12663,5 +12846,62 @@ mod tests {
             app.boundary_hover.is_none(),
             "and the pointer is over content, not a line"
         );
+    }
+
+    /// `V-9`: a drag by hand is written down once, at the release, with the
+    /// divider named by the panes it separates and both numbers the hand
+    /// knows about — how far it went and how much the line gave.
+    #[test]
+    fn a_dragged_divider_is_written_down_once_with_both_numbers() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        let rows = app.layout_log.len();
+        app.grab_boundary(area.y + 3, seam);
+        // Ten cells, all of them allowed: the chat column has room to give.
+        assert!(app.drag_to(seam + 10));
+        assert!(app.release_drag());
+        assert_eq!(app.layout_log.len(), rows + 1, "one gesture, one row");
+        let newest = app.layout_log.last().unwrap();
+        assert_eq!(
+            newest.trigger.words(),
+            "dragged the Code / Chat divider 10 cells, took 10"
+        );
+        assert_eq!(newest.after, app.arrangement_line());
+        let first_drag = newest.after.clone();
+
+        // Further than the clamps allow: the row says the travel it was refused
+        // as well as what it took, because the gap is the thing that was felt.
+        app.grab_boundary(area.y + 3, editor_seam(&app));
+        assert!(app.drag_to(area.x + area.width));
+        assert!(app.release_drag());
+        let clamped = app.layout_log.last().unwrap();
+        assert_ne!(clamped.after, first_drag, "and the screen did move");
+        match &clamped.trigger {
+            crate::transitions::Trigger::DividerDrag { cells, points, .. } => {
+                assert!(
+                    *cells > *points,
+                    "the line stopped short of the hand: {} cells, {} points",
+                    cells,
+                    points
+                );
+                assert!(*points > 0, "and it still gave what it could");
+            }
+            other => panic!("the row should name a drag, not {}", other.words()),
+        }
+    }
+
+    #[test]
+    fn a_press_that_juddered_on_the_line_is_not_a_change() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        let rows = app.layout_log.len();
+        let line = app.arrangement_line();
+        app.grab_boundary(area.y + 3, seam);
+        assert!(!app.drag_to(seam + 1), "one cell is inside the divider");
+        assert!(app.release_drag());
+        assert_eq!(app.layout_log.len(), rows, "nothing was written");
+        assert_eq!(app.arrangement_line(), line, "nothing moved");
     }
 }

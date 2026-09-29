@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — why the screen is arranged this way
+
+`Ctrl+0` opens a list of every change the window arrangement has been through
+since this session opened, oldest first, each row named by the ask that caused
+it: `Ctrl+U cycled to chat-first`, `dragged the Code / Chat divider 6 cells,
+took 5`, `Ctrl+T put the terminal strip on the screen`, `Ctrl+1 recalled the
+view Code`. `↑`/`↓` pick a row, `Enter` opens it into what the screen was
+before and what it is now — panes named with their own widths, so a column you
+pulled wider reads wider in the row — and `Esc` closes it. The list starts with
+the arrangement the session found, saying whether it came back from last
+session's file or was rendered from the configured layout, and its newest row
+is always the screen in front of you. Reading the list changes nothing: no
+pane moves, no ratio shifts, nothing is written.
+
+Two kinds of thing are deliberately absent. A keystroke that moved nothing is
+not a change: `Alt+Left` pressed past a pane's minimum adds no row, and a
+terminal strip asked for on a window too short to hold it is remembered as an
+ask but not listed as a rearrangement. And an overlay is not the arrangement —
+the agent stack `Ctrl+N` puts over the body, a permission prompt — because it
+covers the screen for a moment and leaves it. The one question this answers is
+about the panes, and a list that also logged every popup stops answering it.
+
+The list is session memory. It dies with the session, and nothing about it
+reaches the disk: `layout.json` still records only geometry and focus. That is
+deliberate — the panel answers "why is this pane here" about the screen you are
+looking at, and a log of why, kept across restarts, would describe a screen
+that no longer exists.
+
+One terminal fact worth knowing: `Ctrl+0`, like `Ctrl+1`…`Ctrl+9` and
+`Ctrl+Shift+<digit>` before it, has no control byte of its own — the byte a
+terminal sends for `Ctrl+0` is the byte that means `Ctrl+P`. The chord is
+reachable only when the terminal sends it as an escape sequence instead (the
+kitty keyboard protocol's `CSI 48;5u`), which is how it was verified here: over
+a raw PTY that sequence opened this panel and the plain byte opened the project
+analyzer. A terminal that speaks the sequence for the saved views speaks it for
+this panel too; one that does not leaves both unreachable, with `Ctrl+T`,
+`Ctrl+U`, `Alt+Left`/`Alt+Right` and the drag still doing all the rearranging.
+
 ### Added — resizing a layout by hand
 
 The line between two side-by-side panes is now a handle: it lights as the
