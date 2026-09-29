@@ -197,7 +197,10 @@ Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
 keybinding help overlay. `Ctrl+U` cycles the body layout (classic →
 chat-first → zen, then any layouts you declared in `layout_templates`);
-`Alt+Left`/`Alt+Right` grows or shrinks the focused pane by five points.
+`Alt+Left`/`Alt+Right` grows or shrinks the focused pane by five points, and a
+divider between two side-by-side panes drags to do the same by hand — dragging
+needs the mouse, and **Settings → `Mouse Capture`** gives it back to the
+terminal when a plain drag should select text instead.
 The same choice lives on the Settings panel (`s`) and the same list drives
 both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
 everything persists to `~/.xencode/config.json`. A layout you resized comes

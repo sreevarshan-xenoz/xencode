@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — resizing a layout by hand
+
+The line between two side-by-side panes is now a handle: it lights as the
+pointer crosses it, and dragging it moves the boundary the way `Alt+Left` and
+`Alt+Right` do, clamped so the two panes cannot shrink past their minimums. A
+press does not steal focus, and a drag commits nothing until the second cell —
+a flick of a single cell leaves the screen and the stored layout exactly as
+they were, which is what makes a pointer that lands near a line harmless. On
+release the arrangement is written to `~/.xencode/layout.json`, so a layout you
+pulled apart by hand comes back at the same widths after a restart. Panes
+stacked one above the other are not handles: a group boundary that separates
+rows has no width to give, and reading it as one would take away the line a
+terminal's own text selection sits on.
+
+Reading the mouse is a trade, and xencode now lets you call it off. **Settings
+→ `Mouse Capture`** (config key `mouse_capture`, on by default) decides whether
+the program asks the terminal for mouse events at all; switching it off takes
+effect on the next frame and is remembered, so the terminal's own drag-select
+and shift-select of text come back without quitting. With it off there is no
+wheel scrolling, no clicking a pane to focus it and no divider drag — every one
+of those has a keyboard equivalent (`↑`/`↓`, `Tab`, the resize chords), and
+`xencode config set mouse_capture off` sets the same key from the shell.
+
 ### Added — named views on one chord
 
 `Ctrl+1`…`Ctrl+9` now switch between saved arrangements — a *view* is a pane

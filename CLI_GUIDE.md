@@ -44,7 +44,11 @@ keybinding overlay; the authoritative list lives there. Essentials:
 commands) · `m` model selector · `s` settings · `e` edit focused file ·
 `Ctrl+R` AI review · `Ctrl+Y` PR review · `Ctrl+K` background tasks · `Ctrl+O` worktrees · `Ctrl+L` insights · `Ctrl+B` ByteBot ·
 `Ctrl+H` health check · `Ctrl+G` git refresh · `Ctrl+W` close panel ·
-`Ctrl+C` or `q` quit. Slash commands: `/init`, `/ctx`, `/advise`,
+`Ctrl+C` or `q` quit. If the terminal has the mouse, a divider between two
+side-by-side panes drags to resize them; if you want the terminal's own
+drag-select of text back, `xencode config set mouse_capture off` hands the
+mouse over (the same row lives on the Settings panel, and it takes effect on
+the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
 `/bytebot`, `/plan` (pin or clear the agent's todo list),
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
@@ -1557,6 +1561,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `rounded_borders` | bool | rounded panel corners |
 | `show_scrollbars` | bool | scrollbars on chat & explorer panes |
 | `show_line_numbers` | bool | editor line-number gutter + current-line highlight |
+| `mouse_capture` | bool | whether xencode asks the terminal for the mouse at all: on (default) reads the wheel, pane clicks and divider drags; off hands them back, which is how a terminal's own drag-select of text comes to work again. Takes effect mid-session from the TUI's `Mouse Capture` row, and next start from here |
 | `agent_approval` | string | agent tool-approval mode: `ask`, `edit-allow`, `all-allow` (unknown → `ask`) |
 | `agent_max_rounds` | integer | assistant→tool rounds allowed per chat turn before the model must answer in prose (`1`–`64`, default `16`) |
 | `agent_command_timeout` | integer | seconds the agent's foreground `run_command` may take before it is killed (`1`–`600`, default `30`); slow work belongs in `background_start` |

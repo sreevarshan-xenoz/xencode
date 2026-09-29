@@ -263,6 +263,24 @@ pub(crate) struct AgentRun {
     pub(crate) session: Option<xencode_context_rs::SessionWriter>,
 }
 
+/// A pane-boundary divider the mouse is holding (`V-7`).
+///
+/// The anchor is the column the button went down on, and travel is measured
+/// from it rather than from the last motion event — a column too thin to be
+/// worth a whole percentage point carries into the next one instead of being
+/// thrown away. `paid` is what the arrangement has actually accepted, so a
+/// divider the clamp pinned keeps being asked, and comes back under the hand
+/// the moment the hand returns inside the range.
+#[derive(Debug, Clone)]
+pub struct Drag {
+    /// Which pair of panes the grabbed line separates.
+    pub boundary: crate::view::Boundary,
+    /// Column the button went down on.
+    pub anchor: i16,
+    /// Points the tree has already been moved by, for this drag.
+    pub paid: i16,
+}
+
 pub struct App<'a> {
     pub focus: FocusArea,
     /// Chat input box (multiline-capable; Enter submits, Alt+Enter/Ctrl+J
@@ -344,6 +362,13 @@ pub struct App<'a> {
     /// Body area of the last draw, so a resize chord can promote the current
     /// preset to a tree without guessing dimensions.
     pub last_body_area: ratatui::layout::Rect,
+    /// The divider the left button is holding (`V-7`). Set when a press lands
+    /// on one, cleared when the button comes up or the pointer moves without
+    /// it — never by a resize, so a drag that the clamp refuses still ends.
+    pub drag: Option<Drag>,
+    /// The divider under the pointer with no button held, which is what makes
+    /// the line worth looking at before it is grabbed (`V-7`).
+    pub boundary_hover: Option<crate::view::Boundary>,
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
@@ -1859,6 +1884,113 @@ impl<'a> App<'a> {
         crate::view::hit_test_tree_point(&self.body_tree(area), area, row, column)
     }
 
+    /// Put a resizable tree on screen without moving a pixel (`V-3`, and the
+    /// same promotion a boundary drag needs before it can resize anything).
+    ///
+    /// A preset or a config template is replayed through the tree builder at
+    /// the geometry the frame last drew, so the first resize only takes over
+    /// future geometry. An arrangement that is already a tree is left alone.
+    pub(crate) fn promote_layout_tree(&mut self) {
+        if self.custom_view.is_some() {
+            return;
+        }
+        let tree = crate::templates::tree(
+            &self.config.layout_templates,
+            &self.config.layout,
+            self.last_body_area,
+            self.show_terminal,
+            self.last_body_focus,
+        );
+        self.custom_view = Some(crate::view::ViewState::new(tree));
+    }
+
+    /// Take the divider under (`row`, `column`), and say whether that cell is
+    /// one at all (`V-7`).
+    ///
+    /// A grab is deliberately not a click-to-focus: the two cells of a divider
+    /// are border, not content, and neither pane beside the line is what a hand
+    /// aimed at it was pointing at.
+    pub(crate) fn grab_boundary(&mut self, row: u16, column: u16) -> bool {
+        let area = self.last_body_area;
+        let tree = self.body_tree(area);
+        let Some(boundary) = crate::view::boundary_at(&tree, area, row, column) else {
+            return false;
+        };
+        self.boundary_hover = Some(boundary.clone());
+        self.drag = Some(Drag {
+            boundary,
+            anchor: column as i16,
+            paid: 0,
+        });
+        true
+    }
+
+    /// Follow the pointer to `column` with the grabbed divider, and report
+    /// whether the layout moved (`V-7`).
+    ///
+    /// Nothing is committed until the hand has left the divider's own two
+    /// cells, which is what keeps a press that juddered from resizing the
+    /// window. After that, travel counts from where the button went down, so a
+    /// column too thin for a whole percentage point carries into the next.
+    pub(crate) fn drag_to(&mut self, column: u16) -> bool {
+        let Some(grab) = self.drag.clone() else {
+            return false;
+        };
+        let total = column as i16 - grab.anchor;
+        if total.abs() < crate::view::DRAG_THRESHOLD_CELLS {
+            return false;
+        }
+        self.promote_layout_tree();
+        let area = self.last_body_area;
+        let Some(view) = self.custom_view.as_ref() else {
+            return false;
+        };
+        let step = crate::view::drag_points(&view.root, &grab.boundary, total, area) - grab.paid;
+        let Some(view) = self.custom_view.as_mut() else {
+            return false;
+        };
+        let moved = crate::view::move_boundary(&mut view.root, &grab.boundary, step);
+        if moved == 0 {
+            return false;
+        }
+        if let Some(drag) = self.drag.as_mut() {
+            drag.paid += moved;
+        }
+        self.arrangement_dirty = true;
+        true
+    }
+
+    /// Let go of a divider, and say whether there was one to let go of.
+    ///
+    /// The arrangement is not written here: the caller saves on release,
+    /// because that is the last event of a drag and the only sane moment to
+    /// spend a disk write on one.
+    pub(crate) fn release_drag(&mut self) -> bool {
+        self.drag.take().is_some()
+    }
+
+    /// Move the hover marker to the divider under the pointer, if any (`V-7`).
+    ///
+    /// Motion with no button held also ends a drag: a release the emulator
+    /// never reported would otherwise leave a line highlighted on a screen
+    /// nobody is holding.
+    pub(crate) fn hover_boundary(&mut self, row: u16, column: u16) {
+        self.drag = None;
+        let area = self.last_body_area;
+        let tree = self.body_tree(area);
+        self.boundary_hover = crate::view::boundary_at(&tree, area, row, column);
+    }
+
+    /// The divider to draw as grabbable — the one being dragged, else the one
+    /// under the pointer — and whether a hand is on it (`V-7`).
+    pub(crate) fn active_boundary(&self) -> Option<(&crate::view::Boundary, bool)> {
+        match (&self.drag, &self.boundary_hover) {
+            (Some(drag), _) => Some((&drag.boundary, true)),
+            (None, Some(hover)) => Some((hover, false)),
+            (None, None) => None,
+        }
+    }
+
     /// The agent stack's panes, rebuilt from live state on every draw: one
     /// per spawned subagent run, one for the ByteBot run, one for queued
     /// approvals. Always three, idle ones saying so — switching never lands on
@@ -2028,6 +2160,8 @@ impl<'a> App<'a> {
             active_view: None,
             arrangement_dirty: false,
             last_body_area: ratatui::layout::Rect::default(),
+            drag: None,
+            boundary_hover: None,
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
@@ -7739,7 +7873,10 @@ pub fn should_draw(signals: &FrameSignals) -> bool {
         || signals.activity
 }
 
-pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+/// The TUI frame loop. `B` has to be writable because the mouse-capture
+/// setting (`V-7`) takes effect by asking the terminal for, or against, mouse
+/// events — which is a write to the same place the frames go.
+pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
@@ -7790,7 +7927,30 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     // The first frame always draws: there is no previous frame to be
     // current with, and a blank terminal that waits for an event is a hang.
     let mut first_frame = true;
+    // Whether the terminal has been asked for mouse events, `None` until it
+    // has been asked either way (`V-7`).
+    let mut capture: Option<bool> = None;
     loop {
+        // The mouse belongs to xencode only while the config says it does.
+        // Applied here rather than at process start because the row is on the
+        // Settings panel, where a setting that needed a restart to mean
+        // anything would be a lie about itself.
+        if capture != Some(app.config.mouse_capture) {
+            let want = app.config.mouse_capture;
+            let _ = if want {
+                crossterm::execute!(terminal.backend_mut(), crossterm::event::EnableMouseCapture)
+            } else {
+                crossterm::execute!(
+                    terminal.backend_mut(),
+                    crossterm::event::DisableMouseCapture
+                )
+            };
+            // Whatever the pointer was doing is over: no further motion or
+            // release events can arrive to say otherwise.
+            app.drag = None;
+            app.boundary_hover = None;
+            capture = Some(want);
+        }
         // Event-driven frames (V-8): the loop used to draw unconditionally at
         // ~30 fps. Now each iteration reports what it observed, and the frame
         // is drawn only when something changed, something animates, or a toast
@@ -8455,25 +8615,36 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                         _ => {}
                     },
                     MouseEventKind::Down(MouseButton::Left) => {
-                        let size = terminal.size()?;
-                        // Same outer split as ui::draw: header(1) + body + status(1).
-                        let body_area = ratatui::layout::Rect::new(
-                            0,
-                            1,
-                            size.width,
-                            size.height.saturating_sub(2),
-                        );
-                        match app.body_hit_test(body_area, mouse.row, mouse.column) {
-                            Some(FocusArea::FileExplorer) => {
-                                app.focus = FocusArea::FileExplorer;
-                                let row = mouse.row.saturating_sub(2) as usize;
-                                if row < app.file_tree.len() {
-                                    app.selected_file = row;
+                        // One geometry: the divider check and the focus check
+                        // both ask the tree the frame just drew.
+                        let body_area = app.last_body_area;
+                        if !app.grab_boundary(mouse.row, mouse.column) {
+                            match app.body_hit_test(body_area, mouse.row, mouse.column) {
+                                Some(FocusArea::FileExplorer) => {
+                                    app.focus = FocusArea::FileExplorer;
+                                    let row = mouse.row.saturating_sub(2) as usize;
+                                    if row < app.file_tree.len() {
+                                        app.selected_file = row;
+                                    }
                                 }
+                                Some(target) => app.focus = target,
+                                None => {}
                             }
-                            Some(target) => app.focus = target,
-                            None => {}
                         }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        // Only a press that landed on a divider gets this far:
+                        // `drag_to` does nothing while `drag` is empty, so a
+                        // drag that started inside a pane changes no geometry.
+                        app.drag_to(mouse.column);
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if app.release_drag() && app.arrangement_dirty {
+                            let _ = app.save_arrangement();
+                        }
+                    }
+                    MouseEventKind::Moved => {
+                        app.hover_boundary(mouse.row, mouse.column);
                     }
                     _ => {}
                 },
@@ -12339,6 +12510,158 @@ mod tests {
             out.status.success(),
             "git {args:?}: {}",
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// An app with a body already drawn, which is the only geometry a drag can
+    /// be measured against (`V-7`).
+    fn app_with_body(focus: FocusArea) -> App<'static> {
+        let mut app = App::for_tests();
+        app.focus = focus;
+        app.last_body_area = ratatui::layout::Rect::new(0, 1, 100, 22);
+        app
+    }
+
+    /// The column of the divider between the editor and the chat column in the
+    /// layout actually on screen, asked of the geometry rather than hardcoded —
+    /// a test that named the column itself would still pass if the line moved.
+    fn editor_seam(app: &App) -> u16 {
+        app.body_layout(app.last_body_area)
+            .chat
+            .expect("a chat pane")
+            .left()
+    }
+
+    #[test]
+    fn a_press_on_a_divider_grabs_it_without_moving_focus() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let seam = editor_seam(&app);
+        let before = app.focus;
+        assert!(
+            app.grab_boundary(app.last_body_area.y + 3, seam),
+            "the seam between two panes is a divider"
+        );
+        assert_eq!(app.focus, before, "a grab is not a click on a pane");
+        assert!(app.drag.is_some());
+        assert_eq!(
+            app.boundary_hover,
+            app.drag.as_ref().map(|drag| drag.boundary.clone()),
+            "and the line is marked as soon as it is held"
+        );
+    }
+
+    #[test]
+    fn a_press_in_a_pane_grabs_nothing() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let seam = editor_seam(&app);
+        assert!(
+            !app.grab_boundary(app.last_body_area.y + 3, seam + 12),
+            "twelve columns inside a pane is content"
+        );
+        assert!(app.drag.is_none());
+        assert!(app.boundary_hover.is_none());
+    }
+
+    #[test]
+    fn a_drag_commits_only_once_the_hand_has_left_the_line() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        let before = app.body_layout(area).editor.unwrap().width;
+        app.grab_boundary(area.y + 3, seam);
+        // One cell of judder, inside the divider's own two columns: nothing.
+        assert!(!app.drag_to(seam + 1));
+        assert_eq!(app.body_layout(area).editor.unwrap().width, before);
+        assert!(!app.arrangement_dirty, "and nothing to save");
+        // Two cells is a resize, and the pane on the pointer's side grows.
+        assert!(app.drag_to(seam + 2));
+        assert!(
+            app.body_layout(area).editor.unwrap().width > before,
+            "the editor widened"
+        );
+        assert!(app.arrangement_dirty, "the arrangement is worth keeping");
+    }
+
+    #[test]
+    fn a_drag_from_a_preset_resizes_the_tree_it_promoted() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        assert!(app.custom_view.is_none(), "a preset is on screen");
+        app.grab_boundary(area.y + 3, seam);
+        assert!(app.drag_to(seam + 10));
+        assert!(
+            app.custom_view.is_some(),
+            "the drag promoted the preset to an arrangement first"
+        );
+        let preset =
+            crate::layout::compute_layout(area, "classic", app.show_terminal, app.last_body_focus);
+        assert!(
+            app.body_layout(area).editor.unwrap().width > preset.editor.unwrap().width,
+            "and the ten cells came off the chat column, not the editor"
+        );
+    }
+
+    /// The root split's shares, read off the arrangement itself. Pixel widths
+    /// round; the numbers the tree stores are what a drag is really about.
+    fn root_shares(app: &App) -> Vec<ratatui::layout::Constraint> {
+        use crate::view::LayoutNode;
+        let LayoutNode::Split { parts, .. } =
+            &app.custom_view.as_ref().expect("an arrangement").root
+        else {
+            panic!("the root of an arrangement is a split");
+        };
+        parts.iter().map(|(_, share)| *share).collect()
+    }
+
+    #[test]
+    fn a_pinned_divider_comes_back_under_the_pointer_rather_than_short_of_it() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        app.grab_boundary(area.y + 3, seam);
+        // The chat column can give up twenty points before the minimum stops
+        // it, and no more, however far past the edge of the screen the hand goes.
+        assert!(app.drag_to(seam + 40));
+        assert_eq!(
+            root_shares(&app),
+            [
+                ratatui::layout::Constraint::Percentage(20),
+                ratatui::layout::Constraint::Percentage(70),
+                ratatui::layout::Constraint::Percentage(10),
+            ]
+        );
+        // Back to ten columns of travel: the divider is ten points wider than
+        // the preset, not twenty and not nothing. Travel the clamp refused was
+        // never credited, so it cannot come due on the way home.
+        assert!(app.drag_to(seam + 10));
+        assert_eq!(
+            root_shares(&app),
+            [
+                ratatui::layout::Constraint::Percentage(20),
+                ratatui::layout::Constraint::Percentage(60),
+                ratatui::layout::Constraint::Percentage(20),
+            ]
+        );
+    }
+
+    #[test]
+    fn letting_go_ends_the_drag_and_motion_without_it_ends_the_drag() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        let area = app.last_body_area;
+        let seam = editor_seam(&app);
+        app.grab_boundary(area.y + 3, seam);
+        assert!(app.release_drag());
+        assert!(app.drag.is_none());
+        assert!(!app.drag_to(seam + 20), "nothing is held any more");
+
+        app.grab_boundary(area.y + 3, seam);
+        // Motion with no button down means the release was never reported.
+        app.hover_boundary(area.y + 3, seam + 30);
+        assert!(app.drag.is_none());
+        assert!(
+            app.boundary_hover.is_none(),
+            "and the pointer is over content, not a line"
         );
     }
 }

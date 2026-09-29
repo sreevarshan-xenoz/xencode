@@ -470,6 +470,43 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(rect) = layout.input {
         draw_input(f, app, rect);
     }
+    draw_boundary_grab(f, app, area);
+}
+
+/// Paint the divider the pointer is on (`V-7`).
+///
+/// A terminal has no portable resize cursor — every shape `SetCursorStyle`
+/// names is an arrow, a text bar or a cross — so the line itself carries the
+/// message: held, it is a solid band in the accent colour; hovered, it lights
+/// up to say this border is not decoration. Only one line is ever painted, and
+/// only while a pointer is on it, so an idle screen looks exactly as it did.
+fn draw_boundary_grab(f: &mut Frame, app: &App, area: Rect) {
+    let Some((boundary, grabbed)) = app.active_boundary() else {
+        return;
+    };
+    let tree = app.body_tree(area);
+    let Some(rect) = crate::view::divider_rect(&tree, boundary, area) else {
+        return;
+    };
+    // A divider two cells wide at the edge of a body one cell wide is real
+    // geometry and nothing to paint: ratatui indexes out of its buffer.
+    let rect = rect.intersection(area);
+    if rect.area() == 0 {
+        return;
+    }
+    let style = if grabbed {
+        Style::default().bg(app.theme.accent)
+    } else {
+        Style::default().fg(app.theme.border_active)
+    };
+    let buffer = f.buffer_mut();
+    for row in rect.top()..rect.bottom() {
+        for column in rect.left()..rect.right() {
+            // A buffer indexes (x, y), not (row, column): the transposed pair
+            // runs off the end of the screen and panics inside ratatui.
+            buffer[(column, row)].set_style(style);
+        }
+    }
 }
 
 /// How a pane's border should read, in priority order.
@@ -1085,6 +1122,7 @@ fn setting_display(app: &App, idx: usize) -> String {
                 "Cache Enabled" => app.config.cache_enabled,
                 "Memory Enabled" => app.config.memory_enabled,
                 "Cloud Models" => app.config.allow_cloud_models,
+                "Mouse Capture" => app.config.mouse_capture,
                 _ => false,
             };
             if row.label == "Cloud Models" {

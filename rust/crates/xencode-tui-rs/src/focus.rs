@@ -200,6 +200,11 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
         kind: SettingKind::Toggle,
     },
     SettingRow {
+        label: "Mouse Capture",
+        section: "Display",
+        kind: SettingKind::Toggle,
+    },
+    SettingRow {
         label: "Agent Approval",
         section: "Agent",
         kind: SettingKind::Cycle(crate::agent_tools::APPROVAL_MODE_NAMES),

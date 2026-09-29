@@ -6,9 +6,12 @@
 //! it renders every `FocusArea` across a grid of small sizes and fails with the
 //! exact size/panel combinations that panicked.
 
-use ratatui::{backend::TestBackend, Terminal};
-use xencode_tui_rs::app::{App, FocusArea, UiMessage};
-use xencode_tui_rs::ui::draw;
+use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+use xencode_tui_rs::{
+    app::{App, Drag, FocusArea, UiMessage},
+    ui::draw,
+    view::Boundary,
+};
 
 /// Every overlay reachable from `draw`, plus the base layouts.
 const FOCI: &[(&str, FocusArea)] = &[
@@ -1168,5 +1171,73 @@ fn measured_panels_render_real_rows() {
     assert!(
         text.contains("n/a"),
         "latency has no measurement yet and must not render as 0: {text}"
+    );
+}
+
+/// The dividers a mouse could grab at one size, with the column of the press
+/// that would grab each. Found by asking the tree the frame just drew, which is
+/// the same question the app asks on a press.
+fn grabbable(area: Rect, tree: &xencode_tui_rs::view::LayoutNode) -> Vec<(u16, Boundary)> {
+    let row = area.top() + area.height / 2;
+    let mut found: Vec<(u16, Boundary)> = Vec::new();
+    for column in area.left()..area.right() {
+        if let Some(boundary) = xencode_tui_rs::view::boundary_at(tree, area, row, column) {
+            if !found.iter().any(|(_, seen)| *seen == boundary) {
+                found.push((column, boundary));
+            }
+        }
+    }
+    found
+}
+
+/// V-7: the grabbed line is painted straight into the buffer, which is the one
+/// draw path a size sweep reaches only if it grabs a line first. It wrote the
+/// buffer as `(row, column)` where ratatui indexes `(x, y)`, and a 110-column
+/// terminal took the index as off the end of the screen and panicked — the
+/// crash a pointer on a divider caused before it was caught by hand.
+#[test]
+fn a_grabbed_divider_renders_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    for &width in WIDTHS {
+        for &height in HEIGHTS {
+            // `last_body_area` is only real after a frame, and the frame needs
+            // the size, so the sweep asks the same question twice.
+            let probed = {
+                let mut probe = populated(FocusArea::ChatInput);
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|f| draw(f, &mut probe)).unwrap();
+                let area = probe.last_body_area;
+                grabbable(area, &probe.body_tree(area))
+            };
+            for (column, boundary) in probed {
+                for held in [true, false] {
+                    let mut app = populated(FocusArea::ChatInput);
+                    if held {
+                        app.drag = Some(Drag {
+                            boundary: boundary.clone(),
+                            anchor: column as i16,
+                            paid: 0,
+                        });
+                    } else {
+                        app.boundary_hover = Some(boundary.clone());
+                    }
+                    let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                        terminal.draw(|f| draw(f, &mut app)).unwrap();
+                    }));
+                    if drawn.is_err() {
+                        failures.push(format!(
+                            "{} at {width}x{height}, column {column}",
+                            if held { "held" } else { "hovered" }
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} grabbed-line draws panicked: {failures:#?}",
+        failures.len()
     );
 }

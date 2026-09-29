@@ -200,6 +200,17 @@ Panel-independent (Normal mode):
 | `e` | Code editor: start typing edits |
 | `↑ ↓` / `j k` | Scroll or move selection (all scrollable panels) |
 | Mouse wheel | Scroll the panel under the cursor |
+| Drag a divider | Resize the two panes it splits (side-by-side panes only). The line lights when the pointer is on it; nothing moves until the pointer leaves the divider's two cells, and a line clamped at its minimum stops while the pointer keeps going. |
+
+Reading the mouse costs something: while xencode asks the terminal for mouse
+events, a plain click-drag belongs to xencode and the terminal stops selecting
+text with it. The way back is **Settings → `Mouse Capture`** (config key
+`mouse_capture`, default on) — switch it off mid-session and xencode hands the
+mouse to the terminal on the next frame, so the terminal's own drag-select and
+shift-select work again, and the setting is remembered for the next start. With
+it off, scrolling, pane clicks and divider drags are gone until it is back on;
+every one of them has a keyboard equivalent (`Tab` for pane focus, `↑ ↓` for
+scroll, `Alt+Left` / `Alt+Right` for resize).
 
 Chat editing (after `i`):
 
@@ -306,6 +317,7 @@ Display settings (Settings panel rows, same keys as `xencode config set`):
 | `Rounded Borders` / `rounded_borders` | off | rounded panel corners |
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |
+| `Mouse Capture` / `mouse_capture` | on | xencode reads the wheel, pane clicks and divider drags; off hands the mouse back to the terminal, which is how a terminal's own drag-select comes back (see the note above the chat table) |
 | `Agent Approval` / `agent_approval` | `ask` | how the chat agent may use its tools: `ask` prompts before mutating tools, `edit-allow` auto-approves file edits but still prompts for shell, `all-allow` auto-approves everything inside the workspace (paths outside it, `.git/` and the config dir are always refused) |
 | `Command Timeout` / `agent_command_timeout` | 30 s | how long the agent's `run_command` may run before it is killed; the panel steps 5–300 s, `config set` accepts 1–600 |
 

@@ -142,16 +142,7 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// visible — it only takes over future geometry. A layout named in config
 /// promotes the same way, from its own shape.
 fn resize_focused_pane(app: &mut App, delta: i16) {
-    if app.custom_view.is_none() {
-        let tree = crate::templates::tree(
-            &app.config.layout_templates,
-            &app.config.layout,
-            app.last_body_area,
-            app.show_terminal,
-            app.last_body_focus,
-        );
-        app.custom_view = Some(crate::view::ViewState::new(tree));
-    }
+    app.promote_layout_tree();
     if let Some(view) = app.custom_view.as_mut() {
         crate::view::nudge_focused(&mut view.root, app.focus, delta);
         // V-6: the arrangement on screen is now worth restoring. The frame
@@ -1044,6 +1035,7 @@ fn settings_toggle(app: &mut App, label: &str) -> bool {
         "Cache Enabled" => &mut app.config.cache_enabled,
         "Memory Enabled" => &mut app.config.memory_enabled,
         "Cloud Models" => &mut app.config.allow_cloud_models,
+        "Mouse Capture" => &mut app.config.mouse_capture,
         _ => return false,
     };
     *flag = !*flag;
@@ -1068,6 +1060,20 @@ fn settings_step(app: &mut App, dir: i32) {
         }
         SettingKind::Toggle => {
             if settings_toggle(app, label) {
+                if label == "Mouse Capture" {
+                    // The row is the escape hatch for what the mouse costs, so
+                    // the cost is said at the keystroke rather than in a manual
+                    // nobody has open at the moment text will not select.
+                    app.push_toast(
+                        crate::toast::ToastKind::Info,
+                        if app.config.mouse_capture {
+                            "mouse on: wheel, clicks and divider drags are xencode's"
+                        } else {
+                            "mouse off: the terminal keeps its own text selection"
+                        }
+                        .to_string(),
+                    );
+                }
                 app.save_config();
             }
         }
@@ -2440,7 +2446,8 @@ mod tests {
                 "Layout",
                 "Rounded Borders",
                 "Show Scrollbars",
-                "Line Numbers"
+                "Line Numbers",
+                "Mouse Capture"
             ]
         );
         // I1-01: the agent policy row is a three-option Cycle in its own section.
