@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1669 tests passing, zero warnings (re-verified 2026-09-29)
+- [x] Workspace gates green — 16 crates, 1692 tests passing, zero warnings (re-verified 2026-09-29)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3110,7 +3110,7 @@ access problems** vs **expensive emulations of other editors**.
   high-contrast theme**, with ASCII glyph redundancy replacing the emoji that
   currently carries it (fact 18). **S**. Trap: focus is colour-only today, so
   the fallback needs a border-style-plus-label scheme, and that is an audit of
-  all 24 focus areas.
+  all 25 focus areas.
 - **UX-5 A WCAG contrast test over `ThemeColors`** — pure math, ≥4.5:1
   foreground/background, run in CI. **S**. It will fail immediately on the
   existing solarized and nord palettes; that is the point. Trap: semantic slots
@@ -4564,7 +4564,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 49 | "Explain This Repo" Command | new | QB-5 — HIGH-profile only, citation-gated: no claim without a `file:line` from the graph |
 | 50 | Developer Onboarding Mode | new | QB-6 — ordered read-out of AC-6's map + QB-4's rows + GH-4 hotspots; only the list is trustworthy, not the narration |
 | 51 | Repository Health Scorecard | narrowed | QB-4 — rows only where local data exists, folded into DB-6, zero LLM calls |
-| 52 | Engineering Dashboard | reject | The TUI already aggregates the honest subset across 24 focus areas; a new dashboard over broken sources is trash-in |
+| 52 | Engineering Dashboard | reject | The TUI already aggregates the honest subset across 25 focus areas; a new dashboard over broken sources is trash-in |
 | 53 | Multi-Repository Intelligence | narrowed | QX-1 — cross-repo **read** context only; edits stay per-repo because no CI can build both sides of an interface change |
 | 54 | Organization Graph | reject | Backstage's documented failure is ownership rot that only an org can force-sync. This box has two nodes |
 | 55 | Environment Graph | reject | Same: a graph over laptop + one Colab VM is a config file |
@@ -10884,6 +10884,83 @@ that rearranged itself can say so.
 trigger, and a pane opened by a state change names that state — with the wording
 rule from S-13 applied: a permission-related change says which kind of control it
 is, because a UI that overstates its own authority gives false assurance.
+  **Done 2026-09-29, on the first half of the done-when; the second half has no
+  subject yet.** `transitions.rs` is a `Vec<Transition>` held by `App`: one row
+  per arrangement change, each carrying the ask behind it as a `Trigger` and the
+  screen it left behind, with the list capped at 200 rows and the oldest dropped
+  — the end a reader has already scrolled past. `Ctrl+0` opens it as the
+  twenty-fifth focus area, `LayoutPanel`: oldest at the top, `Enter` on a row
+  opens the arrangement before and after it, and the newest row is the screen in
+  front of you. Opening, reading and closing it move nothing, which the live run
+  checked by comparing every divider column before and after.
+
+  A row's two halves are separate on purpose. `after` is for reading — the
+  layout name, then every pane with the box it was drawn into, then the focused
+  pane, from `view::render`, the same geometry the frame is built from (E4-02's
+  one-geometry rule), so a column pulled wider reads wider in the row. Dedup is
+  `signature`, the layout tree's own encoding, because the drawn boxes follow
+  the terminal's height as much as they follow the arrangement: with the
+  readable line as the comparison, a window the compositor resized looked like a
+  change the list had never recorded, and two tests failed on it. The opening row
+  is written by the first frame that knows a body area, not at construction, so
+  it says what the session found rather than `Files 0x0`, and it says whether the
+  arrangement came back from `layout.json` or was rendered from the configured
+  layout — the difference the question "why is this pane here" is actually asking
+  about on the first frame.
+
+  Two things are not rows, and both are tested rather than asserted in prose. A
+  keystroke that moved nothing adds nothing: `record` returns false when the
+  screen matches the previous row, so `Alt+Left` past a pane's minimum stays
+  silent (`a_keystroke_that_changed_nothing_is_not_a_row`,
+  `sizes_the_terminal_chose_are_not_a_change_in_the_arrangement`), and a terminal
+  strip the window cannot hold is not written down as a rearrangement
+  (`a_strip_the_screen_cannot_hold_is_not_written_down_as_a_change`). An overlay
+  is not the arrangement — the agent stack, a permission prompt — so it adds no
+  row (`an_overlay_opened_over_the_body_is_not_a_row`, which opens the stack over
+  the body and requires the log to be the length it was). S-13's wording rule is
+  applied to every trigger: a row names the control and what it did
+  (`Ctrl+U cycled to chat-first`, `dragged the Code / Chat divider 6 cells, took
+  5`), never a bare noun, and it reports the clamped figure beside the pointer's
+  travel rather than claiming the drag went where it was stopped.
+
+  The log is session memory. `layout.json` still holds version, name, focus,
+  view and active view — geometry and focus only — and there is no fourth file in
+  the config dir (`the_saved_arrangement_carries_no_log`: three rows in the
+  session, no row's words in the saved bytes). The panel says this by having
+  nothing to say about a previous session.
+
+  Guards watched failing, on the built binary rather than in prose: deleting the
+  signature comparison turns exactly three tests red —
+  `a_keystroke_that_changed_nothing_is_not_a_row`,
+  `sizes_the_terminal_chose_are_not_a_change_in_the_arrangement` and
+  `a_strip_the_screen_cannot_hold_is_not_written_down_as_a_change` — and deleting
+  the call that writes down a resize chord turns two,
+  `a_resize_chord_is_written_down_with_the_chord_that_asked_for_it` and
+  `the_saved_arrangement_carries_no_log`; the small-terminal sweep stays green
+  under both, which is the point of asserting on the log and not only on pixels.
+  That sweep covers the panel itself at 0 and 3 rows with the list and the detail
+  open (`renders_layout_panel_at_any_terminal_size`).
+
+  Live on a raw PTY at 110×30, nineteen checks: a session with no input opens on
+  one row; a drag, a `Ctrl+U` and a `Ctrl+T` make four, oldest first; the dragged
+  row reads `dragged the Code / Chat divider 6 cells, took 5` and its pair shows
+  the Code column at 55 then 61, matching the drawn `55 -> 61`; 24 presses of
+  `Alt+Left` leave 5 rows and 40 leave 5, because the panes bottomed out at their
+  minimum; opening and closing the panel leaves the borders at
+  `[0, 21, 22, 76, 77, 108]` both times; and the config dir holds exactly
+  `config.json`, `conversation_memory.json`, `layout.json`, with `layout.json`
+  naming no trigger. The run is also what found the terminal fact now in the
+  changelog: `Ctrl+0` has no control byte — the plain byte is `Ctrl+P`'s — so the
+  chord was driven as the kitty key-report sequence `CSI 48;5u`, and over the same
+  PTY that sequence opened this panel while the plain byte opened the project
+  analyzer.
+
+  **Not done, and not by this item:** the done-when's second clause — a pane
+  opened by a state change names that state — has no subject, because nothing
+  opens a pane from a state change yet. `transitions.rs` records that absence as
+  a missing variant rather than inventing one; `V-10` is the item that opens the
+  pane, and the permission-control wording the clause asks for is its trigger's
+  first job.
 
 ### V-10 Worker-event to window bridge
 

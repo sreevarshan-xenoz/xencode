@@ -39,6 +39,7 @@ const FOCI: &[(&str, FocusArea)] = &[
     ("TaskManager", FocusArea::TaskManager),
     ("WorktreePanel", FocusArea::WorktreePanel),
     ("AdvisePanel", FocusArea::AdvisePanel),
+    ("LayoutPanel", FocusArea::LayoutPanel),
 ];
 
 /// An app carrying enough content that data-dependent branches actually render
@@ -231,6 +232,76 @@ fn queue_prompt(app: &mut App<'static>, tool: &str, class: xencode_tui_rs::agent
 
 /// I1-03: the approval prompt is topmost and modal, so it must survive the
 /// same size sweep — including a stacked queue and a long diff at 1 row.
+/// `V-9`'s panel lists the session's arrangement changes. It takes its rows
+/// from real chords, on an app that has already been drawn once — which is the
+/// order a real session has them in, and the only way the opening row describes
+/// a screen that existed.
+fn app_with_layout_history(rows: usize) -> App<'static> {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = populated(FocusArea::ChatInput);
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    for _ in 0..rows {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        xencode_tui_rs::keymap::handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            &tx,
+        );
+    }
+    app.focus = FocusArea::LayoutPanel;
+    app
+}
+
+#[test]
+fn renders_layout_panel_at_any_terminal_size() {
+    let mut failures = Vec::new();
+    for detail in [false, true] {
+        for rows in [0usize, 3] {
+            let mut app = app_with_layout_history(rows);
+            app.layout_detail = detail;
+            app.layout_scroll = 2; // exercise the clamped scroll path
+            for &width in WIDTHS {
+                for &height in HEIGHTS {
+                    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                        terminal.draw(|f| draw(f, &mut app)).unwrap();
+                    }));
+                    if rendered.is_err() {
+                        failures.push(format!(
+                            "layout panel, {} rows, {} at {width}x{height}",
+                            if detail { "detail" } else { "list" },
+                            rows
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The panel is an inspection, so the newest row it lists has to be the screen
+/// the user is looking at — a history that has drifted from the present would
+/// be the one lie this panel cannot tell.
+#[test]
+fn layout_panel_lists_every_change_and_the_newest_is_the_present() {
+    let mut app = app_with_layout_history(3);
+    assert_eq!(
+        app.layout_log.len(),
+        4,
+        "the screen the session opened on, then three cycles"
+    );
+    assert_eq!(
+        app.layout_log.last().unwrap().after,
+        app.arrangement_line(),
+        "the newest row is the screen as it stands"
+    );
+    let text = render_text(&mut app, 120, 40);
+    assert!(text.contains("session opened on"), "{text}");
+    assert!(text.contains("Ctrl+U cycled to"), "{text}");
+}
+
 #[test]
 fn renders_approval_overlay_at_any_terminal_size() {
     use xencode_tui_rs::agent_tools::ToolClass;
@@ -1217,6 +1288,8 @@ fn a_grabbed_divider_renders_at_any_terminal_size() {
                             boundary: boundary.clone(),
                             anchor: column as i16,
                             paid: 0,
+                            cells: 0,
+                            divider: None,
                         });
                     } else {
                         app.boundary_hover = Some(boundary.clone());

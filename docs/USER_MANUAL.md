@@ -25,7 +25,7 @@ Xencode is a **Rust-only** workspace (`rust/crates/*`, 16 crates):
 The Rust binary (`xencode`) is the entry point.
 
 ### Key Features
-- **Rust TUI**: Ratatui-based terminal interface with 24 focus areas — 17 of them reachable from the `Ctrl+F` feature navigator
+- **Rust TUI**: Ratatui-based terminal interface with 25 focus areas — 17 of them reachable from the `Ctrl+F` feature navigator
 - **Multi-Provider AI Routing**: Ollama and llama.cpp locally + Gemini, Qwen and OpenRouter (any OpenAI-compatible model id) in the cloud, with status-code-driven retry middleware and a sequential `agent_fallback_models` chain
 - **Code Analysis**: per-language heuristics (Python, JS/TS, Rust) + a pattern-based OWASP Top 10 scanner
 - **HTTP/WebSocket Server**: Axum-based collaboration server with token auth, role-based access control, a JSONL audit trail and local-first bind defaults (TLS opt-in)
@@ -183,6 +183,7 @@ Global (work in every panel, any mode):
 | `Ctrl+H` | Run provider health check |
 | `Ctrl+T` | Toggle embedded terminal strip |
 | `Ctrl+U` | Cycle the body layout: classic → chat-first → zen → any template you declared in config |
+| `Ctrl+0` | Layout history: every change this screen has been through, oldest first, each named by the ask behind it (`Enter` on a row shows the pane widths before and after) |
 | `Ctrl+W` | Close panel → chat |
 | `Ctrl+,` | Settings |
 
@@ -308,6 +309,29 @@ config; `xencode config set layout <name>` prints the same note. There is no
 layouts directory and no layout file format: templates live in the config file,
 and `zen` is the one preset no template can reproduce, because its single pane
 follows the focus.
+
+**Why the screen is arranged this way.** `Ctrl+0` opens the layout history:
+every change the arrangement has been through since this session opened, oldest
+at the top, each row named by the ask behind it — `Ctrl+U cycled to
+chat-first`, `dragged the Code / Chat divider 6 cells, took 5`, `Ctrl+T put the
+terminal strip on the screen`. `Enter` opens a row into the pane widths before
+and after it, `j`/`k` move, `Esc` (or `Ctrl+0` again) closes; opening the panel
+moves nothing, and the newest row is the screen in front of you. Two things are
+deliberately absent. A keystroke that changed nothing adds no row — `Alt+Left`
+against a pane's minimum, or a drag the terminal is too short to hold. And an
+overlay is not a row: the agent stack and a permission prompt *cover* the
+arrangement rather than change it, so they are not on the list. The history is
+session memory; `~/.xencode/layout.json` holds geometry and focus only, so
+nothing about "how it got here" reaches the disk.
+
+One terminal fact: `Ctrl+0`, like `Ctrl+1`…`Ctrl+9`, has no control byte of its
+own — the byte a terminal would send is the one that means `Ctrl+P`. The chord
+arrives only when the terminal reports it as an escape sequence (the kitty
+keyboard protocol's `CSI 48;5u`), which is how it was checked here: over a raw
+PTY that sequence opened this panel and the plain byte opened the project
+analyzer. A terminal that cannot send it leaves the saved views and this panel
+alike out of reach; `Ctrl+T`, `Ctrl+U`, `Alt+Left`/`Alt+Right` and dragging a
+divider still do all the rearranging.
 
 Display settings (Settings panel rows, same keys as `xencode config set`):
 

@@ -214,6 +214,23 @@ fn encode_slot(slot: BodySlot) -> String {
     .to_string()
 }
 
+/// The words a reader of a screen uses for one slot (`V-9`), as opposed to the
+/// lowercase names [`encode_slot`] writes into a file a user hand-edits. The
+/// two are deliberately different: the panel says "Code" the way the header
+/// chips and the named views say it, and the file says `editor` because that is
+/// what a template's `slot` field expects.
+impl BodySlot {
+    pub fn word(self) -> &'static str {
+        match self {
+            BodySlot::Explorer => "Files",
+            BodySlot::Editor => "Code",
+            BodySlot::Chat => "Chat",
+            BodySlot::Input => "Input",
+            BodySlot::Terminal => "Terminal",
+        }
+    }
+}
+
 fn encode_focus(focus: FocusArea) -> String {
     match focus {
         FocusArea::FileExplorer => "explorer",
@@ -450,6 +467,34 @@ pub fn hit_test_tree_point(
 /// One pane leaf, shared by the preset builders and the seeded views.
 pub fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
     LayoutNode::Leaf(Pane { slot, focus })
+}
+
+/// The slots a viewer would actually see in this arrangement, in the order
+/// [`render`] lays them out (`V-9`).
+///
+/// One-children groups contribute their active pane and nothing else, because
+/// that is what geometry resolves to: the hidden members of a tabbed or stacked
+/// group are not on screen to be explained.
+pub fn visible_slots(node: &LayoutNode) -> Vec<BodySlot> {
+    let mut out = Vec::new();
+    collect_visible_slots(node, &mut out);
+    out
+}
+
+fn collect_visible_slots(node: &LayoutNode, out: &mut Vec<BodySlot>) {
+    match node {
+        LayoutNode::Leaf(pane) => out.push(pane.slot),
+        LayoutNode::Split { parts, .. } => {
+            for (child, _) in parts {
+                collect_visible_slots(child, out);
+            }
+        }
+        LayoutNode::Tabbed { panes, active } | LayoutNode::Stack { panes, active } => {
+            if let Some(pane) = panes.get(*active) {
+                out.push(pane.slot);
+            }
+        }
+    }
 }
 
 /// Below this many rows, a terminal pane would squeeze its column to nothing
@@ -1007,8 +1052,7 @@ pub fn drag_points(node: &LayoutNode, boundary: &Boundary, cells: i16, area: Rec
 }
 
 /// Move a grabbed divider by up to `points` percentage points, and return how
-/// many it took (`V-7`).
-///
+/// many it took (`V-7`).///
 /// The points come from [`drag_points`], so this is the keyboard chord's own
 /// clamp with a different way of picking the pair: both sides stay `Percentage`
 /// and both stay at or above [`MIN_PANE_PERCENT`]. A shortfall is the clamp and
@@ -1036,6 +1080,27 @@ pub fn divider_rect(node: &LayoutNode, boundary: &Boundary, area: Rect) -> Optio
         area_of_split.top(),
         2,
         area_of_split.height,
+    ))
+}
+
+/// The two panes a boundary's line separates, named for a reader (`V-9`).
+///
+/// Each side is called by the first slot it shows, because a side that is
+/// itself a column — chat with its input strip under it — is what the user
+/// reaches for by its top pane. A name is what a transition row needs: the
+/// line between Code and Chat moving is a different event from the one between
+/// Files and Code, and a row that said only "a divider" would answer nothing.
+pub fn divider_pair(node: &LayoutNode, boundary: &Boundary, area: Rect) -> Option<String> {
+    let (_, kids) = split_geometry(node, area, &boundary.path)?;
+    let name = |index: usize| {
+        visible_slots(kids.get(index)?.0)
+            .first()
+            .map(|slot| slot.word().to_string())
+    };
+    Some(format!(
+        "{} / {}",
+        name(boundary.low)?,
+        name(boundary.low + 1)?
     ))
 }
 

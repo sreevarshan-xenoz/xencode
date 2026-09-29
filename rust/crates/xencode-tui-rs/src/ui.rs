@@ -60,6 +60,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         FocusArea::TaskManager => draw_task_manager(f, app, f.area()),
         FocusArea::WorktreePanel => draw_worktree_panel(f, app, f.area()),
         FocusArea::AdvisePanel => draw_advise_panel(f, app, f.area()),
+        FocusArea::LayoutPanel => draw_layout_panel(f, app, f.area()),
         _ => {}
     }
 
@@ -395,6 +396,13 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
                     "↑↓:select  Enter:detail  o:open file  r:recompute  Esc:close"
                 }
             }
+            FocusArea::LayoutPanel => {
+                if app.layout_detail {
+                    "↑↓:scroll  Enter:back to list  Esc:close"
+                } else {
+                    "↑↓:select  Enter:from and to  Esc:close"
+                }
+            }
             FocusArea::FeatureNavigator => "\u{2191}\u{2193}:nav  Enter:open  Esc:close",
             FocusArea::ByteBotPanel => "Enter:run  Esc:close  Type command above",
             FocusArea::ProviderHealth => "Ctrl+H:run check  Esc:close",
@@ -452,6 +460,9 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
         app.last_body_focus = app.focus;
     }
     app.last_body_area = area;
+    // The session's opening row is written here, by the first frame, because
+    // this is the first moment the body has a size worth recording (`V-9`).
+    app.note_session_opened();
     let layout = app.body_layout(area);
     app.last_layout = layout;
 
@@ -1853,6 +1864,95 @@ fn draw_advise_panel(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, inner, &mut state);
 }
 
+/// LayoutPanel (`V-9`): this session's arrangement changes, oldest at the top,
+/// each row naming the ask that made it. The list is the answer to "why is this
+/// pane here", so a row shows the trigger rather than the result — the result
+/// is on the screen behind the panel, and what one row moved from and to is
+/// what `Enter` opens.
+fn draw_layout_panel(f: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(85, 70, area);
+    f.render_widget(Clear, popup_area);
+
+    let outer = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(format!(
+            " ⌂ Layout history — {} change(s) this session ",
+            app.layout_log.len()
+        ));
+    f.render_widget(outer, popup_area);
+    let inner = popup_area.inner(ratatui::layout::Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.width < 3 || inner.height < 2 {
+        return;
+    }
+
+    if app.layout_detail {
+        let body = layout_detail_text(app);
+        let rows = body.lines().count();
+        let text = Paragraph::new(body)
+            .style(Style::default().fg(app.theme.fg))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                (app.layout_scroll as u16).min(clamp_scroll(rows, inner.height)),
+                0,
+            ));
+        f.render_widget(text, inner);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .layout_log
+        .iter()
+        .map(|row| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:<6}", crate::transitions::elapsed(row.at)),
+                    Style::default().fg(app.theme.message_system),
+                ),
+                Span::styled(row.trigger.words(), Style::default().fg(app.theme.fg)),
+            ]))
+        })
+        .collect();
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(app.theme.highlight_fg)
+            .bg(app.theme.highlight)
+            .add_modifier(Modifier::BOLD),
+    );
+    let mut state = ListState::default();
+    state.select(Some(
+        app.layout_log
+            .len()
+            .saturating_sub(1)
+            .min(app.layout_selected),
+    ));
+    f.render_stateful_widget(list, inner, &mut state);
+}
+
+/// One row read closely: the ask, then the arrangement it found and the one it
+/// left. `V-9` keeps both because the difference is the answer — a resize chord
+/// that grew Code is also one that shrank Chat, and a reader who is looking for
+/// where a pane went wants the pair, not the end state.
+fn layout_detail_text(app: &App) -> String {
+    let Some(row) = app.layout_log.get(
+        app.layout_selected
+            .min(app.layout_log.len().saturating_sub(1)),
+    ) else {
+        return String::new();
+    };
+    format!(
+        "Asked for\n  {}\n\nAt\n  {} after this session opened\n\nFound\n  {}\n\nLeft\n  {}",
+        row.trigger.words(),
+        crate::transitions::elapsed(row.at),
+        row.before,
+        row.after,
+    )
+}
+
 fn advise_kind_style(
     kind: xencode_context_rs::AdviceKind,
     app: &App,
@@ -2475,6 +2575,18 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
         let rows = advise_detail_text(app).lines().count();
         app.advise_scroll = app
             .advise_scroll
+            .min(clamp_scroll(rows, inner.height) as usize);
+    }
+
+    // Layout history detail pane (`V-9`), same viewport as the advice panel.
+    if app.layout_detail {
+        let inner = centered_rect(85, 70, area).inner(ratatui::layout::Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
+        let rows = layout_detail_text(app).lines().count();
+        app.layout_scroll = app
+            .layout_scroll
             .min(clamp_scroll(rows, inner.height) as usize);
     }
 }

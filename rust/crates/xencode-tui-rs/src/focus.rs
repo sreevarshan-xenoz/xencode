@@ -35,6 +35,9 @@ pub enum FocusArea {
     TaskManager,
     WorktreePanel,
     AdvisePanel,
+    /// Why the screen is arranged as it is: this session's layout changes,
+    /// each with the ask behind it (`V-9`).
+    LayoutPanel,
 }
 
 impl FocusArea {
@@ -66,6 +69,7 @@ impl FocusArea {
             FocusArea::TaskManager => "Tasks",
             FocusArea::WorktreePanel => "Worktrees",
             FocusArea::AdvisePanel => "Advice",
+            FocusArea::LayoutPanel => "Layout",
         }
     }
 }

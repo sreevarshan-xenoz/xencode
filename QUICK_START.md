@@ -206,7 +206,9 @@ both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
 everything persists to `~/.xencode/config.json`. A layout you resized comes
 back next start from `~/.xencode/layout.json` (private, `0600`); `Ctrl+U`
 clears it, and the file never stores your conversation or model state — only
-where the panes were.
+where the panes were. `Ctrl+0` lists every one of those changes this session has
+been through, each named by what caused it, with the pane widths before and
+after on `Enter`; it is session memory, and reading it moves nothing.
 
 `Ctrl+1`…`Ctrl+9` recall a *view* — a saved arrangement with the pane it was
 focused on. Six slots arrive filled: `Code`, `Chat`, `Terminal`, `Focus`,
