@@ -161,7 +161,8 @@ pub use watcher::{
     DEFAULT_DEBOUNCE, DEFAULT_EXCLUDED_DIRS,
 };
 pub use worktree::{
-    parse_worktree_list, worktree_add, worktree_list, worktree_remove, WorktreeInfo,
+    parse_worktree_list, worktree_add, worktree_add_detached, worktree_list, worktree_remove,
+    WorktreeInfo,
 };
 
 use std::path::Path;

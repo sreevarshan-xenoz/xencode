@@ -280,6 +280,9 @@ complete -c xencode -n "__fish_xencode_using_subcommand test" -l package -d 'Onl
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l retries -d 'Retries allowed per failing test. Kept at 0 by default: a retry-pass is not a pass' -r
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l stress-count -d 'Run each test this many times, to surface flakes and order dependence' -r
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l timeout -d 'Wall-clock ceiling in seconds' -r
+complete -c xencode -n "__fish_xencode_using_subcommand test" -l isolate -d 'Classify one failing test against the clean base tree instead of running the suite: PRE_EXISTING_FAILURE, INTRODUCED, or FLAKY' -r
+complete -c xencode -n "__fish_xencode_using_subcommand test" -l base -d 'The ref the base tree is taken at for --isolate' -r
+complete -c xencode -n "__fish_xencode_using_subcommand test" -l repeat -d 'Runs per side for --isolate; a pass on any run means flaky' -r
 complete -c xencode -n "__fish_xencode_using_subcommand test" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand test" -s h -l help -d 'Print help'

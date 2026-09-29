@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — cargo-dist release pipeline (tag still required)
+### Added — `xencode test --isolate`: is this red test yours?
+
+Runs one failing test against the clean base tree in a throwaway detached
+worktree and classifies: PRE_EXISTING_FAILURE (fails there too — do not fix
+it), INTRODUCED (only the worktree fails), FLAKY (passes on re-run), or
+INCONCLUSIVE (the base could not run, so nothing is claimed). Each side runs
+up to `--repeat` times because a single outcome pair cannot tell a 1-in-5
+flake from a regression; the verdict ships with the counts, never a rate or a
+transcript. Same filtered nextest run on both trees, worktree removed
+afterwards, working tree never touched.
+
+Five tests including three live scratch-repo proofs. The failure it prevents
+is the agent rewriting correct code around a pre-existing race for five rounds.
+
+
 
 `dist init` configured five release targets with shell and PowerShell
 installers, checksums, and a source tarball; `dist generate` replaced the

@@ -67,6 +67,8 @@ pub struct Options {
     pub stress: u32,
     /// Only these packages.
     pub packages: Vec<String>,
+    /// Only tests whose name contains this substring.
+    pub filter: Option<String>,
     /// Wall-clock ceiling for the whole run.
     pub budget: Duration,
 }
@@ -77,8 +79,176 @@ impl Default for Options {
             retries: 0,
             stress: 0,
             packages: Vec::new(),
+            filter: None,
             budget: Duration::from_secs(1800),
         }
+    }
+}
+
+/// What a failing test turned out to be, after the base tree had its say.
+///
+/// Evidence, not a probability: no gauge renders a number for a measurement
+/// that was never calibrated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureClass {
+    /// Fails on the clean base tree too. Do not fix it; it is not yours.
+    PreExisting,
+    /// Passes on the base tree, fails here. Yours.
+    Introduced,
+    /// Passes here on re-run. A flake, not a regression.
+    Flaky,
+    /// The base tree could not be run, so nothing is claimed.
+    Inconclusive,
+}
+
+impl FailureClass {
+    /// The word the agent acts on.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PreExisting => "PRE_EXISTING_FAILURE",
+            Self::Introduced => "INTRODUCED",
+            Self::Flaky => "FLAKY",
+            Self::Inconclusive => "INCONCLUSIVE",
+        }
+    }
+}
+
+/// The verdict on one failing test, with both halves of the evidence.
+#[derive(Debug, Clone)]
+pub struct Isolation {
+    /// The filter that selected the test.
+    pub test: String,
+    /// The ref the base tree was taken at.
+    pub base: String,
+    /// Fails and runs on the clean base tree. `None` when the base never ran.
+    pub base_fails: Option<u32>,
+    pub base_runs: u32,
+    /// Fails and runs in the working tree.
+    pub work_fails: u32,
+    pub work_runs: u32,
+    /// The classification.
+    pub class: FailureClass,
+    /// Anything that is not the verdict but matters.
+    pub notes: Vec<String>,
+}
+
+impl Isolation {
+    /// Whether it passed on the clean base tree.
+    pub fn base_passed(&self) -> Option<bool> {
+        self.base_fails.map(|f| f == 0)
+    }
+
+    /// Whether it passed in the working tree.
+    pub fn work_passed(&self) -> bool {
+        self.work_fails == 0
+    }
+}
+
+/// Classify from repeat counts. Pure, so the matrix is testable without
+/// running anything.
+///
+/// A single outcome pair cannot tell a flake from a regression: a test failing
+/// 1 run in 5 fails the work re-run four times out of five and would read as
+/// INTRODUCED. Repeating until a pass is observed (or the budget of runs is
+/// spent) is what separates "fails here" from "fails only here".
+pub fn classify(work_fails: u32, work_runs: u32, base_fails: Option<u32>) -> FailureClass {
+    if work_runs == 0 {
+        return FailureClass::Inconclusive;
+    }
+    if work_fails < work_runs {
+        return FailureClass::Flaky;
+    }
+    match base_fails {
+        Some(0) => FailureClass::Introduced,
+        Some(_) => FailureClass::PreExisting,
+        None => FailureClass::Inconclusive,
+    }
+}
+
+/// Run one failing test against the clean base tree in a throwaway worktree.
+///
+/// Each side runs up to `repeat` times, stopping at the first pass: a test
+/// that passes even once after failing is flaky by observation, not by
+/// statistics, and no gauge renders a rate for it. The work tree runs first,
+/// so a flake never pays for a worktree it does not need. The base worktree
+/// is detached at `base` and removed afterwards, forcefully: a leftover
+/// worktree is a second copy of the repository that rots. The working tree is
+/// never touched — classification reads, it does not repair.
+///
+/// What comes back is a verdict plus the counts that produced it, never a
+/// transcript: the base tree may hold answers, and a classification tool that
+/// hands them over is an answer key, not a verdict.
+pub fn isolate(root: &Path, test: &str, base: &str, repeat: u32, budget: Duration) -> Isolation {
+    let mut notes = Vec::new();
+    let repeat = repeat.max(1);
+    let single = |dir: &Path| {
+        let opts = Options {
+            filter: Some(test.to_string()),
+            budget,
+            ..Options::default()
+        };
+        run(dir, &opts).ok
+    };
+
+    let mut work_fails = 0;
+    let mut work_runs = 0;
+    for _ in 0..repeat {
+        work_runs += 1;
+        if single(root) {
+            break;
+        }
+        work_fails += 1;
+    }
+
+    let mut base_fails: Option<u32> = None;
+    let mut base_runs = 0;
+    if work_fails == work_runs {
+        let dir = std::env::temp_dir().join(format!(
+            "xe-isolate-{}-{}",
+            std::process::id(),
+            crate::ledger::digest_hex(&format!("{test}:{base}"))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        match crate::worktree_add_detached(root, &dir, base) {
+            Err(e) => {
+                notes.push(format!("the base worktree could not be made: {e}"));
+            }
+            Ok(_) => {
+                let mut fails = 0;
+                for _ in 0..repeat {
+                    base_runs += 1;
+                    if single(&dir) {
+                        break;
+                    }
+                    fails += 1;
+                }
+                base_fails = Some(fails);
+            }
+        }
+        let _ = crate::worktree_remove(root, &dir, true);
+    } else {
+        notes.push(format!(
+            "the test passed on re-run {work_runs} of the working tree, so no base              worktree was made: flakiness is observed, not inferred"
+        ));
+    }
+
+    let class = classify(work_fails, work_runs, base_fails);
+    notes.push(format!(
+        "evidence: work {work_fails}/{work_runs} failed{}",
+        match base_fails {
+            Some(f) => format!(", base {f}/{base_runs} failed at {base}"),
+            None => ", base never ran".to_string(),
+        }
+    ));
+    Isolation {
+        test: test.to_string(),
+        base: base.to_string(),
+        base_fails,
+        base_runs,
+        work_fails,
+        work_runs,
+        class,
+        notes,
     }
 }
 
@@ -193,6 +363,9 @@ pub fn nextest_argv(opts: &Options) -> Vec<String> {
     for package in &opts.packages {
         argv.push("--package".to_string());
         argv.push(package.clone());
+    }
+    if let Some(filter) = &opts.filter {
+        argv.push(filter.clone());
     }
     argv
 }
@@ -623,6 +796,112 @@ error: test run failed
         std::fs::create_dir_all(&dir).unwrap();
         assert!(manifest_dir(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_classification_matrix() {
+        use FailureClass::*;
+        // (work_fails, work_runs, base_fails): a pass on any run is flaky by
+        // observation, and a base that never ran accuses nothing.
+        assert_eq!(classify(2, 2, Some(2)), PreExisting);
+        assert_eq!(classify(2, 2, Some(1)), PreExisting);
+        assert_eq!(classify(2, 2, Some(0)), Introduced);
+        assert_eq!(classify(1, 2, Some(0)), Flaky);
+        assert_eq!(classify(0, 1, None), Flaky);
+        assert_eq!(classify(2, 2, None), Inconclusive);
+        assert_eq!(classify(0, 0, None), Inconclusive);
+        assert_eq!(PreExisting.label(), "PRE_EXISTING_FAILURE");
+    }
+
+    fn seed_repo(label: &str, test_body: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("xe-iso-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"isodemo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src").join("lib.rs"), test_body).unwrap();
+        let git = |args: &[&str]| {
+            let o = std::process::Command::new("git")
+                .current_dir(&dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(o.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "base"]);
+        dir
+    }
+
+    #[test]
+    fn a_test_broken_on_base_is_pre_existing() {
+        if !nextest_available() {
+            eprintln!("skipping: nextest is not installed");
+            return;
+        }
+        let dir = seed_repo("pre", "#[test]\nfn broken() { assert_eq!(1, 2); }\n");
+        let isolation = isolate(
+            &dir,
+            "broken",
+            "HEAD",
+            2,
+            std::time::Duration::from_secs(300),
+        );
+        assert_eq!(isolation.base_passed(), Some(false));
+        assert!(!isolation.work_passed());
+        assert_eq!(isolation.class, FailureClass::PreExisting);
+        assert!(
+            isolation.notes.iter().any(|n| n.contains("evidence:")),
+            "{:?}",
+            isolation.notes
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_test_broken_only_by_the_worktree_is_introduced() {
+        if !nextest_available() {
+            eprintln!("skipping: nextest is not installed");
+            return;
+        }
+        let dir = seed_repo("intro", "#[test]\nfn fine() { assert_eq!(1, 1); }\n");
+        std::fs::write(
+            dir.join("src").join("lib.rs"),
+            "#[test]\nfn fine() { assert_eq!(1, 2); }\n",
+        )
+        .unwrap();
+        let isolation = isolate(&dir, "fine", "HEAD", 2, std::time::Duration::from_secs(300));
+        assert_eq!(isolation.base_passed(), Some(true));
+        assert!(!isolation.work_passed());
+        assert_eq!(isolation.class, FailureClass::Introduced);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_test_passing_on_re_run_is_flaky_without_a_worktree() {
+        if !nextest_available() {
+            eprintln!("skipping: nextest is not installed");
+            return;
+        }
+        // Fails exactly once per process run, then passes: the work side sees
+        // both outcomes, so the verdict is FLAKY and the base tree never runs.
+        let dir = seed_repo(
+            "flaky",
+            "#[test]\nfn once() {\n    let p = std::env::temp_dir().join(\"xe-iso-once\");\n    if std::fs::read_to_string(&p).is_ok() { return; }\n    std::fs::write(&p, \"1\").unwrap();\n    panic!(\"first run fails\");\n}\n",
+        );
+        let _ = std::fs::remove_file(std::env::temp_dir().join("xe-iso-once"));
+        let isolation = isolate(&dir, "once", "HEAD", 3, std::time::Duration::from_secs(300));
+        assert_eq!(isolation.class, FailureClass::Flaky);
+        assert_eq!((isolation.work_fails, isolation.work_runs), (1, 2));
+        assert_eq!(isolation.base_runs, 0, "no worktree was needed");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(std::env::temp_dir().join("xe-iso-once"));
     }
 
     #[test]
