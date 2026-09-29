@@ -13,7 +13,9 @@ Direct deps, locked versions, pending updates from `cargo update --dry-run`,
 and advisory state from the local corpus — composed, not built. Offline means
 "advisory state unknown", never "clean"; an unchecked update list says so
 rather than posing as current. On this repository: 49 rows, 0 vulnerable,
-0 unknown. Five tests.
+0 unknown. Five tests. Also reports duplicate majors with both versions and
+pulling paths (34 here, including `syn 2.0.119 + 3.0.6`), plus a since-HEAD
+delta of new vs upgraded pins. Ask, never block. Four more tests.
 
 
 

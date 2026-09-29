@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1581 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1584 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -9910,6 +9910,19 @@ report distinguishes "new" from "already present", and the agent is asked rather
 than blocked.
 
 **Placement.** W11, after SE-6 (W7) and into QO-1's `doctor` composition.
+
+  **Built 2026-09-28, as a report riding QO-1, refusal rightly absent** —
+  `doctor --deps` now lists duplicate majors with both versions and the paths
+  that pull each (`aes 0.8.4 via lopdf`, `0.9.3 via zip`), plus a since-HEAD
+  section distinguishing new pins from upgrades from already-present. On this
+  repository: 34 crates with duplicate versions, including the done-when's own
+  example (`syn 2.0.119 + 3.0.6`), and a silent delta because the lock matches
+  HEAD — silence meaning nothing changed, which the empty section says by
+  omission rather than a claim. The refusal is absent as specified: adding
+  thirty dependencies is not necessarily wrong, and a tool that hard-refuses
+  would be overridden until ignored. Four tests (duplicates named, both paths
+  resolved with blank-not-guessed versions, delta distinguishing new from
+  moved).
 
 ### U-6 — Red-to-green reproduction gate
 
