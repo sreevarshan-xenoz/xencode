@@ -360,19 +360,24 @@ complete -c xencode -n "__fish_xencode_using_subcommand hw; and __fish_seen_subc
 complete -c xencode -n "__fish_xencode_using_subcommand hw; and __fish_seen_subcommand_from probe" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand hw; and __fish_seen_subcommand_from help" -f -a "probe" -d 'Read RAM, cores and compute devices, and recommend launch flags'
 complete -c xencode -n "__fish_xencode_using_subcommand hw; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status setup help" -s h -l help -d 'Print help'
-complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status setup help" -f -a "status" -d 'Show which history indexes exist here and time the queries that use them'
-complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status setup help" -f -a "setup" -d 'Write the commit-graph and the multi-pack-index, then time them'
-complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status setup help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status digest setup help" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status digest setup help" -f -a "status" -d 'Show which history indexes exist here and time the queries that use them'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status digest setup help" -f -a "digest" -d 'Print the ~250-token history digest for one file'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status digest setup help" -f -a "setup" -d 'Write the commit-graph and the multi-pack-index, then time them'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and not __fish_seen_subcommand_from status digest setup help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from status" -l path -d 'Repository to look at (default: the current directory)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from status" -l file -d 'File to run a blame probe on (default: README.md, else the first tracked file)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from status" -l json -d 'Emit JSON instead of a table'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from digest" -l path -d 'Repository to read (default: the current directory)' -r -F
+complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from digest" -l json -d 'Emit JSON instead of text'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from digest" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from setup" -l path -d 'Repository to write into (default: the current directory)' -r -F
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from setup" -l file -d 'File to run a blame probe on (default: README.md, else the first tracked file)' -r
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from setup" -l json -d 'Emit JSON instead of a table'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from setup" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show which history indexes exist here and time the queries that use them'
+complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "digest" -d 'Print the ~250-token history digest for one file'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "setup" -d 'Write the commit-graph and the multi-pack-index, then time them'
 complete -c xencode -n "__fish_xencode_using_subcommand history; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c xencode -n "__fish_xencode_using_subcommand tui" -s h -l help -d 'Print help'
@@ -454,4 +459,5 @@ complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_su
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from llamacpp" -f -a "set-path" -d 'Set the configured GGUF model path used for auto-start/load'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from hw" -f -a "probe" -d 'Read RAM, cores and compute devices, and recommend launch flags'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "status" -d 'Show which history indexes exist here and time the queries that use them'
+complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "digest" -d 'Print the ~250-token history digest for one file'
 complete -c xencode -n "__fish_xencode_using_subcommand help; and __fish_seen_subcommand_from history" -f -a "setup" -d 'Write the commit-graph and the multi-pack-index, then time them'

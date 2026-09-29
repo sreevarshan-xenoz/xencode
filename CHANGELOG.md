@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — per-session artifact directories with pruning
+### Added — `xencode history digest`: the why-does-this-exist signal at tier-5 scale
+
+Last-touch subject per changed hunk plus the five most recent subjects touching
+the path, capped at ~250 tokens with the cut marked — because raw blame/log
+runs 10–80× that budget. Identical subjects dedup; no history is a fact, not
+an error. On this repository a README digest runs 403 chars. Four tests.
+
+
 
 `.xencode/artifacts/<session>/` holds the evidence ledger rows point at.
 Writes keep the last 8 KiB on a character boundary — the failure is at the
