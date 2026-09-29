@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1631 tests passing, zero warnings (re-verified 2026-09-29)
+- [x] Workspace gates green — 16 crates, 1653 tests passing, zero warnings (re-verified 2026-09-29)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10579,6 +10579,49 @@ shortcut, not a gate.
 **Done-when.** Six seeded views switch in one chord, each restores its exact
 geometry and focused pane, a view survives a restart via V-6, and every panel
 inside a view is still reachable without naming the view at all.
+  **Done 2026-09-29.** `Ctrl+1`…`Ctrl+9` recall a view, `Ctrl+Shift+<digit>`
+  stores the screen that is on screen into that slot. Nine slots, six seeded in
+  code so the chord works on a first start with an empty config — `Code`
+  (explorer 15 / editor 60 / chat column 25), `Chat` (editor 20 / column 80),
+  `Terminal` (the same, with the strip asked for in the tree), `Focus` (the
+  column alone, full width), `Review` (explorer 25 / editor 75 stacked over the
+  column at 40), `Split` (editor 50 / column 50); slots 7–9 are empty until
+  stored. A stored view is a `name → tree` entry in `config.json`
+  (`XencodeConfig::layout_views`), in the same vocabulary `V-5`'s templates
+  speak, held as raw JSON for the same reason: one unreadable entry is refused
+  by name with its reason and the rest of the config survives it. No new file —
+  the `V-5` boundary against a layouts directory holds — and `layout.json`
+  gains only `active_view`, the *name* that was on screen, so geometry is never
+  stored twice; `Arrangement::version` goes to 2 because `deny_unknown_fields`
+  would otherwise turn the new optional field into a field error instead of the
+  "written by a newer xencode" sentence, and a version-1 file without the name
+  still loads. The header chip names the view when one is active, and `Ctrl+U`
+  clears it: cycling layouts is leaving a view, not renaming it. Switching
+  retargets focus only when a body pane already held it, so `Ctrl+T`, `Ctrl+U`
+  and the resize chords keep working over a view — the "never the only way to
+  reach a panel" rule, with a test that walks all three on top of an active
+  view. An empty slot says what is missing and names the chord that fills it
+  (`view 9 holds no view yet — Ctrl+Shift+9 stores the screen as one`) and
+  changes nothing on screen. Seven tests in `views.rs`, five over the chords in
+  `keymap.rs`, two in `arrangement.rs`, one in the config crate.
+  Watched on a raw PTY at 110×30, each comparison taken after the toast had
+  expired and a geometry-free redraw (`Ctrl+G`) had repainted: the border
+  columns down the body rows were `[0, 21, 22, 76, 77, 108]` for classic,
+  `[0, 16, 17, 82, 83, 108]` for `Code`, `[0, 21, 22, 108]` for `Chat`,
+  `[0, 108]` for `Focus`, `[0, 26, 28]` for `Review`, `[0, 54, 55, 108]` for
+  `Split` — six different arrangements, one chord each. `Ctrl+9` with nothing
+  stored left the classic borders byte-identical and drew that sentence.
+  `Ctrl+Shift+7` wrote `layout_views: {"7": …}` and `layout.json`
+  (`active_view: "7"`, version 2, mode `0600`); the restart came back on those
+  same `[0, 26, 28]` borders with `7` in the header. One harness note worth
+  keeping: the arrangement flushes on the keypress that dirties it, not only at
+  quit (that is `V-6`'s behaviour and is correct), so every measured session
+  has to start from a wiped config dir or the previous session's screen is what
+  it restores — which is exactly how the first run of this check produced a
+  false failure. Not done, and not implied: no rename/reorder UI for the slots,
+  no per-project views, and the Agents/Verify/Git names from the original
+  proposal are not seeded — the six seeds are arrangements of the panels that
+  exist today.
 
 ### V-5 Layout templates as data
 

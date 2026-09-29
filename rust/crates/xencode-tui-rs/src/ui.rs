@@ -264,10 +264,15 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let w = area.width as usize;
     let mut left = String::from(" ✦ xencode ");
     if w >= 72 {
-        left.push_str(&format!(
-            "[{}] ",
-            crate::templates::effective_name(&app.config.layout_templates, &app.config.layout)
-        ));
+        // The chip names what is on screen: a view has one, and while it is up
+        // its tree — not the configured layout — is the geometry (`V-4`).
+        let shown = match app.active_view.as_deref() {
+            Some(view) => view.to_string(),
+            None => {
+                crate::templates::effective_name(&app.config.layout_templates, &app.config.layout)
+            }
+        };
+        left.push_str(&format!("[{shown}] "));
     }
     if w >= 60 {
         left.push_str(&format!("⎇ {} ", app.git_branch));

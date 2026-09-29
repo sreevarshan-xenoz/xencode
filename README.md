@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 1631 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 1653 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -428,6 +428,20 @@ flowchart TD
   arrangement only — never the transcript, model state, or anything a worker
   owns — and is written in the same words as `layout_templates`, so there is
   one layout vocabulary, not a hidden second one.
+- **A screen you arranged has a key on it.** `Ctrl+1`…`Ctrl+9` recall a *view* —
+  a saved arrangement with its focused pane — and `Ctrl+Shift+<digit>` stores
+  whatever is on screen into that slot. Six of the nine slots ship filled:
+  **Code** (files, code, conversation), **Chat** (code squeezed to the side),
+  **Terminal** (the same with the terminal strip in it), **Focus** (the
+  conversation across the whole body), **Review** (files and code up top, the
+  transcript along the bottom) and **Split** (half code, half conversation);
+  slots 7–9 are yours. A stored view is a `name → tree` entry under
+  `layout_views` in `config.json`, written in the same vocabulary as
+  `layout_templates`, so one bad entry is refused by name with its reason and
+  the rest of your config still loads — and no new file format. Views are a
+  shortcut, never a gate: `Ctrl+T`, `Ctrl+U` and `Alt+Left`/`Alt+Right` keep
+  working on top of one, and every panel a view shows is reachable without
+  naming the view at all.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
@@ -561,7 +575,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1631 passing)
+cargo test                          # Full workspace suite (1653 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

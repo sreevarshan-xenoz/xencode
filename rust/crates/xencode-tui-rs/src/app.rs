@@ -331,6 +331,12 @@ pub struct App<'a> {
     /// `Some` means the tree does, until a preset cycle clears it. Pane state
     /// lives outside both, so swapping between them loses nothing.
     pub custom_view: Option<crate::view::ViewState>,
+    /// Which named view `custom_view` is, when it is one (`V-4`). `None`
+    /// means the tree on screen was produced by a resize chord or restored
+    /// without a name — the arrangement is real, it just belongs to no view.
+    /// `Ctrl+U` clears this along with the tree, because cycling layouts is
+    /// leaving the view, not renaming it.
+    pub active_view: Option<String>,
     /// The arrangement on screen differs from `<config dir>/layout.json`, so
     /// the frame loop writes it once through `V-6`'s choke point. Set by the
     /// resize chord and by a layout cycle that clears the tree.
@@ -2019,6 +2025,7 @@ impl<'a> App<'a> {
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
             custom_view: None,
+            active_view: None,
             arrangement_dirty: false,
             last_body_area: ratatui::layout::Rect::default(),
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),

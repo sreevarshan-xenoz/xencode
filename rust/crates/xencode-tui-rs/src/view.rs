@@ -463,7 +463,8 @@ pub fn hit_test_tree_point(
     hit_test_tree(node, area, column)
 }
 
-fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
+/// One pane leaf, shared by the preset builders and the seeded views.
+pub fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
     LayoutNode::Leaf(Pane { slot, focus })
 }
 
@@ -472,11 +473,11 @@ fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
 /// in the same shared place, not in the draw code.
 pub const TERMINAL_MIN_HEIGHT: u16 = 18;
 
-/// The chat column's vertical stack, shared by every preset that shows chat.
-/// Same splits as `split_chat_column`, so the tree and the preset cannot drift:
-/// chat, optional terminal, input. The terminal leaf is always built when
+/// The chat column's vertical stack, shared by every preset that shows chat
+/// and by the seeded views (`V-4`), so the two cannot drift: chat, optional
+/// terminal, input. The terminal leaf is always built when
 /// asked for; [`render`] drops it in short areas.
-fn chat_column(show_terminal: bool, tall_enough: bool) -> LayoutNode {
+pub fn chat_column(show_terminal: bool, tall_enough: bool) -> LayoutNode {
     if show_terminal && tall_enough {
         LayoutNode::Split {
             horizontal: false,
