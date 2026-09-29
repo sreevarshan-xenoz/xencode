@@ -426,6 +426,21 @@ enum Commands {
         action: SessionAction,
     },
 
+    /// Run the machine-checkable checklist: test, lint, fmt — each verified, none graded
+    Verify {
+        /// Skip these checks (repeatable); skipped is reported, never passed
+        #[arg(long)]
+        skip: Vec<String>,
+
+        /// Wall-clock ceiling in seconds for the test slot
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+
+        /// Output format
+        #[arg(long, default_value = "text")]
+        format: OutputFormat,
+    },
+
     /// Report environment keys read in code against the templates that document them
     Envcheck {
         /// Output format
@@ -1092,6 +1107,11 @@ async fn main() {
             format,
         } => run_toolchain(&action, allow_dirty, format),
         Commands::Session { action } => run_session(action),
+        Commands::Verify {
+            skip,
+            timeout,
+            format,
+        } => run_verify(skip, timeout, format),
         Commands::Envcheck { format } => run_envcheck(format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
@@ -4158,6 +4178,53 @@ fn run_session(action: SessionAction) -> Result<(), String> {
             );
             Ok(())
         }
+    }
+}
+
+fn run_verify(skip: Vec<String>, timeout: u64, format: OutputFormat) -> Result<(), String> {
+    use xencode_analysis_rs::toolchain as kit;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    for name in &skip {
+        if !["test", "lint", "fmt"].contains(&name.as_str()) {
+            return Err(format!(
+                "cannot skip {name:?}: the checklist is test, lint, fmt"
+            ));
+        }
+    }
+    let list = kit::run_checklist(&root, &skip, timeout)?;
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": list.ok(),
+                "checks": list.checks.iter().map(|c| serde_json::json!({
+                    "name": c.name, "ran": c.ran,
+                    "exit": c.exit_code, "evidence": c.evidence_ref,
+                })).collect::<Vec<_>>(),
+                "failed": list.failed(),
+                "skipped": list.skipped(),
+            })
+        );
+    } else {
+        for check in &list.checks {
+            let state = if !check.ran {
+                "SKIPPED".to_string()
+            } else if check.passed() {
+                "PASS".to_string()
+            } else {
+                format!("FAIL (exit {})", check.exit_code.unwrap_or(-1))
+            };
+            println!("  {:<7} {:<5} {}", check.name, state, check.evidence_ref);
+        }
+        if !list.skipped().is_empty() {
+            println!("\n  skipped, not passed: {}", list.skipped().join(", "));
+        }
+    }
+    if list.ok() {
+        Ok(())
+    } else {
+        Err(format!("checklist failed: {}", list.failed().join(", ")))
     }
 }
 

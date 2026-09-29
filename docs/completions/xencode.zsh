@@ -855,6 +855,15 @@ esac
     ;;
 esac
 ;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+'*--skip=[Skip these checks (repeatable); skipped is reported, never passed]:SKIP:_default' \
+'--timeout=[Wall-clock ceiling in seconds for the test slot]:TIMEOUT:_default' \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (envcheck)
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
@@ -1644,6 +1653,10 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (envcheck)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -1855,6 +1868,7 @@ _xencode_commands() {
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -2235,6 +2249,7 @@ _xencode__subcmd__help_commands() {
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
 'session:Name sessions, resolve them, and export redacted transcripts' \
+'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -2689,6 +2704,11 @@ _xencode__subcmd__help__subcmd__toolchain_commands() {
 _xencode__subcmd__help__subcmd__tui_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help tui commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__verify_commands] )) ||
+_xencode__subcmd__help__subcmd__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help verify commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__worktree_commands] )) ||
 _xencode__subcmd__help__subcmd__worktree_commands() {
@@ -3251,6 +3271,11 @@ _xencode__subcmd__toolchain_commands() {
 _xencode__subcmd__tui_commands() {
     local commands; commands=()
     _describe -t commands 'xencode tui commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__verify_commands] )) ||
+_xencode__subcmd__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode verify commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__worktree_commands] )) ||
 _xencode__subcmd__worktree_commands() {
