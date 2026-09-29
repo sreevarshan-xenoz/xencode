@@ -327,6 +327,13 @@ pub struct App<'a> {
     /// The body geometry `draw_body` rendered last frame. The Tab focus-ring
     /// reads it so it can only Tab to panes the user can actually see.
     pub last_layout: crate::layout::BodyLayout,
+    /// A resized tree, when the user resized one. `None` means presets decide;
+    /// `Some` means the tree does, until a preset cycle clears it. Pane state
+    /// lives outside both, so swapping between them loses nothing.
+    pub custom_view: Option<crate::view::ViewState>,
+    /// Body area of the last draw, so a resize chord can promote the current
+    /// preset to a tree without guessing dimensions.
+    pub last_body_area: ratatui::layout::Rect,
     /// Tool classes the user answered "always allow" for this session
     /// (I1-03 approvals). Session-only: never persisted. Shared with the
     /// spawned tool loops so a grant made mid-turn holds for the next one.
@@ -1787,6 +1794,21 @@ impl<'a> App<'a> {
         app
     }
 
+    /// Body geometry for one frame: the custom tree when the user resized
+    /// one, the preset otherwise. The single branch point, so draw, hit-test
+    /// and the Tab ring cannot disagree about what is on screen.
+    pub fn body_layout(&self, area: ratatui::layout::Rect) -> crate::layout::BodyLayout {
+        match &self.custom_view {
+            Some(view) => crate::view::to_body_layout(&view.render(area)),
+            None => crate::layout::compute_layout(
+                area,
+                &self.config.layout,
+                self.show_terminal,
+                self.last_body_focus,
+            ),
+        }
+    }
+
     /// The agent stack's panes, rebuilt from live state on every draw: one
     /// per spawned subagent run, one for the ByteBot run, one for queued
     /// approvals. Always three, idle ones saying so — switching never lands on
@@ -1952,6 +1974,8 @@ impl<'a> App<'a> {
             show_terminal: false,
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
+            custom_view: None,
+            last_body_area: ratatui::layout::Rect::default(),
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
             agent_plan: crate::agent_tools::new_plan_handle(),
@@ -8343,12 +8367,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             size.width,
                             size.height.saturating_sub(2),
                         );
-                        let body_layout = crate::layout::compute_layout(
-                            body_area,
-                            &app.config.layout,
-                            app.show_terminal,
-                            app.last_body_focus,
-                        );
+                        let body_layout = app.body_layout(body_area);
                         match body_layout.hit_test(mouse.column) {
                             Some(FocusArea::FileExplorer) => {
                                 app.focus = FocusArea::FileExplorer;

@@ -446,12 +446,8 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
     ) {
         app.last_body_focus = app.focus;
     }
-    let layout = compute_layout(
-        area,
-        &app.config.layout,
-        app.show_terminal,
-        app.last_body_focus,
-    );
+    app.last_body_area = area;
+    let layout = app.body_layout(area);
     app.last_layout = layout;
 
     if let Some(rect) = layout.explorer {
