@@ -14,6 +14,7 @@
 
 pub mod advise;
 pub mod anchor;
+pub mod artifacts;
 pub mod budget;
 pub mod cochange;
 pub mod compact;

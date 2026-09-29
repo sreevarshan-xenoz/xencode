@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — session run-ledger: every verification run leaves a row
+### Added — per-session artifact directories with pruning
+
+`.xencode/artifacts/<session>/` holds the evidence ledger rows point at.
+Writes keep the last 8 KiB on a character boundary — the failure is at the
+end — under path-safe names, and pruning keeps the newest 5 session dirs plus
+every session with a failing ledger row. `xencode test` writes a compact run
+log per run, fills the ledger `log_ref`, and prunes afterwards, so the disk
+trap is handled by running the prune rather than by asking. Four tests.
+
+
 
 `.xencode/ledger.jsonl` records session, run class, exit code, subject
 digests, and a log reference per run — OTel-shaped rows, in-toto-flavoured
