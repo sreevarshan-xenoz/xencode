@@ -1,18 +1,21 @@
-//! Layout tree and views (`V-1`), alongside — not instead of — presets.
+//! Layout tree and views (`V-1`), alongside — not instead of — presets at
+//! first, and since `V-5` the only thing a frame draws.
 //!
-//! `compute_layout` in [`crate::layout`] stays the shipped geometry path. This
-//! module introduces the tree that will eventually replace the preset match:
 //! `LayoutNode` (`Leaf`, `Split`, `Tabbed`, `Stack`) plus `Pane`, rendered by
-//! one function every surface shares. The three presets are re-expressed as
-//! builder functions, and a sweep test proves the tree renders them
-//! pixel-identically to `compute_layout` — until that proof exists for every
-//! consumer, both paths live and the flag (still presets) chooses.
+//! one function every surface shares. The three presets are expressed as
+//! builder functions, and a sweep proves the tree renders them
+//! pixel-identically to `crate::layout::compute_layout` — which is why that
+//! function now exists as the *reference* the sweep compares against, rather
+//! than as a second path a frame can take. [`crate::templates`] is the one
+//! place a layout name resolves: a preset to its builder here, a name the user
+//! declared in config to the data constructor there.
 //!
 //! Three rules from the plan, enforced here:
 //!
-//! - One geometry source: [`render`] feeds drawing, [`hit_test_tree`] feeds
-//!   the mouse, so the two cannot drift. Tabbed and Stack resolve to the
-//!   active child, and the tests cover those node kinds, not just widths.
+//! - One geometry source: [`render`] feeds drawing, [`hit_test_tree`] (and its
+//!   cell-wise sibling [`hit_test_tree_point`]) feeds the mouse, so the two
+//!   cannot drift. Tabbed and Stack resolve to the active child, and the tests
+//!   cover those node kinds, not just widths.
 //! - [`FocusArea`](crate::focus::FocusArea) stays the focus model. A pane
 //!   carries one; the tree never invents a second focus concept.
 //! - `Tabbed` and `Stack` resolve the active pane to the whole area. The
@@ -20,7 +23,7 @@
 
 use crate::focus::FocusArea;
 use crate::layout::BodyLayout;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 
 /// Which body slot a pane fills. Mirrors [`BodyLayout`]'s fields so a rendered
 /// tree folds back into one without loss.
@@ -89,30 +92,49 @@ impl ViewState {
 
 /// Leaf panes with their rects, in render order. Splits use the same ratatui
 /// primitives as `compute_layout`, so identical inputs give identical rects.
-/// Terminal leaves are dropped when the area is too short for the column to
-/// stay useful — the same rule `split_chat_column` applies, so a resized tree
-/// and a preset agree about when the terminal vanishes.
+/// A stacked split shorter than [`TERMINAL_MIN_HEIGHT`] drops its terminal
+/// children *before* the split is computed — the same rule the preset builders
+/// apply through `chat_column`, so a resized tree, a template and a preset
+/// agree about when the terminal vanishes. Their rows go back to the chat pane
+/// above instead of squeezing it to nothing.
 pub fn render(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
     render_inner(node, area)
+}
+
+/// Is this node a leaf holding the embedded terminal?
+fn is_terminal_leaf(node: &LayoutNode) -> bool {
+    matches!(
+        node,
+        LayoutNode::Leaf(Pane {
+            slot: BodySlot::Terminal,
+            ..
+        })
+    )
 }
 
 fn render_inner(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
     match node {
         LayoutNode::Leaf(pane) => vec![(*pane, area)],
         LayoutNode::Split { horizontal, parts } => {
+            let shown: Vec<&(LayoutNode, Constraint)> = parts
+                .iter()
+                .filter(|(child, _)| {
+                    *horizontal || area.height >= TERMINAL_MIN_HEIGHT || !is_terminal_leaf(child)
+                })
+                .collect();
             let direction = if *horizontal {
                 Direction::Horizontal
             } else {
                 Direction::Vertical
             };
-            let constraints: Vec<Constraint> = parts.iter().map(|(_, c)| *c).collect();
+            let constraints: Vec<Constraint> = shown.iter().map(|(_, c)| *c).collect();
             let areas = Layout::default()
                 .direction(direction)
                 .constraints(constraints)
                 .split(area);
             let mut out = Vec::new();
-            for ((child, _), rect) in parts.iter().zip(areas.iter()) {
-                out.extend(render_inner(child, *rect));
+            for (child, rect) in shown.iter().zip(areas.iter()) {
+                out.extend(render_inner(&child.0, *rect));
             }
             out
         }
@@ -174,6 +196,32 @@ pub fn hit_test_tree(node: &LayoutNode, area: Rect, column: u16) -> Option<Focus
         last = Some(focus);
     }
     last
+}
+
+/// Which body panel owns the cell at (`row`, `column`), walking the tree.
+///
+/// [`hit_test_tree`] answers a column-only version of this question, which is
+/// the right question while every body split is side-by-side — the three
+/// presets are. A template may split top from bottom, and there a column is not
+/// enough: the pane whose rect contains the cell wins. A cell that lands on no
+/// pane — the input strip, the terminal, a hidden tab — falls back to the
+/// column rule, so a click keeps landing where it always did.
+pub fn hit_test_tree_point(
+    node: &LayoutNode,
+    area: Rect,
+    row: u16,
+    column: u16,
+) -> Option<FocusArea> {
+    for (pane, rect) in render(node, area) {
+        let claims = matches!(
+            pane.slot,
+            BodySlot::Explorer | BodySlot::Editor | BodySlot::Chat
+        );
+        if claims && rect.contains(Position { x: column, y: row }) {
+            return Some(pane.focus);
+        }
+    }
+    hit_test_tree(node, area, column)
 }
 
 fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
@@ -841,5 +889,102 @@ mod tests {
             from_tree,
             compute_layout(area, "classic", false, FocusArea::ChatInput)
         );
+    }
+
+    #[test]
+    fn a_point_hit_test_agrees_with_the_column_rule_for_every_preset() {
+        // The mouse path now asks by cell, because a template may stack panes.
+        // For the presets — which split side by side — the answer may not move:
+        // every cell lands on the pane the shipped column rule names.
+        for area in areas() {
+            for preset in LAYOUT_NAMES {
+                for focus in focuses() {
+                    for show_terminal in [false, true] {
+                        let tree = preset_tree(area, preset, show_terminal, focus);
+                        let shipped = compute_layout(area, preset, show_terminal, focus);
+                        for row in area.y..area.bottom() {
+                            for column in 0..area.width.saturating_add(2) {
+                                assert_eq!(
+                                    hit_test_tree_point(&tree, area, row, column),
+                                    shipped.hit_test(column),
+                                    "{preset} row={row} col={column} {area:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_stacked_tree_hit_tests_by_point() {
+        // Editor above chat: both leaves span the full width, so a column can
+        // never tell them apart and only the cell can.
+        let area = rect(80, 22);
+        let tree = LayoutNode::Split {
+            horizontal: false,
+            parts: vec![
+                (
+                    leaf(BodySlot::Editor, FocusArea::CodeEditor),
+                    Constraint::Percentage(50),
+                ),
+                (
+                    leaf(BodySlot::Chat, FocusArea::ChatInput),
+                    Constraint::Percentage(50),
+                ),
+            ],
+        };
+        let leaves = render(&tree, area);
+        let editor_rect = leaves[0].1;
+        let chat_rect = leaves[1].1;
+        assert_eq!(
+            hit_test_tree_point(&tree, area, editor_rect.y, 40),
+            Some(FocusArea::CodeEditor)
+        );
+        assert_eq!(
+            hit_test_tree_point(&tree, area, chat_rect.y, 40),
+            Some(FocusArea::ChatInput)
+        );
+    }
+
+    #[test]
+    fn a_short_stacked_split_drops_the_terminal_it_cannot_fit() {
+        // The chat column with the terminal named: at 10 rows the terminal leaf
+        // is dropped before layout, so its eight rows stay with the chat pane.
+        // This is what makes a data template agree with the preset builders,
+        // which decide the same thing while building (proved against
+        // `compute_layout` in `templates.rs`).
+        let tree = LayoutNode::Split {
+            horizontal: false,
+            parts: vec![
+                (
+                    leaf(BodySlot::Chat, FocusArea::ChatInput),
+                    Constraint::Min(6),
+                ),
+                (
+                    leaf(BodySlot::Terminal, FocusArea::ChatInput),
+                    Constraint::Length(8),
+                ),
+                (
+                    leaf(BodySlot::Input, FocusArea::ChatInput),
+                    Constraint::Length(3),
+                ),
+            ],
+        };
+        let short = render(&tree, rect(80, 10));
+        assert!(
+            !short
+                .iter()
+                .any(|(pane, _)| pane.slot == BodySlot::Terminal),
+            "no terminal at 10 rows: {short:?}"
+        );
+        let from_tree = to_body_layout(&short);
+        assert_eq!(from_tree.chat.map(|r| r.height), Some(7));
+        assert_eq!(from_tree.input.map(|r| r.height), Some(3));
+
+        // The same column at 22 rows keeps the terminal.
+        let tall = to_body_layout(&render(&tree, rect(80, 22)));
+        assert_eq!(tall.terminal.map(|r| r.height), Some(8));
     }
 }

@@ -1,38 +1,31 @@
-//! Body layout: the one geometry source for draw, mouse hit-testing and
-//! resize scroll-clamping.
+//! Body layout: the preset geometry the tree is proved against.
 //!
 //! `compute_layout` is pure — presets are plain geometry, so switching the
 //! layout can never lose pane state (open file, scrolls, messages live in
 //! `App`, not here). Hidden panes are `None`, not zero-sized rects: callers
 //! must skip drawing them, and clicks in their regions fall to the nearest
 //! visible neighbour.
+//!
+//! Since `V-5` this is **the reference, not the render path**: every configured
+//! layout, presets included, is drawn from the tree in [`crate::templates`],
+//! and `view`'s sweep asserts the tree reproduces these rects and this
+//! hit-testing exactly. It stays because that proof needs an independent
+//! implementation to compare against — deleting the reference would delete the
+//! test. The name list and the fallback contract live in `templates` and are
+//! re-exported here, so a preset name exists in one place only.
 
 use crate::focus::FocusArea;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Layout presets in cycle order (←/→ on the Layout settings row, Ctrl+U).
-pub const LAYOUT_NAMES: &[&str] = &["classic", "chat-first", "zen"];
+/// Re-exported from the template registry, which is where the names a user can
+/// choose actually live.
+pub const LAYOUT_NAMES: &[&str] = crate::templates::PRESET_NAMES;
 
 /// The preset to render: an unknown configured value (typo, hand-edited
 /// config) falls back to "classic" — same contract as unknown themes.
 pub fn effective_layout(name: &str) -> &'static str {
-    LAYOUT_NAMES
-        .iter()
-        .find(|l| **l == name)
-        .map_or("classic", |&l| l)
-}
-
-/// Next layout name when cycling by one step (`forward`). Unknown values
-/// start the cycle from "classic".
-pub fn cycle_layout(active: &str, forward: bool) -> String {
-    let len = LAYOUT_NAMES.len();
-    let pos = LAYOUT_NAMES.iter().position(|l| *l == active).unwrap_or(0);
-    let next = if forward {
-        (pos + 1) % len
-    } else {
-        (pos + len - 1) % len
-    };
-    LAYOUT_NAMES[next].to_string()
+    crate::templates::preset_name(name).unwrap_or("classic")
 }
 
 /// Every body-region rect for one frame, already resolved: `None` means
@@ -78,6 +71,10 @@ fn split_chat_column(area: Rect, show_terminal: bool) -> (Rect, Option<Rect>, Re
 /// tracks it so overlay focus doesn't flicker zen's target); only
 /// `FileExplorer` and `CodeEditor` claim the whole body, everything else
 /// gets the chat column.
+///
+/// No longer the path a frame takes — `templates::tree` renders every layout
+/// now — but still the statement of what each preset means, which is what the
+/// tree is compared against.
 pub fn compute_layout(
     area: Rect,
     preset: &str,
@@ -197,15 +194,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_names_fall_back_and_cycles_wrap() {
+    fn unknown_names_fall_back_to_classic() {
         assert_eq!(effective_layout("bogus"), "classic");
         assert_eq!(effective_layout("zen"), "zen");
-        assert_eq!(cycle_layout("classic", true), "chat-first");
-        assert_eq!(cycle_layout("chat-first", true), "zen");
-        assert_eq!(cycle_layout("zen", true), "classic");
-        assert_eq!(cycle_layout("classic", false), "zen");
-        // Unknown starts from classic rather than getting stuck.
-        assert_eq!(cycle_layout("bogus", true), "chat-first");
+        assert_eq!(effective_layout("classic"), "classic");
+        assert_eq!(effective_layout("chat-first"), "chat-first");
+        // The cycle itself now lives in the template registry, where the names
+        // a user declared are one more stop; `templates`' own tests cover it.
     }
 
     #[test]

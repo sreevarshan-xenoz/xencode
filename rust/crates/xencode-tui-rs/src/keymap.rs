@@ -137,14 +137,16 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// the input-mode handlers (e.g. Ctrl+J reaches the chat textarea as a
 /// newline).
 /// Grow or shrink the focused pane, promoting the preset to a custom tree
-/// on first press. Promotion replays the current preset through the tree
+/// on first press. Promotion replays the current layout through the tree
 /// builder at the last drawn body size, so the first resize changes nothing
-/// visible — it only takes over future geometry.
+/// visible — it only takes over future geometry. A layout named in config
+/// promotes the same way, from its own shape.
 fn resize_focused_pane(app: &mut App, delta: i16) {
     if app.custom_view.is_none() {
-        let tree = crate::view::preset_tree(
-            app.last_body_area,
+        let tree = crate::templates::tree(
+            &app.config.layout_templates,
             &app.config.layout,
+            app.last_body_area,
             app.show_terminal,
             app.last_body_focus,
         );
@@ -152,6 +154,23 @@ fn resize_focused_pane(app: &mut App, delta: i16) {
     }
     if let Some(view) = app.custom_view.as_mut() {
         crate::view::nudge_focused(&mut view.root, app.focus, delta);
+    }
+}
+
+/// Move one step through the layout names — the three shipped presets and the
+/// templates declared in config — in the direction `dir` names, and say which
+/// one is on screen now. A template that refuses to build is reported here, at
+/// the keystroke, rather than discovered a frame later: the name is stored
+/// either way, and the frame renders classic, so the two toasts together tell
+/// the whole truth.
+fn cycle_layout(app: &mut App, dir: i32) {
+    let next =
+        crate::templates::cycle_name(&app.config.layout_templates, &app.config.layout, dir >= 0);
+    app.config.layout = next.clone();
+    app.custom_view = None;
+    app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
+    if let Some(problem) = crate::templates::problem(&app.config.layout_templates, &next) {
+        app.push_toast(crate::toast::ToastKind::Warning, problem);
     }
 }
 
@@ -310,15 +329,13 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
             app.show_terminal = !app.show_terminal;
         }
         KeyCode::Char('u') => {
-            // Live layout-preset cycling (H1-05): pure geometry, so this
-            // never touches pane state — open file, scrolls and messages
-            // all survive the switch. Cycling drops any resized tree: the
-            // preset is the source of truth again until the next resize.
-            let next = crate::layout::cycle_layout(&app.config.layout, true);
-            app.config.layout = next.clone();
-            app.custom_view = None;
+            // Live layout cycling (H1-05, V-5): every name on offer, presets and
+            // the templates config declares. Pure geometry, so this never
+            // touches pane state — open file, scrolls and messages all survive
+            // the switch. Cycling drops any resized tree: the name is the
+            // source of truth again until the next resize.
+            cycle_layout(app, 1);
             app.save_config();
-            app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
         }
         KeyCode::Char('h') => {
             if !app.health_check_in_progress {
@@ -388,7 +405,7 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
 fn next_body_focus(app: &App) -> FocusArea {
     use crate::focus::FocusArea::*;
     let ring = [FileExplorer, CodeEditor, ChatInput];
-    if crate::layout::effective_layout(&app.config.layout) == "zen" {
+    if crate::templates::preset_name(&app.config.layout) == Some("zen") {
         return match app.focus {
             FileExplorer => CodeEditor,
             CodeEditor => ChatInput,
@@ -894,7 +911,9 @@ fn stepped(v: u64, dir: i32, step: u64, min: u64, max: u64) -> u64 {
 fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], dir: i32) {
     let current = match label {
         "Theme" => app.config.active_theme.clone(),
-        "Layout" => app.config.layout.clone(),
+        // "Layout" is not here: its options are the names the config declares,
+        // so it cycles through `keymap::cycle_layout`, which reads them
+        // (`V-5`).
         "Agent Approval" => app.config.agent_approval.clone(),
         _ => return,
     };
@@ -912,7 +931,6 @@ fn settings_cycle(app: &mut App, label: &str, options: &'static [&'static str], 
             app.theme = ThemeColors::get(&app.config.active_theme);
             app.style_chat_input();
         }
-        "Layout" => app.config.layout = value.to_string(),
         "Agent Approval" => app.config.agent_approval = value.to_string(),
         _ => {}
     }
@@ -940,6 +958,12 @@ fn settings_step(app: &mut App, dir: i32) {
     match settings_current(app).kind {
         SettingKind::Cycle(options) => {
             settings_cycle(app, label, options, dir);
+            app.save_config();
+        }
+        SettingKind::CycleLayout => {
+            // The same helper Ctrl+U calls, so the panel and the chord cannot
+            // drift apart about what the next layout is.
+            cycle_layout(app, dir);
             app.save_config();
         }
         SettingKind::Toggle => {
@@ -1656,6 +1680,77 @@ mod tests {
         // Preset cycling drops the custom tree.
         press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
         assert!(app.custom_view.is_none());
+    }
+
+    #[test]
+    fn ctrl_u_and_the_settings_row_cycle_the_layouts_config_declares() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.config.layout = "classic".into();
+        app.config.layout_templates.insert(
+            "editor-first".to_string(),
+            serde_json::json!({"split": {"horizontal": true, "parts": [
+                [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
+                [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
+            ]}}),
+        );
+
+        // The three presets still cycle, and the declared name is one more stop.
+        for expected in ["chat-first", "zen", "editor-first"] {
+            press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+            assert_eq!(app.config.layout, expected);
+        }
+        // The stop is real: the body now renders the shape the config describes.
+        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
+        let layout = app.body_layout(area);
+        assert_eq!(layout.explorer, None);
+        assert_eq!(layout.editor.map(|r| r.width), Some(70));
+        // Resizing promotes this layout the same way it promotes a preset.
+        handle_key(
+            &mut app,
+            press_alt(KeyCode::Right),
+            &mpsc::unbounded_channel().0,
+        );
+        assert!(app.custom_view.is_some(), "a declared layout promotes too");
+        app.custom_view = None;
+
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(app.config.layout, "classic", "the cycle wraps");
+
+        // The Settings row walks the same list, so the panel cannot offer less
+        // than the chord does.
+        app.focus = FocusArea::Settings;
+        app.settings_cursor = crate::focus::settings_row_index("Layout");
+        press(&mut app, KeyCode::Right);
+        assert_eq!(app.config.layout, "chat-first");
+        for expected in ["zen", "editor-first"] {
+            press(&mut app, KeyCode::Right);
+            assert_eq!(app.config.layout, expected);
+        }
+        press(&mut app, KeyCode::Left);
+        assert_eq!(app.config.layout, "zen");
+    }
+
+    #[test]
+    fn cycling_onto_a_template_that_cannot_build_says_why() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.config.layout = "zen".into();
+        app.config.layout_templates.insert(
+            "broken".to_string(),
+            serde_json::json!({"leaf": {"slot": "sidebar", "focus": "editor"}}),
+        );
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert_eq!(app.config.layout, "broken", "the name is stored as chosen");
+        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
+        assert!(
+            said.iter().any(|m| m.contains("unknown slot")),
+            "the keystroke explains the refusal: {said:?}"
+        );
+        // And the body renders classic, which is what the toast promises.
+        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
+        assert_eq!(
+            app.body_layout(area),
+            crate::layout::compute_layout(area, "classic", false, app.last_body_focus)
+        );
     }
 
     #[test]

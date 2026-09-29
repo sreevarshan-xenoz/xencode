@@ -16,7 +16,6 @@ use crate::focus::{
     mask_secret, FocusArea, InputMode, SettingKind, FEATURE_LIST, SETTINGS_ITEMS,
     SETTINGS_LABEL_WIDTH,
 };
-use crate::layout::compute_layout;
 use crate::widgets::{gauge, panel_border_set, spinner};
 
 pub fn draw(f: &mut Frame, app: &mut App) {
@@ -267,7 +266,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     if w >= 72 {
         left.push_str(&format!(
             "[{}] ",
-            crate::layout::effective_layout(&app.config.layout)
+            crate::templates::effective_name(&app.config.layout_templates, &app.config.layout)
         ));
     }
     if w >= 60 {
@@ -434,11 +433,12 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
 // ── Body (explorer + editor + chat + input) ────────────────────────────────
 
-/// Renders the body from the layout engine's resolved rects (H1-03). The
-/// geometry lives in exactly one place (`layout::compute_layout`); the mouse
-/// handler and resize clamp call the same function. `last_layout` is
-/// recorded here so the Tab focus-ring can see what the user can see, and
-/// `last_body_focus` is latched for zen's focus-follows target.
+/// Renders the body from the layout tree's resolved rects (V-1, V-5). The
+/// geometry comes from one place — `App::body_tree`, which answers with the
+/// resized arrangement when there is one and the configured layout otherwise —
+/// and the mouse handler asks the same tree. `last_layout` is recorded here so
+/// the Tab focus-ring can see what the user can see, and `last_body_focus` is
+/// latched for zen's focus-follows target.
 fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
     if matches!(
         app.focus,
@@ -1035,6 +1035,17 @@ fn draw_model_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// One choice row's value column: the current name, then one dot per option
+/// with the current one filled. Shared by the static option lists and the
+/// layout names read from config, so a row cannot format them differently.
+fn cycle_value_line(current: &str, options: &[String]) -> String {
+    let pos = options.iter().position(|o| o == current).unwrap_or(0);
+    let dots: Vec<&str> = (0..options.len())
+        .map(|i| if i == pos { "●" } else { "○" })
+        .collect();
+    format!("{}  [{}]", current, dots.join(" "))
+}
+
 /// The right-hand value column for one settings row, formatted per its
 /// `SettingKind` (and label, for the rows that carry units or types).
 fn setting_display(app: &App, idx: usize) -> String {
@@ -1045,15 +1056,21 @@ fn setting_display(app: &App, idx: usize) -> String {
         SettingKind::Cycle(options) => {
             let current = match row.label {
                 "Theme" => &app.config.active_theme,
-                "Layout" => &app.config.layout,
                 "Agent Approval" => &app.config.agent_approval,
                 _ => options[0],
             };
-            let pos = options.iter().position(|o| *o == current).unwrap_or(0);
-            let dots: Vec<&str> = (0..options.len())
-                .map(|i| if i == pos { "●" } else { "○" })
-                .collect();
-            format!("{}  [{}]", current, dots.join(" "))
+            let names: Vec<String> = options.iter().map(|o| o.to_string()).collect();
+            cycle_value_line(current, &names)
+        }
+        SettingKind::CycleLayout => {
+            let names = crate::templates::names(&app.config.layout_templates);
+            // The name shown is the one being rendered, which is not always the
+            // one in the config: a typo, or a template that refuses to build,
+            // renders classic, and the row says what is on screen. The startup
+            // toast names what was refused.
+            let rendered =
+                crate::templates::effective_name(&app.config.layout_templates, &app.config.layout);
+            cycle_value_line(&rendered, &names)
         }
         SettingKind::Toggle => {
             let on = match row.label {
@@ -2323,8 +2340,11 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
     let area = Rect::new(0, 0, width, height);
 
-    // Chat pane: outer [header 1 | body | status 1], then the layout
-    // engine's chat rect — the exact one draw_body renders (H1-03).
+    // Chat pane: outer [header 1 | body | status 1], then the body tree's own
+    // chat rect — the exact one `draw_body` renders, from the same
+    // `App::body_layout`, so clamp and draw cannot drift (E6-02). It used to
+    // re-derive this through `compute_layout`, which was fine while presets
+    // were the only layouts and is wrong for a template named in config.
     let body = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2333,12 +2353,7 @@ pub fn clamp_scrolls_on_resize(app: &mut App, width: u16, height: u16) {
             Constraint::Length(1),
         ])
         .split(area)[1];
-    let layout = compute_layout(
-        body,
-        &app.config.layout,
-        app.show_terminal,
-        app.last_body_focus,
-    );
+    let layout = app.body_layout(body);
     if let Some(chat_area) = layout.chat {
         let rows = chat_area
             .height

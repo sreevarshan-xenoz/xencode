@@ -1794,19 +1794,42 @@ impl<'a> App<'a> {
         app
     }
 
-    /// Body geometry for one frame: the custom tree when the user resized
-    /// one, the preset otherwise. The single branch point, so draw, hit-test
+    /// The body tree for one frame: the resized arrangement when the user has
+    /// one, otherwise the configured layout — a preset through its proven
+    /// builder, a template declared in config through the data constructor, and
+    /// classic for a name that is neither. One branch point, so draw, hit-test
     /// and the Tab ring cannot disagree about what is on screen.
-    pub fn body_layout(&self, area: ratatui::layout::Rect) -> crate::layout::BodyLayout {
+    pub fn body_tree(&self, area: ratatui::layout::Rect) -> crate::view::LayoutNode {
         match &self.custom_view {
-            Some(view) => crate::view::to_body_layout(&view.render(area)),
-            None => crate::layout::compute_layout(
-                area,
+            Some(view) => view.root.clone(),
+            None => crate::templates::tree(
+                &self.config.layout_templates,
                 &self.config.layout,
+                area,
                 self.show_terminal,
                 self.last_body_focus,
             ),
         }
+    }
+
+    /// Body geometry for one frame, folded from [`App::body_tree`] so the many
+    /// callers that want named rectangles keep working.
+    pub fn body_layout(&self, area: ratatui::layout::Rect) -> crate::layout::BodyLayout {
+        crate::view::to_body_layout(&crate::view::render(&self.body_tree(area), area))
+    }
+
+    /// Which body pane owns one mouse cell. The tree answers, and it answers by
+    /// point rather than by column: a template may stack a pane above another,
+    /// where a column alone cannot tell them apart. Cells that land on no pane
+    /// (the input strip, the terminal) fall to the column rule, which is what
+    /// the shipped presets have always done.
+    pub fn body_hit_test(
+        &self,
+        area: ratatui::layout::Rect,
+        row: u16,
+        column: u16,
+    ) -> Option<crate::focus::FocusArea> {
+        crate::view::hit_test_tree_point(&self.body_tree(area), area, row, column)
     }
 
     /// The agent stack's panes, rebuilt from live state on every draw: one
@@ -2232,6 +2255,14 @@ impl<'a> App<'a> {
                 role: msg.role.clone(),
                 content: msg.content.clone(),
             });
+        }
+        // A configured layout that will not render as written says so once, at
+        // startup, instead of leaving the user to wonder why the body looks
+        // like classic (V-5).
+        if let Some(problem) =
+            crate::templates::problem(&app.config.layout_templates, &app.config.layout)
+        {
+            app.push_toast(crate::toast::ToastKind::Warning, problem);
         }
         app
     }
@@ -8367,8 +8398,7 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             size.width,
                             size.height.saturating_sub(2),
                         );
-                        let body_layout = app.body_layout(body_area);
-                        match body_layout.hit_test(mouse.column) {
+                        match app.body_hit_test(body_area, mouse.row, mouse.column) {
                             Some(FocusArea::FileExplorer) => {
                                 app.focus = FocusArea::FileExplorer;
                                 let row = mouse.row.saturating_sub(2) as usize;
@@ -8493,6 +8523,71 @@ mod tests {
     use tokio::sync::mpsc;
     use xencode_context_rs::init_project;
     use xencode_core_rs::{scan_workspace, ScanOptions, TaskStatus};
+
+    /// V-5: a layout named in config renders with no code change, and a
+    /// template that cannot build says so at startup instead of looking like a
+    /// preference that was quietly ignored.
+    #[test]
+    fn a_layout_named_in_config_is_rendered_and_a_broken_one_is_reported() {
+        let area = ratatui::layout::Rect::new(0, 1, 100, 22);
+
+        let editable = XencodeConfig {
+            layout: "editor-first".to_string(),
+            layout_templates: [(
+                "editor-first".to_string(),
+                serde_json::json!({"split": {"horizontal": true, "parts": [
+                    [{"leaf": {"slot": "editor", "focus": "editor"}}, {"percent": 70}],
+                    [{"leaf": {"slot": "chat", "focus": "chat"}}, {"percent": 30}]
+                ]}}),
+            )]
+            .into_iter()
+            .collect(),
+            ..XencodeConfig::default()
+        };
+        let app = App::with_config_and_memory(
+            editable,
+            ConversationMemory::new(10),
+            std::path::PathBuf::new(),
+        );
+        let layout = app.body_layout(area);
+        assert_eq!(layout.explorer, None, "this shape has no explorer");
+        assert_eq!(layout.editor.map(|r| r.width), Some(70));
+        assert_eq!(layout.chat.map(|r| r.width), Some(30));
+        // The mouse follows the same tree, and by cell rather than by column.
+        assert_eq!(app.body_hit_test(area, 5, 90), Some(FocusArea::ChatInput));
+        assert_eq!(app.body_hit_test(area, 5, 10), Some(FocusArea::CodeEditor));
+        assert!(
+            app.toasts.is_empty(),
+            "a template that builds is not a problem"
+        );
+
+        // The same name with a typo in it: classic renders, and the reason is
+        // said out loud rather than left to be discovered.
+        let broken = XencodeConfig {
+            layout: "editor-first".to_string(),
+            layout_templates: [(
+                "editor-first".to_string(),
+                serde_json::json!({"leaf": {"slot": "sidebar", "focus": "editor"}}),
+            )]
+            .into_iter()
+            .collect(),
+            ..XencodeConfig::default()
+        };
+        let app = App::with_config_and_memory(
+            broken,
+            ConversationMemory::new(10),
+            std::path::PathBuf::new(),
+        );
+        assert_eq!(
+            app.body_layout(area),
+            crate::layout::compute_layout(area, "classic", false, FocusArea::ChatInput)
+        );
+        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
+        assert!(
+            said.iter().any(|m| m.contains("unknown slot")),
+            "the refusal must be said: {said:?}"
+        );
+    }
 
     /// QA-1: which runs can be written down, and which are left alone.
     #[test]

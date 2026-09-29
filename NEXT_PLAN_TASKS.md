@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1614 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1631 tests passing, zero warnings (re-verified 2026-09-29)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10609,6 +10609,42 @@ no reason to make yet.
 config with no code change, `Ctrl+U` still cycles and the header still names the
 current one, and an unknown template name falls back to `classic` exactly as
 `effective_layout` does today.
+  **Done 2026-09-29, with one stated exception for the third preset.** Presets
+  and config templates are one registry in `tui-rs/src/templates.rs`: the name
+  list is the three presets in cycle order followed by the declared names
+  sorted, and `Ctrl+U`, the Settings Layout row and the header chip all read
+  that one list, so they cannot disagree. `layout_templates` is a new
+  `XencodeConfig` field — name → raw JSON, deliberately untyped, because this
+  file is hand-edited and a template that does not parse must be refused by
+  name rather than fail the load and silently reset every other setting.
+  A template is a leaf (`slot`, `focus`) or a split whose children carry a
+  share as `percent`, `min` or `length` — the same three constraint kinds the
+  preset builders use, so a template is not a weaker vocabulary.
+  `preset_template` gives `classic` and `chat-first` a data twin, and a test
+  proves the twin renders what the builder renders across the size sweep;
+  **`zen` has no twin and that is the exception** — its single pane follows the
+  focused body area, which no shape made of words can state. The unknown-name
+  fallback is `classic` through `effective_layout`, and a template that refuses
+  to build (mistyped slot, split of one child, zero share, an unknown node kind)
+  renders classic and says why: a toast at startup, a toast at the keystroke in
+  `Ctrl+U` or the Settings row, and a note from `xencode config set layout`.
+  Every configured layout now renders through the tree, so the preset `match`
+  left the render path as duplication; `compute_layout` stays as the
+  independent reference the pixel-identity and hit-test sweeps compare against
+  rather than as a second shipped path. Two things had to be added for that to
+  be honest rather than merely claimed: `render` now really drops a terminal
+  leaf from a stacked split too short to hold it (its doc promised this since
+  V-1 and the code did not do it), and the mouse hit-tests by cell rather than
+  by column, because a template may stack one pane above another where a column
+  cannot tell them apart — parity with the old column rule is asserted for
+  every preset, every size and every cell. Sixteen tests: eight in
+  `templates.rs`, three in `view.rs`, one in `app.rs`, two in `keymap.rs`, two
+  in `xencode-config-rs`. Not done, and not implied: no template *directory* or
+  file format (the boundary above), no tab chrome for `Tabbed`/`Stack`, no
+  per-pane template state (V-6 owns persistence), and no editing surface in the
+  TUI — a template is written in the config file or not at all. The CLI note
+  on `config set layout <name>` is not covered by a test: no test in this
+  workspace runs `run_config` against a real config directory.
 
 ### V-6 Persist the window arrangement
 

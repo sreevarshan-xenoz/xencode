@@ -140,6 +140,11 @@ impl LangField {
 pub enum SettingKind {
     /// ←/→ selects among option names (also the config values).
     Cycle(&'static [&'static str]),
+    /// ←/→ selects among the layout names on offer: the three shipped presets
+    /// plus the templates declared in config. Read at the keystroke rather than
+    /// baked into the table, because a declared name only exists once the
+    /// config that declares it has been loaded (`V-5`).
+    CycleLayout,
     /// ←/→ flips a boolean.
     Toggle,
     /// ←/→ adjusts an integer by `step`, never below `min` nor above `max`.
@@ -176,7 +181,7 @@ pub const SETTINGS_ITEMS: &[SettingRow] = &[
     SettingRow {
         label: "Layout",
         section: "Display",
-        kind: SettingKind::Cycle(crate::layout::LAYOUT_NAMES),
+        kind: SettingKind::CycleLayout,
     },
     SettingRow {
         label: "Rounded Borders",

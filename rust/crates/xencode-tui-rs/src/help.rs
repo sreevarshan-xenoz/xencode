@@ -31,10 +31,13 @@ pub(crate) const GLOBAL: &[Binding] = &[
     ("Ctrl+N", "agent stack overlay (Esc closes)"),
     (
         "Alt+Left/Right",
-        "resize focused pane (Ctrl+U resets to preset)",
+        "resize focused pane (Ctrl+U clears the resize)",
     ),
     ("Ctrl+T", "toggle terminal strip"),
-    ("Ctrl+U", "cycle layout preset"),
+    (
+        "Ctrl+U",
+        "cycle body layout (presets + templates you declared)",
+    ),
     ("Ctrl+H", "run provider health check"),
 ];
 

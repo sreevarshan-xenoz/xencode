@@ -182,7 +182,7 @@ Global (work in every panel, any mode):
 | `Ctrl+B` | ByteBot agent panel |
 | `Ctrl+H` | Run provider health check |
 | `Ctrl+T` | Toggle embedded terminal strip |
-| `Ctrl+U` | Cycle body layout preset: classic → chat-first → zen |
+| `Ctrl+U` | Cycle the body layout: classic → chat-first → zen → any template you declared in config |
 | `Ctrl+W` | Close panel → chat |
 | `Ctrl+,` | Settings |
 
@@ -261,20 +261,48 @@ last error. There is no auto-reconnect; `r` is manual by design.
 
 ### Layouts & Display
 
-The body layout is a preset — pick it with `Ctrl+U` (live, with a toast) or
-on the Settings panel (`s`). All choices persist to `~/.xencode/config.json`.
+The body layout is one tree chosen by name — pick it with `Ctrl+U` (live, with
+a toast) or on the Settings panel (`s`); both walk the same list, which is the
+three shipped presets plus anything you declared in config. All choices persist
+to `~/.xencode/config.json`.
 
-| Preset | Shape |
-|--------|-------|
+| Name | Shape |
+|------|-------|
 | `classic` | explorer 20 % / editor 50 % / chat 30 % (the default look) |
 | `chat-first` | explorer hidden, editor 25 %, chat 75 % |
 | `zen` | one pane fills the body — explorer or editor when focused, otherwise chat |
+| *yours* | declared under `layout_templates`, selected with `layout` |
+
+The presets are built in; a name you add is data, so a new arrangement costs no
+code:
+
+```json
+"layout": "editor-first",
+"layout_templates": {
+  "editor-first": { "split": { "horizontal": true, "parts": [
+    [{ "leaf": { "slot": "editor", "focus": "editor" }}, { "percent": 70 }],
+    [{ "leaf": { "slot": "chat",   "focus": "chat"   }}, { "percent": 30 }]
+  ]}}
+}
+```
+
+A leaf names one of five slots (`explorer`, `editor`, `chat`, `input`,
+`terminal`) and the focus it carries (`explorer`, `editor` or `chat`); a split
+names `horizontal: true` for side-by-side or `false` for stacked, and each
+child's share as `{"percent": n}`, `{"min": n}` or `{"length": n}`. A name that
+is neither a preset nor a declared template renders `classic`, and a template
+that cannot be built — a mistyped slot, a split with one child, a zero share —
+is refused with its reason in a toast instead of costing you the rest of the
+config; `xencode config set layout <name>` prints the same note. There is no
+layouts directory and no layout file format: templates live in the config file,
+and `zen` is the one preset no template can reproduce, because its single pane
+follows the focus.
 
 Display settings (Settings panel rows, same keys as `xencode config set`):
 
 | Row / config key | Default | Effect |
 |------------------|---------|--------|
-| `Layout` / `layout` | `classic` | preset above; unknown values fall back to classic |
+| `Layout` / `layout` | `classic` | preset or declared template above; unknown values fall back to classic |
 | `Rounded Borders` / `rounded_borders` | off | rounded panel corners |
 | `Show Scrollbars` / `show_scrollbars` | on | vertical scrollbar on chat & explorer (panes ≥ 24 cols) |
 | `Line Numbers` / `show_line_numbers` | on | editor gutter + current-line highlight (editor ≥ 45 cols) |

@@ -1542,6 +1542,18 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
             } else {
                 println!("set {key} = {value}");
             }
+            // A layout name that is neither a shipped preset nor a template the
+            // config declares renders classic. `config set` is where a user
+            // types such a name, so it is where saying so is worth the line —
+            // the value is stored anyway, because the template it names may be
+            // added afterwards.
+            if key == "layout" {
+                if let Some(problem) =
+                    xencode_tui_rs::templates::problem(&config.layout_templates, &config.layout)
+                {
+                    println!("note: {problem}");
+                }
+            }
             Ok(())
         }
         ConfigAction::Reset => {
