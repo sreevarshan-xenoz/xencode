@@ -1914,6 +1914,12 @@ from a dry run, advisory state from the local corpus. Offline reads as
 "unknown", never "clean"; a dry run that never ran says so. Exits non-zero on
 any vulnerable dependency.
 
+### `xencode agents [--format text|json]`
+
+List installed roster agents with versions and how each was installed
+(`mise:<tool>`, cargo, npm, system, user-local, unknown — only what the path
+shows). Discovery only: nothing is installed, upgraded, or written.
+
 ### `xencode hotspots [--limit 10] [--format text|json]`
 
 Rank files by commits × bytes with bus factor and CODEOWNERS owners, as

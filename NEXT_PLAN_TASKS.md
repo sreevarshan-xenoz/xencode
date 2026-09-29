@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1588 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1590 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -8720,6 +8720,13 @@ prove nothing about a remote connection).
 |---|---|---|---|
 | **AR-1** | Headless interop probe across the installed agent CLIs | core | the gate for all of W16/W17; needs the user's own logged-in accounts and a real (tiny, read-only) spend |
 | **AR-2** | Discover installed agents, versions, and how each was installed | core | PATH + `mise` reality; never installs, never upgrades |
+  **Done 2026-09-28** — `xencode agents` over `roster::inventory`: PATH
+  resolution, first line of `--version` bounded at 15 s, and an install source
+  classified from the path alone (`mise:<tool>`, cargo, npm, system,
+  user-local, unknown). Read-only by construction — scans plus version runs,
+  nothing installed or written. On this machine all six report versions and
+  `mise:*` provenance. The manager of record wins over the packaging format: an
+  npm package installed by mise reads `mise:gemini`, not npm. Two unit tests.
 | **AR-3** | Contract probe: the flags each agent actually advertises | core | replaces "capability detection by name"; feeds `OR-6`'s routing |
 
 #### W16 — One worker at a time, then brokered — 12 items

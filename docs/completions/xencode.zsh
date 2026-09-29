@@ -881,6 +881,13 @@ _arguments "${_arguments_options[@]}" : \
 '--help[Print help]' \
 && ret=0
 ;;
+(agents)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format]:FORMAT:(text json)' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
 (hotspots)
 _arguments "${_arguments_options[@]}" : \
 '--limit=[How many files to list]:LIMIT:_default' \
@@ -1683,6 +1690,10 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(agents)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (hotspots)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -1897,6 +1908,7 @@ _xencode_commands() {
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
+'agents:List installed agents with versions and install provenance' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -1985,6 +1997,11 @@ _xencode__subcmd__advisories__subcmd__status_commands() {
 _xencode__subcmd__advisories__subcmd__sync_commands() {
     local commands; commands=()
     _describe -t commands 'xencode advisories sync commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__agents_commands] )) ||
+_xencode__subcmd__agents_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode agents commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__analyze_commands] )) ||
 _xencode__subcmd__analyze_commands() {
@@ -2285,6 +2302,7 @@ _xencode__subcmd__help_commands() {
 'session:Name sessions, resolve them, and export redacted transcripts' \
 'verify:Run the machine-checkable checklist\: test, lint, fmt — each verified, none graded' \
 'envcheck:Report environment keys read in code against the templates that document them' \
+'agents:List installed agents with versions and install provenance' \
 'hotspots:Rank files by churn times size with bus factor and owners' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -2336,6 +2354,11 @@ _xencode__subcmd__help__subcmd__advisories__subcmd__status_commands() {
 _xencode__subcmd__help__subcmd__advisories__subcmd__sync_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help advisories sync commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__agents_commands] )) ||
+_xencode__subcmd__help__subcmd__agents_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help agents commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__analyze_commands] )) ||
 _xencode__subcmd__help__subcmd__analyze_commands() {

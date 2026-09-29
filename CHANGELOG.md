@@ -16,7 +16,14 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Added — `xencode doctor --selfcheck`: the self-debug slice
+### Added — `xencode agents`: versions and install provenance, discovery only
+
+PATH resolution, bounded `--version` runs, and an install source read from the
+path alone. All six agents here report versions with `mise:*` provenance. The
+function never installs, upgrades, or writes. Two unit tests plus a CLI parse
+test.
+
+
 
 Index open, git found, providers reachable, MCP servers resolvable, metrics
 parseable, cache writable — each pass, fail, or absent with a named string.

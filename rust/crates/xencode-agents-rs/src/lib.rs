@@ -30,4 +30,6 @@ pub mod probe;
 pub mod roster;
 
 pub use probe::{ProbeOptions, ProbeReport, RunCapture};
-pub use roster::{provenance_of_help_cell, AgentSpec, ROSTER};
+pub use roster::{
+    inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, ROSTER,
+};
