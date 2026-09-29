@@ -62,6 +62,21 @@ pub fn handle_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
             return flow;
         }
     }
+    // Pane resize chords (V-3): Alt+Left/Right grows or shrinks the focused
+    // pane by five points, promoting the preset to a tree on first press.
+    // Skipped while editing code — the textarea owns modified arrows there.
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        match key.code {
+            KeyCode::Left | KeyCode::Right
+                if app.input_mode != InputMode::Editing || app.focus != FocusArea::CodeEditor =>
+            {
+                let delta = if key.code == KeyCode::Right { 5 } else { -5 };
+                resize_focused_pane(app, delta);
+                return done();
+            }
+            _ => {}
+        }
+    }
     match app.input_mode {
         InputMode::Editing => editing_key(app, key, tx),
         InputMode::Normal => normal_key(app, key, tx),
@@ -121,6 +136,25 @@ fn help_modal_key(app: &mut App, key: KeyEvent) -> KeyFlow {
 /// The global Ctrl chord table. `Some` = consumed, `None` = fall through to
 /// the input-mode handlers (e.g. Ctrl+J reaches the chat textarea as a
 /// newline).
+/// Grow or shrink the focused pane, promoting the preset to a custom tree
+/// on first press. Promotion replays the current preset through the tree
+/// builder at the last drawn body size, so the first resize changes nothing
+/// visible — it only takes over future geometry.
+fn resize_focused_pane(app: &mut App, delta: i16) {
+    if app.custom_view.is_none() {
+        let tree = crate::view::preset_tree(
+            app.last_body_area,
+            &app.config.layout,
+            app.show_terminal,
+            app.last_body_focus,
+        );
+        app.custom_view = Some(crate::view::ViewState::new(tree));
+    }
+    if let Some(view) = app.custom_view.as_mut() {
+        crate::view::nudge_focused(&mut view.root, app.focus, delta);
+    }
+}
+
 /// Advance the agent stack overlay, wrapping over the live pane count.
 /// Wrapping here rather than clamping at render keeps the state bounded: an
 /// index that grows forever is a leak wearing a counter's clothes.
@@ -278,9 +312,11 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
         KeyCode::Char('u') => {
             // Live layout-preset cycling (H1-05): pure geometry, so this
             // never touches pane state — open file, scrolls and messages
-            // all survive the switch.
+            // all survive the switch. Cycling drops any resized tree: the
+            // preset is the source of truth again until the next resize.
             let next = crate::layout::cycle_layout(&app.config.layout, true);
             app.config.layout = next.clone();
+            app.custom_view = None;
             app.save_config();
             app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
         }
@@ -1580,6 +1616,60 @@ mod tests {
         assert_eq!(app.agent_stack_index, 0, "wraps instead of growing");
         press_with_mods(&mut app, KeyCode::Esc, KeyModifiers::empty());
         assert!(!app.agent_stack_visible);
+    }
+
+    fn press_alt(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::ALT)
+    }
+
+    #[test]
+    fn alt_right_promotes_and_grows_then_ctrl_u_resets() {
+        let mut app = app_with(FocusArea::ChatInput);
+        app.config.layout = "classic".into();
+        // A drawn body to promote from: the chord replays the preset at this size.
+        app.last_body_area = ratatui::layout::Rect::new(0, 1, 100, 22);
+        assert!(app.custom_view.is_none());
+        handle_key(
+            &mut app,
+            press_alt(KeyCode::Right),
+            &mpsc::unbounded_channel().0,
+        );
+        assert!(app.custom_view.is_some(), "first press promotes");
+        let chat_after = app.body_layout(app.last_body_area).chat.unwrap().width;
+        let preset = crate::layout::compute_layout(
+            app.last_body_area,
+            "classic",
+            app.show_terminal,
+            app.last_body_focus,
+        );
+        assert!(
+            chat_after > preset.chat.unwrap().width,
+            "chat column grew rightward"
+        );
+        handle_key(
+            &mut app,
+            press_alt(KeyCode::Left),
+            &mpsc::unbounded_channel().0,
+        );
+        let chat_back = app.body_layout(app.last_body_area).chat.unwrap().width;
+        assert_eq!(chat_back, preset.chat.unwrap().width, "shrinking restores");
+        // Preset cycling drops the custom tree.
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert!(app.custom_view.is_none());
+    }
+
+    #[test]
+    fn resize_chord_yields_to_the_editor() {
+        // In Editing mode with the editor focused, Alt+arrows belong to the
+        // textarea, not the tree.
+        let mut app = app_with(FocusArea::CodeEditor);
+        app.input_mode = InputMode::Editing;
+        handle_key(
+            &mut app,
+            press_alt(KeyCode::Right),
+            &mpsc::unbounded_channel().0,
+        );
+        assert!(app.custom_view.is_none());
     }
 
     fn app_with(focus: FocusArea) -> App<'static> {

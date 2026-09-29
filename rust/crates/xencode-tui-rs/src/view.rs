@@ -89,7 +89,14 @@ impl ViewState {
 
 /// Leaf panes with their rects, in render order. Splits use the same ratatui
 /// primitives as `compute_layout`, so identical inputs give identical rects.
+/// Terminal leaves are dropped when the area is too short for the column to
+/// stay useful — the same rule `split_chat_column` applies, so a resized tree
+/// and a preset agree about when the terminal vanishes.
 pub fn render(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
+    render_inner(node, area)
+}
+
+fn render_inner(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
     match node {
         LayoutNode::Leaf(pane) => vec![(*pane, area)],
         LayoutNode::Split { horizontal, parts } => {
@@ -105,7 +112,7 @@ pub fn render(node: &LayoutNode, area: Rect) -> Vec<(Pane, Rect)> {
                 .split(area);
             let mut out = Vec::new();
             for ((child, _), rect) in parts.iter().zip(areas.iter()) {
-                out.extend(render(child, *rect));
+                out.extend(render_inner(child, *rect));
             }
             out
         }
@@ -173,9 +180,15 @@ fn leaf(slot: BodySlot, focus: FocusArea) -> LayoutNode {
     LayoutNode::Leaf(Pane { slot, focus })
 }
 
+/// Below this many rows, a terminal pane would squeeze its column to nothing
+/// useful, so the renderer drops it — the same rule as `split_chat_column`,
+/// in the same shared place, not in the draw code.
+pub const TERMINAL_MIN_HEIGHT: u16 = 18;
+
 /// The chat column's vertical stack, shared by every preset that shows chat.
 /// Same splits as `split_chat_column`, so the tree and the preset cannot drift:
-/// chat, optional terminal, input.
+/// chat, optional terminal, input. The terminal leaf is always built when
+/// asked for; [`render`] drops it in short areas.
 fn chat_column(show_terminal: bool, tall_enough: bool) -> LayoutNode {
     if show_terminal && tall_enough {
         LayoutNode::Split {
@@ -226,7 +239,7 @@ pub fn classic_tree(area: Rect, show_terminal: bool) -> LayoutNode {
                 Constraint::Percentage(50),
             ),
             (
-                chat_column(show_terminal, area.height >= 18),
+                chat_column(show_terminal, area.height >= TERMINAL_MIN_HEIGHT),
                 Constraint::Percentage(30),
             ),
         ],
@@ -243,7 +256,7 @@ pub fn chat_first_tree(area: Rect, show_terminal: bool) -> LayoutNode {
                 Constraint::Percentage(25),
             ),
             (
-                chat_column(show_terminal, area.height >= 18),
+                chat_column(show_terminal, area.height >= TERMINAL_MIN_HEIGHT),
                 Constraint::Percentage(75),
             ),
         ],
@@ -255,7 +268,7 @@ pub fn zen_tree(area: Rect, show_terminal: bool, body_focus: FocusArea) -> Layou
     match body_focus {
         FocusArea::FileExplorer => leaf(BodySlot::Explorer, FocusArea::FileExplorer),
         FocusArea::CodeEditor => leaf(BodySlot::Editor, FocusArea::CodeEditor),
-        _ => chat_column(show_terminal, area.height >= 18),
+        _ => chat_column(show_terminal, area.height >= TERMINAL_MIN_HEIGHT),
     }
 }
 
@@ -446,6 +459,89 @@ pub fn stack_overlay_text(panes: &[AgentPane], active: usize) -> Vec<String> {
     ));
     out.extend(panes[active].rows.iter().cloned());
     out
+}
+
+/// Minimum share of a split any pane keeps, in percentage points. Below this
+/// a pane is a sliver its content cannot use, and a resize that produced one
+/// would be a collapse wearing an adjustment's clothes.
+pub const MIN_PANE_PERCENT: u16 = 10;
+
+/// Grow the branch holding the focused pane by `delta` percentage points,
+/// taking from a sibling in the nearest enclosing horizontal split.
+///
+/// Only `Percentage` constraints move: `Length` and `Min` children are fixed
+/// chrome (input rows, terminal height), and resizing fixed chrome is how a
+/// three-row input becomes a zero-row one. Both sides clamp at
+/// [`MIN_PANE_PERCENT`]; a move that cannot happen returns `false` rather
+/// than a partial one.
+pub fn nudge_focused(node: &mut LayoutNode, focus: FocusArea, delta: i16) -> bool {
+    fn path_to(node: &LayoutNode, focus: FocusArea, path: &mut Vec<usize>) -> bool {
+        match node {
+            LayoutNode::Leaf(pane) => pane.focus == focus,
+            LayoutNode::Split { parts, .. } => {
+                for (index, (child, _)) in parts.iter().enumerate() {
+                    path.push(index);
+                    if path_to(child, focus, path) {
+                        return true;
+                    }
+                    path.pop();
+                }
+                false
+            }
+            LayoutNode::Tabbed { .. } | LayoutNode::Stack { .. } => false,
+        }
+    }
+
+    fn child_at<'a>(node: &'a mut LayoutNode, path: &[usize]) -> Option<&'a mut LayoutNode> {
+        let mut current = node;
+        for index in path {
+            match current {
+                LayoutNode::Split { parts, .. } => {
+                    current = &mut parts.get_mut(*index)?.0;
+                }
+                _ => return None,
+            }
+        }
+        Some(current)
+    }
+
+    let mut path = Vec::new();
+    if !path_to(node, focus, &mut path) {
+        return false;
+    }
+    // Walk from the leaf up to the nearest enclosing horizontal split.
+    while let Some(index) = path.pop() {
+        let Some(parent) = child_at(node, &path) else {
+            return false;
+        };
+        let LayoutNode::Split { horizontal, parts } = parent else {
+            continue;
+        };
+        if !*horizontal {
+            continue;
+        }
+        let donor = if index + 1 < parts.len() {
+            index + 1
+        } else {
+            index.saturating_sub(1)
+        };
+        if donor == index || parts.len() < 2 {
+            return false;
+        }
+        let (grow_pct, give_pct) = match (&parts[index].1, &parts[donor].1) {
+            (Constraint::Percentage(grow), Constraint::Percentage(give)) => (*grow, *give),
+            _ => return false,
+        };
+        let room = give_pct.saturating_sub(MIN_PANE_PERCENT) as i16;
+        let moved = delta.clamp(-(grow_pct as i16 - MIN_PANE_PERCENT as i16), room);
+        if moved == 0 {
+            return false;
+        }
+        parts[index].1 = Constraint::Percentage((grow_pct as i16 + moved) as u16);
+        parts[donor].1 = Constraint::Percentage((give_pct as i16 - moved) as u16);
+        return true;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -662,6 +758,78 @@ mod tests {
         assert!(text[0].contains("[ByteBot (1)]"), "{text:?}");
         assert!(text.iter().any(|l| l.contains("fetch: done")), "{text:?}");
         assert!(stack_overlay_text(&[], 0) == vec!["no agent panes".to_string()]);
+    }
+
+    fn classic_widths(tree: &LayoutNode, area: Rect) -> Vec<u16> {
+        render(tree, area)
+            .iter()
+            .filter(|(pane, _)| {
+                pane.slot == BodySlot::Explorer
+                    || pane.slot == BodySlot::Editor
+                    || pane.slot == BodySlot::Chat
+            })
+            .map(|(_, rect)| rect.width)
+            .collect()
+    }
+
+    #[test]
+    fn nudging_grows_the_focused_pane_from_its_neighbour() {
+        let area = rect(100, 22);
+        let mut tree = classic_tree(area, false);
+        let before = classic_widths(&tree, area);
+        assert!(nudge_focused(&mut tree, FocusArea::CodeEditor, 5));
+        let after = classic_widths(&tree, area);
+        assert!(after[1] > before[1], "editor grew: {before:?} -> {after:?}");
+        // Editor is the middle child: it grows from its next sibling, the
+        // chat column, while the explorer is untouched.
+        assert_eq!(after[0], before[0], "explorer untouched");
+        assert!(
+            after[2] < before[2],
+            "chat column paid: {before:?} -> {after:?}"
+        );
+        assert!(nudge_focused(&mut tree, FocusArea::CodeEditor, -5));
+        assert_eq!(classic_widths(&tree, area), before, "shrinking restores");
+    }
+
+    #[test]
+    fn nudging_clamps_at_the_documented_minimum() {
+        let area = rect(100, 22);
+        let mut tree = classic_tree(area, false);
+        for _ in 0..30 {
+            nudge_focused(&mut tree, FocusArea::CodeEditor, 5);
+        }
+        // Explorer clamped at the minimum: thirty presses cannot collapse it,
+        // and a thirty-first press reports that nothing moved.
+        let widths = classic_widths(&tree, area);
+        assert!(widths[0] >= 10, "explorer survived: {widths:?}");
+        assert!(
+            !nudge_focused(&mut tree, FocusArea::CodeEditor, 5),
+            "clamped means no move to report"
+        );
+    }
+
+    #[test]
+    fn nudging_a_missing_focus_is_a_no_op() {
+        let area = rect(100, 22);
+        let mut tree = chat_first_tree(area, false);
+        // No explorer leaf in chat-first: nothing to grow.
+        assert!(!nudge_focused(&mut tree, FocusArea::FileExplorer, 5));
+    }
+
+    #[test]
+    fn resized_trees_survive_tiny_areas() {
+        // The done-when's resize clause: a resized tree at 20x4 renders inside
+        // its area without panicking, whatever the ratios became.
+        let area = rect(100, 22);
+        let mut tree = classic_tree(area, false);
+        for _ in 0..10 {
+            nudge_focused(&mut tree, FocusArea::CodeEditor, 5);
+        }
+        for tiny in [rect(20, 4), rect(3, 1), rect(1, 1)] {
+            for (pane, r) in render(&tree, tiny) {
+                assert_eq!(r.intersection(tiny), r, "{:?} escapes {tiny:?}", pane.slot);
+            }
+        }
     }
 
     #[test]

@@ -16,7 +16,15 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Added — agent stack overlay: three panes, one chord
+### Added — chord-resize on the layout tree
+
+`Alt+Left/Right` grows or shrinks the focused pane by five points from a
+sibling, clamping at ten percent and moving only percentage constraints. First
+press promotes the preset to a tree; `Ctrl+U` clears back. One branch point
+serves draw, hit-test, and the Tab ring. No undo, no persistence, no modal
+layer — each exclusion documented where it would have lived. Six tests.
+
+
 
 `PaneKind` vocabulary (Code through Monitor), agent panes built from live
 state (subagents, ByteBot steps, approvals — always three, idle ones saying

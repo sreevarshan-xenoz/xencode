@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1608 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1614 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -10544,7 +10544,18 @@ do not begin the latter.
 the documented minimum, survives a terminal resize without panes collapsing, and
 is undone by the same path that undoes a file edit (Q-12 rejects universal undo
 over non-git state, so this stays out of that argument deliberately).
-
+  **Done 2026-09-29, geometry only as specified** — `nudge_focused` grows the
+  focused pane from a sibling in the nearest enclosing horizontal split
+  (`Alt+Right` +5, `Alt+Left` −5), clamping both sides at `MIN_PANE_PERCENT`
+  (10), moving only `Percentage` constraints so fixed chrome never collapses.
+  First press promotes the preset to a tree at the last drawn body size;
+  `Ctrl+U` cycling clears back to presets. `App::body_layout` is the single
+  branch point for draw, hit-test, and the Tab ring. No undo (the Q-12
+  exclusion, stated not implemented), no persistence (V-6 owns it), no modal
+  layer, no drag. Editing mode keeps Alt+arrows for the textarea. Six tests:
+  grow/shrink/restore, clamp at minimum over thirty presses, missing focus is
+  a no-op, resized trees survive tiny areas, chord promote/grow/reset,
+  editor yield.
 ### V-4 Named views
 
 **Proposed.** `Ctrl+1`…`Ctrl+9` switching between semantic arrangements — Code,
