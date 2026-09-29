@@ -26,9 +26,11 @@
 //! that needs an account and has none stops at the auth check, which is still a
 //! useful observation and is recorded as one.
 
+pub mod contract;
 pub mod probe;
 pub mod roster;
 
+pub use contract::{probe_contract, ClaimResult, Verdict};
 pub use probe::{ProbeOptions, ProbeReport, RunCapture};
 pub use roster::{
     inventory, provenance_of_help_cell, AgentSpec, InstallSource, InstalledAgent, ROSTER,

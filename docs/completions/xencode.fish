@@ -275,6 +275,7 @@ json\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand envcheck" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -l format -d 'Output format' -r -f -a "text\t''
 json\t''"
+complete -c xencode -n "__fish_xencode_using_subcommand agents" -l contract -d 'Verify each roster claim against the agent\'s live --help'
 complete -c xencode -n "__fish_xencode_using_subcommand agents" -s h -l help -d 'Print help'
 complete -c xencode -n "__fish_xencode_using_subcommand hotspots" -l limit -d 'How many files to list' -r
 complete -c xencode -n "__fish_xencode_using_subcommand hotspots" -l format -d 'Output format' -r -f -a "text\t''

@@ -469,6 +469,10 @@ enum Commands {
 
     /// List installed agents with versions and install provenance
     Agents {
+        /// Verify each roster claim against the agent's live --help
+        #[arg(long)]
+        contract: bool,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1156,7 +1160,7 @@ async fn main() {
             format,
         } => run_verify(skip, timeout, format),
         Commands::Envcheck { format } => run_envcheck(format),
-        Commands::Agents { format } => run_agents(format),
+        Commands::Agents { contract, format } => run_agents(contract, format),
         Commands::Hotspots { limit, format } => run_hotspots(limit, format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
@@ -4657,7 +4661,10 @@ fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     Ok(())
 }
 
-fn run_agents(format: OutputFormat) -> Result<(), String> {
+fn run_agents(contract: bool, format: OutputFormat) -> Result<(), String> {
+    if contract {
+        return run_contract(format);
+    }
     let found = xencode_agents_rs::inventory();
     if matches!(format, OutputFormat::Json) {
         println!(
@@ -4689,6 +4696,50 @@ fn run_agents(format: OutputFormat) -> Result<(), String> {
         println!("\n  discovery only: nothing was installed, upgraded, or written");
     }
     Ok(())
+}
+
+fn run_contract(format: OutputFormat) -> Result<(), String> {
+    use xencode_agents_rs::Verdict;
+
+    let results = xencode_agents_rs::probe_contract();
+    let bad = results
+        .iter()
+        .filter(|r| matches!(r.verdict, Verdict::Contradicted(_)))
+        .count();
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "claims": results.iter().map(|r| serde_json::json!({
+                    "agent": r.agent,
+                    "claim": r.claim,
+                    "expected": r.expected,
+                    "verdict": format!("{:?}", r.verdict),
+                    "missing": r.missing,
+                    "sources": r.sources,
+                })).collect::<Vec<_>>(),
+            })
+        );
+    } else {
+        for result in &results {
+            match &result.verdict {
+                Verdict::Confirmed => {}
+                Verdict::Contradicted(why) => {
+                    println!("\n  CONTRADICTED {} {}: {why}", result.agent, result.claim)
+                }
+                Verdict::Untestable(why) => {
+                    println!("\n  untestable {} {}: {why}", result.agent, result.claim)
+                }
+            }
+        }
+        let confirmed = results.len() - bad;
+        println!("\n  {confirmed} claims confirmed, {bad} contradicted");
+    }
+    if bad == 0 {
+        Ok(())
+    } else {
+        Err("roster claims contradicted by live --help".to_string())
+    }
 }
 
 fn run_hotspots(limit: usize, format: OutputFormat) -> Result<(), String> {
@@ -6132,6 +6183,15 @@ mod tests {
         ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn agents_contract_parses() {
+        let cli = Cli::try_parse_from(["xencode", "agents", "--contract"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Agents { contract: true, .. })
+        ));
     }
 
     #[test]

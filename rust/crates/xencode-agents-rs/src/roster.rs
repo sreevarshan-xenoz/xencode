@@ -84,8 +84,8 @@ pub const ROSTER: &[AgentSpec] = &[
         advertises_acp: true,    // `opencode acp`
         advertises_mcp: true,    // `opencode mcp`
         advertises_resume: true, // `session list`, `export`/`import`
-        advertises_approval: false,
-        read_on: "2026-09-28",
+        advertises_approval: true, // `--auto`, auto-approve permissions (AR-3 contradicted `false` on 2026-09-29)
+        read_on: "2026-09-29",
     },
     AgentSpec {
         name: "cline",
@@ -142,8 +142,8 @@ pub const ROSTER: &[AgentSpec] = &[
         name: "crush",
         binaries: &["crush"],
         one_shot: "crush run {prompt}",
-        stream_flag: None, // no structured output option in help
-        advertises_daemon: false,
+        stream_flag: None,       // no structured output option in help
+        advertises_daemon: true, // `server` subcommand binding a socket (AR-3 contradicted `false` on 2026-09-29)
         advertises_acp: false,
         advertises_mcp: false,
         advertises_resume: true,   // `--session`, `--continue`

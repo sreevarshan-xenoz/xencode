@@ -1914,11 +1914,15 @@ from a dry run, advisory state from the local corpus. Offline reads as
 "unknown", never "clean"; a dry run that never ran says so. Exits non-zero on
 any vulnerable dependency.
 
-### `xencode agents [--format text|json]`
+### `xencode agents [--format text|json] [--contract]`
 
 List installed roster agents with versions and how each was installed
 (`mise:<tool>`, cargo, npm, system, user-local, unknown — only what the path
 shows). Discovery only: nothing is installed, upgraded, or written.
+
+`--contract` re-reads every roster claim from the agents' live `--help` and
+reports confirmed or contradicted per claim with evidence. A contradiction is
+a stale roster cell, and a firewall test fails the build on any of them.
 
 ### `xencode hotspots [--limit 10] [--format text|json]`
 

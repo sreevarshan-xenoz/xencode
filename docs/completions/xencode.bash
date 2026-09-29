@@ -968,7 +968,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__agents)
-            opts="-h --format --help"
+            opts="-h --contract --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

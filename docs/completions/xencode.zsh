@@ -884,6 +884,7 @@ _arguments "${_arguments_options[@]}" : \
 (agents)
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
+'--contract[Verify each roster claim against the agent'\''s live --help]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0
