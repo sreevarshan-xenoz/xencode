@@ -19,6 +19,7 @@ pub mod task_profiles;
 pub mod theme;
 pub mod toast;
 pub mod ui;
+pub mod view;
 pub mod voice;
 pub mod widgets;
 
