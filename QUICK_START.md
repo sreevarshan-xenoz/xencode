@@ -205,6 +205,14 @@ back next start from `~/.xencode/layout.json` (private, `0600`); `Ctrl+U`
 clears it, and the file never stores your conversation or model state — only
 where the panes were.
 
+`Ctrl+1`…`Ctrl+9` recall a *view* — a saved arrangement with the pane it was
+focused on. Six slots arrive filled: `Code`, `Chat`, `Terminal`, `Focus`,
+`Review`, `Split`; `Ctrl+Shift+<digit>` stores the screen you are looking at
+into any of the nine, including the empty `7`–`9`. The view you were on comes
+back next start. Stored views are `layout_views` in `config.json`; `Ctrl+U`
+leaves a view without renaming it, and nothing here is a gate — every panel a
+view shows is still reachable on its own keys.
+
 ## Examples
 
 ### Example 1: Basic Chat

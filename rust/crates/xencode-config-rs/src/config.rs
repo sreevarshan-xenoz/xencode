@@ -349,6 +349,21 @@ pub struct XencodeConfig {
     #[serde(default)]
     pub layout_templates: std::collections::BTreeMap<String, serde_json::Value>,
 
+    /// Named views the user stored or hand-wrote (V-4), keyed by slot name:
+    /// `Code`, `Chat`, `Terminal`, `Focus`, `Review`, `Split` — the six seeded
+    /// names — and `7`, `8`, `9` for the unseeded chord slots. A value is the
+    /// same layout tree a `layout_templates` entry holds, in the same
+    /// vocabulary; `xencode_tui_rs::views` reads this map.
+    ///
+    /// Raw JSON for the same reason as templates, and one more: the map is
+    /// written back out by `Ctrl+Shift+<digit>`, so a hand-added entry —
+    /// or one from a future build that knows a node kind this one does not —
+    /// must survive the round trip rather than fail the load. An empty map
+    /// changes nothing: the seeded views live in code, and a view never
+    /// becomes the only way to reach a pane.
+    #[serde(default)]
+    pub layout_views: std::collections::BTreeMap<String, serde_json::Value>,
+
     /// Google Colab bridge settings. Opt-in: every field has a safe default,
     /// so a config that predates the block still loads with the bridge off.
     #[serde(default)]
@@ -541,6 +556,7 @@ impl Default for XencodeConfig {
             model_profiles: Vec::new(),
             model_routing: false,
             layout_templates: std::collections::BTreeMap::new(),
+            layout_views: std::collections::BTreeMap::new(),
             colab: ColabConfig::default(),
         }
     }
@@ -1162,6 +1178,33 @@ mod tests {
         // either: nothing is invented for a config that declared nothing.
         let json = config.to_json().unwrap();
         assert!(json.contains("\"layout_templates\": {}"), "{json}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_config_can_declare_named_views_and_an_unknown_shape_still_loads() {
+        let dir = temp_dir();
+        let path = dir.join("config.json");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            &path,
+            r#"{
+                "layout_views": {
+                    "Code": {"leaf": {"slot": "editor", "focus": "editor"}},
+                    "9": {"zones": [{"kind": "editor"}]}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let config = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(config.layout_views.len(), 2);
+        // A view this build cannot read is carried as written and costs
+        // nothing else — the same promise templates make.
+        assert_eq!(config.layout_views["9"]["zones"][0]["kind"], "editor");
+        config.save_to(&path).unwrap();
+        let again = XencodeConfig::load_from(&path).unwrap();
+        assert_eq!(again, config);
         fs::remove_dir_all(&dir).unwrap();
     }
 

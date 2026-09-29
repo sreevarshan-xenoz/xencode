@@ -33,7 +33,11 @@ use crate::view::ViewState;
 /// The version this build writes, and the highest it can read. The next
 /// shape change bumps it; anything above it in a file means the file was
 /// written by a newer xencode, and that is said rather than guessed at.
-pub const ARRANGEMENT_VERSION: u32 = 1;
+/// Version two added `active_view`, the name of the view on screen (`V-4`):
+/// optional on read, so a version-one file still loads, but a version-two
+/// file must not be read by a build that would ignore the name and call the
+/// restored tree unnamed.
+pub const ARRANGEMENT_VERSION: u32 = 2;
 
 /// The name of the file inside the config directory.
 pub const ARRANGEMENT_FILE: &str = "layout.json";
@@ -55,6 +59,12 @@ pub struct Arrangement {
     /// overwrite the old tree, not leave it to come back next start.
     #[serde(default)]
     pub view: Option<ViewState>,
+    /// Which named view that tree was, if it was one (`V-4`). The tree itself
+    /// is already stored above, so this only names it: without it, a restart
+    /// onto the `Code` view would come back as an unnamed resized arrangement,
+    /// and the next `Ctrl+Shift+1` would be the first time it had a name.
+    #[serde(default)]
+    pub active_view: Option<String>,
 }
 
 /// Why a stored arrangement could not be read. Every variant is a sentence
@@ -114,6 +124,7 @@ pub fn capture(app: &App) -> Arrangement {
         name: app.config.layout.clone(),
         focus: app.last_body_focus,
         view: app.custom_view.clone(),
+        active_view: app.active_view.clone(),
     }
 }
 
@@ -143,6 +154,7 @@ pub fn apply(app: &mut App, arrangement: &Arrangement) -> Restored {
     }
     if let Some(view) = &arrangement.view {
         app.custom_view = Some(view.clone());
+        app.active_view = arrangement.active_view.clone();
     }
     app.last_body_focus = arrangement.focus;
     Restored::Applied
@@ -277,6 +289,7 @@ mod tests {
                         Rect::new(0, 1, 100, 22),
                         false
                     ))),
+                    active_view: None,
                 }
             ),
             Restored::Stale
@@ -322,6 +335,64 @@ mod tests {
             ReadError::Refused(why) => assert!(why.contains("zero share"), "{why}"),
             other => panic!("expected a refusal, got {other:?}"),
         }
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_view_survives_the_restart_with_its_name_and_its_geometry() {
+        // V-4's done-when in this file's words: quitting on a view comes back
+        // on that view — same rects, same focused pane, same name.
+        let path = temp_path("named-view");
+        let mut app = resized_app();
+        app.active_view = Some("Code".to_string());
+        app.last_body_focus = FocusArea::CodeEditor;
+        let before = app
+            .custom_view
+            .as_ref()
+            .expect("resized")
+            .render(Rect::new(0, 1, 100, 22));
+        write_to(&path, &capture(&app)).expect("write");
+
+        let restored = read_from(&path).expect("read");
+        assert_eq!(restored.active_view.as_deref(), Some("Code"));
+        let mut fresh = App::for_tests();
+        fresh.config.layout = "classic".to_string();
+        assert_eq!(apply(&mut fresh, &restored), Restored::Applied);
+        assert_eq!(fresh.active_view.as_deref(), Some("Code"));
+        assert_eq!(
+            fresh
+                .custom_view
+                .as_ref()
+                .expect("the tree came back")
+                .render(Rect::new(0, 1, 100, 22)),
+            before,
+            "the view's geometry is the geometry that returns"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_version_one_file_without_a_view_name_still_loads() {
+        // The name arrived after the file did. It is optional on read, so a
+        // user's saved arrangement is not held hostage by the upgrade.
+        let path = temp_path("v1");
+        std::fs::write(
+            &path,
+            br#"{
+                "version": 1,
+                "name": "classic",
+                "focus": "codeeditor",
+                "view": {"root": {"leaf": {"slot": "editor", "focus": "editor"}}}
+            }"#,
+        )
+        .unwrap();
+        let restored = read_from(&path).expect("a v1 file reads");
+        assert_eq!(restored.active_view, None);
+        let mut fresh = App::for_tests();
+        fresh.config.layout = "classic".to_string();
+        assert_eq!(apply(&mut fresh, &restored), Restored::Applied);
+        assert_eq!(fresh.active_view, None, "no name, no claim");
+        assert!(fresh.custom_view.is_some(), "the geometry is not");
         std::fs::remove_file(&path).ok();
     }
 

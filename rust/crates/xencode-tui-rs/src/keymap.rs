@@ -171,6 +171,10 @@ fn cycle_layout(app: &mut App, dir: i32) {
         crate::templates::cycle_name(&app.config.layout_templates, &app.config.layout, dir >= 0);
     app.config.layout = next.clone();
     app.custom_view = None;
+    // Cycling layouts is leaving a view, not renaming it (`V-4`): the name
+    // goes with the tree, or the header would keep advertising a view that is
+    // no longer on screen.
+    app.active_view = None;
     // The stored arrangement must change with the name, or next start would
     // resurrect the tree this keystroke threw away (`V-6`).
     app.arrangement_dirty = true;
@@ -188,6 +192,79 @@ fn advance_agent_stack(app: &mut App) {
     app.agent_stack_index = (app.agent_stack_index + 1) % count;
 }
 
+/// Put a named view on screen (`V-4`): its tree becomes the arrangement and
+/// its pane takes focus, so one chord restores both. A view that cannot be
+/// shown says why and changes nothing — the alternative is a screen whose
+/// geometry the user did not ask for, with a name on it that they did.
+///
+/// Switching is pure geometry. Open files, scrolls and messages live in
+/// `App`, not in the tree, so they ride through untouched, exactly as they do
+/// under `Ctrl+U`.
+fn switch_view(app: &mut App, slot: usize) {
+    let Some((tree, focus)) = crate::views::shape(
+        &app.config.layout_views,
+        slot,
+        app.last_body_area,
+        app.show_terminal,
+    ) else {
+        return;
+    };
+    let name = crate::views::slot_name(slot);
+    app.custom_view = Some(crate::view::ViewState::new(tree));
+    app.active_view = Some(name.clone());
+    app.last_body_focus = focus;
+    // Only a body pane is retargeted: closing a panel is not part of changing
+    // a view, and stealing focus from Settings mid-keystroke would be.
+    if matches!(
+        app.focus,
+        FocusArea::FileExplorer | FocusArea::CodeEditor | FocusArea::ChatInput
+    ) {
+        app.focus = focus;
+    }
+    // V-6: the view on screen is now the arrangement worth restoring.
+    app.arrangement_dirty = true;
+    app.push_toast(crate::toast::ToastKind::Info, format!("View: {name}"));
+}
+
+/// Save the arrangement on screen as a named view (`V-4`). If the user resized
+/// a preset and stores that, they get back what they were looking at, not what
+/// the preset was — so a plain preset is promoted to a tree first, the same
+/// promotion the resize chord performs.
+fn store_view(app: &mut App, slot: usize) {
+    if app.custom_view.is_none() {
+        let tree = crate::templates::tree(
+            &app.config.layout_templates,
+            &app.config.layout,
+            app.last_body_area,
+            app.show_terminal,
+            app.last_body_focus,
+        );
+        app.custom_view = Some(crate::view::ViewState::new(tree));
+    }
+    let Some(view) = app.custom_view.as_ref() else {
+        return;
+    };
+    let name = crate::views::slot_name(slot);
+    let encoded = match serde_json::to_value(&view.root) {
+        Ok(value) => value,
+        Err(why) => {
+            app.push_toast(
+                crate::toast::ToastKind::Warning,
+                format!("view {name:?} not stored: {why}"),
+            );
+            return;
+        }
+    };
+    app.active_view = Some(name.clone());
+    app.config.layout_views.insert(name.clone(), encoded);
+    app.save_config();
+    app.arrangement_dirty = true;
+    app.push_toast(
+        crate::toast::ToastKind::Info,
+        format!("Stored view {name} — Ctrl+{slot} recalls it"),
+    );
+}
+
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     match key.code {
         KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -199,6 +276,23 @@ fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
                 app.agent_stack_index = 0;
             } else {
                 advance_agent_stack(app);
+            }
+            return Some(done());
+        }
+        KeyCode::Char(digit) if digit.is_ascii_digit() => {
+            // Named views (`V-4`): one chord recalls one arrangement, with the
+            // pane it was focused on; Shift stores what is on screen. `0` is
+            // not a slot, so it falls through to whatever the pane makes of it.
+            let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+            match crate::views::chord(digit, shift) {
+                None => return None,
+                Some(crate::views::ViewChord::Store(slot)) => store_view(app, slot),
+                Some(crate::views::ViewChord::Switch(slot)) => {
+                    match crate::views::problem(&app.config.layout_views, slot) {
+                        Some(why) => app.push_toast(crate::toast::ToastKind::Warning, why),
+                        None => switch_view(app, slot),
+                    }
+                }
             }
             return Some(done());
         }
@@ -1756,6 +1850,143 @@ mod tests {
         assert_eq!(
             app.body_layout(area),
             crate::layout::compute_layout(area, "classic", false, app.last_body_focus)
+        );
+    }
+
+    /// A test app with a body already drawn at a known size, which is what the
+    /// view chords build their trees at.
+    fn app_with_body(focus: FocusArea) -> App<'static> {
+        let mut app = app_with(focus);
+        app.last_body_area = ratatui::layout::Rect::new(0, 1, 120, 40);
+        app
+    }
+
+    #[test]
+    fn one_chord_puts_a_view_on_screen_with_its_own_geometry_and_focus() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
+        assert_eq!(app.active_view.as_deref(), Some("Code"));
+        assert_eq!(
+            app.focus,
+            FocusArea::CodeEditor,
+            "the view names the pane it is for"
+        );
+        assert_eq!(app.last_body_focus, FocusArea::CodeEditor);
+        assert!(
+            app.toasts.iter().any(|t| t.message == "View: Code"),
+            "the chord says which view is on screen"
+        );
+        // Its geometry, not the preset's: 15% explorer on 120 columns.
+        let body = crate::view::to_body_layout(
+            &app.custom_view
+                .as_ref()
+                .expect("a view is a tree")
+                .render(app.last_body_area),
+        );
+        assert_eq!(body.explorer.map(|r| r.width), Some(18));
+        assert!(body.editor.is_some() && body.chat.is_some());
+        // And it is marked for saving, because the screen just changed (`V-6`).
+        assert!(app.arrangement_dirty);
+    }
+
+    #[test]
+    fn storing_the_screen_becomes_the_view_and_outlives_a_layout_cycle() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        // Ctrl+Shift+2 on a plain preset: the tree is promoted first, so what
+        // is stored is the arrangement the user was looking at.
+        press_with_mods(
+            &mut app,
+            KeyCode::Char('2'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert!(app.config.layout_views.contains_key("Chat"));
+        assert_eq!(app.active_view.as_deref(), Some("Chat"));
+        let stored = app
+            .custom_view
+            .as_ref()
+            .expect("storing shows what it stored")
+            .render(app.last_body_area);
+
+        // A layout cycle is leaving the view; the stored arrangement survives.
+        press_with_mods(&mut app, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        assert!(app.custom_view.is_none());
+        assert_eq!(app.active_view, None, "cycling is not being in a view");
+
+        press_with_mods(&mut app, KeyCode::Char('2'), KeyModifiers::CONTROL);
+        assert_eq!(
+            app.custom_view
+                .as_ref()
+                .expect("recalled")
+                .render(app.last_body_area),
+            stored,
+            "the same rects come back, from config rather than the seed"
+        );
+        assert_eq!(
+            app.config.layout, "chat-first",
+            "recalling a view does not quietly change the configured layout"
+        );
+    }
+
+    #[test]
+    fn an_empty_slot_says_what_is_missing_and_changes_nothing() {
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('9'), KeyModifiers::CONTROL);
+        let said: Vec<&str> = app.toasts.iter().map(|t| t.message.as_str()).collect();
+        assert!(
+            said.iter().any(|m| m.contains("view 9 holds no view yet")),
+            "the chord names the gap instead of guessing: {said:?}"
+        );
+        assert!(app.custom_view.is_none(), "nothing was on screen");
+        assert_eq!(app.active_view, None);
+        assert!(!app.arrangement_dirty, "and nothing is worth saving");
+    }
+
+    #[test]
+    fn a_view_never_becomes_the_only_way_to_reach_a_panel() {
+        // The done-when's last clause, checked with a view on screen: every
+        // other layout chord still works exactly as it did without one.
+        let mut app = app_with_body(FocusArea::ChatInput);
+        press_with_mods(&mut app, KeyCode::Char('1'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::CodeEditor);
+
+        press_with_mods(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
+        assert_eq!(app.focus, FocusArea::FileExplorer, "Ctrl+E is unaffected");
+
+        let explorer = |app: &App| {
+            app.custom_view
+                .as_ref()
+                .expect("still a view")
+                .render(app.last_body_area)
+                .iter()
+                .find(|(pane, _)| pane.slot == crate::view::BodySlot::Explorer)
+                .map(|(_, r)| r.width)
+                .unwrap()
+        };
+        // Ctrl+E moved focus to the explorer, so that is the pane the chord
+        // grows — the same rule it follows with no view on screen.
+        let before = explorer(&app);
+        handle_key(
+            &mut app,
+            press_alt(KeyCode::Right),
+            &mpsc::unbounded_channel().0,
+        );
+        assert!(
+            explorer(&app) > before,
+            "the resize chord works on a view's tree: {before} → {}",
+            explorer(&app)
+        );
+
+        press_with_mods(&mut app, KeyCode::Char('t'), KeyModifiers::CONTROL);
+        assert!(app.show_terminal, "Ctrl+T is unaffected");
+    }
+
+    #[test]
+    fn the_view_chord_is_documented_and_handled() {
+        assert!(
+            crate::help::GLOBAL
+                .iter()
+                .any(|(key, _)| *key == "Ctrl+1…9"),
+            "the view chord missing from the GLOBAL help table"
         );
     }
 

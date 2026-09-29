@@ -38,6 +38,10 @@ pub(crate) const GLOBAL: &[Binding] = &[
         "Ctrl+U",
         "cycle body layout (presets + templates you declared)",
     ),
+    (
+        "Ctrl+1…9",
+        "recall a named view (Ctrl+Shift+N stores this screen as one)",
+    ),
     ("Ctrl+H", "run provider health check"),
 ];
 

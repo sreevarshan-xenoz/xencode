@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — named views on one chord
+
+`Ctrl+1`…`Ctrl+9` now switch between saved arrangements — a *view* is a pane
+tree with its ratios and the pane that was focused, put back on screen by one
+key. Six of the nine slots are filled from the first start: **Code** (files
+down the left, code in the middle, the conversation on the right), **Chat**
+(code squeezed to a fifth of the screen), **Terminal** (the same with the
+terminal strip asked for in the arrangement), **Focus** (the conversation
+across the whole body), **Review** (files and code along the top, the
+transcript along the bottom) and **Split** (half code, half conversation).
+`Ctrl+Shift+<digit>` stores whatever is on screen — including a layout you just
+resized — into that slot, and slots 7–9 stay empty until you do. An empty slot
+says so and names the chord that fills it, and leaves the screen alone.
+
+A stored view is a `name → tree` entry under `layout_views` in
+`~/.xencode/config.json`, in the same words as `layout_templates`, so there is
+no new file to learn: an entry this build cannot read is refused by name with
+the reason, and the rest of your config survives it. The view that was on
+screen comes back next start through the arrangement file, which now records
+its name too. Views are a shortcut and not a gate — `Ctrl+T`, `Ctrl+U` and
+`Alt+Left`/`Alt+Right` keep working on top of one, and every panel a view shows
+is reachable without naming a view at all. The header names the view while it
+is on screen; `Ctrl+U` leaves it.
+
 ### Added — the window arrangement survives a restart
 
 A layout you resized with `Alt+Left`/`Alt+Right` now comes back when xencode

@@ -22,6 +22,7 @@ pub mod theme;
 pub mod toast;
 pub mod ui;
 pub mod view;
+pub mod views;
 pub mod voice;
 pub mod widgets;
 
