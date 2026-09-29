@@ -154,6 +154,9 @@ fn resize_focused_pane(app: &mut App, delta: i16) {
     }
     if let Some(view) = app.custom_view.as_mut() {
         crate::view::nudge_focused(&mut view.root, app.focus, delta);
+        // V-6: the arrangement on screen is now worth restoring. The frame
+        // loop writes it once, through the same choke point every save uses.
+        app.arrangement_dirty = true;
     }
 }
 
@@ -168,6 +171,9 @@ fn cycle_layout(app: &mut App, dir: i32) {
         crate::templates::cycle_name(&app.config.layout_templates, &app.config.layout, dir >= 0);
     app.config.layout = next.clone();
     app.custom_view = None;
+    // The stored arrangement must change with the name, or next start would
+    // resurrect the tree this keystroke threw away (`V-6`).
+    app.arrangement_dirty = true;
     app.push_toast(crate::toast::ToastKind::Info, format!("Layout: {next}"));
     if let Some(problem) = crate::templates::problem(&app.config.layout_templates, &next) {
         app.push_toast(crate::toast::ToastKind::Warning, problem);

@@ -10670,6 +10670,34 @@ file which no longer exists reopens empty and says so.
 **Done-when.** A saved arrangement round-trips through a restart with geometry and
 focus intact, a layout file written by a newer `config_version` is rejected with an
 explanation rather than parsed, and the file is `0600`.
+  **Done 2026-09-29, with one stated substitution.** `<config dir>/layout.json`
+  holds the tree with its ratios, the focused pane, and the layout name the
+  arrangement belongs to — nothing else: no transcript, no model state, no tool
+  state. The writer is `DB-1`'s `write_atomic`, which brings `SE-1`'s `0600`,
+  and it is one JSON document, not a store. **`DB-2`'s ladder has not shipped
+  (no `config_version` exists in the config struct), so the file carries its
+  own `version` field** and refuses anything above it before parsing, naming
+  the version it found. The tree is stored in the same vocabulary `V-5`'s
+  templates speak (`leaf`/`split`/`percent`/`min`/`length`, plus `tabbed`/
+  `stack` for shapes the overlay can reach), so a hand-written template and an
+  app-written file are one dialect — proved by a test that feeds each reader
+  the other's words. A tree holding `Constraint::Fill` or `Max` cannot be
+  saved and says so; no shipped builder makes one. Saves are gated by the same
+  `persist_config` switch as config, so a test keystroke never rewrites the
+  developer's file. A stored name that no longer matches the config (the user
+  changed layouts between sessions) drops the tree — config is the more recent
+  ask — and says so; `Ctrl+U` marks the arrangement dirty on clearing it, so a
+  thrown-away tree cannot resurrect. Startup refusals land as a toast. The
+  done-when was watched, not asserted: on a raw PTY at 110×30, three
+  `Alt+Right` chords took the chat column 30→45 and quit wrote the file
+  (`0600`, contents quoted in the run record); the restart drew identical pane
+  borders at columns `[0, 21, 22, 60, 61, 108]` — a fresh preset would have
+  bordered at 77; a hand-forced `version: 99` file restored nothing and the
+  first frame carried the toast *"layout.json was written by a newer xencode
+  (version 99, this build reads up to 1) — not restored"*. Seven tests in
+  `arrangement.rs`. Not done, and not implied: named views are `V-4` (the
+  struct is a single unnamed view until then), and pane-boundary mouse drags
+  are `V-7`.
 
 ### V-7 Pane-boundary mouse
 

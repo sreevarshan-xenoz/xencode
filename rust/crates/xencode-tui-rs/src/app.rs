@@ -331,6 +331,10 @@ pub struct App<'a> {
     /// `Some` means the tree does, until a preset cycle clears it. Pane state
     /// lives outside both, so swapping between them loses nothing.
     pub custom_view: Option<crate::view::ViewState>,
+    /// The arrangement on screen differs from `<config dir>/layout.json`, so
+    /// the frame loop writes it once through `V-6`'s choke point. Set by the
+    /// resize chord and by a layout cycle that clears the tree.
+    pub arrangement_dirty: bool,
     /// Body area of the last draw, so a resize chord can promote the current
     /// preset to a tree without guessing dimensions.
     pub last_body_area: ratatui::layout::Rect,
@@ -1791,6 +1795,23 @@ impl<'a> App<'a> {
         let dir = xencode_plugin_rs::default_plugin_dir();
         let mut app = Self::with_config_and_memory(config, memory, dir);
         app.load_plugins();
+        // V-6: the window arrangement comes back with the app. A file this
+        // build cannot read is said out loud — a toast on the first frame —
+        // rather than silently leaving the user on the preset they did not
+        // ask for.
+        match crate::arrangement::load_into(&mut app) {
+            crate::arrangement::Restored::Skipped(why) => {
+                app.push_toast(crate::toast::ToastKind::Warning, why)
+            }
+            crate::arrangement::Restored::Stale => app.push_toast(
+                crate::toast::ToastKind::Info,
+                format!(
+                    "saved layout dropped: {} is not the configured layout",
+                    crate::arrangement::ARRANGEMENT_FILE
+                ),
+            ),
+            _ => {}
+        }
         app
     }
 
@@ -1998,6 +2019,7 @@ impl<'a> App<'a> {
             last_body_focus: FocusArea::ChatInput,
             last_layout: crate::layout::BodyLayout::default(),
             custom_view: None,
+            arrangement_dirty: false,
             last_body_area: ratatui::layout::Rect::default(),
             agent_grants: Arc::new(std::sync::Mutex::new(Vec::new())),
             checkpoints: Arc::new(crate::agent_tools::CheckpointStore::new()),
@@ -2335,6 +2357,24 @@ impl<'a> App<'a> {
         if self.persist_config {
             let _ = self.config.save();
         }
+    }
+
+    /// The one choke point that writes the window arrangement (`V-6`). Gated
+    /// by the same `persist_config` switch as config, because a test keystroke
+    /// must not rewrite the developer's real `<config dir>/layout.json` any
+    /// more than it may rewrite their config. A write failure on a background
+    /// save is swallowed — the file is a convenience restored at start, and
+    /// geometry still works on screen — but on quit it is reported, because
+    /// that is the last chance the arrangement has.
+    pub fn save_arrangement(&mut self) -> Result<(), crate::arrangement::ReadError> {
+        self.arrangement_dirty = false;
+        if !self.persist_config {
+            return Ok(());
+        }
+        let Some(path) = crate::arrangement::path() else {
+            return Ok(());
+        };
+        crate::arrangement::write_to(&path, &crate::arrangement::capture(self))
     }
 
     /// The agent tool-loop's approval mode, parsed from config with the
@@ -8265,7 +8305,25 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                     // global Ctrl chords, then per-focus handlers.
                     if crate::keymap::handle_key(&mut app, key, &tx) == crate::keymap::KeyFlow::Quit
                     {
+                        // The arrangement is written on the way out, and a
+                        // failure is said: this is the last chance the resized
+                        // panes have of surviving the restart.
+                        if let Err(why) = app.save_arrangement() {
+                            let message = match why {
+                                crate::arrangement::ReadError::Refused(w)
+                                | crate::arrangement::ReadError::Io(w) => w,
+                            };
+                            crate::toast::push(
+                                &mut app.toasts,
+                                message,
+                                crate::toast::ToastKind::Warning,
+                                current_timestamp(),
+                            );
+                        }
                         return Ok(());
+                    }
+                    if app.arrangement_dirty {
+                        let _ = app.save_arrangement();
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {

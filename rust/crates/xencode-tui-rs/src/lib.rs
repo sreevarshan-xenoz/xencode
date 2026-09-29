@@ -1,5 +1,6 @@
 pub mod agent_tools;
 pub mod app;
+pub mod arrangement;
 pub mod collab_client;
 pub mod crate_docs;
 pub mod crate_sources;

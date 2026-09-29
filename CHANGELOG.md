@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the window arrangement survives a restart
+
+A layout you resized with `Alt+Left`/`Alt+Right` now comes back when xencode
+starts again. The arrangement — the pane tree with its ratios, which pane was
+focused, and the layout name it belongs to — is written to
+`~/.xencode/layout.json` (owner-only `0600`, atomic, so it can never be read
+half-written) when you resize and when you quit, and restored at startup. A
+layout cycle clears it, so a tree you threw away cannot resurrect; a layout
+name you changed in the config file wins over the stored tree, because the
+config is the more recent ask. The file carries its own version number: one
+written by a newer xencode is refused with the version it found, shown as a
+toast on the first frame, and the preset you configured renders instead. The
+stored shape speaks exactly the same words as the `layout_templates` you hand
+write in `config.json` — `leaf`, `split`, `percent`, `min`, `length` — so
+there is one layout vocabulary, not a second one behind the scenes. Nothing
+else is persisted here: no transcript, no model state, no tool state; this
+file records where your panes were, not what you were working on.
+
 ### Added — layouts named in config, and one list of layout names
 
 The body layout is now chosen from one registry: the shipped `classic`,

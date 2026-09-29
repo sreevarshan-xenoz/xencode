@@ -24,10 +24,12 @@
 use crate::focus::FocusArea;
 use crate::layout::BodyLayout;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
+use serde::{Deserialize, Serialize};
 
 /// Which body slot a pane fills. Mirrors [`BodyLayout`]'s fields so a rendered
 /// tree folds back into one without loss.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum BodySlot {
     Explorer,
     Editor,
@@ -36,7 +38,10 @@ pub enum BodySlot {
     Terminal,
 }
 
-/// One surface: what it shows and what focus it carries.
+/// One surface: what it shows and what focus it carries. Never serialized
+/// directly — trees go to disk as [`PaneCode`], whose focus is one of the
+/// three words a template speaks (`explorer`, `editor`, `chat`), mapped in
+/// [`encode_focus`]/[`decode_focus`] rather than by `FocusArea` itself.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pane {
     /// The body slot this pane fills.
@@ -47,6 +52,10 @@ pub struct Pane {
 }
 
 /// A layout: leaves, splits, or one-visible-child groups.
+///
+/// Serialized by hand through [`TreeCode`], not derived: a tree must decode
+/// through the same validating constructor a config template goes through,
+/// and a derived impl cannot refuse a zero share or an unknown slot word.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayoutNode {
     /// One pane filling its whole area.
@@ -64,9 +73,9 @@ pub enum LayoutNode {
     Stack { panes: Vec<Pane>, active: usize },
 }
 
-/// A named arrangement: the root plus nothing else yet. V-6 names views and
-/// V-9 persists them; both extend this struct rather than replacing it.
-#[derive(Debug, Clone)]
+/// A named arrangement: the root plus nothing else yet. `V-6` persists this
+/// and `V-4` adds names to it; both extend the struct rather than replacing it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ViewState {
     /// The arrangement.
     pub root: LayoutNode,
@@ -87,6 +96,236 @@ impl ViewState {
     /// Leaf panes with their rects, in render order.
     pub fn render(&self, area: Rect) -> Vec<(Pane, Rect)> {
         render(&self.root, area)
+    }
+}
+
+/// A tree that refuses to be read back, with the sentence why. Mirrors
+/// [`crate::templates::TemplateError`]: a stored arrangement that this build
+/// cannot understand is reported by name, never guessed at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeError(pub String);
+
+impl std::fmt::Display for TreeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// How a split child takes its share — the same three words a config template
+/// speaks (`crate::templates::Share`), so the file on disk and the file a user
+/// hand-writes are one vocabulary. `Ratio` exists only on the encode side: a
+/// tree holding one cannot be saved, and says so, rather than being written
+/// with a word no template can state.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ShareCode {
+    Percent(u16),
+    Min(u16),
+    Length(u16),
+    /// Encode-only: `serde(skip)` makes a stored `ratio` a refusal on read,
+    /// which is the correct answer to geometry this vocabulary cannot keep.
+    #[serde(skip)]
+    Ratio(u32, u32),
+}
+
+fn encode_constraint(constraint: Constraint) -> ShareCode {
+    match constraint {
+        Constraint::Percentage(v) => ShareCode::Percent(v),
+        Constraint::Min(v) => ShareCode::Min(v),
+        Constraint::Length(v) => ShareCode::Length(v),
+        Constraint::Ratio(n, d) => ShareCode::Ratio(n, d),
+        // `max` and `fill` are words no template speaks; saving either is
+        // inventing geometry a rebuilt tree will not reproduce. Routed
+        // through the encode-only `Ratio`, so the save refuses them by name.
+        Constraint::Fill(v) => ShareCode::Ratio(v as u32, 0),
+        Constraint::Max(v) => ShareCode::Ratio(v as u32, 1),
+    }
+}
+
+fn decode_constraint(share: ShareCode) -> Result<Constraint, TreeError> {
+    match share {
+        ShareCode::Percent(v) => Ok(Constraint::Percentage(v)),
+        ShareCode::Min(v) => Ok(Constraint::Min(v)),
+        ShareCode::Length(v) => Ok(Constraint::Length(v)),
+        ShareCode::Ratio(_, _) => Err(TreeError(
+            "a split child shares with a word this build does not store".to_string(),
+        )),
+    }
+}
+
+/// The JSON shape of a pane: slot and focus as the words a template uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct PaneCode {
+    slot: String,
+    focus: String,
+}
+
+fn encode_pane(pane: Pane) -> PaneCode {
+    PaneCode {
+        slot: encode_slot(pane.slot),
+        focus: encode_focus(pane.focus),
+    }
+}
+
+impl Pane {
+    fn decode(code: &PaneCode) -> Result<Self, TreeError> {
+        Ok(Pane {
+            slot: decode_slot(&code.slot)?,
+            focus: decode_focus(&code.focus)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SplitCode {
+    horizontal: bool,
+    parts: Vec<(TreeCode, ShareCode)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct GroupCode {
+    panes: Vec<PaneCode>,
+    active: usize,
+}
+
+/// The on-disk shape of a tree, written by encoding a live one and read back
+/// with validation. Tagged in the same lowercase words a config template
+/// uses (`crate::templates::LayoutTemplate`), so the file the app writes and
+/// the file a user hand-writes are one vocabulary. `Tabbed` and `Stack` are
+/// the shapes V-2's stack overlay cycles inside; a resized preset tree never
+/// contains them today, and this still stores one honestly if it ever does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TreeCode {
+    Leaf(PaneCode),
+    Split(SplitCode),
+    Tabbed(GroupCode),
+    Stack(GroupCode),
+}
+
+fn encode_slot(slot: BodySlot) -> String {
+    match slot {
+        BodySlot::Explorer => "explorer",
+        BodySlot::Editor => "editor",
+        BodySlot::Chat => "chat",
+        BodySlot::Input => "input",
+        BodySlot::Terminal => "terminal",
+    }
+    .to_string()
+}
+
+fn encode_focus(focus: FocusArea) -> String {
+    match focus {
+        FocusArea::FileExplorer => "explorer",
+        FocusArea::CodeEditor => "editor",
+        _ => "chat",
+    }
+    .to_string()
+}
+
+fn decode_slot(word: &str) -> Result<BodySlot, TreeError> {
+    match word {
+        "explorer" => Ok(BodySlot::Explorer),
+        "editor" => Ok(BodySlot::Editor),
+        "chat" => Ok(BodySlot::Chat),
+        "input" => Ok(BodySlot::Input),
+        "terminal" => Ok(BodySlot::Terminal),
+        other => Err(TreeError(format!(
+            "unknown slot {other:?}: want explorer, editor, chat, input, or terminal"
+        ))),
+    }
+}
+
+fn decode_focus(word: &str) -> Result<FocusArea, TreeError> {
+    match word {
+        "explorer" => Ok(FocusArea::FileExplorer),
+        "editor" => Ok(FocusArea::CodeEditor),
+        "chat" => Ok(FocusArea::ChatInput),
+        other => Err(TreeError(format!(
+            "unknown focus {other:?}: want explorer, editor, or chat"
+        ))),
+    }
+}
+
+fn encode_node(node: &LayoutNode) -> TreeCode {
+    match node {
+        LayoutNode::Leaf(pane) => TreeCode::Leaf(encode_pane(*pane)),
+        LayoutNode::Split { horizontal, parts } => TreeCode::Split(SplitCode {
+            horizontal: *horizontal,
+            parts: parts
+                .iter()
+                .map(|(child, constraint)| (encode_node(child), encode_constraint(*constraint)))
+                .collect(),
+        }),
+        LayoutNode::Tabbed { panes, active } => TreeCode::Tabbed(GroupCode {
+            panes: panes.iter().cloned().map(encode_pane).collect(),
+            active: *active,
+        }),
+        LayoutNode::Stack { panes, active } => TreeCode::Stack(GroupCode {
+            panes: panes.iter().cloned().map(encode_pane).collect(),
+            active: *active,
+        }),
+    }
+}
+
+fn decode_node(code: &TreeCode) -> Result<LayoutNode, TreeError> {
+    match code {
+        TreeCode::Leaf(pane) => Ok(LayoutNode::Leaf(Pane::decode(pane)?)),
+        TreeCode::Split(split) => {
+            if split.parts.len() < 2 {
+                return Err(TreeError("a split needs at least two children".to_string()));
+            }
+            let mut parts = Vec::new();
+            for (child, share) in &split.parts {
+                if matches!(
+                    share,
+                    ShareCode::Percent(0) | ShareCode::Min(0) | ShareCode::Length(0)
+                ) {
+                    return Err(TreeError(
+                        "a zero share lays out nothing; remove the child instead".to_string(),
+                    ));
+                }
+                let constraint = decode_constraint(*share)?;
+                parts.push((decode_node(child)?, constraint));
+            }
+            Ok(LayoutNode::Split {
+                horizontal: split.horizontal,
+                parts,
+            })
+        }
+        TreeCode::Tabbed(group) | TreeCode::Stack(group) => {
+            let mut panes = Vec::new();
+            for pane in &group.panes {
+                panes.push(Pane::decode(pane)?);
+            }
+            let node = if matches!(code, TreeCode::Tabbed(_)) {
+                LayoutNode::Tabbed {
+                    panes,
+                    active: group.active,
+                }
+            } else {
+                LayoutNode::Stack {
+                    panes,
+                    active: group.active,
+                }
+            };
+            Ok(node)
+        }
+    }
+}
+
+impl serde::Serialize for LayoutNode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        encode_node(self).serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for LayoutNode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Same contract as a config template: the shape is read, then
+        // validated, and a refusal is a sentence rather than a guess.
+        let code = TreeCode::deserialize(deserializer)?;
+        decode_node(&code).map_err(serde::de::Error::custom)
     }
 }
 

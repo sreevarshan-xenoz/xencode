@@ -8,7 +8,8 @@ pub enum InputMode {
     Editing,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum FocusArea {
     ChatInput,
     FileExplorer,
