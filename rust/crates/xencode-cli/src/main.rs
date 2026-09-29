@@ -4543,6 +4543,27 @@ fn run_test(
     };
     let outcome = verify::run(&root, &opts);
 
+    // EVd-1's first producer: every run leaves a row — session, class, exit
+    // code, what it ran against — whether or not anyone reads it back. The log
+    // reference stays empty until EVd-4 owns artifacts; an empty ref says no
+    // log was kept rather than pointing at one that does not exist.
+    {
+        use xencode_context_rs::ledger;
+        let entry = ledger::LedgerEntry {
+            ts_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            session: None,
+            run_class: ledger::RunClass::Test,
+            exit_code: outcome.exit.unwrap_or(-1),
+            subjects: vec![ledger::digest_hex(&outcome.command)],
+            log_ref: String::new(),
+            note: String::new(),
+        };
+        let _ = ledger::append_ledger(&root.join(xencode_context_rs::XENCODE_DIR), &entry);
+    }
+
     if matches!(format, OutputFormat::Json) {
         let report = serde_json::json!({
             "ok": outcome.ok,

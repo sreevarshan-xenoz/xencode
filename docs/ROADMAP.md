@@ -8,7 +8,7 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
 > **Verified against the tree on 2026-09-25** — 15 crates, 1142 tests, re-counted
-> 2026-09-28 at 16 crates and 1541 tests after the interop crate landed. Every line
+> 2026-09-28 at 16 crates and 1546 tests after the interop crate landed. Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
 > [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.

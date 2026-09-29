@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1541 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1546 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -3762,11 +3762,26 @@ even though the design is not.
   in-toto-predicate-flavoured, no signatures. *Effort: M.* This is the shared
   primitive of proposals 5+6+11. *Trap:* ledgers are secret-full — a raw
   `test.log` tail can carry a config value; **EV-2**'s redaction rule applies at
-  write time, not read time.
+  write time, not read time. **Done 2026-09-28** — `ledger.rs` in
+  `xencode-context-rs`: append-only `.xencode/ledger.jsonl`, closed run-class
+  vocabulary, subjects as digests, log as reference, and the one free-text
+  field scrubbed through the trace module's secret patterns *before* it reaches
+  disk. `passed()` reads the exit code and nothing else — no row ever says
+  "verified". Readers skip corrupt lines rather than hiding the ledger behind
+  one, and a missing ledger reads as empty. `xencode test` is the first
+  producer: every run leaves a row, with an empty log ref until EVd-4 owns
+  artifacts. Five tests, including a secret-in-a-note reaching disk scrubbed
+  and a sibling assertion that the raw note would have leaked, so the scrub is
+  what passed.
 - **EVd-2 — A session key** on `RequestMetrics` (`metrics.rs:22-42` has none) and
   on ledger rows. *Effort: S.* Also unblocks **CX-1**, which O lists as needing
   precisely this. *Trap:* drifting into **L-9**'s cost work — a key is not a
-  bill.
+  bill. **Done 2026-09-28** — and the "has none" is stale: `session_id`,
+  `model`, `provider`, and `source` fields predate this session, `App::
+  metrics_identity` stamps all four from the live session on both production
+  write paths, and `a_stamped_row_carries_its_model_provider_session_and_
+  destination` persists one and reads it back. Every ledger row carries the
+  EVd-2 key by schema as of EVd-1. No cost fields were touched.
 - **EVd-3 — A checks-ran verdict**: `{ran, skipped, failed, evidence-ref}`,
   never the word "verified" while `VF-1` is unbuilt, and the scanner's output
   labelled `pattern-scan` wherever it is surfaced (fact 11) rather than
