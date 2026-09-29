@@ -2259,10 +2259,10 @@ impl<'a> App<'a> {
             .map(|f| f.path.display().to_string())
             .collect();
 
-        let available_models = if !config.default_model.is_empty() {
-            vec![config.default_model.clone()]
+        let available_models = if config.default_model.is_empty() {
+            Vec::new()
         } else {
-            vec!["qwen2.5:7b".to_string()]
+            vec![config.default_model.clone()]
         };
         let selected_model = 0;
         let theme = ThemeColors::get(&config.active_theme);
@@ -6253,14 +6253,11 @@ impl<'a> App<'a> {
             let _ = tx.send(token);
         });
     }
-    /// Dynamically discover models installed by the user in Ollama and configured cloud models.
+    /// Discover models currently reported by the local model servers.
     pub fn refresh_models(&mut self, tx: mpsc::UnboundedSender<String>) {
         let ollama_url = self.config.ollama_url.clone();
         let llama_cpp_url = self.config.llama_cpp_url.clone();
         let timeout = self.config.response_timeout;
-        let has_openrouter = self.config.api_keys.openrouter_api_key.is_some();
-        let has_gemini = self.config.api_keys.google_gemini_api_key.is_some();
-        let has_qwen = self.config.api_keys.qwen_api_key.is_some();
         let current_default = self.config.default_model.clone();
 
         tokio::spawn(async move {
@@ -6286,22 +6283,9 @@ impl<'a> App<'a> {
                 }
             }
 
-            // Cloud providers if keys are configured
-            if has_openrouter {
-                models.push("anthropic/claude-3.5-sonnet".to_string());
-                models.push("openai/gpt-4o".to_string());
-            }
-            if has_gemini {
-                models.push("google/gemini-1.5-pro".to_string());
-                models.push("google/gemini-1.5-flash".to_string());
-            }
-            if has_qwen {
-                models.push("qwen-max".to_string());
-                models.push("qwen-plus".to_string());
-            }
-
-            // Fallback if no models discovered
-            if models.is_empty() && !current_default.is_empty() {
+            // Preserve the configured model even when local discovery succeeds.
+            // It is a user choice, not a claim that a provider catalog found it.
+            if !current_default.is_empty() && !models.contains(&current_default) {
                 models.push(current_default);
             }
 
@@ -6342,19 +6326,11 @@ impl<'a> App<'a> {
                         .collect();
 
                     if !chat_models.is_empty() {
-                        // Send refreshed model list to TUI
+                        // Keep the user's configured selection visible even if
+                        // local discovery succeeds; do not add catalog guesses.
                         let mut all_models = chat_models.clone();
-                        if openrouter_key.is_some() {
-                            all_models.push("anthropic/claude-3.5-sonnet".to_string());
-                            all_models.push("openai/gpt-4o".to_string());
-                        }
-                        if gemini_key.is_some() {
-                            all_models.push("google/gemini-1.5-pro".to_string());
-                            all_models.push("google/gemini-1.5-flash".to_string());
-                        }
-                        if qwen_key.is_some() {
-                            all_models.push("qwen-max".to_string());
-                            all_models.push("qwen-plus".to_string());
+                        if !default_model.is_empty() && !all_models.contains(&default_model) {
+                            all_models.push(default_model.clone());
                         }
                         let _ = tx.send(format!(
                             "[MODELS]{}",

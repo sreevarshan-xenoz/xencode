@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — model discovery reports observed models only
+
+The collaboration API no longer inserts example local or cloud model names
+when listing models, and `/api/config` no longer publishes a hardcoded model
+catalog. The TUI model selector now includes cloud models only when they are
+actually configured as the current model; an API key by itself does not claim
+that specific model is available. Local models still come from Ollama and
+llama.cpp discovery.
+
 ### Changed — bounded background tasks (AR-6)
 
 The TUI's in-process background task manager now gives commands a 30-minute

@@ -235,7 +235,8 @@ Ctrl+C (or q) quits.
 $ xencode
 
 Press m              # opens the model selector (refreshes the list)
-↑ ↓ to pick qwen2.5:7b, Enter to set it as default (r re-refreshes)
+↑ ↓ to pick an installed model reported by Ollama or llama.cpp; Enter sets it as default
+If the list is empty, install/start a local model server or configure the cloud model directly.
 You › explain async/await
 Xencode › [uses the new model]
 ```

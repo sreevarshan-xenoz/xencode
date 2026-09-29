@@ -725,7 +725,7 @@ Vulnerabilities can be reported privately to **security@xenoz.com** — see
 
 ## 🗺️ Roadmap
 
-The Rust migration (all 8 phases, 15 crates) is **complete**, and so is
+The Rust migration (all 8 phases, 16 crates) is **complete**, and so is
 **Milestone J** (2026-09-21) — the pass that made every TUI panel tell the truth
 and gave the plugin surface a runtime — followed by **Milestone K** (2026-09-23),
 the remote-provider and Colab GPU-bridge pass, verified against a live free-tier

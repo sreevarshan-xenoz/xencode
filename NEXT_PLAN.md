@@ -2,7 +2,7 @@
 
 > Companion doc to [docs/ROADMAP.md](docs/ROADMAP.md). This file tracks the
 > current focus and immediate next milestones for Xencode. **Verified against
-> the tree on 2026-09-21** — day-to-day detail in
+> the tree on 2026-09-29** — day-to-day detail in
 > [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md).
 
 ## Current Status
@@ -14,7 +14,7 @@
 - ✅ **Milestone F complete**: Live refactor insights (watcher-driven snapshot refresh + `Ctrl+L` insights panel + `/advise` + `xencode advise` CLI + `repo_advise` agent tool)
 - ✅ **Milestone G complete**: Team mode hardening (bearer-token auth + RBAC on HTTP and WS, first-frame WS identity, JSONL audit trail, local-first bind with opt-in TLS, real TUI Collaboration Hub)
 - ✅ **Milestone I complete** (2026-09-21): approval-gated agent tool loop with checkpoints and `/rewind`, plan visibility, real ByteBot delegation, MCP stdio tool servers, pre/post tool hooks, `/spawn` in a worktree, and a sequential provider fallback chain — closed out by **I4-02**, the manuals-vs-implementation honesty sweep
-- ✅ **Rust migration complete**: 15 crates, 831 tests passing, 4 ignored, zero warnings — the Rust workspace is the only active codebase (Milestone K added `xencode-colab-rs`)
+- ✅ **Rust migration complete**: 16 crates, 1694 tests passing, zero warnings — the Rust workspace is the only active codebase (workspace gates re-verified 2026-09-29)
 - ✅ **Milestone J complete** (2026-09-21): every panel tells the truth.
   The I4-02 sweep left seven scripted TUI panels and a manifest-only plugin
   surface; dead Rust, the Python-era tooling configs and the unused k8s /
@@ -233,6 +233,12 @@
   declined. Also settled: the word "workspace" is taken four times over, so this
   is `ViewState` and named **views**. Appendix: [NEXT_PLAN_TASKS.md](NEXT_PLAN_TASKS.md)
   § Milestone V.
+  **Implementation status (2026-09-29):** the layout tree, templates, saved
+  views, split/resize controls, event-driven redraw, pane mouse handling and
+  `Ctrl+0` transition inspector have shipped. V-10 remains open because the
+  normalized worker-event sources it needs (AR-1/4/5/9) do not exist yet;
+  automatic layout (V-11) remains parked. The TUIOS adaptation is therefore
+  partial, not complete.
 - 🛰️ **Milestone W recorded** (2026-09-28): the "Xencode as an agent-agnostic
   control plane" direction — the same proposal as Milestone S with a different
   diagram, and the plan already owns it. The proposal's `I0`–`I7` map onto

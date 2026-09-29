@@ -7,10 +7,8 @@ Transform Xencode from a tool into the **system** developers use for 80% of thei
 
 ## ⚡ Execution Plan: "Depth Over Breadth"
 
-> **Verified against the tree on 2026-09-25** — 15 crates, 1142 tests, re-counted
-> 2026-09-28 at 16 crates and 1614 tests after the interop crate landed, and again
-> 2026-09-29 at 16 crates and 1631 tests when layouts became config-authored
-> templates. Every line
+> **Verified against the tree on 2026-09-29** — 16 crates and 1694 tests passing
+> (`cargo test --workspace`). Every line
 > below is marked with what the code does today, and the entry points are the
 > real ones (`xencode --help`, `?` in the TUI).
 > [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md) is the day-to-day record.
@@ -122,32 +120,21 @@ xencode (Rust binary) → providers-rs → Ollama / llama.cpp / Gemini / Qwen / 
    port from the bytes it was made of — same stream reader, same permission gate,
    tools really executing, no model answering
 
-### 🚀 Next up
-No *committed* milestone. **Milestone K** (remote providers + the Google Colab GPU
-bridge) closed on 2026-09-23, verified against a live free-tier T4 rather than a
-mock; nothing has been green-lit since.
+### 🚀 Current plan status
 
-What exists is planning, tracked in
-[`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md): two planned tracks — **L** (any
-machine you can SSH into, and an agent that finishes its own work) and **M**
-(ecosystem compatibility: hooks, skills, agents-as-markdown, MCP server, ACP) —
-plus five research appendices — **N**, **O**, **P**,
-**Q** (an external hundred-proposal review, dispositioned item by item) and **S** (an
-external thirty-eight-proposal review of running other vendors' coding agents, checked
-against what those agents already do) —
-which between them record 208 candidate features from N–Q, 26 further tasks from S, a
-do-not-build register for each family, and the defects found while checking claims
-against the code. The
-appendices were deliberately never ranked by worth, and still are not. The
-**order** was settled afterwards as **Milestone R**: eighteen dependency waves
-over all 284 recorded plan items — the 208 research candidates, the 31 further Q
-IDs that turned out to be folds or refinements of candidates already counted, the
-19 committed tasks in L and M, and S's 26 — sequenced by what would otherwise inherit another
-item's broken measurement — correctness first, then observability, the model
-substrate, code intelligence, verification, trust, knowledge, autonomy, and the
-product surface last. What remains an owner decision is valuation within a wave
-(effort, defect closure, daily-driver value, how much of the local-first story
-each item protects), not sequence. The icebox above still feeds it.
+Milestone V's TUIOS-informed layout work is partially delivered. The tree-backed
+layout, resizing, persistence, templates and related TUI improvements are tracked
+in [`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md). **V-9**, the session layout
+transition inspector, shipped on 2026-09-29 as `Ctrl+0`. **V-10**, which would
+open a pane for observed worker permission requests and report worker state, is
+not complete: it waits for measured and normalized worker events from AR-1,
+AR-4, AR-5 and AR-9. V-11's automatic rearrangement remains parked. Do not read
+the TUIOS adaptation as complete while V-10 is still open.
+
+The ordered backlog and its dependency waves remain in
+[`NEXT_PLAN_TASKS.md`](../NEXT_PLAN_TASKS.md); the milestone summary is in
+[`NEXT_PLAN.md`](../NEXT_PLAN.md). Research appendices are evidence and candidate
+records, not a list of shipped behavior.
 
 ## 📊 Success Metrics & Current Status
 
@@ -158,10 +145,9 @@ each item protects), not sequence. The icebox above still feeds it.
 - **Feature Usage**: 80% of users use 3+ advanced features
 - **Performance**: Sub-second response times for all operations
 
-### 📈 Metrics as measured (2026-09-23)
-- **Rust Migration**: 15/15 crates — complete; the Python stack is deleted, and
-  Milestone K added `xencode-colab-rs` as the 15th
-- **Test Suite**: 1142 passing, 0 failing, 11 ignored (`cargo test --workspace`)
+### 📈 Metrics as measured (2026-09-29)
+- **Rust Migration**: 16/16 crates — complete; the Python stack is deleted
+- **Test Suite**: 1694 passing, 0 failing (`cargo test --workspace`)
 - **Compilation**: `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all --check` clean
 - **Code Quality**: per-language heuristics + pattern-based OWASP scanner

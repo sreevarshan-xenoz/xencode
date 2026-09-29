@@ -845,15 +845,17 @@ $ xencode server
 $ curl http://localhost:8765/
 {"status":"online","service":"Xencode Server","version":"0.1.0"}
 
-# List models as the server sees them
+# List models reported by local model servers
 $ curl http://localhost:8765/api/models
-{"models":[{"name":"qwen3:4b","provider":"ollama","type":"local","size":...,"modified_at":"..."},
-           {"name":"gpt-4o","provider":"openai","type":"remote"},
-           {"name":"claude-3.5-sonnet","provider":"anthropic","type":"remote"}]}
+{"models":[{"name":"installed-model","provider":"ollama","type":"local","size":...,"modified_at":"..."},
+           {"name":"served-model","provider":"llamacpp","type":"local"}]}
 ```
-`/api/models` lists what Ollama and llama.cpp actually report **and** appends
-two hardcoded remote entries; when both local servers are offline it falls back
-to two sample Ollama names. Treat it as a demo payload, not a model registry.
+`/api/models` contains only models returned by Ollama and the configured
+llama.cpp server. An unavailable server contributes no rows, and an empty
+`models` array means neither server reported a chat model. Cloud model discovery
+is not implemented by this endpoint; credentials alone do not add model rows.
+`GET /api/config` reports server settings and features, not a supported-model
+catalog.
 Routes: `/`, `/sessions/create`, `/sessions/{id}`, `/ws/{session_id}`,
 `/auth/login`, `/auth/verify`, `/api/config`, `/api/models`, `/api/status`,
 `/api/llamacpp/{status,load,unload}`.

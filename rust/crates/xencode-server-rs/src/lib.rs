@@ -442,14 +442,13 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = json_body(response).await;
         let models = json["models"].as_array().unwrap();
-        // The always-present remote providers plus the offline fallbacks; the
-        // exact count depends on local servers, so assert on the invariant.
-        assert!(models.len() >= 2, "remotes always listed: {models:?}");
-        let names: Vec<&str> = models.iter().map(|m| m["name"].as_str().unwrap()).collect();
-        assert!(names.contains(&"gpt-4o"), "openai row present: {names:?}");
         assert!(
-            names.contains(&"claude-3.5-sonnet"),
-            "anthropic row present: {names:?}"
+            models.iter().all(|m| {
+                (m["provider"] == "ollama" || m["provider"] == "llamacpp")
+                    && m["name"].is_string()
+                    && m["type"] == "local"
+            }),
+            "only discovered local models are listed: {models:?}"
         );
     }
 
