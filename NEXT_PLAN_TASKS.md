@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1560 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1564 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -5285,6 +5285,21 @@ coordination is not.
   ☑" is worse than no checklist — the mechanism behind the WHO surgical checklist's
   measured effect (complications 11.0%→7.0%, mortality 1.5%→0.8%, NEJM 2009) is a
   hard stop where **the machine verifies**, not a list the operator grades.
+  **Done 2026-09-28** — `xencode verify [--skip test|lint|fmt]` runs the three
+  slots every release-facing change needs: the full nextest suite (retries 0,
+  flaky-result fail), clippy with zero tolerance, `cargo fmt --check`. Each
+  slot is a command whose exit code is the verdict; each leaves a ledger row
+  and an artifact; skips are reported, never passed. Four tests for the
+  aggregation (a skip is neither pass nor fail, one failure fails and names
+  itself, empty is not a pass) plus a live scratch run proving slots, skips,
+  rows, and evidence pointers.
+
+  **Its first live run on this repository failed two slots, correctly.** Clippy
+  without `-D warnings` surfaced a real `unused_imports` in the new toolchain
+  tests — a warning the denied CI build never sees — and the completions drift
+  test caught the new `verify` subcommand itself. Both fixed, both re-proved.
+  A checklist that passes everything on its first run has proved nothing; this
+  one earned its keep before the commit.
 
 Items 98/99 (both DSLs) and 1/4 lose on the record, not on taste: what survived
 in this space is schema-free markdown (`.claude/commands`, Aider's flag-bag

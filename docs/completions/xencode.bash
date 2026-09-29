@@ -112,6 +112,9 @@ _xencode() {
             xencode,tui)
                 cmd="xencode__subcmd__tui"
                 ;;
+            xencode,verify)
+                cmd="xencode__subcmd__verify"
+                ;;
             xencode,worktree)
                 cmd="xencode__subcmd__worktree"
                 ;;
@@ -342,6 +345,9 @@ _xencode() {
                 ;;
             xencode__subcmd__help,tui)
                 cmd="xencode__subcmd__help__subcmd__tui"
+                ;;
+            xencode__subcmd__help,verify)
+                cmd="xencode__subcmd__help__subcmd__verify"
                 ;;
             xencode__subcmd__help,worktree)
                 cmd="xencode__subcmd__help__subcmd__worktree"
@@ -734,7 +740,7 @@ _xencode() {
 
     case "${cmd}" in
         xencode)
-            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="-h -V --help --version scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1690,7 +1696,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help)
-            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
+            opts="scan config models cache audit advisories query memory tasks worktree colab advise server analyze fetch interop anchor toolchain session verify envcheck generate mutants cov test review replay eval plugin llamacpp hw history tui help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2754,6 +2760,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__tui)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__verify)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -4292,6 +4312,32 @@ _xencode() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__verify)
+            opts="-h --skip --timeout --format --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --skip)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "text json" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;

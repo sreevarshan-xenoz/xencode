@@ -345,8 +345,15 @@ mod tests {
 
     /// A cargo home holding one registry with `<name>-<version>` unpacked for
     /// each entry, each carrying a Cargo.toml that repeats its own version.
+    ///
+    /// One home per call: parallel tests sharing a directory remove and
+    /// recreate it under each other, and the failure blames a missing file
+    /// rather than the race. A process-wide counter makes each home unique
+    /// without threading a label through every call site.
     fn unpacked(crates: &[(&str, &str)]) -> PathBuf {
-        let home = scratch("home");
+        static NEXT_HOME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT_HOME.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let home = scratch(&format!("home-{n}"));
         let src = home
             .join("registry")
             .join("src")

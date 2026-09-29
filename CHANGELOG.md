@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode test --isolate`: is this red test yours?
+### Added — `xencode verify`: the checklist where the machine verifies
+
+Runs three slots — full nextest suite, clippy with zero tolerance, `cargo fmt
+--check` — each a command whose exit code is the verdict, each leaving a
+ledger row and an artifact. Skips are reported, never passed; an empty
+checklist is not a pass. Four tests.
+
+Its first live run failed two slots, correctly: a real `unused_imports` the
+denied CI build never sees, and the completions drift test catching the new
+subcommand itself.
+
+
 
 Runs one failing test against the clean base tree in a throwaway detached
 worktree and classifies: PRE_EXISTING_FAILURE (fails there too — do not fix

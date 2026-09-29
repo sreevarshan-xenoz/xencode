@@ -333,9 +333,260 @@ pub fn manifest_dir(root: &Path) -> Result<PathBuf, String> {
     xencode_context_rs::verify::manifest_dir(root)
 }
 
+/// One machine-checked slot in a verification checklist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    /// `test`, `lint`, or `fmt`.
+    pub name: String,
+    /// Whether the check ran. A skipped check is skipped, never passed —
+    /// JUnit's `skipped ≠ passed` semantics, because a checklist that counts
+    /// skips as passes is a green report on work nobody did.
+    pub ran: bool,
+    /// Process exit code when it ran.
+    pub exit_code: Option<i32>,
+    /// Where the evidence lives, relative to the project when possible.
+    pub evidence_ref: String,
+}
+
+impl Check {
+    /// Passed means ran and exited zero. Nothing else.
+    pub fn passed(&self) -> bool {
+        self.ran && self.exit_code == Some(0)
+    }
+}
+
+/// The verdict over a whole checklist.
+#[derive(Debug, Clone, Default)]
+pub struct Checklist {
+    /// One slot per check, in run order.
+    pub checks: Vec<Check>,
+}
+
+impl Checklist {
+    /// All ran checks passed. Skips do not fail the verdict, and they do not
+    /// pass it either — they are reported alongside, named.
+    pub fn ok(&self) -> bool {
+        !self.checks.is_empty() && self.checks.iter().filter(|c| c.ran).all(Check::passed)
+    }
+
+    /// Names of checks that ran and failed.
+    pub fn failed(&self) -> Vec<&str> {
+        self.checks
+            .iter()
+            .filter(|c| c.ran && !c.passed())
+            .map(|c| c.name.as_str())
+            .collect()
+    }
+
+    /// Names of checks that were skipped.
+    pub fn skipped(&self) -> Vec<&str> {
+        self.checks
+            .iter()
+            .filter(|c| !c.ran)
+            .map(|c| c.name.as_str())
+            .collect()
+    }
+}
+
+/// Run the machine-checkable checklist: test suite, clippy, formatting.
+///
+/// Each check is a command whose exit code is the verdict — the mechanism
+/// behind a checklist that actually works is a hard stop where the machine
+/// verifies, not a list anyone grades. Evidence goes to the session artifacts
+/// and a ledger row per check, so the verdict points at what produced it.
+pub fn run_checklist(root: &Path, skip: &[String], timeout_secs: u64) -> Result<Checklist, String> {
+    use xencode_context_rs::{artifacts, ledger};
+
+    let manifest = manifest_dir(root)?;
+    let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
+    let skipped = |name: &str| skip.iter().any(|s| s == name);
+    let mut checklist = Checklist::default();
+
+    let mut record = |name: &str, ran: bool, exit_code: Option<i32>, evidence: &str| {
+        checklist.checks.push(Check {
+            name: name.to_string(),
+            ran,
+            exit_code,
+            evidence_ref: evidence.to_string(),
+        });
+        let _ = ledger::append_ledger(
+            &xencode_dir,
+            &ledger::LedgerEntry {
+                ts_unix_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+                session: Some("cli".to_string()),
+                run_class: match name {
+                    "test" => ledger::RunClass::Test,
+                    "lint" => ledger::RunClass::Lint,
+                    _ => ledger::RunClass::Other,
+                },
+                exit_code: exit_code.unwrap_or(-1),
+                subjects: vec![],
+                log_ref: evidence.to_string(),
+                note: String::new(),
+            },
+        );
+    };
+
+    // fmt is fastest and its failure is cheapest to fix; test is slowest and
+    // runs last so a formatting complaint never costs a full suite run.
+    if skipped("fmt") {
+        record("fmt", false, None, "");
+    } else {
+        let clean = fmt_check(&manifest)?;
+        let evidence = artifacts::write_artifact(
+            &xencode_dir,
+            "cli",
+            "verify-fmt.log",
+            if clean {
+                "fmt: clean\n"
+            } else {
+                "fmt: differs\n"
+            },
+        )
+        .ok()
+        .map(|p| display_relative(root, &p))
+        .unwrap_or_default();
+        record("fmt", true, Some(i32::from(!clean)), &evidence);
+    }
+
+    if skipped("lint") {
+        record("lint", false, None, "");
+    } else {
+        let report = clippy_report(&manifest)?;
+        let mut evidence_text = format!("clippy: {}\n", report.summary());
+        for d in report.diagnostics.iter().take(20) {
+            evidence_text.push_str(&format!(
+                "{} {} {}\n",
+                d.lint,
+                d.file.as_deref().unwrap_or("?"),
+                d.line.unwrap_or(0)
+            ));
+        }
+        let evidence =
+            artifacts::write_artifact(&xencode_dir, "cli", "verify-lint.log", &evidence_text)
+                .ok()
+                .map(|p| display_relative(root, &p))
+                .unwrap_or_default();
+        record(
+            "lint",
+            true,
+            Some(i32::from(report.count() != 0)),
+            &evidence,
+        );
+    }
+
+    if skipped("test") {
+        record("test", false, None, "");
+    } else {
+        let opts = xencode_context_rs::verify::Options {
+            budget: std::time::Duration::from_secs(timeout_secs),
+            ..Default::default()
+        };
+        let outcome = xencode_context_rs::verify::run(&manifest, &opts);
+        let mut evidence_text = format!(
+            "command: {}\nexit: {}\nflaky: {}\nfailed: {}\n",
+            outcome.command,
+            outcome.exit.unwrap_or(-1),
+            outcome.flaky.join(", "),
+            outcome.failed.join(", "),
+        );
+        for note in &outcome.notes {
+            evidence_text.push_str(&format!("note: {note}\n"));
+        }
+        let evidence =
+            artifacts::write_artifact(&xencode_dir, "cli", "verify-test.log", &evidence_text)
+                .ok()
+                .map(|p| display_relative(root, &p))
+                .unwrap_or_default();
+        record("test", true, outcome.exit, &evidence);
+    }
+
+    let _ = artifacts::prune_artifacts(&xencode_dir, artifacts::KEEP_LAST_PASSING);
+    Ok(checklist)
+}
+
+fn display_relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(|r| r.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check(name: &str, ran: bool, exit: Option<i32>) -> Check {
+        Check {
+            name: name.to_string(),
+            ran,
+            exit_code: exit,
+            evidence_ref: format!("{name}.log"),
+        }
+    }
+
+    #[test]
+    fn a_skip_is_neither_pass_nor_fail() {
+        // JUnit semantics: the checklist that counts skips as passes is a green
+        // report on work nobody did.
+        let skipped = check("fmt", false, None);
+        assert!(!skipped.passed());
+        let list = Checklist {
+            checks: vec![skipped, check("lint", true, Some(0))],
+        };
+        assert!(list.ok(), "skips do not fail the verdict");
+        assert_eq!(list.skipped(), vec!["fmt"]);
+        assert!(list.failed().is_empty());
+    }
+
+    #[test]
+    fn one_failure_fails_the_verdict_and_names_itself() {
+        let list = Checklist {
+            checks: vec![
+                check("fmt", true, Some(0)),
+                check("lint", true, Some(1)),
+                check("test", false, None),
+            ],
+        };
+        assert!(!list.ok());
+        assert_eq!(list.failed(), vec!["lint"]);
+        assert_eq!(list.skipped(), vec!["test"]);
+    }
+
+    #[test]
+    fn an_empty_checklist_is_not_a_pass() {
+        assert!(!Checklist::default().ok());
+    }
+
+    #[test]
+    fn skips_run_fast_on_scratch_and_leave_evidence() {
+        let dir = std::env::temp_dir().join(format!("xe-verify-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"v\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("src").join("lib.rs"), "// clean\n").unwrap();
+        let list = run_checklist(&dir, &["test".to_string(), "lint".to_string()], 60).unwrap();
+        assert_eq!(list.checks.len(), 3);
+        assert_eq!(list.skipped(), vec!["lint", "test"]);
+        assert!(list.ok(), "the only ran check passed");
+        let rows = xencode_context_rs::ledger::read_ledger(&dir.join(".xencode"));
+        assert_eq!(
+            rows.len(),
+            3,
+            "every slot leaves a ledger row, skips included"
+        );
+        assert!(
+            !rows[0].log_ref.is_empty(),
+            "the ran check points at evidence"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Verbatim `compiler-message` lines from a real clippy run, trimmed to the
     /// fields the parser reads.
