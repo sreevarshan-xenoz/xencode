@@ -1756,6 +1756,21 @@ fn count_report(
 }
 
 impl<'a> App<'a> {
+    /// Whether a spinner-showing operation is running. The renderer draws
+    /// spinner frames from `spinner_tick` in several panels, so while any of
+    /// these holds the loop must keep drawing — freezing mid-spin would report
+    /// a live operation as hung.
+    pub fn activity_animating(&self) -> bool {
+        self.is_generating
+            || self.is_reviewing
+            || self.health_check_in_progress
+            || self.bytebot_running
+            || self.voice_busy
+            || self.collab_sync_status == "connecting"
+            || self.sec_scan_active
+            || self.profiler_running
+    }
+
     pub fn new() -> Self {
         let config = XencodeConfig::load().unwrap_or_default();
         let mut memory = ConversationMemory::with_persistence(config.max_memory_items)
@@ -7564,6 +7579,39 @@ pub fn parse_llama_port(url: &str) -> u16 {
         .unwrap_or(8080)
 }
 
+/// What one loop iteration observed. The frame decision reads only this,
+/// so the "draw or skip" rule is testable without a terminal.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FrameSignals {
+    /// A key, mouse, or resize event was handled.
+    pub event_handled: bool,
+    /// Async messages drained from the background tasks.
+    pub messages: usize,
+    /// Approval requests queued from the tool loop.
+    pub approvals: usize,
+    /// Toast count before and after pruning.
+    pub toasts_before: usize,
+    pub toasts_after: usize,
+    /// A spinner-showing operation is running.
+    pub activity: bool,
+}
+
+/// Whether this iteration must draw.
+///
+/// Skipping is the whole point: an idle loop — no event, no messages, no
+/// toast change, nothing animating, no toast on screen — draws nothing, and
+/// the 30 fps redraw becomes one draw per actual change. Toasts on screen
+/// keep drawing because their TTL expiry is itself a visual change with no
+/// other signal announcing it.
+pub fn should_draw(signals: &FrameSignals) -> bool {
+    signals.event_handled
+        || signals.messages > 0
+        || signals.approvals > 0
+        || signals.toasts_before != signals.toasts_after
+        || signals.toasts_after > 0
+        || signals.activity
+}
+
 pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     let mut app = App::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -7612,12 +7660,24 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         });
     }
 
+    // The first frame always draws: there is no previous frame to be
+    // current with, and a blank terminal that waits for an event is a hang.
+    let mut first_frame = true;
     loop {
+        // Event-driven frames (V-8): the loop used to draw unconditionally at
+        // ~30 fps. Now each iteration reports what it observed, and the frame
+        // is drawn only when something changed, something animates, or a toast
+        // is on screen with a TTL still to expire. The 33 ms poll stays —
+        // input latency is unchanged; only redundant draws go away.
+        let mut signals = FrameSignals {
+            toasts_before: app.toasts.len(),
+            ..FrameSignals::default()
+        };
         crate::toast::prune(&mut app.toasts, current_timestamp());
-        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         // Drain async messages
         while let Ok(token) = rx.try_recv() {
+            signals.messages += 1;
             if let Some(body) = token.strip_prefix("[REVIEW]") {
                 app.append_review(body);
             } else if let Some(body) = token.strip_prefix("[SPAWN]") {
@@ -8111,12 +8171,14 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
         // modal overlay answers the front one and wakes its task.
         if let Some(arx) = app.approval_rx.as_mut() {
             while let Ok((request, responder)) = arx.try_recv() {
+                signals.approvals += 1;
                 app.approval_queue.push_back((request, responder));
             }
         }
 
         // Poll events (~30fps)
         if event::poll(Duration::from_millis(33))? {
+            signals.event_handled = true;
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     // Dispatch lives in keymap.rs (E6-01): modal help overlay,
@@ -8281,17 +8343,16 @@ pub async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                 }
                 _ => {}
             }
-        } else if app.is_generating
-            || app.is_reviewing
-            || app.health_check_in_progress
-            || app.bytebot_running
-            || app.voice_busy
-            || app.collab_sync_status == "connecting"
-            || app.sec_scan_active
-            || app.profiler_running
-        {
+        } else if app.activity_animating() {
             app.spinner_tick = app.spinner_tick.wrapping_add(1);
         }
+
+        signals.toasts_after = app.toasts.len();
+        signals.activity = app.activity_animating();
+        if first_frame || should_draw(&signals) {
+            terminal.draw(|f| ui::draw(f, &mut app))?;
+        }
+        first_frame = false;
     }
 }
 
@@ -8380,8 +8441,9 @@ mod tests {
         cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
         parse_porcelain_z, parse_term_suggestions, parse_voice_level, preview_repo_map,
-        repo_map_tier_line, trace_age, trace_report, watch_warning_for, App, ConversationMemory,
-        Egress, FocusArea, LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        repo_map_tier_line, should_draw, trace_age, trace_report, watch_warning_for, App,
+        ConversationMemory, Egress, FocusArea, FrameSignals, LoopSink, SpawnRecord, XencodeConfig,
+        CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -11510,6 +11572,70 @@ mod tests {
     /// The done-when for the cost work, checked end to end: records written to
     /// the file, priced against a table on disk, printed by the command — and the
     /// figure matches what the same records add up to by hand.
+    #[test]
+    fn an_idle_loop_draws_nothing() {
+        // The whole point of V-8: no event, no messages, no toast change, no
+        // toast on screen, nothing animating — the frame is skipped.
+        assert!(!should_draw(&FrameSignals::default()));
+    }
+
+    #[test]
+    fn every_signal_draws() {
+        let base = FrameSignals::default();
+        assert!(should_draw(&FrameSignals {
+            event_handled: true,
+            ..base
+        }));
+        assert!(should_draw(&FrameSignals {
+            messages: 1,
+            ..base
+        }));
+        assert!(should_draw(&FrameSignals {
+            approvals: 1,
+            ..base
+        }));
+        assert!(should_draw(&FrameSignals {
+            activity: true,
+            ..base
+        }));
+        assert!(should_draw(&FrameSignals {
+            toasts_before: 1,
+            toasts_after: 0,
+            ..base
+        }));
+        // A toast on screen keeps drawing: its TTL expiry is a visual change
+        // with no other signal announcing it.
+        assert!(should_draw(&FrameSignals {
+            toasts_before: 1,
+            toasts_after: 1,
+            ..base
+        }));
+    }
+
+    #[test]
+    fn animation_covers_every_spinner_source() {
+        let app = App::for_tests();
+        assert!(!app.activity_animating());
+        for set in [
+            |a: &mut App| a.is_generating = true,
+            |a: &mut App| a.is_reviewing = true,
+            |a: &mut App| a.health_check_in_progress = true,
+            |a: &mut App| a.bytebot_running = true,
+            |a: &mut App| a.voice_busy = true,
+            |a: &mut App| a.sec_scan_active = true,
+            |a: &mut App| a.profiler_running = true,
+        ] {
+            let mut app = App::for_tests();
+            set(&mut app);
+            assert!(app.activity_animating());
+        }
+        let mut app = App::for_tests();
+        app.collab_sync_status = "connecting".to_string();
+        assert!(app.activity_animating());
+        app.collab_sync_status = "idle".to_string();
+        assert!(!app.activity_animating());
+    }
+
     #[test]
     fn cost_numbers_come_from_the_records_and_match_a_hand_sum() {
         let dir = cost_project("priced");
