@@ -83,6 +83,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.help_visible {
         draw_help_overlay(f, app, f.area());
     }
+    if app.agent_stack_visible {
+        draw_agent_stack_overlay(f, app, f.area());
+    }
     if app.pending_approval().is_some() {
         draw_approval_overlay(f, app, f.area());
     }
@@ -210,6 +213,29 @@ fn draw_model_download(f: &mut Frame, app: &App, area: Rect, progress: &str) {
         )),
         strip,
     );
+}
+
+fn draw_agent_stack_overlay(f: &mut Frame, app: &App, area: Rect) {
+    use crate::view::stack_overlay_text;
+
+    let panes = app.agent_stack_panes();
+    // Clamp, don't trust: the index survives pane-count changes between draws.
+    let active = app.agent_stack_index.min(panes.len().saturating_sub(1));
+    let lines: Vec<Line> = stack_overlay_text(&panes, active)
+        .into_iter()
+        .map(Line::from)
+        .collect();
+    let popup_area = centered_rect(70, 60, area);
+    f.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .border_set(panel_border_set(app.config.rounded_borders))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" Agents — Ctrl+N to switch, Esc to close ");
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    f.render_widget(para, popup_area);
 }
 
 fn draw_help_overlay(f: &mut Frame, app: &App, area: Rect) {

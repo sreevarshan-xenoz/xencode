@@ -180,7 +180,7 @@ pub struct SpawnRecord {
 }
 
 impl SpawnRecord {
-    fn finished_line(&self) -> String {
+    pub(crate) fn finished_line(&self) -> String {
         let done = self.steps.iter().filter(|(_, s)| s == "done").count();
         format!("{done}/{} call(s) completed", self.steps.len())
     }
@@ -409,6 +409,11 @@ pub struct App<'a> {
     pub init_log: Vec<String>,
     pub init_visible: bool,
     pub help_visible: bool,
+    /// Agent stack overlay: visible flag plus the active pane index. The panes
+    /// themselves are rebuilt from live state on every draw, so this holds no
+    /// content that could go stale — only which pane is frontmost.
+    pub agent_stack_visible: bool,
+    pub agent_stack_index: usize,
     pub help_scroll: u16,
     /// Transient notifications (file-watch warnings etc.), see `toast` module.
     pub toasts: Vec<crate::toast::Toast>,
@@ -1782,6 +1787,24 @@ impl<'a> App<'a> {
         app
     }
 
+    /// The agent stack's panes, rebuilt from live state on every draw: one
+    /// per spawned subagent run, one for the ByteBot run, one for queued
+    /// approvals. Always three, idle ones saying so — switching never lands on
+    /// nothing, and no content here can go stale.
+    pub fn agent_stack_panes(&self) -> Vec<crate::view::AgentPane> {
+        let spawns: Vec<(String, String)> = self
+            .spawns
+            .iter()
+            .map(|s| (s.branch.clone(), s.finished_line()))
+            .collect();
+        let approvals: Vec<String> = self
+            .approval_queue
+            .iter()
+            .map(|(request, _)| format!("{} — {}", request.tool, request.summary))
+            .collect();
+        crate::view::agent_panes(&spawns, &self.bytebot_steps, &approvals)
+    }
+
     /// Isolated app for tests: default config, non-persistent conversation
     /// memory, config writes disabled, and a plugin directory that holds
     /// nothing — a plugin someone installed on their own machine must not be
@@ -1965,6 +1988,8 @@ impl<'a> App<'a> {
             init_log: Vec::new(),
             init_visible: false,
             help_visible: false,
+            agent_stack_visible: false,
+            agent_stack_index: 0,
             help_scroll: 0,
             toasts: Vec::new(),
             init_cancel: Arc::new(AtomicBool::new(false)),

@@ -16,7 +16,16 @@ tools and denied syscalls yield absence, never errors. The JSON also carries
 the U-3 configuration-drift result as one row, completing U-3's W11 surface.
 Three unit tests plus a CLI parse test.
 
-### Added — layout tree alongside presets, pixel-identical by proof
+### Added — agent stack overlay: three panes, one chord
+
+`PaneKind` vocabulary (Code through Monitor), agent panes built from live
+state (subagents, ByteBot steps, approvals — always three, idle ones saying
+so), `Ctrl+N` opening and advancing an overlay of the active pane's rows,
+`Esc` closing, chord in the help table. Tree-level `cycle_active` plus a
+`stack_active` reader so no parallel index can disagree. Six tests. UX-1
+rebindability, UX-3 which-key, and the agent event feed stay pending by name.
+
+
 
 `LayoutNode` (leaf, split, tabbed, stack), `Pane` carrying `FocusArea`, and
 `ViewState` — introduced beside `compute_layout`, which is untouched and still
