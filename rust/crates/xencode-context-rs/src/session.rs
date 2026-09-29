@@ -15,6 +15,7 @@
 //! writes one unless a caller asks for it: recording is opt-in per session, and
 //! the `run_id` in the file name is what a later `xencode replay` is given.
 
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -287,6 +288,188 @@ fn read_session_text(text: &str, origin: &str) -> Result<Session, String> {
     Ok(Session { run, calls })
 }
 
+/// Names a human gave to runs, so `--resume <name>` finds a run across
+/// processes without anyone memorising a run id.
+fn names_path(xencode_dir: &Path) -> PathBuf {
+    sessions_dir(xencode_dir).join("names.json")
+}
+
+fn read_names(xencode_dir: &Path) -> BTreeMap<String, String> {
+    std::fs::read_to_string(names_path(xencode_dir))
+        .ok()
+        .and_then(|text| serde_json::from_str::<BTreeMap<String, String>>(&text).ok())
+        .unwrap_or_default()
+}
+
+/// Whether a session name is usable. `latest` is reserved for resolution, and
+/// anything that is not a short token is refused rather than sanitised into a
+/// different name than the caller typed.
+pub fn valid_session_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name != "latest"
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Name a run. Overwriting an existing name is refused: silently repointing a
+/// name the caller may have resumed yesterday is how context gets swapped.
+pub fn name_session(xencode_dir: &Path, name: &str, run_id: &str) -> Result<(), String> {
+    if !valid_session_name(name) {
+        return Err(format!(
+            "{name:?} is not a usable session name: short tokens of letters, digits,              `-` and `_`, anything but `latest`"
+        ));
+    }
+    if read_session(xencode_dir, run_id).is_err() {
+        return Err(format!(
+            "no recording for run {run_id}, so there is nothing to name"
+        ));
+    }
+    let mut names = read_names(xencode_dir);
+    if let Some(current) = names.get(name) {
+        if current != run_id {
+            return Err(format!(
+                "{name:?} already names run {current}; pick another name rather than                  repointing it"
+            ));
+        }
+        return Ok(());
+    }
+    names.insert(name.to_string(), run_id.to_string());
+    let path = names_path(xencode_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(
+        &temp,
+        serde_json::to_string_pretty(&names).unwrap_or_default(),
+    )
+    .map_err(|e| format!("could not write {}: {e}", temp.display()))?;
+    std::fs::rename(&temp, &path)
+        .map_err(|e| format!("could not replace {}: {e}", path.display()))?;
+    Ok(())
+}
+
+/// Resolve a name, an id prefix, or `latest` to a full run id.
+///
+/// An id prefix matching two recordings is refused with both candidates,
+/// because resuming the wrong run restores the wrong context and nothing
+/// downstream can tell.
+pub fn resolve_session(xencode_dir: &Path, name_or_id: &str) -> Result<String, String> {
+    if name_or_id == "latest" {
+        return list_session_ids(xencode_dir)
+            .into_iter()
+            .next()
+            .ok_or_else(|| "no recordings yet, so there is nothing to resume".to_string());
+    }
+    if let Some(run_id) = read_names(xencode_dir).get(name_or_id) {
+        if session_path(xencode_dir, run_id).is_file() {
+            return Ok(run_id.clone());
+        }
+        return Err(format!(
+            "{name_or_id:?} names run {run_id}, whose recording is gone"
+        ));
+    }
+    let mut hits: Vec<String> = list_session_ids(xencode_dir)
+        .into_iter()
+        .filter(|id| *id == name_or_id || id.starts_with(name_or_id))
+        .collect();
+    hits.sort();
+    hits.dedup();
+    match hits.as_slice() {
+        [] => Err(format!("no session named or starting with {name_or_id:?}")),
+        [one] => Ok(one.clone()),
+        several => Err(format!(
+            "{name_or_id:?} matches more than one recording — {} — so it is refused              rather than resumed into the wrong context",
+            several.join(", ")
+        )),
+    }
+}
+
+/// Everything a new process needs to pick up where a run left off.
+#[derive(Debug, Clone)]
+pub struct ResumeContext {
+    /// The full run id that was resolved.
+    pub run_id: String,
+    /// Model, server, and tool root the run recorded.
+    pub model: String,
+    pub server: String,
+    pub tool_root: String,
+    /// How many model calls the recording holds.
+    pub calls: usize,
+    /// The messages of the first request: the conversation a replay starts
+    /// from. `None` means the recording is broken, not empty.
+    pub opening_messages: Option<Vec<serde_json::Value>>,
+}
+
+/// Load a session by name, id prefix, or `latest`, across processes.
+pub fn resume_context(xencode_dir: &Path, name_or_id: &str) -> Result<ResumeContext, String> {
+    let run_id = resolve_session(xencode_dir, name_or_id)?;
+    let session = read_session(xencode_dir, &run_id)?;
+    Ok(ResumeContext {
+        run_id,
+        model: session.run.model.clone(),
+        server: session.run.server.clone(),
+        tool_root: session.run.tool_root.clone(),
+        calls: session.calls.len(),
+        opening_messages: session.opening_messages(),
+    })
+}
+
+/// A session's transcript as markdown, with secrets redacted when asked.
+///
+/// Redaction reuses the trace module's secret patterns — PEM blocks, keyed
+/// values with secret names, bearer tokens, prefixed tokens — because a second
+/// secret detector is a second opinion nobody asked for. What is *not*
+/// redacted is everything else, deliberately: a transcript that hides tool
+/// names or file paths along with the secrets is useless for sharing.
+pub fn export_transcript(
+    xencode_dir: &Path,
+    name_or_id: &str,
+    redacted: bool,
+) -> Result<String, String> {
+    let run_id = resolve_session(xencode_dir, name_or_id)?;
+    let session = read_session(xencode_dir, &run_id)?;
+    let mut out = format!(
+        "# Session {}\n\n- model: {}\n- server: {}\n- tool root: {}\n- calls: {}\n",
+        run_id,
+        session.run.model,
+        session.run.server,
+        session.run.tool_root,
+        session.calls.len()
+    );
+    for call in &session.calls {
+        out.push_str(&format!(
+            "\n## call {} — {} {} → {}\n\n",
+            call.seq, call.method, call.path, call.status
+        ));
+        out.push_str("request:\n```json\n");
+        out.push_str(&call.request_body);
+        out.push_str("\n```\nresponse:\n```\n");
+        out.push_str(
+            call.response_body
+                .lines()
+                .take(40)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .as_str(),
+        );
+        out.push_str("\n```\n");
+        if !call.tools.is_empty() {
+            out.push_str("\ntools:\n");
+            for tool in &call.tools {
+                out.push_str(&format!("- {}: {}\n", tool.index, tool.name));
+            }
+        }
+    }
+    if redacted {
+        out = crate::trace::redact_secrets(&out);
+    }
+    Ok(out)
+}
+
 /// Every run id this project has a recording for, newest first.
 pub fn list_session_ids(xencode_dir: &Path) -> Vec<String> {
     let mut ids: Vec<String> = std::fs::read_dir(sessions_dir(xencode_dir))
@@ -394,6 +577,151 @@ mod tests {
             writer.record(call.clone()).unwrap();
         }
         assert_eq!(writer.run_id(), "r1");
+    }
+
+    fn write_as(dir: &Path, id: &str, calls: &[RecordedCall]) {
+        let mut run = run(id);
+        run.run_id = id.to_string();
+        let mut writer = SessionWriter::begin(dir, &run).unwrap();
+        for c in calls {
+            writer.record(c.clone()).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_name_survives_across_processes() {
+        // Written here, resolved cold from disk: the point is that no
+        // in-memory handle is involved.
+        let dir = temp_dir("name");
+        write_as(&dir, "r1", &[call(0, "hello")]);
+        name_session(&dir, "demo", "r1").unwrap();
+        assert_eq!(resolve_session(&dir, "demo").unwrap(), "r1");
+        let ctx = resume_context(&dir, "demo").unwrap();
+        assert_eq!(ctx.run_id, "r1");
+        assert_eq!(ctx.calls, 1);
+        let messages = ctx.opening_messages.expect("a readable first request");
+        assert!(serde_json::to_string(&messages).unwrap().contains("hello"));
+    }
+
+    #[test]
+    fn a_name_is_not_silently_repointed() {
+        let dir = temp_dir("repoint");
+        write_as(&dir, "r1", &[call(0, "one")]);
+        write_as(&dir, "r2", &[call(0, "two")]);
+        name_session(&dir, "demo", "r1").unwrap();
+        let err = name_session(&dir, "demo", "r2").unwrap_err();
+        assert!(err.contains("already names"), "{err}");
+        assert_eq!(resolve_session(&dir, "demo").unwrap(), "r1");
+    }
+
+    #[test]
+    fn reserved_and_sloppy_names_are_refused_not_sanitised() {
+        let dir = temp_dir("names");
+        write_as(&dir, "r1", &[call(0, "one")]);
+        for bad in [
+            "",
+            "latest",
+            "has space",
+            "semi;colon",
+            "a/very/long/name/that/keeps/going/past/sixty/four/characters/yes",
+        ] {
+            assert!(
+                name_session(&dir, bad, "r1").is_err(),
+                "{bad:?} should have been refused"
+            );
+        }
+        assert!(name_session(&dir, "good-name_2", "r1").is_ok());
+        assert!(name_session(&dir, "ghost", "no-such-run").is_err());
+    }
+
+    #[test]
+    fn an_ambiguous_prefix_is_a_question_not_a_guess() {
+        let dir = temp_dir("ambig");
+        write_as(&dir, "1700000001-aaaa1111", &[call(0, "one")]);
+        write_as(&dir, "1700000001-aaaa2222", &[call(0, "two")]);
+        let err = resolve_session(&dir, "1700000001-aaaa").unwrap_err();
+        assert!(err.contains("more than one"), "{err}");
+        assert!(
+            err.contains("aaaa1111") && err.contains("aaaa2222"),
+            "{err}"
+        );
+        // ...while an unambiguous prefix still resolves.
+        assert_eq!(
+            resolve_session(&dir, "1700000001-aaaa1111").unwrap(),
+            "1700000001-aaaa1111"
+        );
+    }
+
+    #[test]
+    fn latest_means_the_newest_recording() {
+        let dir = temp_dir("latest");
+        if list_session_ids(&dir).is_empty() {
+            assert!(resolve_session(&dir, "latest").is_err());
+        }
+        write_as(&dir, "1700000001-first000", &[call(0, "one")]);
+        write_as(&dir, "1700000002-second00", &[call(0, "two")]);
+        assert_eq!(
+            resolve_session(&dir, "latest").unwrap(),
+            "1700000002-second00"
+        );
+    }
+
+    const SEEDED_SECRET: &str = "sk-live-abcdef1234567890";
+    const SEEDED_GITHUB: &str = "ghp_deadbeefcafe1234567890";
+    const SEEDED_PEM: &str =
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA7b\n-----END RSA PRIVATE KEY-----";
+
+    fn leaky_call() -> RecordedCall {
+        let mut c = call(0, "do the thing");
+        c.request_body = serde_json::json!({
+            "model": "test-model",
+            "messages": [
+                {"role": "user", "content": "do the thing"},
+                {"role": "system", "content": format!("key is {SEEDED_SECRET}")}
+            ]
+        })
+        .to_string();
+        c.response_body = format!(
+            "the token is {SEEDED_GITHUB} and the key block is\n{SEEDED_PEM}\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig\n"
+        );
+        c
+    }
+
+    #[test]
+    fn export_redacts_secrets_but_keeps_the_shape() {
+        let dir = temp_dir("export");
+        write_as(&dir, "r1", &[leaky_call()]);
+        let redacted = export_transcript(&dir, "r1", true).unwrap();
+        for secret in [
+            SEEDED_SECRET,
+            SEEDED_GITHUB,
+            "MIIEowIBAAKCAQEA7b",
+            "eyJhbGciOiJIUzI1NiJ9",
+        ] {
+            assert!(
+                !redacted.contains(secret),
+                "redacted export leaks {secret:?}:\n{redacted}"
+            );
+        }
+        assert!(redacted.contains("[redacted"), "redaction must be visible");
+        // The shape survives: seq, model, tool name, call count.
+        assert!(redacted.contains("call 0"));
+        assert!(redacted.contains("remote:test-model"));
+        assert!(redacted.contains("read_file"));
+    }
+
+    #[test]
+    fn the_redaction_test_is_not_vacuous() {
+        // If the unredacted export did not contain the secrets either, the test
+        // above would pass while proving nothing.
+        let dir = temp_dir("export-raw");
+        write_as(&dir, "r1", &[leaky_call()]);
+        let raw = export_transcript(&dir, "r1", false).unwrap();
+        assert!(
+            raw.contains(SEEDED_SECRET),
+            "the fixture must actually leak"
+        );
+        assert!(raw.contains(SEEDED_GITHUB));
     }
 
     #[test]

@@ -1898,6 +1898,15 @@ that key is written *after* the `run:` it applies to. Dropping it would produce 
 command that passes in CI and fails from the repository root — a green tick on a
 broken recipe, which is the one outcome this command exists to prevent.
 
+### `xencode session <name|resolve|export>`
+
+Name a run so it survives without its id (`session name <run> <name>`; existing
+names are never repointed), resolve a name, id prefix, or `latest` to the full
+id, and print a transcript (`session export <target> [--redacted]`). Resume
+restores the model, server, tool root, call count, and opening messages across
+processes. `--redacted` scrubs secrets with the trace module's patterns; an
+ambiguous prefix is refused with the candidates named rather than guessed.
+
 ### `xencode envcheck [--format text|json]`
 
 Report environment keys read in code against the templates that document them.

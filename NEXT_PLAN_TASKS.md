@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1533 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1541 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1674,7 +1674,22 @@ never is.
 - **WF-3 session resume/naming + redacted transcript export** (`--resume <name>`,
   `/share`). S-M. Trap: transcripts contain secrets — reuse `mask_secret`.
   Done-when: resume restores context across processes and export passes a
-  redaction test.
+  redaction test. **Done 2026-09-28** — `xencode session <name|resolve|export>`
+  over `session.rs` naming plus the existing JSONL recordings. `name_session`
+  refuses overwrite, reserved/sloppy names, and naming a run with no recording;
+  `resolve_session` takes a name, id prefix, or `latest`, and refuses ambiguity
+  with the candidates named. `resume_context` returns model, server, tool root,
+  call count, and the opening messages — the conversation a replay starts from.
+  `export_transcript` renders markdown and, with `--redacted`, scrubs secrets
+  through the trace module's existing patterns (PEM, keyed values, bearer,
+  prefixed tokens) rather than a second detector.
+
+  Proved across processes on a seeded recording: named, resolved, exported with
+  both seeded secrets (`sk-live-…`, `ghp_…`) gone and the shape (seq, model,
+  tool names) intact. Seven unit tests plus a CLI parse test, including the
+  non-vacuous pair: the redaction test asserts the secrets vanish *and* a
+  sibling test asserts the raw export contains them, so the first cannot pass
+  while proving nothing.
 - **WF-4 build/test autodiscovery** — probe README/CI files/`justfile`/`mise`,
   write the recipe into `anchor.md`, and *prove* it by running it. M. Trap: false
   confidence; require exit 0. Done-when: a fresh clone yields a working

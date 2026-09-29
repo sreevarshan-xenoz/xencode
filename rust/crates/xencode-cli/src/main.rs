@@ -420,6 +420,12 @@ enum Commands {
         format: OutputFormat,
     },
 
+    /// Name sessions, resolve them, and export redacted transcripts
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
     /// Report environment keys read in code against the templates that document them
     Envcheck {
         /// Output format
@@ -787,6 +793,30 @@ enum HwAction {
 }
 
 #[derive(Subcommand)]
+enum SessionAction {
+    /// Name a run so it can be resumed without its id
+    Name {
+        /// The run id (or a prefix of one)
+        run: String,
+        /// The name to give it
+        name: String,
+    },
+    /// Resolve a name, id prefix, or `latest` to a full run id
+    Resolve {
+        /// Name, id prefix, or `latest`
+        target: String,
+    },
+    /// Print a session's transcript; `--redacted` scrubs secrets
+    Export {
+        /// Name, id prefix, or `latest`
+        target: String,
+        /// Scrub secrets with the trace module's patterns
+        #[arg(long)]
+        redacted: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum HistoryAction {
     /// Show which history indexes exist here and time the queries that use them
     Status {
@@ -1035,6 +1065,7 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
+        Commands::Session { action } => run_session(action),
         Commands::Envcheck { format } => run_envcheck(format),
         Commands::Generate { artifact, shell } => run_generate(artifact, shell),
         Commands::Mutants {
@@ -4046,6 +4077,33 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
+fn run_session(action: SessionAction) -> Result<(), String> {
+    use xencode_context_rs::session as sess;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
+    match action {
+        SessionAction::Name { run, name } => {
+            let run_id = sess::resolve_session(&xencode_dir, &run)?;
+            sess::name_session(&xencode_dir, &name, &run_id)?;
+            println!("  {name} now names run {run_id}");
+            Ok(())
+        }
+        SessionAction::Resolve { target } => {
+            let run_id = sess::resolve_session(&xencode_dir, &target)?;
+            println!("{run_id}");
+            Ok(())
+        }
+        SessionAction::Export { target, redacted } => {
+            print!(
+                "{}",
+                sess::export_transcript(&xencode_dir, &target, redacted)?
+            );
+            Ok(())
+        }
+    }
+}
+
 fn run_envcheck(format: OutputFormat) -> Result<(), String> {
     use xencode_analysis_rs::envdrift;
 
@@ -5227,7 +5285,7 @@ async fn run_tui() -> Result<(), String> {
 mod tests {
     use super::{
         compute_advise, format_image_text, join, parse_comma_list, resolve_audit_path,
-        resolve_bind, Cli, Commands, GenerateShell,
+        resolve_bind, Cli, Commands, GenerateShell, SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
@@ -5375,9 +5433,44 @@ mod tests {
     #[test]
     fn completions_name_real_subcommands() {
         let fish = generated_artifact("completions", Some(GenerateShell::Fish));
-        for subcommand in ["toolchain", "test", "cov", "mutants", "anchor", "generate"] {
+        for subcommand in [
+            "toolchain",
+            "test",
+            "cov",
+            "mutants",
+            "anchor",
+            "generate",
+            "session",
+            "envcheck",
+        ] {
             assert!(fish.contains(subcommand), "completions omit {subcommand}");
         }
+    }
+
+    #[test]
+    fn session_actions_parse() {
+        let cli = Cli::try_parse_from(["xencode", "session", "resolve", "latest"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                action: SessionAction::Resolve { .. }
+            })
+        ));
+        let cli =
+            Cli::try_parse_from(["xencode", "session", "export", "demo", "--redacted"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                action: SessionAction::Export { .. }
+            })
+        ));
+        let cli = Cli::try_parse_from(["xencode", "session", "name", "abc123", "demo"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                action: SessionAction::Name { .. }
+            })
+        ));
     }
 
     #[test]
