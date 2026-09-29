@@ -1755,6 +1755,11 @@ tasks` runs in the same project (the TUI's `Ctrl+K` panel keeps its own
 in-process registry). Status is derived on read from the task's exit file,
 killed flag, and process liveness.
 
+The TUI's in-process task manager applies a 30-minute wall-clock limit by
+default. On Unix, stopping a task or reaching its limit kills its process group,
+including ordinary child processes started by the command. A task started
+through the manager API can use a shorter per-task limit.
+
 ```bash
 xencode tasks start "cargo test" --name tests   # → "started task 1 (pid …)"
 xencode tasks list                              # table; --json for machine output

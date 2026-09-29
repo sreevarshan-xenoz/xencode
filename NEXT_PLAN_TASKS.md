@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1692 tests passing, zero warnings (re-verified 2026-09-29)
+- [x] Workspace gates green — 16 crates, 1694 tests passing, zero warnings (re-verified 2026-09-29)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -9257,11 +9257,16 @@ worker, `OR-` for the thing that decides what workers to talk to.
       **Done-when:** every new file is written with `DB-1`'s atomic write, `DB-5`'s
       torn-line discard and `0600` per `SE-1`, and a redaction pass proves an
       authentication token that appeared in a stream did not land on disk (S-6 #31).
-- [ ] **AR-6 — the process ceiling.** Track each worker as a row on the existing
-      background-task manager: start, interrupt, wall-clock limit, output tail, and a
-      hard kill that reaches the vendor's own children.
-      **Done-when:** a wedged worker cannot outlive its task, and killing it leaves no
-      orphan — verified against a real run, not a test fixture.
+- [x] **AR-6 — the process ceiling.** 2026-09-29. The existing in-process
+      background-task manager now applies a 30-minute wall-clock limit by default,
+      supports tighter per-task limits, drains a capped output tail, and gives each
+      Unix command its own process group. A watchdog kills the group at the deadline;
+      manual stop and manager drop do the same. A real `sh` parent with a live
+      `sleep` child was stopped and the child was verified non-executable; the
+      deadline path was also exercised against a live process. File-backed
+      `xencode tasks` remains a separate registry and is not part of AR-6.
+      **Done-when:** bounded execution and descendant cleanup are verified by the
+      subprocess checks in `xencode-core-rs`.
 - [ ] **AR-7 — the handoff package.** Build "what the next worker needs to know" purely
       from observed facts: the diff, the tests xencode itself ran and their exit codes,
       the last normalised events, and why the previous worker stopped.

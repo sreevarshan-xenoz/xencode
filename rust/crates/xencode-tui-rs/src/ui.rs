@@ -1663,6 +1663,7 @@ fn task_line(
         TaskStatus::Exited(0) => ("✓", app.theme.success),
         TaskStatus::Exited(_) => ("✗", app.theme.danger),
         TaskStatus::Killed => ("⊘", app.theme.warning),
+        TaskStatus::TimedOut => ("⌛", app.theme.danger),
     };
     let marker = if selected { "> " } else { "  " };
     let row = format!(
