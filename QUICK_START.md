@@ -197,9 +197,13 @@ Those are the only slash commands. Tab completes them; typing a lone `/`
 and pressing Tab lists them. Press `?` (or `F1`) any time for the full
 keybinding help overlay. `Ctrl+U` cycles the body layout (classic →
 chat-first → zen, then any layouts you declared in `layout_templates`);
-the same choice lives on the Settings panel (`s`) and the same list drives
+`Alt+Left`/`Alt+Right` grows or shrinks the focused pane by five points.
+The same choice lives on the Settings panel (`s`) and the same list drives
 both, alongside Rounded Borders / Show Scrollbars / Line Numbers toggles —
-everything persists to `~/.xencode/config.json`.
+everything persists to `~/.xencode/config.json`. A layout you resized comes
+back next start from `~/.xencode/layout.json` (private, `0600`); `Ctrl+U`
+clears it, and the file never stores your conversation or model state — only
+where the panes were.
 
 ## Examples
 

@@ -418,6 +418,16 @@ flowchart TD
   of leaving you to wonder. Templates live in the config file and inherit its
   versioning; a `~/.xencode/layouts/` directory would be a file format, and
   this project has no reason to promise one yet.
+- **A layout you resized comes back.** `Alt+Left`/`Alt+Right` grows or shrinks
+  the focused pane, and that arrangement — tree, ratios, focused pane — is
+  written to `~/.xencode/layout.json` (owner-only, atomic, versioned) when you
+  resize and when you quit, and restored at the next start. `Ctrl+U` clears it
+  along with the tree on screen, a layout name you changed in the config wins
+  over a stored tree, and a file written by a newer xencode is refused by
+  version with the reason shown on the first frame. The file records the
+  arrangement only — never the transcript, model state, or anything a worker
+  owns — and is written in the same words as `layout_templates`, so there is
+  one layout vocabulary, not a hidden second one.
 - **What a local server can afford is read off the machine, not guessed.**
   `xencode hw probe` prints the memory and cores, the compute devices as
   `llama-server` itself reports them (PCI config space cannot see video memory:
