@@ -782,6 +782,79 @@ _arguments "${_arguments_options[@]}" : \
 ':action -- What to run\: lint, fix, fmt, or shear:_default' \
 && ret=0
 ;;
+(session)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__session_commands" \
+"*::: :->session" \
+&& ret=0
+
+    case $state in
+    (session)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-session-command-$line[1]:"
+        case $line[1] in
+            (name)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':run -- The run id (or a prefix of one):_default' \
+':name -- The name to give it:_default' \
+&& ret=0
+;;
+(resolve)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':target -- Name, id prefix, or `latest`:_default' \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+'--redacted[Scrub secrets with the trace module'\''s patterns]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':target -- Name, id prefix, or `latest`:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__session__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-session-help-command-$line[1]:"
+        case $line[1] in
+            (name)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(resolve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (envcheck)
 _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
@@ -1527,6 +1600,34 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(session)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__session_commands" \
+"*::: :->session" \
+&& ret=0
+
+    case $state in
+    (session)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-session-command-$line[1]:"
+        case $line[1] in
+            (name)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(resolve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(export)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (envcheck)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -1733,6 +1834,7 @@ _xencode_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'session:Name sessions, resolve them, and export redacted transcripts' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -2112,6 +2214,7 @@ _xencode__subcmd__help_commands() {
 'interop:Measure what the coding-agent CLIs on this machine actually do' \
 'anchor:Find this repository'\''s build and test commands, run them, and record only the ones that actually worked' \
 'toolchain:Run the project'\''s own toolchain checks, and report structured evidence' \
+'session:Name sessions, resolve them, and export redacted transcripts' \
 'envcheck:Report environment keys read in code against the templates that document them' \
 'generate:Print shell completions or the man page; both are generated from the clap definition, never written by hand' \
 'mutants:Find code whose tests cannot tell right from wrong' \
@@ -2485,6 +2588,30 @@ _xencode__subcmd__help__subcmd__scan_commands() {
 _xencode__subcmd__help__subcmd__server_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help server commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__session_commands] )) ||
+_xencode__subcmd__help__subcmd__session_commands() {
+    local commands; commands=(
+'name:Name a run so it can be resumed without its id' \
+'resolve:Resolve a name, id prefix, or \`latest\` to a full run id' \
+'export:Print a session'\''s transcript; \`--redacted\` scrubs secrets' \
+    )
+    _describe -t commands 'xencode help session commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__session__subcmd__export_commands] )) ||
+_xencode__subcmd__help__subcmd__session__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help session export commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__session__subcmd__name_commands] )) ||
+_xencode__subcmd__help__subcmd__session__subcmd__name_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help session name commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__session__subcmd__resolve_commands] )) ||
+_xencode__subcmd__help__subcmd__session__subcmd__resolve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help session resolve commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__tasks_commands] )) ||
 _xencode__subcmd__help__subcmd__tasks_commands() {
@@ -2937,6 +3064,61 @@ _xencode__subcmd__scan_commands() {
 _xencode__subcmd__server_commands() {
     local commands; commands=()
     _describe -t commands 'xencode server commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session_commands] )) ||
+_xencode__subcmd__session_commands() {
+    local commands; commands=(
+'name:Name a run so it can be resumed without its id' \
+'resolve:Resolve a name, id prefix, or \`latest\` to a full run id' \
+'export:Print a session'\''s transcript; \`--redacted\` scrubs secrets' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode session commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__export_commands] )) ||
+_xencode__subcmd__session__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session export commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__help_commands] )) ||
+_xencode__subcmd__session__subcmd__help_commands() {
+    local commands; commands=(
+'name:Name a run so it can be resumed without its id' \
+'resolve:Resolve a name, id prefix, or \`latest\` to a full run id' \
+'export:Print a session'\''s transcript; \`--redacted\` scrubs secrets' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode session help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__help__subcmd__export_commands] )) ||
+_xencode__subcmd__session__subcmd__help__subcmd__export_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session help export commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__session__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__help__subcmd__name_commands] )) ||
+_xencode__subcmd__session__subcmd__help__subcmd__name_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session help name commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__help__subcmd__resolve_commands] )) ||
+_xencode__subcmd__session__subcmd__help__subcmd__resolve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session help resolve commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__name_commands] )) ||
+_xencode__subcmd__session__subcmd__name_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session name commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__session__subcmd__resolve_commands] )) ||
+_xencode__subcmd__session__subcmd__resolve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode session resolve commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__tasks_commands] )) ||
 _xencode__subcmd__tasks_commands() {

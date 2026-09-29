@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — agent-made commits carry the signing environment (signed-commit passthrough)
+### Added — `xencode session`: name runs, resolve them, export redacted transcripts
+
+`session name <run> <name>` pins a human name to a recording without ever
+repointing an existing one; `session resolve <name|prefix|latest>` returns the
+full id, refusing ambiguity with the candidates named; `session export
+<target> [--redacted]` prints the transcript as markdown. Resume restores
+model, server, tool root, call count, and the opening messages across
+processes. Redaction reuses the trace module's secret patterns rather than a
+second detector.
+
+Proved on a seeded recording end to end, with the non-vacuous pair: one test
+asserts seeded secrets vanish from the redacted export, a sibling asserts the
+raw export contains them. Eight tests.
+
+
 
 The Git commit panel committed through a bare `git` call with no signing
 environment, so a configured signature failed cryptically — or hung on a
