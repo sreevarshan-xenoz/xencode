@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `xencode hotspots`: churn times size with bus factor and owners
+### Added — `xencode doctor --deps`: dependency health from composed parts
+
+Direct deps, locked versions, pending updates from `cargo update --dry-run`,
+and advisory state from the local corpus — composed, not built. Offline means
+"advisory state unknown", never "clean"; an unchecked update list says so
+rather than posing as current. On this repository: 49 rows, 0 vulnerable,
+0 unknown. Five tests.
+
+
 
 One name-only mine plus working-tree sizes: top files by commits × bytes,
 bus factor by author email, CODEOWNERS cross-checked with last-match-wins —
