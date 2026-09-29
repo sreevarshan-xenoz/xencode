@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1530 tests passing, zero warnings (re-verified 2026-09-28)
+- [x] Workspace gates green — 16 crates, 1533 tests passing, zero warnings (re-verified 2026-09-28)
 
 ## Real-Time Intelligence (Phase 3+)
 
@@ -1745,7 +1745,22 @@ never is.
 - **WF-8 `xencode-action`** — the review command as a GitHub Action commenting on
   PRs. M. Trap: token scoping is a supply-chain risk; depends on WF-2.
 - **WF-9 signed-commit passthrough.** S. Trap: GPG agent env inside a TUI.
-  Done-when: agent-made commits verify on GitHub.
+  Done-when: agent-made commits verify on GitHub. **Done 2026-09-28** — the Git
+  commit panel (`key_git_commit`) now commits through `gitsign::commit_signed`
+  (`xencode-tui-rs/src/gitsign.rs`), which hands the subprocess the signing
+  environment explicitly: `GPG_TTY` resolved from stdin's tty when the shell
+  never set it, `SSH_AUTH_SOCK`/`GNUPGHOME` passed through when present.
+
+  "Passthrough" is load-bearing: nothing here changes *whether* signing happens
+  — the user's `commit.gpgsign` decides. The module only makes the yes-case
+  work and the no-key case fail fast with words, with a timeout backstop that
+  reports a likely invisible passphrase prompt instead of hanging. The working
+  directory semantics are byte-identical to the bare call it replaced; only the
+  environment is new.
+
+  Proved with a throwaway keyring and `git verify-commit HEAD`: the agent-made
+  commit verifies with a good signature, and a configured-but-missing key fails
+  in seconds with a non-empty error. Three tests.
 - **WF-10 stacked-diff assist over worktrees.** L. Trap: rebase correctness, and
   GitHub's stacked-PRs preview may commoditize it — revisit after that matures.
 

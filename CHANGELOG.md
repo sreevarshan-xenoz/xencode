@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `rename` agent tool: one symbol across the tree, zero model tokens
+### Fixed — agent-made commits carry the signing environment (signed-commit passthrough)
+
+The Git commit panel committed through a bare `git` call with no signing
+environment, so a configured signature failed cryptically — or hung on a
+pinentry prompt nobody could see — whenever the TUI launched without terminal
+setup. It now commits through a helper that passes `GPG_TTY` (resolved from
+the session's tty when the shell never set it), `SSH_AUTH_SOCK`, and
+`GNUPGHOME` to the subprocess, with a timeout that reports a likely invisible
+passphrase prompt instead of hanging.
+
+Nothing decides *whether* to sign here: the user's `commit.gpgsign` does, as
+before. Proved with a throwaway keyring: the agent-made commit passes `git
+verify-commit`, and a missing key fails fast with words. Three tests.
+
+
 
 `rename(symbol, new_name)` resolves through the tree-sitter symbol index and
 refuses on ambiguity — no definition, or two-or-more with every site named —

@@ -1036,9 +1036,10 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
             Ok(plan) => {
                 let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
                 format!(
-                    "rename would turn `{}` ({}) into `{}` at {total} site(s) across {} file(s):{}",
+                    "rename would turn `{}` ({} in {}) into `{}` at {total} site(s) across {} file(s):{}",
                     plan.symbol,
                     plan.kind,
+                    plan.definition,
                     plan.new_name,
                     plan.rewrites.len(),
                     describe_rewrites(&plan.rewrites)
@@ -1193,7 +1194,7 @@ fn quote_symbol(args: &serde_json::Map<String, serde_json::Value>) -> String {
 
 /// One file an `ast_edit` call would rewrite, with the text it currently holds.
 #[derive(Debug)]
-struct PlannedRewrite {
+pub(crate) struct PlannedRewrite {
     full: PathBuf,
     display: String,
     current: String,
@@ -1813,7 +1814,7 @@ fn tool_codemod(
 
 /// What a `rename` call resolved, before anything is written.
 #[derive(Debug)]
-pub struct RenamePlan {
+pub(crate) struct RenamePlan {
     /// The symbol being renamed.
     pub symbol: String,
     /// Its replacement.
@@ -1943,7 +1944,7 @@ fn definition_sites(root: &Path, symbol: &str) -> Vec<(String, String)> {
 /// symbol index, and only a uniquely-defined symbol proceeds. References are
 /// then rewritten through ast-grep's identifier matches, definition site
 /// included, so the declaration and every use move together.
-pub fn plan_rename(
+pub(crate) fn plan_rename(
     root: &Path,
     args: &serde_json::Map<String, serde_json::Value>,
     timeout_secs: u64,
@@ -2028,9 +2029,10 @@ fn tool_rename(
     }
     let total: usize = plan.rewrites.iter().map(|r| r.sites).sum();
     let mut out = format!(
-        "rename: `{}` ({}) became `{}` at {total} site(s) across {} file(s):\n{}",
+        "rename: `{}` ({} in {}) became `{}` at {total} site(s) across {} file(s):\n{}",
         plan.symbol,
         plan.kind,
+        plan.definition,
         plan.new_name,
         plan.rewrites.len(),
         describe_rewrites(&plan.rewrites)
