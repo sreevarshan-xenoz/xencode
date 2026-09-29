@@ -787,6 +787,7 @@ _arguments "${_arguments_options[@]}" : \
 '--format=[Output format]:FORMAT:(text json)' \
 '--env[Machine environment facts]' \
 '--deps[Dependency health\: outdated list plus advisory state]' \
+'--selfcheck[Self-debug slice\: index, git, providers, MCP servers, metrics, cache]' \
 '-h[Print help]' \
 '--help[Print help]' \
 && ret=0

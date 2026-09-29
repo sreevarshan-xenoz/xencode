@@ -430,6 +430,10 @@ enum Commands {
         #[arg(long)]
         deps: bool,
 
+        /// Self-debug slice: index, git, providers, MCP servers, metrics, cache
+        #[arg(long)]
+        selfcheck: bool,
+
         /// Output format
         #[arg(long, default_value = "text")]
         format: OutputFormat,
@@ -1132,7 +1136,12 @@ async fn main() {
             allow_dirty,
             format,
         } => run_toolchain(&action, allow_dirty, format),
-        Commands::Doctor { env, deps, format } => run_doctor(env, deps, format),
+        Commands::Doctor {
+            env,
+            deps,
+            selfcheck,
+            format,
+        } => run_doctor(env, deps, selfcheck, format),
         Commands::Session { action } => run_session(action),
         Commands::Verify {
             skip,
@@ -4182,13 +4191,17 @@ fn run_toolchain(action: &str, allow_dirty: bool, format: OutputFormat) -> Resul
     }
 }
 
-fn run_doctor(env: bool, deps: bool, format: OutputFormat) -> Result<(), String> {
+fn run_doctor(env: bool, deps: bool, selfcheck: bool, format: OutputFormat) -> Result<(), String> {
     use xencode_context_rs::doctor;
 
-    if !env && !deps {
+    if !env && !deps && !selfcheck {
         return Err(
-            "nothing to probe: `xencode doctor` needs `--env`, `--deps`, or both".to_string(),
+            "nothing to probe: `xencode doctor` needs `--env`, `--deps`, `--selfcheck`, or several"
+                .to_string(),
         );
+    }
+    if selfcheck {
+        return run_selfcheck(format);
     }
     if deps {
         return run_doctor_deps(format);
@@ -4390,6 +4403,108 @@ fn run_doctor_deps(format: OutputFormat) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
+    use xencode_context_rs::doctor as doc;
+
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let xencode_dir = root.join(xencode_context_rs::XENCODE_DIR);
+    let mut checks = vec![
+        doc::check_index(&xencode_dir),
+        doc::check_git(&root),
+        doc::check_metrics(&xencode_dir),
+        doc::check_cache_writable(&xencode_dir),
+    ];
+
+    // Providers: locals always probed, cloud only when a key is configured —
+    // dialling an endpoint nobody set up proves nothing about this machine.
+    let mut endpoints: Vec<(String, String, u16)> = vec![
+        ("ollama".to_string(), "127.0.0.1".to_string(), 11434),
+        ("llamacpp".to_string(), "localhost".to_string(), 8080),
+    ];
+    if let Ok(config) = xencode_config_rs::XencodeConfig::load() {
+        let keyed = [
+            ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
+            (
+                "openrouter",
+                &config.api_keys.openrouter_api_key,
+                "openrouter.ai",
+            ),
+            (
+                "gemini",
+                &config.api_keys.google_gemini_api_key,
+                "generativelanguage.googleapis.com",
+            ),
+            ("qwen", &config.api_keys.qwen_api_key, "chat.qwen.ai"),
+        ];
+        for (name, key, host) in keyed {
+            if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {
+                endpoints.push((format!("cloud:{name}"), host.to_string(), 443));
+            }
+        }
+        for (name, server) in &config.mcp_servers {
+            match doc::resolve_on_path(&server.command) {
+                Some(path) => checks.push(doc::SelfCheck {
+                    name: format!("mcp:{name}"),
+                    state: "pass".to_string(),
+                    detail: format!("{} resolves to {}", server.command, path.display()),
+                }),
+                None => checks.push(doc::SelfCheck {
+                    name: format!("mcp:{name}"),
+                    state: "fail".to_string(),
+                    detail: format!(
+                        "{} is not on PATH, so the server cannot spawn",
+                        server.command
+                    ),
+                }),
+            }
+        }
+    }
+    for (name, host, port) in endpoints {
+        let reachable = doc::tcp_reachable(&host, port, std::time::Duration::from_secs(2));
+        checks.push(doc::SelfCheck {
+            name: format!("provider:{name}"),
+            state: if reachable {
+                "pass".to_string()
+            } else {
+                "fail".to_string()
+            },
+            detail: format!(
+                "{host}:{port} {}",
+                if reachable { "accepts TCP" } else { "refused" }
+            ),
+        });
+    }
+
+    if matches!(format, OutputFormat::Json) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "checks": checks.iter().map(|c| serde_json::json!({
+                    "name": c.name, "state": c.state, "detail": c.detail,
+                })).collect::<Vec<_>>(),
+            })
+        );
+    } else {
+        for check in &checks {
+            let mark = match check.state.as_str() {
+                "pass" => "PASS",
+                "fail" => "FAIL",
+                _ => "ABSENT",
+            };
+            println!("  {:<6} {:<18} {}", mark, check.name, check.detail);
+        }
+        let failed: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.state == "fail")
+            .map(|c| c.name.as_str())
+            .collect();
+        if !failed.is_empty() {
+            println!("\n  failing: {}", failed.join(", "));
+        }
+    }
+    Ok(())
 }
 
 fn run_session(action: SessionAction) -> Result<(), String> {
@@ -5988,6 +6103,18 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Hotspots { limit: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn doctor_selfcheck_parses() {
+        let cli = Cli::try_parse_from(["xencode", "doctor", "--selfcheck"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Doctor {
+                selfcheck: true,
+                ..
+            })
         ));
     }
 

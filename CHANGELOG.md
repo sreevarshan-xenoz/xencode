@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode doctor --env`: probe and display this machine
+
+Cores, available memory, PSI readability, cgroup limit, `nvidia-smi` GPUs,
+journalctl readability, dmesg denial, and colab route presence (state file
+plus live forward pid) — in text or `--json`. Every fact best-effort: absent
+tools and denied syscalls yield absence, never errors. The JSON also carries
+the U-3 configuration-drift result as one row, completing U-3's W11 surface.
+Three unit tests plus a CLI parse test.
+
+### Added — `xencode doctor --selfcheck`: the self-debug slice
+
+Index open, git found, providers reachable, MCP servers resolvable, metrics
+parseable, cache writable — each pass, fail, or absent with a named string.
+Absent is not failed. Providers are real TCP connects (locals always, cloud
+only when keyed); MCP checks resolve on PATH without spawning side effects.
+Live here: index and metrics absent (true), git and cache pass, local
+providers refused (true). Three unit tests plus a CLI parse test.
+
 ### Added — `xencode doctor --deps`: dependency health from composed parts
 
 Direct deps, locked versions, pending updates from `cargo update --dry-run`,

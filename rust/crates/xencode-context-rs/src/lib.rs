@@ -81,7 +81,10 @@ pub use context::{
     HISTORY_TURN_OVERHEAD_TOKENS, STABLE_END_MARKER,
 };
 pub use conversation::{Transcript, TranscriptEntry};
-pub use doctor::{probe_env, EnvFacts};
+pub use doctor::{
+    check_cache_writable, check_git, check_index, check_metrics, probe_env, resolve_on_path,
+    tcp_reachable, EnvFacts, SelfCheck,
+};
 pub use documents::{
     is_document_path, parse_document, parse_document_bytes, DocError, DocKind, DocText,
     MAX_DOC_BYTES, MAX_DOC_CHARS,
