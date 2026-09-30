@@ -39,6 +39,7 @@ pub struct BodyLayout {
     pub chat: Option<Rect>,
     pub input: Option<Rect>,
     pub terminal: Option<Rect>,
+    pub agents: Option<Rect>,
 }
 
 /// Below this many rows, a terminal pane would squeeze the chat column to
@@ -94,6 +95,7 @@ pub fn compute_layout(
                 chat: Some(chat),
                 input: Some(input),
                 terminal,
+                agents: None,
             }
         }
         "zen" => match body_focus {
@@ -103,6 +105,7 @@ pub fn compute_layout(
                 chat: None,
                 input: None,
                 terminal: None,
+                agents: None,
             },
             FocusArea::CodeEditor => BodyLayout {
                 explorer: None,
@@ -110,6 +113,7 @@ pub fn compute_layout(
                 chat: None,
                 input: None,
                 terminal: None,
+                agents: None,
             },
             _ => {
                 let (chat, terminal, input) = split_chat_column(area, show_terminal);
@@ -119,6 +123,7 @@ pub fn compute_layout(
                     chat: Some(chat),
                     input: Some(input),
                     terminal,
+                    agents: None,
                 }
             }
         },
@@ -139,6 +144,7 @@ pub fn compute_layout(
                 chat: Some(chat),
                 input: Some(input),
                 terminal,
+                agents: None,
             }
         }
     }
@@ -149,9 +155,10 @@ impl BodyLayout {
     /// hidden pane's region move to the nearest visible neighbour, so the
     /// mouse can never select something off-screen.
     pub fn hit_test(&self, column: u16) -> Option<FocusArea> {
-        let visible: [Option<(Rect, FocusArea)>; 3] = [
+        let visible: [Option<(Rect, FocusArea)>; 4] = [
             self.explorer.map(|r| (r, FocusArea::FileExplorer)),
             self.editor.map(|r| (r, FocusArea::CodeEditor)),
+            self.agents.map(|r| (r, FocusArea::ByteBotPanel)),
             self.chat.map(|r| (r, FocusArea::ChatInput)),
         ];
         let mut last: Option<(Rect, FocusArea)> = None;
@@ -180,6 +187,9 @@ mod tests {
         }
         if let Some(r) = layout.editor {
             v.push(("editor", r));
+        }
+        if let Some(r) = layout.agents {
+            v.push(("agents", r));
         }
         if let Some(r) = layout.chat {
             v.push(("chat", r));

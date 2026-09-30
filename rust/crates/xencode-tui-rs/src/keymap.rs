@@ -286,9 +286,13 @@ fn store_view(app: &mut App, slot: usize) {
 fn global_ctrl_chord(app: &mut App, key: KeyEvent, tx: &Tx) -> Option<KeyFlow> {
     match key.code {
         KeyCode::Char('n') | KeyCode::Char('N') => {
-            // Agent stack overlay: opens on the first pane, advances after.
-            // One chord, discoverable in the help table; rebindable when UX-1
-            // lands, which takes this arm over unchanged.
+            // Agent stack: if tiled in the body layout, advance it directly;
+            // otherwise open/advance the overlay. One chord, discoverable in
+            // the help table.
+            if app.last_layout.agents.is_some() {
+                advance_agent_stack(app);
+                return Some(done());
+            }
             if !app.agent_stack_visible {
                 app.agent_stack_visible = true;
                 app.agent_stack_index = 0;
@@ -543,7 +547,8 @@ fn normal_key(app: &mut App, key: KeyEvent, tx: &Tx) -> KeyFlow {
 /// From any overlay panel, Tab lands back on the chat input.
 fn next_body_focus(app: &App) -> FocusArea {
     use crate::focus::FocusArea::*;
-    let ring = [FileExplorer, CodeEditor, ChatInput];
+    let default_ring = [FileExplorer, CodeEditor, ChatInput];
+    let ring = [FileExplorer, CodeEditor, ByteBotPanel, ChatInput];
     if crate::templates::preset_name(&app.config.layout) == Some("zen") {
         return match app.focus {
             FileExplorer => CodeEditor,
@@ -554,11 +559,16 @@ fn next_body_focus(app: &App) -> FocusArea {
     let is_visible = |f| match f {
         FileExplorer => app.last_layout.explorer.is_some(),
         CodeEditor => app.last_layout.editor.is_some(),
+        ByteBotPanel => app.last_layout.agents.is_some(),
         ChatInput => app.last_layout.chat.is_some() || app.last_layout.input.is_some(),
         _ => false,
     };
     let active: Vec<FocusArea> = ring.iter().copied().filter(|f| is_visible(*f)).collect();
-    let ring_ref: &[FocusArea] = if active.is_empty() { &ring } else { &active };
+    let ring_ref: &[FocusArea] = if active.is_empty() {
+        &default_ring
+    } else {
+        &active
+    };
     match ring_ref.iter().position(|f| *f == app.focus) {
         Some(i) => ring_ref[(i + 1) % ring_ref.len()],
         None => ChatInput,
@@ -1224,6 +1234,11 @@ fn key_bytebot(app: &mut App, key: KeyEvent, tx: &Tx) -> bool {
         KeyCode::Enter => {
             // Executes what's typed; history recall is ↑.
             app.run_bytebot(tx.clone());
+        }
+        KeyCode::Char('n') | KeyCode::Char('N')
+            if app.last_layout.agents.is_some() && app.bytebot_command.is_empty() =>
+        {
+            advance_agent_stack(app);
         }
         KeyCode::Char(c) => {
             app.bytebot_command.insert(app.bytebot_cursor, c);

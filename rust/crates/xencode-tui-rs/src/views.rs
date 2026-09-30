@@ -128,6 +128,21 @@ fn split_tree(area: Rect, show_terminal: bool) -> LayoutNode {
     ])
 }
 
+/// Code editor on the left, agent stack in the middle, chat column on the right.
+fn agents_tree(area: Rect, show_terminal: bool) -> LayoutNode {
+    split_horizontal(vec![
+        (
+            leaf(BodySlot::Editor, FocusArea::CodeEditor),
+            Constraint::Percentage(40),
+        ),
+        (
+            leaf(BodySlot::Agents, FocusArea::ByteBotPanel),
+            Constraint::Percentage(30),
+        ),
+        (column(area, show_terminal), Constraint::Percentage(30)),
+    ])
+}
+
 /// One seeded view: its chord name, the pane it focuses, and the tree it
 /// draws. The shapes are code, not config data — same reason the presets are
 /// builders: they must exist before any file declares them.
@@ -142,9 +157,9 @@ pub struct ViewDef {
     pub tree: fn(area: Rect, show_terminal: bool) -> LayoutNode,
 }
 
-/// The seeded views, in chord order `Ctrl+1`…`Ctrl+6`. Slots 7–9 have no
+/// The seeded views, in chord order `Ctrl+1`…`Ctrl+7`. Slots 8–9 have no
 /// seed: they answer only once something is stored there.
-pub const SEEDED: [ViewDef; 6] = [
+pub const SEEDED: [ViewDef; 7] = [
     ViewDef {
         name: "Code",
         focus: FocusArea::CodeEditor,
@@ -174,6 +189,11 @@ pub const SEEDED: [ViewDef; 6] = [
         name: "Split",
         focus: FocusArea::CodeEditor,
         tree: split_tree,
+    },
+    ViewDef {
+        name: "Agents",
+        focus: FocusArea::ByteBotPanel,
+        tree: agents_tree,
     },
 ];
 
@@ -297,13 +317,17 @@ pub fn primary_focus(node: &LayoutNode) -> FocusArea {
     fn walk(node: &LayoutNode) -> Option<FocusArea> {
         match node {
             LayoutNode::Leaf(pane) => match pane.slot {
-                BodySlot::Explorer | BodySlot::Editor | BodySlot::Chat => Some(pane.focus),
+                BodySlot::Explorer | BodySlot::Editor | BodySlot::Agents | BodySlot::Chat => {
+                    Some(pane.focus)
+                }
                 BodySlot::Input | BodySlot::Terminal => None,
             },
             LayoutNode::Split { parts, .. } => parts.iter().find_map(|(child, _)| walk(child)),
             LayoutNode::Tabbed { panes, .. } | LayoutNode::Stack { panes, .. } => {
                 panes.iter().find_map(|pane| match pane.slot {
-                    BodySlot::Explorer | BodySlot::Editor | BodySlot::Chat => Some(pane.focus),
+                    BodySlot::Explorer | BodySlot::Editor | BodySlot::Agents | BodySlot::Chat => {
+                        Some(pane.focus)
+                    }
                     BodySlot::Input | BodySlot::Terminal => None,
                 })
             }
@@ -377,19 +401,20 @@ mod tests {
 
     #[test]
     fn a_stored_view_replaces_the_seed_and_an_unseeded_slot_needs_one() {
-        let views = declared(&[("Code", SIDE), ("7", SIDE)]);
+        let views = declared(&[("Code", SIDE), ("8", SIDE)]);
         // Config wins over the seed for a seeded name…
         match seed_for(&views, 1) {
             Some(Seed::Declared(_)) => {}
             other => panic!("expected the stored Code view, got {other:?}"),
         }
-        // …and is the only source for slots 7–9.
-        assert!(matches!(seed_for(&views, 7), Some(Seed::Declared(_))));
+        // …and is the only source for slots 8–9.
+        assert!(matches!(seed_for(&views, 8), Some(Seed::Declared(_))));
         assert!(seed_for(&views, 9).is_none());
         // Without a stored entry, a seeded slot falls back to its shape.
         assert!(matches!(seed_for(&Views::new(), 1), Some(Seed::BuiltIn(_))));
         assert!(matches!(seed_for(&Views::new(), 6), Some(Seed::BuiltIn(_))));
-        assert!(seed_for(&Views::new(), 7).is_none());
+        assert!(matches!(seed_for(&Views::new(), 7), Some(Seed::BuiltIn(_))));
+        assert!(seed_for(&Views::new(), 8).is_none());
     }
 
     #[test]
@@ -421,10 +446,10 @@ mod tests {
 
     #[test]
     fn a_stored_tree_focuses_its_first_body_pane_and_a_seed_its_named_one() {
-        let views = declared(&[("7", SIDE)]);
+        let views = declared(&[("8", SIDE)]);
         // The stored 70/30 editor-chat split: focus goes to the editor, the
         // first pane in reading order that holds one.
-        let (node, focus) = shape(&views, 7, area(), false).expect("stored");
+        let (node, focus) = shape(&views, 8, area(), false).expect("stored");
         assert_eq!(focus, FocusArea::CodeEditor);
         let body = to_body_layout(&crate::view::render(&node, area()));
         assert_eq!(body.editor.unwrap().width, 84, "70% of 120");
@@ -449,7 +474,7 @@ mod tests {
                 "Focus".to_string(),
                 "Review".to_string(),
                 "Split".to_string(),
-                "7".to_string(),
+                "Agents".to_string(),
                 "8".to_string(),
                 "9".to_string(),
             ]
@@ -457,8 +482,8 @@ mod tests {
     }
 
     #[test]
-    fn the_six_seeds_are_six_different_arrangements() {
-        // "Six seeded views" is only worth a chord each if each one moves the
+    fn the_seven_seeds_are_seven_different_arrangements() {
+        // "Seven seeded views" is only worth a chord each if each one moves the
         // panes somewhere new. Compared by rendered geometry, not by name.
         let mut shapes: Vec<Vec<(BodySlot, Rect)>> = Vec::new();
         for def in SEEDED.iter() {
@@ -475,7 +500,7 @@ mod tests {
             );
             shapes.push(leaves);
         }
-        assert_eq!(shapes.len(), 6);
+        assert_eq!(shapes.len(), 7);
     }
 
     fn slot_title(slot: &BodySlot) -> &'static str {
@@ -485,6 +510,7 @@ mod tests {
             BodySlot::Chat => "chat",
             BodySlot::Input => "input",
             BodySlot::Terminal => "terminal",
+            BodySlot::Agents => "agents",
         }
     }
 }

@@ -108,8 +108,9 @@ fn parse_slot(slot: &str) -> Result<BodySlot, TemplateError> {
         "chat" => Ok(BodySlot::Chat),
         "input" => Ok(BodySlot::Input),
         "terminal" => Ok(BodySlot::Terminal),
+        "agents" => Ok(BodySlot::Agents),
         _ => Err(TemplateError(format!(
-            "unknown slot {slot:?}: want explorer, editor, chat, input, or terminal"
+            "unknown slot {slot:?}: want explorer, editor, chat, input, terminal, or agents"
         ))),
     }
 }
@@ -118,9 +119,10 @@ fn parse_focus(focus: &str) -> Result<FocusArea, TemplateError> {
     match focus {
         "explorer" => Ok(FocusArea::FileExplorer),
         "editor" => Ok(FocusArea::CodeEditor),
+        "agents" => Ok(FocusArea::ByteBotPanel),
         "chat" => Ok(FocusArea::ChatInput),
         _ => Err(TemplateError(format!(
-            "unknown focus {focus:?}: want explorer, editor, or chat"
+            "unknown focus {focus:?}: want explorer, editor, agents, or chat"
         ))),
     }
 }

@@ -36,6 +36,7 @@ pub enum BodySlot {
     Chat,
     Input,
     Terminal,
+    Agents,
 }
 
 /// One surface: what it shows and what focus it carries. Never serialized
@@ -210,6 +211,7 @@ fn encode_slot(slot: BodySlot) -> String {
         BodySlot::Chat => "chat",
         BodySlot::Input => "input",
         BodySlot::Terminal => "terminal",
+        BodySlot::Agents => "agents",
     }
     .to_string()
 }
@@ -227,6 +229,7 @@ impl BodySlot {
             BodySlot::Chat => "Chat",
             BodySlot::Input => "Input",
             BodySlot::Terminal => "Terminal",
+            BodySlot::Agents => "Agents",
         }
     }
 }
@@ -235,6 +238,7 @@ fn encode_focus(focus: FocusArea) -> String {
     match focus {
         FocusArea::FileExplorer => "explorer",
         FocusArea::CodeEditor => "editor",
+        FocusArea::ByteBotPanel => "agents",
         _ => "chat",
     }
     .to_string()
@@ -247,8 +251,9 @@ fn decode_slot(word: &str) -> Result<BodySlot, TreeError> {
         "chat" => Ok(BodySlot::Chat),
         "input" => Ok(BodySlot::Input),
         "terminal" => Ok(BodySlot::Terminal),
+        "agents" => Ok(BodySlot::Agents),
         other => Err(TreeError(format!(
-            "unknown slot {other:?}: want explorer, editor, chat, input, or terminal"
+            "unknown slot {other:?}: want explorer, editor, chat, input, terminal, or agents"
         ))),
     }
 }
@@ -257,9 +262,10 @@ fn decode_focus(word: &str) -> Result<FocusArea, TreeError> {
     match word {
         "explorer" => Ok(FocusArea::FileExplorer),
         "editor" => Ok(FocusArea::CodeEditor),
+        "agents" => Ok(FocusArea::ByteBotPanel),
         "chat" => Ok(FocusArea::ChatInput),
         other => Err(TreeError(format!(
-            "unknown focus {other:?}: want explorer, editor, or chat"
+            "unknown focus {other:?}: want explorer, editor, agents, or chat"
         ))),
     }
 }
@@ -400,6 +406,7 @@ pub fn to_body_layout(leaves: &[(Pane, Rect)]) -> BodyLayout {
         let slot = match pane.slot {
             BodySlot::Explorer => &mut layout.explorer,
             BodySlot::Editor => &mut layout.editor,
+            BodySlot::Agents => &mut layout.agents,
             BodySlot::Chat => &mut layout.chat,
             BodySlot::Input => &mut layout.input,
             BodySlot::Terminal => &mut layout.terminal,
@@ -422,7 +429,7 @@ pub fn hit_test_tree(node: &LayoutNode, area: Rect, column: u16) -> Option<Focus
     let mut visible: Vec<(Rect, FocusArea)> = Vec::new();
     for (pane, rect) in render(node, area) {
         match pane.slot {
-            BodySlot::Explorer | BodySlot::Editor | BodySlot::Chat => {
+            BodySlot::Explorer | BodySlot::Editor | BodySlot::Agents | BodySlot::Chat => {
                 visible.push((rect, pane.focus));
             }
             BodySlot::Input | BodySlot::Terminal => {}
@@ -455,7 +462,7 @@ pub fn hit_test_tree_point(
     for (pane, rect) in render(node, area) {
         let claims = matches!(
             pane.slot,
-            BodySlot::Explorer | BodySlot::Editor | BodySlot::Chat
+            BodySlot::Explorer | BodySlot::Editor | BodySlot::Agents | BodySlot::Chat
         );
         if claims && rect.contains(Position { x: column, y: row }) {
             return Some(pane.focus);
@@ -1706,5 +1713,42 @@ mod tests {
             panic!("the root is a split");
         };
         assert_eq!(parts[1].1, Constraint::Percentage(MIN_PANE_PERCENT));
+    }
+
+    #[test]
+    fn agents_slot_encodes_decodes_and_populates_layout() {
+        assert_eq!(encode_slot(BodySlot::Agents), "agents");
+        assert_eq!(decode_slot("agents"), Ok(BodySlot::Agents));
+        assert_eq!(BodySlot::Agents.word(), "Agents");
+        assert_eq!(encode_focus(FocusArea::ByteBotPanel), "agents");
+        assert_eq!(decode_focus("agents"), Ok(FocusArea::ByteBotPanel));
+
+        let leaves = vec![
+            (
+                Pane {
+                    slot: BodySlot::Editor,
+                    focus: FocusArea::CodeEditor,
+                },
+                rect(50, 20),
+            ),
+            (
+                Pane {
+                    slot: BodySlot::Agents,
+                    focus: FocusArea::ByteBotPanel,
+                },
+                rect(30, 20),
+            ),
+            (
+                Pane {
+                    slot: BodySlot::Chat,
+                    focus: FocusArea::ChatInput,
+                },
+                rect(20, 20),
+            ),
+        ];
+        let layout = to_body_layout(&leaves);
+        assert!(layout.editor.is_some());
+        assert!(layout.agents.is_some());
+        assert!(layout.chat.is_some());
     }
 }
