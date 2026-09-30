@@ -7952,6 +7952,9 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     // how many failing checks have already been handed back, and what the
     // project's own commands are (discovered once, from disk, on first use).
     let mut turn_edited = false;
+    // The workspace-relative paths a finished Edit-class call wrote, so a
+    // non-cargo workspace can hand just those files to a language server (L-12).
+    let mut edited_paths: Vec<String> = Vec::new();
     let mut repair_iters: usize = 0;
     let mut check_commands: Option<Vec<String>> = None;
 
@@ -8188,6 +8191,60 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                             ));
                         }
                     }
+                } else if let Some(server) = crate::lsp::applies(&edited_paths) {
+                    // L-12: no cargo project, but the turn edited files a
+                    // language server covers. Pull real diagnostics and gate on
+                    // them the way the cargo branch gates on exit codes: an
+                    // error keeps the turn open for a repair round, a clean
+                    // answer lets it finish verified, and a no-answer is
+                    // reported as unverified — never dressed up as a pass.
+                    let report =
+                        crate::lsp::run(&tool_root, &edited_paths, approval.command_timeout).await;
+                    match report.verdict {
+                        crate::lsp::LspVerdict::Clean => {
+                            if sink == LoopSink::Chat {
+                                let _ = tx.send(format!(
+                                    "[TOOL]✓ verified: {server} found no errors in {} edited file(s)",
+                                    edited_paths.len()
+                                ));
+                            }
+                        }
+                        crate::lsp::LspVerdict::Errors => {
+                            if repair_iters < max_repair_iters && round < max_rounds {
+                                repair_iters += 1;
+                                let call = xencode_providers_rs::ToolCall {
+                                    id: format!("lsp-{rounds}"),
+                                    name: "lsp_diagnostics".to_string(),
+                                    arguments: serde_json::json!({ "files": edited_paths }),
+                                };
+                                history.push(xencode_providers_rs::AgentTurn::Assistant {
+                                    text: step.text.clone(),
+                                    calls: vec![call.clone()],
+                                });
+                                history.push(xencode_providers_rs::AgentTurn::ToolResult {
+                                    id: call.id.clone(),
+                                    content: report.report,
+                                });
+                                if sink == LoopSink::Chat {
+                                    let _ = tx.send(format!(
+                                        "[TOOL]⚠ {server} reported errors · repair attempt {repair_iters}/{max_repair_iters}: the errors are back with the model"
+                                    ));
+                                }
+                                ending_turn = false;
+                            } else if sink == LoopSink::Chat {
+                                let _ = tx.send(format!(
+                                    "[TOOL]✗ INCOMPLETE: {server} still reporting errors after {repair_iters} repair attempt(s) — this task is reported unfinished, not done"
+                                ));
+                            }
+                        }
+                        crate::lsp::LspVerdict::Unverifiable => {
+                            if sink == LoopSink::Chat {
+                                let _ = tx.send(format!(
+                                    "[TOOL]✗ {server} produced no diagnostics, so this turn's edits end unverified"
+                                ));
+                            }
+                        }
+                    }
                 }
             }
             if ending_turn {
@@ -8229,6 +8286,16 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
                 && crate::agent_tools::tool_class(&call.name) == crate::agent_tools::ToolClass::Edit
             {
                 turn_edited = true;
+            }
+            if outcome == crate::agent_tools::CallOutcome::Finished
+                && crate::agent_tools::tool_class(&call.name) == crate::agent_tools::ToolClass::Edit
+            {
+                if let Some(p) = call.arguments_object().get("path").and_then(|v| v.as_str()) {
+                    let rel = p.trim_start_matches("./").to_string();
+                    if !edited_paths.contains(&rel) {
+                        edited_paths.push(rel);
+                    }
+                }
             }
             if sink == LoopSink::Chat && outcome == crate::agent_tools::CallOutcome::Refused {
                 // A policy refusal never reaches the overlay, so it needs its
