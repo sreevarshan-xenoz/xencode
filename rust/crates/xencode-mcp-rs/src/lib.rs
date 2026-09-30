@@ -1,5 +1,5 @@
-//! A client for the Model Context Protocol, as far as xencode uses it:
-//! stdio transport, tools only.
+//! A client for the Model Context Protocol, as far as xencode uses it: the
+//! stdio transport, and the tools, resources and prompts a server declares.
 //!
 //! ```no_run
 //! use std::time::Duration;
@@ -22,4 +22,7 @@ pub mod protocol;
 
 pub use client::{McpClient, ServerSpec};
 pub use error::McpError;
-pub use protocol::{McpTool, ToolOutcome, PROTOCOL_VERSION};
+pub use protocol::{
+    Feature, McpPrompt, McpResource, McpTool, PromptArgument, PromptMessage, ResourceContent,
+    ServerCapabilities, ToolOutcome, PROTOCOL_VERSION,
+};

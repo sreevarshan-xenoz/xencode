@@ -24,6 +24,14 @@ pub enum McpError {
     /// The bytes on stdout were not the protocol we speak.
     #[error("MCP server `{server}` broke protocol: {message}")]
     Protocol { server: String, message: String },
+    /// The handshake said this server has no such method set, so nothing was
+    /// sent. Naming the set is the point: "no tools" and "not connected" are
+    /// different facts for the user.
+    #[error("MCP server `{server}` does not offer {feature}")]
+    NotOffered {
+        server: String,
+        feature: &'static str,
+    },
     /// A well-formed JSON-RPC error response. The method is not recoverable
     /// here (a response carries only its id), so the message stands alone.
     #[error("MCP server `{server}` returned error {code}: {message}")]
@@ -42,6 +50,7 @@ impl McpError {
             | McpError::Timeout { server, .. }
             | McpError::Closed { server, .. }
             | McpError::Protocol { server, .. }
+            | McpError::NotOffered { server, .. }
             | McpError::Server { server, .. } => server,
         }
     }
