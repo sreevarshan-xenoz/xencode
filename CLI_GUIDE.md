@@ -1576,7 +1576,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `model_profiles` | list of objects | saved profiles the TUI's Custom Models panel (J-05) shows: `{ "name": "...", "model": "ollama:qwen2.5:7b", "temperature": 0.2, "max_tokens": 2048, "for_task": "bugfix" }`. `temperature` and `max_tokens` are optional — omit them and the panel renders "unset — the server decides" and sends nothing. `model` takes exactly the form `default_model` does. `Enter` applies a profile to the next turn; `s` in the panel writes the whole list back here; `f` cycles `for_task` through `bugfix`, `general` and none. There is no `top_p`: no provider path in this workspace sends it, and only llama.cpp receives these two knobs in the request body |
 | `model_routing` | bool | Whether a profile's `for_task` mark is acted on by itself. Off by default, so a marked profile still only applies by hand. On, the first profile whose mark matches the turn runs that turn on its model: `bugfix` for a prompt that says something is broken (`fix`, `fails`, `crash` and similar words), `general` for every other prompt, and a mark naming a reading this version does not have (or no mark at all) matches nothing. A profile that would move a llama.cpp model is refused instead — a running `llama-server` holds one model at a time — and the chat prints why. See [Turn routing](#turn-routing) |
 | `mcp_servers` | object | MCP stdio servers to offer as tools: `"name" → { "command": "...", "args": [...], "env": {...} }` (credentials go in `env`, never `args`); nothing is started until you run `/mcp` |
-| `agent_hooks` | object | shell hooks around **approved** agent tool calls: `"before"` and `"after"` maps from an exact tool name (or `"*"` for every tool) to a command run via `sh -c` in the workspace root. A failing `before` hook vetoes the call (nothing runs, no rewind point, output shown as `error: pre-hook vetoed this call`); a passing one has its output prepended to the result. The `after` hook always runs and its output is appended. Hook output is capped like `run_command` (stderr merged, tail kept) |
+| `agent_hooks` | object | shell hooks around **approved** agent tool calls: `"before"` and `"after"` maps from an exact tool name (or `"*"` for every tool) to a command run via `sh -c` in the workspace root. A failing `before` hook vetoes the call (nothing runs, no rewind point, output shown as `error: pre-hook vetoed this call`); a passing one has its output prepended to the result. The `after` hook always runs and its output is appended. Hook output is capped like `run_command` (stderr merged, tail kept). Each hook is handed its event as JSON on **stdin** — `{"hook_event_name": "PreToolUse"\|"PostToolUse", "tool_name", "tool_input", "cwd", "session_id"}` — so a script can read the target out of `tool_input` and decide per call (e.g. veto one `write_file` by its path); the event is never passed in the command line, where `/proc` would expose it |
 
 Edit on `agent_hooks` directly in the JSON (`config set` has no nested-map key):
 
@@ -1593,6 +1593,25 @@ Edit on `agent_hooks` directly in the JSON (`config set` has no nested-map key):
   }
 }
 ```
+
+Because the event arrives on stdin, a hook can act on the specific call rather than
+on the tool name alone. This `before` hook vetoes only a `write_file` aimed at a
+protected path and lets every other write proceed (the payload is compact JSON, so
+`"path":"` sits directly against the value):
+
+```json
+{
+  "agent_hooks": {
+    "before": {
+      "write_file": "grep -q '\"path\":\"\\.env\"' && { echo '.env is protected' >&2; exit 2; }; exit 0"
+    }
+  }
+}
+```
+
+A non-zero exit still vetoes (`error: pre-hook vetoed this call`), so here a write
+whose `tool_input.path` is `.env` is stopped before anything is written, and nothing
+about the event is passed in the command line itself.
 
 ### `xencode cache <action>`
 Response cache management: `stats`, `clear`.
@@ -1837,7 +1856,8 @@ things it can declare are a `prompt_prefix` (placed ahead of the agent's system
 prompt on every turn) and `hooks` — `before`/`after` maps of tool name (or `*`)
 to an `sh -c` command, the same shape as `agent_hooks` in config.json. A
 plugin's hook only lands where config.json is silent, so your own config always
-outranks it.
+outranks it. Because they run through the same path, a plugin's hooks are handed
+the same event JSON on stdin that `agent_hooks` commands receive.
 
 ```json
 {

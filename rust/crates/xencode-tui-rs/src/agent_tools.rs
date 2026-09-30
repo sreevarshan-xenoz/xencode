@@ -2458,18 +2458,40 @@ fn hook_for<'a>(
 /// and output cap as `run_command`. The bool says whether it exited clean;
 /// the string is always an annotated line (status first, output tail only on
 /// a non-zero exit), so a capped or empty body can never look like success.
+///
+/// The event is delivered as JSON on the hook's **stdin**, never in the command
+/// line: a `tool_input` can carry a file's whole contents, and anything in argv
+/// is readable through `/proc` by any local process. The shape follows the
+/// event names the wider ecosystem already uses (`hook_event_name`,
+/// `tool_name`, `tool_input`, `cwd`, `session_id`) so a hook written for another
+/// agent runs here unchanged — xencode adds no fourth dialect.
 async fn run_hook(
     root: &Path,
     name: &str,
-    tool: &str,
+    call: &ToolCall,
     phase: HookPhase,
+    session_id: Option<&str>,
     command: &str,
     timeout_secs: u64,
 ) -> (bool, String) {
-    let child = match tokio::process::Command::new("sh")
+    let tool = call.name.as_str();
+    let payload = serde_json::json!({
+        "hook_event_name": match phase {
+            HookPhase::Before => "PreToolUse",
+            HookPhase::After => "PostToolUse",
+        },
+        "tool_name": tool,
+        "tool_input": call.arguments_object(),
+        "cwd": root.to_string_lossy(),
+        "session_id": session_id.unwrap_or(""),
+    });
+    let payload = serde_json::to_vec(&payload).unwrap_or_else(|_| Vec::new());
+
+    let mut child = match tokio::process::Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(root)
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -2486,6 +2508,17 @@ async fn run_hook(
             );
         }
     };
+    // Hand the event over, then drop the writer so a hook that reads to EOF is
+    // not left hanging. A hook that ignores stdin never reads it; the closed
+    // pipe is simply ignored. A child whose stdin already closed (it exited)
+    // makes this write fail, which is not the hook's fault and must not mask its
+    // exit status — so the write error is swallowed and the wait below reports
+    // the real outcome.
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let _ = stdin.write_all(&payload).await;
+        let _ = stdin.shutdown().await;
+    }
     let secs = timeout_secs.max(1);
     let output = match tokio::time::timeout(
         std::time::Duration::from_secs(secs),
@@ -2732,6 +2765,9 @@ pub struct ApprovalCtx {
     /// every path that is not the chat loop: a call out of the machine has to
     /// be something the user decided, not something the agent worked around.
     pub online_docs: bool,
+    /// The session this turn belongs to, handed to hooks on stdin (M-1) so a
+    /// hook can tell runs apart. `None` where no session is open.
+    pub session_id: Option<String>,
 }
 
 impl ApprovalCtx {
@@ -2807,8 +2843,9 @@ async fn run_and_checkpoint(
         let (ok, text) = run_hook(
             root,
             name,
-            &call.name,
+            call,
             HookPhase::Before,
+            ctx.session_id.as_deref(),
             command,
             ctx.command_timeout,
         )
@@ -2842,8 +2879,9 @@ async fn run_and_checkpoint(
         let (_, text) = run_hook(
             root,
             name,
-            &call.name,
+            call,
             HookPhase::After,
+            ctx.session_id.as_deref(),
             command,
             ctx.command_timeout,
         )
@@ -5169,6 +5207,7 @@ patched = ["{fixed}"]
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
+                session_id: None,
             },
             prompts: rx,
         }
@@ -5644,6 +5683,7 @@ patched = ["{fixed}"]
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
+                session_id: None,
             };
             let content = format!("written in turn {turn}\n");
             let result = execute_tool_call_approved(
@@ -6016,6 +6056,109 @@ patched = ["{fixed}"]
         assert_eq!(
             std::fs::read_to_string(root.join("notes.txt")).unwrap(),
             "hello"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // M-1: the hook receives its event as JSON on stdin, so a script can read
+    // which tool ran and what it asked for — with nothing in the command line.
+    #[tokio::test]
+    async fn a_before_hook_reads_the_event_payload_on_stdin() {
+        let root = temp_root("hook-stdin");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.session_id = Some("sess-abc".to_string());
+        // `cat` echoes stdin back; run_hook keeps non-empty output in its note.
+        h.ctx.hooks = hooks(&[("write_file", "cat")], &[]);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("secret.txt", "top-secret-body"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        let payload = result
+            .strip_prefix("hook[write_file] before write_file: exit 0\n")
+            .unwrap_or(&result)
+            .to_string();
+        // The canonical event names another agent's hook already expects.
+        assert!(
+            payload.contains("\"hook_event_name\":\"PreToolUse\""),
+            "{result}"
+        );
+        assert!(payload.contains("\"tool_name\":\"write_file\""), "{result}");
+        // The tool's arguments — path *and* the file body — arrive on stdin.
+        assert!(payload.contains("secret.txt"), "{result}");
+        assert!(payload.contains("top-secret-body"), "{result}");
+        assert!(payload.contains("\"session_id\":\"sess-abc\""), "{result}");
+        // The write itself still landed; a passing hook only annotates.
+        assert_eq!(
+            std::fs::read_to_string(root.join("secret.txt")).unwrap(),
+            "top-secret-body"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_hook_can_veto_one_write_by_path_from_its_stdin() {
+        let root = temp_root("hook-veto-path");
+        let mut h = harness(ApprovalMode::AllAllow);
+        // Read the event, veto only when it targets secret.txt.
+        let script = "grep -q 'secret.txt' && { echo blocked-by-path >&2; exit 2; }; exit 0";
+        h.ctx.hooks = hooks(&[("write_file", script)], &[]);
+
+        let denied = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("secret.txt", "nope"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            denied.starts_with("error: pre-hook vetoed this call"),
+            "{denied}"
+        );
+        assert!(!root.join("secret.txt").exists(), "{denied}");
+
+        // The same hook lets an unrelated path through, proving it decided on
+        // the payload's path and not on the tool name alone.
+        let allowed = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("public.txt", "ok"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(!allowed.starts_with("error:"), "{allowed}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("public.txt")).unwrap(),
+            "ok"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_after_hook_sees_post_tooluse_for_the_same_call() {
+        let root = temp_root("hook-after-stdin");
+        let mut h = harness(ApprovalMode::AllAllow);
+        h.ctx.hooks = hooks(&[], &[("write_file", "cat")]);
+        let result = execute_tool_call_approved(
+            &new_task_runtime(),
+            &root,
+            &write_call("a.txt", "body"),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            result.contains("hook[write_file] after write_file: exit 0"),
+            "{result}"
+        );
+        assert!(
+            result.contains("\"hook_event_name\":\"PostToolUse\""),
+            "{result}"
         );
         std::fs::remove_dir_all(&root).unwrap();
     }

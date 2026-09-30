@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1694 tests passing, zero warnings (re-verified 2026-09-29)
+- [x] Workspace gates green — 16 crates, 1712 tests passing, zero warnings (re-verified 2026-09-30)
 
 ## Model Catalog Honesty
 
@@ -1466,13 +1466,32 @@ that is auditable and that never widens the interactive TUI path.
 Small-to-large, and deliberately: M-1..M-4 are compatibility work that makes
 xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
 
-- [ ] **M-1 — give hooks their payload.** Write `{tool, args, phase, session_id,
+- [x] **M-1 — give hooks their payload.** Write `{tool, args, phase, session_id,
       workspace}` JSON to the hook process's stdin in `run_hook`, keeping the
       existing non-zero-exit veto and the current output annotation. Adopt the
       event names other agents already use so a hook written for one runs here.
       **Done-when:** a hook script that reads stdin can name the tool and veto a
       specific `write_file` by its path — and no secret ever travels in argv,
       where `/proc` would leak it.
+      *(Done 2026-09-30. `run_hook` now spawns its `sh -c` with a piped stdin and
+      writes one compact JSON event to it —
+      `{hook_event_name, tool_name, tool_input, cwd, session_id}`, with
+      `hook_event_name` `PreToolUse` before the call and `PostToolUse` after —
+      then closes the writer so a hook that reads to EOF never hangs. The names
+      are the ones the wider ecosystem already uses, not a fourth dialect. Nothing
+      about the event goes in the command line: `tool_input` can carry a whole
+      file's body and `argv` is world-readable through `/proc`. The non-zero-exit
+      veto and the output annotation are byte-for-byte the behaviour before. Proven
+      live in the real TUI on a local `llama-server`: with a `before.write_file`
+      hook `grep -q 'guard.txt' && { echo 'policy: guard.txt is protected' >&2;
+      exit 2; }; exit 0`, the model's call `⚙→ write_file({"content": "hello",
+      "path": "named_guard.txt"})` came back `⚙← error: pre-hook vetoed this call:
+      hook[write_file] before write_file: exit 2 / policy: guard.txt is protected`
+      and the file was never created — the hook named the tool and the path from
+      its stdin and vetoed just that write. Three new tool tests cover it
+      (payload-on-stdin, veto-one-write-by-path-while-a-second-path-passes,
+      after-hook-sees-PostToolUse); `cargo test --workspace` green at **1712
+      passed, 0 failed, 17 ignored** with `cargo fmt --check` and clippy clean.)*
 - [ ] **M-2 — enforce what a manifest declares.** Either check `permissions` at
       load and refuse or degrade with a clear message, or delete the field. A
       parsed-but-ignored security-relevant field is worse than an absent one.
