@@ -1115,6 +1115,56 @@ esac
     ;;
 esac
 ;;
+(mcp)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_xencode__subcmd__mcp_commands" \
+"*::: :->mcp" \
+&& ret=0
+
+    case $state in
+    (mcp)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-mcp-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+'--workspace=[The directory the tools work on; a \`path\` or \`cwd\` argument that leaves it is refused]:WORKSPACE:_files' \
+'*--allow=[Permit this one tool to run despite the read-only default. Repeat it per tool; the name must be one of the six xencode publishes, so a typo is reported instead of doing nothing]:ALLOW:_default' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__mcp__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-mcp-help-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
 (llamacpp)
 _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
@@ -1793,6 +1843,26 @@ _arguments "${_arguments_options[@]}" : \
     ;;
 esac
 ;;
+(mcp)
+_arguments "${_arguments_options[@]}" : \
+":: :_xencode__subcmd__help__subcmd__mcp_commands" \
+"*::: :->mcp" \
+&& ret=0
+
+    case $state in
+    (mcp)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:xencode-help-mcp-command-$line[1]:"
+        case $line[1] in
+            (serve)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
 (llamacpp)
 _arguments "${_arguments_options[@]}" : \
 ":: :_xencode__subcmd__help__subcmd__llamacpp_commands" \
@@ -1937,6 +2007,7 @@ _xencode_commands() {
 'replay:Run a recorded session again from the bytes it was made of' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
+'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
@@ -2331,6 +2402,7 @@ _xencode__subcmd__help_commands() {
 'replay:Run a recorded session again from the bytes it was made of' \
 'eval:Score the agent on defects that were seeded on purpose' \
 'plugin:Manage plugins' \
+'mcp:Let another program drive xencode'\''s tools over Model Context Protocol' \
 'llamacpp:llama.cpp server management (status/start/stop/load/unload)' \
 'hw:What this machine can serve, read from the machine' \
 'history:How fast this repository'\''s history is to ask about, and how to speed it up' \
@@ -2614,6 +2686,18 @@ _xencode__subcmd__help__subcmd__llamacpp__subcmd__stop_commands() {
 _xencode__subcmd__help__subcmd__llamacpp__subcmd__unload_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help llamacpp unload commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__mcp_commands] )) ||
+_xencode__subcmd__help__subcmd__mcp_commands() {
+    local commands; commands=(
+'serve:Serve xencode'\''s tools as an MCP server on standard input and output' \
+    )
+    _describe -t commands 'xencode help mcp commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__mcp__subcmd__serve_commands] )) ||
+_xencode__subcmd__help__subcmd__mcp__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help mcp serve commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__memory_commands] )) ||
 _xencode__subcmd__help__subcmd__memory_commands() {
@@ -3025,6 +3109,37 @@ _xencode__subcmd__llamacpp__subcmd__stop_commands() {
 _xencode__subcmd__llamacpp__subcmd__unload_commands() {
     local commands; commands=()
     _describe -t commands 'xencode llamacpp unload commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__mcp_commands] )) ||
+_xencode__subcmd__mcp_commands() {
+    local commands; commands=(
+'serve:Serve xencode'\''s tools as an MCP server on standard input and output' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode mcp commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__mcp__subcmd__help_commands] )) ||
+_xencode__subcmd__mcp__subcmd__help_commands() {
+    local commands; commands=(
+'serve:Serve xencode'\''s tools as an MCP server on standard input and output' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'xencode mcp help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__mcp__subcmd__help__subcmd__help_commands] )) ||
+_xencode__subcmd__mcp__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode mcp help help commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__mcp__subcmd__help__subcmd__serve_commands] )) ||
+_xencode__subcmd__mcp__subcmd__help__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode mcp help serve commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__mcp__subcmd__serve_commands] )) ||
+_xencode__subcmd__mcp__subcmd__serve_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode mcp serve commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__memory_commands] )) ||
 _xencode__subcmd__memory_commands() {

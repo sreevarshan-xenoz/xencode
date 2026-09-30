@@ -13,6 +13,7 @@ pub mod layout;
 pub mod lsp;
 pub mod markdown;
 pub mod mcp;
+pub mod mcp_serve;
 pub mod panic;
 pub mod replay;
 pub mod review;

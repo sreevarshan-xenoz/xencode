@@ -13,12 +13,12 @@
 - [x] Server / collaboration / plugin crates — `xencode-server-rs`, `-collaboration-rs`, `-plugin-rs`
 - [x] Analysis + security scanning — `xencode-analysis-rs`
 - [x] Tool-calling + model capabilities — `generate_stream_with_tools`, `ModelCapabilities`
-- [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, llamacpp, hw, history, tui, advisories
-  (verified against `xencode --help` on 2026-09-28: these 23, plus clap's built-in
-  `help`, are the 24 the binary lists; `advisories` was missing from this line when
-  RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
-  lists 25)
-- [x] Workspace gates green — 16 crates, 1771 tests passing, zero warnings (re-verified 2026-09-30)
+- [x] CLI subcommands — scan, config, models, cache, audit, query, memory, tasks, worktree, colab, advise, server, analyze, fetch, review, replay, eval, plugin, mcp, llamacpp, hw, history, tui, advisories
+  (verified against `xencode --help` on 2026-09-30: it lists 37 subcommands — the
+  ones named above plus `interop`, `anchor`, `toolchain`, `doctor`,
+  `session`, `verify`, `envcheck`, `agents`, `hotspots`, `generate`, `mutants`,
+  `cov`, `test` — and clap's built-in `help`, 38 entries in the list)
+- [x] Workspace gates green — 16 crates, 1789 tests passing, zero warnings (re-verified 2026-09-30)
 
 ## Model Catalog Honesty
 
@@ -1459,7 +1459,13 @@ that is auditable and that never widens the interactive TUI path.
   answers the question people actually ask.
 - **A full command sandbox** (Landlock/seccomp/bubblewrap). Reconsidered only if
   M-5 ships and exposes write tools to external callers; that is the one change
-  that would make it load-bearing rather than nice.
+  that would make it load-bearing rather than nice. **M-5 shipped on 2026-09-30**,
+  and it exposes a write or shell tool only when the operator names that one tool
+  at launch. What shipping proved is the size of the gap: the boundary is a check
+  on the `path`/`cwd` a call carries, not an OS jail, so a granted `run_command`
+  runs with this user's full reach — verified, not inferred. The mitigation today
+  is not granting it, and the default does not. Build the jail before any
+  workflow comes to depend on `--allow run_command`.
 
 ### Tasks
 
@@ -1579,7 +1585,7 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       `plugin_git_install.rs` that spawn the real binary against a real clone.
       Workspace suite **1771 passed, 0 failed, 17 ignored**, `cargo fmt --check`
       and clippy clean.*
-- [ ] **M-5 — `xencode mcp serve`: xencode as an MCP server.** Expose `read_file`,
+- [x] **M-5 — `xencode mcp serve`: xencode as an MCP server.** Expose `read_file`,
       `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` over
       stdio using the official `rmcp` SDK (replacing the hand-rolled client only
       if it earns it — the client stays as-is unless a shared dependency makes
@@ -1588,6 +1594,37 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       read-only against a real workspace, every write path is refused by default
       with an actionable reason, and the 64-char tool-name limit is handled the
       same way the client already handles it.
+      *Verified with the official Model Context Protocol TypeScript SDK (1.30.0,
+      already on this machine) driving `xencode mcp serve` over a real pipe
+      against a real workspace — a caller that is not xencode's code. It read the
+      handshake (`{"name":"xencode","version":"0.1.0"}`, `capabilities:
+      {"tools":{}}`) and listed `read_file[read-only], list_dir[read-only],
+      search_files[read-only], write_file, edit_file, run_command`;
+      `read_file({"path":"hello.txt"})` returned that file's real numbered lines
+      and `search_files({"pattern":"two"})` returned `hello.txt:2:two`. In the
+      default launch `write_file` and `run_command` both came back `isError=true`
+      naming the one flag that would have permitted them (`Start it with --allow
+      write_file to permit this one tool`) and the workspace was listed
+      afterwards: no `written-by-client.txt`, no `ran-by-client`. Restarted with
+      `--allow write_file --allow run_command`, the same client wrote the file
+      (`created written-by-client.txt (1 line(s))` plus the diff) and ran the
+      command (`$ touch ran-by-client` / `exit 0`), while
+      `read_file({"path":"../../etc/passwd"})` stayed refused in *both* modes. The
+      hand-rolled client was left alone — no shared dependency made replacing it
+      free — and its own sanitize-and-fit-in-64 rule is what the server publishes
+      under, so a name cannot fit on one side of the pipe and not the other. Also
+      checked, and documented, the limit the workspace argument does *not* cover:
+      a permitted command's own text is not path-checked, so `--allow
+      run_command` was confirmed to create a file outside `--workspace` (`echo
+      proof > /tmp/m5-outside.txt`, then `existsSync` → `true`), which is why that
+      launch now prints a warning and why no refusal calls a granted server
+      read-only. Covered by 9 tests in `mcp_serve.rs`, 5 CLI integration tests in
+      `mcp_serve_stdio.rs` that spawn the built binary and speak JSON-RPC to its
+      stdin — one asserting the escape above really happens and that the launch
+      warned — and 4 tests on the policy itself, including that a headless grant
+      cannot change what `classify` asks the interactive user. Workspace suite
+      **1789 passed, 0 failed, 17 ignored**, `cargo fmt --check` and clippy
+      clean.*
 - [ ] **M-6 — finish the MCP client: resources, prompts, and HTTP with headers.**
       Negotiate the capabilities the client currently declines, and add an
       HTTP/SSE transport with auth headers so a hosted server is reachable.
@@ -4732,7 +4769,7 @@ evidence-supported form; **reject** = do-not-build (§Q-12).
 | 63 | Project Bootstrap Intelligence | new | QK-4 — declarative seed (AGENTS.md + anchor.md + skills + hooks + a redacted settings template). An LLM inventing CI config is where the 9,371 lines of deleted fiction start |
 | 64 | Agent-to-Agent Protocol | reject | The space consolidated: ACP carries exactly this content and M-7 speaks it. A2A is a networked-fleet protocol |
 | 65 | Xencode Protocol / `.xcp` | reject | A dialect of `.xencode/` + plugin manifests that nobody speaks, with a spec-maintenance tax a solo project cannot pay |
-| 66 | Agent Interoperability Layer | planned | M-5 (`mcp serve`) + M-6 + M-7 (`acp`) — **planned, not shipped**; see Q-13 |
+| 66 | Agent Interoperability Layer | partly shipped | M-5 (`xencode mcp serve`) **shipped**; M-6 (finish the client) and M-7 (`xencode acp`) still planned — see Q-13 |
 | 67 | Model Behavior Profiles | narrowed | QK-1 — static `model` + `verified_by` + a self-test fingerprint. Empirical profiles need many sampled responses; a 4B cannot author them reliably |
 | 68 | Agent Reputation | reject | One local model on one machine, and the arithmetic is fatal anyway: separating 92% from 84% success needs ≈258 runs per arm. τ-bench's pass^k variance is about model capability, not agent trust |
 | 69 | Learning From Rejected Changes | planned | EV-7 — with QK's conditions: an invariant carries no reason field unless a human typed one |
@@ -5566,11 +5603,13 @@ file — **to two of these ten research passes' own reports.**
    What does not exist is the arbiter that chooses between the two paths — and
    building an LLM to guess what a deterministic tool would do, then running the
    tool anyway, is negative value.
-3. **`xencode acp` and `xencode mcp serve` do not exist.** One pass asserted
-   "M-7 already ships `xencode acp`". Grep: no `acp` anywhere under `rust/`, and
-   `M-5`/`M-7` are unchecked items in this file. `xencode-mcp-rs` is a
-   **client** (`ServerSpec` spawns external servers). Items 64–66 are answered by
-   *planned* work, not shipped work.
+3. **`xencode acp` does not exist; `xencode mcp serve` now does.** One pass
+   asserted "M-7 already ships `xencode acp`". Grep: no `acp` anywhere under
+   `rust/`, and `M-7` is still an unchecked item in this file. `M-5` shipped on
+   2026-09-30: `xencode mcp serve` is a real stdio server (`mcp_serve.rs`) built
+   on the `rmcp` SDK, and `xencode-mcp-rs` remains a **client** (`ServerSpec`
+   spawns external servers). Item 66 is therefore *partly* shipped — the
+   server direction exists, ACP and the unfinished client do not.
 4. **There is no `xencode-tools-rs` crate, no `run_agent`, and no `await_turn`.**
    Two passes cited `xencode-tools-rs/src/tools.rs:1240 run_agent` and
    `app.rs:5332 await_turn` as the headless entry points that prove the loop is
