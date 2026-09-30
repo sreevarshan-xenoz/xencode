@@ -1053,9 +1053,19 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (install)
 _arguments "${_arguments_options[@]}" : \
+'--rev=[Install this branch, tag or commit instead of the repository'\''s default branch. What is installed is pinned to the one commit the name resolved to, and \`update\` follows this same name]:REV:_default' \
 '-h[Print help]' \
 '--help[Print help]' \
-':path -- Path to plugin directory or manifest:_files' \
+':source -- A git URL to clone (`https\://…`, `git@…\:…`, `file\:///…`) or a path to a plugin directory or manifest file:_default' \
+&& ret=0
+;;
+(update)
+_arguments "${_arguments_options[@]}" : \
+'--rev=[Move to this branch, tag or commit rather than the one the plugin was installed at]:REV:_default' \
+'--yes[Apply the fetched version even though it changes what the plugin puts in front of the agent. Without this, such an update is only shown]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':name -- Name of an installed plugin:_default' \
 && ret=0
 ;;
 (remove)
@@ -1082,6 +1092,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (install)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(update)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -1764,6 +1778,10 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (install)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(update)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -2653,8 +2671,9 @@ _xencode__subcmd__help__subcmd__mutants_commands() {
 (( $+functions[_xencode__subcmd__help__subcmd__plugin_commands] )) ||
 _xencode__subcmd__help__subcmd__plugin_commands() {
     local commands; commands=(
-'list:List installed plugins and whether each one actually loads' \
-'install:Install a plugin from a path' \
+'list:List installed plugins, whether each one loads, and what it contributes' \
+'install:Install a plugin from a git URL or a local path' \
+'update:Fetch a plugin'\''s own repository again and show what changed before it is applied' \
 'remove:Remove a plugin by name' \
     )
     _describe -t commands 'xencode help plugin commands' commands "$@"
@@ -2673,6 +2692,11 @@ _xencode__subcmd__help__subcmd__plugin__subcmd__list_commands() {
 _xencode__subcmd__help__subcmd__plugin__subcmd__remove_commands() {
     local commands; commands=()
     _describe -t commands 'xencode help plugin remove commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__help__subcmd__plugin__subcmd__update_commands] )) ||
+_xencode__subcmd__help__subcmd__plugin__subcmd__update_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode help plugin update commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__help__subcmd__query_commands] )) ||
 _xencode__subcmd__help__subcmd__query_commands() {
@@ -3120,8 +3144,9 @@ _xencode__subcmd__mutants_commands() {
 (( $+functions[_xencode__subcmd__plugin_commands] )) ||
 _xencode__subcmd__plugin_commands() {
     local commands; commands=(
-'list:List installed plugins and whether each one actually loads' \
-'install:Install a plugin from a path' \
+'list:List installed plugins, whether each one loads, and what it contributes' \
+'install:Install a plugin from a git URL or a local path' \
+'update:Fetch a plugin'\''s own repository again and show what changed before it is applied' \
 'remove:Remove a plugin by name' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -3130,8 +3155,9 @@ _xencode__subcmd__plugin_commands() {
 (( $+functions[_xencode__subcmd__plugin__subcmd__help_commands] )) ||
 _xencode__subcmd__plugin__subcmd__help_commands() {
     local commands; commands=(
-'list:List installed plugins and whether each one actually loads' \
-'install:Install a plugin from a path' \
+'list:List installed plugins, whether each one loads, and what it contributes' \
+'install:Install a plugin from a git URL or a local path' \
+'update:Fetch a plugin'\''s own repository again and show what changed before it is applied' \
 'remove:Remove a plugin by name' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
@@ -3157,6 +3183,11 @@ _xencode__subcmd__plugin__subcmd__help__subcmd__remove_commands() {
     local commands; commands=()
     _describe -t commands 'xencode plugin help remove commands' commands "$@"
 }
+(( $+functions[_xencode__subcmd__plugin__subcmd__help__subcmd__update_commands] )) ||
+_xencode__subcmd__plugin__subcmd__help__subcmd__update_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode plugin help update commands' commands "$@"
+}
 (( $+functions[_xencode__subcmd__plugin__subcmd__install_commands] )) ||
 _xencode__subcmd__plugin__subcmd__install_commands() {
     local commands; commands=()
@@ -3171,6 +3202,11 @@ _xencode__subcmd__plugin__subcmd__list_commands() {
 _xencode__subcmd__plugin__subcmd__remove_commands() {
     local commands; commands=()
     _describe -t commands 'xencode plugin remove commands' commands "$@"
+}
+(( $+functions[_xencode__subcmd__plugin__subcmd__update_commands] )) ||
+_xencode__subcmd__plugin__subcmd__update_commands() {
+    local commands; commands=()
+    _describe -t commands 'xencode plugin update commands' commands "$@"
 }
 (( $+functions[_xencode__subcmd__query_commands] )) ||
 _xencode__subcmd__query_commands() {

@@ -478,6 +478,9 @@ _xencode() {
             xencode__subcmd__help__subcmd__plugin,remove)
                 cmd="xencode__subcmd__help__subcmd__plugin__subcmd__remove"
                 ;;
+            xencode__subcmd__help__subcmd__plugin,update)
+                cmd="xencode__subcmd__help__subcmd__plugin__subcmd__update"
+                ;;
             xencode__subcmd__help__subcmd__session,export)
                 cmd="xencode__subcmd__help__subcmd__session__subcmd__export"
                 ;;
@@ -655,6 +658,9 @@ _xencode() {
             xencode__subcmd__plugin,remove)
                 cmd="xencode__subcmd__plugin__subcmd__remove"
                 ;;
+            xencode__subcmd__plugin,update)
+                cmd="xencode__subcmd__plugin__subcmd__update"
+                ;;
             xencode__subcmd__plugin__subcmd__help,help)
                 cmd="xencode__subcmd__plugin__subcmd__help__subcmd__help"
                 ;;
@@ -666,6 +672,9 @@ _xencode() {
                 ;;
             xencode__subcmd__plugin__subcmd__help,remove)
                 cmd="xencode__subcmd__plugin__subcmd__help__subcmd__remove"
+                ;;
+            xencode__subcmd__plugin__subcmd__help,update)
+                cmd="xencode__subcmd__plugin__subcmd__help__subcmd__update"
                 ;;
             xencode__subcmd__session,export)
                 cmd="xencode__subcmd__session__subcmd__export"
@@ -2562,7 +2571,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__plugin)
-            opts="list install remove"
+            opts="list install update remove"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2604,6 +2613,20 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__help__subcmd__plugin__subcmd__remove)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__help__subcmd__plugin__subcmd__update)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -3752,7 +3775,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__plugin)
-            opts="-h --help list install remove help"
+            opts="-h --help list install update remove help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3766,7 +3789,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__plugin__subcmd__help)
-            opts="list install remove help"
+            opts="list install update remove help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3835,13 +3858,31 @@ _xencode() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        xencode__subcmd__plugin__subcmd__help__subcmd__update)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         xencode__subcmd__plugin__subcmd__install)
-            opts="-h --help"
+            opts="-h --rev --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --rev)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -3870,6 +3911,24 @@ _xencode() {
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        xencode__subcmd__plugin__subcmd__update)
+            opts="-h --rev --yes --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --rev)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;

@@ -714,12 +714,32 @@ enum EvalAction {
 
 #[derive(Subcommand)]
 enum PluginAction {
-    /// List installed plugins and whether each one actually loads
+    /// List installed plugins, whether each one loads, and what it contributes
     List,
-    /// Install a plugin from a path
+    /// Install a plugin from a git URL or a local path
     Install {
-        /// Path to plugin directory or manifest
-        path: std::path::PathBuf,
+        /// A git URL to clone (`https://…`, `git@…:…`, `file:///…`) or a path to
+        /// a plugin directory or manifest file
+        source: String,
+        /// Install this branch, tag or commit instead of the repository's
+        /// default branch. What is installed is pinned to the one commit the
+        /// name resolved to, and `update` follows this same name.
+        #[arg(long)]
+        rev: Option<String>,
+    },
+    /// Fetch a plugin's own repository again and show what changed before it is
+    /// applied
+    Update {
+        /// Name of an installed plugin
+        name: String,
+        /// Move to this branch, tag or commit rather than the one the plugin was
+        /// installed at
+        #[arg(long)]
+        rev: Option<String>,
+        /// Apply the fetched version even though it changes what the plugin puts
+        /// in front of the agent. Without this, such an update is only shown.
+        #[arg(long)]
+        yes: bool,
     },
     /// Remove a plugin by name
     Remove {
@@ -5862,6 +5882,63 @@ fn run_analyze(
     Ok(())
 }
 
+/// Show what a plugin puts in front of every agent turn, line by line, with the
+/// prompt text itself visible rather than counted.
+fn render_declaration(report: &xencode_plugin_rs::LoadReport) -> String {
+    let mut out = format!(
+        "  {} v{} — {}.\n",
+        report.name,
+        report.version,
+        if report.loaded {
+            "loaded"
+        } else {
+            "NOT LOADED"
+        }
+    );
+    if let Some(origin) = report.source.as_ref().and_then(|s| s.summary()) {
+        out.push_str(&format!("      from {origin}\n"));
+    }
+    if !report.loaded {
+        out.push_str(&format!(
+            "      it contributes nothing: {}\n",
+            report
+                .reason
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string())
+        ));
+        return out;
+    }
+    if report.prompt_text.is_empty() {
+        out.push_str("      it contributes no prompt text.\n");
+    } else {
+        out.push_str(&format!(
+            "      it puts {} line(s) ahead of the agent's system prompt on every turn:\n",
+            report.prompt_text.lines().count()
+        ));
+        for line in report.prompt_text.lines() {
+            out.push_str(&format!("      | {line}\n"));
+        }
+    }
+    if report.before_hooks + report.after_hooks > 0 {
+        out.push_str(&format!(
+            "      it declares {} before hook(s) and {} after hook(s), each of which runs a \
+             shell command in the workspace.\n",
+            report.before_hooks, report.after_hooks
+        ));
+    }
+    out
+}
+
+/// "abc1234def5678… (7-character prefix abc1234)" for a full SHA, plain for a
+/// message that is not one.
+fn format_commit(commit: &str) -> String {
+    if commit.len() > 7 && commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        format!("{}…", xencode_plugin_rs::short_commit(commit))
+    } else {
+        commit.to_string()
+    }
+}
+
 fn run_plugin_action(action: PluginAction) -> Result<(), String> {
     let plugin_dir = default_plugin_dir();
     let version = env!("CARGO_PKG_VERSION");
@@ -5874,14 +5951,14 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
             let runtime = PluginRuntime::load(&plugin_dir, version);
             if runtime.reports().is_empty() {
                 println!("No plugins installed in: {}", plugin_dir.display());
-                println!("Use 'xencode plugin install <path>' to install a plugin.");
+                println!("Use 'xencode plugin install <git-url|path>' to install a plugin.");
             } else {
                 println!(
                     "📦 Plugins in {} (xencode {version}):",
                     plugin_dir.display()
                 );
                 for report in runtime.reports() {
-                    println!("  {}", report.summary());
+                    print!("{}", render_declaration(report));
                 }
                 println!(
                     "  {} of {} loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.",
@@ -5890,39 +5967,95 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
                 );
             }
         }
-        PluginAction::Install { path } => {
-            if !path.exists() {
-                return Err(format!("Path does not exist: {}", path.display()));
-            }
-            // Copy plugin directory to plugin folder
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("plugin");
-            let dest = plugin_dir.join(name);
-            if dest.exists() {
-                return Err(format!("Plugin '{}' is already installed", name));
-            }
-            std::fs::create_dir_all(&plugin_dir).map_err(|e| e.to_string())?;
-
-            if path.is_dir() {
-                copy_dir_recursive(&path, &dest)
-                    .map_err(|e| format!("Failed to install: {}", e))?;
+        PluginAction::Install { source, rev } => {
+            // Clone or read, verify the manifest and show what it declares —
+            // before a single file lands where the loader will scan it.
+            let pending = if xencode_plugin_rs::is_git_source(&source) {
+                xencode_plugin_rs::prepare_git(&plugin_dir, &source, rev.as_deref(), version)
             } else {
-                std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
-                std::fs::copy(&path, dest.join(path.file_name().unwrap()))
-                    .map_err(|e| e.to_string())?;
+                xencode_plugin_rs::prepare_path(&plugin_dir, std::path::Path::new(&source), version)
             }
-            println!("✅ Plugin '{name}' installed to {}.", dest.display());
-            // Say right away whether the copied files are a plugin this build
-            // can load, rather than letting the user find out by silence.
-            let runtime = PluginRuntime::load(&plugin_dir, version);
-            match runtime.reports().iter().find(|r| r.name == name) {
-                Some(report) => println!("   {}", report.summary()),
-                None => println!(
-                    "   NOT LOADED: no plugin.json or manifest.json declaring this name — the files were copied but nothing loads from them."
+            .map_err(|e| e.to_string())?;
+            println!("{}", pending.declaration());
+            let outcome = pending.apply().map_err(|e| e.to_string())?;
+            println!(
+                "\n✅ Installed {} v{} into {}.",
+                outcome.name,
+                outcome.version,
+                outcome.destination.display()
+            );
+            match (
+                outcome.source.url.as_deref(),
+                outcome.source.commit.as_deref(),
+            ) {
+                // An install that named no commit still pinned one: say which,
+                // so what is installed can be named exactly later.
+                (Some(_), Some(commit)) => println!(
+                    "   Pinned to commit {shown}{rest}. Nothing more is fetched until \
+                     `xencode plugin update {name}` is run.",
+                    shown = format_commit(commit),
+                    rest = match outcome.source.git_ref.as_deref() {
+                        Some(rev) if rev != commit => format!(" (installed from {rev})"),
+                        _ => String::new(),
+                    },
+                    name = outcome.name
+                ),
+                _ => println!(
+                    "   Copied from a local path, so no commit is pinned. A later install of the \
+                     same name asks you to remove it first."
                 ),
             }
+        }
+        PluginAction::Update { name, rev, yes } => {
+            let plan =
+                xencode_plugin_rs::prepare_update(&plugin_dir, &name, rev.as_deref(), version)
+                    .map_err(|e| e.to_string())?;
+            println!(
+                "{}: {} from {} at {}",
+                if plan.current {
+                    "Already up to date"
+                } else {
+                    "Compared"
+                },
+                name,
+                plan.url,
+                format_commit(&plan.to_commit)
+            );
+            if plan.current {
+                println!(
+                    "   Installed copy is {} at {} and declares the same thing.",
+                    plan.from_version,
+                    format_commit(&plan.to_commit)
+                );
+                return Ok(());
+            }
+            for change in &plan.changes {
+                println!("   · {change}");
+            }
+            if !plan.diff.is_empty() {
+                println!("   Its manifest differs:");
+                for line in plan.diff.lines() {
+                    println!("   {line}");
+                }
+            }
+            if plan.reaches_agent && !yes {
+                println!(
+                    "   NOT APPLIED: {} still v{} at {}. The version above changes what this \
+                     plugin puts in front of the agent on every turn, so read the diff and \
+                     re-run with --yes to install it.",
+                    name,
+                    plan.from_version,
+                    format_commit(plan.from.commit.as_deref().unwrap_or("no recorded commit"))
+                );
+                return Ok(());
+            }
+            let (from, to) = (plan.from_version.clone(), plan.to_version.clone());
+            let source = plan.apply().map_err(|e| e.to_string())?;
+            println!(
+                "   ✅ Applied: v{from} → v{to}, now pinned to {}. Run `/plugin reload` in a \
+                 running xencode, or start a new session, for it to take hold.",
+                format_commit(source.commit.as_deref().unwrap_or("no recorded commit")),
+            );
         }
         PluginAction::Remove { name } => {
             // The name comes from the command line, so it passes the same guard
@@ -5931,27 +6064,34 @@ fn run_plugin_action(action: PluginAction) -> Result<(), String> {
             let path = PluginRegistry::new(plugin_dir.clone())
                 .plugin_path(&name)
                 .ok_or_else(|| format!("Invalid plugin name: {name}"))?;
-            if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to remove: {}", e))?;
-                println!("✅ Plugin '{name}' removed.");
-            } else {
+            if !path.exists() {
                 return Err(format!("Plugin '{name}' not found"));
             }
-        }
-    }
-    Ok(())
-}
-
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let dest_path = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursive(&entry.path(), &dest_path)?;
-        } else {
-            std::fs::copy(entry.path(), dest_path)?;
+            // Say what is being taken away, so a removal can be checked against
+            // the intention — including which commit the copy came from.
+            let runtime = PluginRuntime::load(&plugin_dir, version);
+            let contributions: String = runtime
+                .reports()
+                .iter()
+                .filter(|report| report.name == name)
+                .map(render_declaration)
+                .collect();
+            std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to remove: {}", e))?;
+            println!("✅ Plugin '{name}' removed.");
+            let lines: Vec<&str> = contributions
+                .lines()
+                .map(str::trim_start)
+                .filter(|line| !line.is_empty())
+                .collect();
+            if !lines.is_empty() {
+                println!("   It was contributing:");
+                for line in lines {
+                    println!("     {line}");
+                }
+                println!(
+                    "   A session already running still has the old prompt until /plugin reload."
+                );
+            }
         }
     }
     Ok(())

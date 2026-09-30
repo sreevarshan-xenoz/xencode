@@ -33,7 +33,7 @@ fallback chain** — primary model first, then the configured alternates — whe
 provider is down, without ever using that recovery to move a conversation
 somewhere the model you chose would not have sent it.
 
-At its core is a fast, single-file **Rust** binary (16 crates, 1746 tests,
+At its core is a fast, single-file **Rust** binary (16 crates, 1771 tests,
 zero warnings) wrapped around an agentic coding loop that can plan, edit, test,
 and fix your code — driven entirely from your terminal.
 
@@ -47,7 +47,7 @@ and fix your code — driven entirely from your terminal.
 - **🖥️ Immersive TUI** — a modern Rust/ratatui interface over 25 focus areas (body layouts via `Ctrl+U` — the three shipped presets plus any you declare in `layout_templates` — with 17 panels reachable from the `Ctrl+F` feature navigator): agent, collaboration, git, models, and more.
 - **🔍 Nothing scripted** — every panel shows data that came from the machine, the provider or the repo, and says so in its own words when it cannot get it. No list in this UI is seeded with samples, and no gauge renders a zero for a measurement that never happened.
 - **🔒 Secure by design** — token-authenticated collaboration server and a pattern-based OWASP Top 10 scanner (`xencode analyze`).
-- **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). What a manifest declares is checked, not ignored: adding a prompt prefix requires the `prompt` permission and registering a shell-running hook requires `hooks`, so a plugin that uses a capability it did not ask for — or names one the host does not recognise — is refused and contributes nothing to the loop. No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold and why the rest did not.
+- **🔌 Plugin runtime** — `xencode-plugin-rs` discovers `plugin.json` manifests, registers each compatible one with the host, and routes what it declares into every agent turn: a prompt prefix ahead of the system prompt and `before`/`after` tool hooks (config.json wins any conflict). What a manifest declares is checked, not ignored: adding a prompt prefix requires the `prompt` permission and registering a shell-running hook requires `hooks`, so a plugin that uses a capability it did not ask for — or names one the host does not recognise — is refused and contributes nothing to the loop. No dynamic linking: a manifest is the whole plugin, and `xencode plugin list` / the TUI's `/plugin` report which ones actually took hold and why the rest did not — including the exact lines of prompt text each one puts ahead of the system prompt, and the git commit an installed plugin is pinned to. `xencode plugin install <git-url>` clones, verifies the manifest, and prints that declaration *before* anything is copied into the plugin directory; `xencode plugin update <name>` fetches the repository again and shows a diff, refusing to apply an update that changes the prompt text or hooks until it is acknowledged with `--yes`.
 - **📚 Skills, listed always and read on request** — a skill is one directory holding a `SKILL.md`: a name and a one-line description of when to use it at the top, the instructions below it. Xencode scans `~/.xencode/skills` (or `$XCODE_SKILLS_DIR`) and `.xencode/skills` inside your workspace — a project skill replaces a user skill of the same name — and puts only the *list* (a heading plus one line per skill) ahead of the system prompt. The instructions themselves stay on disk until the model asks for one, by name, through the read-only `load_skill` tool. So thirty installed skills cost a turn a short list rather than thirty documents: measured here on a local model, 30 skills added 736 tokens to the prompt while their 22,380 tokens of instructions were never sent. `/skills` reports what loaded, what was refused and what the list costs; `/skills reload` re-scans both directories.
 - **☁️ Rented GPUs, no infrastructure** — `xencode colab up` brings a Google Colab VM up with llama.cpp or Ollama serving an OpenAI endpoint and tunnels it to `127.0.0.1` over the official `colab ssh` bridge; the model picker, `remote:…` routing and Provider Health treat it like any other provider. No public URL, nothing exposed.
 - **🛰️ Built for teams** — HTTP/WebSocket collaboration server with bearer-token auth, role-based relay and an append-only audit trail, plus a Dockerfile and Compose setup for the API server.
@@ -221,8 +221,9 @@ xencode analyze src/
 xencode server           # local-first: http://127.0.0.1:8765, ws://
 # then in the TUI: Ctrl+F → Collaboration Hub → c to create, j to join
 
-# 7) See which plugins load — the TUI's /plugin reports the same load
-xencode plugin list
+# 7) Install a plugin from a git repository, then see what it contributes
+xencode plugin install <git-url>   # shows what it declares, and the commit it pinned
+xencode plugin list                # the TUI's /plugin reports the same load
 ```
 
 **TUI shortcuts:** `Tab` cycles panels · `?` opens the keybinding help overlay · `Ctrl+F` opens the Feature Navigator.
@@ -302,9 +303,10 @@ Press `?` in the TUI for the live keybinding and command overlay.
 | **Colab** | `xencode colab preflight` | Is the bridge usable? (CLI version, auth, ssh key) |
 | **Colab** | `xencode colab up` | Bring up a VM + inference server and tunnel it to localhost (`--reconnect` repairs a broken bridge) |
 | **Colab** | `xencode colab status` / `down` | Forward/session/endpoint health, then kill the forward and release the VM |
-| **Plugin** | `xencode plugin list` | Report each plugin and whether it loads |
-| **Plugin** | `xencode plugin install <path>` | Install a plugin, then say if it loaded |
-| **Plugin** | `xencode plugin remove <name>` | Remove a plugin by name |
+| **Plugin** | `xencode plugin list` | Report each plugin, whether it loads, what it contributes, and the commit a git install is pinned to |
+| **Plugin** | `xencode plugin install <git-url> \| <path>` | Install from a git URL or a local path — shows what the plugin declares before copying it in, and names the commit a git install was pinned to (`--rev` picks the branch, tag or commit) |
+| **Plugin** | `xencode plugin update <name>` | Fetch the plugin's own repository again and show a diff of what changed; an update that alters the prompt or hooks is only applied with `--yes` |
+| **Plugin** | `xencode plugin remove <name>` | Remove a plugin by name, after listing the prompt lines it was contributing |
 
 > For the full CLI reference run `xencode --help`.
 
@@ -607,7 +609,7 @@ See also: [docs/INSTALL_MANUAL.md](docs/INSTALL_MANUAL.md) · [docs/api_document
 
 ```bash
 cd rust
-cargo test                          # Full workspace suite (1746 passing)
+cargo test                          # Full workspace suite (1771 passing)
 cargo test -p xencode-analysis-rs   # Single crate
 cargo test -p xencode-tui-rs        # TUI widgets and panels
 cargo test -p xencode-server-rs     # Axum HTTP/WS server & auth

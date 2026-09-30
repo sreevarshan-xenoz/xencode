@@ -1,4 +1,5 @@
 pub mod host;
+pub mod install;
 pub mod manifest;
 pub mod plugin_trait;
 pub mod registry;
@@ -6,6 +7,10 @@ pub mod runtime;
 pub mod skills;
 
 pub use host::{BasicHost, Host};
+pub use install::{
+    clone_at, disclose, is_git_source, prepare_git, prepare_path, prepare_update, read_source,
+    short_commit, InstallError, InstallOutcome, Pending, PluginSource, UpdatePlan, SOURCE_FILE,
+};
 pub use manifest::{PluginHooks, PluginManifest};
 pub use plugin_trait::{PluginError, PluginEvent, PluginHost, PluginResponse, XencodePlugin};
 pub use registry::PluginRegistry;

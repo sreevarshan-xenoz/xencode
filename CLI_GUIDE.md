@@ -1853,9 +1853,9 @@ reverse) is an error; the banner prints the real scheme — `ws://` stays
 `ws://`, only certificates earn `wss://`.
 
 ### `xencode plugin <action>`
-`list`, `install <path>`, `remove <name>`. Plugins live in `$XCODE_PLUGIN_DIR`,
-else `<data dir>/xencode/plugins` — the same directory the TUI loads from at
-startup, so the two never disagree.
+`list`, `install <git-url> | <path>`, `update <name>`, `remove <name>`. Plugins
+live in `$XCODE_PLUGIN_DIR`, else `<data dir>/xencode/plugins` — the same
+directory the TUI loads from at startup, so the two never disagree.
 
 A plugin is a directory holding `plugin.json` (or `manifest.json`). This build
 loads no executable plugin code: the manifest is the whole plugin, and the two
@@ -1886,21 +1886,59 @@ outright: it registers nothing and contributes nothing to the agent loop, and
 ```
 
 `list` runs the load and reports what took hold instead of just listing
-directories:
+directories — including the exact prompt lines each loaded plugin inserts and,
+for a git install, the commit it is pinned to:
 
 ```console
 $ xencode plugin list
 📦 Plugins in /tmp/j08-probe/plugins (xencode 0.1.0):
-  future v9.9.9 — NOT LOADED: needs xencode 0.1.0 (declared 9.9.9)
-  guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)
-  loose v0.1.0 — NOT LOADED: declares hooks that run a shell command but did not declare the "hooks" permission in its manifest
+  future v9.9.9 — NOT LOADED.
+      it contributes nothing: needs xencode 0.1.0 (declared 9.9.9)
+  guardrails v1.2.0 — loaded.
+      it puts 1 line(s) ahead of the agent's system prompt on every turn:
+      | Run cargo test before answering.
+      it declares 1 before hook(s) and 1 after hook(s), each of which runs a shell command in the workspace.
+  loose v0.1.0 — NOT LOADED.
+      it contributes nothing: declares hooks that run a shell command but did not declare the "hooks" permission in its manifest
   1 of 3 loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.
 ```
 
-`install <path>` copies the directory (or a single manifest) under that name and
-prints the same one-line verdict, so an install nothing can load is visible
-immediately. `remove <name>` deletes only that one directory; a name containing
-a path separator or `..` is rejected rather than resolved.
+`install` takes either a git URL (`https://…`, `git@…:…`, `file:///…`) or a
+local path to a plugin directory or manifest. With a git URL it clones, verifies
+the manifest against the same rules the loader uses, and **prints what the plugin
+declares — its permissions and the full prompt text — before anything is copied**
+into the plugin directory, so you see what will reach the model before it can.
+The install is pinned to one commit and says which, so what is installed can be
+named exactly later; `--rev <branch|tag|commit>` installs at that ref instead of
+the repository's default branch. A repository with no readable manifest, or a
+second copy of a plugin that is already installed, is refused — the latter points
+you at `update` or `remove` instead of overwriting.
+
+```console
+$ xencode plugin install file:///srv/plugins/guardrails
+What it declares:
+  permissions: prompt
+  prompt prefix: 1 line(s), put ahead of the agent's system prompt on every turn:
+    | Run cargo test before answering.
+  hooks: none
+Nothing else happens: this build loads no plugin code.
+
+✅ Installed guardrails v1.2.0 into ~/.local/share/xencode/plugins/guardrails.
+   Pinned to commit c45e3c2…. Nothing more is fetched until `xencode plugin update guardrails` is run.
+```
+
+`update <name>` fetches that plugin's own repository again (a plugin installed
+from a local path has no record of where it came from and is refused) and shows
+what changed. A bare version bump applies quietly, but an update that changes the
+prompt prefix, its hooks, or its permissions is shown as a unified manifest diff
+and marked `NOT APPLIED` — it changes what reaches the agent on every turn, so
+it is only installed when acknowledged with `--yes`. `--rev <ref>` moves the
+plugin to that branch, tag or commit; without it, a plugin pinned to a specific
+commit stays there even when its branch moves on.
+
+`remove <name>` lists the prompt lines the plugin was contributing, then deletes
+only that one directory; a name containing a path separator or `..` is rejected
+rather than resolved.
 
 ### Skills (`SKILL.md`)
 

@@ -9,7 +9,7 @@ use crate::plugin_trait::PluginError;
 /// attacker-controlled. `Path::join` happily walks out of the plugin directory
 /// given `../..`, and replaces the base entirely given an absolute path, so a
 /// name is only accepted when it is exactly one normal path component.
-fn is_safe_plugin_name(name: &str) -> bool {
+pub(crate) fn is_safe_plugin_name(name: &str) -> bool {
     let mut components = Path::new(name).components();
     matches!(
         (components.next(), components.next()),
@@ -43,6 +43,15 @@ impl PluginRegistry {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {
+                continue;
+            }
+            // A dot-prefixed directory is not a plugin. `xencode plugin update`
+            // moves the previous copy to a sibling of that shape while it swaps
+            // the new one in, and a half-finished swap must never be loaded.
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+            {
                 continue;
             }
 
@@ -256,5 +265,26 @@ mod tests {
 
         let registry = PluginRegistry::new(tmp.path().to_path_buf());
         assert!(registry.discover().is_empty());
+    }
+
+    /// The directory an update moves the previous copy into while it swaps the
+    /// new one in must never be loaded as a plugin of its own.
+    #[test]
+    fn discover_skips_a_dot_prefixed_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["guardrails", ".guardrails.old-4242"] {
+            let dir = tmp.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("plugin.json"),
+                serde_json::to_string(&manifest_named("guardrails")).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let registry = PluginRegistry::new(tmp.path().to_path_buf());
+        let found = registry.discover();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].name, "guardrails");
     }
 }
