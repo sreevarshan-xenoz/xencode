@@ -3583,12 +3583,29 @@ mod tests {
         .starts_with("error: read_file needs"));
     }
 
+    /// Poll until the task leaves Running, then keep polling until the output
+    /// readers have handed over everything they had. An exit is reaped the
+    /// moment the child is gone, but the last lines can still be in flight on
+    /// their reader tasks, so a snapshot taken right after the exit is not yet
+    /// the whole tail.
+    async fn wait_settled(rt: &TaskRuntime, id: u64, expected: usize) -> TaskRecord {
+        let mut rec = wait_exit(rt, id).await;
+        for _ in 0..100 {
+            if rec.output().len() >= expected {
+                return rec;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            rec = rt.lock().await.poll(id).await.unwrap();
+        }
+        panic!("task never finished writing its output: got {:?}", rec.output());
+    }
+
     #[tokio::test]
     async fn poll_output_tail_is_bounded() {
         let rt = new_task_runtime();
         let cmd = "for i in $(seq 1 60); do echo line$i; done";
         let id = rt.lock().await.start("bulk", cmd).await.unwrap();
-        let rec = wait_exit(&rt, id).await;
+        let rec = wait_settled(&rt, id, 60).await;
         // Record itself keeps everything (under the store cap)…
         assert_eq!(rec.output().len(), 60);
         // …but the model-facing render only gets the tail window.
