@@ -3945,6 +3945,7 @@ dependencies = [
  "xencode-config-rs",
  "xencode-context-rs",
  "xencode-core-rs",
+ "xencode-mcp-rs",
  "xencode-memory-rs",
  "xencode-models-rs",
  "xencode-plugin-rs",
@@ -4020,6 +4021,8 @@ dependencies = [
 name = "xencode-mcp-rs"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "reqwest",
  "serde_json",
  "tempfile",
  "thiserror",

@@ -426,17 +426,62 @@ pub struct ModelProfile {
     pub for_task: Option<String>,
 }
 
-/// One declared MCP server: a command we spawn and talk JSON-RPC to over its
-/// stdin/stdout. Credentials for a server go in `env`, not in `args`, so they
-/// do not end up in a shell history or a `ps` line.
+/// One declared MCP server, reached one of two ways: a `command` we spawn and
+/// talk JSON-RPC to over its stdin/stdout, or a hosted `url` we post each
+/// message to. Exactly one of the two is set — a declaration with neither has
+/// nothing to connect to, and one with both would be a coin flip.
+///
+/// Credentials for a spawned server go in `env`, and for an endpoint in
+/// `headers`, rather than in `args`: an argument ends up in a shell history and
+/// in `ps`, and a header value is never printed back.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct McpServer {
     /// Executable to spawn (resolved through `PATH` like a shell would).
-    pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
+    /// `http://` or `https://` address of a hosted server: one POST per message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Sent with every request to `url` — where `authorization: Bearer …` goes.
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+impl McpServer {
+    /// The command to spawn, when the declaration names one.
+    pub fn spawn_command(&self) -> Option<&str> {
+        self.command
+            .as_deref()
+            .filter(|command| !command.trim().is_empty())
+    }
+
+    /// The address to post to, when the declaration names one.
+    pub fn endpoint_url(&self) -> Option<&str> {
+        self.url.as_deref().filter(|url| !url.trim().is_empty())
+    }
+
+    /// What is wrong with a declaration that does not name exactly one way to
+    /// reach the server, in words for the person who wrote it. `None` when the
+    /// declaration is usable.
+    pub fn misconfigured(&self) -> Option<String> {
+        match (
+            self.spawn_command().is_some(),
+            self.endpoint_url().is_some(),
+        ) {
+            (true, false) => None,
+            (false, true) => None,
+            (false, false) => {
+                Some("names neither a \"command\" to spawn nor a \"url\" to reach".to_string())
+            }
+            (true, true) => Some(
+                "names both a \"command\" and a \"url\"; a server is one or the other".to_string(),
+            ),
+        }
+    }
 }
 
 /// Pre/post shell hooks (I3-02): commands run around approved agent tool
@@ -907,7 +952,8 @@ mod tests {
     }
 
     /// MCP servers are declared as a map in config.json, and a server with no
-    /// `args`/`env` of its own must still parse — that is the common case.
+    /// `args`/`env` of its own must still parse — that is the common case. A
+    /// hosted one is declared by its url and the headers it is reached with.
     #[test]
     fn mcp_servers_parse_from_config_json_and_survive_a_roundtrip() {
         let dir = temp_dir();
@@ -920,7 +966,9 @@ mod tests {
                 "mcp_servers": {
                     "docs": {"command": "mcp-docs", "args": ["--root", "/docs"],
                               "env": {"DOCS_TOKEN": "t"}},
-                    "bare": {"command": "npx"}
+                    "bare": {"command": "npx"},
+                    "hosted": {"url": "https://mcp.example.com/v1/mcp",
+                                "headers": {"authorization": "Bearer p-1"}}
                 }
             }"#,
         )
@@ -928,12 +976,23 @@ mod tests {
 
         let mut config = XencodeConfig::load_from(&path).unwrap();
         assert_eq!(config.mcp_timeout, 5);
-        assert_eq!(config.mcp_servers.len(), 2);
+        assert_eq!(config.mcp_servers.len(), 3);
         let docs = &config.mcp_servers["docs"];
-        assert_eq!(docs.command, "mcp-docs");
+        assert_eq!(docs.command.as_deref(), Some("mcp-docs"));
         assert_eq!(docs.args, vec!["--root".to_string(), "/docs".to_string()]);
         assert_eq!(docs.env.get("DOCS_TOKEN").map(String::as_str), Some("t"));
         assert_eq!(config.mcp_servers["bare"].args, Vec::<String>::new());
+        let hosted = &config.mcp_servers["hosted"];
+        assert_eq!(
+            hosted.endpoint_url(),
+            Some("https://mcp.example.com/v1/mcp")
+        );
+        assert_eq!(
+            hosted.headers.get("authorization").map(String::as_str),
+            Some("Bearer p-1")
+        );
+        // A url is not a command: nothing here would try to spawn `hosted`.
+        assert_eq!(hosted.spawn_command(), None);
 
         // Saving must not lose the map, or a server disappears silently.
         config.mcp_timeout = 9;
@@ -943,6 +1002,37 @@ mod tests {
         assert_eq!(loaded, config);
         assert_eq!(loaded.mcp_servers, config.mcp_servers);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A declaration that names no way to reach the server, or names both, is a
+    /// mistake the reader has to be told about rather than one we guess at.
+    #[test]
+    fn a_server_must_name_exactly_one_of_command_and_url() {
+        let usable = |server: McpServer| assert_eq!(server.misconfigured(), None, "{server:?}");
+        let unusable = |server: McpServer| {
+            assert!(server.misconfigured().is_some(), "{server:?} looks usable");
+        };
+
+        usable(McpServer {
+            command: Some("mcp-docs".into()),
+            ..Default::default()
+        });
+        usable(McpServer {
+            url: Some("https://example.com/mcp".into()),
+            ..Default::default()
+        });
+        unusable(McpServer::default());
+        // Empty and whitespace-only are the same as absent: there is nothing to
+        // spawn and nowhere to post.
+        unusable(McpServer {
+            command: Some("   ".into()),
+            ..Default::default()
+        });
+        unusable(McpServer {
+            command: Some("npx".into()),
+            url: Some("https://example.com/mcp".into()),
+            ..Default::default()
+        });
     }
 
     /// Hooks ride along in config.json the way MCP servers do: a missing

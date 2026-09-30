@@ -353,13 +353,12 @@ pub const SETTINGS_LABEL_WIDTH: usize = 17;
 /// Render a secret for the screen: bullets, with the last four characters
 /// kept so two keys can be told apart. A value short enough to be fully
 /// revealed by that tail is hidden entirely.
+///
+/// The rule itself lives with the MCP client, which has to draw an access token
+/// written into a server's url exactly this way, so there is one implementation
+/// rather than two that can drift apart.
 pub fn mask_secret(value: &str) -> String {
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() <= 8 {
-        return "••••".to_string();
-    }
-    let tail: String = chars[chars.len() - 4..].iter().collect();
-    format!("{}{tail}", "•".repeat((chars.len() - 4).min(12)))
+    xencode_mcp_rs::mask_secret(value)
 }
 
 pub const FEATURE_LIST: &[(&str, &str)] = &[

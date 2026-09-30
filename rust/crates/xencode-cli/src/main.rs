@@ -4523,19 +4523,58 @@ fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
             }
         }
         for (name, server) in &config.mcp_servers {
-            match doc::resolve_on_path(&server.command) {
+            let check = format!("mcp:{name}");
+            // A declaration has to say how its server is reached before either
+            // kind of check below means anything.
+            if let Some(problem) = server.misconfigured() {
+                checks.push(doc::SelfCheck {
+                    name: check,
+                    state: "fail".to_string(),
+                    detail: format!("the declaration {problem}"),
+                });
+                continue;
+            }
+            if let Some(url) = server.endpoint_url() {
+                // A hosted server is checked the way a provider endpoint is:
+                // does its address answer. Only the address is printed, with
+                // any credentials it carries masked.
+                let shown = xencode_mcp_rs::masked_url(url);
+                match xencode_mcp_rs::address_of(url) {
+                    Some((host, port)) => {
+                        let reachable =
+                            doc::tcp_reachable(&host, port, std::time::Duration::from_secs(2));
+                        checks.push(doc::SelfCheck {
+                            name: check,
+                            state: if reachable { "pass" } else { "fail" }.to_string(),
+                            detail: if reachable {
+                                format!("{shown} accepts TCP on {host}:{port}")
+                            } else {
+                                format!("{host}:{port} refused, so {shown} is not reachable")
+                            },
+                        });
+                    }
+                    None => checks.push(doc::SelfCheck {
+                        name: check,
+                        state: "fail".to_string(),
+                        detail: format!("{shown} is not an address a server can be reached on"),
+                    }),
+                }
+                continue;
+            }
+            // A command is checked the way a shell would: whether it is there
+            // to spawn. Its environment, where its credentials go, is not
+            // printed.
+            let command = server.spawn_command().unwrap_or_default();
+            match doc::resolve_on_path(command) {
                 Some(path) => checks.push(doc::SelfCheck {
-                    name: format!("mcp:{name}"),
+                    name: check,
                     state: "pass".to_string(),
-                    detail: format!("{} resolves to {}", server.command, path.display()),
+                    detail: format!("{command} resolves to {}", path.display()),
                 }),
                 None => checks.push(doc::SelfCheck {
-                    name: format!("mcp:{name}"),
+                    name: check,
                     state: "fail".to_string(),
-                    detail: format!(
-                        "{} is not on PATH, so the server cannot spawn",
-                        server.command
-                    ),
+                    detail: format!("{command} is not on PATH, so the server cannot spawn"),
                 }),
             }
         }

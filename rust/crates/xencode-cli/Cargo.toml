@@ -22,6 +22,7 @@ xencode-server-rs = { path = "../xencode-server-rs" }
 xencode-plugin-rs = { path = "../xencode-plugin-rs" }
 xencode-analysis-rs = { path = "../xencode-analysis-rs" }
 xencode-context-rs = { path = "../xencode-context-rs" }
+xencode-mcp-rs = { path = "../xencode-mcp-rs" }
 xencode-colab-rs = { path = "../xencode-colab-rs" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use xencode_mcp_rs::McpClient;
-pub use xencode_mcp_rs::ServerSpec;
+pub use xencode_mcp_rs::{ServerSpec, Transport};
 use xencode_providers_rs::ToolDefinition;
 
 /// Prefix that marks a tool as coming from a server rather than from xencode.
@@ -21,18 +21,39 @@ pub const MCP_PREFIX: &str = "mcp__";
 /// names we import from a server and the names we publish as one.
 pub const MAX_TOOL_NAME: usize = 64;
 
-/// A server's declaration in config, turned into what the client needs.
-pub fn spec_from_config(name: &str, server: &xencode_config_rs::McpServer) -> ServerSpec {
-    ServerSpec {
-        name: name.to_string(),
-        command: server.command.clone(),
-        args: server.args.clone(),
-        env: server
-            .env
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
+/// A server's declaration in config, turned into what the client needs. A
+/// declaration that names neither a command to spawn nor an address to post to
+/// — or both — comes back as the sentence a person can act on instead of a
+/// guess about which half they meant.
+pub fn spec_from_config(
+    name: &str,
+    server: &xencode_config_rs::McpServer,
+) -> Result<ServerSpec, String> {
+    if let Some(problem) = server.misconfigured() {
+        return Err(problem);
     }
+    let spec = match server.endpoint_url() {
+        Some(url) => {
+            let mut spec = ServerSpec::http(name, url);
+            for (key, value) in &server.headers {
+                spec = spec.header(key.clone(), value.clone());
+            }
+            spec
+        }
+        None => {
+            // `misconfigured()` said exactly one of the two is set, so the
+            // command a spawned server needs is here.
+            let command = server.spawn_command().unwrap_or_default();
+            ServerSpec::new(name, command).args(&server.args).env(
+                server
+                    .env
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            )
+        }
+    };
+    Ok(spec)
 }
 
 /// A name a provider will accept as a function: ASCII alphanumerics, `_` and
@@ -301,8 +322,10 @@ impl McpHub {
         }
     }
 
-    /// One line per running server for `/mcp`, including what it printed that
-    /// was not the protocol. No servers means a line saying so.
+    /// One line per running server for `/mcp`: where it is reached, how many
+    /// tools it offered, and what it printed that was not the protocol. An
+    /// endpoint's credentials are masked the way a provider key is, so this line
+    /// is safe to read aloud. No servers means a line saying so.
     pub async fn status_lines(&self) -> Vec<String> {
         let sessions = self.sessions.lock().await;
         if sessions.is_empty() {
@@ -321,9 +344,10 @@ impl McpHub {
                     String::new()
                 };
                 format!(
-                    "{}: {} tool(s){noise}",
+                    "{}: {} tool(s){noise} · {}",
                     session.client.name(),
                     session.tools.len(),
+                    session.client.endpoint(),
                 )
             })
             .collect()
@@ -514,7 +538,12 @@ done
         assert!(missing.contains("does not offer"), "{missing}");
 
         let status = hub.status_lines().await;
-        assert_eq!(status, vec!["fixture: 1 tool(s)".to_string()]);
+        assert_eq!(status.len(), 1);
+        assert!(
+            status[0].starts_with("fixture: 1 tool(s) · /bin/sh "),
+            "the line names how the server is reached: {}",
+            status[0]
+        );
 
         // Reconnecting a running server is a no-op that reports itself as such.
         let again = hub.connect(&[spec], Duration::from_secs(5)).await;
@@ -527,5 +556,83 @@ done
             .await
             .contains("not running"));
         std::fs::remove_dir_all(&dir).expect("clean fixture dir");
+    }
+
+    /// A config entry is turned into the transport it names: a command to spawn
+    /// with its arguments and environment, or an address to post to with the
+    /// headers it is authenticated by.
+    #[test]
+    fn a_spawned_server_and_a_hosted_one_become_different_specs() {
+        let spawned = spec_from_config(
+            "docs",
+            &xencode_config_rs::McpServer {
+                command: Some("mcp-docs".into()),
+                args: vec!["--root".into(), "/docs".into()],
+                env: std::collections::BTreeMap::from([("DOCS_TOKEN".into(), "t".into())]),
+                ..Default::default()
+            },
+        )
+        .expect("a command is a way to reach a server");
+        assert_eq!(
+            spawned.transport,
+            Transport::Stdio {
+                command: "mcp-docs".to_string(),
+                args: vec!["--root".to_string(), "/docs".to_string()],
+                env: vec![("DOCS_TOKEN".to_string(), "t".to_string())],
+            }
+        );
+
+        let hosted = spec_from_config(
+            "hosted",
+            &xencode_config_rs::McpServer {
+                url: Some("https://mcp.example.com/v1/mcp".into()),
+                headers: std::collections::BTreeMap::from([(
+                    "authorization".into(),
+                    "Bearer p-1".into(),
+                )]),
+                ..Default::default()
+            },
+        )
+        .expect("a url is a way to reach a server");
+        assert_eq!(
+            hosted.transport,
+            Transport::Http {
+                url: "https://mcp.example.com/v1/mcp".to_string(),
+                headers: vec![("authorization".to_string(), "Bearer p-1".to_string())],
+            }
+        );
+        // An argument belongs to a process. Handing one to an endpoint would be
+        // a silent nothing, so the builder leaves a url spec as it is.
+        assert_eq!(hosted.clone().args(&["--root".into()]), hosted);
+    }
+
+    /// A declaration that cannot be read as one server is refused in words, in
+    /// the same places: nothing is spawned and nothing is posted.
+    #[test]
+    fn a_declaration_that_names_no_way_to_reach_the_server_is_refused() {
+        for (name, server) in [
+            (
+                "empty",
+                xencode_config_rs::McpServer {
+                    ..Default::default()
+                },
+            ),
+            (
+                "both",
+                xencode_config_rs::McpServer {
+                    command: Some("npx".into()),
+                    url: Some("https://example.com/mcp".into()),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let problem = spec_from_config(name, &server)
+                .err()
+                .unwrap_or_else(|| panic!("{name} declares no way to reach a server"));
+            assert!(
+                problem.contains("\"command\"") && problem.contains("\"url\""),
+                "{name}: {problem}"
+            );
+        }
     }
 }
