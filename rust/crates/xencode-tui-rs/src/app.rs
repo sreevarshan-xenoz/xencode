@@ -5378,12 +5378,33 @@ impl<'a> App<'a> {
                     );
                     return;
                 }
+                let mut refused: Vec<String> = Vec::new();
                 let specs: Vec<crate::mcp::ServerSpec> = self
                     .config
                     .mcp_servers
                     .iter()
-                    .map(|(name, server)| crate::mcp::spec_from_config(name, server))
+                    .filter_map(|(name, server)| {
+                        match crate::mcp::spec_from_config(name, server) {
+                            Ok(spec) => Some(spec),
+                            // A declaration that does not say how to reach its
+                            // server is skipped, in words, rather than guessed
+                            // at; the ones that do are still connected.
+                            Err(problem) => {
+                                refused.push(format!("MCP server `{name}` {problem}."));
+                                None
+                            }
+                        }
+                    })
                     .collect();
+                for line in refused {
+                    self.system_line(&line);
+                }
+                if specs.is_empty() {
+                    self.system_line(
+                        "No server in \"mcp_servers\" says how to reach it, so nothing was started.",
+                    );
+                    return;
+                }
                 self.system_line(&format!("Connecting {} MCP server(s)…", specs.len()));
                 let mcp = self.mcp.clone();
                 let timeout = std::time::Duration::from_secs(self.config.mcp_timeout.max(1));
