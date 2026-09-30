@@ -6,6 +6,12 @@
 - **Rust First**: All new development, bug fixes, features, TUI improvements, model provider integrations, settings, and CLI tools MUST be written in Rust under the `rust/` directory (`rust/crates/*`).
 - When inspecting or fixing functionality (such as model selection, settings panel, Ollama integration, etc.), always target the Rust implementation (`rust/crates/xencode-tui-rs`, `rust/crates/xencode-models-rs`, `rust/crates/xencode-providers-rs`, `rust/crates/xencode-config-rs`, etc.).
 
+## 🚫 No Mocks Rule: Real Implementations Only
+
+- **No mocks anywhere** — not in product code, not in tests, not as scaffolding for unfinished features. Every implementation must be real and do what its name claims: actual file/Network/process/system behavior, actual provider calls, actual data. Stubs, fake data sources, canned responses, and "placeholder until we wire it up" shortcuts are forbidden.
+- **Verification means it actually ran.** A done-when claim must come from watching the real behavior happen (live runs, real output, quoted numbers), never from a mock passing. If something can only be tested against a service or device that isn't here, say so and leave the item unchecked — do not fake it green.
+- When a plan item's implementation would require a mock to finish, that item is **blocked, not done** — surface it to the user instead of papering over it.
+
 ## 🔄 Commit Rule: Atomic Git Commits
 
 - **Commit Each Change Before Doing Next Changes**: Every logical task, feature, or bug fix MUST be committed to git immediately upon completion and verification before proceeding to the next change. Never accumulate multiple unrelated changes in the working tree without committing each step first.
