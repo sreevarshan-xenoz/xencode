@@ -5436,7 +5436,25 @@ impl<'a> App<'a> {
             .plugins
             .reports()
             .iter()
-            .map(|report| report.summary())
+            .map(|report| {
+                let mut lines = vec![report.summary()];
+                if let Some(origin) = report.source.as_ref().and_then(|source| source.summary()) {
+                    lines.push(format!("    from {origin}"));
+                }
+                // The summary only says a prefix exists. This is what it says,
+                // so the text reaching the model can be read here rather than
+                // opened out of the manifest file.
+                if !report.prompt_text.is_empty() {
+                    lines.push(format!(
+                        "    its prompt text, on every turn ({} line(s)):",
+                        report.prompt_text.lines().count()
+                    ));
+                    for text in report.prompt_text.lines() {
+                        lines.push(format!("    | {text}"));
+                    }
+                }
+                lines.join("\n")
+            })
             .collect();
         for summary in summaries {
             self.system_line(&format!("  {summary}"));
@@ -10298,6 +10316,16 @@ mod tests {
         assert!(
             said.iter()
                 .any(|line| line.contains("Hooks in effect: 0 before, 0 after")),
+            "{said:?}"
+        );
+        // M-4: the report does not stop at "there is a prefix" — the text every
+        // turn will carry is shown here, so it can be read without opening the
+        // manifest file.
+        assert!(
+            said.iter().any(
+                |line| line.contains("its prompt text, on every turn (1 line(s))")
+                    && line.contains("| Run the tests.")
+            ),
             "{said:?}"
         );
         assert!(app.agent_system_prompt().starts_with("Run the tests."));

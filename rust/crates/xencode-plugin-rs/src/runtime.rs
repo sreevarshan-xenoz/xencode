@@ -17,8 +17,15 @@ pub struct LoadReport {
     pub reason: Option<String>,
     /// Whether it contributes text to the agent's system prompt.
     pub prompt_prefix: bool,
+    /// That text itself, trimmed, exactly as every turn carries it. Empty when
+    /// the plugin adds none. `summary()` counts a prefix; this is what the
+    /// counter is talking about, so a viewer can show it instead of asserting
+    /// that a prefix exists.
+    pub prompt_text: String,
     pub before_hooks: usize,
     pub after_hooks: usize,
+    /// Where the installed copy came from, when the installer recorded it.
+    pub source: Option<crate::install::PluginSource>,
 }
 
 impl LoadReport {
@@ -146,6 +153,9 @@ impl PluginRuntime {
 
         for manifest in manifests {
             let name = manifest.name.clone();
+            // Where this copy came from, reported whatever else happens: a plugin
+            // that refuses to load still needs its commit named.
+            let source = crate::install::read_source(dir, &name);
             if !manifest.is_compatible_with(xencode_version) {
                 reports.push(not_loaded(
                     &manifest,
@@ -153,6 +163,7 @@ impl PluginRuntime {
                         "needs xencode {xencode_version} (declared {})",
                         manifest.xencode_version
                     )),
+                    source,
                 ));
                 continue;
             }
@@ -167,6 +178,7 @@ impl PluginRuntime {
                 reports.push(not_loaded(
                     &manifest,
                     Some(missing_permission_note(&undeclared)),
+                    source,
                 ));
                 continue;
             }
@@ -180,6 +192,7 @@ impl PluginRuntime {
                         quote_list(&unknown),
                         KNOWN_PERMISSIONS.join(", ")
                     )),
+                    source,
                 ));
                 continue;
             }
@@ -187,7 +200,7 @@ impl PluginRuntime {
             let built = match registry.load_plugin(&manifest) {
                 Ok(plugin) => plugin,
                 Err(e) => {
-                    reports.push(not_loaded(&manifest, Some(e.to_string())));
+                    reports.push(not_loaded(&manifest, Some(e.to_string()), source));
                     continue;
                 }
             };
@@ -195,11 +208,12 @@ impl PluginRuntime {
             match host.register(Box::new(built), manifest.clone(), &host_ctx) {
                 Ok(()) => {
                     let (plugin_hooks, plugin_prefix) = declared;
-                    if !plugin_prefix.trim().is_empty() {
+                    let text = plugin_prefix.trim().to_string();
+                    if !text.is_empty() {
                         if !prefix.is_empty() {
                             prefix.push('\n');
                         }
-                        prefix.push_str(plugin_prefix.trim());
+                        prefix.push_str(&text);
                     }
                     merge_hooks(&mut hooks, &plugin_hooks);
                     reports.push(LoadReport {
@@ -207,12 +221,14 @@ impl PluginRuntime {
                         version: manifest.version.clone(),
                         loaded: true,
                         reason: None,
-                        prompt_prefix: !plugin_prefix.trim().is_empty(),
+                        prompt_prefix: !text.is_empty(),
+                        prompt_text: text,
                         before_hooks: plugin_hooks.before.len(),
                         after_hooks: plugin_hooks.after.len(),
+                        source,
                     });
                 }
-                Err(e) => reports.push(not_loaded(&manifest, Some(e.to_string()))),
+                Err(e) => reports.push(not_loaded(&manifest, Some(e.to_string()), source)),
             }
         }
 
@@ -281,21 +297,27 @@ fn merge_hooks(into: &mut PluginHooks, from: &PluginHooks) {
     }
 }
 
-fn not_loaded(manifest: &PluginManifest, reason: Option<String>) -> LoadReport {
+fn not_loaded(
+    manifest: &PluginManifest,
+    reason: Option<String>,
+    source: Option<crate::install::PluginSource>,
+) -> LoadReport {
     LoadReport {
         name: manifest.name.clone(),
         version: manifest.version.clone(),
         loaded: false,
         reason,
         prompt_prefix: false,
+        prompt_text: String::new(),
         before_hooks: 0,
         after_hooks: 0,
+        source,
     }
 }
 
 /// `["a", "b"]` → `"a", "b"` with each entry quoted — used for permission lists
 /// in refusal messages so an empty or odd string stays legible.
-fn quote_list(items: &[&str]) -> String {
+pub(crate) fn quote_list(items: &[&str]) -> String {
     items
         .iter()
         .map(|item| format!("\"{item}\""))
@@ -307,7 +329,7 @@ fn quote_list(items: &[&str]) -> String {
 /// Names each missing permission and, in plain words, what the plugin was about
 /// to do with it, so the fix (add it to `permissions`) is obvious from the
 /// report alone.
-fn missing_permission_note(undeclared: &[&str]) -> String {
+pub(crate) fn missing_permission_note(undeclared: &[&str]) -> String {
     let clauses: Vec<String> = undeclared
         .iter()
         .map(|cap| match *cap {

@@ -189,7 +189,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /rewind [turns]       - Undo the agent's file changes for this session
 /mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them
 /spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
-/plugin [reload]      - Show which plugins took effect, or re-scan the plugin dir
+/plugin [reload]      - Show which plugins took effect, the prompt text and pinned commit each one contributes, or re-scan the plugin dir
 /skills [reload]      - Show which SKILL.md skills loaded, what they refuse and what the prompt pays for them, or re-scan both skill directories
 /trace [turns]        - Replay what the last agent turns did, from the local turn log
 /cost                 - Tokens, KV-cache reuse, speed and spend for this project

@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1746 tests passing, zero warnings (re-verified 2026-09-30)
+- [x] Workspace gates green — 16 crates, 1771 tests passing, zero warnings (re-verified 2026-09-30)
 
 ## Model Catalog Honesty
 
@@ -1555,7 +1555,7 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       menu costs; `/skills reload` re-scans. Covered by 15 loader tests and 9 in
       the TUI. Workspace suite **1746 passed, 0 failed, 17 ignored**,
       `cargo fmt --check` and clippy clean.*
-- [ ] **M-4 — `xencode plugin install <git-url>`.** Clone, pin the commit, verify
+- [x] **M-4 — `xencode plugin install <git-url>`.** Clone, pin the commit, verify
       the manifest, show a diff of what it declares before it can contribute a
       prompt prefix, then copy into the config dir. `remove` and `update`
       complete the cycle.
@@ -1563,6 +1563,22 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       unpinned install says which commit it pinned, and a manifest that gains a
       new `prompt_prefix` on update is shown as a diff rather than applied
       silently.
+      *Verified live against a real `file://` git repository, not a mock. The
+      install printed its declaration ("What it declares:" with the prompt text
+      and `permissions: prompt`) before the copy line, and an unpinned install
+      named the commit it pinned: `Pinned to commit c45e3c2…`, matching
+      `git rev-parse HEAD` `c45e3c2811c34e03d0f4676d5c185cace255666f`. `plugin
+      list` and the TUI `/plugin` both show the source
+      (`from file:///tmp/m4-src @ 0b96689`) and the prefix text line by line
+      (`| Never widen a permission without asking.`). Widening the prompt to two
+      lines and updating without `--yes` printed a unified manifest diff and
+      `NOT APPLIED: … still v0.1.0`, and `grep '"version"'` on the installed
+      file confirmed it was still `0.1.0`; `--yes` applied it and re-pinned to
+      `0b96689…`, leaving no dot-prefixed backup directory behind. Covered by 19
+      tests in `install.rs` and 4 CLI integration tests in
+      `plugin_git_install.rs` that spawn the real binary against a real clone.
+      Workspace suite **1771 passed, 0 failed, 17 ignored**, `cargo fmt --check`
+      and clippy clean.*
 - [ ] **M-5 — `xencode mcp serve`: xencode as an MCP server.** Expose `read_file`,
       `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` over
       stdio using the official `rmcp` SDK (replacing the hand-rolled client only
