@@ -130,6 +130,13 @@ pub struct XencodeConfig {
     #[serde(default = "default_agent_command_timeout")]
     pub agent_command_timeout: u64,
 
+    /// How many times one chat turn may send a failing project check (the
+    /// discovered `cargo test`/`cargo clippy` commands) back to the model for
+    /// another repair attempt before the turn ends and the task is reported
+    /// as incomplete. 0 turns the repair loop off entirely.
+    #[serde(default = "default_agent_repair_max_iters")]
+    pub agent_repair_max_iters: usize,
+
     /// Alternate models tried in order when the configured model fails before
     /// producing any output (I4-01). A different provider/model can fix what a
     /// permanent error on the primary cannot — a 404 `model not found`, a
@@ -474,6 +481,10 @@ fn default_agent_command_timeout() -> u64 {
     30
 }
 
+fn default_agent_repair_max_iters() -> usize {
+    3
+}
+
 fn default_ollama_url() -> String {
     "http://localhost:11434".to_string()
 }
@@ -536,6 +547,7 @@ impl Default for XencodeConfig {
             agent_approval: default_agent_approval(),
             agent_max_rounds: default_agent_max_rounds(),
             agent_command_timeout: default_agent_command_timeout(),
+            agent_repair_max_iters: default_agent_repair_max_iters(),
             agent_fallback_models: Vec::new(),
             ollama_url: default_ollama_url(),
             ollama_reasoning: None,

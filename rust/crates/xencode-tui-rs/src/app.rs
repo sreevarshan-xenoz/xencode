@@ -222,6 +222,10 @@ pub(crate) struct AgentRun {
     /// Offered until the final round, which is tool-less so a run always ends
     /// with a text answer.
     pub(crate) max_rounds: usize,
+    /// How many times a failing project check may be handed back to the model
+    /// for another repair attempt before the turn ends reporting the task
+    /// incomplete (L-7). From `agent_repair_max_iters`; 0 disables the gate.
+    pub(crate) max_repair_iters: usize,
     /// Alternate models tried in order when the primary fails before emitting
     /// any output (I4-01). Set from `agent_fallback_models` config.
     pub(crate) fallback_models: Vec<String>,
@@ -3244,6 +3248,7 @@ impl<'a> App<'a> {
             tool_root: root.clone(),
             // Keep at least one tool round; 0 would offer tools on no turn.
             max_rounds: self.config.agent_max_rounds.clamp(1, 64),
+            max_repair_iters: self.config.agent_repair_max_iters,
             fallback_models: self.config.agent_fallback_models.clone(),
             egress: self.egress_policy(),
             trace_dir: root.join(xencode_context_rs::XENCODE_DIR),
@@ -7908,6 +7913,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         task_runtime,
         tool_root,
         max_rounds,
+        max_repair_iters,
         fallback_models,
         ollama_url,
         llama_cpp_url,
@@ -7942,6 +7948,12 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
     let mut reported_tokens: Option<u64> = None;
     let mut last_timings = None;
     let mut stopped_on_error = false;
+    // L-7 repair gate state: did this turn actually edit workspace files,
+    // how many failing checks have already been handed back, and what the
+    // project's own commands are (discovered once, from disk, on first use).
+    let mut turn_edited = false;
+    let mut repair_iters: usize = 0;
+    let mut check_commands: Option<Vec<String>> = None;
 
     let client = OllamaClient::new(&ollama_url, timeout);
     let llama_client = LlamaCppClient::new(&llama_cpp_url, timeout);
@@ -8071,7 +8083,117 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             // The answer that ended the run is still a model call worth
             // keeping, with no tool results under it.
             record_round(session.as_mut(), recorder.as_ref(), Vec::new());
-            break;
+            // L-7: the model's claim of completion does not end the turn if the
+            // turn edited project files. The project's own test and lint
+            // commands run through the same approval gate as any shell call,
+            // and their exit codes — never the model's words — decide whether
+            // the turn may finish. A failing check goes back to the model for
+            // another repair round, up to `max_repair_iters` times; past that
+            // the turn ends and reports the task unfinished.
+            let mut ending_turn = true;
+            if max_repair_iters > 0 && turn_edited {
+                let commands = check_commands
+                    .get_or_insert_with(|| crate::agent_tools::discover_check_commands(&tool_root));
+                if !commands.is_empty() {
+                    let mut failure: Option<(String, xencode_providers_rs::ToolCall, String)> =
+                        None;
+                    let mut verifiable = true;
+                    for (index_of, command) in commands.iter().enumerate() {
+                        let call = xencode_providers_rs::ToolCall {
+                            id: format!("verify-{rounds}-{index_of}"),
+                            name: "run_command".to_string(),
+                            arguments: serde_json::json!({ "command": command }),
+                        };
+                        if sink == LoopSink::Chat {
+                            let _ = tx.send(format!(
+                                "[TOOL]→ {}",
+                                crate::agent_tools::summarize_call(&call)
+                            ));
+                        }
+                        let result = crate::agent_tools::execute_tool_call_approved(
+                            &task_runtime,
+                            &tool_root,
+                            &call,
+                            &approval,
+                            Some(&approval.mcp),
+                        )
+                        .await;
+                        let outcome = crate::agent_tools::call_outcome(&result);
+                        if sink == LoopSink::Chat {
+                            let _ = tx.send(format!(
+                                "[TOOL]← {}",
+                                crate::agent_tools::truncate_one_line(&result, 120)
+                            ));
+                        }
+                        let tail = xencode_context_rs::tail_preview(
+                            &result,
+                            xencode_context_rs::TRACE_TAIL_CAP,
+                        );
+                        turn_tools.push(xencode_context_rs::ToolTrace {
+                            name: call.name.clone(),
+                            outcome: outcome.label().to_string(),
+                            arguments: xencode_context_rs::arguments_preview(&call.arguments),
+                            tail: (!tail.is_empty()).then_some(tail),
+                        });
+                        match crate::agent_tools::check_verdict(&result) {
+                            crate::agent_tools::CheckVerdict::Passed => continue,
+                            crate::agent_tools::CheckVerdict::Unverifiable => {
+                                // No exit code is a fact about the check (a
+                                // denial, a timeout, a missing toolchain), not
+                                // a verdict on the edit. Say it ended
+                                // unverified and stop gating — inventing a
+                                // pass or a fail here would be a lie.
+                                verifiable = false;
+                                if sink == LoopSink::Chat {
+                                    let _ = tx.send(format!(
+                                        "[TOOL]✗ `{command}` produced no exit code, so this turn's edits end unverified"
+                                    ));
+                                }
+                                break;
+                            }
+                            crate::agent_tools::CheckVerdict::Failed => {
+                                failure = Some((command.clone(), call, result));
+                                break;
+                            }
+                        }
+                    }
+                    if verifiable && failure.is_none() && sink == LoopSink::Chat {
+                        let _ = tx.send(format!(
+                            "[TOOL]✓ verified: {} exited 0",
+                            commands.join(", ")
+                        ));
+                    }
+                    if let Some((command, call, result)) = failure {
+                        // A fed-back failure is only a repair attempt if the
+                        // model actually gets another turn to act on it.
+                        if repair_iters < max_repair_iters && round < max_rounds {
+                            repair_iters += 1;
+                            if sink == LoopSink::Chat {
+                                let _ = tx.send(format!(
+                                    "[TOOL]⚠ `{command}` failed · repair attempt {repair_iters}/{max_repair_iters}: the failure output is back with the model"
+                                ));
+                            }
+                            history.push(xencode_providers_rs::AgentTurn::Assistant {
+                                text: step.text.clone(),
+                                calls: vec![call.clone()],
+                            });
+                            history.push(xencode_providers_rs::AgentTurn::ToolResult {
+                                id: call.id.clone(),
+                                content: result,
+                            });
+                            ending_turn = false;
+                        } else if sink == LoopSink::Chat {
+                            let _ = tx.send(format!(
+                                "[TOOL]✗ INCOMPLETE: `{command}` still failing after {repair_iters} repair attempt(s) — this task is reported unfinished, not done"
+                            ));
+                        }
+                    }
+                }
+            }
+            if ending_turn {
+                break;
+            }
+            continue;
         }
         history.push(xencode_providers_rs::AgentTurn::Assistant {
             text: step.text.clone(),
@@ -8099,6 +8221,15 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             )
             .await;
             let outcome = crate::agent_tools::call_outcome(&result);
+            // A finished Edit-class call means the turn put bytes on disk, which
+            // is what arms the L-7 check gate at the end of the turn. A failed
+            // or refused edit changed nothing and must not arm it.
+            if !turn_edited
+                && outcome == crate::agent_tools::CallOutcome::Finished
+                && crate::agent_tools::tool_class(&call.name) == crate::agent_tools::ToolClass::Edit
+            {
+                turn_edited = true;
+            }
             if sink == LoopSink::Chat && outcome == crate::agent_tools::CallOutcome::Refused {
                 // A policy refusal never reaches the overlay, so it needs its
                 // own transcript line or it would be invisible outside the

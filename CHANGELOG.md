@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — exit-code "done" gate after agent edits (L-7)
+
+An agent turn that edited project files can no longer finish on the model's claim alone. When the model ends its answer, xencode now runs the workspace's own checks — `cargo test` and `cargo clippy`, discovered from a `Cargo.toml` in the workspace root — through the same approval gate as any shell command, and only lets the turn finish on genuinely exiting 0:
+
+- `✓ verified: cargo test, cargo clippy exited 0` when every check passes;
+- a failing check's real output is fed back to the model for another repair round, announced as `⚠ ... repair attempt N/M`, bounded by the new `agent_repair_max_iters` setting (default 3, 0 turns the loop off);
+- `✗ INCOMPLETE: ... still failing after N repair attempt(s)` when the cap or the round budget is exhausted — the task is reported unfinished, not done;
+- `✗ ... produced no exit code, so this turn's edits end unverified` when a check was denied, timed out, or never ran — never reported as a pass or a fail.
+
+Non-Rust workspaces get no invented commands: with nothing discoverable the turn ends as before. Live-verified against a scratch crate with a seeded compile error: failing `cargo test` output was fed back as repair attempts, the seeded `sub` error was repaired in a later round of the same loop (`test tests::subs ... ok` in the check output), and a clean turn ended with `✓ verified: cargo test, cargo clippy exited 0` at exit code 0; the exhaustion path rendered `✗ INCOMPLETE` with the true attempt count.
+
 ### Added — engine and analysis commands connected to main TUI (DOC-3)
 
 Connected standalone engine and analysis tools directly into the interactive TUI session:

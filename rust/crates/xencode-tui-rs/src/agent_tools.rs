@@ -924,6 +924,57 @@ pub fn call_outcome(result: &str) -> CallOutcome {
     }
 }
 
+// ── Post-edit project checks (L-7) ────────────────────────────────────
+// The model saying it is done is not the gate; the project's own commands
+// exiting 0 is. These helpers decide which commands that is for a given
+// workspace, and what a `run_command` result actually says about one.
+
+/// The project's own test and lint commands, discovered from what is on disk:
+/// a `Cargo.toml` in the workspace root means cargo, and cargo's own test and
+/// clippy commands need no configuration to be true. Anything else returns
+/// nothing — there is no invented command for a project we cannot read.
+pub fn discover_check_commands(root: &std::path::Path) -> Vec<String> {
+    if root.join("Cargo.toml").is_file() {
+        vec!["cargo test".to_string(), "cargo clippy".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// What a check run's result string says, read back from the exact shapes
+/// [`run_foreground`] produces. Only a real exit code counts: a denial, a
+/// refusal, a timeout, or a missing toolchain all mean the edit was *not*
+/// verified, which is different from verified-clean and must never be
+/// reported as either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckVerdict {
+    Passed,
+    Failed,
+    Unverifiable,
+}
+
+pub fn check_verdict(result: &str) -> CheckVerdict {
+    // `error: ...` covers the denial/refusal constants, an unspawnable
+    // command, and the timeout notice — none of which carry an exit code.
+    if result.starts_with("error:") {
+        return CheckVerdict::Unverifiable;
+    }
+    // The foreground runner always answers `$ <command>` then the status on
+    // the second line; anything else is not a result it produced.
+    match result.lines().nth(1) {
+        Some("killed by signal") => CheckVerdict::Failed,
+        Some(status) => match status.strip_prefix("exit ") {
+            Some(code) => match code.trim().parse::<i32>() {
+                Ok(0) => CheckVerdict::Passed,
+                Ok(_) => CheckVerdict::Failed,
+                Err(_) => CheckVerdict::Unverifiable,
+            },
+            None => CheckVerdict::Unverifiable,
+        },
+        None => CheckVerdict::Unverifiable,
+    }
+}
+
 /// One-line label for the approval overlay: tool + its focus argument.
 pub fn approval_summary(call: &ToolCall) -> String {
     let args = call.arguments_object();
@@ -6604,6 +6655,53 @@ patched = ["{fixed}"]
             std::fs::read_to_string(root.join("code.rs")).unwrap(),
             seeded
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ── Post-edit project checks (L-7) ────────────────────────────
+
+    #[test]
+    fn discover_check_commands_follows_the_manifest_on_disk() {
+        let with = temp_root("discover-cargo");
+        std::fs::write(with.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        assert_eq!(
+            discover_check_commands(&with),
+            vec!["cargo test".to_string(), "cargo clippy".to_string()]
+        );
+
+        let without = temp_root("discover-bare");
+        assert!(discover_check_commands(&without).is_empty());
+
+        std::fs::remove_dir_all(&with).unwrap();
+        std::fs::remove_dir_all(&without).unwrap();
+    }
+
+    #[tokio::test]
+    async fn check_verdict_reads_the_exit_code_of_real_runs() {
+        let root = temp_root("verdict");
+        let passed = run_foreground(&root, "true", 10).await;
+        assert_eq!(check_verdict(&passed), CheckVerdict::Passed, "{passed}");
+
+        let failed = run_foreground(&root, "exit 3", 10).await;
+        assert_eq!(check_verdict(&failed), CheckVerdict::Failed, "{failed}");
+
+        // A missing toolchain exits 127 through sh: a real code, so it fails
+        // the check rather than silently passing it.
+        let absent = run_foreground(&root, "no-such-check-tool-xyz", 10).await;
+        assert_eq!(check_verdict(&absent), CheckVerdict::Failed, "{absent}");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn check_verdict_refuses_to_guess_when_no_exit_code_arrives() {
+        let root = temp_root("verdict-blind");
+        // A denied call carries no exit code — that is "not verified", which
+        // is neither a pass nor something to hand the model as a repair task.
+        assert_eq!(check_verdict(DENIED_RESULT), CheckVerdict::Unverifiable);
+        assert_eq!(check_verdict(FORBIDDEN_RESULT), CheckVerdict::Unverifiable);
+        // A killed slow command reports a timeout, not a code.
+        let timed_out = run_foreground(&root, "sleep 5", 1).await;
+        assert_eq!(check_verdict(&timed_out), CheckVerdict::Unverifiable);
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
