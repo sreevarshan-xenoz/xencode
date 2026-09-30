@@ -5340,15 +5340,20 @@ impl<'a> App<'a> {
         self.system_line(&msg);
     }
 
-    /// I3-01: the Model Context Protocol, tools only. `/mcp` connects every
-    /// server declared under `mcp_servers` in config.json and offers its tools
-    /// to the model for the session; `/mcp status` lists what is running and
-    /// what non-protocol noise it has printed; `/mcp stop` kills everything and
-    /// withdraws the tools. A configured-but-broken server must not stall TUI
-    /// startup, so nothing here is started unless the user asks.
+    /// I3-01 / M-6: the Model Context Protocol. `/mcp` connects every server
+    /// declared under `mcp_servers` in config.json, offers its tools to the model
+    /// for the session, and lists by name the resources and prompts it holds;
+    /// `/mcp read` and `/mcp prompt` ask the server for one of them. `/mcp status`
+    /// says what is running and what noise it has printed; `/mcp stop` kills
+    /// everything and withdraws the tools. A configured-but-broken server must not
+    /// stall TUI startup, so nothing here is started unless the user asks.
     fn handle_mcp_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
         let arg = prompt.strip_prefix("/mcp").unwrap_or("").trim();
-        match arg {
+        let (head, rest) = match arg.split_once(char::is_whitespace) {
+            Some((head, rest)) => (head, rest.trim()),
+            None => (arg, ""),
+        };
+        match head {
             "status" => {
                 let mcp = self.mcp.clone();
                 tokio::spawn(async move {
@@ -5369,6 +5374,42 @@ impl<'a> App<'a> {
                                 format!("stopped {stopped} MCP server(s) and withdrew their tools.")
                             },
                     );
+                });
+            }
+            "read" | "prompt" => {
+                let Some((server, tail)) = rest.split_once(char::is_whitespace) else {
+                    self.system_line(if head == "read" {
+                        "usage: /mcp read <server> <uri>  ·  uri as /mcp listed it"
+                    } else {
+                        "usage: /mcp prompt <server> <name> [argument=value …]"
+                    });
+                    return;
+                };
+                if server.is_empty() || tail.is_empty() {
+                    self.system_line("usage: /mcp read <server> <uri>  ·  /mcp prompt <server> <name> [argument=value …]");
+                    return;
+                }
+                let mcp = self.mcp.clone();
+                let asking = format!("{head} {server} · {tail}");
+                let work = if head == "read" {
+                    let tail = tail.to_string();
+                    let server = server.to_string();
+                    tokio::spawn(async move { mcp.read_resource(&server, &tail).await })
+                } else {
+                    let server = server.to_string();
+                    let (name, arguments) = split_prompt_arguments(tail);
+                    tokio::spawn(async move { mcp.get_prompt(&server, &name, &arguments).await })
+                };
+                self.system_line(&format!("Asking the server for {asking}…"));
+                tokio::spawn(async move {
+                    let text = match work.await {
+                        Ok(Ok(text)) => text,
+                        Ok(Err(problem)) => format!("error: {problem}"),
+                        Err(_cancelled) => "error: that request was cancelled".to_string(),
+                    };
+                    for line in text.lines() {
+                        let _ = tx.send(format!("[MCP]· {line}"));
+                    }
                 });
             }
             "" => {
@@ -5415,10 +5456,15 @@ impl<'a> App<'a> {
                         } else {
                             format!("[MCP]✗ {} · {}", report.server, report.detail)
                         });
+                        for line in report.offers {
+                            let _ = tx.send(format!("[MCP]{line}"));
+                        }
                     }
                 });
             }
-            _ => self.system_line("usage: /mcp (connect all)  ·  /mcp status  ·  /mcp stop"),
+            _ => self.system_line(
+                "usage: /mcp (connect all)  ·  /mcp status  ·  /mcp stop  ·  /mcp read <server> <uri>  ·  /mcp prompt <server> <name> [argument=value …]",
+            ),
         }
     }
 
@@ -8154,6 +8200,27 @@ fn offered_tools(
     tools
 }
 
+/// Split `/mcp prompt <server> <name> argument=value …` past the server name:
+/// the first word is the prompt's name and every later `key=value` is an
+/// argument. A bare word after the name is dropped rather than guessed at — the
+/// server would only refuse it, and a prompt that takes nothing is asked for
+/// with nothing.
+fn split_prompt_arguments(tail: &str) -> (String, Vec<(String, String)>) {
+    let mut words = tail.split_whitespace();
+    let name = words.next().unwrap_or_default().to_string();
+    let arguments = words
+        .filter_map(|word| {
+            let (key, value) = word.split_once('=')?;
+            if key.is_empty() {
+                None
+            } else {
+                Some((key.to_string(), value.to_string()))
+            }
+        })
+        .collect();
+    (name, arguments)
+}
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -9603,9 +9670,9 @@ mod tests {
         cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
         learning_lessons, live_refresh_snapshot, offered_tools, parse_lesson_quiz,
         parse_llama_port, parse_porcelain_z, parse_term_suggestions, parse_voice_level,
-        preview_repo_map, repo_map_tier_line, should_draw, trace_age, trace_report,
-        watch_warning_for, App, ConversationMemory, Egress, FocusArea, FrameSignals, LoopSink,
-        SpawnRecord, XencodeConfig, CTX_SYSTEM,
+        preview_repo_map, repo_map_tier_line, should_draw, split_prompt_arguments, trace_age,
+        trace_report, watch_warning_for, App, ConversationMemory, Egress, FocusArea, FrameSignals,
+        LoopSink, SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -9930,6 +9997,76 @@ mod tests {
             .expect("status channel stays open");
         assert!(said.starts_with("[MCP]"), "{said}");
         assert!(said.contains("no MCP servers running"), "{said}");
+    }
+
+    /// M-6: the resources and prompts a running server holds are reachable from
+    /// the command line, and the answer arrives on the same channel a generation
+    /// uses. The server here is a real process answering real JSON-RPC.
+    #[tokio::test]
+    async fn mcp_read_and_prompt_ask_the_running_server() {
+        let (dir, spec) = crate::mcp::tests::live_documents_server();
+        let mut app = App::for_tests();
+        let reports = app
+            .mcp
+            .connect(
+                std::slice::from_ref(&spec),
+                std::time::Duration::from_secs(5),
+            )
+            .await;
+        assert!(reports[0].connected, "{:?}", reports[0]);
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        app.handle_mcp_command("/mcp read docs handbook://sre", tx.clone());
+        let said = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the document comes back")
+            .expect("the channel stays open");
+        assert!(said.contains("page one"), "{said}");
+
+        // Prompts are the second case: this server never declared them, so the
+        // refusal is ours and it says which set is missing.
+        app.handle_mcp_command("/mcp prompt docs standup", tx.clone());
+        let said = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the refusal comes back")
+            .expect("the channel stays open");
+        assert!(said.contains("does not offer prompts"), "{said}");
+
+        // A request missing its uri stops at the usage line, before any process
+        // is asked anything.
+        app.handle_mcp_command("/mcp read docs", tx.clone());
+        assert!(
+            app.messages
+                .last()
+                .unwrap()
+                .content
+                .contains("usage: /mcp read"),
+            "{}",
+            app.messages.last().unwrap().content
+        );
+        assert_eq!(app.mcp.stop_all().await, 1);
+        std::fs::remove_dir_all(&dir).expect("clean fixture dir");
+    }
+
+    /// The prompt arguments a person typed are split the way the server wants
+    /// them: the name first, then only the words that carry a value, so a stray
+    /// word cannot become an argument nobody asked for.
+    #[test]
+    fn prompt_arguments_are_read_as_name_and_pairs() {
+        let (name, arguments) = split_prompt_arguments("review patch=@@-1+1@@ style=terse stray");
+        assert_eq!(name, "review");
+        assert_eq!(
+            arguments,
+            [
+                ("patch".to_string(), "@@-1+1@@".to_string()),
+                ("style".to_string(), "terse".to_string())
+            ]
+        );
+        let (name, arguments) = split_prompt_arguments("standup");
+        assert_eq!(name, "standup");
+        assert!(arguments.is_empty(), "{arguments:?}");
+        let (_, arguments) = split_prompt_arguments("review =novalue patch=ok");
+        assert_eq!(arguments, [("patch".to_string(), "ok".to_string())]);
     }
 
     /// J-08: a manifest in the plugin directory changes what the agent loop

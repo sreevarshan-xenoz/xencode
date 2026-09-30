@@ -1625,12 +1625,32 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       cannot change what `classify` asks the interactive user. Workspace suite
       **1789 passed, 0 failed, 17 ignored**, `cargo fmt --check` and clippy
       clean.*
-- [ ] **M-6 — finish the MCP client: resources, prompts, and HTTP with headers.**
+- [x] **M-6 — finish the MCP client: resources, prompts, and HTTP with headers.**
       Negotiate the capabilities the client currently declines, and add an
       HTTP/SSE transport with auth headers so a hosted server is reachable.
       **Done-when:** one real third-party server is connected over each
       transport, a resource and a prompt from it surface in the TUI, and a token
       in config is masked in every render the same way `mask_secret` masks keys.
+      *(Done 2026-09-30, in three commits. `f7aafce` taught the client
+      `resources/list`, `resources/read`, `prompts/list`, `prompts/get` behind
+      the handshake's declared capabilities (a set never declared is never
+      asked for; silence is not a refusal). `81d79af` added the Streamable HTTP
+      transport — one POST per message, session id echoed, answer read off the
+      kept-open stream, DELETE on shutdown — with `headers` carried and never
+      printed and the URL shown via `masked_url`, plus a `url`-vs-`command`
+      declaration rule refused in the same words by the TUI and `xencode
+      doctor`. The TUI half surfaces it: connect reports and `/mcp status` list
+      each server's resources and prompts by name, `/mcp read <server> <uri>`
+      and `/mcp prompt <server> <name> [key=value …]` fetch one, and a
+      documents-only server stays connected with its missing sets named.
+      Proven live against a real third-party server — the official Python MCP
+      SDK (2.2.0), not a fixture: over stdio its `shout` tool answered `HELLO`,
+      `verify://runbook` read back "restart the box" and the `standup` prompt
+      came back with its role; over streamable HTTP with a bearer token the
+      same three answered, and a wrong token was refused. The TUI hub's offers,
+      status lines, read and prompt paths were driven against that same server.
+      Token masking is pinned by `mask_secret`/`masked_url` tests; header values
+      never reach a screen or an error line.)*
 - [ ] **M-7 — `xencode acp`: run the agent inside an editor.** Put the existing
       turn loop behind the ACP Rust SDK over stdio, mapping xencode's approval
       requests onto ACP permission requests and the plan/tool stream onto ACP

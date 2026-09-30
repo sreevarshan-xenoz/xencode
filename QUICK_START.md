@@ -187,7 +187,7 @@ reuses the VM if it lives and re-creates it if it was reaped, from the recorded
 /bytebot <task>       - Delegate a task to the autonomous agent
 /plan [clear]         - Pin the agent's todo list, or clear it
 /rewind [turns]       - Undo the agent's file changes for this session
-/mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them
+/mcp [status|stop]    - Connect all MCP servers declared in config, or ask about/stop them (read a listed resource with `/mcp read <server> <uri>`, ask for a prompt with `/mcp prompt <server> <name>`)
 /spawn <task> [#branch] - Run a subagent in a fresh git worktree (status with /spawn status)
 /plugin [reload]      - Show which plugins took effect, the prompt text and pinned commit each one contributes, or re-scan the plugin dir
 /skills [reload]      - Show which SKILL.md skills loaded, what they refuse and what the prompt pays for them, or re-scan both skill directories

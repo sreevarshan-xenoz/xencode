@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — MCP client: hosted servers, resources and prompts (M-6)
+
+An MCP server had to be a program xencode spawns itself. A declaration under
+`mcp_servers` in config now names either a `command` to spawn or a `url` to
+post to: the client speaks Streamable HTTP — one request per message, the
+session id the server hands back echoed on every later request, the answer read
+off the stream the server keeps open, and a DELETE when the session ends. A
+token for a hosted server goes in `headers` (`authorization: Bearer …`), which
+are sent and never printed; a token written into the URL itself is shown with
+only its last four characters, and the same masking is applied to a refusing
+server's reply, so a mistake the server quotes back cannot leak it. A
+declaration naming neither way to reach the server, or both, is refused in the
+same words by the TUI and by `xencode doctor`, which also probes whether the
+address accepts a connection.
+
+The client used to keep only what the handshake said about tools. It now keeps
+the resources and prompts a server declares and declines to ask for a set the
+server never offered. The TUI surfaces them: connecting reports each server's
+resources and prompts by name, `/mcp status` lists them under the server, and
+`/mcp read <server> <uri>` / `/mcp prompt <server> <name> [key=value …]`
+fetches one. A server offering only documents stays connected instead of being
+reported broken.
+
+Verified against a real third-party server — the official Python MCP SDK,
+not a fixture: over a pipe its tool answered, its `verify://runbook` resource
+read back its text and its prompt came back with its role; over HTTP with a
+bearer token the same three answered and a wrong token was refused; the TUI
+hub's offers, status lines, read and prompt paths were driven against that
+same server.
+
 ### Added — `xencode mcp serve`: another program can drive xencode's tools (M-5)
 
 Xencode could already call somebody else's MCP server; nothing could call xencode. `xencode mcp serve` puts the real tool executor behind the official Rust MCP SDK on standard input and output, publishing six tools — `read_file`, `list_dir`, `search_files`, `write_file`, `edit_file`, `run_command` — each with the JSON Schema the model is given, taken from the same definitions rather than a second copy that could disagree.
