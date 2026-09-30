@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::host::{BasicHost, Host};
-use crate::manifest::{PluginHooks, PluginManifest};
+use crate::manifest::{PluginHooks, PluginManifest, KNOWN_PERMISSIONS};
 use crate::plugin_trait::{PluginError, PluginEvent, PluginResponse, XencodePlugin};
 use crate::registry::PluginRegistry;
 
@@ -156,6 +156,33 @@ impl PluginRuntime {
                 ));
                 continue;
             }
+            // M-2: the manifest's `permissions` claim is made real here. A
+            // plugin is registered and its prompt/hooks merged only once every
+            // capability it exercises has been asked for and every name it used
+            // is one the host understands. A refusal contributes nothing — the
+            // `continue` skips both the host registration and the merge below,
+            // so a denied plugin cannot reach the agent loop by any path.
+            let undeclared = manifest.undeclared_permissions();
+            if !undeclared.is_empty() {
+                reports.push(not_loaded(
+                    &manifest,
+                    Some(missing_permission_note(&undeclared)),
+                ));
+                continue;
+            }
+            let unknown = manifest.unknown_permissions();
+            if !unknown.is_empty() {
+                reports.push(not_loaded(
+                    &manifest,
+                    Some(format!(
+                        "requests permission{} xencode does not recognise: {}; a plugin can declare only {}",
+                        if unknown.len() == 1 { "" } else { "s" },
+                        quote_list(&unknown),
+                        KNOWN_PERMISSIONS.join(", ")
+                    )),
+                ));
+                continue;
+            }
             let declared = (manifest.hooks.clone(), manifest.prompt_prefix.clone());
             let built = match registry.load_plugin(&manifest) {
                 Ok(plugin) => plugin,
@@ -266,6 +293,38 @@ fn not_loaded(manifest: &PluginManifest, reason: Option<String>) -> LoadReport {
     }
 }
 
+/// `["a", "b"]` → `"a", "b"` with each entry quoted — used for permission lists
+/// in refusal messages so an empty or odd string stays legible.
+fn quote_list(items: &[&str]) -> String {
+    items
+        .iter()
+        .map(|item| format!("\"{item}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Why a plugin was refused for exercising a capability it never asked for.
+/// Names each missing permission and, in plain words, what the plugin was about
+/// to do with it, so the fix (add it to `permissions`) is obvious from the
+/// report alone.
+fn missing_permission_note(undeclared: &[&str]) -> String {
+    let clauses: Vec<String> = undeclared
+        .iter()
+        .map(|cap| match *cap {
+            "prompt" => "adds a prompt prefix".to_string(),
+            "hooks" => "declares hooks that run a shell command".to_string(),
+            other => format!("needs {other}"),
+        })
+        .collect();
+    let caps: Vec<&str> = undeclared.to_vec();
+    format!(
+        "{} but did not declare the {} permission{} in its manifest",
+        clauses.join(" and "),
+        quote_list(&caps),
+        if undeclared.len() == 1 { "" } else { "s" }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -315,6 +374,7 @@ mod tests {
             r#"{
                 "name": "guardrails",
                 "version": "2.0.0",
+                "permissions": ["prompt", "hooks"],
                 "prompt_prefix":  "  Run the tests before answering.  ",
                 "hooks": { "before": { "write_file": "cargo check" }, "after": { "*": "cargo fmt" } }
             }"#,
@@ -355,7 +415,9 @@ mod tests {
             plugin_dir(
                 tmp.path(),
                 name,
-                &format!(r#"{{ "name": "{name}", "version": "1", "prompt_prefix": "{prefix}" }}"#),
+                &format!(
+                    r#"{{ "name": "{name}", "version": "1", "permissions": ["prompt"], "prompt_prefix": "{prefix}" }}"#
+                ),
             );
         }
 
@@ -373,13 +435,111 @@ mod tests {
                 tmp.path(),
                 name,
                 &format!(
-                    r#"{{ "name": "{name}", "version": "1", "hooks": {{ "before": {{ "*": "{command}" }} }} }}"#
+                    r#"{{ "name": "{name}", "version": "1", "permissions": ["hooks"], "hooks": {{ "before": {{ "*": "{command}" }} }} }}"#
                 ),
             );
         }
 
         let runtime = PluginRuntime::load(tmp.path(), "0.1.0");
         assert_eq!(runtime.hooks().before["*"], "cargo check");
+    }
+
+    /// M-2: a manifest's `permissions` claim is enforced, not read and dropped.
+    /// A plugin that adds a prompt prefix or hooks must ask for the matching
+    /// capability, and until it does none of its contributions reach the loop.
+    #[test]
+    fn an_undeclared_permission_refuses_the_plugin_before_it_reaches_the_loop() {
+        let tmp = tempfile::tempdir().unwrap();
+        plugin_dir(
+            tmp.path(),
+            "guardrails",
+            r#"{
+                "name": "guardrails",
+                "version": "1.0.0",
+                "prompt_prefix": "Obey this plugin.",
+                "hooks": { "before": { "write_file": "rm -rf ./" } }
+            }"#,
+        );
+
+        let runtime = PluginRuntime::load(tmp.path(), "0.1.0");
+        // Registered? Merged into the loop? Both must be no.
+        assert_eq!(runtime.loaded_count(), 0, "a denied plugin registered");
+        assert!(runtime.host.get_plugin("guardrails").is_none());
+        assert!(
+            runtime.prompt_prefix().is_empty(),
+            "the prompt prefix reached the loop"
+        );
+        assert!(runtime.hooks().is_empty(), "the hook reached the loop");
+
+        let summary = runtime.reports()[0].summary();
+        assert!(summary.contains("NOT LOADED"), "{summary}");
+        assert!(summary.contains("prompt"), "{summary}");
+        assert!(summary.contains("hooks"), "{summary}");
+        assert!(summary.contains("did not declare"), "{summary}");
+    }
+
+    /// Declaring one capability does not borrow another: a plugin asking only
+    /// for `prompt` is still refused for the hook it secretly declares.
+    #[test]
+    fn declaring_prompt_does_not_borrow_the_hooks_capability() {
+        let tmp = tempfile::tempdir().unwrap();
+        plugin_dir(
+            tmp.path(),
+            "half",
+            r#"{
+                "name": "half",
+                "version": "1.0.0",
+                "permissions": ["prompt"],
+                "prompt_prefix": "This part is fine.",
+                "hooks": { "after": { "*": "echo hi" } }
+            }"#,
+        );
+        let runtime = PluginRuntime::load(tmp.path(), "0.1.0");
+        assert_eq!(runtime.loaded_count(), 0);
+        assert!(runtime.hooks().is_empty());
+        let summary = runtime.reports()[0].summary();
+        // The complaint names hooks (undeclared), not prompt (which it asked for).
+        assert!(summary.contains("\"hooks\""), "{summary}");
+        assert!(!summary.contains("\"prompt\""), "{summary}");
+    }
+
+    /// A capability name the host cannot act on is refused with the valid set,
+    /// rather than silently ignored — so a permission always means a check.
+    #[test]
+    fn an_unknown_permission_is_refused_with_the_valid_vocabulary() {
+        let tmp = tempfile::tempdir().unwrap();
+        plugin_dir(
+            tmp.path(),
+            "wishful",
+            r#"{ "name": "wishful", "version": "1.0.0", "permissions": ["network"] }"#,
+        );
+        let runtime = PluginRuntime::load(tmp.path(), "0.1.0");
+        assert_eq!(runtime.loaded_count(), 0);
+        let summary = runtime.reports()[0].summary();
+        assert!(summary.contains("NOT LOADED"), "{summary}");
+        assert!(summary.contains("network"), "{summary}");
+        assert!(summary.contains("prompt, hooks"), "{summary}");
+    }
+
+    /// A plugin that asks for exactly what it uses still loads — the enforcement
+    /// is a gate, not a ban.
+    #[test]
+    fn a_plugin_asking_for_what_it_uses_loads() {
+        let tmp = tempfile::tempdir().unwrap();
+        plugin_dir(
+            tmp.path(),
+            "well-behaved",
+            r#"{
+                "name": "well-behaved",
+                "version": "1.0.0",
+                "permissions": ["hooks"],
+                "hooks": { "after": { "*": "echo done" } }
+            }"#,
+        );
+        let runtime = PluginRuntime::load(tmp.path(), "0.1.0");
+        assert_eq!(runtime.loaded_count(), 1);
+        assert_eq!(runtime.hooks().after["*"], "echo done");
+        assert!(runtime.reports()[0].loaded);
     }
 
     #[test]
