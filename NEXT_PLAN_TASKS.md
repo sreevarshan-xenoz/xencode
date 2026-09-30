@@ -10265,8 +10265,7 @@ Visible gaps to resume from:
 - Most feature areas (Provider Health, Insights, PR Review, Settings, and
   others) still open as modal overlays from the Feature Navigator or direct
   chords. Only the small body layout family is tile-arranged.
-- V-2's agent stack is currently a modal status overlay, not three independent
-  tiled agent windows integrated with the layout tree. Its live rows are
+- V-2's agent stack is now integrated as a first-class tiled body window (slot 7 on `Ctrl+7`, `agents_tree()` template, with divider dragging, hit testing, and in-pane cycling on `Ctrl+N`) in addition to its overlay fallback. Its live rows are
   limited to state Xencode already owns.
 - The `Ctrl+T` terminal region is still a placeholder; it says terminal
   emulation is coming soon and does not host a shell or PTY.
@@ -10573,6 +10572,12 @@ UX-3's which-key popup so it is discoverable rather than remembered.
   named: UX-1 takes the chord arm over for rebindability, UX-3 surfaces it in
   which-key, and the agent event feed (V-11's descendant) addresses panes by
   kind — none of which exist yet, so no architecture was locked around them.
+  **Updated 2026-09-30 (V-2 Tiled Window):** Integrated `BodySlot::Agents` into
+  the layout tree, `BodyLayout`, and view serialization. Seeded View 7 (`Agents`
+  on `Ctrl+7`) as a split layout containing the agent stack pane. When the pane
+  is tiled, `Ctrl+N` cycles the active agent pane in-place within the tiled
+  window rather than spawning an overlay. Mouse hit-testing, divider dragging,
+  and resize clamping all operate seamlessly on the tiled agent window.
 
 ### V-3 Split and resize on a tree
 

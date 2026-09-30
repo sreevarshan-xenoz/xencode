@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — agent stack as a tiled body pane (V-2)
+
+The agent stack is now a first-class pane in the body layout tree (`BodySlot::Agents`), seeded as View 7 (`Agents`) reachable via `Ctrl+7`. When tiled on screen, `Ctrl+N` cycles the active agent pane in-place within the tiled window without launching a modal overlay. If the current layout does not include the agent stack pane, `Ctrl+N` still provides the floating overlay fallback. Divider dragging, mouse hit-testing, and dynamic resizing apply to the tiled agent pane identically to other layout panes.
+
 ### Fixed — model discovery reports observed models only
 
 The collaboration API no longer inserts example local or cloud model names

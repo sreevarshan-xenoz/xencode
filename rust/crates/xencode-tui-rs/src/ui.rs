@@ -47,7 +47,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         FocusArea::ProjectAnalyzer => draw_project_analyzer(f, app, f.area()),
         FocusArea::GitCommit => draw_git_commit(f, app, f.area()),
         FocusArea::FeatureNavigator => draw_feature_navigator(f, app, f.area()),
-        FocusArea::ByteBotPanel => draw_bytebot_panel(f, app, f.area()),
+        FocusArea::ByteBotPanel => {
+            if app.last_layout.agents.is_none() {
+                draw_bytebot_panel(f, app, f.area());
+            }
+        }
         FocusArea::CollaborationHub => draw_collaboration_hub(f, app, f.area()),
         FocusArea::VoiceInterface => draw_voice_interface(f, app, f.area()),
         FocusArea::TerminalAssistant => draw_terminal_assistant(f, app, f.area()),
@@ -215,8 +219,38 @@ fn draw_model_download(f: &mut Frame, app: &App, area: Rect, progress: &str) {
     );
 }
 
+fn draw_agent_stack_pane(f: &mut Frame, app: &App, area: Rect) {
+    use crate::view::stack_overlay_text;
+
+    let panes = app.agent_stack_panes();
+    let active = app.agent_stack_index.min(panes.len().saturating_sub(1));
+    let lines: Vec<Line> = stack_overlay_text(&panes, active)
+        .into_iter()
+        .map(Line::from)
+        .collect();
+    let state = if app.focus == FocusArea::ByteBotPanel {
+        PaneState::Focused
+    } else {
+        PaneState::Plain
+    };
+    let title = if let Some(pane) = panes.get(active) {
+        format!(" Agents [{}] (Ctrl+N to switch) ", pane.title)
+    } else {
+        " Agents ".to_string()
+    };
+    let block = panel_block(app, title, state);
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    f.render_widget(para, area);
+}
+
 fn draw_agent_stack_overlay(f: &mut Frame, app: &App, area: Rect) {
     use crate::view::stack_overlay_text;
+
+    if app.last_layout.agents.is_some() {
+        return;
+    }
 
     let panes = app.agent_stack_panes();
     // Clamp, don't trust: the index survives pane-count changes between draws.
@@ -471,6 +505,9 @@ fn draw_body(f: &mut Frame, app: &mut App, area: Rect) {
     }
     if let Some(rect) = layout.editor {
         draw_code_editor(f, app, rect);
+    }
+    if let Some(rect) = layout.agents {
+        draw_agent_stack_pane(f, app, rect);
     }
     if let Some(rect) = layout.chat {
         draw_messages(f, app, rect);
