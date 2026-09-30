@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — language-server diagnostics after edits, for non-Rust projects (L-12)
+
+The post-edit "done" gate only checked Rust workspaces (`cargo test`/`cargo clippy`); in any other language the agent edited blind — nothing verified its work before a turn finished. Now, when a turn edited files that a language server covers and there is no cargo project to check, xencode pulls real compiler diagnostics from that server and gates on them the same way it gates on exit codes. C and C++ are supported through `clangd`:
+
+- an error the server reports (such as an incompatible pointer conversion) keeps the turn open and is fed back to the model for another repair round, announced as `⚠ clangd reported errors · repair attempt N/M`, using the same `agent_repair_max_iters` cap as the cargo gate;
+- a clean answer ends the turn `✓ verified: clangd found no errors in N edited file(s)`;
+- a workspace with no supported server is untouched by this path — no invented check, and never a pass claimed without the server actually answering;
+- only genuine errors block a turn; warnings and hints are ignored, and the server binary must be present on `PATH` or the file is simply not gated.
+
+Verified live: on a scratch C file (no `Cargo.toml`, so `cargo` cannot check it at all) the agent made an edit that left a seeded `int x = "oops";` type error, and `clangd` flagged it — the turn was held open and the real error fed back as a repair attempt, which the model's own next reply named correctly. Covered by tool-level tests for the extension→server mapping, error-vs-warning reporting, and framing, plus two `clangd` integration tests that open a real broken and a real clean C file and assert the verdict (skipped only where `clangd` is genuinely not installed — never mocked).
+
 ### Added — `edit_file` explains a failed match instead of hard-failing (L-8)
 
 When an `edit_file` `old` string matched nothing or matched more than once, the agent only learned "not found" or "appears N times" and had to re-read the file to guess why. The failure now reports where it missed, so the model's next round self-corrects from the error text rather than a fresh read:

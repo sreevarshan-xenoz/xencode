@@ -1365,11 +1365,30 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** a real prompt is answered through each route from a clean
       config, the 8K-TPM trap is handled and documented rather than surfacing as
       a confusing 429, and no key is ever written by a test.
-- [ ] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
+- [x] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
       diagnostics from an LSP server rather than only `cargo check`, so
       non-cargo languages get the same L-7 treatment.
       **Done-when:** it demonstrably catches something `cargo check` does not,
       in a language the agent currently edits blind — otherwise it does not ship.
+      *(Done 2026-09-30. A minimal LSP-over-stdio client (`xencode-tui-rs/src/lsp.rs`)
+      drives `initialize` / `textDocument/didOpen` and reads `publishDiagnostics`
+      back, bounded by a timeout so a wedged server cannot hang a turn. It is
+      wired into the L-7 gate: when a turn edited files but there is no
+      `Cargo.toml` to check, any edited file a server covers is opened and its
+      errors gate the turn exactly like a failing `cargo test` — an error feeds
+      back for a repair round under `agent_repair_max_iters`, a clean answer ends
+      `✓ verified`, and a workspace with no supported server is left untouched
+      (no invented check, no unearned pass). C/C++ via `clangd` ship; warnings
+      never block, only errors. Proven to catch what `cargo check` cannot:
+      `cargo test` in the scratch project fails outright with "could not find
+      Cargo.toml", while two tool-level tests over a *real* `clangd` (a bad C
+      file → Errors, a valid one → Clean) and a live TUI run on a `demo.c` with a
+      seeded `int x = "oops"` conversion error flagged it and drove
+      `⚙⚠ clangd reported errors · repair attempt 1/3` then `2/3` — the model's
+      own reply named the "incompatible pointer" error back. The live turn then
+      ended at llama.cpp's context limit under the 0.6B model before reaching the
+      `INCOMPLETE` cap; the deterministic Clean/Errors/Unverifiable branches are
+      covered by the tool tests.)*
 
 ## Milestone M — stop being an island: hooks, skills, plugins, MCP, ACP (planned 2026-09-23)
 
