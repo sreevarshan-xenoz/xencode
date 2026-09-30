@@ -461,6 +461,8 @@ Type `/` in the chat input and press `Tab` to list them:
 /plan [clear]           Pin the agent's todo list, or clear it
 /rewind [turns]         Undo the agent's file writes for this session
 /mcp [status|stop]      Start the MCP servers declared in config, or query them
+/mcp read <srv> <uri> Read one resource the server listed, by its URI
+/mcp prompt <s> <name> Ask the server for one of its prompts ([key=value …])
 /plugin [reload]        Report which plugins took effect / re-scan the dir
 /spawn <task> [#branch] Run a subagent in a fresh sibling git worktree
 /trace [turns]          What the recent agent turns did, from the local turn log

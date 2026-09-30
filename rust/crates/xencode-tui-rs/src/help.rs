@@ -97,8 +97,8 @@ const COMMANDS: &[Binding] = &[
         "undo the agent's file changes (session-only)",
     ),
     (
-        "/mcp [status|stop]",
-        "connect/stop the configured MCP tool servers",
+        "/mcp [status|stop|read <server> <uri>|prompt <server> <name>]",
+        "connect MCP servers, read their tools, documents and prompts",
     ),
     (
         "/spawn <task> [#branch]",

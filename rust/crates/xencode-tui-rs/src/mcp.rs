@@ -1,5 +1,6 @@
-//! The TUI's side of MCP (I3-01): what to offer the model, and where a call
-//! goes once it is approved.
+//! The TUI's side of MCP (I3-01, finished by M-6): what to offer the model,
+//! where a call goes once it is approved, and how a running server's documents
+//! and prepared prompts are read back to the person who started it.
 //!
 //! [`xencode_mcp_rs`] speaks the protocol; this module owns the live sessions,
 //! the names the model sees, and the strings the transcript shows. Servers are
@@ -10,7 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use xencode_mcp_rs::McpClient;
+use xencode_mcp_rs::{McpClient, McpError, McpPrompt, McpResource};
 pub use xencode_mcp_rs::{ServerSpec, Transport};
 use xencode_providers_rs::ToolDefinition;
 
@@ -127,12 +128,149 @@ pub struct Report {
     pub connected: bool,
     pub tools: usize,
     pub detail: String,
+    /// What the server offered besides tools, one line each, named — a count of
+    /// resources you cannot name is not something you can use.
+    pub offers: Vec<String>,
+}
+
+/// The lines a server's resources and prompts render to. Shared by the connect
+/// report and `/mcp status` so the two cannot describe the same session
+/// differently. A set the handshake did not declare says so rather than
+/// reporting zero, because "none" and "not offered" are different facts.
+fn offer_lines(resources: &[McpResource], prompts: &[McpPrompt], notes: &[String]) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for note in notes {
+        lines.push(format!("  {note}"));
+    }
+    for resource in resources {
+        let named = if resource.name.is_empty() || resource.name == resource.uri {
+            String::new()
+        } else {
+            format!(" — {}", resource.name)
+        };
+        // The uri leads, because it is what `/mcp read` has to be given.
+        lines.push(format!("  resource {}{named}", resource.uri));
+    }
+    for prompt in prompts {
+        let args = if prompt.arguments.is_empty() {
+            "no arguments".to_string()
+        } else {
+            prompt
+                .arguments
+                .iter()
+                .map(|argument| {
+                    if argument.required {
+                        format!("{}=", argument.name)
+                    } else {
+                        format!("[{}=]", argument.name)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        lines.push(format!("  prompt {} ({args})", prompt.name));
+    }
+    lines
+}
+
+/// A set the server does not have, in the words a session line is built from.
+/// "Not declared" and "declared it, then could not answer for it" are different
+/// facts and are not collapsed into one.
+fn capability_note(feature: &str, error: &McpError) -> String {
+    match error {
+        McpError::NotOffered { .. } => format!("{feature} — not declared by this server"),
+        other => format!("{feature} — asked for, and it said: {other}"),
+    }
+}
+
+/// A running session seen the way both `/mcp` and `/mcp status` need it: the
+/// counts, what was refused, and the names behind them. Drawing it in one place
+/// keeps the two commands from describing the same server differently.
+struct SessionView<'a> {
+    name: &'a str,
+    endpoint: String,
+    tools: usize,
+    stray: usize,
+    resources: &'a [McpResource],
+    prompts: &'a [McpPrompt],
+    refused: &'a [String],
+}
+
+impl<'a> SessionView<'a> {
+    fn of(session: &'a Session) -> Self {
+        SessionView {
+            name: session.client.name(),
+            endpoint: session.client.endpoint(),
+            tools: session.tools.len(),
+            stray: session.client.stray_lines(),
+            resources: &session.resources,
+            prompts: &session.prompts,
+            refused: &session.refused,
+        }
+    }
+
+    /// What this server has, counted. What it said it does not have is a separate
+    /// line, so a count is never read as a refusal.
+    fn counts(&self) -> String {
+        let mut parts = vec![if self.tools == 0 {
+            "no tools".to_string()
+        } else {
+            format!("{} tool(s)", self.tools)
+        }];
+        if !self.resources.is_empty() {
+            parts.push(format!("{} resource(s)", self.resources.len()));
+        }
+        if !self.prompts.is_empty() {
+            parts.push(format!("{} prompt(s)", self.prompts.len()));
+        }
+        parts.join(", ")
+    }
+
+    fn offers(&self) -> Vec<String> {
+        offer_lines(self.resources, self.prompts, self.refused)
+    }
+
+    /// What connecting produced, for `/mcp`. `detail` is the sentence the
+    /// command leads with; the names come along underneath.
+    fn report(&self, server: &str, detail: impl Into<String>) -> Report {
+        Report {
+            server: server.to_string(),
+            connected: true,
+            tools: self.tools,
+            detail: detail.into(),
+            offers: self.offers(),
+        }
+    }
+
+    /// The line `/mcp status` draws: counts and endpoint first, then every
+    /// resource and prompt by name underneath.
+    fn lines(&self) -> Vec<String> {
+        let noise = if self.stray > 0 {
+            format!(", {} non-protocol line(s) ignored", self.stray)
+        } else {
+            String::new()
+        };
+        let mut lines = vec![format!(
+            "{}: {}{noise} · {}",
+            self.name,
+            self.counts(),
+            self.endpoint
+        )];
+        lines.extend(self.offers());
+        lines
+    }
 }
 
 struct Session {
     client: Arc<McpClient>,
     /// `(name the model sees, name the server knows)`, in the server's order.
     tools: Vec<(String, String)>,
+    resources: Vec<McpResource>,
+    prompts: Vec<McpPrompt>,
+    /// A set the server does not have and why, in words — so a session showing
+    /// no resources says whether that was declared, asked for and refused, or
+    /// never asked at all.
+    refused: Vec<String>,
 }
 
 /// The connected servers for this session, shared between `App` (which draws
@@ -164,13 +302,14 @@ impl McpHub {
         let mut reports = Vec::new();
         for spec in specs {
             let key = sanitize(&spec.name);
-            if let Some(tools) = self.running_tools(&key).await {
-                reports.push(Report {
-                    server: spec.name.clone(),
-                    connected: true,
-                    tools,
-                    detail: "already running".to_string(),
-                });
+            let running = self
+                .sessions
+                .lock()
+                .await
+                .get(&key)
+                .map(|session| SessionView::of(session).report(&spec.name, "already running"));
+            if let Some(report) = running {
+                reports.push(report);
                 continue;
             }
             reports.push(self.connect_one(spec, key, timeout).await);
@@ -184,16 +323,42 @@ impl McpHub {
             connected: false,
             tools: 0,
             detail,
+            offers: Vec::new(),
         };
         let client = match McpClient::start(spec, timeout).await {
             Ok(client) => client,
             Err(e) => return failed(e.to_string()),
         };
+
+        // A server that never said it had tools is not a broken one — a server
+        // offering only documents, or only prompts, is a working connection. So
+        // the refusal to send `tools/list` is recorded and the session stays up.
+        // What is fatal is a server that claimed the set and then failed to
+        // answer for it: with no tools, resources or prompts we have nothing.
+        let mut refused: Vec<String> = Vec::new();
         let tools = match client.list_tools().await {
             Ok(tools) => tools,
+            Err(e @ McpError::NotOffered { .. }) => {
+                refused.push(capability_note("tools", &e));
+                Vec::new()
+            }
             Err(e) => {
                 client.shutdown().await;
                 return failed(format!("started, but {}; it is not running", e));
+            }
+        };
+        let resources = match client.list_resources().await {
+            Ok(resources) => resources,
+            Err(e) => {
+                refused.push(capability_note("resources", &e));
+                Vec::new()
+            }
+        };
+        let prompts = match client.list_prompts().await {
+            Ok(prompts) => prompts,
+            Err(e) => {
+                refused.push(capability_note("prompts", &e));
+                Vec::new()
             }
         };
 
@@ -224,42 +389,34 @@ impl McpHub {
                 parameters: tool.input_schema.clone(),
             });
         }
-        let count = definitions.len();
-        let detail = if clashes > 0 {
-            format!("{count} tool(s), {clashes} dropped for a clashing name")
-        } else if count == 0 {
-            "no tools".to_string()
-        } else {
-            format!("{count} tool(s)")
+        let session = Session {
+            client: Arc::new(client),
+            tools: named,
+            resources,
+            prompts,
+            refused,
         };
-        self.add_session(key, Arc::new(client), named, definitions)
-            .await;
-        Report {
+        let view = SessionView::of(&session);
+        let detail = if clashes > 0 {
+            format!("{}, {clashes} dropped for a clashing name", view.counts())
+        } else {
+            view.counts()
+        };
+        let report = Report {
             server: spec.name.clone(),
             connected: true,
-            tools: count,
+            tools: session.tools.len(),
             detail,
-        }
+            offers: view.offers(),
+        };
+        self.add_session(key, session, definitions).await;
+        report
     }
 
-    async fn running_tools(&self, key: &str) -> Option<usize> {
-        self.sessions
-            .lock()
-            .await
-            .get(key)
-            .map(|session| session.tools.len())
-    }
-
-    async fn add_session(
-        &self,
-        key: String,
-        client: Arc<McpClient>,
-        tools: Vec<(String, String)>,
-        definitions: Vec<ToolDefinition>,
-    ) {
+    async fn add_session(&self, key: String, session: Session, definitions: Vec<ToolDefinition>) {
         let previous = {
             let mut sessions = self.sessions.lock().await;
-            sessions.insert(key.clone(), Session { client, tools })
+            sessions.insert(key.clone(), session)
         };
         // A server replaced by its own new session stops as soon as we drop its
         // pipes; the caller must not end up with two of one name.
@@ -271,6 +428,69 @@ impl McpHub {
             split_full_name(&definition.name).map(|(server, _)| server) != Some(key.as_str())
         });
         offered.extend(definitions);
+    }
+
+    /// Read one resource out of a running server by the uri the server itself
+    /// listed. A set the handshake did not declare is refused here too, in the
+    /// same words as everywhere else, so `/mcp read` cannot ask a tools-only
+    /// server for a document.
+    pub async fn read_resource(&self, server: &str, uri: &str) -> Result<String, String> {
+        let key = sanitize(server);
+        let client = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&key).map(|s| Arc::clone(&s.client))
+        };
+        let Some(client) = client else {
+            return Err(format!(
+                "MCP server `{server}` is not running — start it with /mcp"
+            ));
+        };
+        let contents = client.read_resource(uri).await.map_err(|e| e.to_string())?;
+        if contents.is_empty() {
+            return Ok(format!(
+                "MCP server `{server}` read {uri} and it was empty."
+            ));
+        }
+        Ok(contents
+            .iter()
+            .map(|content| content.rendered())
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
+    /// Ask a running server for one of its prompts, with the arguments it asked
+    /// for as `name=value` pairs. The messages come back with the role the
+    /// server gave each one.
+    pub async fn get_prompt(
+        &self,
+        server: &str,
+        name: &str,
+        arguments: &[(String, String)],
+    ) -> Result<String, String> {
+        let key = sanitize(server);
+        let client = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&key).map(|s| Arc::clone(&s.client))
+        };
+        let Some(client) = client else {
+            return Err(format!(
+                "MCP server `{server}` is not running — start it with /mcp"
+            ));
+        };
+        let messages = client
+            .get_prompt(name, arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        if messages.is_empty() {
+            return Ok(format!(
+                "MCP server `{server}` has no prompt called `{name}`."
+            ));
+        }
+        Ok(messages
+            .iter()
+            .map(|message| format!("{}: {}", message.role, message.text))
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 
     fn write_offered(&self) -> std::sync::RwLockWriteGuard<'_, Vec<ToolDefinition>> {
@@ -322,10 +542,11 @@ impl McpHub {
         }
     }
 
-    /// One line per running server for `/mcp`: where it is reached, how many
-    /// tools it offered, and what it printed that was not the protocol. An
-    /// endpoint's credentials are masked the way a provider key is, so this line
-    /// is safe to read aloud. No servers means a line saying so.
+    /// One line per running server for `/mcp`: what it has, where it is reached,
+    /// what non-protocol noise it has printed, and then every resource and
+    /// prompt it offered by name. An endpoint's credentials are masked the way a
+    /// provider key is, so this is safe to read aloud. No servers means a line
+    /// saying so.
     pub async fn status_lines(&self) -> Vec<String> {
         let sessions = self.sessions.lock().await;
         if sessions.is_empty() {
@@ -336,20 +557,7 @@ impl McpHub {
         }
         sessions
             .values()
-            .map(|session| {
-                let stray = session.client.stray_lines();
-                let noise = if stray > 0 {
-                    format!(", {stray} non-protocol line(s) ignored")
-                } else {
-                    String::new()
-                };
-                format!(
-                    "{}: {} tool(s){noise} · {}",
-                    session.client.name(),
-                    session.tools.len(),
-                    session.client.endpoint(),
-                )
-            })
+            .flat_map(|session| SessionView::of(session).lines())
             .collect()
     }
 
@@ -371,7 +579,7 @@ impl McpHub {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -462,13 +670,14 @@ mod tests {
 
     /// A server that really exists, spawned by path from a temp dir: the whole
     /// bridge — handshake, names offered to the model, a routed call, teardown.
-    /// No ports, nothing installed.
+    /// No ports, nothing installed. It declares all three sets, because that is
+    /// what a person points a server at for.
     const FIXTURE: &str = r#"#!/bin/sh
 while IFS= read -r line; do
     id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
     case "$line" in
         *'"method":"initialize"'*)
-            printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"0"}}}\n' "$id"
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{},"resources":{},"prompts":{}},"serverInfo":{"name":"fixture","version":"0"}}}\n' "$id"
             ;;
         *'"method":"tools/list"'*)
             printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Returns its argument","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}},{"name":"echo","description":"Shadow of the first, same visible name"}]}}\n' "$id"
@@ -477,27 +686,75 @@ while IFS= read -r line; do
             text=$(printf '%s' "$line" | sed -n 's/.*"text":"\([^"]*\)".*/\1/p')
             printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo: %s"}]}}\n' "$id" "$text"
             ;;
+        *'"method":"resources/list"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"resources":[{"uri":"file:///notes/todo.md","name":"todo","description":"What is left","mimeType":"text/markdown"}]}}\n' "$id"
+            ;;
+        *'"method":"resources/read"'*)
+            uri=$(printf '%s' "$line" | sed -n 's/.*"uri":"\([^"]*\)".*/\1/p')
+            case "$uri" in
+                *todo.md)
+                    printf '{"jsonrpc":"2.0","id":%s,"result":{"contents":[{"uri":"%s","mimeType":"text/markdown","text":"- fix the mask"}]}}\n' "$id" "$uri"
+                    ;;
+                *)
+                    printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32002,"message":"no such resource"}}\n' "$id"
+                    ;;
+            esac
+            ;;
+        *'"method":"prompts/list"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"prompts":[{"name":"review","description":"Read a patch","arguments":[{"name":"patch","description":"the diff","required":true},{"name":"style"}]}]}}\n' "$id"
+            ;;
+        *'"method":"prompts/get"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"messages":[{"role":"user","content":{"type":"text","text":"review this patch"}}]}}\n' "$id"
+            ;;
     esac
 done
 "#;
 
-    /// Write the fixture where no other test can collide with it.
-    fn fixture_spec() -> (PathBuf, ServerSpec) {
+    /// A server with documents and no tools and no prompts: the session has to
+    /// survive being asked for the sets it never claimed.
+    const DOCUMENTS_FIXTURE: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+    id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+    case "$line" in
+        *'"method":"initialize"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{"resources":{}},"serverInfo":{"name":"docs","version":"0"}}}\n' "$id"
+            ;;
+        *'"method":"resources/list"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"resources":[{"uri":"handbook://sre","name":"sre handbook"}]}}\n' "$id"
+            ;;
+        *'"method":"resources/read"'*)
+            printf '{"jsonrpc":"2.0","id":%s,"result":{"contents":[{"uri":"handbook://sre","text":"page one"}]}}\n' "$id"
+            ;;
+    esac
+done
+"#;
+
+    /// Write a fixture where no other test can collide with it.
+    fn fixture_server(name: &str, script: &str) -> (PathBuf, ServerSpec) {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let unique = format!(
-            "xencode-mcp-hub-{}-{}",
+            "xencode-mcp-hub-{}-{}-{name}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         let dir = std::env::temp_dir().join(&unique);
         std::fs::create_dir_all(&dir).expect("create fixture dir");
         let path = dir.join("server.sh");
-        std::fs::write(&path, FIXTURE).expect("write fixture");
+        std::fs::write(&path, script).expect("write fixture");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
             .expect("make fixture executable");
-        let spec =
-            ServerSpec::new("fixture", "/bin/sh").args(&[path.to_string_lossy().to_string()]);
+        let spec = ServerSpec::new(name, "/bin/sh").args(&[path.to_string_lossy().to_string()]);
         (dir, spec)
+    }
+
+    fn fixture_spec() -> (PathBuf, ServerSpec) {
+        fixture_server("fixture", FIXTURE)
+    }
+
+    /// The documents-only server, for a test in another module that drives the
+    /// real `/mcp` command handler against a server that is actually running.
+    pub(crate) fn live_documents_server() -> (PathBuf, ServerSpec) {
+        fixture_server("docs", DOCUMENTS_FIXTURE)
     }
 
     #[tokio::test]
@@ -538,12 +795,34 @@ done
         assert!(missing.contains("does not offer"), "{missing}");
 
         let status = hub.status_lines().await;
-        assert_eq!(status.len(), 1);
+        assert_eq!(status.len(), 3, "{status:?}");
         assert!(
-            status[0].starts_with("fixture: 1 tool(s) · /bin/sh "),
+            status[0].starts_with("fixture: 1 tool(s), 1 resource(s), 1 prompt(s) · /bin/sh "),
             "the line names how the server is reached: {}",
             status[0]
         );
+        // A count is not something a person can act on; the names are. The
+        // resource is shown by the uri it has to be read with, and the prompt by
+        // the arguments it wants, with the optional one bracketed.
+        assert_eq!(status[1], "  resource file:///notes/todo.md — todo");
+        assert_eq!(status[2], "  prompt review (patch= [style=])");
+
+        // And both are readable from the session that listed them.
+        assert_eq!(
+            hub.read_resource("fixture", "file:///notes/todo.md").await,
+            Ok("- fix the mask".to_string())
+        );
+        assert_eq!(
+            hub.get_prompt(
+                "fixture",
+                "review",
+                &[("patch".into(), "@@ -1 +1 @@".into())]
+            )
+            .await,
+            Ok("user: review this patch".to_string())
+        );
+        let nowhere = hub.read_resource("fixture", "file:///no/such").await;
+        assert!(nowhere.is_err(), "{nowhere:?}");
 
         // Reconnecting a running server is a no-op that reports itself as such.
         let again = hub.connect(&[spec], Duration::from_secs(5)).await;
@@ -556,6 +835,66 @@ done
             .await
             .contains("not running"));
         std::fs::remove_dir_all(&dir).expect("clean fixture dir");
+    }
+
+    /// A server that offers documents and prompts and no tools is a working
+    /// connection, not a failed one: `tools/list` is never sent, the session
+    /// stays up, and what it does have is listed by name.
+    #[tokio::test]
+    async fn a_server_without_tools_stays_connected_and_says_it_has_none() {
+        let (dir, spec) = fixture_server("docs", DOCUMENTS_FIXTURE);
+        let hub = McpHub::new();
+        let reports = hub
+            .connect(std::slice::from_ref(&spec), Duration::from_secs(5))
+            .await;
+        assert!(reports[0].connected, "{:?}", reports[0]);
+        assert_eq!(reports[0].tools, 0, "{:?}", reports[0]);
+        assert_eq!(
+            reports[0].detail, "no tools, 1 resource(s)",
+            "{:?}",
+            reports[0]
+        );
+        assert_eq!(
+            reports[0].offers,
+            [
+                "  tools — not declared by this server".to_string(),
+                "  prompts — not declared by this server".to_string(),
+                "  resource handbook://sre — sre handbook".to_string(),
+            ],
+            "{:?}",
+            reports[0].offers
+        );
+        // Nothing to offer the model, and that is the server's own doing.
+        assert!(hub.definitions().is_empty());
+        // The session is live: its document reads back over the same pipes.
+        assert_eq!(
+            hub.read_resource("docs", "handbook://sre").await,
+            Ok("page one".to_string())
+        );
+        // A prompt it never declared is refused before anything is sent.
+        assert!(hub
+            .get_prompt("docs", "standup", &[])
+            .await
+            .unwrap_err()
+            .contains("does not offer prompts"));
+        std::fs::remove_dir_all(&dir).expect("clean fixture dir");
+    }
+
+    /// Asking a server that is not running for one of its documents is refused
+    /// in the same words everywhere else uses, not by a panic or a hang.
+    #[tokio::test]
+    async fn reading_from_a_server_that_is_not_running_names_it() {
+        let hub = McpHub::new();
+        assert!(hub
+            .read_resource("absent", "file:///x")
+            .await
+            .unwrap_err()
+            .contains("absent"));
+        assert!(hub
+            .get_prompt("absent", "review", &[])
+            .await
+            .unwrap_err()
+            .contains("/mcp"));
     }
 
     /// A config entry is turned into the transport it names: a command to spawn
