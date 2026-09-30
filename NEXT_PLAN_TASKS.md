@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1720 tests passing, zero warnings (re-verified 2026-09-30)
+- [x] Workspace gates green — 16 crates, 1746 tests passing, zero warnings (re-verified 2026-09-30)
 
 ## Model Catalog Honesty
 
@@ -1525,12 +1525,36 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       never reach `agent_system_prompt()` / `session_hooks()`. Workspace suite
       **1720 passed, 0 failed, 17 ignored**, `cargo fmt --check` and clippy
       clean.)*
-- [ ] **M-3 — skills: `SKILL.md` loader.** Discover `~/.xencode/skills/*/SKILL.md`
+- [x] **M-3 — skills: `SKILL.md` loader.** Discover `~/.xencode/skills/*/SKILL.md`
       and `.xencode/skills/*/SKILL.md`, parse frontmatter, inject only the
       name/description menu into the prompt head, and load a full body on demand
       through the existing plugin prompt plumbing. `/skills` lists what loaded.
       **Done-when:** installing a skill measurably changes behavior on a real
       prompt, and a directory of 30 skills costs the prompt a menu, not 30 bodies.
+      *Met. A skill is one directory holding one `SKILL.md`; both roots are
+      scanned at TUI start and a project skill replaces a user skill of the same
+      name. The prompt head gains only the menu — a heading plus `name —
+      description` per skill, a description over 220 characters cut with an
+      ellipsis — and the body reaches the model solely through `load_skill`, a
+      read-only tool that takes a name and no path, so it opens no read outside
+      the skill directories. With no skills installed the menu is absent and the
+      tool list is the 17 built-ins it was before, both asserted.
+      Verified live against a local llama.cpp model on the same prompt in a fresh
+      session each time (Qwen3-4B-Instruct, the smallest model here that calls
+      tools — the 0.6B and 1.7B models on this machine ignored the tool list
+      outright, and `--jinja` suppresses parsed tool calls on this llama.cpp
+      build). No skills: the model asked for a description of the project,
+      `/trace` reporting `1 turn · 0 tool calls`. One skill, whose instructions
+      dictate an exact reply: `⚙→ load_skill({"name": "answer-with-marker"})`,
+      `⚙← skill: answer-with-marker (user) directory: …`, and the answer becomes
+      `MARKER-7734: this workspace is under M-3 skills verification.` —
+      `1 turn · 1 tool call`. Thirty skills: prompt tokens 3391 → 4127, a 736-token
+      menu, with the turn again making no tool call, so none of the 30 bodies
+      (94,948 characters, 22,380 tokens by the server's own tokenizer) were sent.
+      `/skills` reports the roots, what loaded, what was refused and what the
+      menu costs; `/skills reload` re-scans. Covered by 15 loader tests and 9 in
+      the TUI. Workspace suite **1746 passed, 0 failed, 17 ignored**,
+      `cargo fmt --check` and clippy clean.*
 - [ ] **M-4 — `xencode plugin install <git-url>`.** Clone, pin the commit, verify
       the manifest, show a diff of what it declares before it can contribute a
       prompt prefix, then copy into the config dir. `remove` and `update`

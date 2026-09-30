@@ -109,6 +109,10 @@ const COMMANDS: &[Binding] = &[
         "show which plugins took effect; reload re-scans the plugin dir",
     ),
     (
+        "/skills [reload]",
+        "show which SKILL.md skills loaded from ~/.xencode and .xencode; reload re-scans",
+    ),
+    (
         "/trace [turns]",
         "what the recent agent turns did: rounds, tools, tokens (local, asks no model)",
     ),

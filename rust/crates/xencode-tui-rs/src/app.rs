@@ -100,6 +100,7 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "/rewind",
     "/mcp",
     "/plugin",
+    "/skills",
     "/trace",
     "/cost",
     "/doctor",
@@ -433,6 +434,11 @@ pub struct App<'a> {
     /// What is in here — a prompt prefix and `before`/`after` hooks — is in
     /// every agent turn; `reports()` says which manifests did not load and why.
     pub plugins: xencode_plugin_rs::PluginRuntime,
+    /// The skills found in `~/.xencode/skills` and `<workspace>/.xencode/skills`
+    /// when this app started (M-3). The prompt carries their menu and
+    /// `load_skill` reads a body out of here; shared so a turn running on the
+    /// loop's copy sees exactly what `/skills` reports.
+    pub skills: Arc<xencode_plugin_rs::SkillRuntime>,
     /// Pending approval prompts from the agent tool loop, in arrival order.
     /// The overlay shows the front; answering pops and resolves the oneshot
     /// the tool task is awaiting.
@@ -1871,6 +1877,7 @@ impl<'a> App<'a> {
         let dir = xencode_plugin_rs::default_plugin_dir();
         let mut app = Self::with_config_and_memory(config, memory, dir);
         app.load_plugins();
+        app.load_skills();
         // V-6: the window arrangement comes back with the app. A file this
         // build cannot read is said out loud — a toast on the first frame —
         // rather than silently leaving the user on the preset they did not
@@ -2245,6 +2252,50 @@ impl<'a> App<'a> {
         }
     }
 
+    /// M-3: scan the user's skills directory and the workspace's, in that order,
+    /// so a project skill can replace a user skill of the same name. The result
+    /// is held for the session — the menu in the system prompt is read once and
+    /// stays byte-identical after, which is what the cached prefix needs.
+    fn load_skills(&mut self) {
+        let (home, project) = Self::skill_dirs();
+        self.load_skills_from(&home, &project);
+    }
+
+    /// Re-scan the two roots this session is already pointed at. `/plugin
+    /// reload` does the same for the directory it loaded from, and a session
+    /// pointed at nothing re-scans nothing rather than reading the machine.
+    fn load_skills_from(&mut self, home: &std::path::Path, project: &std::path::Path) {
+        self.skills = std::sync::Arc::new(xencode_plugin_rs::SkillRuntime::load(home, project));
+    }
+
+    /// The two roots a session scans: `$XCODE_SKILLS_DIR` or `~/.xencode/skills`,
+    /// then `<workspace>/.xencode/skills`. The workspace is the directory
+    /// xencode was started in, which is what every other tool call is relative
+    /// to.
+    fn skill_dirs() -> (std::path::PathBuf, std::path::PathBuf) {
+        let workspace = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        (
+            xencode_plugin_rs::default_skills_dir(),
+            xencode_plugin_rs::project_skills_dir(&workspace),
+        )
+    }
+
+    /// Where skills are scanned, worded for a chat line. A test app scans
+    /// nothing, and an empty path in a transcript would read like a bug.
+    fn skill_dir_labels(&self) -> (String, String) {
+        let label = |dir: &std::path::Path| {
+            if dir.as_os_str().is_empty() {
+                "(not scanned — this session loads no skills)".to_string()
+            } else {
+                dir.display().to_string()
+            }
+        };
+        (
+            label(self.skills.home_dir()),
+            label(self.skills.project_dir()),
+        )
+    }
+
     /// The one place an `App` is built. `plugin_dir` is where plugins are
     /// loaded from; `App::new()` loads that directory, `for_tests()` hands in an
     /// empty one so nothing on the developer's machine is read.
@@ -2368,6 +2419,13 @@ impl<'a> App<'a> {
             // Nothing is loaded here: `App::new()` calls `load_plugins()`, and a
             // test app is given an empty directory to load from.
             plugins: xencode_plugin_rs::PluginRuntime::empty(plugin_dir),
+            // The same for skills: `App::new()` scans both roots, and a test
+            // app scans neither, so nothing on the developer's machine can
+            // change what a test asserts about the prompt.
+            skills: Arc::new(xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            )),
             plan_pinned: false,
             approval_queue: std::collections::VecDeque::new(),
             approval_scroll: 0,
@@ -2922,6 +2980,12 @@ impl<'a> App<'a> {
             return;
         }
 
+        // Skills: report what the loader found, or re-scan both roots (M-3).
+        if prompt == "/skills" || prompt.starts_with("/skills ") {
+            self.handle_skills_command(&prompt);
+            return;
+        }
+
         // What the last turns did (EV-2): read the turn trace, no model asked.
         if prompt == "/trace" || prompt.starts_with("/trace ") {
             self.handle_trace_command(&prompt);
@@ -3123,6 +3187,7 @@ impl<'a> App<'a> {
             command_timeout: self.config.agent_command_timeout.max(1),
             plan: self.agent_plan.clone(),
             mcp: self.mcp.clone(),
+            skills: self.skills.clone(),
             hooks: self.session_hooks(),
             schemas: std::collections::HashMap::new(),
             online_docs: self.config.allow_online_docs,
@@ -3149,15 +3214,32 @@ impl<'a> App<'a> {
     }
 
     /// The system block for this session's agent turns: whatever the loaded
-    /// plugins contributed (J-08) ahead of the built-in agent prompt. Plugins
-    /// are read once at startup, so the text is byte-identical turn to turn and
-    /// the KV-cache prefix the assembler relies on still holds.
+    /// plugins contributed (J-08) and the installed skills' menu (M-3), ahead of
+    /// the built-in agent prompt. Both are read once at startup, so the text is
+    /// byte-identical turn to turn and the KV-cache prefix the assembler relies
+    /// on still holds. With no plugins and no skills this is `CTX_SYSTEM`
+    /// exactly, so a session that installed nothing sends what it always sent.
     fn agent_system_prompt(&self) -> std::borrow::Cow<'static, str> {
         let prefix = self.plugins.prompt_prefix();
-        if prefix.trim().is_empty() {
+        let menu = self.skills.menu();
+        let has_prefix = !prefix.trim().is_empty();
+        if !has_prefix && menu.is_none() {
             return std::borrow::Cow::Borrowed(CTX_SYSTEM);
         }
-        std::borrow::Cow::Owned(format!("{prefix}\n\n{CTX_SYSTEM}"))
+        let mut text = String::new();
+        if let Some(menu) = menu {
+            text.push_str(&menu);
+        }
+        if has_prefix {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(prefix);
+        }
+        let mut text = text.trim_end().to_string();
+        text.push_str("\n\n");
+        text.push_str(CTX_SYSTEM);
+        std::borrow::Cow::Owned(text)
     }
 
     /// The egress rule this session obeys (PR-2). Every provider manager a turn
@@ -5374,6 +5456,108 @@ impl<'a> App<'a> {
             "  Hooks in effect: {} before, {} after (config.json wins where both declare a tool).",
             hooks.before.len(),
             hooks.after.len()
+        ));
+    }
+
+    /// M-3: what the skill loader found, in both roots, and what it costs the
+    /// prompt. Every skill contributes one menu line to every turn; its
+    /// instructions reach the model only through `load_skill`, so the last line
+    /// names both sizes rather than leaving the difference to trust.
+    /// `/skills reload` re-scans after a new skill is dropped in; the change
+    /// lands on the next turn.
+    fn handle_skills_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/skills").unwrap_or("").trim();
+        if arg == "reload" {
+            let (home, project) = (
+                self.skills.home_dir().to_path_buf(),
+                self.skills.project_dir().to_path_buf(),
+            );
+            self.load_skills_from(&home, &project);
+            self.system_line("Reloaded skills.");
+        } else if !arg.is_empty() {
+            self.system_line("usage: /skills (what is installed)  ·  /skills reload");
+            return;
+        }
+
+        let (home, project) = self.skill_dir_labels();
+        self.system_line(&format!(
+            "Skills in {} and {}: {}",
+            home,
+            project,
+            if self.skills.is_empty() {
+                "none loaded.".to_string()
+            } else {
+                format!("{} loaded.", self.skills.len())
+            }
+        ));
+        let lines: Vec<String> = self
+            .skills
+            .skills()
+            .iter()
+            .map(|skill| {
+                let inferred = if skill.description_inferred {
+                    " — summary taken from its first line"
+                } else {
+                    ""
+                };
+                format!(
+                    "  {} [{}] — {}{}",
+                    skill.name,
+                    skill.scope.label(),
+                    xencode_plugin_rs::cut_description(&skill.description),
+                    inferred
+                )
+            })
+            .collect();
+        for line in lines {
+            self.system_line(&line);
+        }
+        let rejected: Vec<String> = self
+            .skills
+            .rejected()
+            .iter()
+            .map(|rejected| {
+                format!(
+                    "  NOT LOADED: {} — {}",
+                    rejected.file.display(),
+                    rejected.reason
+                )
+            })
+            .collect();
+        for line in rejected {
+            self.system_line(&line);
+        }
+        if !self.skills.shadowed().is_empty() {
+            self.system_line(&format!(
+                "  Project skills replacing user ones: {}",
+                self.skills.shadowed().join(", ")
+            ));
+        }
+        if self.skills.is_empty() {
+            self.system_line(
+                "Install one by making a directory with a SKILL.md in either path, then \
+                 /skills reload.",
+            );
+            return;
+        }
+        let menu_chars = self
+            .skills
+            .menu()
+            .map(|menu| menu.chars().count())
+            .unwrap_or_default();
+        let body_chars: usize = self
+            .skills
+            .skills()
+            .iter()
+            .map(|skill| skill.instructions.chars().count())
+            .sum();
+        let count = self.skills.len();
+        let word = if count == 1 { "skill" } else { "skills" };
+        self.system_line(&format!(
+            "  Menu for {count} {word}: {} characters on every turn. Their instructions are \
+             {body_chars} characters in all, and reach the model one {word} at a time through \
+             load_skill.",
+            menu_chars
         ));
     }
 
@@ -7905,6 +8089,32 @@ fn record_round(
     }
 }
 
+/// The tools one turn is offered: the built-in surface plus whatever the
+/// session brought since — the tools of the servers `/mcp` started, and
+/// `load_skill` when skills are installed (M-3).
+///
+/// A session with no servers and no skills gets exactly the built-in list, so
+/// the request it sends is byte-for-byte the one this sent before either surface
+/// existed. That is the whole reason the two extensions are gated on being
+/// non-empty: an offer of a tool with nothing behind it is a round the model can
+/// waste.
+fn offered_tools(
+    mcp: &crate::mcp::McpHub,
+    skills: &xencode_plugin_rs::SkillRuntime,
+) -> Vec<xencode_providers_rs::ToolDefinition> {
+    let mut tools = xencode_providers_rs::background_tools();
+    tools.extend(xencode_providers_rs::advise_tools());
+    tools.extend(xencode_providers_rs::file_tools());
+    tools.extend(xencode_providers_rs::command_tools());
+    tools.extend(xencode_providers_rs::plan_tools());
+    // Whatever `/mcp` started, read at the moment the turn begins.
+    tools.extend(mcp.definitions());
+    if !skills.is_empty() {
+        tools.extend(xencode_providers_rs::skill_tools());
+    }
+    tools
+}
+
 pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String>) {
     let AgentRun {
         sink,
@@ -7997,13 +8207,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
             let _ = tx.send(format!("[OLLAMA]{note}"));
         }
     }
-    let mut tools = xencode_providers_rs::background_tools();
-    tools.extend(xencode_providers_rs::advise_tools());
-    tools.extend(xencode_providers_rs::file_tools());
-    tools.extend(xencode_providers_rs::command_tools());
-    tools.extend(xencode_providers_rs::plan_tools());
-    // Whatever `/mcp` started, read at the moment the turn begins.
-    tools.extend(approval.mcp.definitions());
+    let tools = offered_tools(&approval.mcp, &approval.skills);
     // The executor validates against the same descriptions the model was
     // offered, so a call that does not fit them is answered rather than run
     // with whatever the reader would have guessed (MI-1).
@@ -9358,11 +9562,11 @@ pub(crate) async fn serve_scripted_answers(
 mod tests {
     use super::{
         cap_at_line, count_report, first_output_line, format_advise_report, format_watch_warning,
-        learning_lessons, live_refresh_snapshot, parse_lesson_quiz, parse_llama_port,
-        parse_porcelain_z, parse_term_suggestions, parse_voice_level, preview_repo_map,
-        repo_map_tier_line, should_draw, trace_age, trace_report, watch_warning_for, App,
-        ConversationMemory, Egress, FocusArea, FrameSignals, LoopSink, SpawnRecord, XencodeConfig,
-        CTX_SYSTEM,
+        learning_lessons, live_refresh_snapshot, offered_tools, parse_lesson_quiz,
+        parse_llama_port, parse_porcelain_z, parse_term_suggestions, parse_voice_level,
+        preview_repo_map, repo_map_tier_line, should_draw, trace_age, trace_report,
+        watch_warning_for, App, ConversationMemory, Egress, FocusArea, FrameSignals, LoopSink,
+        SpawnRecord, XencodeConfig, CTX_SYSTEM,
     };
     use std::collections::HashSet;
     use tokio::sync::mpsc;
@@ -9535,6 +9739,7 @@ mod tests {
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
+            skills: app.skills.clone(),
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,
@@ -9739,6 +9944,251 @@ mod tests {
         let app = App::for_tests();
         assert_eq!(&*app.agent_system_prompt(), CTX_SYSTEM);
         assert!(app.session_hooks().before.is_empty());
+    }
+
+    /// Write one skill into `root` the way a user would: a directory holding a
+    /// `SKILL.md` with frontmatter and instructions.
+    fn install_skill(root: &std::path::Path, name: &str, text: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(xencode_plugin_rs::skills::SKILL_FILE), text).unwrap();
+    }
+
+    /// M-3's prompt half, measured on the real assembled system turn: every
+    /// installed skill contributes its name and its summary line, and no skill
+    /// contributes its instructions — those are one `load_skill` call away.
+    #[test]
+    fn an_installed_skill_reaches_the_prompt_as_a_menu_and_not_as_a_document() {
+        let dir = temp_dir("skill-menu");
+        install_skill(
+            &dir,
+            "pdf-forms",
+            "---\nname: pdf-forms\ndescription: Fill a PDF form when asked.\n---\n\
+             THE FULL PDF INSTRUCTIONS\nstep one\nstep two\n",
+        );
+
+        let mut app = App::for_tests();
+        // A test app scans neither root, so the prompt is the built-in one.
+        assert_eq!(&*app.agent_system_prompt(), CTX_SYSTEM);
+
+        app.skills = std::sync::Arc::new(xencode_plugin_rs::SkillRuntime::load(
+            &dir,
+            std::path::Path::new(""),
+        ));
+        let system = app.agent_system_prompt();
+        assert!(system.starts_with("## Available skills"), "{system}");
+        assert!(
+            system.contains("- pdf-forms: Fill a PDF form when asked."),
+            "{system}"
+        );
+        assert!(
+            !system.contains("THE FULL PDF INSTRUCTIONS"),
+            "the listing is not the instructions: {system}"
+        );
+        assert!(
+            system.contains("load_skill"),
+            "the menu has to say how to read a skill: {system}"
+        );
+        assert!(
+            system.ends_with(CTX_SYSTEM),
+            "the built-in prompt still closes the stable head"
+        );
+        // The loop executes against the same runtime, so what `/skills` prints
+        // and what `load_skill` can read cannot drift apart.
+        let ctx = app.approval_ctx();
+        assert_eq!(ctx.skills.len(), 1);
+        assert!(ctx.skills.get("pdf-forms").is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Both extension surfaces write ahead of the built-in prompt, and the
+    /// order is fixed, so the byte-stable head stays stable for the session.
+    #[test]
+    fn the_skill_menu_and_a_plugin_prefix_both_sit_ahead_of_the_builtin_prompt() {
+        let skills_dir = temp_dir("skill-and-plugin-skills");
+        install_skill(
+            &skills_dir,
+            "alpha",
+            "---\nname: alpha\ndescription: First.\n---\nbody\n",
+        );
+        let plugin_dir = temp_dir("skill-and-plugin-plugin");
+        std::fs::create_dir_all(plugin_dir.join("guardrails")).unwrap();
+        std::fs::write(
+            plugin_dir.join("guardrails").join("plugin.json"),
+            r#"{ "name": "guardrails", "version": "1.0.0", "permissions": ["prompt"],
+                 "prompt_prefix": "Run the tests." }"#,
+        )
+        .unwrap();
+
+        let mut app = App::for_tests();
+        app.skills = std::sync::Arc::new(xencode_plugin_rs::SkillRuntime::load(
+            &skills_dir,
+            std::path::Path::new(""),
+        ));
+        app.plugins =
+            xencode_plugin_rs::PluginRuntime::load(&plugin_dir, env!("CARGO_PKG_VERSION"));
+        let system = app.agent_system_prompt();
+        let menu_at = system.find("## Available skills").expect("no menu");
+        let prefix_at = system.find("Run the tests.").expect("no plugin prefix");
+        let built_in_at = system
+            .find(CTX_SYSTEM)
+            .expect("the built-in prompt is gone");
+        assert!(
+            menu_at < prefix_at && prefix_at < built_in_at,
+            "menu {menu_at}, prefix {prefix_at}, built-in {built_in_at}"
+        );
+
+        std::fs::remove_dir_all(&skills_dir).unwrap();
+        std::fs::remove_dir_all(&plugin_dir).unwrap();
+    }
+
+    /// The tool half of the gate: no skills installed means the turn offers
+    /// exactly the built-in tool list it always did, and installing one skill
+    /// adds exactly one tool rather than a document.
+    #[test]
+    fn load_skill_is_offered_only_when_skills_are_installed() {
+        let none = offered_tools(
+            &crate::mcp::McpHub::new(),
+            &xencode_plugin_rs::SkillRuntime::empty(
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            ),
+        );
+        let built_in: Vec<&str> = none.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(
+            built_in.len(),
+            17,
+            "the built-in surface, uncounted before this: {built_in:?}"
+        );
+        assert!(!built_in.contains(&"load_skill"), "{built_in:?}");
+
+        let dir = temp_dir("offered-skills");
+        install_skill(
+            &dir,
+            "alpha",
+            "---\nname: alpha\ndescription: First.\n---\nbody\n",
+        );
+        let with = offered_tools(
+            &crate::mcp::McpHub::new(),
+            &xencode_plugin_rs::SkillRuntime::load(&dir, std::path::Path::new("")),
+        );
+        let names: Vec<&str> = with.iter().map(|tool| tool.name.as_str()).collect();
+        assert!(names.contains(&"load_skill"), "{names:?}");
+        assert_eq!(names.len(), built_in.len() + 1, "{names:?}");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `/skills` reports what loaded from which root, what was found and
+    /// refused, and what the menu costs against what the documents hold — the
+    /// difference the whole design turns on, stated in the product rather than
+    /// only in a test.
+    #[test]
+    fn skills_command_reports_what_loaded_what_was_refused_and_what_it_costs() {
+        let dir = temp_dir("skills-report");
+        let mut app = App::for_tests();
+        app.skills = std::sync::Arc::new(xencode_plugin_rs::SkillRuntime::empty(
+            dir.clone(),
+            std::path::PathBuf::new(),
+        ));
+
+        app.handle_skills_command("/skills");
+        let said: Vec<String> = app
+            .messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        assert!(
+            said.iter()
+                .any(|line| line.contains("Skills in") && line.contains("none loaded")),
+            "{said:?}"
+        );
+
+        install_skill(
+            &dir,
+            "alpha",
+            "---\nname: alpha\ndescription: First skill.\n---\n\
+             the instructions of alpha, which are long enough to count\n",
+        );
+        // A directory that is not a skill at all, and a document with nothing
+        // inside it: one passes in silence, the other is named.
+        std::fs::create_dir_all(dir.join("not-a-skill")).unwrap();
+        std::fs::write(dir.join("not-a-skill").join("README.md"), "notes").unwrap();
+        install_skill(
+            &dir,
+            "hollow",
+            "---\nname: hollow\ndescription: Empty.\n---\n",
+        );
+
+        let seen = app.messages.len();
+        app.handle_skills_command("/skills reload");
+        let said: Vec<String> = app.messages[seen..]
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        assert!(
+            said.iter().any(|line| line.contains("Reloaded skills.")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|line| line.contains("Skills in") && line.contains("1 loaded")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|line| line.contains("alpha [user] — First skill.")),
+            "{said:?}"
+        );
+        assert!(
+            said.iter()
+                .any(|line| line.contains("NOT LOADED") && line.contains("hollow")),
+            "a hollow SKILL.md must be named, not skipped quietly: {said:?}"
+        );
+        assert!(
+            said.iter().any(|line| {
+                line.contains("Menu for 1 skill:")
+                    && line.contains("reach the model one skill at a time through load_skill")
+            }),
+            "{said:?}"
+        );
+        assert!(
+            !said.iter().any(|line| line.contains("not-a-skill")),
+            "a plain directory is not a failed skill: {said:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An argument that is not a listing or a reload is a usage line, the same
+    /// shape `/plugin` takes.
+    #[test]
+    fn skills_command_rejects_an_unknown_argument() {
+        let mut app = App::for_tests();
+        app.handle_skills_command("/skills enable alpha");
+        let last = app.messages.last().unwrap().content.clone();
+        assert!(last.contains("usage: /skills"), "{last}");
+    }
+
+    /// Typing `/skills` at the prompt is answered by the app: no model is asked
+    /// anything, and the listing lands in the transcript.
+    #[tokio::test]
+    async fn skills_slash_command_routes_to_the_handler() {
+        let mut app = App::for_tests();
+        let (tx, _rx) = mpsc::unbounded_channel::<String>();
+        app.set_chat_text("/skills");
+        app.submit_message(tx);
+        assert!(!app.is_generating, "a skill listing arms no generation");
+        let said: Vec<String> = app
+            .messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect();
+        assert!(
+            said.iter().any(|line| line.contains("Skills in")),
+            "{said:?}"
+        );
     }
 
     /// The far end of J-08: not "the merged map has an entry" but "the tool run
@@ -9985,6 +10435,7 @@ mod tests {
             command_timeout: crate::agent_tools::DEFAULT_COMMAND_TIMEOUT,
             plan: app.agent_plan.clone(),
             mcp: app.mcp.clone(),
+            skills: app.skills.clone(),
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,

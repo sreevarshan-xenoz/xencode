@@ -55,7 +55,10 @@ the next frame). Slash commands: `/init`, `/ctx`, `/advise`,
 `/rewind` (undo the agent's file changes for this session),
 `/mcp` (connect every MCP server declared in config; `/mcp status`,
 `/mcp stop`), `/plugin` (report which plugins loaded and what they changed;
-`/plugin reload` re-scans the plugin directory), `/trace [turns]` (what the
+`/plugin reload` re-scans the plugin directory), `/skills` (report which
+`SKILL.md` skills loaded, which were refused, and how many characters the
+prompt pays for them per turn; `/skills reload` re-scans both skill
+directories), `/trace [turns]` (what the
 recent agent turns did — rounds, tool calls with the arguments they were made
 from and their outcome, the files the context put in front of the model, whether
 the turn carried the `[d]` decision marker, and any token count a server
@@ -71,7 +74,11 @@ git worktree next to the project, e.g. `proj-spawn-1` on branch
 agent's live steps stream in the transcript, its final answer is posted
 back with `(spawn #<id> · <task>)`, and `/spawn status` lists every
 registered run with its worktree location. Your main chat keeps working
-while the subagent works.
+while the subagent works. Four more reach the same engines the CLI runs:
+`/doctor [env|deps]` probes machine resources, GPUs, memory and environment
+facts, `/verify [skip...]` runs the machine-checkable checklist (fmt, lint,
+test), `/hotspots [limit]` ranks files by churn, size and bus factor, and
+`/agents` inventories the coding-agent CLIs installed on `PATH`.
 
 #### What the build tells the model: `/ctx prompts`
 
@@ -1894,6 +1901,56 @@ $ xencode plugin list
 prints the same one-line verdict, so an install nothing can load is visible
 immediately. `remove <name>` deletes only that one directory; a name containing
 a path separator or `..` is rejected rather than resolved.
+
+### Skills (`SKILL.md`)
+
+A skill is one directory holding one `SKILL.md`: a name and a one-line
+description of when to use it at the top, the instructions themselves below.
+
+```markdown
+---
+name: release-notes
+description: Use when the user asks what changed between two tags.
+---
+
+List the commits oldest first. Quote a commit's subject, never its hash.
+```
+
+Xencode scans two directories when the TUI starts —
+`~/.xencode/skills` (set `$XCODE_SKILLS_DIR` to move it) and `.xencode/skills`
+inside the workspace — and a project skill replaces a user skill of the same
+name rather than sitting beside it. What goes into the system prompt is a list:
+one heading, then one line per skill (`name — description`, a description longer
+than 220 characters cut with an ellipsis). The instructions stay on disk.
+
+The model reaches a body through `load_skill`, a read-only tool that takes a
+`name` and nothing else — never a path, so it opens no way to read outside the
+skill directories, and it asks for no approval. It is offered only when at least
+one skill is installed: with none, the tool list and the system prompt are
+byte-for-byte what they were before skills existed. Asking for a name that is
+not installed is answered with the names that are.
+
+`/skills` in the TUI reports the outcome of the scan, and `/skills reload` runs
+the scan again without restarting:
+
+```console
+Skills in /home/sree/.xencode/skills and /tmp/m3-ws/.xencode/skills: 1 loaded.
+answer-with-marker [user] — Use this whenever the user asks what this project is…
+Menu for 1 skill: 337 characters on every turn. Their instructions are 230
+characters in all, and reach the model one skill at a time through load_skill.
+```
+
+A document that cannot be used is named with its reason instead of being loaded
+silently: a file with no instructions behind the frontmatter is refused, frontmatter
+that never closes keeps the fields it did declare and says so, and a file with no
+frontmatter at all loads under its directory name with a description taken from
+its first line — flagged as inferred, because nobody wrote one.
+
+The list is why a large skill directory stays cheap. Measured against a local
+llama.cpp model with the same prompt every time: no skills installed, 3391
+prompt tokens; 30 skills installed, 4127 — and `/trace` confirms the turn made
+no tool call, so none of those 30 bodies (94,948 characters, 22,380 tokens by
+the server's own tokenizer) entered the prompt.
 
 ### `xencode fetch <url> [--format text|json]`
 Fetch a web page and extract research-ready text (title + body, scripts

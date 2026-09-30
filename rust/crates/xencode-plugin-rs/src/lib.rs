@@ -3,12 +3,17 @@ pub mod manifest;
 pub mod plugin_trait;
 pub mod registry;
 pub mod runtime;
+pub mod skills;
 
 pub use host::{BasicHost, Host};
 pub use manifest::{PluginHooks, PluginManifest};
 pub use plugin_trait::{PluginError, PluginEvent, PluginHost, PluginResponse, XencodePlugin};
 pub use registry::PluginRegistry;
 pub use runtime::{LoadReport, ManifestPlugin, PluginRuntime};
+pub use skills::{
+    cut_description, default_home_dir as default_skills_dir, project_skills_dir, RejectedSkill,
+    Skill, SkillRuntime, SkillScope,
+};
 
 /// The directory installed plugins live in: `$XCODE_PLUGIN_DIR` when set (tests
 /// and portable installs), else `<data dir>/xencode/plugins` — the same path

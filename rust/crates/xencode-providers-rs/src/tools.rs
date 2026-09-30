@@ -900,6 +900,36 @@ pub fn plan_tools() -> Vec<ToolDefinition> {
     }]
 }
 
+/// Reading one installed skill's full instructions (M-3). The prompt carries
+/// only a menu of names and one-line summaries, so this is how a skill's actual
+/// text reaches the model — on demand, for whichever skill the task calls for,
+/// instead of every skill's document in front of every turn.
+///
+/// Nothing takes a path: the argument is a name out of the menu, so a skill is
+/// read by what it is called and no directory can be reached through it.
+pub fn skill_tools() -> Vec<ToolDefinition> {
+    vec![ToolDefinition {
+        name: "load_skill".to_string(),
+        description: "Read the full instructions of one installed skill. The \
+                      prompt lists skills by name with a one-line summary; the \
+                      listing is not the instructions, so call this with the \
+                      name written exactly there and follow what comes back. \
+                      Reads one skill, changes nothing, runs nothing."
+            .to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The skill's name, exactly as the Available \
+                                    skills list writes it"
+                }
+            },
+            "required": ["name"]
+        }),
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -937,6 +967,23 @@ mod tests {
         assert_eq!(props.len(), 2);
         assert!(props.contains_key("text") && props.contains_key("status"));
         assert_eq!(item["required"][0], "text");
+    }
+
+    #[test]
+    fn load_skill_takes_only_a_name_and_no_path() {
+        let tools = skill_tools();
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["load_skill"]
+        );
+        let value = tools[0].to_api_value();
+        let params = &value["function"]["parameters"];
+        assert_eq!(params["required"][0], "name");
+        // A skill is addressed by what it is called, never by where it lives,
+        // so there is no path argument for a prompt-injected name to abuse.
+        let props = params["properties"].as_object().unwrap();
+        assert_eq!(props.len(), 1);
+        assert!(!tools[0].description.contains("path"));
     }
 
     #[test]
