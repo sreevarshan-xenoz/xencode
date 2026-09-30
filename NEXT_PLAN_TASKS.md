@@ -18,7 +18,7 @@
   `help`, are the 24 the binary lists; `advisories` was missing from this line when
   RS-5 shipped it, and `interop` was added later the same day by AR-1 — the binary now
   lists 25)
-- [x] Workspace gates green — 16 crates, 1712 tests passing, zero warnings (re-verified 2026-09-30)
+- [x] Workspace gates green — 16 crates, 1720 tests passing, zero warnings (re-verified 2026-09-30)
 
 ## Model Catalog Honesty
 
@@ -1492,11 +1492,39 @@ xencode usable by tooling people already have. M-5..M-7 are the new surfaces.
       (payload-on-stdin, veto-one-write-by-path-while-a-second-path-passes,
       after-hook-sees-PostToolUse); `cargo test --workspace` green at **1712
       passed, 0 failed, 17 ignored** with `cargo fmt --check` and clippy clean.)*
-- [ ] **M-2 — enforce what a manifest declares.** Either check `permissions` at
+- [x] **M-2 — enforce what a manifest declares.** Either check `permissions` at
       load and refuse or degrade with a clear message, or delete the field. A
       parsed-but-ignored security-relevant field is worse than an absent one.
       **Done-when:** `/plugin` reports the enforced decision, and a test proves a
       disallowed capability cannot reach the agent loop.
+      *(Done 2026-09-30. `permissions` is now a closed allowlist enforced in
+      `PluginRuntime::load` — the single place a plugin's contributions merge
+      into the loop. A manifest-only plugin can do exactly two things, so those
+      are the only two capabilities: `prompt` (adds text ahead of the agent's
+      system prompt) and `hooks` (registers a before/after hook, each of which
+      runs `sh -c` in the workspace). `PluginManifest` grew `uses_prompt`,
+      `uses_hooks`, `undeclared_permissions` and `unknown_permissions`; the loader
+      refuses a plugin that exercises a capability it never declared, or that
+      names a capability outside `KNOWN_PERMISSIONS`, and the refusal `continue`s
+      *before* the host registration and the merge — so a denied plugin reaches
+      nothing. The report line carries the reason, and because both `xencode
+      plugin list` and the TUI's `/plugin` render `LoadReport::summary`, the
+      decision is visible in both. Proven live with the real debug binary against
+      a throwaway `XCODE_PLUGIN_DIR`: `bad-hook` (prompt + a
+      `run_command: "rm -rf ./"` before-hook, no permissions) came back
+      `NOT LOADED: adds a prompt prefix and declares hooks that run a shell
+      command but did not declare the "prompt", "hooks" permissions in its
+      manifest`; `sneaky-net` (`permissions: ["network"]`) came back
+      `NOT LOADED: requests permission xencode does not recognise: "network"; a
+      plugin can declare only prompt, hooks`; and `good` (`permissions:
+      ["hooks"]` + an after-hook) loaded — `1 of 3 loaded`. Seven new tests:
+      three on the manifest predicates, three runtime refusals (undeclared-use,
+      partial declaration does not borrow the other capability, unknown name)
+      plus a positive "asks for what it uses loads", and a TUI test that
+      `/plugin reload` reports the refusal AND that the denied prompt and hook
+      never reach `agent_system_prompt()` / `session_hooks()`. Workspace suite
+      **1720 passed, 0 failed, 17 ignored**, `cargo fmt --check` and clippy
+      clean.)*
 - [ ] **M-3 — skills: `SKILL.md` loader.** Discover `~/.xencode/skills/*/SKILL.md`
       and `.xencode/skills/*/SKILL.md`, parse frontmatter, inject only the
       name/description menu into the prompt head, and load a full body on demand

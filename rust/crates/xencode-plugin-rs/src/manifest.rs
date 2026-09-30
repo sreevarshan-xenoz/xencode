@@ -2,6 +2,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// The only capabilities a manifest can ask for in this build, and the only
+/// ones `PluginRuntime::load` will honour. A plugin has no code of its own, so
+/// there is nothing else it could do: it can add text ahead of the agent's
+/// system prompt (`prompt`) and declare hooks that run a shell command
+/// (`hooks`). A manifest naming anything else is refused rather than ignored,
+/// so a declared permission always means the host checked something.
+pub const KNOWN_PERMISSIONS: &[&str] = &["prompt", "hooks"];
+
 /// Hooks a plugin declares, in the same `tool name (or `*`) → shell command`
 /// shape as the `agent_hooks` block in `config.json`. A plugin's entry wins
 /// only where the config is silent; see `PluginRuntime::load`, which merges
@@ -43,6 +51,10 @@ pub struct PluginManifest {
     /// Versions this plugin accepts; `*` (the default) accepts any.
     #[serde(default = "any_version")]
     pub xencode_version: String,
+    /// Capabilities this plugin asks the host to grant, checked at load. A
+    /// manifest that adds a prompt prefix must name `prompt`; one that declares
+    /// hooks must name `hooks`. Anything it uses without asking — or any name
+    /// outside `KNOWN_PERMISSIONS` — refuses the load. See `PluginRuntime::load`.
     #[serde(default)]
     pub permissions: Vec<String>,
     /// Prepended to the agent's system prompt by every turn started after load.
@@ -77,6 +89,43 @@ impl PluginManifest {
     pub fn is_compatible_with(&self, xencode_version: &str) -> bool {
         self.xencode_version == xencode_version || self.xencode_version == "*"
     }
+
+    /// Whether the plugin adds text ahead of the agent's system prompt. Matches
+    /// the trim rule `PluginRuntime::load` uses to decide a prefix is present.
+    pub fn uses_prompt(&self) -> bool {
+        !self.prompt_prefix.trim().is_empty()
+    }
+
+    /// Whether the plugin declares any hook — each of which runs a shell command
+    /// in the workspace, which is why it needs its own permission.
+    pub fn uses_hooks(&self) -> bool {
+        !self.hooks.before.is_empty() || !self.hooks.after.is_empty()
+    }
+
+    /// The capabilities the plugin exercises but did not declare. Non-empty
+    /// means the plugin would change agent behaviour it never asked to be
+    /// allowed to change, so the load is refused.
+    pub fn undeclared_permissions(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if self.uses_prompt() && !self.permissions.iter().any(|p| p == "prompt") {
+            missing.push("prompt");
+        }
+        if self.uses_hooks() && !self.permissions.iter().any(|p| p == "hooks") {
+            missing.push("hooks");
+        }
+        missing
+    }
+
+    /// Declared permission names the host has no meaning for. A plugin asking
+    /// for `network` in a build that cannot grant it is told so and refused,
+    /// rather than having the claim read and dropped.
+    pub fn unknown_permissions(&self) -> Vec<&str> {
+        self.permissions
+            .iter()
+            .map(|p| p.as_str())
+            .filter(|p| !KNOWN_PERMISSIONS.contains(p))
+            .collect()
+    }
 }
 
 impl Default for PluginManifest {
@@ -110,13 +159,60 @@ mod tests {
             "license": "MIT",
             "dependencies": [],
             "xencode_version": "2.1.0",
-            "permissions": ["read"]
+            "permissions": ["prompt"]
         }"#;
         let manifest = PluginManifest::from_json(json).unwrap();
         assert_eq!(manifest.name, "test-plugin");
         assert_eq!(manifest.version, "1.0.0");
         assert!(manifest.prompt_prefix.is_empty());
         assert!(manifest.hooks.is_empty());
+    }
+
+    #[test]
+    fn using_a_contribution_without_its_permission_is_reported_missing() {
+        let mut m = PluginManifest {
+            name: "guardrails".to_string(),
+            version: "1".to_string(),
+            prompt_prefix: "Read the tests first.".to_string(),
+            ..Default::default()
+        };
+        m.hooks
+            .after
+            .insert("*".to_string(), "cargo fmt".to_string());
+        // Both capabilities are exercised but neither was asked for.
+        assert!(m.uses_prompt());
+        assert!(m.uses_hooks());
+        assert_eq!(m.undeclared_permissions(), vec!["prompt", "hooks"]);
+        // Declaring one clears only that one.
+        m.permissions = vec!["hooks".to_string()];
+        assert_eq!(m.undeclared_permissions(), vec!["prompt"]);
+        // Declaring both clears the field.
+        m.permissions = vec!["prompt".to_string(), "hooks".to_string()];
+        assert!(m.undeclared_permissions().is_empty());
+    }
+
+    #[test]
+    fn an_inert_manifest_asks_for_nothing_and_misses_nothing() {
+        let m = PluginManifest {
+            name: "noop".to_string(),
+            version: "1".to_string(),
+            ..Default::default()
+        };
+        assert!(!m.uses_prompt());
+        assert!(!m.uses_hooks());
+        assert!(m.undeclared_permissions().is_empty());
+        assert!(m.unknown_permissions().is_empty());
+    }
+
+    #[test]
+    fn a_permission_name_the_host_does_not_know_is_flagged() {
+        let m = PluginManifest {
+            name: "guardrails".to_string(),
+            version: "1".to_string(),
+            permissions: vec!["prompt".to_string(), "network".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(m.unknown_permissions(), vec!["network"]);
     }
 
     /// A manifest that declares nothing but a name and a version is still a

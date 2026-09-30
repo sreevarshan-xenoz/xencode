@@ -1859,10 +1859,19 @@ plugin's hook only lands where config.json is silent, so your own config always
 outranks it. Because they run through the same path, a plugin's hooks are handed
 the same event JSON on stdin that `agent_hooks` commands receive.
 
+The `permissions` list is checked at load, not decoration: a plugin may add a
+prompt prefix only if it declares `prompt`, and may register hooks — which run a
+shell command in the workspace — only if it declares `hooks`. A plugin that uses
+a capability it did not declare, or names one xencode does not recognise (only
+`prompt` and `hooks` mean anything to a manifest-only plugin), is refused
+outright: it registers nothing and contributes nothing to the agent loop, and
+`list` / `/plugin` say why.
+
 ```json
 {
   "name": "guardrails",
   "version": "1.2.0",
+  "permissions": ["prompt", "hooks"],
   "prompt_prefix": "Run cargo test before answering.",
   "xencode_version": "*",
   "hooks": { "before": { "write_file": "echo pre" }, "after": { "*": "echo post" } }
@@ -1877,7 +1886,8 @@ $ xencode plugin list
 📦 Plugins in /tmp/j08-probe/plugins (xencode 0.1.0):
   future v9.9.9 — NOT LOADED: needs xencode 0.1.0 (declared 9.9.9)
   guardrails v1.2.0 — loaded: prompt prefix, 1 before hook(s), 1 after hook(s)
-  1 of 2 loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.
+  loose v0.1.0 — NOT LOADED: declares hooks that run a shell command but did not declare the "hooks" permission in its manifest
+  1 of 3 loaded — a loaded plugin's prompt prefix and hooks apply to every agent turn.
 ```
 
 `install <path>` copies the directory (or a single manifest) under that name and
