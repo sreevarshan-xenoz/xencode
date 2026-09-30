@@ -1307,7 +1307,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       denied check renders `produced no exit code ... unverified`, never a
       pass. Checks run through the unchanged approval gate (modal prompts
       watched in edit-allow mode). Non-cargo roots get no invented commands.)*
-- [ ] **L-8 — `edit_file` failure fallback.** Today a non-unique or
+- [x] **L-8 — `edit_file` failure fallback.** Today a non-unique or
       non-matching `old` string hard-fails. Return structured "why it didn't
       match" — the count of matches plus each candidate with line numbers and
       surrounding context — so the next turn self-corrects, and retry once
@@ -1315,6 +1315,22 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** an ambiguous edit on a real duplicated line converges in
       one retry, and the existing exact-match contract stays exact — no silent
       fuzzy write.
+      *(Done 2026-09-30. The "retry once automatically" clause was resolved with
+      the user toward model-driven self-correction rather than a tool-level
+      auto-apply: the failure now returns a structured report — a non-unique
+      `old` lists every occurrence with its line number and a `→`-marked context
+      window (capped at 6, with a `… and N more` tail), and a zero-match `old`
+      names the closest real text ("same text, different whitespace", "N of M
+      lines match (ignoring whitespace)", or "nothing in the file resembles it").
+      Nothing is auto-written; the exact-match contract is unchanged. Covered by
+      4 tool-level tests on real files: the duplicated-line report renders both
+      match windows, a context-rich retry edits only the intended occurrence, the
+      whitespace and partial near-misses report correctly while the refused edit
+      leaves the file byte-for-byte untouched. Live-verified in the real TUI
+      against a scratch crate with `a * b` on two lines: round 1 rendered
+      `"old" appears 2 times in src/main.rs — every match below…`, round 2
+      self-corrected to `edited src/main.rs: replaced 2 occurrence(s)`, and the
+      first refusal wrote nothing.)*
 - [x] **L-9 — cost metering over the metrics that already exist.** Aggregate
       `RequestMetrics` (prompt/cached/completion tokens, tok/s, context usage,
       compaction) into per-model and per-session spend with a configurable

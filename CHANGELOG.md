@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `edit_file` explains a failed match instead of hard-failing (L-8)
+
+When an `edit_file` `old` string matched nothing or matched more than once, the agent only learned "not found" or "appears N times" and had to re-read the file to guess why. The failure now reports where it missed, so the model's next round self-corrects from the error text rather than a fresh read:
+
+- a non-unique `old` lists every occurrence with its line number and a `→`-marked context window around it, capped at six matches with a `… and N more` tail;
+- a zero-match `old` names the closest real text: lines that are the same modulo whitespace ("same text, different whitespace"), blocks whose first lines match but whose rest drifted ("N of M lines match (ignoring whitespace)"), or `nothing in the file resembles it` when there is no near miss;
+- the exact-match contract is unchanged — nothing is auto-applied or fuzzy-written. A near miss is shown as a candidate to copy, never as a match, and a refused edit leaves the file byte-for-byte untouched.
+
+Covered by tool-level tests on real files: a duplicated line converges in one retry once the model copies a context-rich block from the report, a whitespace-variant `old` reports its near miss without writing, and unrelated text reports no candidate.
+
 ### Added — exit-code "done" gate after agent edits (L-7)
 
 An agent turn that edited project files can no longer finish on the model's claim alone. When the model ends its answer, xencode now runs the workspace's own checks — `cargo test` and `cargo clippy`, discovered from a `Cargo.toml` in the workspace root — through the same approval gate as any shell command, and only lets the turn finish on genuinely exiting 0:
