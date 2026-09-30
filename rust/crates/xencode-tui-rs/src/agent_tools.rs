@@ -1129,6 +1129,149 @@ pub fn approval_preview(root: &Path, call: &ToolCall) -> String {
     }
 }
 
+/// How many occurrences `occurrence_context` names before saying how many it
+/// left out, and how many near-miss blocks `absence_candidates` shows.
+const MATCH_REPORT_CAP: usize = 6;
+
+/// 1-based line number of a byte offset in `text`.
+fn line_at(text: &str, byte: usize) -> usize {
+    text[..byte].matches('\n').count() + 1
+}
+
+/// A `L{a}-L{b}`-style window label: one number when the block is one line.
+fn window_label(start: usize, end: usize) -> String {
+    if start == end {
+        format!("line {start}")
+    } else {
+        format!("lines {start}-{end}")
+    }
+}
+
+/// One `old` occurrence with a line of context on each side, exactly as the
+/// file holds it. The tab after the line number is what `read_file` shows, so
+/// copying from either output behaves the same.
+fn block_with_context(text: &str, byte: usize, needle: &str) -> String {
+    let before = &text[..byte];
+    let start_line = before.matches('\n').count() + 1;
+    let needle_lines = needle.lines().count().max(1);
+    let end_line = start_line + needle_lines - 1;
+    let lines: Vec<&str> = text.lines().collect();
+    let from = start_line.saturating_sub(2).max(1);
+    let to = (end_line + 1).min(lines.len());
+    let mut out = String::new();
+    for n in from..=to {
+        let mark = if n >= start_line && n <= end_line {
+            "→"
+        } else {
+            " "
+        };
+        let content = truncate_one_line(lines[n - 1], 120);
+        out.push_str(&format!("{mark} {n:>4} | {content}\n"));
+    }
+    out.trim_end().to_string()
+}
+
+/// Where every `old` actually is, so a non-unique edit self-corrects from the
+/// report instead of guessing new context.
+fn occurrence_context(text: &str, old: &str, count: usize) -> String {
+    let mut out = String::new();
+    for (i, byte) in text
+        .match_indices(old)
+        .map(|(p, _)| p)
+        .take(MATCH_REPORT_CAP)
+        .enumerate()
+    {
+        let start = line_at(text, byte);
+        let end = start + old.lines().count().max(1) - 1;
+        out.push_str(&format!(
+            "\n  match {} of {count} ({}):\n{}",
+            i + 1,
+            window_label(start, end),
+            block_with_context(text, byte, old)
+        ));
+    }
+    if count > MATCH_REPORT_CAP {
+        out.push_str(&format!("\n  … and {} more", count - MATCH_REPORT_CAP));
+    }
+    out
+}
+
+/// Why a zero-match `old` probably missed: the lines the file holds that the
+/// model's text looks like — identical modulo whitespace first, then blocks
+/// whose first line matches but whose rest drifted. Always labelled as
+/// near misses: nothing here is proposed as a match, and nothing here is
+/// written; the exact-match contract is unchanged.
+fn absence_candidates(text: &str, old: &str) -> String {
+    let fold = |s: &str| -> String { s.split_whitespace().collect::<Vec<_>>().join(" ") };
+    let old_fold = fold(old);
+    let lines: Vec<&str> = text.lines().collect();
+    let mut hits: Vec<String> = Vec::new();
+    // Same words, different spacing: the usual way an `old` misses.
+    let mut start = 0usize;
+    while start < lines.len() && hits.len() < MATCH_REPORT_CAP {
+        let span = old.lines().count().max(1);
+        if start + span <= lines.len() {
+            let window = fold(&lines[start..start + span].join(" "));
+            if window == old_fold {
+                hits.push(format!(
+                    "\n  {} — same text, different whitespace:\n{}",
+                    window_label(start + 1, start + span),
+                    block_with_context(
+                        text,
+                        offset_of_line(text, start),
+                        &lines[start..start + span].join("\n")
+                    )
+                ));
+                start += span;
+                continue;
+            }
+        }
+        start += 1;
+    }
+    // First line present, rest not: name how far it matched.
+    if hits.is_empty() {
+        let first = old.lines().next().unwrap_or("");
+        let first_fold = fold(first);
+        if !first_fold.is_empty() {
+            for (i, line) in lines.iter().enumerate() {
+                if hits.len() >= MATCH_REPORT_CAP {
+                    break;
+                }
+                if fold(line) == first_fold {
+                    let matched = old
+                        .lines()
+                        .zip(lines[i..].iter())
+                        .take_while(|(a, b)| fold(a) == fold(b))
+                        .count();
+                    hits.push(format!(
+                        "\n  line {} — {} of {} lines match (ignoring whitespace):\n{}",
+                        i + 1,
+                        matched,
+                        old.lines().count(),
+                        block_with_context(text, offset_of_line(text, i), first)
+                    ));
+                }
+            }
+        }
+    }
+    if hits.is_empty() {
+        return " — nothing in the file resembles it".to_string();
+    }
+    hits.concat()
+}
+
+/// Byte offset where the (0-based) line index begins.
+fn offset_of_line(text: &str, line_index: usize) -> usize {
+    let mut off = 0usize;
+    for _ in 0..line_index {
+        match text[off..].find('\n') {
+            Some(n) => off += n + 1,
+            None => break,
+        }
+    }
+    off
+}
+
 fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>) -> String {
     let Some(raw) = arg_str(args, "path") else {
         return err("edit_file needs a string \"path\"");
@@ -1154,14 +1297,17 @@ fn tool_edit_file(root: &Path, args: &serde_json::Map<String, serde_json::Value>
     let replace_all = arg_bool(args, "all");
     if count == 0 {
         return err(format!(
-            "\"old\" not found in {display} — read_file it first and copy the \
-             exact text (including indentation)"
+            "\"old\" not found in {display} (0 matches).{}\nRe-issue edit_file with one \
+             block above copied exactly, indentation and all, or read_file {display} first.",
+            absence_candidates(&text, old)
         ));
     }
     if count > 1 && !replace_all {
         return err(format!(
-            "\"old\" appears {count} times in {display} — pass more context to \
-             make it unique, or all=true to replace every occurrence"
+            "\"old\" appears {count} times in {display} — every match below. Pass more \
+             surrounding context to make \"old\" unique, or all=true to replace every \
+             occurrence.\n{}",
+            occurrence_context(&text, old, count)
         ));
     }
     let updated = if replace_all {
@@ -4565,6 +4711,126 @@ patched = ["{fixed}"]
             unique.starts_with("edited code.rs: replaced 1 occurrence(s)"),
             "{unique}"
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // L-8: a non-unique or absent `old` reports *where* it missed so the model
+    // self-corrects next round, and none of it is written silently.
+    #[test]
+    fn ambiguous_edit_reports_every_match_and_retry_converges() {
+        let root = temp_root("edit_ambiguous");
+        // Two functions with the identical body line — the exact shape that makes
+        // a one-line `old` match twice.
+        std::fs::write(
+            root.join("dup.rs"),
+            "fn a(x: i32) -> i32 {\n    x + 1\n}\n\nfn b(x: i32) -> i32 {\n    x + 1\n}\n",
+        )
+        .unwrap();
+
+        let report = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "dup.rs", "old": "x + 1", "new": "x + 2"})),
+        );
+        assert!(report.contains("appears 2 times"), "{report}");
+        assert!(report.contains("every match below"), "{report}");
+        // Both occurrences named with their line windows and context markers.
+        assert!(report.contains("match 1 of 2 (line 2)"), "{report}");
+        assert!(report.contains("match 2 of 2 (line 6)"), "{report}");
+        assert!(report.contains('→'), "{report}");
+        // The refused edit left the file byte-for-byte untouched.
+        assert_eq!(
+            std::fs::read_to_string(root.join("dup.rs")).unwrap(),
+            "fn a(x: i32) -> i32 {\n    x + 1\n}\n\nfn b(x: i32) -> i32 {\n    x + 1\n}\n"
+        );
+
+        // The model's next round copies a context-rich block from the report:
+        // the second occurrence, uniquely identified by its enclosing `fn b`.
+        let retry = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "dup.rs",
+                "old": "fn b(x: i32) -> i32 {\n    x + 1",
+                "new": "fn b(x: i32) -> i32 {\n    x + 2"
+            })),
+        );
+        assert!(
+            retry.starts_with("edited dup.rs: replaced 1 occurrence(s)"),
+            "{retry}"
+        );
+        // Only the intended occurrence changed; the first is intact.
+        assert_eq!(
+            std::fs::read_to_string(root.join("dup.rs")).unwrap(),
+            "fn a(x: i32) -> i32 {\n    x + 1\n}\n\nfn b(x: i32) -> i32 {\n    x + 2\n}\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn absent_edit_names_whitespace_near_miss_and_writes_nothing() {
+        let root = temp_root("edit_whitespace");
+        std::fs::write(root.join("w.rs"), "fn f() {\n        let x = 1;\n}\n").unwrap();
+
+        // Same words, but `old` uses single spaces while the file indents and
+        // keeps `let x = 1;` — a zero-match `old` whose folded text is present.
+        let miss = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "w.rs",
+                "old": "let  x  =  1;",
+                "new": "let  x  =  2;"
+            })),
+        );
+        assert!(miss.contains("0 matches"), "{miss}");
+        assert!(miss.contains("same text, different whitespace"), "{miss}");
+        assert!(miss.contains("line 2"), "{miss}");
+        // Nothing fuzzy was written: the exact-match contract is unchanged.
+        assert_eq!(
+            std::fs::read_to_string(root.join("w.rs")).unwrap(),
+            "fn f() {\n        let x = 1;\n}\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn absent_multi_line_edit_names_partial_match() {
+        let root = temp_root("edit_partial");
+        std::fs::write(
+            root.join("p.rs"),
+            "fn g() {\n    let a = 1;\n    let b = 99;\n}\n",
+        )
+        .unwrap();
+
+        // First line matches (ignoring whitespace) but the body has drifted.
+        let miss = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({
+                "path": "p.rs",
+                "old": "fn g() {\n    let a = 1;\n    let b = 2;",
+                "new": "fn g() {\n    let a = 1;\n    let b = 3;"
+            })),
+        );
+        assert!(miss.contains("0 matches"), "{miss}");
+        assert!(
+            miss.contains("of 3 lines match (ignoring whitespace)"),
+            "{miss}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("p.rs")).unwrap(),
+            "fn g() {\n    let a = 1;\n    let b = 99;\n}\n"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn absent_edit_unrelated_text_says_nothing_resembles() {
+        let root = temp_root("edit_none");
+        std::fs::write(root.join("n.rs"), "hello\nworld\n").unwrap();
+        let miss = tool_edit_file(
+            &root,
+            &args_of(serde_json::json!({"path": "n.rs", "old": "zzz", "new": "q"})),
+        );
+        assert!(miss.contains("0 matches"), "{miss}");
+        assert!(miss.contains("nothing in the file resembles it"), "{miss}");
         std::fs::remove_dir_all(&root).unwrap();
     }
 
