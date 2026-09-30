@@ -625,6 +625,12 @@ enum Commands {
         action: PluginAction,
     },
 
+    /// Let another program drive xencode's tools over Model Context Protocol
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
     /// llama.cpp server management (status/start/stop/load/unload)
     Llamacpp {
         #[command(subcommand)]
@@ -745,6 +751,31 @@ enum PluginAction {
     Remove {
         /// Name of the plugin
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Serve xencode's tools as an MCP server on standard input and output
+    ///
+    /// For a program that cannot answer an approval prompt — an editor, a
+    /// script, another agent. So this starts read-only: `read_file`, `list_dir`
+    /// and `search_files` run, and `write_file`, `edit_file` and `run_command`
+    /// are refused with the flag that would have permitted them. A path given
+    /// to a tool stays inside `--workspace` whatever the flags; a command the
+    /// caller is allowed to run is not checked that way, so `--allow
+    /// run_command` hands over a shell.
+    Serve {
+        /// The directory the tools work on; a `path` or `cwd` argument that
+        /// leaves it is refused
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Permit this one tool to run despite the read-only default. Repeat
+        /// it per tool; the name must be one of the six xencode publishes, so a
+        /// typo is reported instead of doing nothing.
+        #[arg(long = "allow")]
+        allow: Vec<String>,
     },
 }
 #[derive(Subcommand)]
@@ -1223,6 +1254,7 @@ async fn main() {
             out,
         } => run_replay(run_id, list, run_tools, tool_root, out).await,
         Commands::Plugin { action } => run_plugin_action(action),
+        Commands::Mcp { action } => run_mcp(action).await,
         Commands::Eval { action } => run_eval(action).await,
         Commands::Llamacpp { action } => run_llamacpp(action).await,
         Commands::Hw { action } => run_hw(action),
@@ -5936,6 +5968,64 @@ fn format_commit(commit: &str) -> String {
         format!("{}…", xencode_plugin_rs::short_commit(commit))
     } else {
         commit.to_string()
+    }
+}
+
+/// `xencode mcp serve` (M-5): xencode as the server, on a pipe.
+async fn run_mcp(action: McpAction) -> Result<(), String> {
+    use xencode_tui_rs::agent_tools::{new_task_runtime, HeadlessPolicy};
+    use xencode_tui_rs::mcp_serve;
+
+    match action {
+        McpAction::Serve { workspace, allow } => {
+            let root = std::fs::canonicalize(&workspace).map_err(|error| {
+                format!(
+                    "workspace {} cannot be opened: {error}",
+                    workspace.display()
+                )
+            })?;
+            // A flag naming nothing is a typo, and a typo accepted quietly leaves
+            // the operator believing a tool is permitted when it is not.
+            let published = mcp_serve::exposed_tool_names();
+            for name in &allow {
+                if !published.contains(name) {
+                    return Err(format!(
+                        "`--allow {name}` names no tool xencode publishes; the six are {}",
+                        published.join(", ")
+                    ));
+                }
+            }
+            let policy = HeadlessPolicy::new(allow.clone());
+            // stdout carries the protocol, so anything meant for the person who
+            // started the server has to go to stderr.
+            if policy.is_read_only() {
+                eprintln!(
+                    "xencode serving {} read-only over stdio; a call that would write or \
+                     run a command is refused. Restart with --allow <tool> to permit one.",
+                    root.display()
+                );
+            } else {
+                eprintln!(
+                    "xencode serving {} over stdio, permitting {} in addition to reads. \
+                     A `path` or `cwd` that leaves that directory stays refused.",
+                    root.display(),
+                    allow.join(", ")
+                );
+                // The boundary is checked on the arguments, not inside a shell
+                // command, so an allowed `run_command` reaches wherever this
+                // user's shell can — and nobody is on the pipe to approve it.
+                if allow.iter().any(|name| name == "run_command") {
+                    eprintln!(
+                        "warning: `run_command` is permitted. A permitted command runs \
+                         exactly as the caller wrote it, so it can touch files outside \
+                         {}; that is a shell, not a jailed one, and there is no approval \
+                         prompt on a pipe.",
+                        root.display()
+                    );
+                }
+            }
+            mcp_serve::serve(root, env!("CARGO_PKG_VERSION"), policy, new_task_runtime()).await
+        }
     }
 }
 

@@ -17,6 +17,10 @@ use xencode_providers_rs::ToolDefinition;
 /// Prefix that marks a tool as coming from a server rather than from xencode.
 pub const MCP_PREFIX: &str = "mcp__";
 
+/// Longest function name a provider accepts. Both directions respect it: the
+/// names we import from a server and the names we publish as one.
+pub const MAX_TOOL_NAME: usize = 64;
+
 /// A server's declaration in config, turned into what the client needs.
 pub fn spec_from_config(name: &str, server: &xencode_config_rs::McpServer) -> ServerSpec {
     ServerSpec {
@@ -51,7 +55,7 @@ fn sanitize(raw: &str) -> String {
 pub fn full_tool_name(server: &str, tool: &str) -> String {
     let server = sanitize(server);
     let mut tool = sanitize(tool);
-    let budget = 64usize.saturating_sub(MCP_PREFIX.len() + server.len() + 2);
+    let budget = MAX_TOOL_NAME.saturating_sub(MCP_PREFIX.len() + server.len() + 2);
     if tool.len() > budget {
         let mut cut = budget;
         while cut > 0 && !tool.is_char_boundary(cut) {
@@ -76,6 +80,22 @@ pub fn split_full_name(name: &str) -> Option<(&str, &str)> {
 /// Whether a model-visible tool name comes from a server.
 pub fn is_mcp_tool(name: &str) -> bool {
     split_full_name(name).is_some()
+}
+
+/// A name xencode itself publishes when it is the server rather than the client.
+///
+/// `full_tool_name` is what a *caller* of xencode would see: our six names with
+/// `mcp__xencode__` in front of them, and that prefix leaves only a limited
+/// budget for the name behind it. So a published name goes through the same two
+/// steps the client applies to a tool it imports — sanitize, then fit inside 64 —
+/// and there is one rule for both directions rather than a server that advertises
+/// something a client cannot represent.
+pub fn advertised_tool_name(raw: &str) -> String {
+    // Everything left after sanitizing is ASCII, so a byte cut cannot land
+    // inside a character.
+    let mut name = sanitize(raw);
+    name.truncate(name.len().min(MAX_TOOL_NAME));
+    name
 }
 
 /// What connecting one server produced. Every field is something the server

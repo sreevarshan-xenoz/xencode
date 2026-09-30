@@ -1940,6 +1940,63 @@ commit stays there even when its branch moves on.
 only that one directory; a name containing a path separator or `..` is rejected
 rather than resolved.
 
+### `xencode mcp serve [--workspace <dir>] [--allow <tool>]`
+
+The other direction: instead of xencode calling somebody else's MCP server,
+xencode *is* the server, on standard input and output, for an editor, a script or
+another agent to drive.
+
+```console
+$ xencode mcp serve --workspace ~/code/api
+xencode serving /home/sree/code/api read-only over stdio; a call that would write or run a command is refused. Restart with --allow <tool> to permit one.
+```
+
+It publishes six tools — `read_file`, `list_dir`, `search_files`, `write_file`,
+`edit_file`, `run_command` — each with the same JSON Schema the model is given, so
+a client that has never seen xencode can call them.
+
+A caller on a pipe has no prompt to answer, so nobody can approve a write.
+xencode does not resolve that by auto-approving or by hanging: it starts
+**read-only**. The three reads run; the other three are refused, and the refusal
+names the flag that would have permitted that one tool:
+
+```console
+`run_command` is a shell tool and this `xencode mcp serve` was started in read-only
+mode, so nothing that changes files or runs a command is executed. Start it with
+`--allow run_command` to permit this one tool.
+```
+
+`--allow <tool>` repeats, one tool at a time — permitting `write_file` does not
+open `edit_file` or the shell. Whatever it permits, a `path` or `cwd` argument
+that resolves outside `--workspace`, or into `.git` or the xencode config
+directory, is refused even for an allowed tool, and that refusal has no flag that
+would change it. A `--allow` naming something xencode does not publish stops at
+startup rather than being quietly ignored.
+
+The one thing the workspace argument does *not* confine is a command the caller
+was allowed to run: the check reads the arguments a call carries, not the text of
+a shell command, so `--allow run_command` lets that command touch files anywhere
+your own shell can. Starting the server with it prints a warning to standard
+error saying so, because there is no approval prompt on a pipe and the grant is
+the whole approval. A refusal also says what the launch really permits rather than
+calling it read-only after the fact:
+
+```console
+$ xencode mcp serve --workspace /tmp/m5-ws2 --allow run_command
+xencode serving /tmp/m5-ws2 over stdio, permitting run_command in addition to reads. A `path` or `cwd` that leaves that directory stays refused.
+warning: `run_command` is permitted. A permitted command runs exactly as the caller wrote it, so it can touch files outside /tmp/m5-ws2; that is a shell, not a jailed one, and there is no approval prompt on a pipe.
+
+`write_file` is a file-changing tool and this `xencode mcp serve` was started permitting only `run_command` beyond the three reads, so it is not executed. Start it with `--allow write_file` to permit this one tool.
+```
+
+Everything meant for the person starting the server goes to standard error;
+standard output carries only protocol messages. `xencode mcp serve --help` prints
+the description of the mode and its limits.
+
+The same six names reach a client as `mcp__xencode__<tool>` once that client
+imports them, which is why published names go through the same sanitize-and-fit-
+in-64 rule xencode's own MCP client applies to a tool it imports.
+
 ### Skills (`SKILL.md`)
 
 A skill is one directory holding one `SKILL.md`: a name and a one-line

@@ -221,25 +221,8 @@ pub fn classify(
     // protect the workspace. Those calls still always prompt, where the
     // arguments are shown. The one carve-out is read-only and narrow, described
     // by the `CRATE_AWARE_TOOLS` list.
-    if !external {
-        for key in ["path", "cwd"] {
-            if let Some(serde_json::Value::String(raw)) = args.get(key) {
-                if raw.is_empty() {
-                    continue;
-                }
-                // A `crate:` address is a read and nothing else, so it is
-                // reachable only as `path` on one of the three read tools.
-                // Anything else that escapes the workspace stays refused.
-                let reachable = if crate::crate_sources::is_crate_spec(raw) {
-                    key == "path" && readable_path(root, tool, raw).is_ok()
-                } else {
-                    path_allowed(root, raw)
-                };
-                if !reachable {
-                    return Permission::Deny;
-                }
-            }
-        }
+    if !external && escapes_workspace(root, tool, args) {
+        return Permission::Deny;
     }
     let class = tool_class(tool);
     let base = match class {
@@ -256,6 +239,160 @@ pub fn classify(
         Permission::Allow
     } else {
         base
+    }
+}
+
+/// Whether one of the call's `path`/`cwd` arguments lands outside the workspace
+/// or in a forbidden zone. This is the guard `classify` turns into a hard deny,
+/// lifted out so the headless policy refuses for exactly the same reason the
+/// interactive gate does — the two can never drift on what "outside" means.
+fn escapes_workspace(
+    root: &Path,
+    tool: &str,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    for key in ["path", "cwd"] {
+        if let Some(serde_json::Value::String(raw)) = args.get(key) {
+            if raw.is_empty() {
+                continue;
+            }
+            // A `crate:` address is a read and nothing else, so it is reachable
+            // only as `path` on one of the three read tools. Anything else that
+            // escapes the workspace stays refused.
+            let reachable = if crate::crate_sources::is_crate_spec(raw) {
+                key == "path" && readable_path(root, tool, raw).is_ok()
+            } else {
+                path_allowed(root, raw)
+            };
+            if !reachable {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// ── Headless (non-interactive) permission policy (M-5) ────────────────
+// A caller that cannot answer an approval prompt — an external MCP client
+// talking to `xencode mcp serve` — must not be able to approve by silence.
+// This is a separate decision from `classify`: the interactive gate never
+// consults it, and it never widens that gate. It can only refuse further.
+
+/// A tool a headless caller is permitted to reach. Read-only tools are always
+/// permitted; a file-changing or shell tool is permitted only when named at
+/// launch, and even then a path outside the workspace stays refused.
+#[derive(Debug, Clone, Default)]
+pub struct HeadlessPolicy {
+    /// Tool names the operator allowed when the server started. Fixed for the
+    /// life of the process, so a client cannot widen it by asking.
+    allowed: Vec<String>,
+}
+
+/// The outcome for one headless call, with the reason a refusal gave. Kept
+/// separate from [`Permission`] because there is no "ask" here: a call either
+/// runs or does not, and a refusal must say why in the caller's own terms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Headless {
+    Allow,
+    /// `reason` is what the MCP client is told, and it names the flag that
+    /// would allow the call — a refusal the caller cannot act on is a dead end.
+    Refused {
+        reason: String,
+    },
+}
+
+impl HeadlessPolicy {
+    pub fn new(allowed: impl IntoIterator<Item = String>) -> Self {
+        let mut allowed: Vec<String> = allowed.into_iter().collect();
+        allowed.sort();
+        allowed.dedup();
+        Self { allowed }
+    }
+
+    /// Nothing named: the strictest and default setting — read-only and
+    /// nothing else, which is the only safe answer for a caller with no way to
+    /// approve.
+    pub fn read_only() -> Self {
+        Self::new(Vec::new())
+    }
+
+    pub fn allows(&self, tool: &str) -> bool {
+        self.allowed.iter().any(|name| name == tool)
+    }
+
+    /// Whether nothing beyond reads was named at launch — the state a server
+    /// says so in its handshake, rather than each caller working it out.
+    pub fn is_read_only(&self) -> bool {
+        self.allowed.is_empty()
+    }
+
+    /// The decision for one call. Read-only tools run. A mutating or shell tool
+    /// runs only if the operator named it at launch. A `path` or `cwd` argument
+    /// that lands outside the workspace is refused whatever was named, because
+    /// that boundary is not the operator's to hand to a caller it cannot see.
+    /// What a *granted* shell command then does to paths it names itself is not
+    /// checked here — the guard reads the arguments, not the command text — so
+    /// `--allow run_command` gives the caller a shell, not a jailed one.
+    pub fn decide(
+        &self,
+        root: &Path,
+        tool: &str,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> Headless {
+        if escapes_workspace(root, tool, args) {
+            return Headless::Refused {
+                reason: format!(
+                    "`{tool}` was given a path outside this workspace or in a protected zone; \
+                     xencode refuses a call whose `path` or `cwd` leaves the directory it was \
+                     started in, whatever was allowed at launch"
+                ),
+            };
+        }
+        let class = tool_class(tool);
+        if class == ToolClass::ReadOnly {
+            return Headless::Allow;
+        }
+        if self.allows(tool) {
+            return Headless::Allow;
+        }
+        Headless::Refused {
+            reason: format!(
+                "`{tool}` is a {} tool and this `xencode mcp serve` {}. Start it with \
+                 `--allow {tool}` to permit this one tool.",
+                class_label(class),
+                self.launch_words()
+            ),
+        }
+    }
+
+    /// How a refusal describes this launch. Saying "read-only" after a tool was
+    /// granted would be a lie a caller acts on, so the grant is named instead.
+    fn launch_words(&self) -> String {
+        if self.allowed.is_empty() {
+            "was started in read-only mode, so nothing that changes files or runs a \
+             command is executed"
+                .to_string()
+        } else {
+            format!(
+                "was started permitting only {} beyond the three reads, so it is not \
+                 executed",
+                self.allowed
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    }
+}
+
+/// The word for a tool class in a refusal a human reads.
+fn class_label(class: ToolClass) -> &'static str {
+    match class {
+        ToolClass::ReadOnly => "read-only",
+        ToolClass::Edit => "file-changing",
+        ToolClass::Shell => "shell",
+        ToolClass::External => "external",
     }
 }
 
@@ -3597,7 +3734,10 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             rec = rt.lock().await.poll(id).await.unwrap();
         }
-        panic!("task never finished writing its output: got {:?}", rec.output());
+        panic!(
+            "task never finished writing its output: got {:?}",
+            rec.output()
+        );
     }
 
     #[tokio::test]
@@ -4042,6 +4182,145 @@ mod tests {
         assert_eq!(
             classify(&root, "background_start", &good_cwd, ApprovalMode::Ask, &[]),
             Permission::Ask
+        );
+    }
+
+    #[test]
+    fn headless_defaults_to_read_only_and_says_how_to_widen() {
+        let root = std::env::temp_dir().join(format!("xencode-headless-{}", std::process::id()));
+        let policy = HeadlessPolicy::read_only();
+        let none = args_of(serde_json::json!({}));
+        // Reads need nothing: they are the only thing a caller that cannot
+        // approve is allowed to do.
+        for tool in ["read_file", "list_dir", "search_files", "repo_advise"] {
+            assert_eq!(
+                policy.decide(&root, tool, &none),
+                Headless::Allow,
+                "{tool} is read-only and must run"
+            );
+        }
+        // Everything else is refused, and the refusal names the flag that would
+        // have allowed it — a caller with no prompt to answer cannot guess.
+        for tool in ["write_file", "edit_file", "run_command", "background_start"] {
+            let Headless::Refused { reason } = policy.decide(&root, tool, &none) else {
+                panic!("{tool} must be refused in read-only mode");
+            };
+            assert!(
+                reason.contains(&format!("--allow {tool}")),
+                "{tool} refusal must be actionable: {reason}"
+            );
+            assert!(
+                reason.contains("read-only mode"),
+                "{tool} refusal must say why: {reason}"
+            );
+        }
+        // An unknown tool is a shell by default, so it is refused rather than
+        // trusted.
+        assert!(matches!(
+            policy.decide(&root, "mystery", &none),
+            Headless::Refused { .. }
+        ));
+    }
+
+    #[test]
+    fn headless_allows_only_the_tools_named_at_launch() {
+        let root = std::env::temp_dir().join(format!("xencode-headless-{}", std::process::id()));
+        let policy = HeadlessPolicy::new(["write_file".to_string()]);
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(policy.decide(&root, "write_file", &none), Headless::Allow);
+        assert!(policy.allows("write_file"));
+        // Naming one tool does not open its class. An operator who allowed
+        // `write_file` did not allow `edit_file` or the shell.
+        assert!(!policy.allows("edit_file"));
+        assert!(matches!(
+            policy.decide(&root, "edit_file", &none),
+            Headless::Refused { .. }
+        ));
+        assert!(matches!(
+            policy.decide(&root, "run_command", &none),
+            Headless::Refused { .. }
+        ));
+        // Reads stay open regardless; the allowlist only adds to them.
+        assert_eq!(
+            policy.decide(&root, "read_file", &none),
+            Headless::Allow,
+            "read-only"
+        );
+        // The refusal describes this launch, not a hypothetical one: calling it
+        // "read-only" after a tool was granted would send the operator to fix the
+        // wrong thing.
+        let Headless::Refused { reason } = policy.decide(&root, "edit_file", &none) else {
+            panic!("`edit_file` ran under a launch that only granted `write_file`");
+        };
+        assert!(!reason.contains("read-only"), "{reason}");
+        assert!(reason.contains("`write_file`"), "{reason}");
+        assert!(reason.contains("--allow edit_file"), "{reason}");
+        // The external class is refusable too, so a server tool cannot be
+        // reached without being named.
+        assert!(matches!(
+            policy.decide(&root, "mcp__fs__read", &none),
+            Headless::Refused { .. }
+        ));
+    }
+
+    #[test]
+    fn headless_refuses_a_path_outside_the_workspace_even_when_the_tool_is_allowed() {
+        let root = std::env::temp_dir().join(format!("xencode-headless-{}", std::process::id()));
+        let policy = HeadlessPolicy::new(["write_file".to_string(), "run_command".to_string()]);
+        // The tool is permitted; the target is not. The boundary is not the
+        // operator's to hand to a caller they cannot see.
+        for args in [
+            serde_json::json!({"path": "../escape.txt"}),
+            serde_json::json!({"path": "/etc/passwd"}),
+            serde_json::json!({"path": "repo/.git/config"}),
+        ] {
+            let refused = policy.decide(&root, "write_file", &args_of(args.clone()));
+            let Headless::Refused { reason } = refused else {
+                panic!("an allowed tool must still not leave the workspace: {args}");
+            };
+            assert!(reason.contains("outside this workspace"), "{reason}");
+        }
+        let bad_cwd = args_of(serde_json::json!({"command": "ls", "cwd": "/etc"}));
+        assert!(matches!(
+            policy.decide(&root, "run_command", &bad_cwd),
+            Headless::Refused { .. }
+        ));
+        // An in-workspace path to an allowed tool runs.
+        let inside = args_of(serde_json::json!({"path": "src/main.rs"}));
+        assert_eq!(policy.decide(&root, "write_file", &inside), Headless::Allow);
+    }
+
+    /// The two gates must stay independent: `classify` never consults the
+    /// headless policy, so nothing a headless caller is granted can widen what
+    /// the interactive user is asked about. They do share one thing — the
+    /// workspace boundary — and this pins both halves of that.
+    #[test]
+    fn headless_grant_never_widens_the_interactive_gate() {
+        let root = std::env::temp_dir().join(format!("xencode-headless-{}", std::process::id()));
+        let policy = HeadlessPolicy::new(["run_command".to_string()]);
+        let none = args_of(serde_json::json!({}));
+        assert_eq!(
+            policy.decide(&root, "run_command", &none),
+            Headless::Allow,
+            "the headless caller was given this tool"
+        );
+        for mode in [ApprovalMode::Ask, ApprovalMode::EditAllow] {
+            assert_eq!(
+                classify(&root, "run_command", &none, mode, &[]),
+                Permission::Ask,
+                "a headless grant must not silence the interactive prompt ({mode:?})"
+            );
+        }
+        // And the shared boundary: the same argument is refused by both, so
+        // neither gate can be looser about leaving the workspace than the other.
+        let outside = args_of(serde_json::json!({"command": "ls", "cwd": "/etc"}));
+        assert!(matches!(
+            policy.decide(&root, "run_command", &outside),
+            Headless::Refused { .. }
+        ));
+        assert_eq!(
+            classify(&root, "run_command", &outside, ApprovalMode::AllAllow, &[]),
+            Permission::Deny
         );
     }
 
