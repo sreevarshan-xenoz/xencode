@@ -116,6 +116,19 @@ const COMMANDS: &[Binding] = &[
         "/cost",
         "spend, tokens and speed from the records on disk (local, asks no model)",
     ),
+    (
+        "/doctor [env|deps]",
+        "probe machine resources, GPUs, memory, and environment facts",
+    ),
+    (
+        "/verify [skip...]",
+        "run machine-checkable verification checklist (fmt, lint, test)",
+    ),
+    (
+        "/hotspots [limit]",
+        "rank files by churn, size, and bus factor",
+    ),
+    ("/agents", "inventory installed coding-agent CLIs on PATH"),
 ];
 
 pub(crate) fn panel_bindings(focus: FocusArea) -> &'static [Binding] {

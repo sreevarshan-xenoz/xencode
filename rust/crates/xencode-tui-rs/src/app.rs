@@ -91,8 +91,21 @@ const INPUT_HISTORY_LIMIT: usize = 200;
 
 /// Slash commands intercepted by `submit_message`, in handler order.
 pub const SLASH_COMMANDS: &[&str] = &[
-    "/init", "/ctx", "/advise", "/bytebot", "/spawn", "/plan", "/rewind", "/mcp", "/plugin",
-    "/trace", "/cost",
+    "/init",
+    "/ctx",
+    "/advise",
+    "/bytebot",
+    "/spawn",
+    "/plan",
+    "/rewind",
+    "/mcp",
+    "/plugin",
+    "/trace",
+    "/cost",
+    "/doctor",
+    "/verify",
+    "/hotspots",
+    "/agents",
 ];
 
 /// Complete a partially typed command token against `SLASH_COMMANDS`.
@@ -2918,6 +2931,30 @@ impl<'a> App<'a> {
             return;
         }
 
+        // /doctor [env|deps]: probe machine resources, environment facts and configuration
+        if prompt == "/doctor" || prompt.starts_with("/doctor ") {
+            self.handle_doctor_command(&prompt);
+            return;
+        }
+
+        // /verify [skip...]: run machine verification checklist (fmt, lint, test)
+        if prompt == "/verify" || prompt.starts_with("/verify ") {
+            self.handle_verify_command(&prompt, tx);
+            return;
+        }
+
+        // /hotspots [limit]: rank files by churn and size with bus factor
+        if prompt == "/hotspots" || prompt.starts_with("/hotspots ") {
+            self.handle_hotspots_command(&prompt);
+            return;
+        }
+
+        // /agents: inventory installed coding-agent CLIs on PATH
+        if prompt == "/agents" || prompt.starts_with("/agents ") {
+            self.handle_agents_command(&prompt);
+            return;
+        }
+
         self.is_generating = true;
 
         // Normal LLM generation — project context is injected on every turn:
@@ -5016,6 +5053,203 @@ impl<'a> App<'a> {
                 xencode_context_rs::format_usd(budget.unwrap_or(0))
             ));
         }
+    }
+
+    /// `/doctor [env|deps]`: probe machine resources, environment facts, GPUs,
+    /// cgroup ceilings, and environment configuration drift. Local and read-only.
+    fn handle_doctor_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/doctor").unwrap_or("").trim();
+        let root = xencode_context_rs::default_root();
+        if arg == "deps" {
+            let manifest = root.join("Cargo.lock");
+            if let Ok(lock_text) = std::fs::read_to_string(&manifest) {
+                let dups = xencode_analysis_rs::deps::duplicate_versions(&lock_text);
+                if dups.is_empty() {
+                    self.system_line(
+                        "🏥 Dependency check: No duplicate major versions found in Cargo.lock.",
+                    );
+                } else {
+                    let mut msg = format!(
+                        "🏥 Dependency check: {} duplicate major version(s) in Cargo.lock:\n",
+                        dups.len()
+                    );
+                    for dup in dups.iter().take(8) {
+                        msg.push_str(&format!("\n  • {}: {}", dup.krate, dup.versions.join(", ")));
+                    }
+                    if dups.len() > 8 {
+                        msg.push_str(&format!("\n  … +{} more", dups.len() - 8));
+                    }
+                    self.system_line(&msg);
+                }
+            } else {
+                self.system_line("🏥 Dependency check: No Cargo.lock found in workspace root.");
+            }
+            return;
+        }
+
+        let facts = xencode_context_rs::doctor::probe_env();
+        let cores = facts.nproc.map_or("?".to_string(), |n| n.to_string());
+        let mem = facts.mem_available_kib.map_or("?".to_string(), |k| {
+            format!("{k} KiB ({:.1} GiB)", k as f64 / 1024.0 / 1024.0)
+        });
+        let psi = if facts.psi_readable {
+            "readable"
+        } else {
+            "absent"
+        };
+        let cgroup = facts.cgroup_memory_limit.as_deref().unwrap_or("none");
+        let gpus = if facts.nvidia_gpus.is_empty() {
+            "none visible".to_string()
+        } else {
+            facts.nvidia_gpus.join(", ")
+        };
+        let journal = if facts.journalctl_readable {
+            "readable"
+        } else {
+            "unreadable"
+        };
+        let dmesg = if facts.dmesg_denied {
+            "denied"
+        } else {
+            "permitted"
+        };
+
+        let refs = xencode_analysis_rs::envdrift::extract_env_refs(&root);
+        let templates = xencode_analysis_rs::envdrift::read_templates(&root);
+        let drift = xencode_analysis_rs::envdrift::compare(&refs, &templates);
+
+        let colab_route = if let Ok(home) = std::env::var("HOME") {
+            let colab_file = std::path::Path::new(&home)
+                .join(".xencode")
+                .join("colab_state.json");
+            if colab_file.exists() {
+                "state file present"
+            } else {
+                "none"
+            }
+        } else {
+            "none"
+        };
+
+        let mut lines = Vec::new();
+        lines.push("🏥 Machine & Environment Health (Doctor):".to_string());
+        lines.push(format!(
+            "  • Cores: {cores} | Memory: {mem} | PSI: {psi} | Cgroup limit: {cgroup}"
+        ));
+        lines.push(format!("  • GPUs: {gpus}"));
+        lines.push(format!(
+            "  • System logs: journalctl {journal} | dmesg {dmesg}"
+        ));
+        lines.push(format!("  • Colab route: {colab_route}"));
+        lines.push(format!(
+            "  • Environment drift: {} undocumented, {} unreferenced, {} OS-provided",
+            drift.undocumented.len(),
+            drift.unreferenced.len(),
+            drift.os_provided.len(),
+        ));
+        lines.push(format!("  • Workspace root: {}", root.display()));
+        self.system_line(&lines.join("\n"));
+    }
+
+    /// `/verify [skip...]`: run the machine-checkable verification checklist
+    /// (test, lint, fmt) with structured evidence.
+    fn handle_verify_command(&mut self, prompt: &str, tx: mpsc::UnboundedSender<String>) {
+        let args: Vec<&str> = prompt.split_whitespace().skip(1).collect();
+        let mut skip = Vec::new();
+        for arg in args {
+            if let Some(s) = arg.strip_prefix("--skip=") {
+                skip.push(s.to_string());
+            } else if arg != "skip" && arg != "--skip" {
+                skip.push(arg.to_string());
+            }
+        }
+        self.system_line("Running machine verification checklist (fmt, lint, test)...");
+        let root = xencode_context_rs::default_root();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                xencode_analysis_rs::toolchain::run_checklist(&root, &skip, 180)
+            })
+            .await;
+            match result {
+                Ok(Ok(checklist)) => {
+                    let _ = tx.send("[VERIFY_START]".to_string());
+                    for check in &checklist.checks {
+                        let state = if !check.ran {
+                            "SKIPPED"
+                        } else if check.passed() {
+                            "PASS"
+                        } else {
+                            "FAIL"
+                        };
+                        let _ = tx.send(format!(
+                            "[VERIFY]  {:<6} {:<8} (exit {}) → {}",
+                            check.name,
+                            state,
+                            check.exit_code.map_or("-".to_string(), |e| e.to_string()),
+                            check.evidence_ref
+                        ));
+                    }
+                    if checklist.ok() {
+                        let _ = tx.send("[VERIFY]✅ Verification checklist PASSED.".to_string());
+                    } else {
+                        let failed = checklist.failed().join(", ");
+                        let _ = tx.send(format!(
+                            "[VERIFY]❌ Verification checklist FAILED: {failed}"
+                        ));
+                    }
+                }
+                Ok(Err(err)) => {
+                    let _ = tx.send(format!("[VERIFY_ERR]{err}"));
+                }
+                Err(e) => {
+                    let _ = tx.send(format!("[VERIFY_ERR]Task join error: {e}"));
+                }
+            }
+        });
+    }
+
+    /// `/hotspots [limit]`: rank files by commit churn times working tree size
+    /// with bus factor and CODEOWNERS annotations.
+    fn handle_hotspots_command(&mut self, prompt: &str) {
+        let arg = prompt.strip_prefix("/hotspots").unwrap_or("").trim();
+        let limit = if arg.is_empty() {
+            10
+        } else {
+            arg.parse::<usize>().unwrap_or(10).min(50)
+        };
+        let root = xencode_context_rs::default_root();
+        let rows = xencode_context_rs::hotspots::hotspots(&root, limit);
+        if rows.is_empty() {
+            self.system_line("No git history found to rank hotspots (untracked files or outside git repository).");
+            return;
+        }
+        let mut msg = format!("🔥 Code Hotspots (Top {} churn × size):\n", rows.len());
+        for (i, row) in rows.iter().enumerate() {
+            msg.push_str(&format!("\n {}. {}", i + 1, row.message));
+        }
+        self.system_line(&msg);
+    }
+
+    /// `/agents`: inventory installed coding-agent CLIs on PATH with versions
+    /// and installation provenance.
+    fn handle_agents_command(&mut self, _prompt: &str) {
+        let found = xencode_agents_rs::inventory();
+        if found.is_empty() {
+            self.system_line("No coding-agent CLIs found on PATH (claude, cursor, copilot, aider, windsurf, etc.).");
+            return;
+        }
+        let mut msg = format!("🤖 Installed Coding Agents ({} found):\n", found.len());
+        for a in &found {
+            msg.push_str(&format!(
+                "\n  • {:<12} {:<16} [{}]\n    {}",
+                a.name,
+                a.version.as_deref().unwrap_or("(no version)"),
+                a.source.label(),
+                a.binary.display()
+            ));
+        }
+        msg.push_str("\n\nDiscovery only: nothing was installed, upgraded, or executed.");
+        self.system_line(&msg);
     }
 
     /// I3-01: the Model Context Protocol, tools only. `/mcp` connects every
@@ -8169,9 +8403,12 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                         app.init_log.push(msg.to_string());
                     }
                 }
-            } else if token == "[CTX_START]" || token == "[ADVISE_START]" {
-                // Both open a fresh assistant message that the matching
-                // [CTX]/[ADVISE] tokens populate line by line.
+            } else if token == "[CTX_START]"
+                || token == "[ADVISE_START]"
+                || token == "[VERIFY_START]"
+            {
+                // Open a fresh assistant message that the matching
+                // [CTX]/[ADVISE]/[VERIFY] tokens populate line by line.
                 app.messages.push(UiMessage {
                     role: "assistant".to_string(),
                     content: String::new(),
@@ -8185,6 +8422,21 @@ pub async fn run_app<B: Backend + io::Write>(terminal: &mut Terminal<B>) -> io::
                         last.content.push_str(body);
                     }
                 }
+            } else if let Some(body) = token.strip_prefix("[VERIFY]") {
+                if let Some(last) = app.messages.last_mut() {
+                    if last.role == "assistant" {
+                        if !last.content.is_empty() {
+                            last.content.push('\n');
+                        }
+                        last.content.push_str(body);
+                    }
+                }
+            } else if let Some(err) = token.strip_prefix("[VERIFY_ERR]") {
+                app.push_toast(
+                    crate::toast::ToastKind::Warning,
+                    format!("Verify failed: {err}"),
+                );
+                app.system_line(&format!("❌ Verification error: {err}"));
             } else if let Some(body) = token.strip_prefix("[CTX]") {
                 if let Some(last) = app.messages.last_mut() {
                     if last.role == "assistant" {
@@ -12332,6 +12584,52 @@ mod tests {
             super::complete_slash_token("/cos").as_deref(),
             Some("/cost")
         );
+    }
+
+    #[test]
+    fn the_doctor_verify_hotspots_agents_commands_complete_and_execute() {
+        for cmd in &["/doctor", "/verify", "/hotspots", "/agents"] {
+            assert!(super::SLASH_COMMANDS.contains(cmd));
+        }
+        assert_eq!(
+            super::complete_slash_token("/doc").as_deref(),
+            Some("/doctor")
+        );
+        assert_eq!(
+            super::complete_slash_token("/ver").as_deref(),
+            Some("/verify")
+        );
+        assert_eq!(
+            super::complete_slash_token("/hot").as_deref(),
+            Some("/hotspots")
+        );
+        assert_eq!(
+            super::complete_slash_token("/ag").as_deref(),
+            Some("/agents")
+        );
+        assert_eq!(
+            super::complete_slash_token("/ad").as_deref(),
+            Some("/advise")
+        );
+
+        let mut app = App::for_tests();
+        app.handle_doctor_command("/doctor");
+        assert!(system_lines(&app).iter().any(|l| l.contains("Doctor")));
+
+        app.handle_doctor_command("/doctor deps");
+        assert!(system_lines(&app)
+            .iter()
+            .any(|l| l.contains("Dependency check")));
+
+        app.handle_hotspots_command("/hotspots");
+        assert!(system_lines(&app)
+            .iter()
+            .any(|l| l.contains("Hotspots") || l.contains("No git history")));
+
+        app.handle_agents_command("/agents");
+        assert!(system_lines(&app)
+            .iter()
+            .any(|l| l.contains("Installed Coding Agents") || l.contains("No coding-agent CLIs")));
     }
 
     #[test]

@@ -380,6 +380,7 @@ pub const FEATURE_LIST: &[(&str, &str)] = &[
     ("⏳ Background Tasks", "Running & finished commands"),
     ("🌳 Worktrees", "List, create and remove git worktrees"),
     ("💡 Insights", "Live refactor suggestions & warnings"),
+    ("📐 Layout History", "Why the screen is arranged this way"),
 ];
 
 /// Maps a feature-navigator index to its target FocusArea.
@@ -402,6 +403,7 @@ pub fn navigate_feature(idx: usize) -> FocusArea {
         14 => FocusArea::TaskManager,
         15 => FocusArea::WorktreePanel,
         16 => FocusArea::AdvisePanel,
+        17 => FocusArea::LayoutPanel,
         _ => FocusArea::ChatInput,
     }
 }

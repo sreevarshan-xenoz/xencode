@@ -4022,6 +4022,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tui-textarea",
+ "xencode-agents-rs",
  "xencode-analysis-rs",
  "xencode-collaboration-rs",
  "xencode-config-rs",

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — engine and analysis commands connected to main TUI (DOC-3)
+
+Connected standalone engine and analysis tools directly into the interactive TUI session:
+- `/doctor [env|deps]`: probes host resources, core counts, available memory, pressure stall information (PSI), cgroup limits, GPUs, system log readability, Colab route status, and environment configuration drift without contacting any model.
+- `/verify [skip...]`: runs the machine-checkable verification checklist (`cargo fmt`, `clippy`, `test`) in a non-blocking background task with live streamed progress reporting.
+- `/hotspots [limit]`: analyzes git churn multiplied by working-tree file size, annotating high-churn files with author bus factors and CODEOWNERS entries.
+- `/agents`: inventories installed vendor coding-agent CLIs (`claude`, `cursor`, `copilot`, `aider`, `windsurf`, etc.) on PATH with live version and installation provenance reporting.
+- Added `Layout History` to the Feature Navigator (`Ctrl+F`), allowing direct keyboard navigation to the arrangement transition inspector.
+
 ### Added — agent stack as a tiled body pane (V-2)
 
 The agent stack is now a first-class pane in the body layout tree (`BodySlot::Agents`), seeded as View 7 (`Agents`) reachable via `Ctrl+7`. When tiled on screen, `Ctrl+N` cycles the active agent pane in-place within the tiled window without launching a modal overlay. If the current layout does not include the agent stack pane, `Ctrl+N` still provides the floating overlay fallback. Divider dragging, mouse hit-testing, and dynamic resizing apply to the tiled agent pane identically to other layout panes.
