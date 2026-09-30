@@ -6,10 +6,11 @@
 //! killed when the client goes away — a server that hangs must not outlive the
 //! session that asked it a question.
 //!
-//! Scope is deliberate: tools only. Resources, prompts, sampling and roots are
-//! not part of what xencode's agent loop can act on, so they are never
-//! negotiated. Message shapes live in [`crate::protocol`], where they are
-//! testable without a process on the other end of a pipe.
+//! Scope is deliberate: tools, resources and prompts. Sampling and roots are
+//! requests a server would make of us, and xencode answers neither, so they are
+//! never declared. What a server offers is read from its handshake and a method
+//! it did not declare is not sent. Message shapes live in [`crate::protocol`],
+//! where they are testable without a process on the other end of a pipe.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -77,6 +78,8 @@ pub struct McpClient {
     pending: Pending,
     next_id: AtomicU64,
     watchdog: Arc<Watchdog>,
+    /// The method sets this server said it has, from the handshake.
+    capabilities: protocol::ServerCapabilities,
     reader: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -113,7 +116,7 @@ impl McpClient {
         ));
         tokio::spawn(collect_stderr(stderr, Arc::clone(&watchdog)));
 
-        let client = McpClient {
+        let mut client = McpClient {
             name: spec.name.clone(),
             request_timeout,
             stdin: Arc::new(AsyncMutex::new(stdin)),
@@ -121,19 +124,25 @@ impl McpClient {
             pending,
             next_id: AtomicU64::new(1),
             watchdog,
+            capabilities: protocol::ServerCapabilities::default(),
             reader: Mutex::new(Some(reader)),
         };
 
-        if let Err(e) = client
+        match client
             .request(
                 "initialize",
                 protocol::initialize_params(env!("CARGO_PKG_VERSION")),
             )
             .await
         {
-            let failure = client.with_stderr(e);
-            client.shutdown().await;
-            return Err(failure);
+            // What the server said it has, kept for every later call: a method
+            // it did not declare must not be sent.
+            Ok(offered) => client.capabilities = protocol::parse_server_capabilities(&offered),
+            Err(e) => {
+                let failure = client.with_stderr(e);
+                client.shutdown().await;
+                return Err(failure);
+            }
         }
         if let Err(e) = client
             .write_line(&protocol::notification(
@@ -153,8 +162,28 @@ impl McpClient {
         &self.name
     }
 
+    /// What the handshake said this server has, so a caller can tell "this
+    /// server has no resources" apart from "this server is not connected".
+    pub fn capabilities(&self) -> &protocol::ServerCapabilities {
+        &self.capabilities
+    }
+
+    /// Refuse before sending when the server declared what it has and this was
+    /// not among it. A server that declared nothing is let through — see
+    /// [`protocol::ServerCapabilities::offers`].
+    fn require(&self, feature: protocol::Feature) -> Result<(), McpError> {
+        if self.capabilities.offers(feature) {
+            return Ok(());
+        }
+        Err(McpError::NotOffered {
+            server: self.name.clone(),
+            feature: feature.key(),
+        })
+    }
+
     /// `tools/list`. An empty list is an honest answer, not an error.
     pub async fn list_tools(&self) -> Result<Vec<protocol::McpTool>, McpError> {
+        self.require(protocol::Feature::Tools)?;
         let result = self.request("tools/list", Value::Null).await?;
         Ok(protocol::parse_tools(&result))
     }
@@ -182,6 +211,48 @@ impl McpClient {
         } else {
             Ok(outcome.text)
         }
+    }
+
+    /// `resources/list`. An empty list is an honest answer, not an error.
+    pub async fn list_resources(&self) -> Result<Vec<protocol::McpResource>, McpError> {
+        self.require(protocol::Feature::Resources)?;
+        let result = self.request("resources/list", Value::Null).await?;
+        Ok(protocol::parse_resources(&result))
+    }
+
+    /// `resources/read`. One uri can come back as several pieces, so all of
+    /// them are returned; a server that cannot read it answers with a JSON-RPC
+    /// error, which reaches the caller as [`McpError::Server`].
+    pub async fn read_resource(
+        &self,
+        uri: &str,
+    ) -> Result<Vec<protocol::ResourceContent>, McpError> {
+        self.require(protocol::Feature::Resources)?;
+        let result = self
+            .request("resources/read", protocol::read_resource_params(uri))
+            .await?;
+        Ok(protocol::parse_resource_contents(&result))
+    }
+
+    /// `prompts/list`.
+    pub async fn list_prompts(&self) -> Result<Vec<protocol::McpPrompt>, McpError> {
+        self.require(protocol::Feature::Prompts)?;
+        let result = self.request("prompts/list", Value::Null).await?;
+        Ok(protocol::parse_prompts(&result))
+    }
+
+    /// `prompts/get` — the messages a prepared prompt renders to, with the role
+    /// the server gave each one.
+    pub async fn get_prompt(
+        &self,
+        name: &str,
+        arguments: &[(String, String)],
+    ) -> Result<Vec<protocol::PromptMessage>, McpError> {
+        self.require(protocol::Feature::Prompts)?;
+        let result = self
+            .request("prompts/get", protocol::get_prompt_params(name, arguments))
+            .await?;
+        Ok(protocol::parse_prompt(&result))
     }
 
     /// How many lines of non-JSON the server has printed.
