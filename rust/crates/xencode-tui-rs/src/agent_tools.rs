@@ -125,7 +125,9 @@ pub fn tool_class(tool: &str) -> ToolClass {
     }
     match tool {
         "background_poll" | "repo_advise" | "what_breaks" | "read_file" | "list_dir"
-        | "search_files" | "read_docs" | "lookup_advisory" | "update_plan" => ToolClass::ReadOnly,
+        | "search_files" | "read_docs" | "lookup_advisory" | "load_skill" | "update_plan" => {
+            ToolClass::ReadOnly
+        }
         "write_file" | "edit_file" | "edit_symbol" | "ast_edit" | "codemod" | "rename" => {
             ToolClass::Edit
         }
@@ -615,6 +617,42 @@ fn pinned_version(root: &Path, crate_name: &str) -> Option<String> {
         .into_iter()
         .find(|(name, _)| name == crate_name)
         .map(|(_, version)| version)
+}
+
+/// Read one installed skill's full instructions (M-3).
+///
+/// The name is looked up in the session's loaded skills and nothing else, which
+/// is why this tool takes no path: a skill is reached by what the menu calls it
+/// and no file outside the two scanned directories can be asked for. A name
+/// that is not installed answers with the names that are, so the model can pick
+/// one instead of guessing again.
+fn tool_load_skill(
+    skills: Option<&xencode_plugin_rs::SkillRuntime>,
+    args: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let Some(name) = arg_str(args, "name").map(str::trim) else {
+        return err("load_skill needs a string \"name\", copied from the Available skills list");
+    };
+    let Some(runtime) = skills else {
+        return err(
+            "load_skill is only available in the chat loop, where the session's skills are",
+        );
+    };
+    if runtime.is_empty() {
+        return err("no skills are installed, so there is nothing to load");
+    }
+    match runtime.get(name) {
+        Some(skill) => runtime.render(skill),
+        None => format!(
+            "error: no skill named {name:?}. Installed: {}",
+            runtime
+                .skills()
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 /// The fetched half: the two endpoints that publish by version, each reached
@@ -2579,20 +2617,23 @@ pub async fn execute_tool_call(rt: &TaskRuntime, root: &Path, call: &ToolCall) -
 
 /// [`execute_tool_call`] with the caller's configured foreground timeout.
 ///
-/// These two entry points are the ones outside the chat loop, and they read
-/// crate documentation offline only: the setting that permits a fetch arrives
-/// through [`ApprovalCtx`], which the loop is the only caller that has.
+/// These two entry points are the ones outside the chat loop: they read crate
+/// documentation offline only, because the setting that permits a fetch arrives
+/// through [`ApprovalCtx`], and they know no skills, because the session's
+/// loaded skills arrive the same way. The loop is the only caller that has
+/// either.
 pub async fn execute_tool_call_timed(
     rt: &TaskRuntime,
     root: &Path,
     call: &ToolCall,
     command_timeout: u64,
 ) -> String {
-    execute_tool_call_plan(rt, root, call, command_timeout, None, None, false).await
+    execute_tool_call_plan(rt, root, call, command_timeout, None, None, false, None).await
 }
 
 /// The dispatcher. `plan` is the chat's visible todo list: only the loop has
 /// one, so `update_plan` outside it is an error rather than a silent no-op.
+#[allow(clippy::too_many_arguments)] // each argument is one session surface the loop alone has
 async fn execute_tool_call_plan(
     rt: &TaskRuntime,
     root: &Path,
@@ -2601,6 +2642,7 @@ async fn execute_tool_call_plan(
     plan: Option<&PlanHandle>,
     mcp: Option<&crate::mcp::McpHub>,
     online_docs: bool,
+    skills: Option<&xencode_plugin_rs::SkillRuntime>,
 ) -> String {
     let args = call.arguments_object();
     // Server tools are addressed by their visible `mcp__<server>__<tool>` name;
@@ -2720,6 +2762,7 @@ async fn execute_tool_call_plan(
         "search_files" => tool_search_files(root, &args),
         "read_docs" => tool_read_docs(root, &args, online_docs).await,
         "lookup_advisory" => tool_lookup_advisory(root, &args),
+        "load_skill" => tool_load_skill(skills, &args),
         "write_file" => tool_write_file(root, &args),
         "edit_file" => tool_edit_file(root, &args),
         "edit_symbol" => tool_edit_symbol(root, &args),
@@ -2751,6 +2794,10 @@ pub struct ApprovalCtx {
     /// The session's started MCP servers (I3-01): the turn offers their tools
     /// and routes approved calls back to them. Empty until `/mcp` connects.
     pub mcp: Arc<crate::mcp::McpHub>,
+    /// The skills this session loaded (M-3): the prompt carries their menu and
+    /// `load_skill` reads one's instructions out of here. Empty is the default
+    /// and offers no tool at all.
+    pub skills: Arc<xencode_plugin_rs::SkillRuntime>,
     /// Pre/post shell hooks (I3-02): matched to each approved call by tool
     /// name. Empty by default — no hooks, no change in behavior.
     pub hooks: xencode_config_rs::AgentHooks,
@@ -2864,6 +2911,7 @@ async fn run_and_checkpoint(
         Some(&ctx.plan),
         mcp,
         ctx.online_docs,
+        Some(&ctx.skills),
     )
     .await;
     if let Some(note) = note {
@@ -4456,6 +4504,106 @@ patched = ["{fixed}"]
         assert!(bare.contains("needs a string"), "{bare}");
     }
 
+    /// Point a harness at a skills directory and load what is in it, so a test
+    /// exercises the same runtime the chat loop hands the executor.
+    fn skills_from(dir: &Path) -> Arc<xencode_plugin_rs::SkillRuntime> {
+        Arc::new(xencode_plugin_rs::SkillRuntime::load(
+            dir,
+            std::path::Path::new(""),
+        ))
+    }
+
+    fn install_skill(root: &Path, name: &str, text: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(xencode_plugin_rs::skills::SKILL_FILE), text).unwrap();
+    }
+
+    /// M-3: a skill's instructions reach the model only through this tool, so
+    /// the call has to return the document's own text — and it is read-only, so
+    /// no approval prompt stands between reading a skill and following it.
+    #[tokio::test]
+    async fn an_installed_skill_is_read_by_name_without_an_approval_prompt() {
+        let skills = temp_root("skills-loop");
+        install_skill(
+            &skills,
+            "commit-hygiene",
+            "---\nname: commit-hygiene\ndescription: When writing a commit message.\n---\n\
+             SAY THE BODY OUT LOUD: never paste a log into a commit message.\n",
+        );
+        let mut h = harness(ApprovalMode::Ask);
+        h.ctx.skills = skills_from(&skills);
+        h.ctx.schemas = offered_schemas();
+        let workspace = this_workspace();
+        let out = execute_tool_call_approved(
+            &new_task_runtime(),
+            &workspace,
+            &call("load_skill", serde_json::json!({"name": "commit-hygiene"})),
+            &h.ctx,
+            None,
+        )
+        .await;
+        assert!(
+            out.contains("never paste a log into a commit message"),
+            "the skill's own instructions must come back: {out}"
+        );
+        assert!(out.contains("commit-hygiene"), "{out}");
+        assert!(out.contains("(user)"), "which root it came from: {out}");
+        assert!(
+            h.prompts.try_recv().is_err(),
+            "reading a skill is read-only and must not raise a prompt"
+        );
+        assert_eq!(tool_class("load_skill"), ToolClass::ReadOnly);
+        std::fs::remove_dir_all(&skills).unwrap();
+    }
+
+    #[tokio::test]
+    async fn loading_an_unknown_skill_names_the_ones_that_exist() {
+        let skills = temp_root("skills-unknown");
+        install_skill(
+            &skills,
+            "alpha",
+            "---\nname: alpha\ndescription: First.\n---\nbody a\n",
+        );
+        install_skill(
+            &skills,
+            "beta",
+            "---\nname: beta\ndescription: Second.\n---\nbody b\n",
+        );
+        let runtime = skills_from(&skills);
+        let missing = tool_load_skill(
+            Some(&runtime),
+            &args_of(serde_json::json!({"name": "gamma"})),
+        );
+        assert!(missing.starts_with("error:"), "{missing}");
+        assert!(
+            missing.contains("alpha") && missing.contains("beta"),
+            "{missing}"
+        );
+        let bare = tool_load_skill(Some(&runtime), &args_of(serde_json::json!({})));
+        assert!(bare.contains("needs a string"), "{bare}");
+        // No skills at all is a different answer from a wrong name.
+        let none = xencode_plugin_rs::SkillRuntime::empty(skills.clone(), skills.clone());
+        let empty = tool_load_skill(Some(&none), &args_of(serde_json::json!({"name": "alpha"})));
+        assert!(empty.contains("no skills are installed"), "{empty}");
+        std::fs::remove_dir_all(&skills).unwrap();
+    }
+
+    /// Outside the chat loop nothing carries the session's skills, so a
+    /// `load_skill` call there is answered as unavailable rather than silently
+    /// returning nothing — the same shape as `update_plan` and server tools.
+    #[tokio::test]
+    async fn load_skill_outside_the_loop_says_it_has_no_skills() {
+        let out = timed(
+            &this_workspace(),
+            call("load_skill", serde_json::json!({"name": "anything"})),
+            DEFAULT_COMMAND_TIMEOUT,
+        )
+        .await;
+        assert!(out.starts_with("error:"), "{out}");
+        assert!(out.contains("only available in the chat loop"), "{out}");
+    }
+
     #[tokio::test]
     async fn lookup_advisory_judges_the_version_the_lock_file_pins() {
         let _serial = ADVISORY_CONFIG.lock().await;
@@ -5204,6 +5352,10 @@ patched = ["{fixed}"]
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
+                skills: Arc::new(xencode_plugin_rs::SkillRuntime::empty(
+                    std::path::PathBuf::new(),
+                    std::path::PathBuf::new(),
+                )),
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
@@ -5269,6 +5421,9 @@ patched = ["{fixed}"]
         let mut tools = xencode_providers_rs::file_tools();
         tools.extend(xencode_providers_rs::command_tools());
         tools.extend(xencode_providers_rs::plan_tools());
+        // The turn offers `load_skill` whenever skills are installed, so the
+        // schemas a test validates against include it too.
+        tools.extend(xencode_providers_rs::skill_tools());
         tools
             .into_iter()
             .map(|def| (def.name, def.parameters))
@@ -5680,6 +5835,10 @@ patched = ["{fixed}"]
                 command_timeout: DEFAULT_COMMAND_TIMEOUT,
                 plan: new_plan_handle(),
                 mcp: Arc::new(crate::mcp::McpHub::new()),
+                skills: Arc::new(xencode_plugin_rs::SkillRuntime::empty(
+                    std::path::PathBuf::new(),
+                    std::path::PathBuf::new(),
+                )),
                 hooks: xencode_config_rs::AgentHooks::default(),
                 schemas: std::collections::HashMap::new(),
                 online_docs: false,
