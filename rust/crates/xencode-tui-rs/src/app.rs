@@ -3126,6 +3126,7 @@ impl<'a> App<'a> {
             hooks: self.session_hooks(),
             schemas: std::collections::HashMap::new(),
             online_docs: self.config.allow_online_docs,
+            session_id: self.memory.current_session().cloned(),
         }
     }
 
@@ -9537,6 +9538,7 @@ mod tests {
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,
+            session_id: None,
         };
         let call = xencode_providers_rs::ToolCall {
             id: "c1".to_string(),
@@ -9937,6 +9939,7 @@ mod tests {
             hooks: app.config.agent_hooks.clone(),
             schemas: std::collections::HashMap::new(),
             online_docs: false,
+            session_id: None,
         };
         let call = xencode_providers_rs::ToolCall {
             id: "p1".to_string(),

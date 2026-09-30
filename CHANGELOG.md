@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — hooks are handed the tool event on stdin, not in their arguments (M-1)
+
+A `before`/`after` hook could only run one fixed shell command; it had no way to learn which tool was about to run or what that tool was about to change, so a rule meant to protect a single file had to be written as a blanket check on every call. The agent now passes each hook its event as JSON on the process's **stdin**: `{hook_event_name, tool_name, tool_input, cwd, session_id}`, with `hook_event_name` set to `PreToolUse` before the call and `PostToolUse` after. The names are the ones the wider agent ecosystem already settled on, so a hook written for another tool runs here unchanged and xencode adds no fourth dialect. A hook can now read the target path out of `tool_input` and decide per call — for example veto just the `write_file` that names a protected file and let every other write through. The non-zero-exit veto is exactly as before. Crucially, none of the event travels in the command line: a `tool_input` can carry a file's whole contents, and anything passed in `argv` is readable through `/proc` by any local process, so the payload is written only to the hook's standard input.
+
 ### Added — language-server diagnostics after edits, for non-Rust projects (L-12)
 
 The post-edit "done" gate only checked Rust workspaces (`cargo test`/`cargo clippy`); in any other language the agent edited blind — nothing verified its work before a turn finished. Now, when a turn edited files that a language server covers and there is no cargo project to check, xencode pulls real compiler diagnostics from that server and gates on them the same way it gates on exit codes. C and C++ are supported through `clangd`:
