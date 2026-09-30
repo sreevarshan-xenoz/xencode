@@ -34,6 +34,12 @@
 - [x] **DOC-2 — Record the visible TUIOS adaptation gap.** Add the current
   shipped-versus-missing boundary and a concrete starting point for the next
   implementation session to Milestone V below.
+- [x] **DOC-3 — Connect engine and analysis capabilities to main TUI.** Wired
+  `/doctor` (machine health & envdrift), `/verify` (test/lint/fmt checklist with
+  streaming events), `/hotspots` (churn × size ranking & bus factor), and
+  `/agents` (installed vendor agent inventory) into the slash command dispatcher,
+  Tab completion, and help bindings. Exposed `Layout History` (V-9) in the Feature
+  Navigator (`Ctrl+F`). Verified with crate tests and workspace clippy/fmt.
 
 ## Real-Time Intelligence (Phase 3+)
 
