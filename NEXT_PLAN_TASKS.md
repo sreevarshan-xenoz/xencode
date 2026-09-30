@@ -1287,7 +1287,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
 
 #### Track A — the agent finishes its own work
 
-- [ ] **L-7 — test/lint auto-repair loop with an exit-code "done" gate.** After
+- [x] **L-7 — test/lint auto-repair loop with an exit-code "done" gate.** After
       the agent's edits, run the project's own test and lint commands (discovered
       from `Cargo.toml`/the workspace, over the existing approval gate), feed
       failures back to the model, and iterate a bounded number of times. The
@@ -1296,6 +1296,17 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       the loop and terminates on `cargo test` genuinely exiting 0; the iteration
       cap is configurable and its exhaustion is reported as an incomplete task,
       not as success; the approval gate is unchanged.
+      *(Done 2026-09-30. Live against a scratch crate with a seeded compile
+      error, real TUI + Qwen3-0.6B via llama-server: a successful edit armed
+      the gate, the failing `cargo test` (exit 101, real rustc output) was fed
+      back as `repair attempt N/M`, `test tests::subs ... ok` flipped inside
+      the loop after feedback, and clean turns ended
+      `✓ verified: cargo test, cargo clippy exited 0`. Cap `agent_repair_max_iters`
+      verified at 2 and 3; exhaustion rendered `✗ INCOMPLETE ... after 0/1/2
+      repair attempt(s)` at both the iteration cap and the round budget; a
+      denied check renders `produced no exit code ... unverified`, never a
+      pass. Checks run through the unchanged approval gate (modal prompts
+      watched in edit-allow mode). Non-cargo roots get no invented commands.)*
 - [ ] **L-8 — `edit_file` failure fallback.** Today a non-unique or
       non-matching `old` string hard-fails. Return structured "why it didn't
       match" — the count of matches plus each candidate with line numbers and

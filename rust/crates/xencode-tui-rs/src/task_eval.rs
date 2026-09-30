@@ -635,6 +635,11 @@ async fn run_case(options: &TaskEvalOptions, shape: BugShape, attempt: usize) ->
     let mut run = app.agent_run(LoopSink::Chat, messages, &task.case.task);
     run.tool_root = task.path.clone();
     run.trace_dir = trace_dir.clone();
+    // The eval grades with its own grader command, on the outside of the run;
+    // the chat loop's post-edit repair gate (L-7) would add a second, hidden
+    // grading pass inside the round budget the case is measured against. It is
+    // switched off here so an attempt contains exactly what the model asked for.
+    run.max_repair_iters = 0;
     // What the model was given beyond the brief: nothing, unless the seeded
     // repository happens to carry an index. The trace records the answer either
     // way, so a pass cannot later be explained by files nobody handed over.
