@@ -17,6 +17,12 @@ pub const STATE_FILENAME: &str = "colab.json";
 /// rather than panic (`up` writes the full set; nothing requires it back).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColabState {
+    /// Which backend owns this bridge (`"colab"`). `None` on files written
+    /// before the backend split (L-1) — those are Colab bridges, and a second
+    /// backend must never inherit one, so readers treat `None` as `"colab"`
+    /// rather than as "any backend".
+    #[serde(default)]
+    pub backend: Option<String>,
     /// Session name of the bridged Colab runtime.
     pub session: Option<String>,
     /// PID of the local `ssh -L` forward process.
@@ -126,6 +132,7 @@ mod tests {
         let _g = with_env(&std::env::temp_dir(), &xcode_dir);
 
         let state = ColabState {
+            backend: Some("colab".to_string()),
             session: Some("xencode-t4".to_string()),
             forward_pid: Some(4242),
             keepalive_pid: None,
@@ -158,6 +165,25 @@ mod tests {
         ColabState::clear().expect("clear");
         assert!(!ColabState::state_path().unwrap().exists());
         ColabState::clear().expect("clear again is a no-op");
+    }
+
+    #[test]
+    fn state_written_before_the_backend_split_loads_as_colab() {
+        // A file from before L-1 has no `backend` key at all: it loads (the
+        // field defaults to None) and reads as a Colab bridge, so `status` /
+        // `down` keep working on a live bridge across the upgrade instead of
+        // failing to parse.
+        let xcode_dir = temp_dir("state-migrate");
+        let _g = with_env(&std::env::temp_dir(), &xcode_dir);
+        fs::write(
+            ColabState::state_path().unwrap(),
+            r#"{"session": "xencode-t4", "forward_pid": 4242, "url": "http://127.0.0.1:18000/v1"}"#,
+        )
+        .expect("write old state");
+        let loaded = ColabState::load().expect("old file loads").expect("exists");
+        assert_eq!(loaded.backend, None);
+        assert_eq!(loaded.backend.as_deref().unwrap_or("colab"), "colab");
+        assert_eq!(loaded.session.as_deref(), Some("xencode-t4"));
     }
 
     #[test]

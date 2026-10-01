@@ -1214,6 +1214,19 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** `xencode colab up|status|down|reconnect` behaves
       byte-identically to today (re-run the live T4 bring-up, not just the 49
       hermetic tests), and the Colab-specific file is under ~800 lines.
+      *(Progress 2026-10-01, not done: the split is in the tree behind
+      `backend.rs` (`Backend`: `provision`/`list_sessions`/`deprovision`,
+      `forward_command`/`exec_command`, `reap_hint`, plus `is_transient` for
+      the bridge-slot retry and `id` for state/errors) with `colab.rs`
+      (446 lines) as impl #1; `run_colab_*` keep their signatures and the CLI
+      is untouched; `ColabState` gained `backend` (old files load as Colab).
+      All 53 hermetic colab tests pass (1824 workspace-wide), clippy/fmt
+      clean. Two deliberate deviations: the forward/exec argv are two methods
+      of the one transport seam, and a `provision` failure under `reconnect`
+      now reads `colab reconnect:` instead of `colab up:`. The live T4
+      re-run the done-when demands has not happened — an `up` started
+      2026-10-01 allocated a VM and was aborted mid-bootstrap; the orphan was
+      stopped, nothing is running. Do not tick this box before that re-run.)*
 - [ ] **L-2 — `xencode remote add|list|use|up|status|down`, the BYO-SSH
       backend.** `add` records a host (`user@host[:port]`, optional
       `~/.ssh/config` alias) plus a runtime choice into a per-host profile; `up`

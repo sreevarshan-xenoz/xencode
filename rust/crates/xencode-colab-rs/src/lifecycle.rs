@@ -1,37 +1,42 @@
-//! The `xencode colab up|status|down` lifecycle: bring a Colab VM up over the
-//! official bridge, report it, and tear it down — always idempotent and always
-//! loopback-only on the VM side (never a public tunnel).
+//! The `up|status|down` lifecycle over any [`Backend`]: bring a machine's
+//! inference server up through the bridge, report it, and tear it down —
+//! always idempotent and always loopback-only on the far side (never a
+//! public tunnel).
 //!
-//! Sequencing of `up`:
-//! 1. session validated, created only when absent (`colab new --gpu` also
-//!    spawns the official keep-alive daemon — this feature does not run its
-//!    own, exactly per the plan),
-//! 2. bootstrap script pushed over the bridge and run as `bash -s`,
-//! 3. `ssh -N -L` forward spawned (the VM's endpoint appears on the laptop),
+//! Sequencing of `up` (identical for every backend, which is the point of
+//! L-1):
+//! 1. compute validated, created only when absent (`provision` also spawns
+//!    whatever keep-alive the provider needs — for Colab, `colab new`'s
+//!    official daemon; this feature runs none of its own),
+//! 2. bootstrap script pushed over the backend's remote-command transport and
+//!    run as `bash -s`,
+//! 3. `ssh -N -L` forward spawned (the far endpoint appears on the laptop),
 //! 4. `/v1/models` probed until the endpoint answers,
-//! 5. state written to `~/.xencode/colab.json`.
+//! 5. state written to `~/.xencode/colab.json` (carrying which backend owns
+//!    it, so a second backend never inherits a live Colab bridge).
 //!
 //! I/O is only ever argv/stdin/stdout against `colab`/`ssh` fakes on `$PATH`
 //! in the hermetic tests; nothing here shells out through a user shell except
 //! ssh's own `ProxyCommand` (which every value in is shell-quoted).
 #![forbid(unsafe_code)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use xencode_config_rs::XencodeConfig;
 
+use crate::backend::{error_tail, Backend, TransportCmd};
 use crate::bootstrap::bootstrap_script;
+use crate::colab::ColabBackend;
 use crate::orchestrate::{
-    colab_new_argv, colab_sessions_argv, colab_stop_argv, effective_remote_port, exec_ssh_argv,
-    forward_url, now_rfc3339, parse_sessions, probe_models, spawn_forward, started_age_hours,
-    terminate, validate_session_name, Binaries,
+    effective_remote_port, forward_url, now_rfc3339, probe_models, spawn_forward_cmd, terminate,
+    validate_session_name, Binaries,
 };
 use crate::state::{load_state, remove_state, save_state, ColabState};
 
-/// Timeout for one `colab sessions` / `colab new` / `colab stop` run.
-const CMD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Timeout for one `colab sessions` / `colab new` / `colab stop` run lives
+/// with the backend that runs them ([`crate::colab::CMD_TIMEOUT`]).
 /// The VM bootstrap (runtime download + model download + load until the server
 /// really serves) runs to completion before it reports `READY`. Measured live:
 /// a 0.5B GGUF took ~20 s to fetch and 39 s to load on a T4; a 7-8B Q4 is
@@ -57,9 +62,6 @@ const BRIDGE_ATTEMPTS: u32 = 8;
 const BRIDGE_RETRY_GAP: Duration = Duration::from_secs(20);
 /// How long the forward is given to prove it stayed up before it is trusted.
 const FORWARD_SETTLE: Duration = Duration::from_secs(5);
-/// Colab reaps idle free-tier VMs; a bridge this old is likely pointing at a
-/// dead VM even when a stale pid survives.
-const VM_MAX_AGE_HOURS: f64 = 12.0;
 
 /// GGUF quantization used when neither `--quant` nor `colab_quant` says:
 /// small enough to fit a free-tier T4's 15 GB with a 7-8B model, good enough
@@ -92,21 +94,44 @@ pub struct UpOptions {
 
 /// Bring the VM up. Returns the forward's URL (`http://127.0.0.1:PORT/v1`).
 /// Fails with user-facing messages; the caller (CLI) prints and exits.
+/// Thin wrapper: the sequencing is [`bring_up`] over the Colab backend, so a
+/// second backend reuses it unchanged.
 pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Result<String, String> {
-    validate_session_name(&opts.session).map_err(|e| format!("colab up: {e}"))?;
+    bring_up(
+        &ColabBackend::new(bins.clone(), key.to_path_buf()),
+        "colab up",
+        opts,
+    )
+    .await
+}
+
+/// The generic bring-up: validate, provision, bootstrap, forward, probe,
+/// record. `op` prefixes every error (`"colab up"`, `"colab reconnect"`)
+/// so the two callers' failures read as their own.
+pub async fn bring_up<B: Backend>(
+    backend: &B,
+    op: &str,
+    opts: &UpOptions,
+) -> Result<String, String> {
+    validate_session_name(&opts.session).map_err(|e| format!("{op}: {e}"))?;
     if opts.model.is_empty() {
-        return Err("colab up: --model is required (what should the VM serve?)".to_string());
+        return Err(format!(
+            "{op}: --model is required (what should the VM serve?)"
+        ));
     }
     if opts.runtime != "llama.cpp" && opts.runtime != "ollama" {
         return Err(format!(
-            "colab up: unknown runtime {:?} (expected \"llama.cpp\" or \"ollama\")",
+            "{op}: unknown runtime {:?} (expected \"llama.cpp\" or \"ollama\")",
             opts.runtime
         ));
     }
 
     let remote_port = effective_remote_port(&opts.runtime, opts.remote_port);
 
-    ensure_session(bins, &opts.session, &opts.gpu).await?;
+    backend
+        .provision(&opts.session, &opts.gpu)
+        .await
+        .map_err(|e| format!("{op}: {e}"))?;
 
     let quant = if opts.quant.is_empty() {
         DEFAULT_QUANT
@@ -120,20 +145,21 @@ pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Resu
         quant,
         remote_port,
     )?;
-    run_bootstrap(bins, key, &opts.session, &script).await?;
+    run_bootstrap(backend, op, &opts.session, &script).await?;
 
     let (url, child) =
-        spawn_forward_ready(bins, &opts.session, key, opts.local_port, remote_port).await?;
+        spawn_forward_ready(backend, op, &opts.session, opts.local_port, remote_port).await?;
     let forward_pid = child.id().expect("a just-spawned forward always has a pid");
 
     probe_models(opts.local_port, PROBE_ATTEMPTS, None)
         .await
         .map_err(|e| {
             terminate(forward_pid);
-            format!("colab up: forward came up but the endpoint did not answer: {e}")
+            format!("{op}: forward came up but the endpoint did not answer: {e}")
         })?;
 
     let state = ColabState {
+        backend: Some(backend.id().to_string()),
         session: Some(opts.session.clone()),
         forward_pid: Some(forward_pid),
         keepalive_pid: None,
@@ -144,7 +170,7 @@ pub async fn run_colab_up(bins: &Binaries, key: &Path, opts: &UpOptions) -> Resu
         started_at: Some(now_rfc3339()),
         url: Some(url.clone()),
     };
-    save_state(&state).map_err(|e| format!("colab up: {e}"))?;
+    save_state(&state).map_err(|e| format!("{op}: {e}"))?;
 
     Ok(url)
 }
@@ -165,13 +191,28 @@ pub async fn run_colab_reconnect(
     key: &Path,
     opts: &UpOptions,
 ) -> Result<String, String> {
-    let state = load_state()?.ok_or_else(|| {
-        "colab reconnect: no colab.json — run `xencode colab up` first".to_string()
-    })?;
+    reconnect_bridge(
+        &ColabBackend::new(bins.clone(), key.to_path_buf()),
+        "colab reconnect",
+        opts,
+    )
+    .await
+}
+
+/// The generic one-key reconnect. `op` prefixes errors as in [`bring_up`].
+pub async fn reconnect_bridge<B: Backend>(
+    backend: &B,
+    op: &str,
+    opts: &UpOptions,
+) -> Result<String, String> {
+    let state = load_state()?
+        .ok_or_else(|| format!("{op}: no colab.json — run `xencode colab up` first"))?;
     let session = opts.session.clone();
-    validate_session_name(&session).map_err(|e| format!("colab reconnect: {e}"))?;
+    validate_session_name(&session).map_err(|e| format!("{op}: {e}"))?;
     if opts.model.is_empty() {
-        return Err("colab reconnect: --model is required (what should the VM serve?)".to_string());
+        return Err(format!(
+            "{op}: --model is required (what should the VM serve?)"
+        ));
     }
     let remote_port = effective_remote_port(&opts.runtime, opts.remote_port);
     let local_port = opts.local_port;
@@ -184,23 +225,26 @@ pub async fn run_colab_reconnect(
         return Ok(url);
     }
 
-    // Session gone server-side (or `colab sessions` refusing to name it):
+    // Session gone server-side (or the provider refusing to name it):
     // the VM was reaped. Recreate it like `up` would, then keep going.
-    ensure_session(bins, &session, opts.gpu.as_str()).await?;
+    backend
+        .provision(&session, opts.gpu.as_str())
+        .await
+        .map_err(|e| format!("{op}: {e}"))?;
 
     // Forward before bootstrap. The tunnel is cheap and the VM usually still
     // serves through a new one; rebuilding the VM side would re-download the
     // weights for nothing. On failure, fall through: an empty port behind a
     // live forward means the runtime itself has to come back.
     if let Ok((url, child)) =
-        spawn_forward_ready(bins, &session, key, local_port, remote_port).await
+        spawn_forward_ready(backend, op, &session, local_port, remote_port).await
     {
         let pid = child.id().expect("a just-spawned forward always has a pid");
         if probe_models(local_port, FORWARD_ONLY_PROBE_ATTEMPTS, None)
             .await
             .is_ok()
         {
-            record_bridge(&session, pid, local_port, remote_port, opts, &url)?;
+            record_bridge(backend, op, pid, local_port, remote_port, opts, &url)?;
             return Ok(url);
         }
         // Release the runtime's single SSH slot for the bootstrap below.
@@ -220,27 +264,36 @@ pub async fn run_colab_reconnect(
         quant,
         remote_port,
     )?;
-    run_bootstrap(bins, key, &session, &script).await?;
+    run_bootstrap(backend, op, &session, &script).await?;
 
-    let (url, child) = spawn_forward_ready(bins, &session, key, local_port, remote_port).await?;
+    let (url, child) = spawn_forward_ready(backend, op, &session, local_port, remote_port).await?;
     let forward_pid = child.id().expect("a just-spawned forward always has a pid");
 
     probe_models(local_port, PROBE_ATTEMPTS, None)
         .await
         .map_err(|e| {
             terminate(forward_pid);
-            format!("colab reconnect: forward came up but the endpoint did not answer: {e}")
+            format!("{op}: forward came up but the endpoint did not answer: {e}")
         })?;
 
-    record_bridge(&session, forward_pid, local_port, remote_port, opts, &url)?;
+    record_bridge(
+        backend,
+        op,
+        forward_pid,
+        local_port,
+        remote_port,
+        opts,
+        &url,
+    )?;
 
     Ok(url)
 }
 
 /// Persist the bridge a reconnect rebuilt, so `status` / `down` / the next
 /// reconnect all point at the live forward pid.
-fn record_bridge(
-    session: &str,
+fn record_bridge<B: Backend>(
+    backend: &B,
+    op: &str,
     forward_pid: u32,
     local_port: u16,
     remote_port: u16,
@@ -248,7 +301,8 @@ fn record_bridge(
     url: &str,
 ) -> Result<(), String> {
     save_state(&ColabState {
-        session: Some(session.to_string()),
+        backend: Some(backend.id().to_string()),
+        session: Some(opts.session.clone()),
         forward_pid: Some(forward_pid),
         keepalive_pid: None,
         local_port: Some(local_port),
@@ -258,7 +312,7 @@ fn record_bridge(
         started_at: Some(now_rfc3339()),
         url: Some(url.to_string()),
     })
-    .map_err(|e| format!("colab reconnect: {e}"))
+    .map_err(|e| format!("{op}: {e}"))
 }
 
 /// One line of `status` output.
@@ -278,10 +332,27 @@ pub struct StatusReport {
 
 /// Report the bridge state. Never fails hard — everything degraded is
 /// reported as a line so the CLI stays scriptable.
+/// Thin wrapper over [`bridge_status`] with the Colab backend.
 pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusReport {
+    // Status never builds a transport command, so it carries no key — the
+    // empty path is never spawned from.
+    bridge_status(
+        &ColabBackend::new(bins.clone(), PathBuf::new()),
+        asked_session,
+    )
+    .await
+}
+
+/// The generic status report. The backend answers the two provider questions
+/// (is the session listed? why is an old bridge gone?) and the rest —
+/// forward pid liveness, endpoint probe, recorded fields — is backend-free.
+pub async fn bridge_status<B: Backend>(backend: &B, asked_session: &str) -> StatusReport {
     let mut lines = Vec::new();
     let state = load_state().unwrap_or_else(|e| {
-        lines.push(format!("colab status: could not read state — {e}"));
+        lines.push(format!(
+            "{} status: could not read state — {e}",
+            backend.id()
+        ));
         None
     });
 
@@ -308,10 +379,14 @@ pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusRep
     let session_present = if session.is_empty() {
         false
     } else {
-        match colab_sessions(bins).await {
+        match backend.list_sessions().await {
             Ok(names) => names.iter().any(|n| n == session),
             Err(e) => {
-                lines.push(format!("colab status: colab sessions: {e}"));
+                lines.push(format!(
+                    "{} status: {} sessions: {e}",
+                    backend.id(),
+                    backend.id()
+                ));
                 false
             }
         }
@@ -337,7 +412,7 @@ pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusRep
         false => "forward: down (pid not alive — run `xencode colab up --reconnect`)".to_string(),
     });
     lines.push(match session_present {
-        true => format!("session: {session} (listed by colab sessions)"),
+        true => format!("session: {session} (listed by {} sessions)", backend.id()),
         false => format!("session: {session} (not listed server-side)"),
     });
     lines.push(match endpoint_ok {
@@ -353,13 +428,8 @@ pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusRep
     if let Some(ts) = &state.started_at {
         lines.push(format!("started: {ts}"));
     }
-    if let Some(age) = state.started_at.as_deref().and_then(started_age_hours) {
-        if age > VM_MAX_AGE_HOURS && !endpoint_ok {
-            lines.push(format!(
-                "vm: reaped (started {age:.0}h ago — Colab drops idle VMs after \
-                 ~12h). Run `xencode colab up --reconnect` for a fresh VM."
-            ));
-        }
+    if let Some(hint) = backend.reap_hint(state.started_at.as_deref(), endpoint_ok) {
+        lines.push(hint);
     }
 
     StatusReport {
@@ -373,7 +443,14 @@ pub async fn run_colab_status(bins: &Binaries, asked_session: &str) -> StatusRep
 
 /// Tear the bridge down. Returns a summary string. Idempotent: no state, no
 /// live pid, or an absent session are all "already down" style no-ops.
+/// Thin wrapper over [`tear_down`] with the Colab backend.
 pub async fn run_colab_down(bins: &Binaries) -> Result<String, String> {
+    tear_down(&ColabBackend::new(bins.clone(), PathBuf::new())).await
+}
+
+/// The generic teardown: kill the recorded forward, release the compute
+/// through the backend, clear the state.
+pub async fn tear_down<B: Backend>(backend: &B) -> Result<String, String> {
     let state = match load_state()? {
         Some(s) => s,
         None => return Ok("nothing to tear down (no colab.json)".to_string()),
@@ -391,9 +468,9 @@ pub async fn run_colab_down(bins: &Binaries) -> Result<String, String> {
     }
 
     if let Some(session) = &state.session {
-        match colab_stop(bins, session).await {
-            Ok(()) => parts.push(format!("colab stop {session}")),
-            Err(e) => parts.push(format!("colab stop {session}: {e}")),
+        match backend.deprovision(session).await {
+            Ok(()) => parts.push(format!("{} stop {session}", backend.id())),
+            Err(e) => parts.push(format!("{} stop {session}: {e}", backend.id())),
         }
     }
 
@@ -419,57 +496,23 @@ fn forward_url_no_v1(local_port: u16) -> String {
     format!("http://127.0.0.1:{local_port}")
 }
 
-/// `colab sessions` captured. `Err` turns into a status line, so a
-/// transient backend hiccup never kills the report.
-async fn colab_sessions(bins: &Binaries) -> Result<Vec<String>, String> {
-    let output = run_capture(&bins.colab, &colab_sessions_argv(&bins.colab), CMD_TIMEOUT).await?;
-    Ok(parse_sessions(&String::from_utf8_lossy(&output.stdout)))
-}
-
-/// Create the session only when it does not exist server-side (idempotent
-/// `up`). `colab new` also launches the official keep-alive daemon.
-async fn ensure_session(bins: &Binaries, session: &str, gpu: &str) -> Result<(), String> {
-    let existing = colab_sessions(bins)
-        .await
-        .map_err(|e| format!("colab up: could not list sessions: {e}"))?;
-    if existing.iter().any(|n| n == session) {
-        return Ok(());
-    }
-    let out = run_capture(
-        &bins.colab,
-        &colab_new_argv(&bins.colab, session, gpu),
-        CMD_TIMEOUT,
-    )
-    .await
-    .map_err(|e| format!("colab up: colab new failed: {e}"))?;
-    if !out.status {
-        return Err(format!(
-            "colab up: colab new failed{}",
-            first_line(&String::from_utf8_lossy(&out.stderr))
-                .map(|l| format!(" — {l}"))
-                .unwrap_or_default()
-        ));
-    }
-    Ok(())
-}
-
-/// Feed the bootstrap script to `ssh -l root ... colab-vm bash -s` over the
-/// bridge and wait for a `READY` marker on stdout, retrying while Colab's
-/// single SSH slot is still held by the bridge that just died. Output is
-/// captured, not streamed: a slow install is silent but bounded by
-/// [`BOOTSTRAP_TIMEOUT`].
-async fn run_bootstrap(
-    bins: &Binaries,
-    key: &Path,
+/// Feed the bootstrap script to the backend's remote-command transport and
+/// wait for a `READY` marker on stdout, retrying while the transport slot is
+/// still held by whatever just died. Output is captured, not streamed: a slow
+/// install is silent but bounded by [`BOOTSTRAP_TIMEOUT`]. What counts as
+/// "still held" is the backend's call (`is_transient`).
+async fn run_bootstrap<B: Backend>(
+    backend: &B,
+    op: &str,
     session: &str,
     script: &str,
 ) -> Result<(), String> {
-    let argv = exec_ssh_argv(bins, session, key, "bash -s");
+    let cmd = backend.exec_command(session, "bash -s");
     let mut busy = String::new();
     for attempt in 1..=BRIDGE_ATTEMPTS {
-        let result = bootstrap_once(bins, &argv, script).await;
+        let result = bootstrap_once(&cmd, op, script).await;
         let Err(err) = result else { return Ok(()) };
-        if !bridge_busy(&err) {
+        if !backend.is_transient(&err) {
             return Err(err);
         }
         // The previous bridge's slot is still held; wait it out and redo the
@@ -480,73 +523,44 @@ async fn run_bootstrap(
         }
     }
     Err(format!(
-        "colab up: the runtime allows one SSH bridge and its slot never freed — {busy}"
+        "{op}: the runtime allows one SSH bridge and its slot never freed — {busy}"
     ))
 }
 
-/// True when an error is Colab's single-bridge slot being unavailable rather
-/// than anything the user did wrong — worth waiting out and retrying. Two
-/// shapes, both seen live on a free-tier T4 after killing a forward:
-/// the proxy refusing a second bridge (`HTTP 429 … Already-active SSH
-/// session`), and ssh connecting to the bridge but never getting an SSH
-/// banner because the dying bridge still owns the runtime's sshd slot
-/// (`Connection timed out during banner exchange`).
-fn bridge_busy(text: &str) -> bool {
-    text.contains("Already-active SSH session")
-        || text.contains("HTTP 429")
-        || text.contains("banner exchange")
-}
-
-/// The tail of a subprocess' output — what actually went wrong is at the end;
-/// the first line is usually ssh's host-key warning.
-fn error_tail(s: &str) -> Option<String> {
-    let lines: Vec<&str> = s
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("Warning: Permanently added"))
-        .collect();
-    if lines.is_empty() {
-        return None;
-    }
-    let skip = lines.len().saturating_sub(3);
-    Some(lines[skip..].join(" / ").chars().take(400).collect())
-}
-
-async fn bootstrap_once(bins: &Binaries, argv: &[String], script: &str) -> Result<(), String> {
-    let mut child = tokio::process::Command::new(&bins.ssh)
-        .args(&argv[1..])
+async fn bootstrap_once(cmd: &TransportCmd, op: &str, script: &str) -> Result<(), String> {
+    let mut child = tokio::process::Command::new(&cmd.exe)
+        .args(cmd.argv.iter().skip(1))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("colab up: could not spawn ssh bootstrap: {e}"))?;
+        .map_err(|e| format!("{op}: could not spawn ssh bootstrap: {e}"))?;
 
     {
         let mut stdin = child
             .stdin
             .take()
-            .ok_or_else(|| "colab up: ssh stdin unavailable".to_string())?;
+            .ok_or_else(|| format!("{op}: ssh stdin unavailable"))?;
         use tokio::io::AsyncWriteExt;
         stdin
             .write_all(script.as_bytes())
             .await
-            .map_err(|e| format!("colab up: could not write bootstrap to ssh: {e}"))?;
+            .map_err(|e| format!("{op}: could not write bootstrap to ssh: {e}"))?;
         // Dropping stdin closes it -> ssh feeds EOF -> `bash -s` runs.
     }
 
     let output = tokio::time::timeout(BOOTSTRAP_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {
-            "colab up: VM bootstrap timed out (install may still be running — re-run up)"
-                .to_string()
+            format!("{op}: VM bootstrap timed out (install may still be running — re-run up)")
         })?
-        .map_err(|e| format!("colab up: bootstrap wait failed: {e}"))?;
+        .map_err(|e| format!("{op}: bootstrap wait failed: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
         return Err(format!(
-            "colab up: VM bootstrap failed (exit {}){}",
+            "{op}: VM bootstrap failed (exit {}){}",
             output.status.code().unwrap_or(-1),
             error_tail(&stderr)
                 .or_else(|| error_tail(&stdout))
@@ -555,24 +569,25 @@ async fn bootstrap_once(bins: &Binaries, argv: &[String], script: &str) -> Resul
         ));
     }
     if !stdout.contains("READY") {
-        return Err("colab up: VM bootstrap did not report READY".to_string());
+        return Err(format!("{op}: VM bootstrap did not report READY"));
     }
     Ok(())
 }
 
-/// Spawn the forward, tolerating the one-bridge-per-runtime slot: `ssh` exits
-/// immediately when the bridge is refused, so a forward that is already dead
-/// after [`FORWARD_SETTLE`] is re-spawned until the slot frees.
-async fn spawn_forward_ready(
-    bins: &Binaries,
+/// Spawn the forward, tolerating a transport slot that frees slowly: the
+/// process exits immediately when the far side refuses, so a forward that is
+/// already dead after [`FORWARD_SETTLE`] is re-spawned until the slot frees.
+async fn spawn_forward_ready<B: Backend>(
+    backend: &B,
+    op: &str,
     session: &str,
-    key: &Path,
     local_port: u16,
     remote_port: u16,
 ) -> Result<(String, tokio::process::Child), String> {
+    let cmd = backend.forward_command(session, local_port, remote_port);
     let mut last = String::from("forward exited before it settled");
     for attempt in 1..=BRIDGE_ATTEMPTS {
-        let (url, mut child) = spawn_forward(bins, session, key, local_port, remote_port).await?;
+        let (url, mut child) = spawn_forward_cmd(&cmd, local_port).await?;
         tokio::time::sleep(FORWARD_SETTLE).await;
         match child.try_wait() {
             Ok(None) => return Ok((url, child)),
@@ -584,56 +599,8 @@ async fn spawn_forward_ready(
         }
     }
     Err(format!(
-        "colab up: the ssh forward never stayed up — {last} (a Colab runtime serves one SSH bridge; close any other `colab ssh` and retry)"
+        "{op}: the ssh forward never stayed up — {last} (the far side serves one SSH bridge; close any other bridge to it and retry)"
     ))
-}
-
-/// `colab stop -s <session>` — best-effort: absence is fine, hard backend
-/// errors surface as a message from `down`, never a crash.
-async fn colab_stop(bins: &Binaries, session: &str) -> Result<(), String> {
-    let argv = colab_stop_argv(&bins.colab, session);
-    let out = run_capture(&bins.colab, &argv, CMD_TIMEOUT).await?;
-    if out.status {
-        Ok(())
-    } else {
-        Err(first_line(&String::from_utf8_lossy(&out.stderr))
-            .unwrap_or_else(|| "colab stop failed".to_string()))
-    }
-}
-
-/// A captured subprocess run: `(status_ok, stdout, stderr)` with a timeout.
-/// `argv` mirrors the other builders — `argv[0]` is the exe itself (it must
-/// equal `exe`, which is how `forward_argv`/`exec_ssh_argv` behave too) and is
-/// skipped here so `Command` gets its args only.
-async fn run_capture(exe: &Path, argv: &[String], timeout: Duration) -> Result<Output, String> {
-    tokio::time::timeout(
-        timeout,
-        tokio::process::Command::new(exe).args(&argv[1..]).output(),
-    )
-    .await
-    .map_err(|_| "command timed out".to_string())?
-    .map(|out| Output {
-        status: out.status.success(),
-        stdout: out.stdout,
-        stderr: out.stderr,
-    })
-    .map_err(|e| format!("could not run {}: {e}", exe.display()))
-}
-
-struct Output {
-    status: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-}
-
-/// First non-blank line of `s`, trimmed and capped — for error tails.
-fn first_line(s: &str) -> Option<String> {
-    let line = s.lines().find(|l| !l.trim().is_empty())?;
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    Some(trimmed.chars().take(160).collect())
 }
 
 #[cfg(test)]
@@ -798,26 +765,6 @@ esac
         }
     }
 
-    /// The two bridge refusals seen on a real free-tier runtime are retried;
-    /// a genuine failure (bad key, dead session) is not.
-    #[test]
-    fn only_bridge_slot_errors_are_worth_waiting_out() {
-        assert!(bridge_busy(
-            "colab up: VM bootstrap failed (exit 1) — HTTP 429 Already-active SSH session"
-        ));
-        assert!(bridge_busy(
-            "colab up: VM bootstrap failed (exit 255) — Connection timed out during banner exchange"
-        ));
-        assert!(
-            !bridge_busy("sree@colab-vm: Permission denied (publickey)"),
-            "an auth failure must surface, not retry"
-        );
-        assert!(
-            !bridge_busy("colab up: VM bootstrap did not report READY"),
-            "a broken runtime must surface, not retry"
-        );
-    }
-
     #[tokio::test]
     async fn raw_probe_against_raw_listener_roundtrips() {
         // Bare TCP echo of the /v1/models probe against a minimal HTTP/1.0
@@ -868,6 +815,11 @@ esac
             .expect("state exists");
         let summary = format!("{:?}", state);
         assert_eq!(state.session.as_deref(), Some(session));
+        assert_eq!(
+            state.backend.as_deref(),
+            Some("colab"),
+            "up records which backend owns the bridge: {summary}"
+        );
         assert_eq!(state.local_port, Some(18000));
         assert_eq!(state.remote_port, Some(8080), "explicit override kept");
         assert_eq!(state.runtime.as_deref(), Some("llama.cpp"));
@@ -982,6 +934,7 @@ esac
 
         // A state whose forward pid is dead but whose endpoint already serves.
         let state = ColabState {
+            backend: Some("colab".to_string()),
             session: Some(session.to_string()),
             forward_pid: Some(3), // unlikely to be alive
             keepalive_pid: None,
@@ -1039,6 +992,7 @@ esac
 
         // Stale state with a dead forward pid and no live endpoint.
         let state = ColabState {
+            backend: Some("colab".to_string()),
             session: Some(session.to_string()),
             forward_pid: Some(3),
             keepalive_pid: None,
@@ -1163,6 +1117,7 @@ esac
             .expect("sleep");
         std::fs::write(format!("{mdir}/session-online"), "yes").expect("online");
         let state = ColabState {
+            backend: Some("colab".to_string()),
             session: Some(session.to_string()),
             forward_pid: Some(sleep_child.id()),
             keepalive_pid: None,
@@ -1214,12 +1169,5 @@ esac
     #[test]
     fn forward_url_no_v1_is_the_base() {
         assert_eq!(forward_url_no_v1(18000), "http://127.0.0.1:18000");
-    }
-
-    #[test]
-    fn first_line_trims_and_caps() {
-        assert_eq!(first_line("  hi there\n"), Some("hi there".to_string()));
-        assert_eq!(first_line("\n\n  "), None);
-        assert_eq!(first_line(&"x".repeat(300)).map(|l| l.len()), Some(160));
     }
 }
