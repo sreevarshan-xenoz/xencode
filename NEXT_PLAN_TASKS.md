@@ -1202,7 +1202,7 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
 
 #### Track R — any machine you can SSH into
 
-- [ ] **L-1 — extract a `Backend` trait from `xencode-colab-rs`.** Split the
+- [x] **L-1 — extract a `Backend` trait from `xencode-colab-rs`.** Split the
       generic half of `orchestrate.rs` + `lifecycle.rs` (bootstrap,
       poll-until-serving, forward spawn/hold, state file, reconnect) behind a
       trait with three seams: `provision()` (create/attach the compute),
@@ -1214,19 +1214,29 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** `xencode colab up|status|down|reconnect` behaves
       byte-identically to today (re-run the live T4 bring-up, not just the 49
       hermetic tests), and the Colab-specific file is under ~800 lines.
-      *(Progress 2026-10-01, not done: the split is in the tree behind
-      `backend.rs` (`Backend`: `provision`/`list_sessions`/`deprovision`,
-      `forward_command`/`exec_command`, `reap_hint`, plus `is_transient` for
-      the bridge-slot retry and `id` for state/errors) with `colab.rs`
-      (446 lines) as impl #1; `run_colab_*` keep their signatures and the CLI
-      is untouched; `ColabState` gained `backend` (old files load as Colab).
-      All 53 hermetic colab tests pass (1824 workspace-wide), clippy/fmt
-      clean. Two deliberate deviations: the forward/exec argv are two methods
-      of the one transport seam, and a `provision` failure under `reconnect`
-      now reads `colab reconnect:` instead of `colab up:`. The live T4
-      re-run the done-when demands has not happened — an `up` started
-      2026-10-01 allocated a VM and was aborted mid-bootstrap; the orphan was
-      stopped, nothing is running. Do not tick this box before that re-run.)*
+      *(Done 2026-10-01. The split is `backend.rs` (`Backend`:
+      `provision`/`list_sessions`/`deprovision`, `forward_command`/
+      `exec_command`, `reap_hint`, plus `is_transient` for the bridge-slot
+      retry and `id` for state/errors) with `colab.rs` (446 lines) as impl #1;
+      `run_colab_*` keep their signatures and the CLI is untouched;
+      `ColabState` gained `backend` (old files load as Colab). Two deliberate
+      deviations: the forward/exec argv are two methods of the one transport
+      seam, and a `provision` failure under `reconnect` now reads `colab
+      reconnect:` instead of `colab up:`. Proven by re-running the live T4
+      bring-up against the refactored code: `up` reused the existing session,
+      bootstrapped `Qwen/Qwen3-4B-GGUF` (Q4_K_M, ~2.5 GB — Gemma was refused,
+      see below), the forward answered `/v1/models`, state was written with
+      `"backend": "colab"`, `status` printed the same lines as before,
+      `query -m remote:…` answered `BRIDGE OK` through the tunnel, and `down`
+      left no session, no state file and no stray ssh. 53 hermetic colab tests
+      pass (1824 workspace-wide), clippy/fmt clean.
+      Incidents, both environmental: the user's Gemma suggestion could not be
+      used — `google/gemma-3-4b-it-GGUF` answers HTTP 401 to an unauthenticated
+      fetch (Google gates it behind a license click), so the small-model slot
+      went to the ungated Qwen3-4B instead; and the first `up` attempt hit the
+      known single-bridge 429 because a stale `ssh bash -s` child of the
+      earlier aborted run still held the slot — killed by pid, slot freed,
+      second attempt clean.)*
 - [ ] **L-2 — `xencode remote add|list|use|up|status|down`, the BYO-SSH
       backend.** `add` records a host (`user@host[:port]`, optional
       `~/.ssh/config` alias) plus a runtime choice into a per-host profile; `up`
