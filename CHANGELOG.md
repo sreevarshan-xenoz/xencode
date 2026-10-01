@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a key generated from NVIDIA's own model page now gets real answers
+
+The `nvidia:` route was finished but unusable in practice: every call came
+back `404 … Not found for account`, because a key made from the account page
+carries no invocable functions. Generating the key from a single model's own
+page instead (`build.nvidia.com/deepseek-ai/deepseek-v4.1-flash` → Get API Key)
+registers that one function, and the route answers for real — `xencode query
+-m nvidia:deepseek-ai/deepseek-v4.1-flash` returned `NIM OK` end to end. No
+code change was needed; the fix is which key you paste in.
+
+The catch is throughput. That free function is nearly always cold, and one
+short reply measured 299s, then 251s, then ~1s when it happened to be warm,
+then a stall, then three straight stalls that NVIDIA's own gateway ended with
+HTTP 504 at 302s. So the default 30-second response timeout cannot serve this
+route and was raised to 420s, and `max_tokens` has to clear the model's
+reasoning budget — `max_tokens:20` came back with `content: null` and all 20
+tokens spent on reasoning instead. Keys stay out of the repository: the bearer
+goes in `.env` as `NVIDIA_NIM_API_KEY`, which is gitignored and owner-only.
+
 ### Added — MCP client: hosted servers, resources and prompts (M-6)
 
 An MCP server had to be a program xencode spawns itself. A declaration under

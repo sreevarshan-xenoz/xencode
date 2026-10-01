@@ -1416,6 +1416,26 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       for the personal organization. Nothing in xencode needs to change for
       either — retry the same `xencode query -m nvidia:…` once the account is
       entitled.)*
+      *(Live proof 2026-10-01, the NVIDIA half now answers for real. A key
+      generated from the model's own page — `deepseek-ai/deepseek-v4.1-flash` —
+      cleared the 404: `/v1/models` returns 200 with 81 models and that model is
+      listed, and `xencode query -m nvidia:deepseek-ai/deepseek-v4.1-flash`
+      printed `NIM OK` in 5m24s end to end through xencode's own route. So the
+      per-model-key advice above was right and the code needed no change. The
+      real constraint is throughput, not entitlement: this free function is
+      almost always cold. Measured latency for one "Reply with exactly: NIM OK"
+      was 299s, then 251s, then ~1s when it happened to be warm, then a 120s
+      stall, then three consecutive 300s stalls ending in HTTP 504 from
+      NVIDIA's own gateway at 302s. Other catalog models
+      (`mistralai/mistral-7b-instruct-v0.3`, `nvidia/llama-3.1-nemotron-70b-instruct`,
+      `deepseek-ai/deepseek-coder-6.7b-instruct`) still 404 as not-entitled, and
+      `meta/llama-3.1-8b-instruct` is 410 Gone, so this key really is scoped to
+      the one function. Two consequences to document rather than hide: the
+      default `response_timeout` of 30s cannot serve this route and was raised to
+      420s to get one answer, and `max_tokens` must exceed the reasoning budget —
+      `max_tokens:20` returned `content: null` with all 20 tokens spent on
+      `reasoning_content`. The Groq half is still untouched, so L-11 stays
+      unticked until both routes answer.)*
 - [x] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
       diagnostics from an LSP server rather than only `cargo check`, so
       non-cargo languages get the same L-7 treatment.
