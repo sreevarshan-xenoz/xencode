@@ -331,6 +331,17 @@ fn remote_target(model: &str) -> Option<&str> {
     model.strip_prefix("remote:")
 }
 
+/// NVIDIA NIM's OpenAI-compatible root. Fixed per L-11: a first-run user gets
+/// real capacity without renting anything, and the route carries no
+/// per-deployment URL to misconfigure.
+pub const NVIDIA_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
+
+/// Extract the inner model identifier if `model` routes to NVIDIA NIM
+/// (`nvidia:<vendor/model>`, e.g. `nvidia:mistralai/mistral-7b-instruct-v0.3`).
+fn nvidia_target(model: &str) -> Option<&str> {
+    model.strip_prefix("nvidia:")
+}
+
 /// True when `model` is served by a llama.cpp server, so a caller can decide
 /// whether asking that server anything (its window, its tokenizer) is worth
 /// a request at all. Same rule the provider uses to route, not a copy of it.
@@ -352,6 +363,7 @@ pub fn routes_to_llamacpp(model: &str) -> bool {
 pub fn routes_to_ollama(model: &str) -> bool {
     !routes_to_llamacpp(model)
         && remote_target(model).is_none()
+        && nvidia_target(model).is_none()
         && !model.starts_with("anthropic:")
         && !model.starts_with("qwen:")
         && !model.starts_with("google_gemini:")
@@ -379,6 +391,10 @@ pub struct ProviderManager {
     /// API root of the `remote:` endpoint; `None` until one is configured.
     remote_base_url: Option<String>,
     remote_api_key: Option<String>,
+    /// API root of the `nvidia:` endpoint; `Some` once an NVIDIA key is
+    /// configured (the URL itself is fixed — see [`NVIDIA_BASE_URL`]).
+    nvidia_base_url: Option<String>,
+    nvidia_api_key: Option<String>,
     retry_config: RetryConfig,
     /// Whether a request may leave this machine. Checked before every route in
     /// front of the network, and again when the agent's fallback chain is built.
@@ -417,6 +433,8 @@ impl ProviderManager {
             anthropic_api_key,
             remote_base_url: None,
             remote_api_key: None,
+            nvidia_base_url: None,
+            nvidia_api_key: None,
             retry_config: RetryConfig::default(),
             egress: EgressPolicy::default(),
             client,
@@ -496,6 +514,30 @@ impl ProviderManager {
         self
     }
 
+    /// Point the `nvidia:` prefix at NVIDIA NIM. The key is the whole
+    /// configuration — the URL is fixed — so an `nvidia:` request without one
+    /// reports that instead of dialling anonymously.
+    pub fn with_nvidia(mut self, api_key: Option<String>) -> Self {
+        let key = api_key.filter(|key| !key.trim().is_empty());
+        if key.is_some() {
+            self.nvidia_base_url = Some(NVIDIA_BASE_URL.to_string());
+            self.nvidia_api_key = key;
+        }
+        self
+    }
+
+    /// Point the `nvidia:` prefix at a non-default OpenAI-compatible root
+    /// (a corporate proxy in front of NIM, or a wiremock stand-in in tests).
+    /// An empty `base_url` leaves the route as it was.
+    pub fn with_nvidia_endpoint(mut self, base_url: &str, api_key: Option<String>) -> Self {
+        let base_url = base_url.trim();
+        if !base_url.is_empty() {
+            self.nvidia_base_url = Some(base_url.to_string());
+            self.nvidia_api_key = api_key.filter(|key| !key.trim().is_empty());
+        }
+        self
+    }
+
     /// Set a llama.cpp client for local GGUF/llama-server inference.
     pub fn with_llama_cpp(mut self, client: LlamaCppClient) -> Self {
         self.llama_cpp_client = Some(client);
@@ -528,6 +570,7 @@ impl ProviderManager {
     /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
+    /// - `nvidia:` → NVIDIA NIM (fixed OpenAI-compatible endpoint)
     /// - `llamacpp:` / `llama.cpp:` / `llama:` → llama.cpp server
     /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
@@ -662,6 +705,23 @@ impl ProviderManager {
         Ok(())
     }
 
+    /// The NVIDIA NIM endpoint, or a message saying how to configure it.
+    /// Unlike `remote:`, the URL is fixed — only the key is user-supplied —
+    /// so a missing key is the only unconfigured state.
+    fn nvidia_provider(&self) -> Result<compatible::OpenAICompatibleProvider, ProviderError> {
+        match self.nvidia_base_url.as_deref() {
+            Some(base_url) => Ok(compatible::OpenAICompatibleProvider::new(
+                base_url,
+                self.nvidia_api_key.clone(),
+            )
+            .with_recorder(self.traffic.clone())),
+            None => Err(ProviderError::api_message(
+                "No NVIDIA API key configured — run `xencode config set nvidia_api_key <key>` \
+                 (or export NVIDIA_NIM_API_KEY) and use `nvidia:<vendor/model>`"
+                    .to_string(),
+            )),
+        }
+    }
     /// The configured OpenAI-compatible endpoint, or a message saying how to
     /// configure one. Never falls back to a default host: a mistyped or absent
     /// URL must fail loudly rather than POST the prompt somewhere else.
@@ -720,6 +780,13 @@ impl ProviderManager {
             ));
         }
 
+        // NVIDIA NIM route (models prefixed with "nvidia:")
+        if let Some(inner_model) = nvidia_target(model) {
+            let provider = self.nvidia_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            return provider.generate(inner_model, &rendered, "Nvidia").await;
+        }
+
         // llama.cpp route (models prefixed with "llamacpp:", "llama.cpp:", or "llama:")
         if let Some(inner_model) = llamacpp_target(model) {
             return self.generate_llamacpp(inner_model, messages, options).await;
@@ -769,6 +836,7 @@ impl ProviderManager {
     /// - `anthropic:` → Anthropic Claude API
     /// - `qwen:` → Qwen cloud API
     /// - `google_gemini:` → Google Gemini API
+    /// - `nvidia:` → NVIDIA NIM
     /// - `remote:` → the configured OpenAI-compatible endpoint
     /// - contains `/` with OpenRouter key → OpenRouter
     /// - else → local Ollama
@@ -944,6 +1012,15 @@ impl ProviderManager {
                 .await;
         }
 
+        // NVIDIA NIM route, with full tool-calling support
+        if let Some(inner_model) = nvidia_target(model) {
+            let provider = self.nvidia_provider()?;
+            let rendered = tools::render_history(messages, history, tools::HistoryStyle::OpenAI);
+            return provider
+                .generate_stream_with_tools(inner_model, &rendered, tools, "Nvidia", callback)
+                .await;
+        }
+
         // Custom OpenAI-compatible endpoint, with full tool-calling support
         if let Some(inner_model) = remote_target(model) {
             let provider = self.remote_provider()?;
@@ -1020,6 +1097,16 @@ impl ProviderManager {
             return self
                 .generate_stream_llamacpp(inner_model, messages, options, callback)
                 .await;
+        }
+
+        // NVIDIA NIM route
+        if let Some(inner_model) = nvidia_target(model) {
+            let provider = self.nvidia_provider()?;
+            let rendered = tools::render_history(messages, &[], tools::HistoryStyle::OpenAI);
+            let step = provider
+                .generate_stream_with_tools(inner_model, &rendered, &[], "Nvidia", callback)
+                .await?;
+            return Ok(step.text);
         }
 
         // Custom OpenAI-compatible endpoint
