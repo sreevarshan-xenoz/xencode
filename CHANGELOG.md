@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `xencode query --image` sends a picture with the prompt
+
+Images could only reach a model from the TUI's file explorer, so a script or a
+one-off command had no way to ask about a picture. `xencode query --image <PATH>`
+now does, repeatable for several images, which keep the order they were given in.
+
+Each file goes through the same intake the TUI uses: read, checked to really be
+an image, size-capped, and shrunk to the longest side a vision encoder can use.
+When a file is re-encoded on the way out the change is printed on stderr rather
+than done quietly. A missing path or a file that is not an image is refused by
+name before any request goes out, and a turn with no user message to attach to is
+refused too — sending the prompt without the pictures would look like the model
+had ignored them.
+
+The pictures travel as image parts on the final user message, never pasted into
+the prompt text, so the prompt is not corrupted. Verified against a real
+model answering about a real photograph:
+`xencode query -m nvidia:moonshotai/kimi-k3 --image boardwalk.jpg "What is in this
+image?"` described it correctly, and `--format ndjson` still emits clean
+`start`/`token`/`done` events with an image attached.
+
 ### Fixed — a key generated from NVIDIA's own model page now gets real answers
 
 The `nvidia:` route was finished but unusable in practice: every call came
@@ -25,6 +46,14 @@ route and was raised to 420s, and `max_tokens` has to clear the model's
 reasoning budget — `max_tokens:20` came back with `content: null` and all 20
 tokens spent on reasoning instead. Keys stay out of the repository: the bearer
 goes in `.env` as `NVIDIA_NIM_API_KEY`, which is gitignored and owner-only.
+
+A key scoped to `moonshotai/kimi-k3` reads images as well as text. NVIDIA's own
+example request — a text part plus an `image_url` part, `"stream": true`,
+`"reasoning_effort": "max"` — came back `200` with the first token at 140s and a
+correct description of the picture, with 1100 characters of reasoning before the
+answer. Worth knowing: the `Accept:` header is cosmetic there, because
+`"stream": true` in the body is what decides, and asking for
+`Accept: application/json` still returned `text/event-stream`.
 
 ### Added — MCP client: hosted servers, resources and prompts (M-6)
 

@@ -142,6 +142,7 @@ complete -c xencode -n "__fish_xencode_using_subcommand query" -l seed -d 'llama
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l max-tokens -d 'llama.cpp sampling: max generated tokens' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l grammar -d 'llama.cpp sampling: GBNF grammar file/string' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l json-schema -d 'llama.cpp sampling: JSON schema for structured output' -r
+complete -c xencode -n "__fish_xencode_using_subcommand query" -l image -d 'Image to send with the prompt (repeatable); needs a vision-capable model' -r
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l format -d 'How to write the answer: plain words, or one JSON event per line' -r -f -a "text\t''
 ndjson\t''"
 complete -c xencode -n "__fish_xencode_using_subcommand query" -l no-cache -d 'Do not use cached responses'

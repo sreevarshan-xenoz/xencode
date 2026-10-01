@@ -4064,7 +4064,7 @@ _xencode() {
             return 0
             ;;
         xencode__subcmd__query)
-            opts="-m -h --model --no-cache --session --temperature --top-k --min-p --mirostat --seed --max-tokens --grammar --json-schema --format --help"
+            opts="-m -h --model --no-cache --session --temperature --top-k --min-p --mirostat --seed --max-tokens --grammar --json-schema --image --format --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -4111,6 +4111,10 @@ _xencode() {
                     return 0
                     ;;
                 --json-schema)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --image)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;

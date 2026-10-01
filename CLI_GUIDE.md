@@ -359,12 +359,48 @@ xencode query "Write a haiku" \
 # JSON schema. An invalid --json-schema is rejected up front (exit 1) rather
 # than silently degrading to a plain completion.
 xencode query "List three file formats" --json-schema '{"type":"object"}'
+
+# Send images with the prompt. Repeat --image for more than one. Needs a
+# vision-capable model — `nvidia:moonshotai/kimi-k3` reads them.
+xencode query "What is in this image?" \
+  --model nvidia:moonshotai/kimi-k3 \
+  --image screenshot.png \
+  --image diagram.jpg
 ```
 Sampling flags are read by a model served by llama.cpp, and — except `--grammar`
 and `--mirostat`, which Ollama has no field for — by a model served by Ollama as
 `options` on the request; see
 [What a request to Ollama carries](#what-a-request-to-ollama-carries). The prompt
 alone, with no flags, goes to the configured default model.
+
+#### Sending images
+
+`--image <PATH>` rides along with the prompt as an image part on the final user
+message — never pasted into the prompt text, which would corrupt it — and the
+model sees the picture itself. Repeat the flag for several images; they keep the
+order you gave.
+
+Each file goes through the same intake the TUI's attach path uses: it is read,
+checked to be a real image, capped in size, and shrunk to the longest side a
+vision encoder can use. When a file is re-encoded on the way out, the change is
+printed on stderr rather than done quietly:
+
+```
+image: screenshot.png (sent as image/jpeg (1568×1080, 210 KiB from 2560×1440, 1.2 MiB))
+```
+
+Problems are refused before the request goes out, naming the file — a path that
+does not exist, or bytes that are not an image:
+
+```
+error: cannot read image /tmp/a.png: No such file or directory (os error 2)
+error: /tmp/a.png is not a recognized image
+```
+
+A turn that has no user message to attach them to is refused as well
+(`the attached images could not be sent with this turn …`), because the
+alternative is a request answered from the prompt alone that looks like the
+model ignored the picture.
 
 #### What `--json-schema` guarantees, and what it does not
 
