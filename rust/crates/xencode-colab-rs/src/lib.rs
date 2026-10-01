@@ -18,20 +18,26 @@
 //! probe + signal) and `now_rfc3339` (`localtime_r`). `preflight`, `state`,
 //! `bootstrap`, and `lifecycle` forbid it themselves.
 
+pub mod backend;
 pub mod bootstrap;
+pub mod colab;
 pub mod lifecycle;
 pub mod orchestrate;
 pub mod preflight;
 pub mod state;
 
+pub use backend::{Backend, TransportCmd};
 pub use bootstrap::bootstrap_script;
+pub use colab::{
+    colab_new_argv, colab_sessions_argv, colab_stop_argv, exec_ssh_argv, forward_argv,
+    parse_sessions, proxy_argv, proxy_command_opt, ColabBackend, SSH_USER,
+};
 pub use lifecycle::{
     point_config_at_forward, run_colab_down, run_colab_reconnect, run_colab_status, run_colab_up,
     UpOptions,
 };
 pub use orchestrate::{
-    forward_argv, forward_url, pid_alive, proxy_argv, resolve_binaries, shell_quote, spawn_forward,
-    terminate, Binaries,
+    forward_url, pid_alive, resolve_binaries, shell_quote, spawn_forward_cmd, terminate, Binaries,
 };
 pub use preflight::{preflight, which, Check, PreflightReport, KEY_FILENAME};
 pub use state::{remove_state, save_state, ColabState, STATE_FILENAME};

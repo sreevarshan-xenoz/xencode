@@ -1,28 +1,19 @@
-//! Bridge orchestration core: builds and spawns the local `ssh -L` forward
-//! that carries the Colab VM's OpenAI-compatible endpoint to the laptop.
+//! Bridge orchestration core: the generic half of the `ssh -L` forward that
+//! carries a VM's OpenAI-compatible endpoint to the laptop.
 //!
-//! The forward is one OpenSSH process with the colab bridge as its
-//! `ProxyCommand`:
-//!
-//! ```text
-//! ssh -N -l root -L 127.0.0.1:18000:127.0.0.1:18080 -i <key> \
-//!     -o ProxyCommand="colab ssh --proxy-mode -s <session> -i <key>" \
-//!     colab-vm
-//! ```
-//!
-//! OpenSSH runs `ProxyCommand` through the user's shell, so every value we
-//! interpolate into it ([`shell_quote`]) is single-quoted — a session name is
-//! user-typed and must never be interpreted as shell syntax. The `-L` source
-//! port is the laptop's `local_port`; the destination is `127.0.0.1` inside
-//! the VM, where the runtime binds ([`effective_remote_port`]: llama.cpp
-//! 18080, ollama 11434) unless the config overrides it.
+//! Colab specifics (the `colab ssh --proxy-mode` `ProxyCommand`, `root`
+//! login, `colab new/sessions/stop` argv) live in [`crate::colab`]; this
+//! module owns what every backend reuses: resolving the tools, quoting,
+//! spawning and probing the forward, pid liveness, session-name validation,
+//! runtime port defaults, and the clock helpers behind state stamps.
 //!
 //! Beyond the forward itself, the same ssh is used to *bootstrap* the VM
 //! (`-N` omitted, `bash -s` fed on stdin) — the bridge is ssh's transport, so
 //! a remote command is just ssh without the tunnel flag.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use crate::backend::TransportCmd;
 use crate::preflight::which;
 
 /// Paths to the optional tools the bridge needs, resolved from `PATH`.
@@ -62,107 +53,27 @@ pub fn shell_quote(s: &str) -> String {
     out
 }
 
-/// The user Colab's sshd accepts. Verified live on a free-tier T4 runtime
-/// (2026-09-23): the bridge injects the pubkey for `root` only — logging in as
-/// the local username, `colab`, `sree` or `user` all end in
-/// `Permission denied (publickey)`.
-pub const SSH_USER: &str = "root";
-
-/// The argv of the `colab ssh --proxy-mode -s <session> -i <key>` bridge that
-/// OpenSSH runs as a `ProxyCommand`. Passed as a vector, never through a
-/// shell, so no quoting or injection applies on the colab side.
-pub fn proxy_argv(colab: &Path, session: &str, key: &Path) -> Vec<String> {
-    vec![
-        colab.display().to_string(),
-        "ssh".to_string(),
-        "--proxy-mode".to_string(),
-        "-s".to_string(),
-        session.to_string(),
-        "-i".to_string(),
-        key.display().to_string(),
-    ]
-}
-
-/// The `-o ProxyCommand=...` value for the forward: the colab argv joined,
-/// shell-quoted so the session name cannot escape into OpenSSH's `sh -c`.
-pub fn proxy_command_opt(colab: &Path, session: &str, key: &Path) -> String {
-    let argv = proxy_argv(colab, session, key);
-    let joined = argv
-        .iter()
-        .map(|a| shell_quote(a))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("ProxyCommand={joined}")
-}
-
-/// The argv of the local forward: `ssh -N -L 127.0.0.1:local:127.0.0.1:remote`,
-/// with the colab bridge as its `ProxyCommand`, the shared key, and sane
-/// no-prompt/keepalive options. Runs `-N` (no remote command) so it just
-/// forwards until killed.
-pub fn forward_argv(
-    bins: &Binaries,
-    session: &str,
-    key: &Path,
-    local_port: u16,
-    remote_port: u16,
-) -> Vec<String> {
-    vec![
-        bins.ssh.display().to_string(),
-        "-N".to_string(),
-        "-L".to_string(),
-        format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}"),
-        "-l".to_string(),
-        SSH_USER.to_string(),
-        "-i".to_string(),
-        key.display().to_string(),
-        "-o".to_string(),
-        proxy_command_opt(&bins.colab, session, key),
-        // Never prompt interactively: the bridge does auth, the forward is a
-        // background process with no terminal.
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "StrictHostKeyChecking=no".to_string(),
-        "-o".to_string(),
-        "UserKnownHostsFile=/dev/null".to_string(),
-        // Keep the tunnel from silently going stale.
-        "-o".to_string(),
-        "ServerAliveInterval=15".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=2".to_string(),
-        "-o".to_string(),
-        "ExitOnForwardFailure=yes".to_string(),
-        // The ProxyCommand handles the real host; OpenSSH just needs a name.
-        "colab-vm".to_string(),
-    ]
-}
-
 /// The URL the forward exposes — what `xencode config set remote_url` points
 /// at. `/v1` is the OpenAI-compatible API root served on the VM.
 pub fn forward_url(local_port: u16) -> String {
     format!("http://127.0.0.1:{local_port}/v1")
 }
 
-/// Spawn the forward as a background process. Returns the URL it exposes and
-/// the child handle. `ssh` inherits stderr (bridge/connect errors surface)
-/// with stdin closed and stdout discarded.
-pub async fn spawn_forward(
-    bins: &Binaries,
-    session: &str,
-    key: &Path,
+/// Spawn the forward as a background process from a backend-built command.
+/// Returns the URL it exposes and the child handle. The forward outlives this
+/// function, so it holds no handle the caller owns: stderr is discarded (an
+/// inherited stderr keeps a `xencode colab up | grep` pipeline open until
+/// the tunnel dies, seen live), stdin closed, stdout discarded.
+/// Bridge/connect refusals surface through the exit status in the caller's
+/// settle check.
+pub async fn spawn_forward_cmd(
+    cmd: &TransportCmd,
     local_port: u16,
-    remote_port: u16,
 ) -> Result<(String, tokio::process::Child), String> {
-    let argv = forward_argv(bins, session, key, local_port, remote_port);
-    let child = tokio::process::Command::new(&bins.ssh)
-        .args(&argv[1..])
+    let child = tokio::process::Command::new(&cmd.exe)
+        .args(cmd.argv.iter().skip(1))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        // The forward outlives this function, so it must hold no handle the
-        // caller owns: an inherited stderr keeps a `xencode colab up | grep`
-        // pipeline open until the tunnel dies (seen live), and leaks ssh's
-        // host-key warning into the user's terminal. Bridge refusals are
-        // already reported through the exit status in `spawn_forward_ready`.
         .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("could not spawn ssh forward: {e}"))?;
@@ -236,85 +147,6 @@ pub fn effective_remote_port(runtime: &str, configured: u16) -> u16 {
         "ollama" => 11434,
         _ => 18080,
     }
-}
-
-/// Parse `colab sessions` output into the session names it lists. Lines look
-/// like `[name] endpoint | Hardware: X | Shape: Y | Variant: Z`; the
-/// "no active sessions" notice has the reserved `[colab]` name and is dropped.
-pub fn parse_sessions(output: &str) -> Vec<String> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim_start();
-            let name = line
-                .strip_prefix('[')
-                .and_then(|rest| rest.split(']').next())
-                .map(|n| n.trim())
-                .unwrap_or("");
-            if name.is_empty() || name == "colab" {
-                None
-            } else {
-                Some(name.to_string())
-            }
-        })
-        .collect()
-}
-
-/// argv of `colab sessions` (backend reachability + the session list).
-pub fn colab_sessions_argv(colab: &Path) -> Vec<String> {
-    vec![colab.display().to_string(), "sessions".to_string()]
-}
-
-/// argv of `colab new --gpu <gpu> -s <session>` — verified against the real
-/// CLI (`--session/-s`, `--gpu T4|L4|G4|H100|A100`). `new` also spawns the
-/// official keep-alive daemon, which is what keeps the VM alive.
-pub fn colab_new_argv(colab: &Path, session: &str, gpu: &str) -> Vec<String> {
-    vec![
-        colab.display().to_string(),
-        "new".to_string(),
-        "--gpu".to_string(),
-        gpu.to_string(),
-        "-s".to_string(),
-        session.to_string(),
-    ]
-}
-
-/// argv of `colab stop -s <session>` (tears the VM down and kills its
-/// keep-alive daemon).
-pub fn colab_stop_argv(colab: &Path, session: &str) -> Vec<String> {
-    vec![
-        colab.display().to_string(),
-        "stop".to_string(),
-        "-s".to_string(),
-        session.to_string(),
-    ]
-}
-
-/// The argv of a *remote command* over the same colab bridge: ssh without
-/// `-N`, ending in the target `colab-vm` + a single command string. `bash -s`
-/// (reading the bootstrap from stdin) is the shell form we run.
-pub fn exec_ssh_argv(bins: &Binaries, session: &str, key: &Path, command: &str) -> Vec<String> {
-    vec![
-        bins.ssh.display().to_string(),
-        "-l".to_string(),
-        SSH_USER.to_string(),
-        "-i".to_string(),
-        key.display().to_string(),
-        "-o".to_string(),
-        proxy_command_opt(&bins.colab, session, key),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "StrictHostKeyChecking=no".to_string(),
-        "-o".to_string(),
-        "UserKnownHostsFile=/dev/null".to_string(),
-        "-o".to_string(),
-        "ServerAliveInterval=15".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=2".to_string(),
-        "colab-vm".to_string(),
-        command.to_string(),
-    ]
 }
 
 /// A minimal HTTP GET of `/v1/models` on the forward's local port, retried
@@ -464,58 +296,6 @@ mod tests {
     }
 
     #[test]
-    fn proxy_argv_orders_colab_flags() {
-        let argv = proxy_argv(
-            Path::new("/bin/colab"),
-            "xencode-t4",
-            Path::new("/k/colab_ed25519"),
-        );
-        assert_eq!(
-            argv,
-            vec![
-                "/bin/colab",
-                "ssh",
-                "--proxy-mode",
-                "-s",
-                "xencode-t4",
-                "-i",
-                "/k/colab_ed25519"
-            ]
-        );
-    }
-
-    #[test]
-    fn proxy_command_opt_quotes_so_session_names_cannot_escape() {
-        let opt = proxy_command_opt(Path::new("/bin/colab"), "ev; touch /pwn", Path::new("/k/k"));
-        assert_eq!(
-            opt,
-            "ProxyCommand='/bin/colab' 'ssh' '--proxy-mode' '-s' 'ev; touch /pwn' '-i' '/k/k'"
-        );
-        assert!(!opt.contains('\n'));
-    }
-
-    #[test]
-    fn forward_argv_is_a_background_non_interactive_tunnel() {
-        let bins = Binaries {
-            colab: PathBuf::from("/bin/colab"),
-            ssh: PathBuf::from("/usr/bin/ssh"),
-        };
-        let argv = forward_argv(&bins, "xencode", Path::new("/k/k"), 18000, 8000);
-        assert_eq!(argv[0], "/usr/bin/ssh");
-        assert!(argv.contains(&"-N".to_string()));
-        assert!(argv.contains(&"127.0.0.1:18000:127.0.0.1:8000".to_string()));
-        assert!(argv.contains(&"-o".to_string()));
-        // Colab's sshd only accepts the bridge-injected key for `root`; every
-        // other login ends in `Permission denied (publickey)`.
-        let l = argv.iter().position(|a| a == "-l").expect("-l root");
-        assert_eq!(argv[l + 1], "root");
-        let opts: Vec<&String> = argv.iter().collect();
-        assert!(opts.contains(&&"BatchMode=yes".to_string()));
-        assert!(opts.contains(&&"ExitOnForwardFailure=yes".to_string()));
-        assert_eq!(argv.last().map(String::as_str), Some("colab-vm"));
-    }
-
-    #[test]
     fn forward_url_is_openai_compatible_v1() {
         assert_eq!(forward_url(18000), "http://127.0.0.1:18000/v1");
     }
@@ -609,51 +389,6 @@ mod tests {
         assert_eq!(effective_remote_port("ollama", 0), 11434);
         assert_eq!(effective_remote_port("llama.cpp", 9000), 9000);
         assert_eq!(effective_remote_port("ollama", 7000), 7000);
-    }
-
-    #[test]
-    fn parse_sessions_keeps_names_and_drops_the_notice() {
-        let out = "\
-[xencode-t4] http://colab-xyz.web.app | Hardware: T4 | Shape: STANDARD | Variant: GPU
-[mine2] http://colab-abc.web.app | Hardware: None | Shape: STANDARD | Variant: DEFAULT
-[colab] No active sessions found on server.
-";
-        assert_eq!(parse_sessions(out), vec!["xencode-t4", "mine2"]);
-        assert!(parse_sessions("").is_empty());
-        assert!(parse_sessions("[colab] No active sessions found on server.").is_empty());
-    }
-
-    #[test]
-    fn colab_subcommand_argv_matches_the_real_cli() {
-        assert_eq!(
-            colab_sessions_argv(Path::new("/bin/colab")),
-            vec!["/bin/colab", "sessions"]
-        );
-        assert_eq!(
-            colab_new_argv(Path::new("/bin/colab"), "xencode-t4", "T4"),
-            vec!["/bin/colab", "new", "--gpu", "T4", "-s", "xencode-t4"]
-        );
-        assert_eq!(
-            colab_stop_argv(Path::new("/bin/colab"), "xencode-t4"),
-            vec!["/bin/colab", "stop", "-s", "xencode-t4"]
-        );
-    }
-
-    #[test]
-    fn exec_ssh_argv_runs_a_remote_command_over_the_bridge() {
-        let bins = Binaries {
-            colab: PathBuf::from("/bin/colab"),
-            ssh: PathBuf::from("/usr/bin/ssh"),
-        };
-        let argv = exec_ssh_argv(&bins, "mine", Path::new("/k/k"), "bash -s");
-        assert_eq!(argv[0], "/usr/bin/ssh");
-        assert!(!argv.contains(&"-N".to_string()), "no tunnel flag");
-        assert_eq!(argv.last().map(String::as_str), Some("bash -s"));
-        assert!(
-            argv.iter().any(|a| a.starts_with("ProxyCommand=")),
-            "bridge present"
-        );
-        assert!(argv.iter().any(|a| a == "BatchMode=yes"));
     }
 
     #[tokio::test]
