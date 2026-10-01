@@ -1543,6 +1543,7 @@ A value that begins with a dash is taken as the value rather than as an option t
 | `default_model` | string | e.g. `qwen3:4b` |
 | `ollama_url`, `llama_cpp_url` | string | provider endpoints |
 | `remote_url`, `remote_key` | string | Remote / Colab endpoint (any OpenAI-compatible server, e.g. `http://127.0.0.1:18000/v1` + its bearer token); empty `remote_key` clears it |
+| `nvidia_api_key` | string | NVIDIA NIM token for `nvidia:<vendor/model>` (e.g. `nvidia:mistralai/mistral-7b-instruct-v0.3`); empty clears it. Also read from `NVIDIA_NIM_API_KEY` when unset here — the config value wins |
 | `colab_enabled` | bool | Gates the whole Colab bridge; `false` → `xencode colab *` refuses |
 | `colab_session` | string | Session name for `xencode colab up`; empty = create one |
 | `colab_runtime` | string | `llama.cpp` or `ollama` — what gets installed on the VM |

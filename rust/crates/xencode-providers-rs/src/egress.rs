@@ -18,7 +18,7 @@
 //! cannot be proven local counts as cloud. That is why `remote:` looks at the
 //! configured host rather than trusting its prefix.
 
-use crate::{llamacpp_target, remote_target, ProviderError};
+use crate::{llamacpp_target, nvidia_target, remote_target, ProviderError};
 
 /// Where a request ends up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +111,9 @@ fn route_of(model: &str, facts: RoutingFacts<'_>) -> (Egress, &'static str) {
     }
     if model.starts_with("google_gemini:") {
         return (Egress::Cloud, "google_gemini");
+    }
+    if nvidia_target(model).is_some() {
+        return (Egress::Cloud, "nvidia");
     }
     if llamacpp_target(model).is_some() {
         return (Egress::Local, "llamacpp");
@@ -210,6 +213,7 @@ mod tests {
             "anthropic:claude-3-5-sonnet",
             "qwen:qwen3-max",
             "google_gemini:gemini-2.0-flash",
+            "nvidia:mistralai/mistral-7b-instruct-v0.3",
         ] {
             assert_eq!(
                 classify(model, RoutingFacts::default()),
@@ -308,6 +312,7 @@ mod tests {
             ("anthropic:claude-3-5-sonnet", "anthropic"),
             ("qwen:qwen3-max", "qwen"),
             ("google_gemini:gemini-2.0-flash", "google_gemini"),
+            ("nvidia:mistralai/mistral-7b-instruct-v0.3", "nvidia"),
             ("remote:coder", "remote"),
         ] {
             assert_eq!(provider_for(model, no_key), expected, "{model}");

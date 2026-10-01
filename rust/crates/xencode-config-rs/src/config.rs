@@ -20,6 +20,34 @@ pub struct ApiKeys {
     /// Optional: a local `llama-server`, LM Studio or vLLM usually has none.
     #[serde(default)]
     pub remote_api_key: Option<String>,
+    /// Bearer token for NVIDIA NIM (`nvidia:` models,
+    /// `https://integrate.api.nvidia.com/v1`). Resolved by
+    /// [`ApiKeys::nvidia_api_key_resolved`], which also honours the
+    /// `NVIDIA_NIM_API_KEY` environment variable so the key can live outside
+    /// this file.
+    #[serde(default)]
+    pub nvidia_api_key: Option<String>,
+}
+
+impl ApiKeys {
+    /// The NVIDIA NIM key in force: the configured value wins, otherwise the
+    /// `NVIDIA_NIM_API_KEY` environment variable, otherwise nothing. Blank on
+    /// either side counts as unset, so an empty export cannot shadow a real
+    /// configured key with nothing.
+    pub fn nvidia_api_key_resolved(&self) -> Option<String> {
+        let configured = self
+            .nvidia_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty());
+        if configured.is_some() {
+            return configured.map(str::to_string);
+        }
+        std::env::var("NVIDIA_NIM_API_KEY")
+            .ok()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty())
+    }
 }
 
 /// Google Colab bridge settings (Milestone K). Everything is opt-in by
@@ -733,6 +761,16 @@ mod tests {
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Tests touching `NVIDIA_NIM_API_KEY` must not run concurrently: the
+    /// variable is process-global and two tests swapping it would read each
+    /// other's values.
+    static NIM_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_nim_env() -> MutexGuard<'static, ()> {
+        NIM_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn temp_dir() -> PathBuf {
         // A process-wide counter, not a timestamp. Tests in one binary run in
@@ -745,6 +783,42 @@ mod tests {
             NEXT.fetch_add(1, AtomicOrdering::Relaxed)
         );
         std::env::temp_dir().join(format!("xencode-config-test-{unique}"))
+    }
+
+    #[test]
+    fn nvidia_key_prefers_config_over_environment_and_blank_is_unset() {
+        let _guard = lock_nim_env();
+        let previous = std::env::var_os("NVIDIA_NIM_API_KEY");
+        std::env::set_var("NVIDIA_NIM_API_KEY", "env-key");
+        // Environment alone resolves.
+        assert_eq!(
+            ApiKeys::default().nvidia_api_key_resolved(),
+            Some("env-key".to_string())
+        );
+        // A configured key wins over the environment.
+        let configured = ApiKeys {
+            nvidia_api_key: Some("config-key".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            configured.nvidia_api_key_resolved(),
+            Some("config-key".to_string())
+        );
+        // Blank on either side counts as unset, never as a shadow.
+        let blank_config = ApiKeys {
+            nvidia_api_key: Some("   ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            blank_config.nvidia_api_key_resolved(),
+            Some("env-key".to_string())
+        );
+        std::env::remove_var("NVIDIA_NIM_API_KEY");
+        assert_eq!(ApiKeys::default().nvidia_api_key_resolved(), None);
+        match previous {
+            Some(value) => std::env::set_var("NVIDIA_NIM_API_KEY", value),
+            None => std::env::remove_var("NVIDIA_NIM_API_KEY"),
+        }
     }
 
     #[test]

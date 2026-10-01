@@ -1379,6 +1379,18 @@ fn run_config(action: ConfigAction) -> Result<(), String> {
                     };
                     secret = true;
                 }
+                // NVIDIA NIM token (`nvidia:<vendor/model>`). Same secrecy as
+                // every other key: stored, never echoed. It can also live in
+                // NVIDIA_NIM_API_KEY instead of this file — the config value
+                // wins when both are set.
+                "nvidia_api_key" => {
+                    config.api_keys.nvidia_api_key = if value.trim().is_empty() {
+                        None
+                    } else {
+                        Some(value.clone())
+                    };
+                    secret = true;
+                }
                 "llama_cpp_model_path" => config.llama_cpp_model_path = value.clone(),
                 "llama_cpp_model_url" => config.llama_cpp_model_url = value.clone(),
                 // A SHA256 is accepted in the forms it is usually copied in:
@@ -3576,6 +3588,7 @@ async fn run_query_once(
         &config.remote_base_url,
         config.api_keys.remote_api_key.clone(),
     )
+    .with_nvidia(config.api_keys.nvidia_api_key_resolved())
     .with_request_timeout(config.response_timeout)
     .with_ollama_request(ollama_request)
     .with_egress_policy(EgressPolicy::new(config.allow_cloud_models));
@@ -4503,6 +4516,9 @@ fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
         ("llamacpp".to_string(), "localhost".to_string(), 8080),
     ];
     if let Ok(config) = xencode_config_rs::XencodeConfig::load() {
+        // Env-resolved: a key living in NVIDIA_NIM_API_KEY counts as
+        // configured here too, since the route would use it.
+        let nvidia_key = config.api_keys.nvidia_api_key_resolved();
         let keyed = [
             ("openai", &config.api_keys.openai_api_key, "api.openai.com"),
             (
@@ -4516,6 +4532,7 @@ fn run_selfcheck(format: OutputFormat) -> Result<(), String> {
                 "generativelanguage.googleapis.com",
             ),
             ("qwen", &config.api_keys.qwen_api_key, "chat.qwen.ai"),
+            ("nvidia", &nvidia_key, "integrate.api.nvidia.com"),
         ];
         for (name, key, host) in keyed {
             if key.as_deref().is_some_and(|k| !k.trim().is_empty()) {

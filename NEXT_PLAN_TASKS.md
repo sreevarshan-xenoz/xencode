@@ -1388,6 +1388,22 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       **Done-when:** a real prompt is answered through each route from a clean
       config, the 8K-TPM trap is handled and documented rather than surfacing as
       a confusing 429, and no key is ever written by a test.
+      *(Progress 2026-10-01, NVIDIA half built, not done: `nvidia:<vendor/model>`
+      routes through the existing OpenAI-compatible client at the fixed
+      `https://integrate.api.nvidia.com/v1` in all three generate paths, with
+      `with_nvidia` / `with_nvidia_endpoint` builders, Cloud egress in the
+      shared prefix table, a `nvidia_api_key` config key plus a
+      `NVIDIA_NIM_API_KEY` env fallback (config wins, blanks never shadow), CLI
+      + TUI agent-loop wiring, and 5 wiremock + resolver + egress tests that
+      never touch a real key. Live proof is blocked account-side, not
+      code-side: the owner's key lists 81 models (HTTP 200) but every
+      invocation — chat and embeddings alike — comes back `404 … Not found
+      for account`, i.e. the account has no invocable functions yet. The route
+      itself is proven to the boundary: `xencode query -m
+      nvidia:mistralai/mistral-7b-instruct-v0.3` reaches NVIDIA and surfaces
+      their 404 in xencode's words, and a keyless call names the fix. The Groq
+      half is untouched. Do not tick before a real answer comes back through
+      each route.)*
 - [x] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
       diagnostics from an LSP server rather than only `cargo check`, so
       non-cargo languages get the same L-7 treatment.

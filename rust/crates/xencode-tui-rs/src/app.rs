@@ -238,6 +238,7 @@ pub(crate) struct AgentRun {
     pub(crate) gemini_key: Option<String>,
     pub(crate) remote_base_url: String,
     pub(crate) remote_api_key: Option<String>,
+    pub(crate) nvidia_api_key: Option<String>,
     pub(crate) llama_opts: LlamaCppOptions,
     /// Where this session's prompts may go (PR-2). Carried as the policy itself
     /// instead of re-read from config per request, so the status bar and the
@@ -1721,6 +1722,7 @@ struct SingleShot {
     qwen_key: Option<String>,
     gemini_key: Option<String>,
     remote_api_key: Option<String>,
+    nvidia_api_key: Option<String>,
     llama_opts: LlamaCppOptions,
     /// Where this session's prompts may go (PR-2). Carried as the policy itself
     /// instead of re-read from config per request, so the status bar and the
@@ -1745,6 +1747,7 @@ impl SingleShot {
             qwen_key: config.api_keys.qwen_api_key.clone(),
             gemini_key: config.api_keys.google_gemini_api_key.clone(),
             remote_api_key: config.api_keys.remote_api_key.clone(),
+            nvidia_api_key: config.api_keys.nvidia_api_key_resolved(),
             egress: EgressPolicy::new(config.allow_cloud_models),
             llama_opts: LlamaCppOptions {
                 temperature: config.llama_cpp_temperature,
@@ -1782,6 +1785,7 @@ impl SingleShot {
         )
         .with_llama_cpp(llama_client)
         .with_remote(&self.remote_base_url, self.remote_api_key.clone())
+        .with_nvidia(self.nvidia_api_key.clone())
         .with_egress_policy(self.egress);
         // Decide what Ollama may serve before the prompt is committed to a
         // window, so a one-shot and a chat turn cannot load the same model twice
@@ -3348,6 +3352,7 @@ impl<'a> App<'a> {
             gemini_key: self.config.api_keys.google_gemini_api_key.clone(),
             remote_base_url: self.config.remote_base_url.clone(),
             remote_api_key: self.config.api_keys.remote_api_key.clone(),
+            nvidia_api_key: self.config.api_keys.nvidia_api_key_resolved(),
             llama_opts: LlamaCppOptions {
                 temperature,
                 top_k: self.config.llama_cpp_top_k,
@@ -7551,6 +7556,7 @@ impl<'a> App<'a> {
                 let gemini_key = self.config.api_keys.google_gemini_api_key.clone();
                 let remote_url = self.config.remote_base_url.clone();
                 let remote_key = self.config.api_keys.remote_api_key.clone();
+                let nvidia_key = self.config.api_keys.nvidia_api_key_resolved();
                 let egress = self.egress_policy();
                 let llama_opts = LlamaCppOptions {
                     temperature: self.config.llama_cpp_temperature,
@@ -7570,6 +7576,7 @@ impl<'a> App<'a> {
                         ProviderManager::new(client, or_key, qwen_key, gemini_key, None)
                             .with_llama_cpp(llama_client)
                             .with_remote(&remote_url, remote_key)
+                            .with_nvidia(nvidia_key)
                             .with_egress_policy(egress);
                     // Same window as a chat turn, and the same words when the
                     // server cannot honour part of the ask.
@@ -8240,6 +8247,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         gemini_key,
         remote_base_url,
         remote_api_key,
+        nvidia_api_key,
         llama_opts,
         ollama_asks,
         ollama_setting_problem,
@@ -8286,6 +8294,7 @@ pub(crate) async fn agent_rounds(run: AgentRun, tx: mpsc::UnboundedSender<String
         .with_llama_cpp(llama_client)
         .with_request_timeout(timeout)
         .with_remote(&remote_base_url, remote_api_key)
+        .with_nvidia(nvidia_api_key)
         .with_egress_policy(egress)
         .with_traffic(recorder.clone());
     // Which profile took this turn, and the words that gave it the turn (MI-7).
