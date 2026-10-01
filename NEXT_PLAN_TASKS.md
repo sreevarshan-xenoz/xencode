@@ -1403,7 +1403,19 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       nvidia:mistralai/mistral-7b-instruct-v0.3` reaches NVIDIA and surfaces
       their 404 in xencode's words, and a keyless call names the fix. The Groq
       half is untouched. Do not tick before a real answer comes back through
-      each route.)*
+      each route.
+      *(Diagnosis 2026-10-01, from NVIDIA's own developer forums: this exact
+      shape — `/v1/models` 200, every invocation 404 "Function … not found
+      for account" — is the account missing the "Public API Endpoints"
+      permission, reported by dozens of personal-org accounts through mid-2026.
+      Two ways out, both on NVIDIA's side: generate the key from the model's
+      own page (`build.nvidia.com/<vendor/model>` → Get API Key), which
+      registers that function to the account — one reporter found a generic
+      key failed while a per-model key on the same account worked; or post in
+      the Access/Accounts forum asking staff to enable Public API Endpoints
+      for the personal organization. Nothing in xencode needs to change for
+      either — retry the same `xencode query -m nvidia:…` once the account is
+      entitled.)*
 - [x] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
       diagnostics from an LSP server rather than only `cargo check`, so
       non-cargo languages get the same L-7 treatment.
