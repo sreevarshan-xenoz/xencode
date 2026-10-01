@@ -15,7 +15,9 @@ use xencode_core_rs::{scan_workspace, ScanOptions};
 use xencode_memory_rs::ConversationMemory;
 use xencode_models_rs::{find_llama_server, LlamaCppClient, LlamaCppOptions, OllamaClient};
 use xencode_plugin_rs::{default_plugin_dir, PluginRegistry, PluginRuntime};
-use xencode_providers_rs::{ChatMessage, EgressPolicy, ProviderManager};
+use xencode_providers_rs::{
+    ChatMessage, ContentPart, EgressPolicy, ImageUrlPart, MessageContent, ProviderManager,
+};
 use xencode_server_rs::ws::AppState as ServerState;
 
 /// What `xencode generate` emits.
@@ -247,6 +249,10 @@ enum Commands {
         /// llama.cpp sampling: JSON schema for structured output
         #[arg(long = "json-schema")]
         json_schema: Option<String>,
+
+        /// Image to send with the prompt (repeatable); needs a vision-capable model
+        #[arg(long = "image", value_name = "PATH")]
+        images: Vec<String>,
 
         /// How to write the answer: plain words, or one JSON event per line
         #[arg(long, default_value = "text")]
@@ -1138,6 +1144,7 @@ async fn main() {
             max_tokens,
             grammar,
             json_schema,
+            images,
             format,
         } => {
             run_query(
@@ -1153,6 +1160,7 @@ async fn main() {
                 max_tokens,
                 grammar,
                 json_schema,
+                images,
                 format,
             )
             .await
@@ -3197,6 +3205,7 @@ async fn run_query(
     max_tokens: Option<u32>,
     grammar: Option<String>,
     json_schema: Option<String>,
+    images: Vec<String>,
     format: QueryFormat,
 ) -> Result<(), String> {
     let outcome = run_query_once(
@@ -3212,6 +3221,7 @@ async fn run_query(
         max_tokens,
         grammar,
         json_schema,
+        images,
         format,
     )
     .await;
@@ -3238,13 +3248,22 @@ async fn run_query_once(
     max_tokens: Option<u32>,
     grammar: Option<String>,
     json_schema: Option<String>,
+    images: Vec<String>,
     format: QueryFormat,
 ) -> Result<(), String> {
     let ndjson = format == QueryFormat::Ndjson;
     // Read before the cache is consulted or anything is printed: a schema that
     // is not JSON is the caller's mistake, and a schema that is one is a promise
-    // about the answer.
+    // about the answer. Same for images: an unreadable one is the caller's
+    // mistake, and it is a mistake rather than a silent drop either way.
     let schema = parse_json_schema(json_schema)?;
+    // Same intake the TUI's attach path uses: read, cap, verify it really is an
+    // image, shrink to what a vision encoder can use, and report what changed —
+    // so a re-encoded file is visible rather than quiet.
+    let image_data_urls = images
+        .iter()
+        .map(|path| encode_query_image(path))
+        .collect::<Result<Vec<_>, _>>()?;
     let started = std::time::Instant::now();
     let config = XencodeConfig::load().unwrap_or_default();
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
@@ -3553,7 +3572,7 @@ async fn run_query_once(
             "hint: run `xencode` → /init once for project-aware answers (continuing with guidelines + history only)."
         );
     }
-    let context_messages: Vec<ChatMessage> = assembly
+    let mut context_messages: Vec<ChatMessage> = assembly
         .turns
         .into_iter()
         .map(|t| ChatMessage {
@@ -3561,6 +3580,17 @@ async fn run_query_once(
             content: t.content.into(),
         })
         .collect();
+    // Images ride as message parts on the final user turn, never inlined into
+    // the prompt text — same shape the TUI's attach path builds.
+    if !image_data_urls.is_empty()
+        && !attach_images_to_final_user_message(&mut context_messages, image_data_urls)
+    {
+        return Err(
+            "the attached images could not be sent with this turn (no final user message) \
+             — they were dropped, not seen by the model"
+                .to_string(),
+        );
+    }
 
     let client = OllamaClient::new(&config.ollama_url, config.response_timeout);
     let llama_client = LlamaCppClient::new(&config.llama_cpp_url, config.response_timeout);
@@ -3652,6 +3682,51 @@ async fn run_query_once(
         }
         Err(e) => Err(format!("Query failed: {}", e)),
     }
+}
+
+/// Fold image data URLs into the final user turn as content parts, keeping the
+/// assembled prompt text ahead of them. Returns false when there is no user turn
+/// to attach to, which the caller reports rather than sending a request the
+/// model would answer without ever seeing the images.
+fn attach_images_to_final_user_message(messages: &mut [ChatMessage], urls: Vec<String>) -> bool {
+    let Some(last) = messages.iter_mut().rev().find(|m| m.role == "user") else {
+        return false;
+    };
+    let text = last.text_content();
+    let mut parts = Vec::with_capacity(urls.len() + 1);
+    if !text.is_empty() {
+        parts.push(ContentPart::Text { text });
+    }
+    parts.extend(urls.into_iter().map(|url| ContentPart::ImageUrl {
+        image_url: ImageUrlPart { url, detail: None },
+    }));
+    last.content = MessageContent::Parts(parts);
+    true
+}
+
+/// Read one `--image` path into the base64 data URL a vision request carries,
+/// applying the same size cap, format check, and downscale the TUI's attach
+/// path does. Errors name the file so a mistyped path is obvious.
+fn encode_query_image(path: &str) -> Result<String, String> {
+    use xencode_analysis_rs::{
+        inspect_bytes, prepare_for_send, to_data_url, ImageError, MAX_IMAGE_BYTES,
+    };
+    let bytes = std::fs::read(path).map_err(|e| format!("cannot read image {path}: {e}"))?;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "{path} exceeds the {} MiB image cap",
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
+    }
+    inspect_bytes(path, &bytes).map_err(|e| match e {
+        ImageError::UnknownFormat(_) => format!("{path} is not a recognized image"),
+        other => format!("{path}: {other}"),
+    })?;
+    let prepared = prepare_for_send(&bytes);
+    if let Some(note) = prepared.summary() {
+        eprintln!("image: {path} ({note})");
+    }
+    Ok(to_data_url(prepared.format, &prepared.bytes))
 }
 
 /// Milliseconds since this command started, including config load and context
@@ -6280,11 +6355,50 @@ async fn run_tui() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_advise, format_image_text, join, parse_comma_list, resolve_audit_path,
-        resolve_bind, Cli, Commands, GenerateShell, SessionAction,
+        attach_images_to_final_user_message, compute_advise, format_image_text, join,
+        parse_comma_list, resolve_audit_path, resolve_bind, Cli, Commands, GenerateShell,
+        SessionAction,
     };
     use clap::Parser;
     use xencode_analysis_rs::images::{ImageFormat, ImageMeta};
+    use xencode_providers_rs::{ChatMessage, ContentPart, MessageContent};
+
+    /// Minimal standard-alphabet base64 decoder, so a test can check what the
+    /// encoder put on the wire without adding a dependency for one assertion.
+    fn decode_base64(encoded: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(encoded.len() / 4 * 3);
+        let mut acc: u32 = 0;
+        let mut bits = 0;
+        for c in encoded.bytes() {
+            let value = match c {
+                b'A'..=b'Z' => c - b'A',
+                b'a'..=b'z' => c - b'a' + 26,
+                b'0'..=b'9' => c - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => break,
+                b'\r' | b'\n' => continue,
+                other => panic!("unexpected byte {other:#x} in base64"),
+            } as u32;
+            acc = (acc << 6) | value;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        out
+    }
+
+    /// A 1x1 opaque PNG — the smallest file that is genuinely an image, so the
+    /// intake path is exercised against real bytes.
+    const ONE_PIXEL_PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
+        0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60,
+        0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xdd, 0x8d, 0xb0, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
 
     /// The three repair shapes the mutation run found survive, decided by the
     /// pure gate so each one is pinned by a test rather than by a re-run.
@@ -7175,6 +7289,157 @@ mod tests {
         assert!(unmeasured["tokens_generated"].is_null(), "{unmeasured}");
         assert!(unmeasured["tokens_per_second"].is_null(), "{unmeasured}");
         assert_eq!(unmeasured["cached"], true);
+    }
+
+    /// Images go out as parts on the final user turn, with the prompt text
+    /// ahead of them — the shape vision-capable endpoints accept.
+    #[test]
+    fn images_attach_as_parts_on_the_final_user_message() {
+        let mut msgs = vec![
+            ChatMessage::text("system", "be brief"),
+            ChatMessage::text("user", "what is this?"),
+        ];
+        assert!(attach_images_to_final_user_message(
+            &mut msgs,
+            vec!["data:image/jpeg;base64,AAAA".to_string()]
+        ));
+        assert_eq!(
+            msgs[1].content,
+            MessageContent::Parts(vec![
+                ContentPart::Text {
+                    text: "what is this?".to_string()
+                },
+                ContentPart::ImageUrl {
+                    image_url: xencode_providers_rs::ImageUrlPart {
+                        url: "data:image/jpeg;base64,AAAA".to_string(),
+                        detail: None,
+                    }
+                },
+            ])
+        );
+        assert_eq!(
+            msgs[0].content,
+            MessageContent::Text("be brief".to_string())
+        );
+    }
+
+    /// Several images keep their order after the text.
+    #[test]
+    fn several_images_keep_their_order() {
+        let mut msgs = vec![ChatMessage::text("user", "compare")];
+        assert!(attach_images_to_final_user_message(
+            &mut msgs,
+            vec![
+                "data:image/png;base64,ONE".to_string(),
+                "data:image/png;base64,TWO".to_string()
+            ]
+        ));
+        match &msgs[0].content {
+            MessageContent::Parts(parts) => {
+                assert_eq!(parts.len(), 3);
+                assert_eq!(
+                    msgs[0].image_urls(),
+                    vec!["data:image/png;base64,ONE", "data:image/png;base64,TWO"]
+                );
+                assert_eq!(msgs[0].text_content(), "compare");
+            }
+            other => panic!("expected parts, got {other:?}"),
+        }
+    }
+
+    /// A turn with no user message cannot carry images. Reported, not silently
+    /// dropped — a request that quietly loses the images would be answered from
+    /// the prompt alone and look like the model ignored the picture.
+    #[test]
+    fn images_are_refused_rather_than_dropped_when_there_is_no_user_turn() {
+        let mut msgs = vec![ChatMessage::text("system", "be brief")];
+        assert!(!attach_images_to_final_user_message(
+            &mut msgs,
+            vec!["data:image/png;base64,AAAA".to_string()]
+        ));
+        let mut empty: Vec<ChatMessage> = Vec::new();
+        assert!(!attach_images_to_final_user_message(
+            &mut empty,
+            vec!["data:image/png;base64,AAAA".to_string()]
+        ));
+    }
+
+    /// An empty prompt alongside images still sends the images.
+    #[test]
+    fn images_go_out_even_when_the_text_part_is_empty() {
+        let mut msgs = vec![ChatMessage::text("user", "")];
+        assert!(attach_images_to_final_user_message(
+            &mut msgs,
+            vec!["data:image/png;base64,AAAA".to_string()]
+        ));
+        assert_eq!(msgs[0].image_urls(), vec!["data:image/png;base64,AAAA"]);
+        assert_eq!(msgs[0].text_content(), "");
+    }
+
+    /// The flag parses, repeats, and is absent unless asked for.
+    #[test]
+    fn the_image_flag_parses_and_repeats() {
+        let image_paths = |args: &[&str]| -> Vec<String> {
+            match Cli::parse_from(args.iter().copied()).command {
+                Some(Commands::Query { images, .. }) => images,
+                _ => panic!("expected a query command"),
+            }
+        };
+        assert_eq!(
+            image_paths(&["xencode", "query", "--image", "a.png", "hello"]),
+            vec!["a.png".to_string()]
+        );
+        assert_eq!(
+            image_paths(&["xencode", "query", "--image", "a.png", "--image", "b.jpg", "hello"]),
+            vec!["a.png".to_string(), "b.jpg".to_string()]
+        );
+        assert!(image_paths(&["xencode", "query", "hello"]).is_empty());
+    }
+
+    /// A file that is not an image, or cannot be read, is named and refused
+    /// before any request goes out.
+    #[test]
+    fn an_unusable_image_is_named_and_refused() {
+        let dir = std::env::temp_dir().join(format!("xe-img-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("fake.png");
+        std::fs::write(&fake, b"not an image").unwrap();
+        let reason = super::encode_query_image(fake.to_str().unwrap()).unwrap_err();
+        assert_eq!(
+            reason,
+            format!("{} is not a recognized image", fake.display())
+        );
+
+        let gone = dir.join("gone.png");
+        let reason = super::encode_query_image(gone.to_str().unwrap()).unwrap_err();
+        assert!(
+            reason.starts_with(&format!("cannot read image {}", gone.display())),
+            "{reason}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A real image becomes a data URL the vision path can send.
+    #[test]
+    fn a_real_image_becomes_a_data_url() {
+        let dir = std::env::temp_dir().join(format!("xe-img-ok-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shot.png");
+        std::fs::write(&path, ONE_PIXEL_PNG).unwrap();
+        let url = super::encode_query_image(path.to_str().unwrap()).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"), "{url}");
+        // The payload decodes back to real image bytes, not a header alone: the
+        // PNG magic is in there and the format is still recognisable. Checked on
+        // the encoded text so the assertion is about what goes on the wire.
+        let (_, encoded) = url.split_once(";base64,").unwrap();
+        let raw = decode_base64(encoded);
+        assert_eq!(&raw[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(
+            xencode_analysis_rs::images::detect_format(&raw),
+            Some(ImageFormat::Png)
+        );
+        assert!(raw.len() > 8, "only a signature was sent");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -392,6 +392,7 @@ _arguments "${_arguments_options[@]}" : \
 '--max-tokens=[llama.cpp sampling\: max generated tokens]:MAX_TOKENS:_default' \
 '--grammar=[llama.cpp sampling\: GBNF grammar file/string]:GRAMMAR:_default' \
 '--json-schema=[llama.cpp sampling\: JSON schema for structured output]:JSON_SCHEMA:_default' \
+'*--image=[Image to send with the prompt (repeatable); needs a vision-capable model]:PATH:_default' \
 '--format=[How to write the answer\: plain words, or one JSON event per line]:FORMAT:(text ndjson)' \
 '--no-cache[Do not use cached responses]' \
 '-h[Print help]' \

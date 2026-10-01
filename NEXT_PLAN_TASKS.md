@@ -1436,6 +1436,40 @@ first**, then Track R (L-1 → L-6); L-10 → L-12 are polish after either.
       `max_tokens:20` returned `content: null` with all 20 tokens spent on
       `reasoning_content`. The Groq half is still untouched, so L-11 stays
       unticked until both routes answer.)*
+      *(Second live pass 2026-10-01, vision. A second key scoped to
+      `moonshotai/kimi-k3` answers with a picture in the request, so the route
+      reads images as well as text. The exact request from NVIDIA's own example
+      — one text part, one `image_url` part pointing at a remote JPEG, `"stream":
+      true`, `"reasoning_effort": "max"` — came back `200` with the first token
+      at 140s and the whole answer at 155s over 463 SSE events, and it described
+      the picture correctly (boardwalk, green marsh, cirrus cloud, autumn
+      shrubs). `reasoning_effort` is honoured: 1100 characters of
+      `reasoning_content` arrived before the answer. The same answer also arrives
+      with the image as a `data:` URL, which is the form xencode itself sends.
+      Two details worth keeping: the `Accept:` header is cosmetic here, because
+      `"stream": true` in the body is what decides, and asking for
+      `Accept: application/json` still returned `text/event-stream`; and these
+      functions stay cold-start slow rather than rate-limited — first-token times
+      across runs were 140s, 168s, 185s, 206s, with one warm call at about 1s.*)
+      *(Follow-on 2026-10-01, `--image` on the CLI. Vision was reachable only
+      from the TUI's file-explorer attach path, so `xencode query` grew
+      `--image <PATH>` (repeatable) to close that gap. Images ride as message
+      parts on the final user message — the same shape the TUI builds, and the
+      one NVIDIA's own example uses — and go through the identical intake: read,
+      format-checked, size-capped, and shrunk to what a vision encoder can use,
+      with any re-encode reported on stderr. A path that is missing or is not an
+      image is refused by name before any request goes out, and a turn with no
+      user message to attach to is refused rather than sent without the images,
+      since a request quietly stripped of its picture looks like the model
+      ignored it. Proven live, not mocked: `xencode query -m
+      nvidia:moonshotai/kimi-k3 --image boardwalk.jpg "What is in this image?"`
+      answered correctly about NVIDIA's own example photograph in 8m01s, and
+      again in 3m33s on a second question about its two dominant colours.
+      `--format ndjson` still emits clean `start`/`token`/`done` events with an
+      image attached, so scripts keep working. Shell completions and the man page
+      were regenerated from the binary, and the flag is covered by six tests in
+      `xencode-cli` (part order, image ordering, refusal with no user turn, empty
+      text part, flag repetition, and a real 1x1 PNG round-tripping to a data URL).*
 - [x] **L-12 — LSP diagnostics loop.** After edits, pull real compiler
       diagnostics from an LSP server rather than only `cargo check`, so
       non-cargo languages get the same L-7 treatment.
