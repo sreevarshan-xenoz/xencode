@@ -87,9 +87,20 @@ pub struct Mutant {
     pub file: String,
     /// A human-readable name, e.g. `replace == with != in is_even`.
     pub name: String,
+    /// The function the mutant sits in, from cargo-mutants' own `function_name`.
+    /// A mutation the tool places outside any function gets [`OUTSIDE_FUNCTION`],
+    /// so the per-symbol rollup (`QD-3`) can name what it is scoring rather than
+    /// fall back to a bare file, which would be the "feature X is untested"
+    /// vagueness the item exists to forbid.
+    pub symbol: String,
     /// What happened.
     pub verdict: Verdict,
 }
+
+/// The symbol a mutant is attributed to when cargo-mutants found no enclosing
+/// function — a top-level `const`, a `static`, a macro expansion. Named so a
+/// report still points at a place, never at a vague "area".
+pub const OUTSIDE_FUNCTION: &str = "(outside a function)";
 
 impl Mutant {
     /// The stable identity used to compare two runs.
@@ -159,6 +170,114 @@ impl Run {
             .mutants
             .iter()
             .any(|m| m.verdict == Verdict::BaselineFailed)
+    }
+
+    /// The mutation score rolled up **per symbol** (`QD-3`): one row per function,
+    /// counting how many of its mutants the tests caught. This is the answer to
+    /// "which function is untested", and pointedly not "which feature is
+    /// untested" — a score is only defensible when it names the code it measured.
+    ///
+    /// Sorting is worst-first (lowest caught share, then file, then symbol) so the
+    /// thing to fix is on top without a reader scanning the list.
+    pub fn per_symbol(&self) -> Vec<SymbolScore> {
+        let mut by_key: BTreeMap<(String, String), SymbolScore> = BTreeMap::new();
+        for m in &self.mutants {
+            let entry = by_key
+                .entry((m.file.clone(), m.symbol.clone()))
+                .or_insert_with(|| SymbolScore {
+                    file: m.file.clone(),
+                    symbol: m.symbol.clone(),
+                    caught: 0,
+                    missed: 0,
+                    unviable: 0,
+                    timeout: 0,
+                });
+            match m.verdict {
+                Verdict::Caught => entry.caught += 1,
+                Verdict::Missed => entry.missed += 1,
+                Verdict::Unviable => entry.unviable += 1,
+                Verdict::Timeout => entry.timeout += 1,
+                // A failed baseline means no verdict here means anything; it is
+                // not counted as a symbol's fault.
+                Verdict::BaselineFailed => {}
+            }
+        }
+        let mut rows: Vec<SymbolScore> = by_key.into_values().collect();
+        rows.sort_by(|a, b| {
+            a.score()
+                .map(|(c, t)| c as f64 / t as f64)
+                .unwrap_or(1.0)
+                .partial_cmp(&b.score().map(|(c, t)| c as f64 / t as f64).unwrap_or(1.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.file.cmp(&b.file))
+                .then(a.symbol.cmp(&b.symbol))
+        });
+        rows
+    }
+
+    /// The per-symbol rollup rendered as lines a human or an agent reads. When
+    /// nothing was both generated and viable, it says so instead of printing a
+    /// confident empty table or a 100% that no evidence backs.
+    pub fn symbol_report(&self) -> Vec<String> {
+        let rows = self.per_symbol();
+        if rows.iter().all(|r| r.score().is_none()) {
+            return vec![
+                "no symbol scored: the run produced no viable mutants, so there is no \
+                 evidence to attribute to any function"
+                    .to_string(),
+            ];
+        }
+        rows.into_iter().map(|r| r.line()).collect()
+    }
+}
+
+/// One function's mutation score — the per-symbol unit of `QD-3`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolScore {
+    pub file: String,
+    pub symbol: String,
+    pub caught: usize,
+    pub missed: usize,
+    pub unviable: usize,
+    pub timeout: usize,
+}
+
+impl SymbolScore {
+    /// `(caught, viable)` where viable excludes unviable and timeout — a mutant
+    /// that could not build or never finished says nothing about test strength, so
+    /// it is kept out of the denominator rather than counted for or against.
+    /// `None` when the symbol has no viable mutant to score.
+    pub fn score(&self) -> Option<(usize, usize)> {
+        let viable = self.caught + self.missed;
+        if viable == 0 {
+            None
+        } else {
+            Some((self.caught, viable))
+        }
+    }
+
+    /// The single line this symbol contributes: what survived, of how many the
+    /// tests could have caught. Names the function, never a vague area.
+    pub fn line(&self) -> String {
+        let score = match self.score() {
+            Some((caught, viable)) => format!("{caught}/{viable} caught"),
+            None => "no viable mutant".to_string(),
+        };
+        let mut survivors = format!(
+            "mutants of `{}` ({file}): {score}",
+            self.symbol,
+            file = self.file
+        );
+        if self.missed > 0 {
+            survivors.push_str(&format!(" — {} survived", self.missed));
+        }
+        let undetermined = self.unviable + self.timeout;
+        if undetermined > 0 {
+            survivors.push_str(&format!(
+                " ({undetermined} unviable/timed out, not counted)"
+            ));
+        }
+        survivors
     }
 }
 
@@ -310,9 +429,19 @@ pub fn parse_report(report_dir: &Path) -> Result<Run, String> {
             .and_then(|f| f.as_str())
             .unwrap_or("(unknown file)")
             .to_string();
+        // cargo-mutants reports the enclosing function's name under
+        // `function.function_name`; a mutation outside one has no such field and
+        // is grouped under OUTSIDE_FUNCTION, never under a feature nobody named.
+        let symbol = detail
+            .get("function")
+            .and_then(|f| f.get("function_name"))
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| OUTSIDE_FUNCTION.to_string());
         mutants.push(Mutant {
             file,
             name,
+            symbol,
             verdict: outcome_of(summary),
         });
     }
@@ -548,6 +677,7 @@ mod tests {
         Mutant {
             file: file.to_string(),
             name: name.to_string(),
+            symbol: name.to_string(),
             verdict,
         }
     }
@@ -873,5 +1003,123 @@ mod tests {
         assert!(argv.contains("--in-diff /tmp/x.patch"), "{argv}");
         assert!(argv.contains("--timeout 60"), "{argv}");
         assert_eq!(mutants_argv(None, None), vec!["mutants"]);
+    }
+
+    /// A report in the real cargo-mutants schema, where each mutant names its
+    /// enclosing function under `function.function_name`.
+    const SYMBOL_REPORT: &str = r#"{
+      "outcomes": [
+        {"scenario": {"Baseline": {}}, "summary": "Success"},
+        {"scenario": {"Mutant": {"name": "src/lib.rs:2:5: replace is_even -> bool with true", "file": "src/lib.rs", "function": {"function_name": "is_even", "return_type": "-> bool", "span": {"start": {"line": 2, "column": 1}, "end": {"line": 4, "column": 2}}}}}, "summary": "MissedMutant"},
+        {"scenario": {"Mutant": {"name": "src/lib.rs:2:11: replace == with != in is_even", "file": "src/lib.rs", "function": {"function_name": "is_even", "return_type": "-> bool", "span": {"start": {"line": 2, "column": 1}, "end": {"line": 4, "column": 2}}}}}, "summary": "CaughtMutant"},
+        {"scenario": {"Mutant": {"name": "src/lib.rs:8:3: replace odd -> bool with true in classify", "file": "src/lib.rs", "function": {"function_name": "classify", "return_type": "-> bool", "span": {"start": {"line": 8, "column": 1}, "end": {"line": 12, "column": 2}}}}}, "summary": "CaughtMutant"},
+        {"scenario": {"Mutant": {"name": "src/lib.rs:8:9: replace % with + in classify", "file": "src/lib.rs", "function": {"function_name": "classify", "return_type": "-> bool", "span": {"start": {"line": 8, "column": 1}, "end": {"line": 12, "column": 2}}}}}, "summary": "CaughtMutant"},
+        {"scenario": {"Mutant": {"name": "src/lib.rs:1:1: replace CONST with 0", "file": "src/lib.rs", "genre": "ExprSubst"}}, "summary": "UnviableMutant"}
+      ],
+      "total_mutants": 5, "missed": 1, "caught": 3
+    }"#;
+
+    /// `QD-3`: the rollup is per function, so a score names the code it measured.
+    #[test]
+    fn mutants_roll_up_by_the_function_they_sit_in() {
+        let dir = write_report("symbol", SYMBOL_REPORT);
+        let run = parse_report(&dir).unwrap();
+        let rows = run.per_symbol();
+        // is_even: 1 caught / 2 viable; classify: 2/2; the unviable top-level
+        // constant sits outside a function and is not scored.
+        let is_even = rows.iter().find(|r| r.symbol == "is_even").unwrap();
+        assert_eq!(is_even.score(), Some((1, 2)), "one of two survived");
+        let classify = rows.iter().find(|r| r.symbol == "classify").unwrap();
+        assert_eq!(classify.score(), Some((2, 2)), "fully caught");
+        assert!(
+            rows.iter()
+                .any(|r| r.symbol == OUTSIDE_FUNCTION && r.score().is_none()),
+            "the unviable non-function mutant is present but unscored"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Worst-first: the function the tests are weakest on sorts to the top, so the
+    /// thing to fix is the first line rather than one of many to scan.
+    #[test]
+    fn the_worst_scored_function_sorts_first() {
+        let dir = write_report("worst", SYMBOL_REPORT);
+        let run = parse_report(&dir).unwrap();
+        let rows = run.per_symbol();
+        // is_even (1/2) must come before classify (2/2); unscored rows sort last.
+        let first_scored = rows.iter().find(|r| r.score().is_some()).unwrap();
+        assert_eq!(first_scored.symbol, "is_even");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The rendered line names the function and states what survived, and never
+    /// falls back to the vague "feature X is untested" the item exists to forbid.
+    #[test]
+    fn a_surviving_mutant_is_named_by_its_function_not_a_feature() {
+        let dir = write_report("line", SYMBOL_REPORT);
+        let run = parse_report(&dir).unwrap();
+        let report = run.symbol_report();
+        let line = report
+            .iter()
+            .find(|l| l.contains("is_even"))
+            .expect("a line naming the function");
+        assert!(line.contains("1/2 caught"), "the score is stated: {line}");
+        assert!(
+            line.contains("1 survived"),
+            "the survivor is counted: {line}"
+        );
+        for l in &report {
+            assert!(
+                !l.contains("feature"),
+                "a symbol line must never speak of a feature: {l}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A symbol with no viable mutant has no score, and a run where nothing was
+    /// both generated and viable says so plainly instead of printing a table of
+    /// zeros or a 100% no evidence backs.
+    #[test]
+    fn unviable_mutants_are_never_counted_as_caught() {
+        let only_unviable = Run {
+            mutants: vec![mutant_in(
+                "src/lib.rs",
+                "CONST",
+                OUTSIDE_FUNCTION,
+                Verdict::Unviable,
+            )],
+            ..Run::default()
+        };
+        assert_eq!(only_unviable.per_symbol()[0].score(), None);
+        let report = only_unviable.symbol_report();
+        assert_eq!(report.len(), 1, "one honest note, not a fabricated score");
+        assert!(report[0].contains("no symbol scored"), "{report:?}");
+    }
+
+    /// A mutation the tool places outside any function is still attributed to a
+    /// named bucket, so the report never points at a whole file as if it were a
+    /// single claim about untested code.
+    #[test]
+    fn a_mutation_outside_a_function_is_named_not_blurred() {
+        let dir = write_report("outside", SYMBOL_REPORT);
+        let run = parse_report(&dir).unwrap();
+        assert!(
+            run.mutants
+                .iter()
+                .any(|m| m.symbol == OUTSIDE_FUNCTION && m.file == "src/lib.rs"),
+            "the constant's mutant is grouped under the outside-function label"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A mutant helper that can name a function, for rollup tests that need one.
+    fn mutant_in(file: &str, name: &str, symbol: &str, verdict: Verdict) -> Mutant {
+        Mutant {
+            file: file.to_string(),
+            name: name.to_string(),
+            symbol: symbol.to_string(),
+            verdict,
+        }
     }
 }
